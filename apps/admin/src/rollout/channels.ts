@@ -10,7 +10,8 @@
  *   (`promoteRelease`); rolling a channel back is setting it to a release
  *   it had before (src/rollout/desired.ts).
  * - Retry clears a channel's failed deploys, so the reconciler tries them
- *   again (`retryChannel`).
+ *   again (`retryChannel`), or one client's, pinned or not, from its
+ *   Setup (`retryClient`).
  * - Pin, unpin and move change one client's fields (`pinClient`,
  *   `setClientChannel`).
  *
@@ -287,6 +288,38 @@ export const retryChannel = async (
       action: "channel.retry",
       detail: { channel },
     }
+  );
+};
+
+/** Retrying one client's failed deploy. */
+export const retryClientSchema = z.object({ clientId: z.string().min(1) });
+
+/**
+ * Clears client `input.clientId`'s failed deploy, as `staff`, audited
+ * (`client.retry`): the reconciler then deploys it again, pinned or not,
+ * as many at a time as its channel allows. Nothing when its last deploy
+ * didn't fail. A pinned client's failure never stops its channel
+ * (src/rollout/desired.ts), so this is how it's tried again.
+ */
+export const retryClient = async (
+  env: Env,
+  staff: Staff,
+  input: z.infer<typeof retryClientSchema>
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const { clientId } = retryClientSchema.parse(input);
+  await actIfChanged(
+    db,
+    staff,
+    db
+      .delete(clientDeploys)
+      .where(
+        and(
+          eq(clientDeploys.clientId, clientId),
+          eq(clientDeploys.status, "failed")
+        )
+      ),
+    { action: "client.retry", clientId }
   );
 };
 

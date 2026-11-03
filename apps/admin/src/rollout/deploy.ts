@@ -5,7 +5,7 @@
  * release (src/hosting/operation.ts): resources and migrations, each
  * Worker in turn, the probe and the router's map. On the release the
  * client runs already, it runs it again with the shared secrets in
- * Secrets Store now (a secrets rollout, src/rollout/secrets.ts).
+ * Secrets Store now (src/rollout/shared-secrets.ts).
  *
  * The reconciler claimed the client for this run before creating it (in
  * `client_runs` and `client_deploys`, one batch), so nothing else changes

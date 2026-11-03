@@ -1,6 +1,6 @@
 /**
  * The client grid: every client with what the admin recorded of it
- * (release, ring, last deploy), read from D1 and shown at once, and, for
+ * (release, channel, last deploy), read from D1 and shown at once, and, for
  * each active one, what its destination shows now: drift, whether it runs
  * the shared secrets in Secrets Store, whether the router reaches its
  * core, and where its onboarding stands (onboarding.ts).
@@ -21,6 +21,7 @@ import { z } from "zod";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
 import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -78,7 +79,8 @@ export interface GridRow {
   id: string;
   name: string;
   status: "provisioning" | "active" | "offboarded";
-  ring: number;
+  /** The release channel it follows (src/rollout/channels.ts). */
+  channel: Channel;
   /** `<id>.<domain>`; null while the admin has no domain. */
   hostname: string | null;
   /** The release the admin made live on every Worker; null when none, or they differ. */
@@ -164,7 +166,7 @@ const recordedClients = async (db: AdminDatabase) => {
       id: clients.id,
       name: clients.name,
       status: clients.status,
-      ring: clients.ring,
+      channel: clients.channel,
       pinnedReleaseId: clients.pinnedReleaseId,
       lastDeploy: {
         releaseId: clientProvisions.releaseId,
@@ -318,7 +320,7 @@ const liveOf = async (
         row.id,
         secrets === null
           ? undefined
-          : { fetch: stoppedBy(signal, fetch), secrets }
+          : { dispatcher: env.DISPATCHER, secrets, signal }
       ),
     null,
     "grid.drift_unread",

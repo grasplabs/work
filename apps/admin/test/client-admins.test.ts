@@ -62,7 +62,7 @@ const recordClient = async (
 /** A live placed client running `releaseId`, as its operation made it. */
 const liveClient = async (releaseId: string, order = "") => {
   const clientId = `client-${order}${crypto.randomUUID().slice(0, 8)}`;
-  const { core } = await livePlacedClient(cloudflare, 1, releaseId, {
+  const { core } = await livePlacedClient(cloudflare, releaseId, {
     id: clientId,
     signIn: null,
   });

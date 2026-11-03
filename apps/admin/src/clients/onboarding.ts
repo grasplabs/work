@@ -2,8 +2,7 @@
  * A client's onboarding, as its card on the grid shows it: what its core
  * answers at `onboardingSummaryPath`, numbers only (core's
  * src/onboarding/summary.ts). Only the admin may ask: the request is
- * signed with the key both derive from the client's auth secret, as a
- * platform update notice is (src/rollout/activity.ts), and goes through
+ * signed with the key both derive from the client's auth secret, and goes through
  * the router's route with the router secret, as the health check does.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";

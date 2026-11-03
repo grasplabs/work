@@ -11,8 +11,8 @@
  * And what someone at Grasp does to it, where it shows
  * (src/admin/setup-actions.tsx): resume setting it up or confirm Workers
  * Paid, place it in a hosting destination, pin it, move it to another
- * ring, roll it back, change how its people sign in, apply its settings,
- * rotate its secrets. Its account's numbers now (reach, errors, drift,
+ * channel, change how its people sign in, apply its settings, rotate its
+ * secrets. Its account's numbers now (reach, errors, drift,
  * shared secrets, cost) are read live once the section shows; what the
  * admin doesn't keep day by day says so rather than show a number.
  */
@@ -58,6 +58,7 @@ import { z } from "zod";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
+import { channelIds } from "../db/schema.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import { retryProvisioningFn } from "../hosting/functions.ts";
@@ -71,12 +72,14 @@ import {
 } from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
+import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
-import { fetchDrift } from "../rollout/functions.ts";
+import { fetchDrift, retryClientFn } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
+import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import { aiStatusLine } from "./ai-status-words.ts";
-import { attentionWords, ringWords } from "./platform-parts.tsx";
+import { attentionWords } from "./platform-parts.tsx";
 import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
@@ -85,8 +88,7 @@ import {
   History,
   LiveNumbers,
   PinRelease,
-  RingChange,
-  RollBack,
+  ChannelChange,
   RotateSecrets,
   SignInChange,
   SealedSecretChange,
@@ -124,16 +126,12 @@ const shortVersion = (id: string): string => id.slice(0, 8);
 
 // The words of the admin's own records, as staff read them.
 
-type Target = NonNullable<ClientSetup["rollout"]>["target"];
+type DeployStatus = NonNullable<ClientSetup["deploy"]>["status"];
 
-const targetWords: Record<Target, string> = {
-  pending: "Waits for its ring",
-  deploying: "Deploying",
-  done: "On it",
-  failed: "Failed",
-  rolled_back: "Rolled back",
-  skipped: "Skipped",
-  stopped: "Stopped",
+const deployWords: Record<DeployStatus, string> = {
+  deploying: "deploying",
+  done: "done",
+  failed: "failed",
 };
 
 const driftWords: Record<ClientDriftState, string> = {
@@ -203,10 +201,9 @@ type PlatformNeed =
     }
   | { kind: "provisioning"; view: ProvisioningView }
   | { kind: "not_started"; why: ProvisioningView["notStarted"] }
-  | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
+  | { kind: "deploy"; deploy: NonNullable<ClientSetup["deploy"]> }
   | { kind: "secrets" }
   | { kind: "settings" }
-  | { kind: "behind"; releases: number }
   | { kind: "teams_bot_secret"; days: number }
   | { kind: "stephen"; over: number };
 
@@ -241,9 +238,6 @@ const chatNeedsOf = (setup: ClientSetup): PlatformNeed[] => {
   return needs;
 };
 
-/** A company this many releases behind the newest, not pinned, needs a look. */
-const behindAt = 2;
-
 /** Whether its secrets rotated and no deploy has made them live since. */
 const secretsWaiting = (account: ClientSetup["account"]): boolean =>
   account?.rotatedAt !== null &&
@@ -252,7 +246,7 @@ const secretsWaiting = (account: ClientSetup["account"]): boolean =>
     account.rotationLiveAt < account.rotatedAt);
 
 const needsOf = (setup: ClientSetup): PlatformNeed[] => {
-  const { provisioning, rollout, behind } = setup;
+  const { provisioning, deploy, target } = setup;
   const needs: PlatformNeed[] = [];
   if (provisioning.phase === "failed") {
     needs.push(
@@ -268,8 +262,9 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   if (provisioning.phase === "placing") {
     needs.push({ kind: "not_started", why: provisioning.notStarted });
   }
-  if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
-    needs.push({ kind: "rollout", rollout });
+  // Failed on its target: the reconciler leaves it until staff retry.
+  if (deploy?.status === "failed" && deploy.releaseId === target) {
+    needs.push({ kind: "deploy", deploy });
   }
   const active = provisioning.client?.status === "active";
   if (active && secretsWaiting(setup.account)) {
@@ -277,11 +272,6 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   }
   if (active && setup.configPending) {
     needs.push({ kind: "settings" });
-  }
-  // A pinned company stays behind on purpose.
-  const pinned = provisioning.client?.pinnedReleaseId ?? null;
-  if (pinned === null && behind !== null && behind >= behindAt) {
-    needs.push({ kind: "behind", releases: behind });
   }
   return active ? [...needs, ...chatNeedsOf(setup)] : needs;
 };
@@ -319,20 +309,16 @@ const needWords = (need: PlatformNeed): ReactNode => {
   if (need.kind === "not_started") {
     return notStartedWords(need.why);
   }
-  if (need.kind === "rollout") {
-    const { rollout } = need;
-    const what =
-      rollout.releaseId === null
-        ? "The secrets rollout"
-        : `The rollout of ${rollout.releaseId}`;
-    const how =
-      rollout.target === "failed" ? "failed for it" : "was rolled back for it";
-    return rollout.error === null ? (
-      `${what} ${how}.`
+  if (need.kind === "deploy") {
+    const { deploy } = need;
+    const what = `Its deploy of ${deploy.releaseId} failed`;
+    return deploy.error === null ? (
+      `${what}: retry it once what stopped it is fixed.`
     ) : (
       <>
-        {`${what} ${how}: `}
-        <ErrorCode code={rollout.error} />
+        {`${what}: `}
+        <ErrorCode code={deploy.error} />
+        {" Retry it once what stopped it is fixed."}
       </>
     );
   }
@@ -345,10 +331,7 @@ const needWords = (need: PlatformNeed): ReactNode => {
   if (need.kind === "teams_bot_secret") {
     return `${botSecretWords(need.days)} Mint a new client secret for its bot in its own Entra and set it under Its Teams bot, with the day it expires.`;
   }
-  if (need.kind === "stephen") {
-    return `${need.over === 1 ? "One of Stephen's signals is" : `${need.over} of Stephen's signals are`} over its bar: see Stephen below.`;
-  }
-  return `${need.releases} releases behind the newest.`;
+  return `${need.over === 1 ? "One of Stephen's signals is" : `${need.over} of Stephen's signals are`} over its bar: see Stephen below.`;
 };
 
 /** How a company's platform stands, as one word. */
@@ -399,7 +382,7 @@ const releaseOf = (setup: ClientSetup): string | null =>
 
 // The tabs.
 
-/** Its address, how it stands, its release and ring, and the ways over to the admin and Cloudflare. */
+/** Its address, how it stands, its release and channel, and the ways over to the admin and Cloudflare. */
 const Header = ({
   clientId,
   setup,
@@ -432,7 +415,7 @@ const Header = ({
           {client === null ? null : (
             <>
               <span aria-hidden>·</span>
-              <span>{ringWords(client.ring)}</span>
+              <span>{channelWords[client.channel]}</span>
             </>
           )}
           {client?.pinnedReleaseId === null ||
@@ -726,7 +709,39 @@ const RetryNow = ({ clientId }: { clientId: string }) => {
   );
 };
 
-/** Where what a need says is seen to: the rollout's page, or the tab it is done on. */
+/**
+ * Retry its deploy: clears its failed deploy as the staff member
+ * (`retryClientFn`), so the reconciler deploys it again, pinned or not.
+ */
+const RetryDeploy = ({ clientId }: { clientId: string }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useRolloutAction();
+  const retry = () => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await retryClientFn({ data: { clientId } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+        Retry
+      </Button>
+      {failure === null ? null : (
+        <span className="text-destructive text-sm" role="alert">
+          {failure}
+        </span>
+      )}
+    </span>
+  );
+};
+
+/** Where what a need says is seen to: Platform, or the tab it is done on. */
 const NeedAction = ({
   clientId,
   need,
@@ -735,22 +750,8 @@ const NeedAction = ({
   need: PlatformNeed;
 }) => {
   switch (need.kind) {
-    case "rollout": {
-      return (
-        <Button
-          nativeButton={false}
-          render={
-            <Link
-              params={{ rolloutId: need.rollout.id }}
-              to="/platform/rollouts/$rolloutId"
-            />
-          }
-          size="sm"
-          variant="ghost"
-        >
-          The rollout
-        </Button>
-      );
+    case "deploy": {
+      return <RetryDeploy clientId={clientId} />;
     }
     case "secrets":
     case "settings":
@@ -758,13 +759,6 @@ const NeedAction = ({
       return (
         <TabLink clientId={clientId} tab="settings">
           Its settings
-        </TabLink>
-      );
-    }
-    case "behind": {
-      return (
-        <TabLink clientId={clientId} tab="releases">
-          Its releases
         </TabLink>
       );
     }
@@ -804,11 +798,9 @@ const placedOf = (hosting: ClientHostingView | null): boolean =>
 const HostingSection = ({
   setup,
   hosting,
-  releases,
 }: {
   setup: ClientSetup;
   hosting: ClientHostingView | null;
-  releases: readonly { id: string; notes: string }[];
 }) =>
   hosting !== null &&
   (placedOf(hosting) ||
@@ -826,7 +818,7 @@ const HostingSection = ({
               its state kept between refreshes. */}
           <CollapsibleContent keepMounted>
             <div className="mt-4">
-              <ClientHosting releases={releases} view={hosting} />
+              <ClientHosting view={hosting} />
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -926,7 +918,6 @@ const Status = ({
   aiStatus,
   progress,
   hosting,
-  releases,
 }: {
   clientId: string;
   setup: ClientSetup;
@@ -937,7 +928,6 @@ const Status = ({
   aiStatus: Promise<AiStatusReport | null>;
   hosting: ClientHostingView | null;
   progress: ProvisioningProgress | null;
-  releases: readonly { id: string; notes: string }[];
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
@@ -965,7 +955,7 @@ const Status = ({
         </ul>
       </Section>
     ) : null}
-    <HostingSection hosting={hosting} releases={releases} setup={setup} />
+    <HostingSection hosting={hosting} setup={setup} />
     {setup.provisioning.client?.status === "active" ? (
       <AiStatus status={aiStatus} />
     ) : null}
@@ -997,8 +987,8 @@ const Status = ({
   </>
 );
 
-/** What a ring change records besides. */
-const ringSchema = z.object({ ring: z.number() });
+/** What a channel change records besides. */
+const channelSchema = z.object({ channel: z.enum(channelIds) });
 
 /** What setting each sealed secret did, for its log. */
 const sealedSecretWords: Record<SealedSecretName, string> = {
@@ -1022,6 +1012,15 @@ const plainEventWords: Readonly<Record<string, string>> = {
   "client.teams_bot": "Changed its Teams bot.",
 };
 
+/** A move to another channel, in a sentence, from what its event records. */
+const channelChangeWords = (detail: string | null): string => {
+  const channel = channelSchema.safeParse(JSON.parse(detail ?? "null")).data
+    ?.channel;
+  return channel === undefined
+    ? "Moved it to another channel."
+    : `Moved it to ${channelWords[channel]}.`;
+};
+
 /** What staff did by hand, in a sentence. */
 const eventWords = ({
   action,
@@ -1035,18 +1034,14 @@ const eventWords = ({
     case "client.provision_placed": {
       return `Started provisioning it on ${target ?? "a release"}.`;
     }
-    case "client.ring": {
-      const ring = ringSchema.safeParse(JSON.parse(detail ?? "null")).data
-        ?.ring;
-      return ring === undefined
-        ? "Moved it to another ring."
-        : `Moved it to ${ringWords(ring)}.`;
+    case "client.channel": {
+      return channelChangeWords(detail);
     }
     case "client.pin": {
       return `Pinned it to ${target ?? "a release"}.`;
     }
     case "client.unpin": {
-      return "Let it follow the rollouts again.";
+      return "Let it follow its channel again.";
     }
     case "client.sealed_secret": {
       return isSealedSecretName(target)
@@ -1102,7 +1097,7 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
         </Section>
       ) : null}
       <Section
-        description="Everything the admin’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning, deploys and rollouts."
+        description="Everything the admin’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning and deploys."
         title="Its history"
       >
         <History history={history} />
@@ -1118,7 +1113,7 @@ const sharedSecretsWords = (current: boolean | null): string => {
   }
   return current
     ? "It runs the shared secrets in Secrets Store now."
-    : "It doesn’t run the shared secrets in Secrets Store now: a secrets rollout brings it up to date.";
+    : "It doesn’t run the shared secrets in Secrets Store now: its next deploy, which the reconciler starts by itself, brings it up to date.";
 };
 
 /** What its account runs, read from Cloudflare when staff ask. */
@@ -1349,18 +1344,9 @@ const Resources = ({
   );
 };
 
-/** Where the latest rollout that reached it stands for it. */
-const rolloutFact = (
-  rollout: NonNullable<ClientSetup["rollout"]>
-): ReactNode => (
-  <Link
-    className="hover:text-foreground underline underline-offset-4"
-    params={{ rolloutId: rollout.id }}
-    to="/platform/rollouts/$rolloutId"
-  >
-    {`${rollout.releaseId ?? "New secrets"}: ${targetWords[rollout.target].toLowerCase()}`}
-  </Link>
-);
+/** Its last deploy, in a few words. */
+const deployFact = (deploy: NonNullable<ClientSetup["deploy"]>): string =>
+  `${deploy.releaseId}: ${deployWords[deploy.status]}${deploy.error === null ? "" : ` (${deploy.error})`}`;
 
 const Releases = ({
   clientId,
@@ -1374,28 +1360,29 @@ const Releases = ({
   imported: readonly { id: string; notes: string }[];
   refresh: Refresh;
 }) => {
-  const { provisioning, releases, rollout } = setup;
+  const { provisioning, releases, deploy, target } = setup;
   const { client } = provisioning;
   const runs = releaseOf(setup);
   const pinned = client?.pinnedReleaseId ?? null;
   return (
     <>
       <Section
-        description="A release goes out ring by ring, and waits after each for someone at Grasp. A pinned company stays on its release, whatever the rollouts."
+        description="It gets each release promoted to its channel. A pinned company stays on its release: promotions skip it."
         title="Where it gets releases"
       >
         <Facts
           rows={[
             {
-              label: "Ring",
-              value: client === null ? "–" : ringWords(client.ring),
+              label: "Channel",
+              value: client === null ? "–" : channelWords[client.channel],
             },
             {
               label: "Release",
               value:
                 pinned === null
-                  ? "Follows the rollouts"
-                  : `Pinned to ${pinned}`,
+                  ? "Follows its channel"
+                  : `Pinned to ${pinned}: promotions skip it`,
+              attention: pinned !== null,
             },
             {
               label: "Runs now",
@@ -1407,20 +1394,28 @@ const Releases = ({
                 ),
             },
             {
-              label: "The latest rollout",
-              value: rollout === null ? "Not in one yet" : rolloutFact(rollout),
-              attention:
-                rollout?.target === "failed" ||
-                rollout?.target === "rolled_back",
+              label: "Should run",
+              value:
+                target === null ? (
+                  "No release on its channel yet"
+                ) : (
+                  <span className="font-mono text-xs">{target}</span>
+                ),
+              attention: target === null,
+            },
+            {
+              label: "Last deploy",
+              value: deploy === null ? "None yet" : deployFact(deploy),
+              attention: deploy?.status === "failed",
             },
           ]}
         />
         {client === null ? null : (
           <CardContent>
-            <RingChange
+            <ChannelChange
+              channel={client.channel}
               clientId={clientId}
               refresh={refresh}
-              ring={client.ring}
             />
             {/* Only a live company is pinned: one being set up gets the release it was added with. */}
             {client.status === "active" ? (
@@ -1433,7 +1428,6 @@ const Releases = ({
             ) : null}
           </CardContent>
         )}
-        <RollBack clientId={clientId} refresh={refresh} rollout={rollout} />
       </Section>
       <Section
         action={
@@ -1900,7 +1894,6 @@ export const OrgSetup = ({
             needs={needs}
             aiStatus={aiStatus}
             checklist={checklist}
-            releases={releases}
             setup={setup}
           />
         </div>

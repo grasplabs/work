@@ -57,7 +57,7 @@ const liveClient = async (): Promise<{
 }> => {
   const release = await placedRelease("feat(core): count Stephen");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { core } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,

@@ -56,7 +56,6 @@ test("staff move between Platform's places from its navigation", async ({
 
   for (const [name, path] of [
     ["Releases", "/platform/releases"],
-    ["Rollouts", "/platform/rollouts"],
     ["Offboarded", "/platform/offboarded"],
     ["Overview", "/platform"],
   ] as const) {

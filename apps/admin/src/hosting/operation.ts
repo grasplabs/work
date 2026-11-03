@@ -82,7 +82,7 @@ import {
 import type { Stage } from "@grasp-os/shared/names";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
-import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
@@ -103,12 +103,7 @@ import {
 import type { ScriptTarget } from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import {
-  clientProvisions,
-  clients,
-  clientWorkers,
-  releases,
-} from "../db/schema.ts";
+import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
@@ -216,7 +211,7 @@ export const provisionOperationErrorCodes = [
   "release_behind_migration",
   /**
    * The release failed its probe once live and was rolled back to the
-   * release before on its own: a rollout counts the client failed.
+   * release before on its own: its deploy counts as failed.
    */
   "release_rolled_back",
 ] as const;
@@ -540,28 +535,16 @@ const assertCanGo = async (
   }
 };
 
-/** When release `id` was built; null when it isn't imported. */
-const builtAtOf = async (
-  db: AdminDatabase,
-  id: string
-): Promise<Date | null> => {
-  const row = await db
-    .select({ builtAt: releases.builtAt })
-    .from(releases)
-    .where(eq(releases.id, id))
-    .get();
-  return row?.builtAt ?? null;
-};
-
 /**
- * Switches client `held.clientId`'s provisioning `operation` to the newer
- * release `releaseId`, as `actor`, audited (`provision.switch_release`):
- * only while the client is still being provisioned and its operation
- * isn't done, so nothing of it is live, and only to a release that has
- * every Durable Object migration its scripts ran (`assertCanGo`). Its
- * next run starts again from its first step on the new release: every
- * step finds what an earlier one did. An older release, or a client
- * that's live, is refused (`operation_release_changed`).
+ * Switches client `held.clientId`'s provisioning `operation` to release
+ * `releaseId`, newer or older, as `actor`, audited
+ * (`provision.switch_release`): only while the client is still being
+ * provisioned and its operation isn't done, so nothing of it is live, and
+ * only to a release that has every Durable Object migration its scripts
+ * ran (`assertCanGo`, the rule a rollback goes by), so a channel set back
+ * mid-setup is followed. Its next run starts again from its first step on
+ * the new release: every step finds what an earlier one did. A client
+ * that's live is refused (`operation_release_changed`).
  */
 const switchProvisionRelease = async (
   db: AdminDatabase,
@@ -581,24 +564,6 @@ const switchProvisionRelease = async (
     .where(eq(clients.id, clientId))
     .get();
   if (client?.status !== "provisioning" || operation.status === "done") {
-    throw changed;
-  }
-  const [from, to] = await Promise.all([
-    builtAtOf(db, operation.releaseId),
-    builtAtOf(db, releaseId),
-  ]);
-  if (to === null) {
-    throw new ProvisionOperationError(
-      "release_not_imported",
-      `Release ${releaseId} isn't imported`
-    );
-  }
-  // Newer as the releases list them: by when built, then by id.
-  const newer =
-    from === null ||
-    to > from ||
-    (to.getTime() === from.getTime() && releaseId > operation.releaseId);
-  if (!newer) {
     throw changed;
   }
   await assertCanGo(db, operation, releaseId, false);
@@ -639,9 +604,10 @@ const switchProvisionRelease = async (
  * Records the operation that provisions client `held.clientId` with
  * release `releaseId`, as `actor`, and returns its id: the one it has
  * already when it has one, so starting again resumes it (spec 40.1). One
- * of an older release is switched to `releaseId` while nothing of the
+ * of another release is switched to `releaseId` while nothing of the
  * client is live (`switchProvisionRelease`), so a client started on a
- * release that can't finish takes a fixed one; anything else is refused
+ * release that can't finish takes a fixed one, and one whose channel was
+ * set back follows it; a live client's is refused
  * (`operation_release_changed`). Only while runner `held` holds the
  * client, in the same statement: a start that lost the client writes
  * nothing.
@@ -696,23 +662,6 @@ const releaseAction = ({
 };
 
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
-
-/**
- * Throws unless client `clientId` may go back to release `back`, as a
- * rollback would: by the Durable Object migrations each of its scripts
- * was seen at (`assertCanGo`), before anything of the rollback is claimed
- * or uploaded.
- */
-export const assertCanRollBack = async (
-  db: AdminDatabase,
-  clientId: string,
-  back: string
-): Promise<void> => {
-  const operation = await provisionOf(db, clientId);
-  if (operation !== undefined) {
-    await assertCanGo(db, operation, back, true);
-  }
-};
 
 /**
  * Whether `operation` has `target` already, so starting it changes
@@ -906,7 +855,7 @@ export const startClientRelease = async (
         status: "running",
         step: null,
         error: null,
-        // A change of its own, counted: what a rollout's rollback reads.
+        // A change of its own, counted.
         change: operation.change + 1,
         what: target === operation.releaseId ? (what ?? "settings") : "release",
         startedBy: actorName(actor),
@@ -1141,7 +1090,7 @@ const noteSuperseded = async (
  * What's left: Cloudflare may still apply a call whose sender died, or one
  * still unanswered past this bound, after a rollback that waited it out
  * has made its own. Nothing here can see that call land; the client would
- * then run the rollout's Worker while the admin records the rollback's,
+ * then run the deploy's Worker while the admin records the rollback's,
  * until drift (src/rollout/drift.ts) shows it and the next run replaces it.
  */
 const sendSettleMs = 5 * 60_000;
@@ -1329,9 +1278,8 @@ const sendHolding = async (
 /**
  * Whether no call sent for client `clientId`'s change `change` is still
  * on its way (`sendHolding`): none marked for it, or each marked at least
- * `sendSettleMs` ago. What a runner that took the client over checks,
- * step by step, before it changes the client's Workers itself
- * (src/rollout/rollback.ts).
+ * `sendSettleMs` ago: what a runner that took the client over waits for
+ * before it changes the client's Workers itself.
  */
 export const sendsSettled = async (
   db: AdminDatabase,
@@ -1548,32 +1496,6 @@ const load = async (
     client,
     readAt,
   };
-};
-
-/** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
-const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
-  or(
-    gt(releases.builtAt, row.builtAt),
-    and(eq(releases.builtAt, row.builtAt), gt(releases.id, row.id))
-  );
-
-/**
- * The newest imported release (by when built, then id); with `newerThan`,
- * only one built after that one. Null when there is none. What a client
- * is provisioned with when staff don't pick one, and what a retry moves a
- * stopped one forward to.
- */
-export const newestRelease = async (
-  db: AdminDatabase,
-  newerThan?: { id: string; builtAt: Date }
-): Promise<string | null> => {
-  const [row] = await db
-    .select({ id: releases.id })
-    .from(releases)
-    .where(newerThan === undefined ? undefined : newerThanRow(newerThan))
-    .orderBy(desc(releases.builtAt), desc(releases.id))
-    .limit(1);
-  return row?.id ?? null;
 };
 
 /**
