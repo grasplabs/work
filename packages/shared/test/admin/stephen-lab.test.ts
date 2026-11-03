@@ -271,6 +271,20 @@ describe("real interviews by version", () => {
   });
 });
 
+describe("one Stephen run as two releases", () => {
+  it("keeps the real interviews of his earlier release with him when only Claire's texts changed", () => {
+    const lab = labOf(
+      [run("r1", [0.6], {}, "talks-s"), run("r2", [0.6], {}, "talks-s")],
+      [organization("Bakkerij", held("r1", 3, 3))]
+    );
+
+    expect(
+      lab.versions.map(({ name, real }) => [name, real?.started ?? null])
+    ).toStrictEqual([["Stephen 1", 3]]);
+    expect(lab.needs).toStrictEqual([]);
+  });
+});
+
 describe("a lab gone quiet", () => {
   it("is said after two weeks without a run", () => {
     const old = run("v1", [0.6], { at: "2026-10-01T09:00:00.000Z" });

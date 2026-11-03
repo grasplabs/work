@@ -487,12 +487,15 @@ export const stephenLabOf = ({
       releaseOf.set(versionOfRun(run), run.stephen.version);
     }
   }
-  // Real interviews of a release join the newest lab Stephen of that name; the rest are rows of their own.
+  // Real interviews of a release join the newest lab Stephen run as that release, whatever else he
+  // was run as later (a change to Claire's texts alone is a new release with the same Stephen); the
+  // releases the lab never ran are rows of their own.
   const rowOfRelease = new Map<string, string>();
-  for (const mark of measured) {
-    const release = releaseOf.get(mark);
-    if (release !== undefined) {
-      rowOfRelease.set(release, mark);
+  for (const run of [...open, ...hidden].toSorted((x, y) =>
+    x.at.localeCompare(y.at)
+  )) {
+    if (run.stephen.version !== undefined) {
+      rowOfRelease.set(run.stephen.version, versionOfRun(run));
     }
   }
   const unmeasured = [...realVersions].filter(
