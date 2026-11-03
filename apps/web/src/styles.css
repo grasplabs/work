@@ -306,6 +306,92 @@
 }
 
 /*
+ * The sign-in page's motion, as joingrasp.com's log-in page has it
+ * (grasplabs/grasp `apps/marketing/src/styles/sections/login.css`): light
+ * falls down three of the painted field's column lines, one beam at a
+ * time, while Grasp's line and then the card rise in. All of it is still
+ * with reduced motion (routes/sign-in.tsx).
+ */
+@utility sign-in-beams {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+
+  & > span {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 22%;
+    border-radius: 2px;
+    background: linear-gradient(
+      180deg,
+      transparent,
+      var(--highlight) 70%,
+      var(--background)
+    );
+    filter: drop-shadow(0 0 6px var(--highlight));
+    opacity: 0;
+    animation: sign-in-fall 7s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  /* On the columns' own lines (`columns` draws six columns). */
+  & > span:nth-child(1) {
+    left: calc(100% / 3 - 1px);
+  }
+  & > span:nth-child(2) {
+    left: calc(50% - 1px);
+    animation-duration: 9s;
+    animation-delay: 2.6s;
+  }
+  & > span:nth-child(3) {
+    left: calc(500% / 6 - 1px);
+    animation-duration: 8s;
+    animation-delay: 1.2s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    display: none;
+  }
+}
+
+@keyframes sign-in-fall {
+  0% {
+    opacity: 0;
+    transform: translateY(-110%);
+  }
+  12%,
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(480%);
+  }
+}
+
+@keyframes sign-in-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(8px);
+  }
+}
+
+@utility sign-in-rise {
+  animation: sign-in-rise 1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.25s both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@utility sign-in-float {
+  animation: sign-in-rise 1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/*
  * From the prototype (packages/grasp/src/index.css), the dashboard's pile
  * of what waits on the person (dashboard/todo-pile.tsx).
  */

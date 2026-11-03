@@ -281,9 +281,7 @@ test("a deep link opened signed out leads through sign-in, then to its screen wi
   const link = `/links/${app}/shared?input=${encodeURIComponent(JSON.stringify({ id: "n7" }))}`;
   // A refused sign-in's error on the link isn't carried back to it.
   await page.goto(`${link}&error=forbidden`);
-  await expect(
-    page.getByText("Use your organization’s account to go on.")
-  ).toBeVisible();
+  await expect(page.getByText("Log in with your work account.")).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
   expect(returnTo).toBe(link);
   // Nothing of the App ran for someone signed out.

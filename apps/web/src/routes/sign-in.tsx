@@ -1,12 +1,12 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
-import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { LanguageButton } from "../language-picker.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -38,39 +38,96 @@ const returnPathOf = (value: unknown): string =>
     ? value
     : "/";
 
+/** Where Grasp's terms and privacy policy are published. */
+const graspSite = "https://joingrasp.com";
+
 /**
- * The page in the onboarding's frame (frame/onboarding-frame.tsx), with
- * Grasp's buddy.
+ * The page as joingrasp.com's log-in page is (grasplabs/grasp
+ * `apps/marketing/src/pages/login.astro`), so there is one way in to
+ * Grasp: its painted dawn with light falling down the columns and Grasp's
+ * line on one side, the card with a button per work account on the
+ * other, stacked on a phone. Only the buttons differ: they start this
+ * deployment's own sign-in, with the IdPs it is set up with. Its "New to
+ * Grasp? Talk to us" is left out, as everyone here is already in.
  */
 const SignIn = () => {
   const { connected, signInOptions } = Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
   const { t } = useLingui();
   return (
-    <OnboardingFrame>
-      <GraspBuddy />
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>
-          <Trans>Sign in to Grasp</Trans>
-        </PageHeaderTitle>
-        {connected ? (
-          <p className="text-muted-foreground text-balance">
-            <Trans>Use your organization’s account to go on.</Trans>
-          </p>
-        ) : null}
+    <div className="bg-background grid min-h-svh text-sm lg:grid-cols-2">
+      <PaintedField
+        className="m-2 flex min-h-96 flex-col justify-between gap-10 p-7 sm:p-10 lg:m-3"
+        painting="dawn"
+        pattern="columns"
+      >
+        <span aria-hidden="true" className="sign-in-beams">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span className="flex items-center gap-2 text-lg font-medium">
+          <GraspMark className="size-5" />
+          Grasp
+        </span>
+        <p className="type-display sign-in-rise max-w-sm lg:text-5xl">
+          <Trans>Find the work AI should be doing.</Trans>
+        </p>
+      </PaintedField>
+      <div className="flex flex-col">
+        <main className="flex flex-1 items-center justify-center px-6 py-12 sm:px-10">
+          <div className="sign-in-float flex w-full max-w-sm flex-col gap-7">
+            <div className="flex flex-col gap-2.5">
+              <h1 className="type-display">
+                <Trans>Welcome back.</Trans>
+              </h1>
+              {connected ? (
+                <p className="text-muted-foreground text-base">
+                  <Trans>Log in with your work account.</Trans>
+                </p>
+              ) : null}
+            </div>
+            {connected ? (
+              <SignInOptions
+                error={error}
+                options={signInOptions}
+                returnTo={returnTo}
+              />
+            ) : (
+              <ErrorText>
+                {t`Grasp can't be reached right now. Try again in a moment.`}
+              </ErrorText>
+            )}
+            <p className="text-muted-foreground">
+              <Trans>
+                By continuing, you agree to Grasp’s{" "}
+                <a
+                  className="text-foreground underline underline-offset-3"
+                  href={`${graspSite}/terms-of-service`}
+                  rel="noopener"
+                  target="_blank"
+                >
+                  terms
+                </a>{" "}
+                and{" "}
+                <a
+                  className="text-foreground underline underline-offset-3"
+                  href={`${graspSite}/privacy-policy`}
+                  rel="noopener"
+                  target="_blank"
+                >
+                  privacy policy
+                </a>
+                .
+              </Trans>
+            </p>
+          </div>
+        </main>
+        <footer className="flex h-18 flex-none items-center justify-end px-4 sm:px-10">
+          <LanguageButton />
+        </footer>
       </div>
-      {connected ? (
-        <SignInOptions
-          error={error}
-          options={signInOptions}
-          returnTo={returnTo}
-        />
-      ) : (
-        <ErrorText>
-          {t`Grasp can't be reached right now. Try again in a moment.`}
-        </ErrorText>
-      )}
-    </OnboardingFrame>
+    </div>
   );
 };
 
