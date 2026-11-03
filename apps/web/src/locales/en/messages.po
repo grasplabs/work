@@ -7996,6 +7996,10 @@ msgid "Lessons"
 msgstr "Lessons"
 
 #: src/activity/audit-words.ts
+msgid "Let a domain's visitors use one of its functions"
+msgstr "Let a domain's visitors use one of its functions"
+
+#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Let an erased member's old address in again"
 
@@ -13597,6 +13601,10 @@ msgid "Stopped"
 msgstr "Stopped"
 
 #: src/activity/audit-words.ts
+msgid "Stopped a domain's visitors using one of its functions"
+msgstr "Stopped a domain's visitors using one of its functions"
+
+#: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
 
@@ -15938,6 +15946,10 @@ msgstr "Use your organization’s account to go on."
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "Used a connected tool"
+
+#: src/activity/audit-words.ts
+msgid "Used a domain's function as a visitor"
+msgstr "Used a domain's function as a visitor"
 
 #: src/engines/resource-bindings.tsx
 #: src/knowledge/document.tsx
