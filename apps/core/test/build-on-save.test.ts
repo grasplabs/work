@@ -1,7 +1,7 @@
 import type { SavedBuild } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave } from "../src/save-builds.ts";
@@ -130,6 +130,7 @@ describe("building on save", { timeout: 60_000 }, () => {
         throw new Error("The compiler is unreachable");
       },
     };
+    const warned = vi.spyOn(console, "warn");
 
     const committed = await commitFiles(
       { ...env, LOADER: unreachable },
@@ -151,6 +152,15 @@ describe("building on save", { timeout: 60_000 }, () => {
         workflows: { status: "none" },
       },
     });
+    // The warning says why, not only what kind of error.
+    expect(warned.mock.calls).toContainEqual([
+      expect.objectContaining({
+        event: "app.save_build_failed",
+        kind: "screens",
+        errorName: "Error",
+        errorMessage: "The compiler is unreachable",
+      }),
+    ]);
     const files = await versionFiles(env, appIdSchema.parse(app), 1);
     await expect(buildScreens(env, files, "app-test")).resolves.toMatchObject({
       ok: true,
