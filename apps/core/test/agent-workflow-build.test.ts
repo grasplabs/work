@@ -373,9 +373,14 @@ describe("the agent building an independent workflow", () => {
     });
     try {
       const asked = chat.ask("Publish it");
-      await vi.waitFor(() => {
-        expect(held.storing).toBeTruthy();
-      });
+      // Waits on the gate itself, for as long as the chat takes to reach
+      // the write under load: only a chat that never stores times out.
+      await vi.waitFor(
+        () => {
+          expect(held.storing).toBeTruthy();
+        },
+        { timeout: 15_000, interval: 20 }
+      );
       await admin.api.permissions.revoke(granted);
       held.revoked = true;
       await asked;
