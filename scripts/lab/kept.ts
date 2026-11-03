@@ -31,6 +31,12 @@ const openFolders = {
 
 export type Place = keyof typeof openFolders;
 
+/**
+ * Where the hidden set's scores are kept in the repository, for the admin's
+ * Stephen Lab: a run's means and how many cases, never a case (results.ts).
+ */
+export const scoresFolder = path.join(here, "scores");
+
 /** The open set's cases, which may be read, or the hidden set's, of which only scores are shown. */
 export type CaseSet = "open" | "hidden";
 

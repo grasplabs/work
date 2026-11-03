@@ -1,12 +1,12 @@
 /**
- * How two runs compare (compare.ts): the noise is what runs of the same
+ * How two runs compare (lab-compare.ts): the noise is what runs of the same
  * Stephen differ by, measured, never assumed; a change counts only when it
  * is larger than that. Pure logic, tested on its own.
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { compare, meansOf, noiseOf } from "./compare.ts";
-import type { CaseScore } from "./results.ts";
+import { compare, meansOf, noiseOf } from "../src/lab-compare.ts";
+import type { CaseScore } from "../src/lab-compare.ts";
 
 const run = (
   scores: Record<string, Record<string, number>>

@@ -1,3 +1,4 @@
+import type { Result } from "@grasp-os/shared/lab-runs";
 /**
  * The report (report.ts): where a bench stands on the newest Stephen
  * measured, by kind of moment, and that of the hidden set it shows numbers
@@ -7,7 +8,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { kindsOf, reportPage, standingsOf } from "./report.ts";
 import type { AskDetail } from "./report.ts";
-import type { Result } from "./results.ts";
 
 const version = (talks: string) => ({
   interviewer: "stephen" as const,

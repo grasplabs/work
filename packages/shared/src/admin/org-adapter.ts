@@ -378,6 +378,9 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         toRead: false,
         rating: interview.progress.rating ?? null,
         interviewer: interviewerOf(interview.progress.interviewer),
+        ...(interview.stephen === undefined
+          ? {}
+          : { stephen: interview.stephen }),
       },
     ];
   });

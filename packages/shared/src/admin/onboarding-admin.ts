@@ -919,6 +919,8 @@ export interface Interview {
   rating: number | null;
   /** Who held it: whoever the person chose on the way in, and Stephen where there was no choice yet. */
   interviewer: Interviewer;
+  /** Which Stephen held its last turn (`stephenVersion` in core's onboarding/lab-marks.ts); none where it isn't known. */
+  stephen?: string;
 }
 
 /** The kinds of mistake an interviewer makes, as the review scores them. */

@@ -11,15 +11,16 @@
  */
 import path from "node:path";
 
+import { meansOf, noiseOf, shown } from "@grasp-os/shared/lab-compare";
+import { benches, markOf } from "@grasp-os/shared/lab-runs";
+import type { Bench, Result, StephenVersion } from "@grasp-os/shared/lab-runs";
 import { z } from "zod";
 
 import { escaped, pageStyle } from "./check.ts";
-import { meansOf, noiseOf, shown } from "./compare.ts";
 import { allKept, openFolder } from "./kept.ts";
 import { groups, signalGroup, signalPlain, signals } from "./moments.ts";
 import type { Signal } from "./moments.ts";
-import { alike, benches, markOf, meansLine } from "./results.ts";
-import type { Bench, Result, StephenVersion } from "./results.ts";
+import { alike, meansLine } from "./results.ts";
 
 /** What a run of the next-question bench kept of one moment. */
 export const askDetailSchema = z.object({
