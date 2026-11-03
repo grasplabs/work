@@ -335,7 +335,7 @@ const refusalOf = (error: unknown): unknown => {
     return operationErrors.create("resource.declined");
   }
   // An HTTP connection's request off what an admin approved (its paths,
-  // methods, headers, a redirect elsewhere, a host that leads inside).
+  // methods, headers, a redirect elsewhere).
   if (code === "connect.http_refused") {
     return operationErrors.create("resource.not_allowed");
   }

@@ -1237,6 +1237,12 @@ export const disconnect = async (
     await refused("role.forbidden");
     throw roleErrors.create("role.forbidden");
   }
+  // Staff never approve an HTTP connection (`createHttpConnection`), so
+  // they never take one away either.
+  if (connection.serverKind === "http" && person.staff) {
+    await refused("connection.staff_not_allowed");
+    throw connectionErrors.create("connection.staff_not_allowed");
+  }
   if (connection.status === "disconnected") {
     // Already stopped, maybe by a call that failed before it dropped the
     // held actions: dropped now.

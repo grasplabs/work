@@ -74,7 +74,8 @@ const headerNamePattern = /^[A-Za-z0-9-]{1,64}$/u;
 
 /**
  * Headers a call can't set: the credential is connect's to add, a method
- * override would turn a read into a change, and the rest would change the
+ * or URL override would turn a read into a change or reach another path
+ * than the one checked, and the rest would change the
  * connection itself or speak for someone else.
  */
 const refusedHeaders = new Set([
@@ -96,6 +97,11 @@ const refusedHeaders = new Set([
   "x-http-method",
   "x-method-override",
   "x-real-ip",
+  "x-original-url",
+  "x-rewrite-url",
+  "x-override-url",
+  "x-original-method",
+  "x-host",
 ]);
 
 /** Prefixes of headers a call can't set (see `refusedHeaders`). */
@@ -109,10 +115,13 @@ export const isSettableHeader = (name: string, credential: string): boolean =>
   !refusedHeaders.has(name) &&
   !refusedHeaderPrefixes.some((prefix) => name.startsWith(prefix));
 
-/** A header value: no line breaks or controls, which could add a header. */
-const headerValuePattern =
-  // oxlint-disable-next-line no-control-regex -- controls are what it refuses
-  /^[^\u0000-\u0008\u000A-\u001F\u007F]*$/u;
+/**
+ * A header value or credential: visible ASCII, spaces and tabs only. No
+ * line breaks or controls, which could add a header, and nothing past
+ * ASCII, which `Headers` refuses only once the request is built, after an
+ * idempotency key would be spent.
+ */
+const headerValuePattern = /^[\t\u0020-\u007E]*$/u;
 
 /**
  * Characters a path may not hold: whitespace and controls, which the URL

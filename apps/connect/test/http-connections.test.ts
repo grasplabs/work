@@ -1,5 +1,7 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { signCapability } from "@grasp-os/shared/capability";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { httpLimits } from "@grasp-os/shared/http-connections";
 import type { HttpConnectionInput } from "@grasp-os/shared/http-connections";
 import { env, exports } from "cloudflare:workers";
 import {
@@ -11,7 +13,15 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { appFor, auditEvents, callAs, outcome, someone } from "./connect.ts";
+import {
+  appFor,
+  auditEvents,
+  callAs,
+  connectWith,
+  originOf,
+  outcome,
+  someone,
+} from "./connect.ts";
 import type { Call } from "./connect.ts";
 
 // HTTP connections (src/http-connections.ts), from their threat model: an
@@ -22,8 +32,14 @@ import type { Call } from "./connect.ts";
 
 const secret = "the-billing-api-test-credential";
 
+/**
+ * What the fake DNS answers for one record type: its addresses, a 503 of
+ * the resolver itself, or SERVFAIL (DNS status 2).
+ */
+type Records = string[] | "unavailable" | "servfail";
+
 /** What each name resolves to, by record type, as the fake DNS answers. */
-const dns = new Map<string, { A: string[]; AAAA: string[] }>();
+const dns = new Map<string, { A: Records; AAAA: Records }>();
 
 /** One request that reached the fake API. */
 interface Sent {
@@ -35,9 +51,47 @@ interface Sent {
 
 const sent: Sent[] = [];
 
+/**
+ * A body that sends one chunk and then nothing, never ending, until the
+ * request's signal aborts: then it errors, as a real fetch's body does.
+ */
+const drippingBody = (signal: AbortSignal | null | undefined) =>
+  new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      controller.enqueue(new TextEncoder().encode('{"invoices":['));
+      signal?.addEventListener("abort", () => {
+        controller.error(signal.reason);
+      });
+    },
+  });
+
 /** The fake API's answer to `request` on `url`. */
-const answer = (request: Request, url: URL): Response => {
+const answer = (
+  request: Request,
+  url: URL,
+  signal: AbortSignal | null | undefined
+): Response => {
   switch (url.pathname) {
+    case "/v1/echo": {
+      // A debugging endpoint: the request's headers, back in the body and
+      // in a header of its own.
+      const headers = Object.fromEntries(request.headers);
+      return Response.json(
+        { headers },
+        {
+          headers: {
+            "x-echo": `${request.headers.get("authorization") ?? ""} ${request.headers.get("x-api-key") ?? ""}`,
+          },
+        }
+      );
+    }
+    case "/v1/bytes": {
+      // Not UTF-8: three bytes, which decode to more as text.
+      return new Response(new Uint8Array([0xff, 0xfe, 0x41]));
+    }
+    case "/v1/drip": {
+      return new Response(drippingBody(signal));
+    }
     case "/v1/invoices": {
       return Response.json(
         { method: request.method, invoices: [{ id: "inv-1" }] },
@@ -72,13 +126,20 @@ const answer = (request: Request, url: URL): Response => {
 const resolve = (url: URL): Response => {
   const name = url.searchParams.get("name") ?? "";
   const type = url.searchParams.get("type") === "AAAA" ? "AAAA" : "A";
-  const records = dns.get(name);
-  if (records === undefined) {
+  const all = dns.get(name);
+  if (all === undefined) {
     return Response.json({ Status: 3 });
+  }
+  const records = all[type];
+  if (records === "unavailable") {
+    return new Response("unavailable", { status: 503 });
+  }
+  if (records === "servfail") {
+    return Response.json({ Status: 2 });
   }
   return Response.json({
     Status: 0,
-    Answer: records[type].map((data) => ({
+    Answer: records.map((data) => ({
       name,
       type: type === "A" ? 1 : 28,
       TTL: 60,
@@ -142,11 +203,12 @@ describe("HTTP connections", () => {
         headers: Object.fromEntries(request.headers),
         body: await request.text(),
       });
-      return answer(request, url);
+      return answer(request, url, init?.signal);
     });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -168,6 +230,18 @@ describe("HTTP connections", () => {
       ),
       await outcome(create(billing({ origin: "https://nowhere.example" }))),
       await outcome(create(billing({ pathPrefixes: ["/v1/../admin"] }))),
+      // A credential a header can't carry as it is: past ASCII, or a
+      // control that could end the header.
+      await outcome(
+        create(
+          billing({
+            credential: { kind: "header", header: "X-Api-Key", secret: "clé" },
+          })
+        )
+      ),
+      await outcome(
+        create(billing({ credential: { kind: "bearer", token: "a\u0085b" } }))
+      ),
     ];
     const person = admin();
     const connectionId = await create(billing(), person);
@@ -185,6 +259,8 @@ describe("HTTP connections", () => {
       "connection.http_origin_refused",
       "connection.http_origin_refused",
       "connection.http_origin_refused",
+      "connection.invalid",
+      "connection.invalid",
       "connection.invalid",
     ]);
     expect(listed).toMatchObject({
@@ -214,6 +290,44 @@ describe("HTTP connections", () => {
     });
   });
 
+  it("ask an admin to try again when DNS can't answer, and take a failed IPv6 lookup beside a good IPv4 one as no IPv6", async () => {
+    dns.set("down.billing.example", { A: "unavailable", AAAA: [] });
+    dns.set("servfail.billing.example", { A: "servfail", AAAA: "servfail" });
+    dns.set("v6down.billing.example", {
+      A: ["93.184.216.36"],
+      AAAA: "unavailable",
+    });
+    dns.set("v6servfail.billing.example", {
+      A: ["93.184.216.37"],
+      AAAA: "servfail",
+    });
+    const answered = await Promise.all(
+      ["down", "servfail", "v6down", "v6servfail"].map(
+        async (name) =>
+          await outcome(
+            create(billing({ origin: `https://${name}.billing.example` }))
+          )
+      )
+    );
+    const recorded = await events();
+
+    expect({
+      answered,
+      // Nothing to refuse: only the approval is audited.
+      audited: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.outcome),
+    }).toStrictEqual({
+      answered: [
+        "connect.server_unavailable",
+        "connect.server_unavailable",
+        "ok",
+        "ok",
+      ],
+      audited: ["ok", "ok"],
+    });
+  });
+
   it("send an allowed read to the origin with the credential, and hand back neither it nor cookies, audited by method, path and status", async () => {
     const connectionId = await create();
     const call: Call = {
@@ -226,11 +340,20 @@ describe("HTTP connections", () => {
     };
     const result = await callAs(app, call);
     const answered: unknown = JSON.parse(result.output);
+    await callAs(app, {
+      connectionId,
+      action: "get",
+      input: { path: "/v1/bytes" },
+    });
     const recorded = await events();
-    const audited = recorded.find(({ action }) => action === "connection.call");
+    const calls = recorded.filter(({ action }) => action === "connection.call");
+    const audited = calls.find(
+      ({ detail }) => detail.httpPath === "/v1/invoices"
+    );
+    const notText = calls.find(({ detail }) => detail.httpPath === "/v1/bytes");
 
     expect(
-      sent.map(({ method, url, headers }) => ({
+      sent.slice(0, 1).map(({ method, url, headers }) => ({
         method,
         url,
         accept: headers.accept,
@@ -262,6 +385,8 @@ describe("HTTP connections", () => {
       httpBytes: JSON.stringify({ method: "GET", invoices: [{ id: "inv-1" }] })
         .length,
     });
+    // The bytes as they came, not as many as their text takes.
+    expect(notText?.detail.httpBytes).toBe(3);
     // Neither the credential nor the query is audited.
     expect(
       [secret, "status=open"].filter((text) => allText(recorded).includes(text))
@@ -286,13 +411,23 @@ describe("HTTP connections", () => {
         action: "get",
         input: { path: "/v1/invoices", headers: { authorization: "x" } },
       },
-      {
+      // Overrides some servers and proxies read as the method or the URL.
+      ...[
+        "x-http-method-override",
+        "x-original-method",
+        "x-original-url",
+        "x-rewrite-url",
+        "x-override-url",
+        "x-host",
+      ].map((name) => ({
         action: "get",
-        input: {
-          path: "/v1/invoices",
-          headers: { "x-http-method-override": "DELETE" },
-        },
-      },
+        input: { path: "/v1/invoices", headers: { [name]: "/admin" } },
+      })),
+      // Values a header can't carry as they are.
+      ...["café", "a\u0085b", "a\rb"].map((value) => ({
+        action: "get",
+        input: { path: "/v1/invoices", headers: { "x-note": value } },
+      })),
       {
         action: "send",
         input: { method: "DELETE", path: "/v1/invoices" },
@@ -324,45 +459,114 @@ describe("HTTP connections", () => {
     const moved = await outcome(
       callAs(app, { connectionId, action: "get", input: { path: "/v1/moved" } })
     );
+    // A read of a context that read restricted data is held for its
+    // person and carried out under a key, as a change is: refused once
+    // confirmed, it did nothing, so it is refused, not of unknown outcome.
+    const anna = someone();
+    const run = appFor(anna.userId, "app-invoices");
+    const signed = { restricted: true };
+    const keyedMove: Call = {
+      connectionId,
+      action: "get",
+      input: { path: "/v1/moved" },
+      idempotencyKey: "run-5:moved",
+    };
+    const held = await outcome(callAs(run, keyedMove, signed));
+    const [waiting] = await exports.default.listPendingActions(anna);
+    const confirmed = await outcome(
+      exports.default.confirmAction({
+        person: anna,
+        id: waiting?.id ?? "",
+        inputHash: waiting?.inputHash ?? "",
+        capability: await signCapability(env.CAPABILITY_SIGNING_KEY, run, {
+          connectionId,
+          action: "get",
+          idempotencyKey: waiting?.idempotencyKey,
+          origin: originOf(run),
+          ...signed,
+          decision: { kind: "confirm", pendingActionId: waiting?.id ?? "" },
+        }),
+      })
+    );
     const hopped = await callAs(app, {
       connectionId,
       action: "get",
       input: { path: "/v1/hop" },
     });
 
-    expect(moved).toBe("connect.http_refused");
+    expect({ moved, held, confirmed }).toStrictEqual({
+      moved: "connect.http_refused",
+      held: "connect.held",
+      confirmed: "connect.http_refused",
+    });
     expect(JSON.parse(hopped.output)).toMatchObject({ status: 200 });
     expect(sent.map(({ url }) => url)).toStrictEqual([
+      "https://api.billing.example/v1/moved",
       "https://api.billing.example/v1/moved",
       "https://api.billing.example/v1/hop",
       "https://api.billing.example/v1/invoices?from=hop",
     ]);
   });
 
-  it("refuse a call once the origin's name leads inside a network, with nothing sent", async () => {
-    const connectionId = await create();
-    dns.set("api.billing.example", { A: ["127.0.0.1"], AAAA: [] });
-    const toLoopback = await outcome(
-      callAs(app, {
+  it("never hand back the credential an API echoes, in its body or headers", async () => {
+    const byHeader = await create();
+    const byBearer = await create(
+      billing({ credential: { kind: "bearer", token: secret } })
+    );
+    const echoOf = async (connectionId: string): Promise<string> => {
+      const result = await callAs(app, {
         connectionId,
         action: "get",
-        input: { path: "/v1/invoices" },
-      })
-    );
-    dns.set("api.billing.example", { A: ["169.254.169.254"], AAAA: [] });
-    const toMetadata = await outcome(
-      callAs(app, {
-        connectionId,
-        action: "get",
-        input: { path: "/v1/invoices" },
-      })
-    );
+        input: { path: "/v1/echo" },
+      });
+      return result.output;
+    };
+    const echoed = [await echoOf(byHeader), await echoOf(byBearer)];
 
-    expect([toLoopback, toMetadata]).toStrictEqual([
-      "connect.http_refused",
-      "connect.http_refused",
+    // It went out with each, and came back with neither.
+    expect(
+      sent.map(({ headers }) => headers["x-api-key"] ?? headers.authorization)
+    ).toStrictEqual([secret, `Bearer ${secret}`]);
+    expect(echoed.map((output) => output.includes(secret))).toStrictEqual([
+      false,
+      false,
     ]);
-    expect(sent).toStrictEqual([]);
+    const answers = echoed.map((output): unknown => JSON.parse(output));
+    expect(answers).toMatchObject([
+      { headers: { "x-echo": "[credential]" } },
+      { headers: { "x-echo": "[credential]" } },
+    ]);
+  });
+
+  it("cut off an answer whose body drips in past the time limit", async () => {
+    const connectionId = await create();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let settled = false;
+    const call = outcome(
+      callAs(
+        app,
+        { connectionId, action: "get", input: { path: "/v1/drip" } },
+        {},
+        // In this test's own context, where its fake timers run.
+        connectWith({})
+      )
+    ).finally(() => {
+      settled = true;
+    });
+    // Until the API has the request (`scheduler.wait` runs on real time).
+    while (sent.length === 0) {
+      // oxlint-disable-next-line no-await-in-loop -- waiting on the request
+      await scheduler.wait(5);
+    }
+    // The call has its body's first chunk and waits on the rest: only the
+    // time limit ends it.
+    vi.advanceTimersByTime(httpLimits.timeoutMs - 1);
+    await scheduler.wait(50);
+    const beforeLimit = settled;
+    vi.advanceTimersByTime(1);
+
+    await expect(call).resolves.toBe("connect.server_unavailable");
+    expect(beforeLimit).toBeFalsy();
   });
 
   it("send a change from a workflow run once, under its key, with its body", async () => {
@@ -381,10 +585,24 @@ describe("HTTP connections", () => {
     const unkeyed = await outcome(
       callAs(app, { ...send, idempotencyKey: undefined })
     );
+    // A header it can't send is refused before its key is claimed: the
+    // same key then sends the right call.
+    const badHeader = await outcome(
+      callAs(app, {
+        ...send,
+        input: {
+          method: "POST",
+          path: "/v1/invoices",
+          headers: { "x-note": "café" },
+          body: '{"amount":10}',
+        },
+      })
+    );
     const first = await callAs(app, send);
     const repeat = await callAs(app, send);
 
     expect(unkeyed).toBe("connect.idempotency_key_required");
+    expect(badHeader).toBe("connect.http_refused");
     expect(JSON.parse(first.output)).toMatchObject({ status: 201 });
     expect(repeat.output).toBe(first.output);
     expect(sent).toStrictEqual([
@@ -446,6 +664,18 @@ describe("HTTP connections", () => {
   it("stop taking calls and drop the credential once disconnected", async () => {
     const person = admin();
     const connectionId = await create(billing(), person);
+    // Staff can't approve one, so they can't take one away either.
+    const byStaff = await outcome(
+      exports.default.disconnect({
+        person: { ...admin(), staff: true },
+        connectionId,
+      })
+    );
+    const stillActive = await env.DB.prepare(
+      "SELECT status FROM connections WHERE id = ?"
+    )
+      .bind(connectionId)
+      .first<{ status: string }>();
     await exports.default.disconnect({ person, connectionId });
     const after = await outcome(
       callAs(app, {
@@ -460,6 +690,10 @@ describe("HTTP connections", () => {
       .bind(connectionId)
       .first<{ sealed: string | null }>();
 
+    expect({ byStaff, stillActive }).toStrictEqual({
+      byStaff: "connection.staff_not_allowed",
+      stillActive: { status: "active" },
+    });
     expect(after).toBe("connect.connection_inactive");
     expect(row).toStrictEqual({ sealed: null });
     expect(sent).toStrictEqual([]);

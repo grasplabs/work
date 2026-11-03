@@ -1,5 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { connectErrors } from "@grasp-os/shared/connect";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,7 +10,9 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
-import { httpContract } from "../src/release-contracts.ts";
+import { httpContract, httpReadContract } from "../src/release-contracts.ts";
+import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import {
   httpApiInsideOrigin,
   httpApiOrigin,
@@ -321,6 +325,68 @@ describe("an App calling an outside API", () => {
   });
 });
 
+describe("the chat and an outside API", () => {
+  it("lists it only as one for Apps, and can neither ask for it nor call it, even granted", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const person = await signedInApi(idp, "user");
+    const { connectionId } = await admin.api.connections.createHttp({
+      name: "Billing API",
+      origin: httpApiOrigin,
+      pathPrefixes: ["/v1"],
+      methods: ["GET"],
+      credential: { kind: "bearer", token: secret },
+    });
+    const id = JSON.stringify(connectionId);
+    const chats = await personalChatsOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => {
+          const tried = async (work) => { try { return await work(); } catch (error) { return error.message; } };
+          const available = await env.connections.available();
+          return {
+            listed: available.filter(({ connectionId }) => connectionId === ${id}),
+            asked: await tried(() => env.connections.request({ connectionId: ${id}, actions: ["get"], binding: "ASKED", reason: "To list invoices." })),
+            called: await tried(() => env.connections.call("API", "get", { path: "/v1/invoices" })),
+          };
+        };`
+      ),
+      says("Done.")
+    );
+    // Even an agent an admin granted it to can't call it from the chat.
+    await requestGranted(idp, builder, {
+      subject: { type: "agent", agentId: chats.agent.agentId },
+      object: { type: "connection", connectionId },
+      actions: ["get"],
+      binding: "API",
+    });
+    const before = await received();
+    const { chat, ask } = await chats.newChat();
+    await ask("List the open invoices.");
+    const steps = await codeResults(chats.stub, chat.id);
+    const after = await received();
+
+    expect(steps.map(({ text }) => text)).toStrictEqual([
+      `Returned:\n${JSON.stringify({
+        listed: [
+          {
+            connectionId,
+            provider: "http",
+            account: `Billing API (${httpApiOrigin})`,
+            scope: "shared",
+            actions: ["get"],
+            decidedBy: "admin",
+            forAppsOnly: true,
+          },
+        ],
+        asked: permissionErrors.create("permission.invalid").message,
+        called: connectErrors.create("connect.class_unknown").message,
+      })}`,
+    ]);
+    expect(after).toHaveLength(before.length);
+  });
+});
+
 /** A JSON workflow creating an invoice for `who` through binding `api`. */
 const invoicingTasks = [
   {
@@ -400,5 +466,82 @@ describe("a JSON workflow calling an outside API", () => {
         body: '{"who":"Ada"}',
       },
     ]);
+  });
+});
+
+/** A JSON workflow listing invoices through binding `api`. */
+const listingTasks = [
+  {
+    list: {
+      call: "grasp.connector",
+      with: {
+        binding: "api",
+        operation: "get",
+        arguments: { path: "/v1/invoices" },
+      },
+      output: { as: "${ {status: (.status | tostring)} }" },
+    },
+  },
+];
+
+describe("a JSON workflow's HTTP contract", () => {
+  it("binds a connection allowing no change only as reads, and never asks reads for a change", async () => {
+    const { signedIn } = jsonWorkflowAppsOf(idp);
+    const admin = await signedIn("admin");
+    const builder = await signedIn("builder");
+    await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
+    const { connectionId } = await admin.api.connections.createHttp({
+      name: "Billing API",
+      origin: httpApiOrigin,
+      pathPrefixes: ["/v1/invoices"],
+      methods: ["GET"],
+      credential: { kind: "header", header: "x-api-key", secret },
+    });
+    /** Workflow `tasks` with `api` bound to `contract`, granted reads. */
+    const granted = async (tasks: unknown[], contract: string) => {
+      const workflow = await publishedWorkflow(builder, (name) =>
+        definitionOf(name, tasks, {
+          bindings: { api: { kind: "connector", contract } },
+        })
+      );
+      const requested = await builder.api.permissions.request({
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "connection", connectionId },
+        actions: ["get"],
+        binding: `API_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      await admin.api.permissions.grant(requested.id, { version: null });
+      return { workflow, permissionId: requested.id };
+    };
+    const bind = async ({
+      workflow,
+      permissionId,
+    }: Awaited<ReturnType<typeof granted>>) =>
+      await failure(
+        async () =>
+          await admin.api.workflowResources.approveBinding(workflow.id, {
+            alias: "api",
+            target: {
+              kind: "connector",
+              permissionId,
+              contract: "http.request@1",
+            },
+            reviewed: { version: 1 },
+          })
+      );
+
+    const full = await bind(await granted(listingTasks, httpContract));
+    const reads = await bind(await granted(listingTasks, httpReadContract));
+    const sendOnReads = await failure(
+      async () => await granted(invoicingTasks, httpReadContract)
+    );
+
+    expect({ full, reads, sendOnReads }).toStrictEqual({
+      // The full contract's `send` has nothing to serve it.
+      full: "workflow.binding_invalid",
+      reads: "ok",
+      // The reads' contract has no `send` to call.
+      sendOnReads: "workflow.definition_invalid",
+    });
   });
 });

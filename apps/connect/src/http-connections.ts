@@ -58,15 +58,21 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //
 // - Reaching inside a network (SSRF): the origin is exactly
 //   `https://host[:port]`, never an IP address or a private name
-//   (`originRefusal`, the rules links and outbound webhooks go by). Its
-//   host is resolved (DNS over HTTPS, `resolvedPublic`) when it is
-//   approved and again before every call; any address outside the public
-//   internet (loopback, private, link-local, carrier-grade NAT, unique
-//   local, metadata) refuses it, as does a name that resolves to nothing.
-//   Between that lookup and the fetch the name could be rebound: on
-//   Cloudflare, connect's `global_fetch_strictly_public` refuses a private
-//   address whatever the name; on plain workerd, its network's
-//   `allow = ["public"]` does.
+//   (`originRefusal`, the rules links and outbound webhooks go by). What
+//   keeps every call on the public internet is the fetch itself: on
+//   Cloudflare, connect's `global_fetch_strictly_public` refuses any
+//   address outside it (loopback, private, link-local, metadata) whatever
+//   the name resolves to, at the moment it connects. On-prem, connect's
+//   fetches for HTTP connections must go through a workerd network that
+//   allows only `public` (`allow = ["public"]`); without that, nothing here
+//   stops a name that leads inside. A DNS lookup of our own can't stand in
+//   for it: the name can be rebound between the lookup and the fetch, and
+//   on-prem, split-horizon DNS answers the outside resolver one address
+//   and the install's own resolver another, so a public answer means
+//   nothing. The host is looked up only when an admin approves the
+//   connection (`resolvedPublic`), as feedback: a name that resolves to
+//   nothing or to a private address is refused then, and a resolver that
+//   can't answer is a retryable `connect.server_unavailable`.
 // - Leaving what the admin approved: every request goes to the origin
 //   itself, with a method the admin allowed and a path under one of the
 //   admin's prefixes, compared segment by segment after the URL parser,
@@ -78,8 +84,11 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   connection, origin and header, never returned by any RPC, never
 //   logged or audited, and sent only to the origin. A call can't set the
 //   credential's header, `authorization`, cookies, `host`, hop-by-hop or
-//   forwarding headers, or a method override (`isSettableHeader`). A
-//   response's `set-cookie` and the credential's header are dropped.
+//   forwarding headers, or a method or URL override (`isSettableHeader`);
+//   header values and the credential are visible ASCII only. A response's
+//   `set-cookie` and the credential's header are dropped, and an API that
+//   echoes the credential back has every exact copy of it replaced, in the
+//   body and in header values (`withoutCredential`).
 // - Holding connect up, or flooding it: each call has `timeoutMs`
 //   (redirects included); a request body is at most `requestBodyBytes`
 //   and a response's is read up to `responseBodyBytes`, counted as it
@@ -114,7 +123,11 @@ const dnsTimeoutMs = 5000;
 /** DNS record types: an IPv4 and an IPv6 address. */
 const addressTypes = { A: 1, AAAA: 28 } as const;
 
-/** The addresses DNS answers for `host` of `type`, or undefined on failure. */
+/**
+ * The addresses DNS answers for `host` of `type` (none for a name that
+ * doesn't exist), or undefined when the resolver couldn't answer: it
+ * failed, timed out, or answered something else (SERVFAIL, bad JSON).
+ */
 const addressesOf = async (
   host: string,
   type: keyof typeof addressTypes
@@ -172,23 +185,24 @@ const addressesOf = async (
   });
 };
 
-/** Why a host can't be reached, or `public` when it can. */
-export type HostReach = "public" | "private" | "unresolved";
+/** Where a host leads, as DNS answers now. */
+type HostReach = "public" | "private" | "unresolved" | "unanswered";
 
 /**
  * Whether `host` leads only to public internet addresses, as DNS answers
  * now: `private` if any of its addresses is outside it, `unresolved` if
- * it has none, or DNS couldn't be asked.
+ * it has none, `unanswered` if the resolver couldn't answer for its IPv4
+ * addresses. A failed IPv6 lookup beside a good IPv4 one counts as none.
  */
-export const resolvedPublic = async (host: string): Promise<HostReach> => {
+const resolvedPublic = async (host: string): Promise<HostReach> => {
   const [v4, v6] = await Promise.all([
     addressesOf(host, "A"),
     addressesOf(host, "AAAA"),
   ]);
-  if (v4 === undefined || v6 === undefined) {
-    return "unresolved";
+  if (v4 === undefined) {
+    return "unanswered";
   }
-  const addresses = [...v4, ...v6];
+  const addresses = [...v4, ...(v6 ?? [])];
   if (addresses.length === 0) {
     return "unresolved";
   }
@@ -237,6 +251,10 @@ export const createHttpConnection = async (
   }
   const { hostname } = new URL(connection.origin);
   const reach = await resolvedPublic(hostname);
+  if (reach === "unanswered") {
+    // Not the origin's fault: the admin may simply try again.
+    throw connectErrors.create("connect.server_unavailable");
+  }
   if (reach !== "public") {
     await auditRefusal(env, person, "connection.connect", {
       ...base,
@@ -465,9 +483,10 @@ interface Traced {
 
 /**
  * Checks a call of an HTTP connection before it is held or claimed: its
- * request is one the connection allows, and its host leads only to the
- * public internet now. What it is goes on `progress.http`, for the audit
- * log. Nothing for a call of any other connection.
+ * request is one the connection allows. What it is goes on
+ * `progress.http`, for the audit log. Nothing for a call of any other
+ * connection. Where its host leads is the fetch's to enforce (see the
+ * header), never a lookup of ours.
  */
 export const requireHttpRequest = async (
   env: Env,
@@ -488,10 +507,6 @@ export const requireHttpRequest = async (
   const plan = httpPlanOf(config, action, input);
   trace.method = plan.method;
   trace.path = plan.pathname.slice(0, 256);
-  const reach = await resolvedPublic(plan.url.hostname);
-  if (reach !== "public") {
-    throw refused(`host_${reach}`);
-  }
 };
 
 /**
@@ -506,21 +521,22 @@ const droppedResponseHeaders = new Set([
   "transfer-encoding",
 ]);
 
-/** A response's body as text, read up to the limit; undefined past it. */
-const boundedText = async (response: Response): Promise<string | undefined> => {
-  if (response.body === null) {
-    return "";
-  }
-  const reader = response.body.getReader();
+/** Every chunk of `reader`, up to the limit (`boundedText`). */
+const readAll = async (
+  reader: ReadableStreamDefaultReader,
+  signal: AbortSignal
+): Promise<{ text: string; bytes: number } | undefined> => {
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   for (;;) {
+    signal.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- a stream, read in turn
-    const chunk = await reader.read();
+    const chunk: ReadableStreamReadResult<unknown> = await reader.read();
+    signal.throwIfAborted();
     if (chunk.done) {
       break;
     }
-    const value: unknown = chunk.value;
+    const { value } = chunk;
     if (!(value instanceof Uint8Array)) {
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await reader.cancel();
@@ -540,11 +556,71 @@ const boundedText = async (response: Response): Promise<string | undefined> => {
     all.set(chunk, at);
     at += chunk.byteLength;
   }
-  return new TextDecoder().decode(all);
+  return { text: new TextDecoder().decode(all), bytes };
 };
 
-/** A refusal the server makes itself, with nothing sent: taken at its word. */
-const notSent = (reason: string): McpToolResult => ({
+/** Cancels `reader`'s stream, only logging if that fails. */
+const cancelQuietly = async (
+  reader: ReadableStreamDefaultReader,
+  reason: unknown
+): Promise<void> => {
+  try {
+    await reader.cancel(reason);
+  } catch (error) {
+    log.warn("http.cancel_failed", errorFields(error));
+  }
+};
+
+/**
+ * A response's body as text, with the bytes it came in, read up to the
+ * limit; undefined past it. Throws once `signal` aborts, whether or not
+ * the body stream itself errors then: a cut-off body is never an answer.
+ */
+const boundedText = async (
+  response: Response,
+  signal: AbortSignal
+): Promise<{ text: string; bytes: number } | undefined> => {
+  if (response.body === null) {
+    return { text: "", bytes: 0 };
+  }
+  const reader = response.body.getReader();
+  let cancelling: Promise<void> | undefined;
+  const stop = (): void => {
+    // Ends the pending read; `readAll` then throws the abort's reason.
+    cancelling = cancelQuietly(reader, signal.reason);
+  };
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    return await readAll(reader, signal);
+  } finally {
+    signal.removeEventListener("abort", stop);
+    await cancelling;
+  }
+};
+
+/** What every copy of the credential an API echoes back is replaced with. */
+const credentialPlaceholder = "[credential]";
+
+/**
+ * `text` with every exact copy of the credential, as sent and bare,
+ * replaced: an API that echoes its request back (a debugging endpoint, an
+ * error that quotes the headers) never hands it to the App.
+ */
+const withoutCredential = (text: string, sentAs: readonly string[]): string => {
+  let replaced = text;
+  for (const secret of sentAs) {
+    replaced = replaced.replaceAll(secret, credentialPlaceholder);
+  }
+  return replaced;
+};
+
+/**
+ * A call that did nothing, as connect's server says: a request refused
+ * before it went out, or a read's answer refused (a redirect off what the
+ * admin approved), which changed nothing. Taken at its word (call.ts),
+ * with the key, if any, freed.
+ */
+const notDone = (reason: string): McpToolResult => ({
   output: JSON.stringify({ code: "connect.http_refused", reason }),
   provenance: [],
   isError: true,
@@ -552,6 +628,15 @@ const notSent = (reason: string): McpToolResult => ({
   outcomeUnknown: false,
   effectAbsent: false,
   change: undefined,
+});
+
+/**
+ * A call that did nothing for want of something connect holds (the
+ * credential, or an answer it could keep): `connect.server_unavailable`.
+ */
+const unavailable = (code: string): McpToolResult => ({
+  ...notDone(code),
+  output: JSON.stringify({ error: { code } }),
 });
 
 /** Where a redirect leads, if it is one a `get` follows: on the origin and paths. */
@@ -585,22 +670,24 @@ const isRedirect = (status: number): boolean =>
 
 /**
  * Sends `plan` with the credential, following a read's redirects on the
- * origin and its paths, within the time limit: the answer, or a refusal
- * of a redirect anywhere else. Throws `McpError` when no answer came: a
- * send may then have acted (call.ts spends its key).
+ * origin and its paths, each step under `signal`: the answer, or a refusal
+ * of a redirect anywhere else (a read, which changed nothing, so it is
+ * not done, its key freed). Throws `McpError` when no answer came: a send
+ * may then have acted (call.ts spends its key).
  */
-const send = async (
+const sendWithin = async (
   config: HttpConfig,
   credential: string,
   plan: HttpPlan,
-  trace: HttpTrace
+  trace: HttpTrace,
+  signal: AbortSignal
 ): Promise<McpToolResult> => {
-  const signal = AbortSignal.timeout(httpLimits.timeoutMs);
+  const sentAs =
+    config.credentialKind === "bearer" ? `Bearer ${credential}` : credential;
   const headers: Record<string, string> = {
     "user-agent": "Grasp-HTTP/1",
     ...plan.headers,
-    [config.credentialHeader]:
-      config.credentialKind === "bearer" ? `Bearer ${credential}` : credential,
+    [config.credentialHeader]: sentAs,
   };
   let { url } = plan;
   let response: Response;
@@ -625,34 +712,37 @@ const send = async (
     const target = followable(config, url, response);
     if (target === "refused") {
       trace.status = response.status;
-      // Only a read follows: it is refused as such, nothing kept.
-      throw refused("redirect");
+      log.warn("http.refused", { reason: "redirect" });
+      // Only a read follows, and a read changed nothing: not done.
+      return notDone("redirect");
     }
     if (hop >= httpLimits.redirects) {
       trace.status = response.status;
-      throw refused("redirects");
+      log.warn("http.refused", { reason: "redirects" });
+      return notDone("redirects");
     }
     url = target;
   }
   trace.status = response.status;
-  let body: string | undefined;
+  let read: { text: string; bytes: number } | undefined;
   try {
-    body = await boundedText(response);
+    read = await boundedText(response, signal);
   } catch (error) {
     throw new McpError("The answer couldn't be read", error);
   }
-  if (body === undefined) {
+  if (read === undefined) {
     // A send went out and was answered: never taken as nothing done.
     return {
-      ...notSent("too_large"),
+      ...unavailable("too_large"),
       notPerformed: plan.action === "get",
     };
   }
-  trace.bytes = new TextEncoder().encode(body).byteLength;
+  trace.bytes = read.bytes;
+  const secrets = [sentAs, credential];
   const answerHeaders: Record<string, string> = {};
   for (const [name, value] of response.headers) {
     if (!droppedResponseHeaders.has(name) && name !== config.credentialHeader) {
-      answerHeaders[name] = value;
+      answerHeaders[name] = withoutCredential(value, secrets);
     }
   }
   // A send's redirect is its answer, never followed: where it leads is
@@ -666,7 +756,7 @@ const send = async (
   const answer: HttpAnswer = {
     status: response.status,
     headers: answerHeaders,
-    body,
+    body: withoutCredential(read.text, secrets),
   };
   return {
     output: JSON.stringify(answer),
@@ -677,6 +767,26 @@ const send = async (
     effectAbsent: false,
     change: undefined,
   };
+};
+
+/** `sendWithin`, under one time limit for the whole call. */
+const send = async (
+  config: HttpConfig,
+  credential: string,
+  plan: HttpPlan,
+  trace: HttpTrace
+): Promise<McpToolResult> => {
+  // One limit for the whole call, its body's last byte included: a body
+  // that drips in is cut off with the request it belongs to.
+  const timeout = new AbortController();
+  const timer = setTimeout(() => {
+    timeout.abort(new DOMException("The call took too long", "TimeoutError"));
+  }, httpLimits.timeoutMs);
+  try {
+    return await sendWithin(config, credential, plan, trace, timeout.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /**
@@ -719,21 +829,19 @@ export const httpServer = (
       try {
         plan = httpPlanOf(config, name, input);
       } catch {
-        return notSent("request");
+        return notDone("request");
       }
-      // Its host was resolved as the call was checked (`requireHttpRequest`,
-      // on every carry-out, a held action's confirmation too); from then
-      // on connect's fetch reaches public addresses only (see the header).
+      // Connect's fetch reaches public addresses only (see the header).
       const vault = await vaultFor(env);
       if (vault === undefined || config.sealed === null) {
-        return notSent("credential");
+        return unavailable("credential");
       }
       let credential: string;
       try {
         credential = await vault.open(config.sealed, credentialContext(config));
       } catch (error) {
         log.error("http.credential_unreadable", errorFields(error));
-        return notSent("credential");
+        return unavailable("credential");
       }
       return await send(config, credential, plan, trace);
     },

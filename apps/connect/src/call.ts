@@ -85,17 +85,33 @@ const retryAfterSchema = z.object({
   }),
 });
 
+const httpRefusalSchema = z.object({
+  code: z.literal("connect.http_refused"),
+  reason: z.string().max(64),
+});
+
 /**
  * `connect.server_unavailable` for a call its tool says did nothing, with
  * the wait the tool passed on, if it did (`{ error: { retryAfterSeconds } }`,
- * as the connector kit reports a provider's `retry-after`).
+ * as the connector kit reports a provider's `retry-after`). An HTTP
+ * connection's refusal of what it was answered (a redirect off what the
+ * admin approved) is `connect.http_refused`: trying again won't help.
  */
-const notPerformed = ({ output }: McpToolResult): Error => {
+const notPerformed = (
+  kind: Connection["serverKind"],
+  { output }: McpToolResult
+): Error => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch {
     parsed = undefined;
+  }
+  const refusal = httpRefusalSchema.safeParse(parsed);
+  if (kind === "http" && refusal.success) {
+    return connectErrors.create("connect.http_refused", {
+      reason: refusal.data.reason,
+    });
   }
   const wait = retryAfterSchema.safeParse(parsed).data?.error.retryAfterSeconds;
   return connectErrors.create(
@@ -639,7 +655,7 @@ const readOnce = async (
       : error;
   }
   if (didNothing(connection.serverKind, read)) {
-    throw notPerformed(read);
+    throw notPerformed(connection.serverKind, read);
   }
   return { ...answerOf(read), replayed: false };
 };
@@ -755,7 +771,7 @@ const sendClaimed = async (
   // claim (and its connector build) afresh.
   if (didNothing(connection.serverKind, done)) {
     await (recovering ? store.spend() : store.release());
-    throw notPerformed(done);
+    throw notPerformed(connection.serverKind, done);
   }
   // ...or the provider refused it access, and the connection's grant lacks
   // a right its connector asks for now: it is marked for its person to
@@ -1012,7 +1028,7 @@ export const carryOut = async (
   requirePointedMailbox(claims, connection, call.action, tool, input);
   requirePointedResource(claims, connection, call.action, input);
   // Before it is held or its key claimed: an HTTP request the connection
-  // doesn't allow, or a host that leads inside, is refused unsent.
+  // doesn't allow is refused unsent.
   await requireHttpRequest(env, connection, call.action, input, progress);
   const files = await requireFiles(takesFiles, input, call.attachments);
   if (recovering !== undefined) {

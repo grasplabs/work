@@ -2347,7 +2347,7 @@ export const connectErrors = defineErrorFamily({
   "connect.resource_not_pointed":
     "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
   "connect.http_refused":
-    "That request isn't one this connection allows: its method, path or headers, or where its host leads, aren't what an admin approved. Nothing was sent.",
+    "That request isn't one this connection allows: its method, path or headers, or where it was redirected, aren't what an admin approved, so nothing was changed.",
   "connect.mailbox_not_pointed":
     "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });
