@@ -1443,6 +1443,13 @@
       "when": 1793665296423,
       "tag": "0205_app_visitors",
       "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "6",
+      "when": 1793666835063,
+      "tag": "0206_app_visitor_grants",
+      "breakpoints": true
     }
   ]
 }

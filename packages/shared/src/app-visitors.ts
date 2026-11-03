@@ -2,13 +2,16 @@ import { z } from "zod";
 
 import { appLinkSchema } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
+import { functionRequestMaxBytes } from "./operation-limits.ts";
 
 // Visitors (core's app-visitors.ts): someone who isn't a member opens a
 // published App at its own link (`appLinkSchema`), once they sign in with
 // a code core mails them. Only an address the App's builders listed, or
 // one at a domain they listed, can ask for a code. A visitor's session
-// opens that one App's screens and nothing else, and the screens call
-// none of the App's functions: nothing runs as a member, or as anyone.
+// opens that one App's screens and nothing else. Its screens call only the
+// functions the App's builders granted visitors, for the version they
+// granted them on, and those run as the App itself, never as a member
+// (core's app-visitor-calls.ts).
 // How each part can be attacked, and what stops it, is in core's
 // app-visitors.ts.
 
@@ -107,6 +110,24 @@ export const appVisitorCodeSchema = z
   .transform((value) => value.replaceAll(/\s/gu, ""))
   .pipe(z.string().regex(new RegExp(`^\\d{${appVisitorCodeDigits}}$`, "u")));
 
+/** Most functions one App's version grants visitors. */
+export const appVisitorGrantsMax = 50;
+
+/**
+ * The functions of an App's version that visitors may call, by path
+ * (`notes.titles`): its public queries and mutations only.
+ */
+export const appVisitorGrantsSchema = z
+  .array(z.string().min(1).max(256))
+  .max(appVisitorGrantsMax);
+
+/** What an App grants visitors: its current version's functions. */
+export interface AppVisitorGrants {
+  /** The version they are granted on; null while none is current. */
+  version: number | null;
+  functions: string[];
+}
+
 /** A visitor's session: 32 random bytes, base64url. */
 export const appVisitorTokenSchema = z
   .string()
@@ -130,6 +151,19 @@ export const appVisitorRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("sign_out"),
     token: appVisitorTokenSchema,
   }),
+  /**
+   * A call of one of the App's functions from its screen, as the screen
+   * client writes it (`request`, JSON text), with the lease its frame was
+   * opened with.
+   */
+  z.strictObject({
+    action: z.literal("call"),
+    token: appVisitorTokenSchema,
+    lease: z.string().max(256),
+    // As many characters as a call's bytes; the call itself counts its
+    // bytes (`functionRequestMaxBytes`) before it parses them.
+    request: z.string().max(functionRequestMaxBytes),
+  }),
 ]);
 export type AppVisitorRequest = z.input<typeof appVisitorRequestSchema>;
 
@@ -150,4 +184,7 @@ export const appVisitorErrors = defineErrorFamily({
   "visitor.unavailable": "No code could be sent now. Try again later.",
   "visitor.list_changed":
     "Someone else changed who may visit this App while you were editing it. Reload the list and try again.",
+  "visitor.not_granted": "This App doesn't let visitors do that.",
+  "visitor.grants_changed":
+    "Someone else changed what visitors may do in this App while you were editing it. Reload and try again.",
 });

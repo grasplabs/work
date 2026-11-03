@@ -22,7 +22,8 @@ export default defineProject({
       main: "./test/worker.ts",
       miniflare: {
         compatibilityDate: "2026-09-15",
-        d1Databases: { BRAIN: "brain" },
+        // A second, empty Brain: what an export is restored into.
+        d1Databases: { BRAIN: "brain", RESTORED: "restored" },
         r2Buckets: { BLOBS: "blobs" },
         bindings: { BRAIN_MIGRATIONS: migrations },
       },

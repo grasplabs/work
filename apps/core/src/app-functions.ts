@@ -1155,6 +1155,136 @@ const callFunction = async (
 };
 
 /**
+ * Who a visitor's call runs for (app-visitor-calls.ts): never a person.
+ * The App's version is the one it was granted on.
+ */
+export interface VisitorCaller {
+  readonly app: AppId;
+  readonly version: number;
+  /**
+   * `visitor:<session>`, a name no member's ID has: it owns what the call
+   * inserts, and keys its receipts, so no two visitors share either.
+   */
+  readonly principal: string;
+  /**
+   * Throws unless the visitor may still call `path`: their session live,
+   * the App published at this version, their address listed, and `path`
+   * still granted. Read before the call and before each commit.
+   */
+  readonly stillAllowed: (path: string) => Promise<void>;
+  /**
+   * Refuses the call of `path` as not granted, recorded: for what no grant
+   * can open (an action, core's own queries) as for what isn't granted.
+   */
+  readonly notGranted: (path: string) => Promise<never>;
+  /** Told the function the call runs, once it is admitted. */
+  readonly admitted: (path: string) => Promise<void>;
+}
+
+/**
+ * The invocation of `release`'s function `path` for a visitor: the App's
+ * store, as no member (no `appMembers` or `appBuilders` table opens to it,
+ * and an `owner` table shows only the visitor's own rows), with nothing
+ * else bound. No resource (no connection, Knowledge, model, store, other
+ * App or template), no workflow started, no notification staged: a
+ * function that asks for any of them is refused (`resource.unavailable`),
+ * whatever the App holds for its members.
+ */
+export const visitorInvocation = async (
+  env: Env,
+  release: Release,
+  caller: VisitorCaller,
+  path: string,
+  requestId: string,
+  deadline: number
+): Promise<Invocation> => {
+  const store =
+    release.store === null
+      ? noStore()
+      : await openStore(env, release.store.storeId);
+  return {
+    principal: caller.principal,
+    consumer: {
+      resourceId: caller.app,
+      resourceVersion: release.manifest.resourceVersion,
+    },
+    store,
+    requestId,
+    deadline,
+    runId: null,
+    authorize: async () => {
+      await requireNotRevoked(env, caller.app, caller.version);
+      await caller.stillAllowed(path);
+      return { appMember: false, appBuilder: false };
+    },
+  };
+};
+
+/**
+ * Calls a function of a published App for a visitor (app-visitor-calls.ts),
+ * as the App itself: only a public query or mutation of the version the
+ * visitor's grant is on, never an action (which reaches resources) and
+ * never core's own workflow or preference queries, which are a member's.
+ * `request` is the call as the screen client wrote it, as text.
+ */
+export const callVisitorFunction = async (
+  env: Env,
+  caller: VisitorCaller,
+  request: unknown,
+  deadline: number
+): Promise<FunctionAnswer> => {
+  const requestId = crypto.randomUUID();
+  const refused = (error: unknown): FunctionAnswer => ({
+    result: { ok: false, error: refusalOf(error, requestId) },
+    provenance: null,
+    fingerprint: null,
+    manifestHash: null,
+  });
+  try {
+    const call = callAllowed(request, { kind: undefined, windowed: false });
+    const { contractId } = call.reference;
+    // Never granted, whatever the grants say: refused, and recorded, before
+    // anything of the release is read.
+    if (
+      call.reference.kind === "action" ||
+      isWorkflowQueryPath(contractId) ||
+      isPreferencePath(contractId)
+    ) {
+      return refused(await caller.notGranted(contractId));
+    }
+    const release = await loadRelease(env, caller.app, caller.version);
+    const { path } = await referenceIn(release, call.reference);
+    await caller.stillAllowed(path);
+    await caller.admitted(path);
+    const invocation = await visitorInvocation(
+      env,
+      release,
+      caller,
+      path,
+      requestId,
+      deadline
+    );
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      call.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: call.idempotencyKey }
+    );
+    return {
+      result,
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
+/**
  * Calls a public function of App `app` for `by` (spec 32.6): `request`
  * is the call as its caller sent it, as text, bounded before it is read.
  * It runs only against the release of the App's current version, and
