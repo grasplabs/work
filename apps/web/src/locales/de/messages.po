@@ -2683,6 +2683,10 @@ msgstr "Eine archivierte Domäne bleibt, wie sie ist, und geht offline: Niemand 
 msgid "An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
 msgstr "Eine archivierte Domäne bleibt, wie sie war, und geht offline: Niemand öffnet sie, ihre Auslöser stoppen und ihre unvollendeten Läufe werden abgebrochen. Ein Builder kann sie als Entwurf wiederherstellen."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An email to its own address"
+msgstr "Eine E-Mail an seine eigene Adresse"
+
 #: src/settings/audit-chain.tsx
 msgid "An entry doesn't link to the one before it."
 msgstr "Ein Eintrag ist nicht mit dem davor verknüpft."
@@ -14793,6 +14797,10 @@ msgstr "Der Lauf wurde gestoppt."
 msgid "The run's input fields, each from the event as a JSON Pointer, as JSON"
 msgstr "Die Eingabefelder des Laufs, jedes aus dem Ereignis als JSON Pointer, als JSON"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The run's input fields, each from the message as a JSON Pointer, as JSON"
+msgstr "Die Eingabefelder des Laufs, jedes aus der Nachricht als JSON Pointer, als JSON"
+
 #: src/inbox/item-detail.tsx
 msgid "The run's own files"
 msgstr "Die eigenen Dateien des Laufs"
@@ -16858,6 +16866,7 @@ msgid "When a workflow is known"
 msgstr "Wann ein Workflow bekannt ist"
 
 #: src/workflows/triggers.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "Wenn eine E-Mail für {localPart} eingeht"
 

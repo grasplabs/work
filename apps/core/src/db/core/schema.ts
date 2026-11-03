@@ -3732,8 +3732,8 @@ export const workflowResourceMembers = sqliteTable(
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
  * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule), owned by whoever created it,
- * never by the workflow's owner or an App. `current_version` names the
+ * connector event, a webhook, a schedule, mail to its address), owned by
+ * whoever created it, never by the workflow's owner or an App. `current_version` names the
  * version (`trigger_resource_versions`) future starts use; `enabled` false,
  * or `deleted_at`, stops future starts, never runs already started. Its
  * starts need a permission of its own (`start` on the workflow) like any
@@ -3743,12 +3743,19 @@ export const triggerResources = sqliteTable("trigger_resources", {
   id: text().primaryKey(),
   ownerId: text("owner_id").notNull(),
   kind: text({
-    enum: ["system", "connector", "webhook", "schedule"],
+    enum: ["system", "connector", "webhook", "schedule", "email"],
   }).notNull(),
   currentVersion: integer("current_version").notNull(),
   enabled: integer({ mode: "boolean" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * For an email trigger: the part before the `@` of the address it
+   * receives mail at (`trigger-<token>`, 128 random bits), set as it is
+   * created and never changed; null for any other kind. Unlike its ID,
+   * shown only to whoever may see the trigger, never logged or audited.
+   */
+  emailAddress: text("email_address").unique(),
 });
 
 /**
@@ -3797,7 +3804,9 @@ export const triggerResourceVersions = sqliteTable(
      * how each event becomes its run's input (canonical JSON: input fields
      * to JSON Pointers into the event, and literal defaults), checked as
      * the version was written (trigger-resources.ts). Its event type is
-     * `event_type`, with no `event_contract`. Null for any other kind.
+     * `event_type`, with no `event_contract`. An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
      */
     connectionId: text("connection_id"),
     connectionResource: text("connection_resource"),
@@ -3908,10 +3917,11 @@ export const agentHeldStarts = sqliteTable(
 );
 
 /**
- * Where an event stands for a connector trigger that didn't start its run
- * (src/workflows/connector-triggers.ts), by the trigger and the event's
- * key: held back at its hourly limit since `held_since` (`settled` null),
- * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * Where an event stands for a connector trigger, or a message for an email
+ * trigger, that didn't start its run (src/workflows/connector-triggers.ts,
+ * `startOnce`), by the trigger and the event's key: held back at its
+ * hourly limit since `held_since` (`settled` null), or settled for it for
+ * good: `dropped`, held past a day, or `refused`,
  * refused for good. A settled row is a tombstone, so the same event
  * delivered again for another trigger's sake is known and starts nothing
  * here. The clock sweeps both past their retention.
@@ -3928,6 +3938,34 @@ export const connectorTriggerHolds = sqliteTable(
     settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
+);
+
+/**
+ * The places taken in each trigger's hourly room (src/workflows/
+ * connector-triggers.ts, `startOnce`): one per event (or message) the
+ * trigger started or refused for good, taken in one conditional insert
+ * before either, so no more than `triggeredRunsPerHour` are taken an hour
+ * however many arrive at once, and an event held back for want of one
+ * writes no audit row. A place counts only within its hour: delivered
+ * again within it, an event takes no other; after it, it takes its place
+ * anew under the limit. The clock sweeps places past their hour.
+ */
+export const triggerHourSlots = sqliteTable(
+  "trigger_hour_slots",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.eventKey] }),
+    // A trigger's places this hour.
+    index("trigger_hour_slots_taken").on(table.triggerId, table.takenAt),
+    // The places past their hour, for the sweep.
+    index("trigger_hour_slots_taken_at").on(table.takenAt),
+  ]
 );
 
 /**
