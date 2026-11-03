@@ -202,7 +202,7 @@ export const woken = async (run: string, step = "go"): Promise<void> => {
  * A look a decision wait records (resource-host.ts and host.ts, `look`):
  * when it looked, by the clock, and whether anyone had answered.
  */
-const decisionLook = /(?::decision:(?:reached|reminded)|:woken:\d+)$/u;
+const decisionLook = /(?::reached|:decision:reminded|:woken:\d+)$/u;
 const lookedSchema = z.looseObject({ at: z.number() });
 /**
  * An enter step's journal with its task's deadline (resource-host.ts,
@@ -230,6 +230,28 @@ const movedBack = (name: string, value: unknown, ms: number): unknown => {
 };
 
 /**
+ * Whether the run is parked on an event wait (a decision's): suspended
+ * on it, or stopped while in it.
+ */
+const parkedIn = (sql: SqlStorage): "waiting" | "paused" | "not_yet" => {
+  const [current] = sql
+    .exec<{ status: string }>("SELECT status FROM run")
+    .toArray();
+  const waiting = sql
+    .exec(
+      "SELECT 1 FROM steps WHERE type = 'waitForEvent' AND state = 'waiting'"
+    )
+    .toArray();
+  if (
+    waiting.length === 0 ||
+    (current?.status !== "waiting" && current?.status !== "paused")
+  ) {
+    return "not_yet";
+  }
+  return current.status;
+};
+
+/**
  * Lets `ms` pass for the decision run `run` waits on, as its clock would,
  * without the test waiting for it: every instant the run recorded of it
  * (each look's `at`, a task's deadline) and the decision's own deadline
@@ -243,70 +265,61 @@ export const decisionTimePassed = async (
   ms: number
 ): Promise<void> => {
   const object = runObject(run);
-  // First: the run reads it as it replays.
+  // Parked first: a run that hasn't reached its wait yet would read the
+  // decision's moved deadline (host.ts reads it as it waits) and not wait.
+  // Once parked, nothing of it moves until its wait comes due.
+  await vi.waitFor(
+    async () => {
+      const state = await runInDurableObject(object, (_object, durable) =>
+        parkedIn(durable.storage.sql)
+      );
+      expect(state).not.toBe("not_yet");
+    },
+    { timeout: 10_000, interval: 100 }
+  );
   await env.DB.prepare(
     "UPDATE workflow_decisions SET expires_at = expires_at - ? WHERE run_id = ? OR resource_run_id = ?"
   )
     .bind(ms, run, run)
     .run();
-  const found = await vi.waitFor(
-    async () => {
-      const state = await runInDurableObject(
-        object,
-        async (_object, durable): Promise<"waiting" | "paused" | "not_yet"> => {
-          const { sql } = durable.storage;
-          const [current] = sql
-            .exec<{ status: string }>("SELECT status FROM run")
-            .toArray();
-          const waiting = sql
-            .exec(
-              "SELECT 1 FROM steps WHERE type = 'waitForEvent' AND state = 'waiting'"
-            )
-            .toArray();
-          if (
-            waiting.length === 0 ||
-            (current?.status !== "waiting" && current?.status !== "paused")
-          ) {
-            return "not_yet";
-          }
-          const recorded = sql
-            .exec<{ ordinal: number; name: string; value: string }>(
-              "SELECT ordinal, name, value FROM steps WHERE type = 'do' AND state = 'succeeded' AND value IS NOT NULL"
-            )
-            .toArray();
-          for (const { ordinal, name, value } of recorded) {
-            const moved = movedBack(name, decode(value), ms);
-            if (moved !== undefined) {
-              sql.exec(
-                "UPDATE steps SET value = ? WHERE ordinal = ?",
-                encode(moved),
-                ordinal
-              );
-            }
-          }
-          if (current.status === "paused") {
-            // Resuming moves each deadline on by the time the run was
-            // paused: one set to when it paused comes due as it resumes.
-            sql.exec(
-              "UPDATE steps SET deadline = (SELECT paused_at FROM run) WHERE type = 'waitForEvent' AND state = 'waiting'"
-            );
-            return "paused";
-          }
-          const now = Date.now();
-          sql.exec(
-            "UPDATE steps SET deadline = ? WHERE type = 'waitForEvent' AND state = 'waiting'",
-            now
-          );
-          sql.exec("UPDATE run SET wake_at = ?", now);
-          await durable.storage.setAlarm(now);
-          return "waiting";
-        }
+  const found = await runInDurableObject(object, async (_object, durable) => {
+    const { sql } = durable.storage;
+    const state = parkedIn(sql);
+    if (state === "not_yet") {
+      throw new Error(`Run ${run} went on before its time passed`);
+    }
+    const recorded = sql
+      .exec<{ ordinal: number; name: string; value: string }>(
+        "SELECT ordinal, name, value FROM steps WHERE type = 'do' AND state = 'succeeded' AND value IS NOT NULL"
+      )
+      .toArray();
+    for (const { ordinal, name, value } of recorded) {
+      const moved = movedBack(name, decode(value), ms);
+      if (moved !== undefined) {
+        sql.exec(
+          "UPDATE steps SET value = ? WHERE ordinal = ?",
+          encode(moved),
+          ordinal
+        );
+      }
+    }
+    if (state === "paused") {
+      // Resuming moves each deadline on by the time the run was paused:
+      // one set to when it paused comes due as it resumes.
+      sql.exec(
+        "UPDATE steps SET deadline = (SELECT paused_at FROM run) WHERE type = 'waitForEvent' AND state = 'waiting'"
       );
-      expect(state).not.toBe("not_yet");
       return state;
-    },
-    { timeout: 10_000, interval: 100 }
-  );
+    }
+    const now = Date.now();
+    sql.exec(
+      "UPDATE steps SET deadline = ? WHERE type = 'waitForEvent' AND state = 'waiting'",
+      now
+    );
+    sql.exec("UPDATE run SET wake_at = ?", now);
+    await durable.storage.setAlarm(now);
+    return state;
+  });
   if (found === "paused") {
     await resumed(run);
   }
