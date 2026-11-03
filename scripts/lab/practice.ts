@@ -41,9 +41,28 @@ import { cardText, roleCardOf } from "./role-card.ts";
 /** What the lab kept of an interview a model played. */
 const playedSchema = z.object({
   interviewer: interviewerSchema,
-  /** The first practice people, who tell all they know; or people as they are, with a temper. */
-  people: z.enum(["ideal", "real"]),
+  /** The first practice people, who tell all they know; people as they are, with a temper (v1); or with a mix and a state that drifts (v2, drift.ts). */
+  people: z.enum(["ideal", "real", "v2"]),
+  /** With v1, their temper; with v2, the temper that leads their mix. */
   temper: z.enum(tempers).optional(),
+  /** People v2: their mix of tempers, and their state after each answer. */
+  mix: z.partialRecord(z.enum(tempers), z.number()).optional(),
+  states: z
+    .array(
+      z.object({
+        temper: z.enum(tempers),
+        state: z.object({
+          patience: z.number(),
+          trust: z.number(),
+          energy: z.number(),
+          focus: z.number(),
+        }),
+        turned: z.array(
+          z.enum(["warmed up", "closed up", "tired", "wants to finish", "left"])
+        ),
+      })
+    )
+    .optional(),
   seed: z.int().optional(),
   said: z.array(z.array(z.string())),
   notesAt: z.array(z.int()),

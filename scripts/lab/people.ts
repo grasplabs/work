@@ -267,6 +267,14 @@ const say = {
     'Do not tell your story yet. Ask where he wants you to start, or what he wants to hear, in a few words. "said" is empty.',
 } as const;
 
+/** What someone who wants to finish, or goes, is told: people v2 reaches these by patience (people-v2.ts). */
+export const leavingSay = {
+  terse: say.terse,
+  mustGo: say.mustGo,
+  mustGoNow: say.mustGoNow,
+  gone: say.gone,
+} as const;
+
 /** How often an answer of someone with nothing to make of it is a word or two, as people's are. */
 const briefShare = 0.29;
 
@@ -508,6 +516,7 @@ export const realSystem = ({
   locale,
   temper,
   seed,
+  also = [],
 }: {
   key: AnswerKey;
   employee: KeyEmployee;
@@ -515,21 +524,27 @@ export const realSystem = ({
   locale: InterviewLocale;
   temper: Temper;
   seed: string;
+  /** People v2: the other tempers of their mix, less of them than of `temper` (drift.ts). */
+  also?: readonly Temper[];
 }): string => {
   const colleagues = colleaguesOf(key, employee);
   const slice = sliceOf(key, employee);
-  const guesses = temper === "guesser" ? guessesFor(slice, lead, seed) : {};
-  const procedure =
-    temper === "official"
-      ? `\nThe written procedure, which is what you tell first: ${key.procedure}\n`
-      : "";
+  const has = new Set([temper, ...also]);
+  const guesses = has.has("guesser") ? guessesFor(slice, lead, seed) : {};
+  const procedure = has.has("official")
+    ? `\nThe written procedure, which is what you tell first: ${key.procedure}\n`
+    : "";
+  const habit = [
+    habits[temper],
+    ...also.map((other) => `At times, too: ${habits[other]}`),
+  ].join(" ");
   return `${whoIs(key, employee, lead)}
 
 ${how(languages[locale])}
 
 You and AI, for when Stephen asks about that (it is not in your list, and it is how it is for you): ${stanceFor(seed)}
 
-Who you are in this talk: ${habits[temper]}
+Who you are in this talk: ${habit}
 
 The people you work with: ${colleagues.length > 0 ? colleagues.join("; ") : "nobody in particular"}.
 ${procedure}

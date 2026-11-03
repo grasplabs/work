@@ -11,7 +11,10 @@ import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { adminCommand } from "../seed/admin-command.ts";
 import { inTurns, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
+import { mixesFor, mixLine, tempersOf } from "./drift.ts";
 import type { AnswerKey } from "./keys/types.ts";
+import { realPlayerV2 } from "./people-v2.ts";
+import type { PeopleVersion } from "./people-v2.ts";
 import { realPlayer, realSystem, tempersFor } from "./people.ts";
 import { employeeSystem, modelPlayer } from "./person.ts";
 import { playInterview } from "./play.ts";
@@ -25,6 +28,8 @@ export interface SimulateOptions {
   seed: number;
   /** The first practice people, who tell all they know. */
   ideal: boolean;
+  /** People v2 (a mix and a state that drifts), or v1 (one temper each), when not ideal. */
+  people: PeopleVersion;
   interviewer: Interviewer;
   /** How many interviews at once. */
   parallel: number;
@@ -58,14 +63,24 @@ const deviceKey = async (
   return session.key ?? person.key;
 };
 
+/** Who played them, as the lab keeps it. */
+const peopleOf = (ideal: boolean, v2: boolean): "ideal" | "real" | "v2" => {
+  if (ideal) {
+    return "ideal";
+  }
+  return v2 ? "v2" : "real";
+};
+
 /** Lets a model play everyone asked for who hasn't talked yet; says how many it played. */
 export const simulate = async (
   core: Core,
   practice: Practice,
   key: AnswerKey,
-  { only, seed, ideal, interviewer, parallel, log }: SimulateOptions
+  { only, seed, ideal, people, interviewer, parallel, log }: SimulateOptions
 ): Promise<number> => {
   const tempers = tempersFor(practice.people.length, seed);
+  const mixes = mixesFor(practice.people.length, seed);
+  const v2 = !ideal && people === "v2";
   const links = await linksOf(core);
   const asker = askerOf(core);
   const open = practice.people.filter(
@@ -76,7 +91,7 @@ export const simulate = async (
         only.includes(person.employee))
   );
   log(
-    `A model plays ${open.length} people${ideal ? ", who tell all they know" : `, as people really answer (seed ${seed})`}`
+    `A model plays ${open.length} people${ideal ? ", who tell all they know" : `, as people really answer (people ${people}, seed ${seed})`}`
   );
   const played = await inTurns(open, parallel, async (person) => {
     const employee = key.employees.find((each) => each.id === person.employee);
@@ -89,8 +104,33 @@ export const simulate = async (
     if (deviced === null) {
       return false;
     }
-    const temper = tempers[practice.people.indexOf(person)] ?? "plain";
+    const place = practice.people.indexOf(person);
+    const mix = mixes[place] ?? { plain: 1 };
+    const [leading = "plain", ...also] = tempersOf(mix);
+    const temper = v2 ? leading : (tempers[place] ?? "plain");
     const mark = `${key.id}:${employee.id}:${seed}`;
+    const playerV2 = v2
+      ? realPlayerV2({
+          asker,
+          name: employee.name,
+          system: realSystem({
+            key,
+            employee,
+            lead: practice.lead.name,
+            locale: practice.locale,
+            temper,
+            seed: mark,
+            also,
+          }),
+          known: employee.knows,
+          mix,
+          seed: mark,
+          locale: practice.locale,
+        })
+      : null;
+    if (playerV2 !== null) {
+      log(`  ${person.id}: ${mixLine(mix)}`);
+    }
     const player = ideal
       ? modelPlayer(
           asker,
@@ -98,7 +138,8 @@ export const simulate = async (
           employeeSystem(key, employee, practice.lead.name, practice.locale),
           employee.knows
         )
-      : realPlayer({
+      : (playerV2 ??
+        realPlayer({
           asker,
           name: employee.name,
           system: realSystem({
@@ -113,7 +154,7 @@ export const simulate = async (
           temper,
           seed: mark,
           locale: practice.locale,
-        });
+        }));
     log(`> ${person.id}`);
     const interview = await playInterview(onLink, player, {
       locale: practice.locale,
@@ -126,8 +167,9 @@ export const simulate = async (
     person.played = {
       ...kept,
       interviewer,
-      people: ideal ? "ideal" : "real",
+      people: peopleOf(ideal, v2),
       ...(ideal ? {} : { temper, seed }),
+      ...(playerV2 === null ? {} : { mix, states: playerV2.states }),
     };
     // Kept at once, so an interview that fails later loses none before it.
     keepPractice(practice);

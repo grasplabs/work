@@ -229,6 +229,9 @@ const peopleOf = (scored: Scored[]): Result["people"] => {
   if (played.length === 0) {
     return "person";
   }
+  if (played.some((each) => each.people === "v2")) {
+    return "v2";
+  }
   return played.some((each) => each.people === "real") ? "real" : "ideal";
 };
 
