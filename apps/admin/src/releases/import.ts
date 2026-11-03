@@ -214,7 +214,8 @@ const importRelease = async (
     );
   }
   // Before anything is checked: retention keeps the blobs of a release
-  // that's still being imported, over however many runs it takes.
+  // that's still being imported, over however many runs it takes, as the
+  // manifest it has now names them.
   await recordBlobs(db, id, manifest);
   const manifestSha256 = await sha256OfBytes(manifestBytes);
   // Where an earlier run got to, for this very manifest: another (a broken

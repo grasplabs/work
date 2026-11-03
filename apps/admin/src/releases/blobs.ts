@@ -1,8 +1,9 @@
 /**
  * Which blobs each published release names (`release_blobs`): what
  * retention keeps (src/releases/retention.ts). Written when the import
- * first reads a release's manifest (src/releases/import.ts), before it's
- * verified, so a release still being imported keeps its blobs too; and,
+ * reads a release's manifest (src/releases/import.ts), before it's
+ * verified, so a release still being imported keeps its blobs too, those
+ * of a manifest replaced since included; and,
  * for a release imported before these were kept, by retention itself.
  */
 import { blobKeys } from "@grasp-os/shared/release";
@@ -16,22 +17,23 @@ import { releaseBlobs } from "../db/schema.ts";
 const rowsPerInsert = 40;
 
 /**
- * Records the blobs `manifest` names as release `releaseId`'s, unless
- * they're recorded already: one batch, so a release has all its rows or
- * none.
+ * Records the blobs `manifest` names as release `releaseId`'s, in place of
+ * any it had: a manifest replaced before its import finished (a broken
+ * upload put right) names others. One batch, so a release has all its
+ * rows or none, and nothing when they're recorded already.
  */
 export const recordBlobs = async (
   db: AdminDatabase,
   releaseId: string,
   manifest: ReleaseManifest
 ): Promise<void> => {
+  const keys = [...new Set(blobKeys(manifest))];
   const known = await db
-    .select({ releaseId: releaseBlobs.releaseId })
+    .select({ key: releaseBlobs.blobKey })
     .from(releaseBlobs)
-    .where(eq(releaseBlobs.releaseId, releaseId))
-    .limit(1);
-  const keys = blobKeys(manifest);
-  if (known.length > 0 || keys.length === 0) {
+    .where(eq(releaseBlobs.releaseId, releaseId));
+  const recorded = new Set(known.map(({ key }) => key));
+  if (recorded.size === keys.length && keys.every((key) => recorded.has(key))) {
     return;
   }
   const inserts = [];
@@ -47,8 +49,8 @@ export const recordBlobs = async (
         .onConflictDoNothing()
     );
   }
-  const [first, ...rest] = inserts;
-  if (first !== undefined) {
-    await db.batch([first, ...rest]);
-  }
+  await db.batch([
+    db.delete(releaseBlobs).where(eq(releaseBlobs.releaseId, releaseId)),
+    ...inserts,
+  ]);
 };

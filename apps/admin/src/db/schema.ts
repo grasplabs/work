@@ -47,8 +47,8 @@ export const releases = sqliteTable("releases", {
 
 /**
  * Which blobs each published release names (src/releases/blobs.ts): one
- * row a blob, written when the import first reads the release's manifest,
- * imported yet or not. Blobs are content-addressed and shared, so a blob
+ * row a blob, written when the import reads the release's manifest,
+ * imported yet or not, and replaced when that manifest is. Blobs are content-addressed and shared, so a blob
  * may leave the releases bucket only once no release still holding its
  * bundle names it (src/releases/retention.ts): an indexed look-up, never
  * a read of every manifest. No foreign key: a release still being

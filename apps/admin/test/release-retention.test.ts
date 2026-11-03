@@ -274,6 +274,54 @@ describe("release retention", () => {
     }).toStrictEqual({ importFailed: true, claimed: true, sharedCore: true });
   });
 
+  it("leaves a blob that a pending release's replaced manifest names", async () => {
+    const shared = `export default { replaced: "${crypto.randomUUID()}" };`;
+    const old = await imported(
+      "fix(core): expired, sharing the replaced core",
+      unpromotedRetentionMs + day,
+      shared
+    );
+    // Published, then its manifest replaced before it was imported (a
+    // broken upload put right): each time one of its own assets is
+    // missing, so its import fails and waits.
+    const publish = async (core: string, id?: string) => {
+      const release = await buildRelease(
+        {
+          notes: "feat(core): put right",
+          core,
+          assets: { "/only-mine.txt": crypto.randomUUID() },
+        },
+        id
+      );
+      await putBlobs(release);
+      const mine = Object.keys(release.manifest.assets).find(
+        (hash) => !Object.hasOwn(old.manifest.assets, hash)
+      );
+      await env.RELEASES.delete(assetKey(mine ?? ""));
+      await putManifest(release);
+      return release;
+    };
+    const first = await publish(
+      `export default { first: "${crypto.randomUUID()}" };`
+    );
+    const firstRun = await importReleases(env.RELEASES, db);
+    await publish(shared, first.id);
+    const secondRun = await importReleases(env.RELEASES, db, {
+      now: new Date(Date.now() + day),
+    });
+
+    await retain();
+
+    expect({
+      failed: [
+        firstRun.failed.includes(first.id),
+        secondRun.failed.includes(first.id),
+      ],
+      claimed: (await deletedAt(old)) instanceof Date,
+      sharedCore: await coreLeft(old),
+    }).toStrictEqual({ failed: [true, true], claimed: true, sharedCore: true });
+  });
+
   it("deletes nothing until every kept release's blobs are on record, a few a run", async () => {
     const old = await imported(
       "fix(core): waits its turn",
