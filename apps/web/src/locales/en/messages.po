@@ -2449,8 +2449,8 @@ msgid "App not found"
 msgstr "App not found"
 
 #: src/settings/erasures.tsx
-msgid "App preferences and form answers"
-msgstr "App preferences and form answers"
+msgid "App preferences and usage signals of their collections"
+msgstr "App preferences and usage signals of their collections"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -2628,8 +2628,8 @@ msgid "Archived: nobody opens its apps and nothing runs, until a builder restore
 msgstr "Archived: nobody opens its apps and nothing runs, until a builder restores it."
 
 #: src/settings/erasures.tsx
-msgid "Areas erased"
-msgstr "Areas erased"
+msgid "Areas finished"
+msgstr "Areas finished"
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -8557,10 +8557,6 @@ msgstr "Nothing starts it on its own: it runs when someone starts it."
 msgid "Nothing this domain asked for is waiting."
 msgstr "Nothing this domain asked for is waiting."
 
-#: src/settings/erasures.tsx
-msgid "Nothing to erase"
-msgstr "Nothing to erase"
-
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
@@ -10720,10 +10716,6 @@ msgstr "Runs started"
 msgid "Runs started from {from} to {to}."
 msgstr "Runs started from {from} to {to}."
 
-#: src/settings/erasures.tsx
-msgid "Runs still going, and their spending limit"
-msgstr "Runs still going, and their spending limit"
-
 #: src/workflows/item-test.tsx
 msgid "Runs the draft on the input of your {most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding."
 msgstr "Runs the draft on the input of your {most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding."
@@ -11512,6 +11504,10 @@ msgstr "Skip"
 #: src/onboarding/setup-steps.tsx
 msgid "Skip for now"
 msgstr "Skip for now"
+
+#: src/settings/erasures.tsx
+msgid "Skipped, may still hold data"
+msgstr "Skipped, may still hold data"
 
 #: src/onboarding/document-drop.tsx
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
@@ -13723,6 +13719,10 @@ msgstr "Undoing its changes after a failure"
 #: src/workflows/history-view.tsx
 msgid "Undoing its changes after it was cancelled"
 msgstr "Undoing its changes after it was cancelled"
+
+#: src/settings/erasures.tsx
+msgid "Unfinished runs (stopped) and decision confirmations"
+msgstr "Unfinished runs (stopped) and decision confirmations"
 
 #: src/activity/pending.tsx
 msgid "Unknown"

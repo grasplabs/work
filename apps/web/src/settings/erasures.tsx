@@ -59,9 +59,9 @@ const areaLabels: Record<string, MessageDescriptor> = {
   channels: msg`Chat accounts, invitations and notifications`,
   connect: msg`Personal connections`,
   workspace: msg`Chats, drafts and dashboard`,
-  apps: msg`App preferences and form answers`,
+  apps: msg`App preferences and usage signals of their collections`,
   brain: msg`Personal Knowledge and memories`,
-  runs: msg`Runs still going, and their spending limit`,
+  runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,
 };
 
@@ -69,7 +69,9 @@ const areaLabels: Record<string, MessageDescriptor> = {
 const stateLabels: Record<string, MessageDescriptor> = {
   pending: msg`In progress`,
   complete: msg`Erased`,
-  skipped: msg`Nothing to erase`,
+  // Core skips an area it can't reach (the interview, once the address was
+  // let in again or the key changed), so it may still hold data.
+  skipped: msg`Skipped, may still hold data`,
 };
 
 /** How many of `areas` are done, one way or another. */
@@ -84,7 +86,7 @@ const ErasureAreas = ({ areas }: { areas: readonly ErasureArea[] }) => {
     <div className="flex flex-col gap-3">
       <Progress max={areas.length} value={done}>
         <ProgressLabel>
-          <Trans>Areas erased</Trans>
+          <Trans>Areas finished</Trans>
         </ProgressLabel>
         <span className="text-muted-foreground ml-auto text-sm tabular-nums">
           <Trans>

@@ -2449,8 +2449,8 @@ msgid "App not found"
 msgstr "Application introuvable"
 
 #: src/settings/erasures.tsx
-msgid "App preferences and form answers"
-msgstr "Préférences des applications et réponses aux formulaires"
+msgid "App preferences and usage signals of their collections"
+msgstr "Préférences des applications et signaux d’utilisation de leurs collections"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -2628,8 +2628,8 @@ msgid "Archived: nobody opens its apps and nothing runs, until a builder restore
 msgstr "Archivé : personne n’ouvre ses apps et rien ne s’exécute, jusqu’à ce qu’un concepteur le restaure."
 
 #: src/settings/erasures.tsx
-msgid "Areas erased"
-msgstr "Domaines effacés"
+msgid "Areas finished"
+msgstr "Domaines terminés"
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -8557,10 +8557,6 @@ msgstr "Rien ne le lance tout seul : il s'exécute quand quelqu'un le lance."
 msgid "Nothing this domain asked for is waiting."
 msgstr "Rien de ce que ce domaine a demandé n’est en attente."
 
-#: src/settings/erasures.tsx
-msgid "Nothing to erase"
-msgstr "Rien à effacer"
-
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
@@ -10720,10 +10716,6 @@ msgstr "Exécutions lancées"
 msgid "Runs started from {from} to {to}."
 msgstr "Exécutions lancées du {from} au {to}."
 
-#: src/settings/erasures.tsx
-msgid "Runs still going, and their spending limit"
-msgstr "Exécutions en cours et leur plafond de dépenses"
-
 #: src/workflows/item-test.tsx
 msgid "Runs the draft on the input of your {most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding."
 msgstr "Exécute le brouillon sur l’entrée de vos {most} exécutions les plus récentes. Rien n’est envoyé ni modifié : chaque appel reçoit la réponse que vous donnez ici, sous le nom de sa liaison."
@@ -11512,6 +11504,10 @@ msgstr "Passer"
 #: src/onboarding/setup-steps.tsx
 msgid "Skip for now"
 msgstr "Passer pour l’instant"
+
+#: src/settings/erasures.tsx
+msgid "Skipped, may still hold data"
+msgstr "Ignoré, peut encore contenir des données"
 
 #: src/onboarding/document-drop.tsx
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
@@ -13723,6 +13719,10 @@ msgstr "Annule ses modifications après un échec"
 #: src/workflows/history-view.tsx
 msgid "Undoing its changes after it was cancelled"
 msgstr "Annule ses modifications après son annulation"
+
+#: src/settings/erasures.tsx
+msgid "Unfinished runs (stopped) and decision confirmations"
+msgstr "Exécutions inachevées (arrêtées) et confirmations de décisions"
 
 #: src/activity/pending.tsx
 msgid "Unknown"
