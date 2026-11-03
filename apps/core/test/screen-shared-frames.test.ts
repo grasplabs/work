@@ -14,8 +14,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { approvalApp } from "./approval-app.ts";
 import { pastAccessRecheck, published } from "./apps.ts";
-import { approvalApp } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";

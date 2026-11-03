@@ -72,7 +72,8 @@ const heldWait = /^:held:(?<round>\d+):\d+$/u;
 const heldCheck = /^:held:(?<round>\d+):\d+:check$/u;
 const heldRun = /^:held:\d+:run$/u;
 const decisionWait = /^:decision:wait:\d+$/u;
-const decisionLook = /^:decision:(?:asked|reached|outcome|woken:\d+)$/u;
+const decisionLook =
+  /^:decision:(?:asked|remind|reminded|reached|outcome|woken:\d+)$/u;
 /** A try's retry of a task's step: a round of it, and the backoff before one. */
 const retryRound = /^:retry:\d+$/u;
 const retryBackoff = /^:retry:\d+:wait$/u;

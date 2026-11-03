@@ -754,13 +754,15 @@ const recordAsk = async (
 
 /**
  * Tells each of `userIds` who has a chat with Stephen in a chat app of
- * decision `decisionId`, once, with its link (channels/reach.ts); the rest
- * find it in their inbox alone. Never fails the ask.
+ * decision `decisionId`, once, and once more for its reminder, with its
+ * link (channels/reach.ts); the rest find it in their inbox alone. Never
+ * fails the ask.
  */
 const tellInTheirChats = async (
   env: Env,
   decisionId: string,
-  userIds: readonly string[]
+  userIds: readonly string[],
+  reminder: boolean
 ): Promise<void> => {
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
@@ -771,8 +773,11 @@ const tellInTheirChats = async (
   await Promise.all(
     userIds.map(
       async (userId) =>
-        await tellInChat(env, userId, `decision:${decisionId}`, (locale) =>
-          say("decisionWaiting", locale, { link })
+        await tellInChat(
+          env,
+          userId,
+          `decision:${decisionId}${reminder ? ":reminder" : ""}`,
+          (locale) => say("decisionWaiting", locale, { link })
         )
     )
   );
@@ -785,13 +790,15 @@ const tellInTheirChats = async (
  * never fails for how many they are. Up to {@link maxDeciders}, the ask is
  * audited with whom, by ID, as
  * `decisionRecipients` audits it; past that, with how many alone
- * (`listed: false`), a list too long for the log. How many were asked;
- * none once it was answered, closed or past its deadline.
+ * (`listed: false`), a list too long for the log. Its `reminder` asks
+ * again whoever may answer it then. How many were asked; none once it was
+ * answered, closed or past its deadline.
  */
 export const askDecision = async (
   env: Env,
   run: DecisionRun,
-  decision: string
+  decision: string,
+  reminder = false
 ): Promise<number> => {
   const row = await runDecision(env, run, decision);
   if (row.status !== "open" || row.expiresAt.getTime() <= Date.now()) {
@@ -811,10 +818,10 @@ export const askDecision = async (
       env,
       run,
       row,
-      { recipients: people.length, reminder: false, listed: true },
+      { recipients: people.length, reminder, listed: true },
       whom
     );
-    await tellInTheirChats(env, row.id, whom);
+    await tellInTheirChats(env, row.id, whom, reminder);
     return people.length;
   }
   const [counted] = await db
@@ -824,7 +831,7 @@ export const askDecision = async (
   const recipients = counted?.count ?? people.length;
   await recordAsk(env, run, row, {
     recipients,
-    reminder: false,
+    reminder,
     listed: false,
   });
   return recipients;

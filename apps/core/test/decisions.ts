@@ -1,220 +1,315 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 /**
  * The approval workflow the decision tests run, and how they drive it:
  * start it, read whom it asked, and wait on its decisions.
  */
+import { v } from "@grasp-os/sdk";
 import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
+import { runFileContentPath } from "@grasp-os/shared/run-files";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { release } from "./apps.ts";
 import { finished } from "./runs.ts";
 import type { signedInApi } from "./sign-in.ts";
-import { sampleCall } from "./workflow-apps.ts";
+import { routed, unique } from "./sign-in.ts";
 
 /** Someone signed in, with their API. */
 export type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * The approval App, of spec 8's layout: it keeps whom each ask went to,
- * with their links, as a workflow that mails them would
- * (`approvals.remember`, once per ask: the first and the reminder are
- * calls of their own), and answers them (`approvals.asks`).
+ * The approval workflow's own action, which tells the people its decision
+ * asks (the decision's `ask`): it keeps whom each ask went to, with their
+ * links, as a file of its run's (`ask.json`, then `reminder.json`), as an
+ * action that mails them would send each once.
  */
-export const approvalFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+const askModule = (
+  fails: boolean
+) => `import { action, resource, v } from "@grasp-os/sdk/action";
 
-export default defineSchema({ asks: defineTable({ body: v.string() }) });
-`,
-  "operations/approvals.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
-
+const files = resource.files("files", { operations: ["write"] });
 const recipient = v.object({ userId: v.string(), name: v.string(), email: v.string(), link: v.string() });
 
-export const remember = mutation({
+export const ask = action({
   args: { recipients: v.array(recipient), reminder: v.boolean() },
   returns: v.null(),
+  uses: [files],
   handler: async (ctx, args) => {
-    await ctx.db.insert("asks", { body: JSON.stringify(args) });
+    ${fails ? 'throw new Error("The mail server refused the message");' : ""}
+    await ctx.resources.files.write({
+      name: args.reminder ? "reminder.json" : "ask.json",
+      type: "application/json",
+      content: JSON.stringify(args),
+    });
     return null;
   },
 });
+`;
 
-export const asks = query({
-  args: {},
-  returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("asks").take(100)).map(({ body }) => body),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+/**
+ * What a person may answer: nothing, or a comment, with a total and a
+ * nested value besides (what decision-confirmations.test.ts sends).
+ */
+const answers = v.union(
+  v.null(),
+  v.object({
+    comment: v.string(),
+    total: v.number().optional(),
+    nested: v.object({ a: v.null(), b: v.number() }).optional(),
+  })
+);
 
-import { asks, remember } from "./operations/approvals.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Approvals",
-  schema,
-  access: { tables: { asks: { read: "appMembers", write: "appMembers" } } },
-  operations: { approvals: { remember, asks } },
-  internalOperations: {},
-  screens: [],
-  uses: [],
-});
-`,
+/** `answers`, as the workflow's output schema has it. */
+const responseSchema = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      properties: {
+        comment: { type: "string" },
+        total: { type: "number" },
+        nested: {
+          type: "object",
+          properties: { a: { type: "null" }, b: { type: "number" } },
+          required: ["a", "b"],
+          additionalProperties: false,
+        },
+      },
+      required: ["comment"],
+      additionalProperties: false,
+    },
+  ],
 };
 
-/**
- * An ask's code that keeps its recipients and whether it is the reminder
- * in the approval App (`approvals.remember`), failing as it refuses.
- */
-export const remember = `        const remembered = (await env.APP.callFunction({ contractId: "approvals.remember", kind: "mutation" }, { recipients: recipients.map(({ userId, name, email, link }) => ({ userId, name, email, link })), reminder })) as { ok: true } | { ok: false; error: { message: string; code: string } };
-        if (!remembered.ok) {
-          throw Object.assign(new Error(remembered.error.message), { code: remembered.error.code });
-        }`;
-
-/** A workflow that waits for one decision and returns how it ended. */
-export const approval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "approval",
-  {
-    params: {},
-    input: z.object({ from: z.string(), timeout: z.number(), remindAfter: z.number().optional() }),
+/** A JSON object schema of `properties`, each required, and nothing else. */
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
   },
-  async (step, { input, env }) =>
-    await step.decision("review", {
-      description: "Approve the invoice",
-      from: input.from as Person,
-      ask: async ({ recipients, reminder }) => {
-${remember}
+});
+
+/** How the approval workflow asks: whom, for how long, when it reminds. */
+export interface Asking {
+  /** Who decides: `person:<id>`, `team:<id>` or `role:<name>`. */
+  from: string;
+  /** How long it takes answers, in ms. */
+  timeout: number;
+  /** How long after asking it asks once more, in ms. */
+  remindAfter?: number;
+  /**
+   * Whether its action fails to tell them, its decision inside a `try`
+   * whose catch would end the run with nobody's answer.
+   */
+  failsToTell?: boolean;
+}
+
+/**
+ * The definition of approval workflow `name`: it asks `from` to approve
+ * the invoice, telling them by its own action (`ask`), reminding them
+ * `remindAfter` after asking, if given, and waiting `timeout` at most,
+ * then ends with the decision's answer. Its bindings: the decision
+ * contract `contract`, the action, and the run's files under the files
+ * contract `files`.
+ */
+const approvalOf = (
+  name: string,
+  { contract, files }: { contract: string; files: string },
+  { from, timeout, remindAfter, failsToTell = false }: Asking
+): string => {
+  const review = {
+    review: {
+      call: "grasp.decision",
+      with: {
+        binding: "approval",
+        recipients: [from],
+        prompt: "Approve the invoice",
+        input: { invoice: "${ $workflow.input.invoice }" },
+        ask: "ask",
+        ...(remindAfter === undefined
+          ? {}
+          : { remindAfter: { milliseconds: remindAfter } }),
       },
-      timeout: input.timeout,
-      ...(input.remindAfter === undefined ? {} : { remindAfter: input.remindAfter }),
-    })
-);
-`;
+      timeout: { after: { milliseconds: timeout } },
+    },
+  };
+  const unanswered = {
+    unanswered: {
+      set: { answered: false, approved: false, by: "nobody", value: null },
+    },
+  };
+  return JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            approval: { kind: "decision", contract },
+            ask: { kind: "operation", contract: "local:code/ask.ts#ask" },
+            files: { kind: "files", contract: files },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ invoice: { type: "string" } }) },
+    output: {
+      schema: objectSchema({
+        answered: { type: "boolean" },
+        approved: { type: "boolean" },
+        by: { type: "string" },
+        value: responseSchema,
+      }),
+    },
+    do: failsToTell
+      ? [{ guarded: { try: [review], catch: { do: [unanswered] } } }]
+      : [review],
+  });
+};
 
-export const approvalTests = `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import approval from "./approval.ts";
-
-export default workflowTests(approval, [
-  {
-    name: "ends with the answer",
-    input: { from: "role:admin", timeout: 1000 },
-    decisions: { review: { approved: true, by: "anna" } },
-    expect: { output: { timedOut: false, approved: true, by: "anna", payload: null } },
-  },
-]);
-`;
-
-export const week = 7 * 86_400_000;
+export const day = 86_400_000;
+export const week = 7 * day;
 
 /**
- * A decision a test acts on while it waits for the reminder: the reminder
- * is due five seconds after the ask, which leaves a slow runner room for
- * what a test does first (change a team, switch a feature off, stop the
- * run). The deadline, ten seconds after the decision opened, leaves room
- * to switch back on before it, where a test does that.
+ * A decision a test acts on while it waits for the reminder: due a day
+ * after the ask, its deadline a week after it, so nothing a test does
+ * races either. The test lets that time pass when it is ready
+ * (`decisionTimePassed`, runs.ts).
  */
-export const reminding = { timeout: 10_000, remindAfter: 5000 };
-
-/** Who released each approval App (`approvalApp`), who reads its asks. */
-const builders = new Map<string, Person>();
+export const reminding = { timeout: week, remindAfter: day };
 
 /**
- * A new approval App with `workflows`, released by `builder`, whose asks
- * `asksOf` reads.
+ * A new approval workflow asking as `asking` says, published by
+ * `builder`, its decision contract and files published and its bindings
+ * approved by `admin`, the decision's for `asking.from`: its ID.
  */
-export const approvalAppWith = async (
-  builder: Person,
-  workflows: Record<string, string>
+export const approvalWorkflow = async (
+  { admin, builder }: { admin: Person; builder: Person },
+  asking: Asking
 ): Promise<string> => {
-  const { id } = await builder.api.apps.create({ name: "Approvals" });
-  await release(builder, id, { ...approvalFiles, ...workflows });
-  builders.set(id, builder);
+  const contract = `approval-${unique()}`;
+  const files = `asks-${unique()}`;
+  await admin.api.workflowResources.publishContract({
+    key: contract,
+    kind: "decision",
+    input: JSON.stringify(v.object({ invoice: v.string() }).descriptor),
+    response: JSON.stringify(answers.descriptor),
+  });
+  await admin.api.workflowResources.publishContract({
+    key: files,
+    kind: "files",
+  });
+  const { id, name } = await builder.api.workflowResources.create(
+    `approval-${unique()}`
+  );
+  await builder.api.workflowResources.publish(id, {
+    definition: approvalOf(name, { contract, files }, asking),
+    basedOn: null,
+    modules: { "code/ask.ts": askModule(asking.failsToTell === true) },
+  });
+  await admin.api.workflowResources.approveBinding(id, {
+    alias: "approval",
+    target: { kind: "decision", deciders: [asking.from] },
+    reviewed: { version: 1 },
+  });
+  await admin.api.workflowResources.approveBinding(id, {
+    alias: "files",
+    target: { kind: "files" },
+    reviewed: { version: 1 },
+  });
   return id;
 };
 
-/** A new App with the approval workflow, released by `builder`. */
-export const approvalApp = async (builder: Person): Promise<string> =>
-  await approvalAppWith(builder, {
-    "workflows/approval.ts": approval,
-    "workflows/approval.workflow-tests.ts": approvalTests,
-  });
+/** A run of approval workflow `workflow`, started by `by`. */
+export interface ApprovalRun {
+  workflow: string;
+  run: string;
+  by: Person;
+}
 
-export const askSchema = z.array(
-  z.object({
-    recipients: z.array(
-      z.object({
-        userId: z.string(),
-        name: z.string(),
-        email: z.string(),
-        link: z.url(),
-      })
-    ),
-    reminder: z.boolean(),
-  })
-);
-export type Ask = z.infer<typeof askSchema>[number];
+/** Starts a run of approval workflow `workflow` as `by`: its ID. */
+export const startedApproval = async (
+  by: Person,
+  workflow: string
+): Promise<ApprovalRun> => {
+  const { runId } = await by.api.workflowResources.start(workflow, {
+    version: 1,
+    input: { invoice: "INV-7" },
+    key: unique(),
+  });
+  return { workflow, run: z.string().parse(runId), by };
+};
+
+export const askSchema = z.object({
+  recipients: z.array(
+    z.object({
+      userId: z.string(),
+      name: z.string(),
+      email: z.string(),
+      link: z.url(),
+    })
+  ),
+  reminder: z.boolean(),
+});
+export type Ask = z.infer<typeof askSchema>;
 
 /**
- * The asks the approval App kept, as the builder who released it reads
- * them, once there are `count` of them.
+ * The asks approval run `run` made, as the person who started it
+ * downloads its files from its run sheet, in the order they were made,
+ * once there are `count` of them.
  */
-export const asksOf = async (app: string, count = 1): Promise<Ask[]> => {
-  const builder = builders.get(app);
-  if (builder === undefined) {
-    throw new Error("Not an approval App of these tests");
-  }
-  return await vi.waitFor(
+export const asksOf = async (
+  { workflow, run, by }: ApprovalRun,
+  count = 1
+): Promise<Ask[]> =>
+  await vi.waitFor(
     async () => {
-      const kept = await sampleCall(
-        builder,
-        app,
-        "approvals.asks",
-        "query",
-        {}
-      );
-      if (!Array.isArray(kept)) {
-        throw new TypeError(`The asks didn't read: ${String(kept)}`);
+      const listed =
+        (await by.api.workflowResources.runFiles(workflow, run)) ?? [];
+      if (listed.length < count) {
+        throw new Error(`${listed.length} of ${count} asks so far`);
       }
-      const asks = askSchema.parse(
-        kept.map((body: unknown): unknown => {
-          const parsed: unknown = JSON.parse(String(body));
-          return parsed;
-        })
+      return await Promise.all(
+        listed
+          .toSorted((a, b) => a.finishedAt.localeCompare(b.finishedAt))
+          .map(async ({ id }) => {
+            const response = await routed(
+              runFileContentPath(workflow, run, id),
+              {
+                headers: {
+                  cookie: by.session,
+                  "sec-fetch-site": "same-origin",
+                },
+              }
+            );
+            return askSchema.parse(await response.json());
+          })
       );
-      if (asks.length < count) {
-        throw new Error(`${asks.length} of ${count} asks so far`);
-      }
-      return asks;
     },
     { timeout: 20_000, interval: 100 }
   );
-};
 
-/** Starts the approval workflow and waits until it has asked. */
-export const asking = async (
-  builder: Person,
-  input: { from: string; timeout: number; remindAfter?: number },
-  source = approval
-) => {
-  const app = await approvalAppWith(builder, {
-    "workflows/approval.ts": source,
-    "workflows/approval.workflow-tests.ts": approvalTests,
-  });
-  const run = await builder.api.workflows.start(app, "approval", input);
-  const [ask] = await asksOf(app);
-  if (!ask) {
-    throw new Error("No ask");
-  }
-  const decision = await vi.waitFor(
+/**
+ * The decision approval run `run` opened, once the run has asked its
+ * people and waits on it: its ID.
+ */
+export const decisionOfRun = async (run: ApprovalRun): Promise<string> => {
+  await asksOf(run);
+  return await vi.waitFor(
     async () => {
       const row = await env.DB.prepare(
-        "SELECT id FROM workflow_decisions WHERE run_id = ?"
+        "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
       )
-        .bind(run.id)
+        .bind(run.run)
         .first<{ id: string }>();
       if (!row) {
         throw new Error("No decision yet");
@@ -223,17 +318,38 @@ export const asking = async (
     },
     { timeout: 10_000 }
   );
-  return { app, run, ask, decision };
 };
 
-/** What the run returned, once it has ended. */
-export const outputOf = async (
-  builder: Person,
-  run: string
-): Promise<unknown> => {
+/**
+ * A run of a new approval workflow asking as `asking` says, started by
+ * `owners.builder`, once it has asked: the run, its first ask and its
+ * decision.
+ */
+export const asking = async (
+  owners: { admin: Person; builder: Person },
+  input: Asking
+) => {
+  const workflow = await approvalWorkflow(owners, input);
+  const run = await startedApproval(owners.builder, workflow);
+  const decision = await decisionOfRun(run);
+  const [ask] = await asksOf(run);
+  if (!ask) {
+    throw new Error("No ask");
+  }
+  return { run, ask, decision };
+};
+
+/** How approval run `run` ended: its output, or its error's code. */
+export const outputOf = async ({
+  workflow,
+  run,
+  by,
+}: ApprovalRun): Promise<unknown> => {
   await finished(run);
-  const { output } = await builder.api.workflows.status(run);
-  return output;
+  const ended = await by.api.workflowResources.run(workflow, run);
+  return ended.status === "completed"
+    ? ended.output
+    : { status: ended.status, code: ended.error?.code };
 };
 
 /** Whether `decision`'s deadline has passed, by the database's clock. */
