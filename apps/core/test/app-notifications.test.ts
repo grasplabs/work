@@ -829,14 +829,16 @@ describe("a mutation's ctx.afterCommit.notifyPeople", () => {
 
   it("refuses a visitor's send, so a visitor reaches no member", async () => {
     const fx = await fixture();
+    const session = crypto.randomUUID();
     const invocation = await visitorInvocation(
       env,
       fx.release,
       {
         app: fx.app,
         version: 1,
-        principal: `visitor:${crypto.randomUUID()}`,
+        principal: `visitor:${session}`,
         email: "visitor@example.test",
+        actor: { type: "visitor", appId: fx.app, sessionId: session },
         stillAllowed: async () => {},
         notGranted: async () => await Promise.reject(new Error("Not granted")),
         admitted: async () => {},
