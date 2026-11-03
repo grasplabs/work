@@ -586,16 +586,27 @@ const cursorAfter = (
 export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [older, setOlder] = useState<RemovedPerson[]>([]);
-  const [more, setMore] = useState(page.more);
-  const people = [...page.people, ...older];
+  // Older pages count only on top of the first page they were read after:
+  // fresh loader data (after an erasure, say) starts the list over from its
+  // own first page, instead of keeping older rows as they were.
+  const [paged, setPaged] = useState<{
+    after: RemovedPeoplePage;
+    more: boolean;
+    older: RemovedPerson[];
+  }>();
+  const current = paged?.after === page ? paged : undefined;
+  const people = [...page.people, ...(current?.older ?? [])];
+  const more = current?.more ?? page.more;
   const showMore = async (): Promise<void> => {
     const next = await run(
       async (session) => await session.members.removed(cursorAfter(people))
     );
     if (next !== undefined) {
-      setOlder([...older, ...next.people]);
-      setMore(next.more);
+      setPaged({
+        after: page,
+        more: next.more,
+        older: [...(current?.older ?? []), ...next.people],
+      });
     }
   };
   return (
