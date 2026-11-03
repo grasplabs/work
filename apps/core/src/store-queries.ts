@@ -1012,13 +1012,31 @@ const relationIn = (
   return relation;
 };
 
+/** Whether `scope` may read table `name` of the pinned schema. */
+const mayRead = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  name: string
+): boolean => {
+  try {
+    readableTable(pinned, scope, name);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The tables `query` reads besides its own: those its relations name, as
- * the pinned schema declares them. A relation that isn't one is left for
- * the read to refuse.
+ * the pinned schema declares them, and only those `scope` may read. A
+ * table it can't read is withheld, so its generation, which moves with
+ * every write to it, is never handed out either: a live query following
+ * it would tell its activity. A relation that isn't one is left for the
+ * read to refuse.
  */
 export const relatedTables = (
   pinned: PinnedSchema,
+  scope: ReadScope,
   query: QueryRequest
 ): string[] => {
   const declared = Object.hasOwn(pinned.manifest.tables, query.table)
@@ -1032,7 +1050,7 @@ export const relatedTables = (
         : undefined;
     const relation =
       descriptor === undefined ? undefined : relationOf(descriptor);
-    if (relation !== undefined) {
+    if (relation !== undefined && mayRead(pinned, scope, relation.table)) {
       names.add(relation.table);
     }
   }

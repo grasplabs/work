@@ -522,21 +522,28 @@ describe("related records", () => {
     });
   });
 
-  it("make the read depend on their tables too, so a live query follows them", async () => {
+  it("make the read depend on the tables the caller may read, so a live query follows them", async () => {
     const fixture = await storeWith();
     await put(fixture, "customers", [{ id: "c1", fields: { name: "Acme" } }]);
     await put(fixture, "orders", [
       { id: "o1", fields: { region: "EU", paid: true, customer: "c1" } },
     ]);
-    const scope = scopeOf(fixture.schemaHash);
     const { generations } = await fixture.store.read(
-      scope,
-      ordersRequest({ with: ["customer"] })
+      scopeOf(fixture.schemaHash),
+      ordersRequest({ with: ["customer", "items"] })
     );
-    expect(Object.keys(generations).toSorted()).toStrictEqual([
-      "customers",
-      "orders",
-    ]);
+    const builders = await fixture.store.read(
+      scopeOf(fixture.schemaHash, { appBuilder: true }),
+      ordersRequest({ with: ["customer", "items"] })
+    );
+    expect({
+      // Products are withheld from a member, and so is their activity.
+      member: Object.keys(generations).toSorted(),
+      builder: Object.keys(builders.generations).toSorted(),
+    }).toStrictEqual({
+      member: ["customers", "orders"],
+      builder: ["customers", "orders", "products"],
+    });
   });
 
   it("are refused past their bounds, clearly", async () => {

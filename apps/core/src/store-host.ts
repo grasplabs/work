@@ -175,7 +175,14 @@ import type {
   RecordSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
-import { installSearches, planSearches } from "./store-search.ts";
+import {
+  dropSearches,
+  installSearches,
+  optimizeSearches,
+  planSearches,
+  searchesPending,
+  searchObjectsLeft,
+} from "./store-search.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -525,6 +532,7 @@ const purgedTables = [
   "sdk_files",
   "sdk_record_refs",
   "sdk_records",
+  "sdk_search_docs",
   "sdk_schemas",
   "sdk_schema_backfills",
   "sdk_reserved_fields",
@@ -2380,7 +2388,7 @@ export class StoreHost {
     const names =
       read.kind === "get"
         ? [read.table]
-        : [read.query.table, ...relatedTables(pinned, read.query)];
+        : [read.query.table, ...relatedTables(pinned, reader, read.query)];
     return this.#readIn(storeId, pinned, reader, names, preview, (statements) =>
       indexRequired(() =>
         read.kind === "get"
@@ -2889,6 +2897,16 @@ export class StoreHost {
       throw new Error("Not a page");
     }
     const keys = await this.#cursorKeys(storeId);
+    // A search's cursor holds its table's generation (store-cursors.ts):
+    // one from before a write to it is expired, never sought on scores
+    // that moved.
+    const searchGenerationOf = (
+      generations: Record<string, number>
+    ): number | null =>
+      query.search === undefined ? null : (generations[query.table] ?? 0);
+    const opened = searchGenerationOf(
+      this.#generationsOf(pinned, [query.table])
+    );
     const binding: CursorBinding = {
       storeId,
       schemaHash: reader.schemaHash,
@@ -2902,6 +2920,7 @@ export class StoreHost {
       filter: query.filter,
       order: query.order,
       search: query.search ?? null,
+      searchGeneration: opened,
     };
     const anchor =
       terminal.cursor === null
@@ -2911,16 +2930,26 @@ export class StoreHost {
       storeId,
       pinned,
       reader,
-      [query.table, ...relatedTables(pinned, query)],
+      [query.table, ...relatedTables(pinned, reader, query)],
       preview,
       (statements) =>
         indexRequired(() => readPage(statements, pinned, reader, query, anchor))
     );
+    const searchGeneration = searchGenerationOf(generations);
+    // A write landed while the cursor was opened: the page read sought on
+    // scores that moved.
+    if (anchor !== null && searchGeneration !== opened) {
+      throw dataErrors.create("data.cursor_expired");
+    }
     const value: PageAnswer =
       read.hasMore && read.last !== undefined
         ? {
             items: read.items,
-            nextCursor: await sealCursor(keys, binding, read.last),
+            nextCursor: await sealCursor(
+              keys,
+              { ...binding, searchGeneration },
+              read.last
+            ),
             hasMore: true,
           }
         : { items: read.items, nextCursor: null, hasMore: false };
@@ -6550,6 +6579,13 @@ export class StoreHost {
       failed = true;
       log.error("store.cascade_failed", errorFields(error));
     }
+    // After the cascades, whose deletions mark search indexes due.
+    try {
+      optimizeSearches(this.ctx.storage);
+    } catch (error) {
+      failed = true;
+      log.error("store.search_optimize_failed", errorFields(error));
+    }
     try {
       await this.files.sweep(this.#storeId());
     } catch (error) {
@@ -6631,7 +6667,7 @@ export class StoreHost {
       // SELECT at five terms.
       const [left] = this.ctx.storage.sql
         .exec<{ left: number }>(
-          `SELECT (EXISTS (SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL) ${purgedTables.map((table) => `OR EXISTS (SELECT 1 FROM ${table})`).join(" ")}) AS left`
+          `SELECT (EXISTS (SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL) ${purgedTables.map((table) => `OR EXISTS (SELECT 1 FROM ${table})`).join(" ")} OR ${searchObjectsLeft}) AS left`
         )
         .toArray();
       if (left?.left === 1) {
@@ -6686,6 +6722,8 @@ export class StoreHost {
       )
       .get();
     const times = [
+      // A search index with records removed: its `optimize` is due.
+      searchesPending(this.ctx.storage.sql) ? Date.now() : null,
       cascading === undefined ? null : Date.now(),
       typeof failedJob?.at === "number"
         ? failedJob.at + cascadeFailedRetryMs
@@ -6826,6 +6864,11 @@ export class StoreHost {
     if (this.#db.select({ id: files.fileId }).from(files).get() !== undefined) {
       await this.files.purgeStore(storeIdSchema.parse(bound.storeId));
     }
+    // Its search indexes first, with their triggers: no deleted record's
+    // text stays behind, and no trigger runs for the records going.
+    this.ctx.storage.transactionSync(() => {
+      dropSearches(this.ctx.storage.sql);
+    });
     const started = Date.now();
     for (const table of purgedTables) {
       for (;;) {
