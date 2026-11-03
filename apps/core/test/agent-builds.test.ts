@@ -851,7 +851,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("lands no file write the person stopped while it was under way", async () => {
-    const { chat, existing, grant } = await setUp((app) => [
+    const { chat, existing } = await setUp((app) => [
       toolStep("writeFile", {
         app,
         path: "screens/late.tsx",
@@ -859,7 +859,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }),
       says("Never asked."),
     ]);
-    await grant();
 
     // The write is let in at once, then waits on the App's files while the
     // person presses Stop: refused as it commits.
