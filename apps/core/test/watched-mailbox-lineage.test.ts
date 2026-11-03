@@ -16,6 +16,7 @@ import {
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
+  endLiveResourceRuns,
   jsonWorkflowAppsOf,
   objectSchema,
   publishedWorkflow,
@@ -535,6 +536,8 @@ describe(
   "runs a run's mail to a watched mailbox starts",
   { timeout: 180_000 },
   () => {
+    afterEach(endLiveResourceRuns);
+
     it("join its lineage, until its descendant limit refuses one, for good", async () => {
       await withQuotas(
         { ...configuredLimits, workflowDescendantRuns: 2 },
