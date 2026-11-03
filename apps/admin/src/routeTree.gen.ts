@@ -36,8 +36,6 @@ import { Route as OrganizationsClientIdWorkflowsRouteImport } from './routes/org
 import { Route as PlatformReleasesIndexRouteImport } from './routes/platform/releases/index'
 import { Route as PlatformReleasesReleaseIdRouteImport } from './routes/platform/releases/$releaseId'
 import { Route as PlatformReleasesDiffRouteImport } from './routes/platform/releases/diff'
-import { Route as PlatformRolloutsIndexRouteImport } from './routes/platform/rollouts/index'
-import { Route as PlatformRolloutsRolloutIdRouteImport } from './routes/platform/rollouts/$rolloutId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -190,17 +188,6 @@ const PlatformReleasesDiffRoute = PlatformReleasesDiffRouteImport.update({
   path: '/platform/releases/diff',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PlatformRolloutsIndexRoute = PlatformRolloutsIndexRouteImport.update({
-  id: '/platform/rollouts/',
-  path: '/platform/rollouts/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformRolloutsRolloutIdRoute =
-  PlatformRolloutsRolloutIdRouteImport.update({
-    id: '/platform/rollouts/$rolloutId',
-    path: '/platform/rollouts/$rolloutId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -228,10 +215,8 @@ export interface FileRoutesByFullPath {
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
   '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId/': typeof OrganizationsClientIdIndexRoute
   '/platform/releases/': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts/': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -258,10 +243,8 @@ export interface FileRoutesByTo {
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
   '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId': typeof OrganizationsClientIdIndexRoute
   '/platform/releases': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -290,10 +273,8 @@ export interface FileRoutesById {
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
   '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId/': typeof OrganizationsClientIdIndexRoute
   '/platform/releases/': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts/': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -323,10 +304,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
     | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId/'
     | '/platform/releases/'
-    | '/platform/rollouts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -353,10 +332,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
     | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId'
     | '/platform/releases'
-    | '/platform/rollouts'
   id:
     | '__root__'
     | '/'
@@ -384,10 +361,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
     | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId/'
     | '/platform/releases/'
-    | '/platform/rollouts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -402,9 +377,7 @@ export interface RootRouteChildren {
   PlatformIndexRoute: typeof PlatformIndexRoute
   PlatformReleasesReleaseIdRoute: typeof PlatformReleasesReleaseIdRoute
   PlatformReleasesDiffRoute: typeof PlatformReleasesDiffRoute
-  PlatformRolloutsRolloutIdRoute: typeof PlatformRolloutsRolloutIdRoute
   PlatformReleasesIndexRoute: typeof PlatformReleasesIndexRoute
-  PlatformRolloutsIndexRoute: typeof PlatformRolloutsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -598,20 +571,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlatformReleasesDiffRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/platform/rollouts/': {
-      id: '/platform/rollouts/'
-      path: '/platform/rollouts'
-      fullPath: '/platform/rollouts/'
-      preLoaderRoute: typeof PlatformRolloutsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform/rollouts/$rolloutId': {
-      id: '/platform/rollouts/$rolloutId'
-      path: '/platform/rollouts/$rolloutId'
-      fullPath: '/platform/rollouts/$rolloutId'
-      preLoaderRoute: typeof PlatformRolloutsRolloutIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -670,9 +629,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlatformIndexRoute: PlatformIndexRoute,
   PlatformReleasesReleaseIdRoute: PlatformReleasesReleaseIdRoute,
   PlatformReleasesDiffRoute: PlatformReleasesDiffRoute,
-  PlatformRolloutsRolloutIdRoute: PlatformRolloutsRolloutIdRoute,
   PlatformReleasesIndexRoute: PlatformReleasesIndexRoute,
-  PlatformRolloutsIndexRoute: PlatformRolloutsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -26,7 +26,7 @@ import { claimRun } from "../src/runners.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, staff } from "./hosting.ts";
+import { db, onChannel, staff } from "./hosting.ts";
 import { namespaceRelease } from "./namespace-release.ts";
 import { graspAccount, ownId } from "./own-destination.ts";
 import { callServerFn } from "./pages.ts";
@@ -179,6 +179,8 @@ describe("creating an organization", () => {
   it("sets it up end to end from its three fields, with nothing else asked of staff, and its progress follows every step", async () => {
     const account = graspAccount(cloudflare);
     const manifest = await namespaceRelease();
+    // On Stable, which a new organization follows.
+    await onChannel(manifest.releaseId);
     const clientId = `acme-${crypto.randomUUID().slice(0, 8)}`;
     const signIn = await callServerFn(
       detectSignInFn,

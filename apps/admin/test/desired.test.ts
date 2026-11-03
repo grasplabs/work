@@ -147,10 +147,28 @@ describe("a channel's plan", () => {
 });
 
 describe("shared secrets behind", () => {
-  it("is a held secret whose fingerprint isn't the rolled-out one, and never before a rollout", () => {
-    const delivered = { connect: { A: "1", B: "2" } };
-    expect(isSecretsBehind(delivered, null)).toBeFalsy();
-    expect(isSecretsBehind(delivered, { A: "1", B: "2", C: "3" })).toBeFalsy();
-    expect(isSecretsBehind(delivered, { A: "1", B: "9" })).toBeTruthy();
+  const desired = { connect: { A: "1", B: "2" }, core: { A: "1" } };
+
+  it("is nothing while what was delivered is what the store holds, or the store can't be read", () => {
+    expect(isSecretsBehind(desired, desired)).toBeFalsy();
+    expect(isSecretsBehind({ connect: { A: "9" } }, null)).toBeFalsy();
+  });
+
+  it("is another fingerprint, a name missing, or a name the store no longer has, on any Worker", () => {
+    expect({
+      other: isSecretsBehind(
+        { connect: { A: "1", B: "9" }, core: { A: "1" } },
+        desired
+      ),
+      missing: isSecretsBehind(
+        { connect: { A: "1" }, core: { A: "1" } },
+        desired
+      ),
+      extra: isSecretsBehind(
+        { connect: { A: "1", B: "2", C: "3" }, core: { A: "1" } },
+        desired
+      ),
+      worker: isSecretsBehind({ connect: { A: "1", B: "2" } }, desired),
+    }).toStrictEqual({ other: true, missing: true, extra: true, worker: true });
   });
 });

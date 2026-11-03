@@ -58,6 +58,7 @@ const stoppedSchedule: WorkflowTrigger = {
     missedOccurrences: "coalesce",
   },
   nextAt: null,
+  address: null,
   stopped: true,
 };
 
@@ -74,6 +75,20 @@ const othersMail: WorkflowTrigger = {
     input: { fields: {}, defaults: {} },
   },
   nextAt: null,
+  address: null,
+  stopped: false,
+};
+
+const ownMail: WorkflowTrigger = {
+  ...base,
+  id: "trigger-email",
+  kind: "email",
+  owner: "me",
+  principal: "me",
+  enabled: true,
+  config: { input: { fields: {}, defaults: {} } },
+  nextAt: null,
+  address: "trigger-0b7c",
   stopped: false,
 };
 
@@ -98,20 +113,21 @@ const connection = (
 let listReads = 0;
 
 /**
- * The tab for `me` (a builder when `builder`), with Connect down when
- * `connectFails`: what core was asked to do.
+ * The tab for `me` (a builder when `builder`), listing `listed`, with
+ * Connect down when `connectFails`: what core was asked to do.
  */
 const shown = async (
   builder: boolean,
   connectFails = false,
-  changeFails = false
+  changeFails = false,
+  listed: readonly WorkflowTrigger[] = [stoppedSchedule, othersMail]
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   listReads = 0;
   const triggers = {
     list: async () => {
       listReads += 1;
-      return await Promise.resolve([stoppedSchedule, othersMail]);
+      return await Promise.resolve(listed);
     },
     create: async (input: unknown) => {
       await Promise.resolve();
@@ -347,6 +363,36 @@ describe("a workflow's Triggers tab", () => {
               connection: { connectionId: "connection-google" },
               event: "google.mail.received",
               input: { fields: { subject: "/payload/subject" }, defaults: {} },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it("adds an email trigger with the mapping typed, and shows one by the part of its address before the @", async () => {
+    const asked = await shown(true, false, false, [ownMail]);
+    const says = document.body.textContent;
+    await fill("What starts it", "email");
+    await fill(
+      "The run's input fields, each from the message as a JSON Pointer, as JSON",
+      '{"subject": "/subject"}'
+    );
+    await submit();
+
+    expect({
+      address: says.includes("When an email arrives for trigger-0b7c"),
+      asked,
+    }).toStrictEqual({
+      address: true,
+      asked: [
+        {
+          create: {
+            kind: "email",
+            workflowId: "workflow-1",
+            version: 2,
+            config: {
+              input: { fields: { subject: "/subject" }, defaults: {} },
             },
           },
         },

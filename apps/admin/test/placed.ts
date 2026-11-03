@@ -86,7 +86,7 @@ export const placedRelease = async (
   return manifest.releaseId;
 };
 
-/** What a placed client is recorded as, beyond its ring. */
+/** What a placed client is recorded as. */
 export interface PlacedClientOptions {
   /** Its id; a new one when not given. */
   id?: string;
@@ -111,13 +111,12 @@ export interface PlacedClient {
 }
 
 /**
- * A client in `ring`, placed in the stage's destination on `cloudflare`,
+ * A client, placed in the stage's destination on `cloudflare`,
  * and not provisioned yet: as staff leave it once they've added and
  * placed it.
  */
 export const placedClientRecord = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  ring: number,
   {
     id = `client-${crypto.randomUUID().slice(0, 8)}`,
     name = `Acme ${id}`,
@@ -143,7 +142,6 @@ export const placedClientRecord = async (
       db.insert(clients).values({
         id: clientId,
         name,
-        ring,
         channel,
         signIn: signIn === null ? null : JSON.stringify(signIn),
         createdAt: now,
@@ -201,17 +199,16 @@ export const deployPlaced = async (
 };
 
 /**
- * A client in `ring` on `releaseId`, placed in the stage's destination on
+ * A client on `releaseId`, placed in the stage's destination on
  * `cloudflare`, and provisioned there: live, its operation done and its
  * runner released.
  */
 export const livePlacedClient = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  ring: number,
   releaseId: string,
   options?: PlacedClientOptions
 ): Promise<PlacedClient> => {
-  const client = await placedClientRecord(cloudflare, ring, options);
+  const client = await placedClientRecord(cloudflare, options);
   await deployPlaced(client.clientId, releaseId);
   const [row] = await db
     .select({ status: clients.status })

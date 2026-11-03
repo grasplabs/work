@@ -65,6 +65,22 @@ describe("email triggers", () => {
     ]);
   });
 
+  it("receive at an address that starts as an independent trigger's do, which no trigger has", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("trigger-invoices"));
+
+    const delivery = await deliver(
+      "trigger-invoices@grasp.test",
+      invoiceMail({ to: "trigger-invoices@grasp.test" })
+    );
+    const read = await readByRun(builder, app);
+
+    expect({
+      rejected: delivery.rejected,
+      subject: read.subject,
+    }).toStrictEqual({ rejected: undefined, subject: "Invoice INV-7" });
+  });
+
   it("show with their workflow, by the part of the address they receive at before the @", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("shown"));
