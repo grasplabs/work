@@ -184,4 +184,24 @@ describe("audit event types", () => {
     expect(typeOf("staff.session.started")).toBe("permission");
     expect(typeOf("permission.granted")).toBe("permission");
   });
+
+  it("files a visitor's sign-in, sign-out and refusals, and who may visit, under permissions, and a code sent as an action, never as configuration", () => {
+    expect(
+      [
+        "app.visitor_signed_in",
+        "app.visitor_signed_out",
+        "app.visitor_refused",
+        "app.visitor_listed",
+        "app.visitor_unlisted",
+        "app.visitor_code_sent",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual([
+      "permission",
+      "permission",
+      "permission",
+      "permission",
+      "permission",
+      "action",
+    ]);
+  });
 });

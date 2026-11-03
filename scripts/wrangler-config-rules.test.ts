@@ -34,6 +34,13 @@ const configWith = (changes: Record<string, unknown>): string =>
     ...changes,
   });
 
+/** A rate limit binding, `perMinute` a minute. */
+const limit = (name: string, id: string, perMinute: number) => ({
+  name,
+  namespace_id: id,
+  simple: { limit: perMinute, period: 60 },
+});
+
 describe("wrangler config rules", () => {
   it("accept a config that follows every rule", () => {
     expect(wranglerConfigErrors(file, compliant)).toStrictEqual([]);
@@ -120,6 +127,46 @@ describe("wrangler config rules", () => {
         `${file} (env staging): declare routes under "routes", not "route".`,
       ],
       plural: [],
+    });
+  });
+
+  it("refuse an env that leaves out a rate limit the top level binds, or binds it to another limit, as an env inherits none", () => {
+    const withLimits = (staging: unknown[]) =>
+      configWith({
+        ratelimits: [limit("AUTH", "1001", 300), limit("VISITOR", "1007", 20)],
+        env: { staging: { ratelimits: staging } },
+      });
+    expect({
+      same: wranglerConfigErrors(
+        file,
+        withLimits([limit("AUTH", "2001", 300), limit("VISITOR", "2007", 20)])
+      ),
+      missing: wranglerConfigErrors(
+        file,
+        withLimits([limit("AUTH", "2001", 300)])
+      ),
+      other: wranglerConfigErrors(
+        file,
+        withLimits([limit("AUTH", "2001", 300), limit("VISITOR", "2007", 200)])
+      ),
+      none: wranglerConfigErrors(
+        file,
+        configWith({
+          ratelimits: [limit("AUTH", "1001", 300)],
+          env: { staging: {} },
+        })
+      ),
+    }).toStrictEqual({
+      same: [],
+      missing: [
+        `${file} (env staging): bind rate limit VISITOR as the top level does (20 a 60 s), with its own namespace_id.`,
+      ],
+      other: [
+        `${file} (env staging): bind rate limit VISITOR as the top level does (20 a 60 s), with its own namespace_id.`,
+      ],
+      none: [
+        `${file} (env staging): bind rate limit AUTH as the top level does (300 a 60 s), with its own namespace_id.`,
+      ],
     });
   });
 

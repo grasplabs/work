@@ -1436,6 +1436,13 @@
       "when": 1793662566980,
       "tag": "0204_email_trigger_addresses",
       "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "6",
+      "when": 1793665296423,
+      "tag": "0205_app_visitors",
+      "breakpoints": true
     }
   ]
 }

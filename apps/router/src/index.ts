@@ -1,3 +1,4 @@
+import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { channelsApiPath } from "@grasp-os/shared/channels";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -156,7 +157,8 @@ const authBasePath = "/api/auth";
 
 /**
  * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT`,
- * `INTERVIEW_RATE_LIMIT` and `CHANNELS_RATE_LIMIT` all have it in
+ * `INTERVIEW_RATE_LIMIT`, `CHANNELS_RATE_LIMIT` and `VISITOR_RATE_LIMIT`
+ * all have it in
  * wrangler.jsonc.
  */
 const limitPeriodS = 60;
@@ -232,32 +234,45 @@ const interviewLinkPaths: ReadonlySet<string> = new Set([
   interviewHearPath,
 ]);
 
+/** The rate limiter bindings, in wrangler.jsonc. */
+type LimitBinding =
+  | "AUTH_RATE_LIMIT"
+  | "GUEST_RATE_LIMIT"
+  | "VISITOR_RATE_LIMIT"
+  | "CHANNELS_RATE_LIMIT"
+  | "INTERVIEW_RATE_LIMIT";
+
 /**
  * The limit a request to `pathname` counts against, if any: the public
  * endpoints core reaches without a session.
  */
-const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
+const limitFor = (pathname: string): LimitBinding | undefined => {
   // Signing out needs no protection from guessing, and refusing it would
   // leave the person signed in.
   const isAuth =
     pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
   if (isAuth && pathname !== signOutPath) {
-    return env.AUTH_RATE_LIMIT;
+    return "AUTH_RATE_LIMIT";
   }
   // A guest chat's endpoint (core's src/guests.ts), which anyone with a
   // link, or without one, can reach.
   if (pathname === guestApiPath) {
-    return env.GUEST_RATE_LIMIT;
+    return "GUEST_RATE_LIMIT";
+  }
+  // A visitor's endpoint (core's src/app-visitors.ts), where anyone can
+  // ask for a code or try one.
+  if (pathname === appVisitorApiPath) {
+    return "VISITOR_RATE_LIMIT";
   }
   // A chat platform's webhook (core's src/channels/door.ts), which anyone
   // can post to; core checks each request is the platform's own.
   if (pathname.startsWith(`${channelsApiPath}/`)) {
-    return env.CHANNELS_RATE_LIMIT;
+    return "CHANNELS_RATE_LIMIT";
   }
   // An interview link's endpoints (`interviewLinkPaths`), the same, from
   // one budget; core counts per link too.
   if (interviewLinkPaths.has(pathname)) {
-    return env.INTERVIEW_RATE_LIMIT;
+    return "INTERVIEW_RATE_LIMIT";
   }
   return undefined;
 };
@@ -444,9 +459,19 @@ export default {
     if (pathname === mailIngressPath) {
       return new Response("Not found", { status: 404 });
     }
-    const limiter = limiterFor(pathname, env);
-    if (limiter !== undefined && !(await withinLimit(limiter, request, host))) {
-      return rateLimited(url, host);
+    const limit = limitFor(pathname);
+    if (limit !== undefined) {
+      // Read as the stage may have it: an env's `ratelimits` replace the
+      // top level's, so one left out there is missing at run time. Such
+      // an endpoint is refused, never let through unlimited.
+      const limiter: RateLimit | undefined = env[limit];
+      if (limiter === undefined) {
+        log.error("router.rate_limit_unbound", { host, limit });
+        return new Response("Service unavailable", { status: 503 });
+      }
+      if (!(await withinLimit(limiter, request, host))) {
+        return rateLimited(url, host);
+      }
     }
 
     // Any copy the caller sent is replaced (threat model RT3): the secret

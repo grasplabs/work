@@ -8020,6 +8020,10 @@ msgstr "Déjame juntarlo todo para ti."
 msgid "Let people ask Stephen to start it"
 msgstr "Permitir pedirle a Stephen que lo inicie"
 
+#: src/activity/audit-words.ts
+msgid "Let someone visit a domain"
+msgstr "Permitió que alguien visite un dominio"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "Reanudar las entrevistas"
@@ -13031,6 +13035,10 @@ msgstr "Inició sesión por primera vez, tras unirse desde el directorio"
 msgid "Signed in to a connection again"
 msgstr "Volvió a iniciar sesión en una conexión"
 
+#: src/activity/audit-words.ts
+msgid "Signed in to a domain as a visitor"
+msgstr "Inició sesión en un dominio como visitante"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Sesión iniciada con"
@@ -13038,6 +13046,10 @@ msgstr "Sesión iniciada con"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Signed off"
 msgstr "Aprobada"
+
+#: src/activity/audit-words.ts
+msgid "Signed out of a domain as a visitor"
+msgstr "Cerró sesión en un dominio como visitante"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -13618,6 +13630,10 @@ msgstr "Se detuvo el {date}"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Programación detenida"
+
+#: src/activity/audit-words.ts
+msgid "Stopped someone visiting a domain"
+msgstr "Dejó de permitir que alguien visite un dominio"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -16103,6 +16119,10 @@ msgstr "Página de visión"
 msgid "Vision page confirmed"
 msgstr "Página de visión confirmada"
 
+#: src/activity/audit-log.tsx
+msgid "Visitor of {domain}"
+msgstr "Visitante de {domain}"
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgctxt "model: Stephen's voice"
 msgid "Voice"
@@ -16287,12 +16307,20 @@ msgid "Was refused adding a member to a domain"
 msgstr "No se le permitió añadir un miembro a un dominio"
 
 #: src/activity/audit-words.ts
+msgid "Was refused as a domain's visitor"
+msgstr "Fue rechazado como visitante de un dominio"
+
+#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Se rechazaron paquetes conocidos como malware"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
 msgstr "Se le denegaron paquetes que nadie aprobó"
+
+#: src/activity/audit-words.ts
+msgid "Was sent a code to visit a domain"
+msgstr "Recibió un código para visitar un dominio"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"
