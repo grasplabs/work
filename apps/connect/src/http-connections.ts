@@ -31,7 +31,7 @@ import type {
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, inArray, isNotNull, like } from "drizzle-orm";
+import { and, eq, isNotNull, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -355,7 +355,11 @@ export const httpSummaries = async (
   const rows = await drizzle(env.DB)
     .select()
     .from(httpConnections)
-    .where(inArray(httpConnections.connectionId, [...ids]));
+    // As one JSON parameter: D1 binds at most 100 to a statement, and an
+    // organization may have more HTTP connections than that.
+    .where(
+      sql`${httpConnections.connectionId} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+    );
   return new Map(
     rows.map((row) => [
       row.connectionId,

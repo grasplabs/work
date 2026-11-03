@@ -267,6 +267,19 @@ describe("HTTP connections", () => {
           billing({ credential: { kind: "bearer", token: "short-token" } })
         )
       ),
+      // One with a space or tab at either end, which `fetch` trims, so it
+      // would go out as another text than the one its scrub looks for.
+      ...(await Promise.all(
+        [` ${secret}`, `${secret}\t`].map(
+          async (token) =>
+            await outcome(
+              create(billing({ credential: { kind: "bearer", token } }))
+            )
+        )
+      )),
+      // A prefix with a query, empty or not.
+      await outcome(create(billing({ pathPrefixes: ["/v1?"] }))),
+      await outcome(create(billing({ pathPrefixes: ["/v1?a=b"] }))),
     ];
     const person = admin();
     const connectionId = await create(billing(), person);
@@ -284,6 +297,10 @@ describe("HTTP connections", () => {
       "connection.http_origin_refused",
       "connection.http_origin_refused",
       "connection.http_origin_refused",
+      "connection.invalid",
+      "connection.invalid",
+      "connection.invalid",
+      "connection.invalid",
       "connection.invalid",
       "connection.invalid",
       "connection.invalid",
@@ -419,6 +436,40 @@ describe("HTTP connections", () => {
     ).toStrictEqual([]);
   });
 
+  it("send a query as it is, encoded separators and URLs in it too: only the path is matched", async () => {
+    const connectionId = await create();
+    const paths = [
+      "/v1/invoices?callback=https%3A%2F%2Fexample.com%2Fdone",
+      "/v1/invoices?next=../admin&dir=a%2e%2eb%5cc",
+      "/v1/invoices?to=/admin/users",
+    ];
+    for (const path of paths) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
+      await callAs(app, { connectionId, action: "get", input: { path } });
+    }
+
+    expect(sent.map(({ url }) => url)).toStrictEqual(
+      paths.map((path) => `https://api.billing.example${path}`)
+    );
+  });
+
+  it("list every HTTP connection, past the most one statement binds", async () => {
+    const person = admin();
+    const created = new Set<string>();
+    // One more than D1 binds to a statement.
+    for (let index = 0; index < 101; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      created.add(await create(billing({ name: `API ${index}` }), person));
+    }
+    const listed = await exports.default.listConnections(person);
+    const ours = listed.filter(({ id }) => created.has(id));
+
+    expect({
+      listed: ours.length,
+      described: ours.filter(({ http }) => http !== undefined).length,
+    }).toStrictEqual({ listed: 101, described: 101 });
+  });
+
   it("refuse a request off the approved paths, methods or headers, with nothing sent, audited", async () => {
     const connectionId = await create();
     const asks: Omit<Call, "connectionId">[] = [
@@ -426,6 +477,11 @@ describe("HTTP connections", () => {
       { action: "get", input: { path: "/v1/../admin" } },
       { action: "get", input: { path: "/v1/%2e%2e/admin" } },
       { action: "get", input: { path: "/v1%2F..%2Fadmin" } },
+      // A query beside them changes nothing.
+      { action: "get", input: { path: "/v1/%2e%2e/admin?next=%2Fv1" } },
+      { action: "get", input: { path: "/v1/../admin?next=1" } },
+      { action: "get", input: { path: "/v1\\..\\admin?next=1" } },
+      { action: "get", input: { path: "/admin?to=/v1/invoices" } },
       { action: "get", input: { path: "/v10/invoices" } },
       { action: "get", input: { path: "//collector.example/v1" } },
       { action: "get", input: { path: "https://collector.example/v1" } },

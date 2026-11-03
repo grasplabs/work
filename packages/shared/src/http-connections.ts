@@ -129,16 +129,21 @@ export const isSettableHeader = (name: string, credential: string): boolean =>
 const headerValuePattern = /^[\t\u0020-\u007E]*$/u;
 
 /**
- * Characters a path may not hold: whitespace and controls, which the URL
- * parser strips or rewrites, a backslash, read as a slash, and a fragment.
+ * Characters neither a path nor its query may hold: whitespace and
+ * controls, which the URL parser strips or rewrites, and a fragment.
  */
-const notInPath =
+const notInRequest =
   // oxlint-disable-next-line no-control-regex -- controls are what it refuses
-  /[\u0000- \u007F-\u009F\\#]/u;
+  /[\u0000- \u007F-\u009F#]/u;
+
+/** What a path, before its query, may not hold either: a backslash, read as a slash. */
+const notInPathname = /\\/u;
 
 /**
  * Escapes a server may decode into a dot or a separator after the path was
- * checked (`/api/..%2fadmin`): refused outright, whatever the server does.
+ * checked (`/api/..%2fadmin`): refused outright in the path, whatever the
+ * server does. Never in the query, which no prefix is matched against: a
+ * query such as `?callback=https%3A%2F%2Fexample.com%2Fdone` is sent as it is.
  */
 const decodedSeparators = /%(?:2e|2f|5c|00)/iu;
 
@@ -146,9 +151,11 @@ const decodedSeparators = /%(?:2e|2f|5c|00)/iu;
 const pathBase = "https://path.invalid";
 
 /**
- * The path `path` as sent, if it is one exactly as the URL standard would
- * send it: starting with one `/`, with no dot segments, encoded separators
- * or anything the parser would rewrite. Its pathname apart, to match.
+ * The path `path` as sent, if its pathname is one exactly as the URL
+ * standard would send it: starting with one `/`, with no dot segments,
+ * encoded separators or anything the parser would rewrite. Its query is
+ * checked for whitespace, controls and a fragment alone, and sent as the
+ * parser encodes it. Its pathname apart, to match against the prefixes.
  */
 const parsedPath = (
   path: unknown
@@ -157,11 +164,18 @@ const parsedPath = (
     typeof path !== "string" ||
     path.length === 0 ||
     path.length > httpLimits.pathChars ||
-    !path.startsWith("/") ||
-    path.startsWith("//") ||
     !path.isWellFormed() ||
-    notInPath.test(path) ||
-    decodedSeparators.test(path)
+    notInRequest.test(path)
+  ) {
+    return undefined;
+  }
+  const queryAt = path.indexOf("?");
+  const pathname = queryAt === -1 ? path : path.slice(0, queryAt);
+  if (
+    !pathname.startsWith("/") ||
+    pathname.startsWith("//") ||
+    notInPathname.test(pathname) ||
+    decodedSeparators.test(pathname)
   ) {
     return undefined;
   }
@@ -171,8 +185,8 @@ const parsedPath = (
   } catch {
     return undefined;
   }
-  // Nothing the parser rewrote: no dot segment, no stray `?`, no encoding.
-  if (url.origin !== pathBase || `${url.pathname}${url.search}` !== path) {
+  // Nothing the parser rewrote in the path: no dot segment, no encoding.
+  if (url.origin !== pathBase || url.pathname !== pathname) {
     return undefined;
   }
   return { pathname: url.pathname, search: url.search };
@@ -209,7 +223,7 @@ const prefixSchema = z
   .max(httpLimits.prefixChars)
   .refine((prefix) => {
     const parsed = parsedPath(prefix);
-    return parsed !== undefined && parsed.search === "";
+    return parsed !== undefined && !prefix.includes("?");
   }, "A path prefix starts with / and holds no query, dot segments or encoded separators");
 
 /** An origin an admin may approve: exactly `https://host[:port]`, public. */
@@ -220,15 +234,30 @@ export const httpOriginSchema = z
     "An https origin, exactly as written (https://api.example.com), on a public host name"
   );
 
+/** A space or tab at either end. */
+const edgeSpace = /^[\t ]|[\t ]$/u;
+
+/**
+ * A credential: a header value, at least `secretMinChars` long, with no
+ * space or tab at either end. `fetch` trims a header value's ends, so a
+ * credential with them would go out as another text than connect knows,
+ * and its scrub from what an API echoes would miss it.
+ */
+const secretSchema = z
+  .string()
+  .min(httpLimits.secretMinChars)
+  .max(httpLimits.secretChars)
+  .regex(headerValuePattern)
+  .refine(
+    (secret) => !edgeSpace.test(secret),
+    "A credential can't start or end with a space or tab"
+  );
+
 /** The credential connect sends with every request, in one header. */
 export const httpCredentialSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("bearer"),
-    token: z
-      .string()
-      .min(httpLimits.secretMinChars)
-      .max(httpLimits.secretChars)
-      .regex(headerValuePattern),
+    token: secretSchema,
   }),
   z.strictObject({
     kind: z.literal("header"),
@@ -242,11 +271,7 @@ export const httpCredentialSchema = z.discriminatedUnion("kind", [
           name === "authorization" || isSettableHeader(name, "authorization"),
         "Not a header a credential can go in"
       ),
-    secret: z
-      .string()
-      .min(httpLimits.secretMinChars)
-      .max(httpLimits.secretChars)
-      .regex(headerValuePattern),
+    secret: secretSchema,
   }),
 ]);
 export type HttpCredential = z.input<typeof httpCredentialSchema>;
