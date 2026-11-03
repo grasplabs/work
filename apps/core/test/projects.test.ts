@@ -3,6 +3,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { addMember } from "../src/app-members.ts";
 import {
   addProjectMember,
   fileItem,
@@ -10,7 +11,10 @@ import {
   removeProjectMember,
   unfileItem,
 } from "../src/projects.ts";
-import { deleteWorkflowResource } from "../src/workflow-resources.ts";
+import {
+  deleteWorkflowResource,
+  shareWorkflowResource,
+} from "../src/workflow-resources.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -546,7 +550,8 @@ describe("projects", { timeout: 120_000 }, () => {
       workflowOf(owner),
       workflowOf(owner),
     ]);
-    // Seeded past the old limits of 200 items and 100 people.
+    // Seeded up to the old limits of 200 items and 100 people: the adds
+    // below go past them.
     const now = Date.now();
     await env.DB.batch([
       ...Array.from({ length: 200 }, () =>
@@ -647,7 +652,12 @@ describe("projects", { timeout: 120_000 }, () => {
       item: { type: "workflow", id: workflow },
       share: true,
     });
+    const [bobsWorkflow, bobsApp] = await Promise.all([
+      workflowOf(bob),
+      bob.api.apps.create({ name: `Desk ${unique()}` }),
+    ]);
     const asBob = await bob.api.whoami();
+    const toProject = { type: "project", id: project, role: "user" } as const;
     /** Core's env, Bob taken out of the project right before `writes` run. */
     const takenOutFirst = (writes: RegExp) => ({
       ...env,
@@ -697,12 +707,49 @@ describe("projects", { timeout: 120_000 }, () => {
         { type: "workflow", id: workflow }
       )
     );
+    // From his own App's and workflow's Share dialogs, each checked again
+    // in the share's own write.
+    await owner.api.projects.addMember(project, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const sharesApp = await outcome(
+      addMember(
+        takenOutFirst(/insert into "app_members"/u),
+        asBob,
+        bobsApp.id,
+        toProject
+      )
+    );
+    await owner.api.projects.addMember(project, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const sharesWorkflow = await outcome(
+      shareWorkflowResource(
+        takenOutFirst(/insert into "workflow_resource_members"/u),
+        asBob,
+        bobsWorkflow,
+        toProject
+      )
+    );
     const page = await owner.api.projects.get(project);
+    const [appShares, workflowShares] = await Promise.all([
+      bob.api.apps.members.list(bobsApp.id),
+      bob.api.workflowResources.members(bobsWorkflow),
+    ]);
 
     expect({
       addsHimself,
       deletes,
       unfiles,
+      sharesApp,
+      sharesWorkflow,
+      sharedWithProject: [...appShares, ...workflowShares].filter(
+        ({ type }) => type === "project"
+      ).length,
       adaIn: page.members.some(({ id }) => id === ada.userId),
       bobsRole: page.members.find(({ id }) => id === bob.userId)?.role,
       stillShared: page.items.map(({ id, sharedAs }) => ({ id, sharedAs })),
@@ -710,6 +757,9 @@ describe("projects", { timeout: 120_000 }, () => {
       addsHimself: "role.forbidden",
       deletes: "role.forbidden",
       unfiles: "role.forbidden",
+      sharesApp: "role.forbidden",
+      sharesWorkflow: "role.forbidden",
+      sharedWithProject: 0,
       adaIn: false,
       bobsRole: "user",
       stillShared: [{ id: workflow, sharedAs: "user" }],

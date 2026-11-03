@@ -29,7 +29,7 @@ import type {
   ProjectSummary,
   ProjectsApi,
 } from "@grasp-os/shared/projects";
-import { requireBuilder } from "@grasp-os/shared/roles";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { and, asc, count, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
@@ -518,6 +518,8 @@ const guarded = async <T>(
   } catch (error) {
     if (guardedColumns.some((column) => notNullFailed(error, column))) {
       await requireStillBuilt(env, id, by.userId);
+      // Theirs to build again by now: still, it wasn't when the write ran.
+      throw roleErrors.create("role.forbidden");
     }
     throw error;
   }
@@ -941,7 +943,7 @@ export const fileItem = async (
         itemType: ref.type,
         // Only while the item is still there: one removed or deleted
         // since it was opened, after its cleanup ran, would otherwise
-        // leave a row nobody sees taking a place.
+        // leave a row nobody sees.
         itemId:
           ref.type === "app"
             ? sql`(SELECT ${apps.id} FROM ${apps} WHERE ${apps.id} = ${itemId} AND ${apps.removedAt} IS NULL)`
