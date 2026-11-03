@@ -576,18 +576,30 @@ describe("who finds an App", setUpTime, () => {
     ).resolves.toStrictEqual([]);
   });
 
-  it("is never given to an App, which would keep what it found for whoever it is shared with", async () => {
+  it("is never given to an App, which would keep what it found for whoever it is shared with, nor written by an agent, which builds with no grant", async () => {
     const admin = await personOf("admin");
     const owner = await personOf("builder");
     // Indexed, so the collection is there.
     await releasedApp(owner, agentsMd(term()));
     const { id: app } = await owner.api.apps.create({ name: `X ${term()}` });
     const subject = { type: "app" as const, appId: app };
+    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
+    const writing = {
+      ...readCollection(agent, appsCollection),
+      actions: ["read", "write"],
+    };
     // Asked for before requests were refused: the grant refuses it.
     const old = await storedGrant(
       { type: "app", id: app },
       { type: "collection", id: appsCollection },
       ["read"],
+      "APPS",
+      "requested"
+    );
+    const oldWrite = await storedGrant(
+      { type: "agent", id: agent.agentId },
+      { type: "collection", id: appsCollection },
+      ["read", "write"],
       "APPS",
       "requested"
     );
@@ -598,10 +610,20 @@ describe("who finds an App", setUpTime, () => {
           owner.api.permissions.request(readCollection(subject, appsCollection))
         ),
         outcome(grantReviewed(admin.api, old)),
+        outcome(owner.api.permissions.request(writing)),
+        outcome(grantReviewed(admin.api, oldWrite)),
       ])
-    ).resolves.toStrictEqual(["permission.invalid", "permission.invalid"]);
+    ).resolves.toStrictEqual([
+      "permission.invalid",
+      "permission.invalid",
+      "permission.invalid",
+      "permission.invalid",
+    ]);
     await expect(admin.api.permissions.list(subject)).resolves.toMatchObject([
       { id: old, status: "requested" },
+    ]);
+    await expect(admin.api.permissions.list(agent)).resolves.toMatchObject([
+      { id: oldWrite, status: "requested" },
     ]);
   });
 

@@ -96,7 +96,7 @@ const setUp = async (
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
-      actions: ["read", "write"],
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
   return { admin, builder, person, app, chat, grant };
@@ -544,12 +544,11 @@ describe("the agent building an independent workflow", () => {
     });
   });
 
-  it("writes no workflow from a restricted chat", async () => {
+  it("writes no workflow from a restricted chat, though building needs no grant", async () => {
     const calls = tryEach({
       create: `(await env.workflowBuild.create("restricted-${unique()}")).id`,
     });
-    const { chat, grant } = await setUp([codeStep(calls), says("No.")]);
-    await grant();
+    const { chat } = await setUp([codeStep(calls), says("No.")]);
     await runInDurableObject(chat.stub, (instance) =>
       instance.restrictChat(chatIdSchema.parse(chat.chat.id))
     );

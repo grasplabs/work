@@ -167,7 +167,6 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
     const { env } = this;
     const scope = this.ctx.props;
     return await asPerson(env, scope, {
-      allowed: () => true,
       method: `workflowBuild.${method}`,
       read: async (person) => await run(await buildingAs(env, scope, person)),
       ...(detail === undefined ? {} : { detail }),

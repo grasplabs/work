@@ -1451,7 +1451,7 @@ describe("dependency approval", () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
-      actions: ["read", "write"],
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
     // The registry answers two seconds late; the run has a second.
@@ -1550,7 +1550,7 @@ describe("dependency approval", () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
-      actions: ["read", "write"],
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
 

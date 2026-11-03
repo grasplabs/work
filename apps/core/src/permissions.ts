@@ -494,12 +494,16 @@ const requireApps = async (
  * read it could hold another App's AGENTS.md, and be shared with someone
  * who may not open that App, and both provenance checks would pass. An
  * agent acts for its person, who may read what they find there, and keeps
- * nothing to share: it may be given it.
+ * nothing to share: it may be given it, to read. Nobody writes it (its
+ * entries are made from the Apps themselves), and an agent builds Apps
+ * as its person with no permission of its own (agent-builds.ts), so a
+ * `write` on it would allow nothing: it is refused rather than granted.
  */
 const requireCollection = async (
   env: Env,
   subject: PermissionSubject,
-  object: PermissionObject
+  object: PermissionObject,
+  actions: readonly string[]
 ): Promise<void> => {
   if (object.type !== "collection") {
     return;
@@ -534,6 +538,13 @@ const requireCollection = async (
     throw permissionErrors.create("permission.invalid", {
       issues: [
         "object.collectionId: The Apps collection is given to agents alone.",
+      ],
+    });
+  }
+  if (found.source === "apps" && actions.some((action) => action !== "read")) {
+    throw permissionErrors.create("permission.invalid", {
+      issues: [
+        "actions: The Apps collection is only read. Building Apps needs no permission of the agent's own.",
       ],
     });
   }
@@ -954,7 +965,7 @@ export const requestPermission = async (
   }
   await requireStoreObject(env, subject, object, roles);
   await requireApps(env, subject, object);
-  await requireCollection(env, subject, object);
+  await requireCollection(env, subject, object, actions);
   const row: Row = {
     id: crypto.randomUUID(),
     ...subjectColumns(subject),
@@ -1193,8 +1204,14 @@ export const grantPermission = async (
     throw permissionErrors.create("permission.not_found");
   }
   // No grant ever names a missing or personal collection, nor gives an App
-  // the Apps collection, however old its request.
-  await requireCollection(env, subjectOf(found), objectOf(found));
+  // the Apps collection, nor anything but reading it, however old its
+  // request.
+  await requireCollection(
+    env,
+    subjectOf(found),
+    objectOf(found),
+    toPermission(found).actions
+  );
   // A chat's own request: an admin grants only a shared connection, still
   // connected and offered. A personal one is its person's alone: to anyone
   // else it doesn't exist.

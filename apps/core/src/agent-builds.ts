@@ -635,7 +635,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     const { env } = this;
     const scope = this.ctx.props;
     return await asPerson(env, scope, {
-      allowed: () => true,
       method,
       read: async (person: Member) =>
         await run(await buildingAs(env, scope, person)),

@@ -157,11 +157,11 @@ const setUp = async (
   const others = { admin, builder };
   const person = role === "user" ? await signedInApi(idp, role) : others[role];
   const chat = await chatOf(person.userId, ...replies);
-  const grant = async (actions: ("read" | "write")[] = ["read", "write"]) => {
+  const grant = async () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
-      actions,
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
   };
@@ -713,12 +713,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes no App code from a restricted chat", async () => {
+  it("writes no App code from a restricted chat, though building needs no grant", async () => {
     const calls = tryEach({
       create: `(await env.build.create({ name: "Refused" })).name`,
     });
-    const { chat, grant } = await setUp([codeStep(calls), says("No.")]);
-    await grant();
+    const { chat } = await setUp([codeStep(calls), says("No.")]);
     await runInDurableObject(chat.stub, (instance) =>
       instance.restrictChat(chatIdSchema.parse(chat.chat.id))
     );
@@ -730,15 +729,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lands no draft write whose run ran out of time while it was under way", async () => {
-    const { chat, existing, grant } = await setUp([]);
+  it("lands no draft write whose run ran out of time while it was under way, with no grant to revoke", async () => {
+    const { chat, existing } = await setUp([]);
     await fakeProvider(
       codeStep(`export default async (self, env) => {
           await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
         };`),
       says("It ran out of time.")
     );
-    await grant();
 
     // The write is let in at once, then waits on the App's files past its
     // run's end: refused as it commits.

@@ -63,7 +63,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The Apps the person has a role in, oldest first. */
   async list(): Promise<App[]> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: () => true,
       method: "apps.list",
       read: async (person) => await listApps(this.env, person),
       detail: (listed) => ({ apps: listed.length }),
@@ -73,7 +72,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** An App's files at `version`, or at its latest: for its builders. */
   async files(app: unknown, version?: unknown): Promise<AppFiles> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: () => true,
       method: "apps.files",
       read: async (person) => {
         const files = await readFiles(this.env, person, app, version);
@@ -271,7 +269,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** An App's versions, newest first: for its builders. */
   async versions(app: unknown, before?: unknown): Promise<AppVersion[]> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: () => true,
       method: "apps.versions",
       read: async (person) => {
         const listed = await listVersions(this.env, person, app, before);
