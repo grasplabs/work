@@ -26,7 +26,7 @@ import {
   teamMembers,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { grantedPermissions, requireActivePerson } from "../permissions.ts";
+import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 
@@ -43,7 +43,8 @@ import type { WorkContext } from "../restricted.ts";
 // (R5): a grant never reaches past that person. The exceptions read what
 // the person may read, without a grant: an agent's memory
 // (`readableForPerson`), only their memory files, and the agent of a
-// person's own chat (`isOwnChat`), their own tool. What anyone reads is
+// person's own chat (`isOwnChat`), their own tool, which still needs a
+// grant for a sensitive collection. What anyone reads is
 // marked with where it came from and recorded in the audit log, and
 // restricted data puts the chat or App an App or agent works in in
 // restricted mode (`noteProvenance`).
@@ -343,7 +344,7 @@ export const mayRead = (
 const grantedToRead = async (
   env: Env,
   authority: Authority,
-  permissionId: PermissionId | undefined
+  permissionId?: PermissionId
 ): Promise<string[]> => {
   const granted = await grantedPermissions(env, authority);
   const ids = granted.flatMap(({ id, object, actions }) =>
@@ -382,11 +383,15 @@ export const readableForPerson = async (
  * Whether `reader` is the agent of a person's own chat: the organization's
  * agent, in a chat nobody else shares. The chat is the person's own tool,
  * as an assistant they use themselves is: it reads what they may read,
- * with no grant (`collectionsAllowed`, the Brain's recall in
- * recall-grants.ts). Still as a delegate, so what it reads restricts the
- * chat and is recorded as the agent's for them. An App, a run, a chat
- * others share, and a stub built from a grant (`permissionId`) read only
- * under grants.
+ * with no grant but for a sensitive collection (`collectionsAllowed`, the
+ * Brain's recall in recall-grants.ts). Still as a delegate, so what it
+ * reads restricts the chat and is recorded as the agent's for them. An
+ * App, a run, a chat others share, and a stub built from a grant
+ * (`permissionId`) read only under grants.
+ *
+ * A chat others share is told by its kept audience: a turn in one keeps
+ * it first and takes none without it (workspace.ts), and it is never
+ * removed, so every read in one finds it.
  */
 export const isOwnChat = async (env: Env, reader: Reader): Promise<boolean> =>
   reader.type === "delegate" &&
@@ -401,8 +406,7 @@ export interface CollectionsAllowed {
   condition: SQL;
   /**
    * The collections an App or agent is granted to read, read now (every
-   * collection's own rule applies on top); undefined for a person and
-   * a person's own chat, which need none.
+   * collection's own rule applies on top); undefined for a person.
    */
   granted: readonly string[] | undefined;
   /**
@@ -416,7 +420,8 @@ export interface CollectionsAllowed {
  * The collections `reader` may read (`condition`), and those an App or
  * agent is granted. A person's own chat reads what its person may read
  * (`isOwnChat`): their own, their teams' and everyone's collections, but
- * not one for admins, which agents never read.
+ * not one for admins, which agents never read, and a sensitive one only
+ * under a grant.
  */
 export const collectionsAllowed = async (
   env: Env,
@@ -437,10 +442,19 @@ export const collectionsAllowed = async (
   }
   const { authority, permissionId, context } = reader;
   if (await isOwnChat(env, reader)) {
-    await requireActivePerson(env, authority);
+    // A sensitive collection still takes a grant: reading one restricts
+    // the chat for good, which a broad search mustn't do by chance.
+    const granted = await grantedToRead(env, authority);
     return {
-      condition: await readableForPerson(env, db, authority.onBehalfOf),
-      granted: undefined,
+      condition:
+        and(
+          await readableForPerson(env, db, authority.onBehalfOf),
+          or(
+            eq(collections.sensitive, false),
+            granted.length === 0 ? undefined : inList(collections.id, granted)
+          )
+        ) ?? sql`0`,
+      granted,
       shared: false,
     };
   }

@@ -1656,7 +1656,8 @@ const listQueryMin = 2;
 
 /**
  * Refuses, as `brain.denied`, a reader the host doesn't let read the Brain
- * (its `recall.require` port: an App or agent without the `brain` grant),
+ * (its `recall.require` port: in core, an App or run without the `brain`
+ * grant),
  * before anything is read: the gate every entity and relation read
  * passes, as a recall does.
  */
@@ -2093,7 +2094,7 @@ export const entityMatchProposals = async <C>(
     matchProposalsInputSchema,
     input
   );
-  // As a recall: an App, run or agent only under its Brain grant.
+  // As a recall: only a reader the host lets recall.
   await brain.ports.recall.require(reader);
   const linked = await readableMentions(
     brain,

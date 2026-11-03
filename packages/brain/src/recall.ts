@@ -1172,10 +1172,11 @@ export const recallWithSources = async <C>(
       input
     );
     // Every check that can refuse runs before the timed read, so a short
-    // deadline never turns a refusal into an empty pack: the `brain` grant
-    // (an App, run or agent recalls only under it, and only from the
-    // collections it was granted: a binding can't search the whole
-    // company because its name is "Brain"), each named collection, and
+    // deadline never turns a refusal into an empty pack: whether the host
+    // lets the reader recall (in core an App or run recalls only under its
+    // `brain` grant, and only from the collections it was granted: a
+    // binding can't search the whole company because its name is
+    // "Brain"), each named collection, and
     // the access revision the pack carries. Their time counts against the
     // deadline: the read gets what is left of it, and none once it is
     // spent, on the host's clock (`ports.clock`), as everything the Brain

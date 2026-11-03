@@ -35,14 +35,15 @@ import { grantedPermissions } from "./permissions.ts";
 // on that connection stays), a collection or App deleted.
 //
 // What a run read of the Brain is pinned too (GRA-299; the threat model is
-// on the issue): beside its collections, the agent's `brain` grant it read
-// under (`brainGrantRead`) and each document it was handed
+// on the issue): beside its collections, that the Brain's recall admitted
+// it (`brainGrantRead`: a person's own chat always, another only under the
+// agent's `brain` grant) and each document it was handed
 // (`brainDocumentRead`), at its version, pinned as its text was
-// (`PinnedVersion`), so its results are withheld once that grant is
-// revoked, or once a document it was handed is erased, moved or purged,
-// though its collection may still be read.
+// (`PinnedVersion`), so its results are withheld once the recall no
+// longer admits it, or once a document it was handed is erased, moved or
+// purged, though its collection may still be read.
 
-/** The source a run's read of the Brain under the agent's `brain` grant is recorded as. */
+/** The source a run's read of the Brain is recorded as, while recall admits it. */
 export const brainGrantRead = "brain-grant";
 
 const brainDocumentPrefix = "brain-document:";

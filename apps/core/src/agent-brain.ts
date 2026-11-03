@@ -94,10 +94,11 @@ interface Delegated<T> {
 /**
  * Records what a Brain read of the chat's code read from, before it is
  * handed over: its collections with the chat (`recordSources`), and with
- * the run the agent's `brain` grant and each document handed over too
- * (history-access.ts), pinned as its text was, so the run's result is
- * withheld from the model once that grant is revoked or a document is
- * erased, moved or purged, though its collection may still be read. Only ever added to: a later read that
+ * the run that the Brain admitted its recall (`brainGrantRead`) and each
+ * document handed over too (history-access.ts), pinned as its text was,
+ * so the run's result is withheld from the model once the Brain no longer
+ * admits it or a document is erased, moved or purged, though its
+ * collection may still be read. Only ever added to: a later read that
  * finds nothing lifts nothing.
  */
 const recordBrainRead = async (

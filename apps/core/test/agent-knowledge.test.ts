@@ -1138,6 +1138,51 @@ describe("a chat's Knowledge", setUpTime, () => {
     ).toStrictEqual([false]);
   });
 
+  it("reads a sensitive collection its person may read only under a grant, which restricts the chat", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const { id: payroll } = await admin.knowledge.createCollection({
+      name: `Payroll ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+      sensitive: true,
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: payroll,
+      path: "pay.md",
+      text: `# Pay\n${word}`,
+      ifVersion: 0,
+    });
+    const recall = codeStep(
+      `export default async (self, env) => (await env.brain.recall(${JSON.stringify({ query: word })})).items.length;`
+    );
+    const { stub, chat, ask, agent } = await chatOf(
+      person.userId,
+      recall,
+      says("Nothing."),
+      recall,
+      says("Found it.")
+    );
+
+    // A broad search by chance: the chat stays as it was.
+    const before = await ask("What do we pay?");
+    await grantRead(admin, agent, payroll);
+    const after = await ask("What do we pay, now?");
+
+    const results = await codeResults(stub, chat.id);
+    expect({
+      results: results.map(({ text }) => text),
+      before: before.provenance?.restricted,
+      after: after.provenance?.restricted,
+    }).toStrictEqual({
+      results: ["Returned:\n0", "Returned:\n1"],
+      before: false,
+      after: true,
+    });
+  });
+
   it("recalls for a chat with no grant, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
     const admin = await newAdmin();
     const person = await newPerson();

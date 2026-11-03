@@ -119,9 +119,10 @@ const unchangedPins = async <C>(
 /** The Brain's store, as recall reads it. */
 export interface BrainStore<C> {
   /**
-   * Refuses, as `brain.denied`, an App, run or agent without an active
-   * `brain` grant, read now: a person needs none. The grant lets it recall;
-   * what it recalls from is still only the collections it was granted.
+   * Refuses, as `brain.denied`, a reader the host doesn't let recall, read
+   * now (its `recall.require` port): in core, an App, run or agent without
+   * an active `brain` grant, but neither a person nor a person's own chat.
+   * What it recalls from is still only what its reader may read.
    */
   requireBrainGrant: (reader: C) => Promise<void>;
   /**

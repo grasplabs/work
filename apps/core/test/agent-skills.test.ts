@@ -31,7 +31,9 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 // fail, tried here at core's boundary (the Brain's own tests try every
 // rule, packages/brain/test/skills.test.ts):
 // - a chat selects or reads a skill in a collection its person can't read
-//   (a person's own chat reads what they may read, with no grant);
+//   (a person's own chat reads what they may read, with no grant: the one
+//   rule every read of it follows, tried through the chat in
+//   agent-knowledge.test.ts);
 // - a skill is selected whose required capability the agent doesn't hold,
 //   or isn't for one it holds by a grant of the calling chat's alone; a
 //   capability core names can't be required at all;
