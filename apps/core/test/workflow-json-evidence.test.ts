@@ -30,11 +30,12 @@ import { callingRunOf } from "../src/workflows/resource-authority.ts";
 import { callKnowledge } from "../src/workflows/resource-reads.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
+import { runEvidenceMaxRows } from "../src/workflows/run-evidence.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { runObject } from "./runs.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A JSON workflow's recalls pinned to its run, and every way out of it
 // gated on them (GRA-299; the threat model is on the issue): once the run
@@ -457,7 +458,15 @@ const recallingWorkflow = async (
   }
   // A read reads the document its input names.
   const who = how === "read" ? leave.id : "Ada";
-  return { workflow, collectionGrant, documentId: leave.id, fact, lead, who };
+  return {
+    workflow,
+    collectionGrant,
+    collectionId: collection.id,
+    documentId: leave.id,
+    fact,
+    lead,
+    who,
+  };
 };
 
 /** Run `run` once it sleeps in its hold, after its recall. */
@@ -1113,5 +1122,53 @@ describe("a JSON workflow's recalled evidence", () => {
         named: false,
       },
     });
+  });
+
+  it("refuses a recall that would keep more than a run's cap of evidence, though one citing only what it keeps still answers", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const made = await recallingWorkflow(ada, admin, "output");
+    // Another document in its collection, which only a recall of "Back"
+    // finds.
+    await saveDocument(env, admin, {
+      collectionId: made.collectionId,
+      path: "other.md",
+      text: "# Back\nBack to work on Monday.",
+      ifVersion: 0,
+    });
+    const runId = await startedHolding(ada, made);
+    const run = await callingRunOf(env, made.workflow.id, runId);
+    const binding = run?.bindings.get("docs");
+    if (run === undefined || binding === undefined) {
+      throw new Error("The run holds no knowledge binding");
+    }
+    const kept = await env.DB.prepare(
+      "SELECT permission_id AS permission FROM run_brain_evidence WHERE run_id = ? AND document_id = ?"
+    )
+      .bind(runId, made.documentId)
+      .first<{ permission: string }>();
+    if (kept === null) {
+      throw new Error("The run's recall kept no evidence");
+    }
+    // Up to the cap, as a run recalling in a loop would come to.
+    await env.DB.prepare(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO run_brain_evidence (run_id, document_id, collection_id, version, pinned, permission_id, recorded_at) SELECT ?, 'filler-' || i, 'filler', 1, 'filler', ?, 0 FROM n"
+    )
+      .bind(runEvidenceMaxRows - 1, runId, kept.permission)
+      .run();
+    const recall = async (query: string) =>
+      await outcome(
+        callKnowledge(env, run, binding, {
+          operation: "recall",
+          arguments: { query },
+        })
+      );
+
+    expect({
+      // The leave document again: nothing more to keep.
+      again: await recall("leave"),
+      // `other.md`: one past the cap.
+      past: await recall("Back"),
+    }).toStrictEqual({ again: "ok", past: "brain.budget_exceeded" });
   });
 });
