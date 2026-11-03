@@ -48,6 +48,13 @@ const couldNotRun =
  */
 const maxLeftoversNamed = 20;
 
+/**
+ * The most characters of a failed build's error message the warning
+ * keeps: enough to tell the compiler unreachable, out of CPU or refused
+ * apart, without logging a long message whole.
+ */
+const maxLoggedMessage = 300;
+
 /** What a save says of a build that didn't answer within its wait. */
 const tookTooLong =
   "The build didn't finish in time. It runs again when this is first used.";
@@ -121,6 +128,12 @@ const savedBuild = async (
       version,
       kind,
       errorName: error instanceof Error ? error.name : typeof error,
+      // Why it couldn't run (the compiler unreachable, a Loader or asset
+      // error, a sandbox stop): the name alone doesn't say which. Never
+      // the stack, and cut short.
+      ...(error instanceof Error
+        ? { errorMessage: error.message.slice(0, maxLoggedMessage) }
+        : {}),
     });
     return { status: "error", diagnostics: [], error: couldNotRun };
   }
