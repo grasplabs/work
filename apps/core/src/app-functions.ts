@@ -1,5 +1,4 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
-import { appVisitorErrors } from "@grasp-os/shared/app-visitors";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
@@ -1173,6 +1172,11 @@ export interface VisitorCaller {
    * still granted. Read before the call and before each commit.
    */
   readonly stillAllowed: (path: string) => Promise<void>;
+  /**
+   * Refuses the call of `path` as not granted, recorded: for what no grant
+   * can open (an action, core's own queries) as for what isn't granted.
+   */
+  readonly notGranted: (path: string) => Promise<never>;
   /** Told the function the call runs, once it is admitted. */
   readonly admitted: (path: string) => Promise<void>;
 }
@@ -1238,17 +1242,18 @@ export const callVisitorFunction = async (
   });
   try {
     const call = callAllowed(request, { kind: undefined, windowed: false });
-    if (call.reference.kind === "action") {
-      throw appVisitorErrors.create("visitor.not_granted");
+    const { contractId } = call.reference;
+    // Never granted, whatever the grants say: refused, and recorded, before
+    // anything of the release is read.
+    if (
+      call.reference.kind === "action" ||
+      isWorkflowQueryPath(contractId) ||
+      isPreferencePath(contractId)
+    ) {
+      return refused(await caller.notGranted(contractId));
     }
     const release = await loadRelease(env, caller.app, caller.version);
-    const { path, workflowQuery, preference } = await referenceIn(
-      release,
-      call.reference
-    );
-    if (workflowQuery !== undefined || preference !== undefined) {
-      throw appVisitorErrors.create("visitor.not_granted");
-    }
+    const { path } = await referenceIn(release, call.reference);
     await caller.stillAllowed(path);
     await caller.admitted(path);
     const invocation = await visitorInvocation(

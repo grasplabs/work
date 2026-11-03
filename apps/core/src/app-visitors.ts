@@ -24,6 +24,7 @@ import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
@@ -65,6 +66,7 @@ import { escapeHtml } from "./mail-outbox.ts";
 import { sendMail } from "./mail.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
 import { deliveryOf, leasedBuild, standingOf } from "./screen-trust.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import { visitorScreen } from "./screens-rpc.ts";
 import { requireNotStaff } from "./sharing.ts";
 
@@ -127,8 +129,14 @@ import { requireNotStaff } from "./sharing.ts";
 const minuteMs = 60 * 1000;
 const hourMs = 60 * minuteMs;
 
-/** The most a visitor's request may carry: an address and a code. */
-const requestMaxLength = 4 * 1024;
+/**
+ * The most bytes a visitor's request may carry: a call's request
+ * (`functionRequestMaxBytes`, as a member's screen may send) written as a
+ * JSON string, where escaping can at most double it, and room for the
+ * rest (the action, a session and a lease). Every other request is far
+ * smaller, and checked field by field once it is parsed.
+ */
+const requestMaxLength = 2 * functionRequestMaxBytes + 4 * 1024;
 
 /** Most rows the sweep deletes of each, a run. */
 const sweptPerRun = 500;
@@ -505,7 +513,10 @@ const signIn = async (
   const token = randomToken();
   const sessionId = crypto.randomUUID();
   const expiresAt = now + appVisitorSessionHours * hourMs;
-  // The code is used once: the session goes in only if this took it.
+  // The code is used once: the session goes in only if this took it, and
+  // only while the App is still published as it goes in, so an unpublish
+  // that ended every session meanwhile leaves none behind it.
+  const stillPublished = sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${eq(apps.id, found.id)} AND ${eq(apps.status, "published")})`;
   const [, inserted] = await auditedBatch(env, db, [
     db
       .update(appVisitorCodes)
@@ -516,7 +527,7 @@ const signIn = async (
     db
       .insert(appVisitorSessions)
       .select(
-        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0`
+        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0 AND ${stillPublished}`
       )
       .returning({ id: appVisitorSessions.id }),
     outboxedIfChanged(db, {
@@ -527,7 +538,9 @@ const signIn = async (
     }),
   ]);
   if (inserted.length === 0) {
-    return await codeRefused(env, found.id, address.data, "used");
+    const reason =
+      (await publishedAt(env, link)) === undefined ? "not_published" : "used";
+    return await codeRefused(env, found.id, address.data, reason);
   }
   return { token, expiresAt: new Date(expiresAt).toISOString() };
 };
@@ -622,6 +635,64 @@ const sessionById = async (env: Env, id: string) =>
     )
     .get();
 
+/** Whose screen build a visitor's call runs for (`deliveredToVisitor`). */
+interface VisitorDeliveryTarget {
+  app: AppId;
+  sessionId: string;
+  build: LeasedBuild | undefined;
+}
+
+/**
+ * Refuses, with `screen.revoked` or `screen.unreviewed`, unless `build`
+ * gets the App's data now; the refusal is audited as the visitor, with
+ * the stage it came at.
+ */
+const requireVisitorDelivery = async (
+  env: Env,
+  { app, sessionId, build }: VisitorDeliveryTarget,
+  stage: "admission" | "delivery"
+): Promise<void> => {
+  const delivery = deliveryOf(await standingOf(env, app, build));
+  if (delivery === "open") {
+    return;
+  }
+  await audited(
+    env,
+    app,
+    "app.visitor_refused",
+    { reason: `screen_${delivery}`, stage },
+    sessionId
+  );
+  throw screenErrors.create(
+    delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+  );
+};
+
+/**
+ * `run`'s answer for a visitor's screen running `target.build`, as
+ * `delivering` (screen-trust.ts) is for a member's: trust is read before
+ * `run`, so code nobody approved starts nothing, and again before
+ * whatever `run` ends with is handed over, its answer or its error, so an
+ * approval taken back while it ran keeps both here. What `run` already
+ * changed stays changed.
+ */
+export const deliveredToVisitor = async <Answer>(
+  env: Env,
+  target: VisitorDeliveryTarget,
+  run: () => Promise<Answer>
+): Promise<Answer> => {
+  await requireVisitorDelivery(env, target, "admission");
+  let answer: Answer;
+  try {
+    answer = await run();
+  } catch (error) {
+    await requireVisitorDelivery(env, target, "delivery");
+    throw error;
+  }
+  await requireVisitorDelivery(env, target, "delivery");
+  return answer;
+};
+
 /**
  * A call of one of the App's functions by a visitor, from its screen
  * (app-visitor-calls.ts): run as the App itself, only for a function the
@@ -656,56 +727,68 @@ const callAsVisitor = async (
     !(await host.admitRequest(principal)) ||
     !(await host.admitRequest(visitorsBucket))
   ) {
+    await audited(
+      env,
+      appId,
+      "app.visitor_refused",
+      { reason: "too_many_calls" },
+      session.id
+    );
     throw appVisitorErrors.create("visitor.too_many");
   }
-  // Only a build whose code gets the App's data, as for a member's call.
-  const build = await leasedBuild(env, principal, appId, lease);
-  const delivery = deliveryOf(await standingOf(env, appId, build));
-  if (delivery !== "open") {
-    throw screenErrors.create(
-      delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+  const notGranted = async (path: string): Promise<never> => {
+    await audited(
+      env,
+      appId,
+      "app.visitor_refused",
+      { reason: "not_granted", function: path, version },
+      session.id
     );
-  }
-  return await callVisitorFunction(
+    throw appVisitorErrors.create("visitor.not_granted");
+  };
+  // Only a build whose code gets the App's data, as for a member's call:
+  // before it runs, and again before its answer or error is handed over.
+  const build = await leasedBuild(env, principal, appId, lease);
+  const target = { app: appId, sessionId: session.id, build };
+  return await deliveredToVisitor(
     env,
-    {
-      app: appId,
-      version,
-      principal,
-      stillAllowed: async (path) => {
-        const live = await sessionById(env, session.id);
-        const now = await publishedApp(env, appId);
-        if (
-          live === undefined ||
-          now === undefined ||
-          now.currentVersion !== version ||
-          !(await isListed(env, appId, session.address))
-        ) {
-          throw appVisitorErrors.create("visitor.signed_out");
-        }
-        if (!(await grantHeld(env, appId, version, path))) {
-          await audited(
-            env,
-            appId,
-            "app.visitor_refused",
-            { reason: "not_granted", function: path, version },
-            session.id
-          );
-          throw appVisitorErrors.create("visitor.not_granted");
-        }
-      },
-      admitted: async (path) => {
-        await audited(
-          env,
-          appId,
-          "app.visitor_called",
-          { function: path, version },
-          session.id
-        );
-      },
-    },
-    request,
-    Date.now() + visitorCallMs
+    target,
+    async () =>
+      await callVisitorFunction(
+        env,
+        {
+          app: appId,
+          version,
+          principal,
+          stillAllowed: async (path) => {
+            const live = await sessionById(env, session.id);
+            const now = await publishedApp(env, appId);
+            if (
+              live === undefined ||
+              now === undefined ||
+              now.currentVersion !== version ||
+              !(await isListed(env, appId, session.address))
+            ) {
+              throw appVisitorErrors.create("visitor.signed_out");
+            }
+            if (!(await grantHeld(env, appId, version, path))) {
+              await notGranted(path);
+            }
+          },
+          notGranted,
+          admitted: async (path) => {
+            await audited(
+              env,
+              appId,
+              "app.visitor_called",
+              { function: path, version },
+              session.id
+            );
+          },
+        },
+        request,
+        Date.now() + visitorCallMs
+      )
   );
 };
 

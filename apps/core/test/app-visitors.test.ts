@@ -918,6 +918,65 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     ).toStrictEqual({ screen: "home", route: "home" });
   });
 
+  it("never keep a session past an unpublish: ending them fails the unpublish, and a sign-in that lands after one opens nothing", async () => {
+    const domain = newDomain();
+    const { builder, app, link } = await visitedApp([
+      { kind: "domain", value: domain },
+    ]);
+    const mail = await mailbox();
+    const visitor = `un@${domain}`;
+    await ask(link, visitor);
+    await signIn(link, visitor, await lastCode(mail, visitor));
+    const statusOf = async () => {
+      const row = await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+        .bind(app)
+        .first<{ status: string }>();
+      return row?.status;
+    };
+
+    // Ending this App's sessions fails, as a database can: the unpublish
+    // goes with it, rather than leaving sessions a republish revives.
+    const blocked = `test_block_${app.replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${blocked} BEFORE DELETE ON app_visitor_sessions WHEN OLD.app_id = '${app}' BEGIN SELECT RAISE(ABORT, 'unavailable'); END`
+    ).run();
+    const unpublish = await outcome(builder.api.apps.unpublish(app));
+    await env.DB.prepare(`DROP TRIGGER ${blocked}`).run();
+    const afterFailed = await statusOf();
+    // Published either way for what follows.
+    await published(app);
+
+    // The App is unpublished as the code is taken, before the session
+    // goes in: the sign-in opens nothing.
+    const late = `late@${domain}`;
+    await ask(link, late);
+    const code = await lastCode(mail, late);
+    const raced = `test_race_${app.replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${raced} AFTER UPDATE OF used_at ON app_visitor_codes WHEN NEW.app_id = '${app}' BEGIN UPDATE apps SET status = 'draft' WHERE id = '${app}'; END`
+    ).run();
+    const lateSignIn = await signIn(link, late, code);
+    await env.DB.prepare(`DROP TRIGGER ${raced}`).run();
+    await published(app);
+    const lateSessions = await env.DB.prepare(
+      "SELECT count(*) AS n FROM app_visitor_sessions WHERE app_id = ? AND address = ?"
+    )
+      .bind(app, late)
+      .first<{ n: number }>();
+
+    expect({
+      unpublishRefused: unpublish !== "ok",
+      afterFailed,
+      lateSignIn,
+      lateSessions: lateSessions?.n,
+    }).toStrictEqual({
+      unpublishRefused: true,
+      afterFailed: "published",
+      lateSignIn: "visitor.code_invalid",
+      lateSessions: 0,
+    });
+  });
+
   it("forgets codes an hour on and sessions once expired", async () => {
     const domain = newDomain();
     const { app, link } = await visitedApp([{ kind: "domain", value: domain }]);

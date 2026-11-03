@@ -239,6 +239,17 @@ export const changeStatus = async (
         ? storedEvent(event.id)
         : sql`0`
     ),
+    // Every visitor's session ends with a published App (app-visitors.ts),
+    // in the same batch and only if the change won: a status changed with
+    // sessions left over would let a republish revive them.
+    db
+      .delete(appVisitorSessions)
+      .where(
+        and(
+          eq(appVisitorSessions.appId, found.id),
+          found.status === "published" ? storedEvent(event.id) : sql`0`
+        )
+      ),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");
@@ -248,13 +259,6 @@ export const changeStatus = async (
     // Open screens look again (access-revocations.ts), and stop where the
     // status no longer serves them.
     await tellKept(env, revocations);
-  }
-  if (found.status === "published") {
-    // Every visitor's session ends with it (app-visitors.ts), as each of
-    // their requests would refuse it anyway from now on.
-    await db
-      .delete(appVisitorSessions)
-      .where(eq(appVisitorSessions.appId, app.id));
   }
   if (to === "archived") {
     await cancelRunsOf(env, by, app.id, now);

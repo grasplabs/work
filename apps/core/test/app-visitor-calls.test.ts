@@ -9,8 +9,10 @@ import { z } from "zod";
 
 import { visitorInvocation } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { deliveredToVisitor } from "../src/app-visitors.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { leasedBuild } from "../src/screen-trust.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -396,6 +398,10 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         stillAllowed: async () => {
           await Promise.resolve();
         },
+        notGranted: async () => {
+          await Promise.resolve();
+          throw new Error("Not granted");
+        },
         admitted: async () => {
           await Promise.resolve();
         },
@@ -636,6 +642,116 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       functions: sets[winner],
       granted: expected.granted,
       ungranted: expected.ungranted,
+    });
+  });
+
+  it("refuse an action and core's own queries before anything runs, each refusal audited", async () => {
+    const domain = newDomain();
+    const { builder, app, link, version } = await portal(domain);
+    const mail = await mailbox();
+    const ana = await visitor(mail, link, `ana@${domain}`);
+    await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    const refusedPaths = [
+      "portal.shout",
+      "workflows.followUp.queries.runs",
+      "preferences.get",
+    ];
+
+    let answers: unknown[] = [];
+    const events = await auditedDuring(async () => {
+      answers = await Promise.all(
+        refusedPaths.map(
+          async (path) => await call(app, version, ana, path, { text: "x" })
+        )
+      );
+    });
+
+    expect({
+      answers,
+      audited: events
+        .filter(
+          (event) =>
+            event.target?.id === app && event.action === "app.visitor_refused"
+        )
+        .map(({ detail }) =>
+          z.object({ function: z.string() }).loose().parse(detail)
+        )
+        .toSorted((one, other) => one.function.localeCompare(other.function)),
+    }).toStrictEqual({
+      answers: refusedPaths.map(() => "visitor.not_granted"),
+      audited: refusedPaths.toSorted().map((path) => ({
+        reason: "not_granted",
+        function: path,
+        version,
+      })),
+    });
+  });
+
+  it("take a call as large as a member's screen may send, past the 4 KiB the other requests get", async () => {
+    const domain = newDomain();
+    const { builder, app, link, version } = await portal(domain);
+    const mail = await mailbox();
+    const ana = await visitor(mail, link, `ana@${domain}`);
+    await builder.api.apps.setVisitorGrants(app, ["portal.add", "portal.mine"]);
+    // Quotes, escaped once more in the body, make it larger still.
+    const text = `"${"x".repeat(6000)}"`;
+
+    expect({
+      added: await call(app, version, ana, "portal.add", { text }),
+      mine: await call(app, version, ana, "portal.mine"),
+    }).toStrictEqual({ added: null, mine: [text] });
+  });
+
+  it("hand over neither answer nor error once the screen's approval is taken back while the call runs, and audit it", async () => {
+    const domain = newDomain();
+    const { admin, app, link } = await portal(domain);
+    const mail = await mailbox();
+    const ana = await visitor(mail, link, `ana@${domain}`);
+    const sessions = await env.DB.prepare(
+      "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
+    )
+      .bind(app)
+      .all<{ id: string }>();
+    const sessionId = sessions.results[0]?.id ?? "";
+    const appId = appIdSchema.parse(app);
+    const build = await leasedBuild(
+      env,
+      `visitor:${sessionId}`,
+      appId,
+      ana.lease
+    );
+    const revoked = async (run: () => Promise<string>) =>
+      await outcome(
+        deliveredToVisitor(env, { app: appId, sessionId, build }, run)
+      );
+
+    let answered = "";
+    const events = await auditedDuring(async () => {
+      answered = await revoked(async () => {
+        await admin.api.screenTrust.revoke(app, build?.artifact ?? "");
+        return "the answer";
+      });
+    });
+    const failed = await revoked(async () => {
+      await Promise.resolve();
+      throw new Error("what the App read");
+    });
+
+    expect({
+      leased: build !== undefined,
+      answered,
+      failed,
+      audited: events
+        .filter(
+          (event) =>
+            event.target?.id === app && event.action === "app.visitor_refused"
+        )
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      leased: true,
+      answered: "screen.revoked",
+      failed: "screen.revoked",
+      audited: [{ reason: "screen_revoked", stage: "delivery" }],
     });
   });
 

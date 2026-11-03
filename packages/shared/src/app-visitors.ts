@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { appLinkSchema } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
+import { functionRequestMaxBytes } from "./operation-limits.ts";
 
 // Visitors (core's app-visitors.ts): someone who isn't a member opens a
 // published App at its own link (`appLinkSchema`), once they sign in with
@@ -159,7 +160,9 @@ export const appVisitorRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("call"),
     token: appVisitorTokenSchema,
     lease: z.string().max(256),
-    request: z.string().max(64 * 1024),
+    // As many characters as a call's bytes; the call itself counts its
+    // bytes (`functionRequestMaxBytes`) before it parses them.
+    request: z.string().max(functionRequestMaxBytes),
   }),
 ]);
 export type AppVisitorRequest = z.input<typeof appVisitorRequestSchema>;
