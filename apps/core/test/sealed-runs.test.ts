@@ -1940,7 +1940,7 @@ describe("a sealed run's decisions on the run host", () => {
     });
   });
 
-  it("opens no decision, and tells nobody, for a test's run: a draft's or one an App's test started", async () => {
+  it("opens none of the organization's decisions, and tells nobody, for a test's run: a draft's or one an App's test started", async () => {
     const { reviewer } = reviewed;
     const run = async (calling: (frozen: CallingRun) => CallingRun) => {
       const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
@@ -1955,15 +1955,25 @@ describe("a sealed run's decisions on the run host", () => {
         asked: await asksAudited(runId),
       };
     };
-    const opensNone = {
-      ran: failedWith("workflow.call_invalid"),
-      decisions: [],
-      asked: 0,
-    };
+    // Its decision is kept with its test, or answered from its start's
+    // fixtures (sealed-dispatch.test.ts): a run that only claims to be a
+    // test's has neither, so it fails there, never reaching the
+    // organization's decisions or anyone's inbox.
     expect({
       fixture: await run((frozen) => ({ ...frozen, fixture: true })),
       candidate: await run((frozen) => ({ ...frozen, candidate: new Map() })),
-    }).toStrictEqual({ fixture: opensNone, candidate: opensNone });
+    }).toMatchObject({
+      fixture: {
+        ran: { ended: "operation.cancelled" },
+        decisions: [],
+        asked: 0,
+      },
+      candidate: {
+        ran: { ended: "workflow.call_denied" },
+        decisions: [],
+        asked: 0,
+      },
+    });
   });
 
   it("replays a decision as it ran: the same decision, asked once, and its recorded outcome", async () => {

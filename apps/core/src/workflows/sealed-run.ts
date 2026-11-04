@@ -9,6 +9,7 @@ import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
@@ -40,8 +41,18 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
+import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
+import {
+  fixtureDecisionDeadline,
+  fixtureDecisionLookMs,
+  fixtureDecisionOutcome,
+  openFixtureDecision,
+  takeFixtureDecision,
+} from "./fixture-decisions.ts";
+import type { FixtureDecisionRun } from "./fixture-decisions.ts";
 import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
+  DecisionsKept,
   DecisionWait,
   HostControls,
   HostedRun,
@@ -63,6 +74,7 @@ import { callCompute } from "./resource-compute.ts";
 import {
   askDeciders,
   callInvalid,
+  candidateDecision,
   decisionRunOf,
   openRunDecision,
   promptOf,
@@ -70,6 +82,7 @@ import {
   requireDecisionAuthority,
   takeDecision,
 } from "./resource-decisions.ts";
+import type { DecisionAnswer } from "./resource-decisions.ts";
 import {
   failureOf,
   matchesFilter,
@@ -168,7 +181,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   it is made (`requireCallAuthority`, in `makeCall` and `emitEvent`): a
 //   revoked approval, permission or role stops the next call
 //   (`workflow.call_denied`). The person the run acts for must still be an
-//   active member before every step.
+//   active member before every step; a run an App's test started acts for
+//   its fixture's principal, whose role nothing changes.
 // - An effect repeated. A store operation's, a model's and an action's
 //   call goes out at most once per step, whatever its attempts
 //   (`SentCalls`, marked sent just before it leaves, after every check of
@@ -186,7 +200,17 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   one of its lineage's host calls; its attempts are admitted as its
 //   activation says (resource-runs.ts, `sealedActivation`): an independent
 //   run's as its workflow's (`workflow-resource:<id>`) in its account's
-//   lineage, a test run's as its own.
+//   lineage, a test run's as its own, a run an App's test started against
+//   its test's own admission, which counts nothing of the organization's.
+// - A test's run reaching the organization. A test run of a draft's
+//   checkpoint calls nothing: every call is answered from its start's
+//   fixtures (resource-calls.ts, `makeCall`, `calling.candidate`). A run
+//   an App's test started makes only the calls its test serves
+//   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
+//   arguments are matched or audited (`resource.unavailable`); its model
+//   calls are answered by its fixture and its store calls run on its
+//   test's own store (`fixtureCall`), tried once as a real call is; and
+//   `makeCall` refuses every call of it again.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
 //   record of the failure no catch took yet (`#pending`), mapped by
 //   resource-errors.ts from what it knows. A failure the host made keeps
@@ -242,8 +266,12 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     either; its authority decided again; its prompt the recorded one,
 //     its deadline the sealed timeout's (else what is left of the run's
 //     age), whatever its code asks. A step run again opens the decision
-//     it opened (one per run and step). A test's run (a draft's, or one
-//     an App's test started) opens none, and reaches nobody.
+//     it opened (one per run and step). A test's run reaches nobody: a
+//     draft's opens none, its outcome the answer its start gave the
+//     binding (`candidateDecision`); one an App's test started opens its
+//     decision with its test, asking its fixture's principals alone,
+//     never among the organization's (fixture-decisions.ts,
+//     `openFixtureDecision`). Neither is asked by any notice.
 //   - Its task step must record exactly the decision the host opened in
 //     it. Its asking step asks only that one, by the host's own notice
 //     (`askDeciders`: the isolate learns nobody's address), its authority
@@ -252,9 +280,13 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     ask again (one cut off unheard, its activation lost, may ask once
 //     more: a second notice, never a second decision).
 //   - Its wait is for that decision only, until its deadline
-//     (`decisionWait`). The outcome is read from the decision's row,
-//     never from the event that wakes the run nor from the isolate, and
-//     taken only as the binding still allows it (`takeDecision`:
+//     (`decisionWait`). The outcome is read from the decision's row (a
+//     test run's from where it keeps them, `decisionsKeptOf`: looked at
+//     again every `fixtureDecisionLookMs`, as a test's answer owes no
+//     wake), never from the event that wakes the run nor from the
+//     isolate, and taken only as the binding still allows it (a test
+//     run's as its fixture does: `candidateDecision`,
+//     `takeFixtureDecision`; any other's `takeDecision`:
 //     authority decided again, whoever answered still covered and never
 //     the run's person, what they answered held to the contract's
 //     response schema), in the step that records it, so a replay takes it
@@ -1088,6 +1120,76 @@ const nothingToRecord = async (): Promise<void> => {
   await Promise.resolve();
 };
 
+/** `run`, as a test's run's decisions and calls take it (fixture-decisions.ts). */
+const fixtureRunOf = ({
+  runId,
+  workflowId,
+  version,
+  calling,
+  createdAt,
+}: HostedSealedRun): FixtureDecisionRun => ({
+  runId,
+  workflowId,
+  version,
+  principal: calling.principal,
+  createdAt,
+});
+
+/** The prefix of the decision a draft's test run opens nowhere. */
+const candidateDecisionPrefix = "candidate:";
+
+/** The decision a draft's test run "opens" through binding `alias`. */
+const candidateDecisionOf = (alias: string): string =>
+  `${candidateDecisionPrefix}${alias}`;
+
+/** Its deadline: the run's longest wait past its start. */
+const candidateDeadlineOf = ({
+  createdAt,
+  maxSleepMs,
+}: HostedSealedRun): number => createdAt + (maxSleepMs ?? 0);
+
+/**
+ * Where `run`'s decisions are kept, for a test's run (`RunKind.decisionsKept`):
+ * a draft's, answered at once from its start's fixtures, opened nowhere;
+ * one an App's test started, with its test, answered by its fixture's
+ * principals. None for any other run: decisions.ts keeps them.
+ */
+const decisionsKeptOf = (
+  env: Env,
+  run: HostedSealedRun
+): DecisionsKept | undefined => {
+  const { calling, runId } = run;
+  const { candidate } = calling;
+  if (candidate !== undefined) {
+    return {
+      outcome: async (decision) => {
+        const alias = decision.startsWith(candidateDecisionPrefix)
+          ? decision.slice(candidateDecisionPrefix.length)
+          : "";
+        const { approved, by, value } = await candidateDecision(
+          env,
+          candidate,
+          alias
+        );
+        return { answered: true, approved, by, payload: value };
+      },
+      deadline: async () => await Promise.resolve(candidateDeadlineOf(run)),
+      // Never waited on: its first look finds it answered.
+      lookMs: fixtureDecisionLookMs,
+    };
+  }
+  if (calling.fixture === true) {
+    return {
+      outcome: async (decision, close) =>
+        await fixtureDecisionOutcome(env, runId, decision, close),
+      deadline: async (decision) =>
+        await fixtureDecisionDeadline(env, runId, decision),
+      lookMs: fixtureDecisionLookMs,
+    };
+  }
+  return undefined;
+};
+
 class SealedRun implements SealedRunKind {
   readonly #env: Env;
   readonly #host: HostControls;
@@ -1155,6 +1257,7 @@ class SealedRun implements SealedRunKind {
   readonly run: HostedSealedRun;
   readonly audit: RunKind["audit"];
   readonly decisionRun: RunKind["decisionRun"];
+  readonly decisionsKept: DecisionsKept | undefined;
   readonly aiWaitRun: RunKind["aiWaitRun"];
 
   constructor(
@@ -1183,14 +1286,20 @@ class SealedRun implements SealedRunKind {
       },
     };
     this.decisionRun = decisionRunOf(run.calling);
+    this.decisionsKept = decisionsKeptOf(env, run);
     this.aiWaitRun = { kind: "resource", runId: run.runId };
   }
 
-  /** The person the run acts for must still be an active member. */
+  /**
+   * The person the run acts for must still be an active member: a test's
+   * run acts for its fixture's principal, whose role nothing changes.
+   */
   async requirePerson(): Promise<void> {
-    if (
-      (await memberRole(this.#env.DB, this.run.calling.principal)) === undefined
-    ) {
+    const { calling } = this.run;
+    if (calling.fixture === true) {
+      return;
+    }
+    if ((await memberRole(this.#env.DB, calling.principal)) === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
   }
@@ -1806,13 +1915,7 @@ class SealedRun implements SealedRunKind {
       return outcome;
     }
     try {
-      const { approved, by, value } = await takeDecision(
-        this.#env,
-        this.run.calling,
-        task.id,
-        task.call.binding,
-        outcome
-      );
+      const { approved, by, value } = await this.#taken(task, outcome);
       return { answered: true, approved, by, payload: value };
     } catch (error) {
       // Decided: trying again takes nothing else.
@@ -1820,6 +1923,32 @@ class SealedRun implements SealedRunKind {
         ? namedError("NonRetryableError", error.message, error.code)
         : error;
     }
+  }
+
+  /**
+   * The answer of decision task `task`, once its decision was answered as
+   * `outcome`: a draft's test run's from its start's fixtures, one an
+   * App's test started as its fixture allows, any other's as its binding
+   * still allows (`takeDecision`).
+   */
+  async #taken(
+    task: DecisionTask,
+    outcome: DecisionOutcome
+  ): Promise<DecisionAnswer> {
+    const { calling } = this.run;
+    const { binding } = task.call;
+    if (calling.candidate !== undefined) {
+      return await candidateDecision(this.#env, calling.candidate, binding);
+    }
+    if (calling.fixture === true) {
+      return await takeFixtureDecision(
+        this.#env,
+        fixtureRunOf(this.run),
+        binding,
+        outcome
+      );
+    }
+    return await takeDecision(this.#env, calling, task.id, binding, outcome);
   }
 
   /**
@@ -2029,13 +2158,40 @@ class SealedRun implements SealedRunKind {
         );
       }
       const { calling, createdAt } = this.run;
-      // A test's run (a draft's, or one an App's test started) reaches no
-      // person: until its decisions are answered from its fixtures here,
-      // it opens none.
-      if (calling.candidate !== undefined || calling.fixture === true) {
-        throw callInvalid(
-          "binding: A test run opens no decision on the run host yet."
+      const built = {
+        binding: call.binding,
+        recipients: [...asks.recipients],
+        prompt: asks.prompt,
+        input: asks.input,
+        ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+      };
+      // A test run of a draft's checkpoint reaches no person: its decision
+      // is the answer its start gave the binding (`candidateDecision`,
+      // checked here), opened nowhere (`decisionsKeptOf`).
+      if (calling.candidate !== undefined) {
+        await candidateDecision(this.#env, calling.candidate, call.binding);
+        const opened = {
+          decision: candidateDecisionOf(call.binding),
+          deadline: candidateDeadlineOf(this.run),
+        };
+        this.#openings.set(attempt, opened);
+        return opened;
+      }
+      // A run an App's test started asks its fixture's principals alone,
+      // its decision kept with its test, never the organization's
+      // (fixture-decisions.ts).
+      if (calling.fixture === true) {
+        this.#requireHolds(attempt);
+        const opened = await openFixtureDecision(
+          this.#env,
+          fixtureRunOf(this.run),
+          task.id,
+          attempt.step,
+          built
         );
+        this.#requireHolds(attempt);
+        this.#openings.set(attempt, opened);
+        return opened;
       }
       // Its input is shown to people other than the run's person.
       await requireResourceRunEvidenceReadable(this.#env, calling);
@@ -2045,15 +2201,7 @@ class SealedRun implements SealedRunKind {
         { ...calling, createdAt },
         task.id,
         attempt.step,
-        {
-          binding: call.binding,
-          recipients: [...asks.recipients],
-          prompt: asks.prompt,
-          input: asks.input,
-          ...(call.timeoutMs === undefined
-            ? {}
-            : { timeoutMs: call.timeoutMs }),
-        }
+        built
       );
       this.#requireHolds(attempt);
       this.#openings.set(attempt, opened);
@@ -2085,9 +2233,14 @@ class SealedRun implements SealedRunKind {
           "decision"
         );
       }
+      const { calling } = this.run;
+      // A test's run tells nobody: its fixture's principals answer through
+      // its test, and a draft's run asked nobody.
+      if (calling.candidate !== undefined || calling.fixture === true) {
+        return [];
+      }
       // Its people are shown what it asks: never once its binding was
       // revoked, or its run's evidence can't be read, since it opened.
-      const { calling } = this.run;
       await requireDecisionAuthority(this.#env, calling, task.call.binding);
       await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
@@ -2184,7 +2337,15 @@ class SealedRun implements SealedRunKind {
           `Step "${attempt.step}" calls only ${template.operation}.`
         );
       }
-      const { params } = this.run;
+      const { params, calling } = this.run;
+      // A test's run reaches only its own sealed modules and the model and
+      // store calls its test serves (fixture-calls.ts): never a connection,
+      // an action or an event. Refused before its arguments are matched,
+      // its sensitive values put in or it is audited, so nothing says a
+      // call went out.
+      if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
+        throw operationErrors.create("resource.unavailable");
+      }
       const sensitive: Json[] = [];
       let value: Json;
       try {
@@ -2335,10 +2496,8 @@ class SealedRun implements SealedRunKind {
         }
       }
       case "grasp.operation": {
-        return await makeCall(
-          this.#env,
-          calling,
-          task.id,
+        return await this.#madeOrServed(
+          task,
           { name: call.name, binding: call.binding, arguments: value },
           effect
         );
@@ -2349,10 +2508,8 @@ class SealedRun implements SealedRunKind {
           `${effect.key}:${attempt.number}:${attempt.generation}`
         );
         try {
-          return await makeCall(
-            this.#env,
-            calling,
-            task.id,
+          return await this.#madeOrServed(
+            task,
             {
               name: call.name,
               binding: call.binding,
@@ -2420,6 +2577,25 @@ class SealedRun implements SealedRunKind {
         return call satisfies never;
       }
     }
+  }
+
+  /**
+   * A store or model call, made as a resource run's is; for a run an App's
+   * test started, served by its test instead (fixture-calls.ts): a model's
+   * answer from its fixture, a store's on its test's own store.
+   */
+  async #madeOrServed(
+    task: SealedTask,
+    built: BuiltCall,
+    effect: Effect
+  ): Promise<Json> {
+    const { calling } = this.run;
+    if (calling.fixture !== true) {
+      return await makeCall(this.#env, calling, task.id, built, effect);
+    }
+    // Tried once as a real call is: `fixtureCall` marks it as it goes out
+    // (`SentCalls`), so no later attempt of its step sends it again.
+    return await fixtureCall(this.#env, fixtureRunOf(this.run), built, effect);
   }
 
   /**
@@ -2608,23 +2784,24 @@ export const sealedRunModules = ({
 };
 
 /**
- * The aliases of the build's calls to the workflow's own modules (its
- * compute and action bindings): sealed with the build, which no approval
- * freezes, so the start has them from its table.
+ * The aliases `build`'s calls go through: each sealed task's binding. A
+ * run's frozen bindings are these; a test run binds none, its calls
+ * answered from its start's fixtures or served by its test.
  */
-const localAliases = (run: HostedSealedRun): string[] =>
-  run.build.tasks.flatMap((task) =>
-    task.kind === "call" &&
-    (task.call.name === "grasp.compute" || task.call.name === "grasp.action")
-      ? [task.call.binding]
-      : []
-  );
+const callAliasesOf = (build: LoadedBuild): string[] => [
+  ...new Set(
+    build.tasks.flatMap((task) =>
+      task.kind === "call" && "binding" in task.call ? [task.call.binding] : []
+    )
+  ),
+];
 
 /**
  * What a sealed run's main module starts with: its input, only the
- * parameters the build lists as not sensitive, and its bindings by alias,
- * its frozen catalog ones and its own modules', each a binding whose
- * `call` goes to the host, which holds every call to the sealed table.
+ * parameters the build lists as not sensitive, and the aliases its calls
+ * go through (`callAliasesOf`), each a binding whose `call` goes to the
+ * host, which checks it against the sealed template and the run's
+ * authority.
  */
 export const sealedRunStart = (run: HostedSealedRun) => ({
   runId: run.runId,
@@ -2634,9 +2811,7 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
     )
   ),
   input: run.input,
-  connections: [
-    ...new Set([...run.calling.bindings.keys(), ...localAliases(run)]),
-  ],
+  connections: callAliasesOf(run.build),
   collections: [],
   brains: [],
 });
