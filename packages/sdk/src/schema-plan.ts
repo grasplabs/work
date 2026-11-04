@@ -71,7 +71,9 @@ import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 //   The store reads and writes every table under the access and rules its
 //   contract holds, whichever version is pinned (store-host.ts,
 //   `#pinned`), so once the contract takes them they hold for every
-//   record and every version at once.
+//   record and every version at once. The store takes them only after
+//   core's database made the release current, never before, as nothing
+//   can refuse them (core's store-backfill.ts, `applyCurrentRules`).
 //
 // Refused (`refused`):
 //

@@ -25,6 +25,7 @@ import type {
   FileReader,
   Publishable,
 } from "./file-host.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
@@ -168,9 +169,25 @@ export class DataStore extends DurableObject<Env> {
   async activateReady(
     storeId: StoreId,
     schemaHash: string,
-    consumer: SchemaConsumer
+    consumer: SchemaConsumer,
+    owed?: OwedRules
   ): Promise<SchemaStatus> {
-    return await this.#live().activateReady(storeId, schemaHash, consumer);
+    return await this.#live().activateReady(
+      storeId,
+      schemaHash,
+      consumer,
+      owed
+    );
+  }
+
+  /** `StoreHost.applyRules`. */
+  async applyRules(storeId: StoreId, schemaHash: string): Promise<boolean> {
+    return await this.#live().applyRules(storeId, schemaHash);
+  }
+
+  /** `StoreHost.settleRules`. */
+  settleRules(storeId: StoreId, owedIds: readonly string[]): void {
+    this.#live().settleRules(storeId, owedIds);
   }
 
   /** `StoreHost.schemaStatus`. */

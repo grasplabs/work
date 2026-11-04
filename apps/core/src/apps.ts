@@ -29,7 +29,12 @@ import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  BlueprintId,
+  StoreId,
+  WorkflowId,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -79,10 +84,11 @@ import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { appBindingKinds, madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import {
-  activateCurrentSchemas,
+  applyRulesAfterCommit,
   requireStoreSchemaActive,
   storeBindings,
 } from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 import {
   requireWorkflowTestsPass,
@@ -1644,21 +1650,26 @@ export const makeCurrent = async (
     "core"
   );
   const db = drizzle(env.DB);
+  // The rules its store owes from its activation below until the batch
+  // is done, under this call's own ID.
+  const owed: OwedRules = { id: crypto.randomUUID(), kind: "app" };
+  let owing: StoreId[] = [];
   if (sealedLayout) {
     // Last before the batch: a ready explicit migration's store switches
     // to its contract now, and a change that checks records (a narrowing,
-    // a changed rule) is applied (store-backfill.ts), after every gate
+    // a field required) is applied (store-backfill.ts), after every gate
     // above, so no refused gate leaves the version still current locked
-    // out of its store. The store goes first because applying can still
-    // be refused (a write since the dry run), and the batch can't be taken
-    // back once it committed. The store and D1 share no transaction: the
+    // out of its store. That goes first because applying can still be
+    // refused (a write since the dry run), and the batch can't be taken
+    // back once it is in; a batch that isn't ours (a lost compare and
+    // set, one that keeps failing) leaves the version current refused its
+    // writes where the change left it behind, never reading more. A
+    // changed access mode or row rule waits for the batch: whatever its
+    // outcome, the store then takes the rules of the version D1 has
+    // current (`applyRulesAfterCommit`), so none is in force that D1
+    // never made current. The store and D1 share no transaction: the
     // batch is retried here if it fails, and a version found current after
-    // all is answered as such. A batch that isn't ours (a lost compare and
-    // set, or one that keeps failing) puts the store back on the schema of
-    // the version D1 has current (`activateCurrentSchemas`), which plans a
-    // changed rule or a narrowing back. Only an explicit migration's
-    // records, transformed already, stay ahead of D1, until making it
-    // current is asked again.
+    // all is answered as such.
     //
     // Its candidate still verified, superseded by no commit meanwhile:
     // asked here, before the store switches, so a candidate refused below
@@ -1669,24 +1680,14 @@ export const makeCurrent = async (
     // the candidate was verified, and a verified candidate never expires,
     // so an artifact changed in storage since must refuse it here.
     await requireReleaseAsReported(env, appId, number, candidate);
-    await requireStoreSchemaActive(env, appId, number, { activate: true });
+    const bound = await storeBindings(env, appId, number);
+    owing = bound.map(({ storeId }) => storeId);
+    await requireStoreSchemaActive(env, appId, number, { activate: owed });
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
   // worked out from still holds (trigger-registry.ts). The event is stored
   // only if this batch made it current, and what follows it only then.
-  const storeBack = async (): Promise<void> => {
-    if (sealedLayout) {
-      const { currentVersion } = await findApp(env, appId);
-      const bound = await storeBindings(env, appId, number);
-      await activateCurrentSchemas(
-        env,
-        appId,
-        currentVersion,
-        bound.map(({ storeId }) => storeId)
-      );
-    }
-  };
   const batch = async () =>
     await retriedBatch(
       async () =>
@@ -1806,9 +1807,8 @@ export const makeCurrent = async (
   let made: Awaited<ReturnType<typeof batch>>;
   try {
     made = await batch();
-  } catch (error) {
-    await storeBack();
-    throw error;
+  } finally {
+    await applyRulesAfterCommit(env, owed, appId, owing);
   }
   const [[changed]] = made;
   if (!changed) {
@@ -1828,7 +1828,6 @@ export const makeCurrent = async (
       waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }
-    await storeBack();
     requireNotArchived(await findApp(env, appId));
     if (sealedLayout) {
       // Revoked or deleted since it was checked: refused as such.

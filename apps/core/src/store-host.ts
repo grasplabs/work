@@ -120,6 +120,7 @@ import {
   recordRefs,
   records,
   reservedFields,
+  rulesOwed,
   schemaActivations,
   schemas,
   store,
@@ -139,7 +140,12 @@ import {
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { recordBackfillAbandoned } from "./store-abandon.ts";
-import { keepStoreBackfillGoing } from "./store-backfill.ts";
+import {
+  applyCurrentRules,
+  keepStoreBackfillGoing,
+  owedRulesSchema,
+} from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import {
   historyDueAt,
   admittedHistoryOf,
@@ -655,6 +661,7 @@ const purgedTables = [
   "sdk_mutation_receipts",
   "sdk_preferences",
   "sdk_record_changes",
+  "sdk_rules_owed",
   "sdk_import_rows",
   "sdk_tables",
 ] as const;
@@ -713,6 +720,15 @@ const alarmGapMs = 1000;
 
 /** The wait before the alarm tries again after its work failed. */
 const alarmRetryMs = 30_000;
+
+/**
+ * How long rules a store owes are left to core before its alarm applies
+ * them (`StoreHost.activateReady` with `owed`): longer than the make-current
+ * or publication that owes them can still be running, so the alarm never
+ * applies the rules of the version current before that one commits, and
+ * settles them, with no one left to apply the new ones.
+ */
+const rulesOwedGraceMs = 5 * 60_000;
 
 /** A stored intent, or undefined if it no longer reads as one. */
 const intentOf = (stored: string) => {
@@ -1419,6 +1435,10 @@ const underContractRules = (
           })
         ),
       };
+
+/** A table's access mode and row rules, as canonical text. */
+const rulesOf = (table: ManifestTable | undefined): string =>
+  canonicalText({ access: table?.access, rules: table?.rules ?? null });
 
 /** A schema whose checked change waits to be made current (`schemaStatus`). */
 const readyStatus = (hash: string): SchemaStatus => ({
@@ -5804,11 +5824,25 @@ export class StoreHost {
    * left behind among them, every record checked against it again
    * (`#applyChecked`, store-schema-changes.ts). Answers the schema's
    * status after (`schemaStatus`).
+   *
+   * With `owed`, as core makes an App's version current or publishes a
+   * workflow's (store-backfill.ts), the change is applied with the
+   * contract's access and rules kept, and the store owes the consumer's
+   * resource its rules (`sdk_rules_owed`): core's database hasn't made
+   * the version current yet, and may not (a lost compare-and-set, a
+   * failure), so no version reads under rules it never made current.
+   * What checks records goes first because it can still be refused (a
+   * write since the dry run), and the version it leaves behind then is
+   * refused its writes, never let read more; rules can't be refused, so
+   * they follow the commit (`applyRules`), or the alarm applies them
+   * (`#applyOwedRules`). Without `owed` (a preview, whose version is
+   * current at once), the rules are applied with the rest.
    */
   async activateReady(
     storeId: StoreId,
     schemaHash: string,
-    consumer: SchemaConsumer
+    consumer: SchemaConsumer,
+    owed?: OwedRules
   ): Promise<SchemaStatus> {
     const hash = dataErrors.parse(
       "data.invalid",
@@ -5820,6 +5854,30 @@ export class StoreHost {
       schemaConsumerSchema,
       consumer
     );
+    const owing =
+      owed === undefined
+        ? undefined
+        : dataErrors.parse("data.invalid", owedRulesSchema, owed);
+    if (owing !== undefined) {
+      // Owed before anything moves: a crash from here on leaves the
+      // alarm to apply whatever rules core's database ends up with.
+      this.ctx.storage.transactionSync(() => {
+        this.#bind(storeId, false);
+        const now = Date.now();
+        this.#db
+          .insert(rulesOwed)
+          .values({
+            owedId: owing.id,
+            resourceKind: owing.kind,
+            resourceId: named.resourceId,
+            owedAt: now,
+            dueAt: now + rulesOwedGraceMs,
+          })
+          .onConflictDoNothing()
+          .run();
+      });
+      await this.schedule();
+    }
     const activated = this.ctx.storage.transactionSync((): boolean => {
       this.#bind(storeId, false);
       const pending = this.#pendingTarget();
@@ -5863,7 +5921,7 @@ export class StoreHost {
     // Then the change the schema checks records for, onto the contract in
     // force now: one the target just activated may still leave some (a
     // rule the schema changes beside the migration's tables, say).
-    await this.#applyChecked(storeId, hash, named);
+    await this.#applyChecked(storeId, hash, named, owing !== undefined);
     return this.schemaStatus(storeId, hash, named);
   }
 
@@ -5904,13 +5962,17 @@ export class StoreHost {
    * of `schema` onto the contract, with `answers`, when it is accepted and
    * checks records; or, for a schema a change left behind (`superseded`,
    * a rollback), when it is accepted and changes the contract at all, so
-   * every record is checked against it again. Null for neither. Reads
-   * only; call it inside a transaction.
+   * every record is checked against it again. Null for neither. With
+   * `keepRules`, the schema is planned with the contract's access and
+   * rules (`underContractRules`): only what checks records, the rules
+   * owed until core's database commits (`activateReady`). Reads only;
+   * call it inside a transaction.
    */
   #checkedStep(
-    schema: SchemaManifest,
+    declared: SchemaManifest,
     superseded: boolean,
-    answers: readonly SchemaAnswer[]
+    answers: readonly SchemaAnswer[],
+    keepRules: boolean
   ): CheckedStep | null {
     const row = this.#db
       .select({
@@ -5930,6 +5992,9 @@ export class StoreHost {
     // writes fit, may still narrow what records hold or change the rules,
     // which the contract takes only as it is made current.
     const contract = readSchemaManifest(row.manifest).manifest;
+    const schema = keepRules
+      ? underContractRules(declared, contract)
+      : declared;
     const plan = planSchemaChange(contract, schema, {
       reserved: this.#reservedFields(),
       answers,
@@ -5953,12 +6018,13 @@ export class StoreHost {
   async #applyChecked(
     storeId: StoreId,
     hash: string,
-    consumer: SchemaConsumer
+    consumer: SchemaConsumer,
+    keepRules: boolean
   ): Promise<void> {
     for (let attempt = 1; ; attempt += 1) {
       const planned = this.ctx.storage.transactionSync(() => {
         this.#bind(storeId, false);
-        return this.#stepFor(hash, consumer);
+        return this.#stepFor(hash, consumer, keepRules);
       });
       if (planned === null) {
         return;
@@ -5967,7 +6033,7 @@ export class StoreHost {
       const contractHash = await sha256Hex(manifestText(planned.plan.contract));
       const done = this.ctx.storage.transactionSync((): boolean => {
         this.#bind(storeId, false);
-        const step = this.#stepFor(hash, consumer);
+        const step = this.#stepFor(hash, consumer, keepRules);
         if (
           step === null ||
           step.baseHash !== planned.baseHash ||
@@ -5994,7 +6060,11 @@ export class StoreHost {
    * store records it, not abandoned, and holds no pending target. Call it
    * inside a transaction.
    */
-  #stepFor(hash: string, consumer: SchemaConsumer): CheckedStep | null {
+  #stepFor(
+    hash: string,
+    consumer: SchemaConsumer,
+    keepRules: boolean
+  ): CheckedStep | null {
     const recorded = this.#db
       .select({
         manifest: schemas.manifest,
@@ -6014,7 +6084,8 @@ export class StoreHost {
     return this.#checkedStep(
       readSchemaManifest(recorded.manifest).manifest,
       recorded.supersededAt !== null,
-      this.#answersOf(consumer, hash)
+      this.#answersOf(consumer, hash),
+      keepRules
     );
   }
 
@@ -6080,6 +6151,195 @@ export class StoreHost {
       return tableId === undefined ? [] : [tableId];
     });
     this.#rewrote(new Set([...run.changedTables, ...ruled]));
+  }
+
+  /**
+   * Moves the contract's access modes and row rules to those schema
+   * `schemaHash` declares, for each table both hold: what a version owes
+   * once core's database made it current or published it (`activateReady`
+   * with `owed`; store-backfill.ts, `applyCurrentRules`). No record
+   * changes, so none is checked and nothing can refuse it; each table
+   * whose rules changed moves its generation, so every live query of it
+   * reads again under them. Applying them again changes nothing, as does
+   * a schema the store never recorded. False, changing nothing, while a
+   * target is pending: it activates from the contract it was planned on,
+   * so the rules follow once it is in force.
+   */
+  async applyRules(storeId: StoreId, schemaHash: string): Promise<boolean> {
+    const hash = dataErrors.parse(
+      "data.invalid",
+      backfillTargetSchema,
+      schemaHash
+    );
+    // Hashing is asynchronous and a transaction isn't: planned, then
+    // planned again in the transaction, which applies it only if the
+    // contract is still the one it was planned from.
+    for (let attempt = 1; ; attempt += 1) {
+      const planned = this.ctx.storage.transactionSync(() => {
+        this.#bind(storeId, false);
+        return this.#rulesStep(hash);
+      });
+      if (planned === "pending") {
+        return false;
+      }
+      if (planned === null) {
+        return true;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- once a try
+      const contractHash = await sha256Hex(planned.text);
+      const done = this.ctx.storage.transactionSync((): boolean => {
+        this.#bind(storeId, false);
+        const step = this.#rulesStep(hash);
+        if (
+          step === "pending" ||
+          step === null ||
+          step.baseHash !== planned.baseHash ||
+          step.text !== planned.text
+        ) {
+          return false;
+        }
+        this.#moveContractTo(step.baseHash, contractHash, step.text);
+        const tableIds = new Map(
+          this.#tableRows().map(({ name, tableId }) => [name, tableId])
+        );
+        this.#rewrote(
+          new Set(step.tables.flatMap((table) => tableIds.get(table) ?? []))
+        );
+        return true;
+      });
+      if (done) {
+        this.#forgetSchemas();
+        return true;
+      }
+      if (attempt >= 3) {
+        throw migrationErrors.create("migration.busy", { retryable: true });
+      }
+    }
+  }
+
+  /**
+   * `applyRules`' change for schema `hash`: the contract it moves from,
+   * the contract with the schema's rules (`underContractRules`, the other
+   * way round), and the tables whose rules change; null for none,
+   * `pending` while a target is. Call it inside a transaction.
+   */
+  #rulesStep(
+    hash: string
+  ): { baseHash: string; text: string; tables: string[] } | "pending" | null {
+    const recorded = this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, hash))
+      .get();
+    const row = this.#db
+      .select({ hash: store.contractHash, manifest: store.contractManifest })
+      .from(store)
+      .get();
+    if (
+      recorded === undefined ||
+      row?.hash === null ||
+      row?.hash === undefined ||
+      row.manifest === null
+    ) {
+      return null;
+    }
+    const contract = readSchemaManifest(row.manifest).manifest;
+    const ruled = underContractRules(
+      contract,
+      readSchemaManifest(recorded.manifest).manifest
+    );
+    const changed = Object.keys(contract.tables).filter(
+      (table) =>
+        rulesOf(contract.tables[table]) !== rulesOf(ruled.tables[table])
+    );
+    if (changed.length === 0) {
+      return null;
+    }
+    if (this.#pendingTarget() !== null) {
+      return "pending";
+    }
+    return { baseHash: row.hash, text: manifestText(ruled), tables: changed };
+  }
+
+  /**
+   * Settles the rules the store owed under `owedIds`: core applied those
+   * of the version its database has current, and found it still current
+   * after (store-backfill.ts, `applyCurrentRules`).
+   */
+  settleRules(storeId: StoreId, owedIds: readonly string[]): void {
+    const ids = dataErrors.parse(
+      "data.invalid",
+      z.array(z.uuid()).max(16),
+      owedIds
+    );
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      this.#db.delete(rulesOwed).where(inArray(rulesOwed.owedId, ids)).run();
+    });
+  }
+
+  /**
+   * The alarm's turn at the rules the store owes that core never settled
+   * (a crash after its commit, say), once due: those of the version core's
+   * database has current, for each resource owed, applied by core's own
+   * way (store-backfill.ts, `applyCurrentRules`) with this host for its
+   * store. Settled once applied; tried again a while later while a target
+   * is pending, or when it fails.
+   */
+  async #applyOwedRules(): Promise<void> {
+    const now = Date.now();
+    const due = this.#db
+      .select({
+        owedId: rulesOwed.owedId,
+        kind: rulesOwed.resourceKind,
+        resourceId: rulesOwed.resourceId,
+      })
+      .from(rulesOwed)
+      .where(lte(rulesOwed.dueAt, now))
+      .all();
+    if (due.length === 0) {
+      return;
+    }
+    const storeId = this.#storeId();
+    const resources = new Map(
+      due.map(({ kind, resourceId }) => [
+        `${kind}:${resourceId}`,
+        { kind, id: resourceId },
+      ])
+    );
+    for (const [key, resource] of resources) {
+      const ids = due
+        .filter(({ kind, resourceId }) => `${kind}:${resourceId}` === key)
+        .map(({ owedId }) => owedId);
+      let applied = false;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one resource at a time
+        applied = await applyCurrentRules(
+          this.env,
+          {
+            id: storeId,
+            applyRules: async (schemaHash) =>
+              await this.applyRules(storeId, schemaHash),
+          },
+          resource
+        );
+      } catch (error) {
+        log.error("store.rules_apply_failed", {
+          storeId,
+          resourceId: resource.id,
+          ...errorFields(error),
+        });
+      }
+      if (applied) {
+        this.#db.delete(rulesOwed).where(inArray(rulesOwed.owedId, ids)).run();
+      } else {
+        this.#db
+          .update(rulesOwed)
+          .set({ dueAt: Date.now() + alarmRetryMs })
+          .where(inArray(rulesOwed.owedId, ids))
+          .run();
+      }
+    }
   }
 
   /**
@@ -6728,7 +6988,7 @@ export class StoreHost {
     // No history row: a fill adds a defaulted field, never one a row rule
     // in force reads (rules name fields their table had, and a changed
     // rule takes effect only as its release is made current, through
-    // `#applyIn`), so the states a history read by rules is rebuilt
+    // `#applyIn` or `applyRules`), so the states a history read by rules is rebuilt
     // through admit the same people before and after it. A migration's
     // rewrite keeps none for the same reason (store-migrations.ts,
     // `rule_changed`).
@@ -7352,10 +7612,16 @@ export class StoreHost {
         return { state: "abandoned" };
       }
       const schema = readSchemaManifest(recorded.manifest).manifest;
+      const pending = this.#pendingTarget();
+      // Its rules don't hold it back: they follow core's commit
+      // (`applyRules`). Unless a target is pending, which the contract
+      // can't move past: a changed rule waits for it as a checked change
+      // does, never answered as in force under the old rules.
       const step = this.#checkedStep(
         schema,
         recorded.supersededAt !== null,
-        named === undefined ? [] : this.#answersOf(named, hash)
+        named === undefined ? [] : this.#answersOf(named, hash),
+        pending === null
       );
       if (recorded.supersededAt !== null) {
         // Writes under it are refused (`#requireInForce`): it runs on the
@@ -7374,7 +7640,7 @@ export class StoreHost {
       return statusInForce(hash, schema, {
         checked: step !== null,
         contract,
-        pending: this.#pendingTarget(),
+        pending,
         consumer: named,
       });
     });
@@ -7873,6 +8139,12 @@ export class StoreHost {
       log.error("store.retention_failed", errorFields(error));
     }
     try {
+      await this.#applyOwedRules();
+    } catch (error) {
+      failed = true;
+      log.error("store.rules_owed_failed", errorFields(error));
+    }
+    try {
       await this.#keepBackfillGoing();
     } catch (error) {
       // Not the alarm's failure: its next look is a lease's time away
@@ -7987,6 +8259,11 @@ export class StoreHost {
       .from(backfills)
       .where(and(eq(backfills.state, "running"), isNull(backfills.readyAt)))
       .get();
+    // Rules owed that core never settled: the alarm's from when they're due.
+    const owed = this.#db
+      .select({ at: min(rulesOwed.dueAt) })
+      .from(rulesOwed)
+      .get();
     // A cascade job with members left: its next batch is due now.
     const cascading = this.#db
       .select({ jobId: cascadeJobs.jobId })
@@ -8022,6 +8299,7 @@ export class StoreHost {
       // A file expiring, or a deleted file's bytes due for purging.
       this.files.nextDue(),
       unaudited === undefined ? null : Date.now(),
+      owed?.at,
       backfill === undefined ? null : backfillDueAt(backfill),
       typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
     ].filter((time): time is number => typeof time === "number");

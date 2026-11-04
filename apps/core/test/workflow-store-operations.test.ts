@@ -551,14 +551,16 @@ describe("a workflow's store, called by another workflow", () => {
     const ada = await person("builder");
     const owner = await ownerOf(ada);
     const add = await consumerOf(admin, ada, owner, "addOrder");
-    // A record whose document fits only without a default added later.
+    // A record whose document fits only without a default added later:
+    // `{"customer":"…","total":1}` is 25 bytes besides the name, five
+    // short of the limit, and `,"state":"open"` adds 15.
     const store = await openStore(env, owner.storeId);
     await commit(store, owner.store.schemaHash, [
       {
         op: "insert",
         table: "orders",
         id: newRecordId(),
-        fields: { customer: "x".repeat(documentMaxBytes - 60), total: 1 },
+        fields: { customer: "x".repeat(documentMaxBytes - 30), total: 1 },
       },
     ]);
     // Version 2 adds a defaulted field the store can't fill in for it.

@@ -295,6 +295,33 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
   abandonedAt: integer("abandoned_at"),
 });
 
+/** What a version whose rules the store owes is a version of. */
+export const owedResourceKinds = ["app", "workflow"] as const;
+
+/**
+ * Access and row rules the store owes a resource (store-host.ts,
+ * `activateReady` with `owed`): its version's change was applied, rules
+ * kept, before core's database made the version current or published it,
+ * and the rules of whichever version core's database then has current
+ * follow once it committed (`applyRules`). Core settles it once they did;
+ * one core never settled (a crash after the commit) is the alarm's from
+ * `due_at` on, which applies them itself (store-backfill.ts,
+ * `applyCurrentRules`).
+ */
+export const rulesOwed = sqliteTable(
+  "sdk_rules_owed",
+  {
+    /** The make-current or publication's own ID. */
+    owedId: text("owed_id").primaryKey(),
+    resourceKind: text("resource_kind", { enum: owedResourceKinds }).notNull(),
+    resourceId: text("resource_id").notNull(),
+    owedAt: integer("owed_at").notNull(),
+    /** When the alarm takes it up, or tries it again. */
+    dueAt: integer("due_at").notNull(),
+  },
+  (table) => [index("sdk_rules_owed_due").on(table.dueAt)]
+);
+
 /**
  * The fields an abandoned pending target added (store-host.ts,
  * `abandonBackfill`), each with its descriptor: records its backfill

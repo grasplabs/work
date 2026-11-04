@@ -67,10 +67,11 @@ import type { Fragment } from "./store-expressions.ts";
 // - A rule changed while versions pinned to the old one still run: the
 //   store reads and writes every version under the rules and access mode
 //   its contract holds, whatever the version declared (store-host.ts,
-//   `underContractRules`), and the contract takes a changed rule only as
-//   the release that changes it is made current (sdk schema-plan.ts,
-//   `ruleChanges`). So an older version never reads on under looser
-//   rules, nor a newer one under its own before it is current. A schema
+//   `underContractRules`), and the contract takes a changed rule only
+//   once core's database made the release that changes it current
+//   (`StoreHost.applyRules`; sdk schema-plan.ts, `ruleChanges`). So an
+//   older version never reads on under looser rules, nor a newer one
+//   under its own before it is current. A schema
 //   change never rewrites a field a rule reads (`rule_field_rewritten`).
 
 /** Who a rule is evaluated for: what core resolved for the invocation. */

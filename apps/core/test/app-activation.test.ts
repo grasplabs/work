@@ -1040,11 +1040,16 @@ describe(
       ]);
 
       const winner = outcomes[0] === "ok" ? asText : asNumber;
+      const [refused, made] = outcomes.toSorted();
       expect({
-        outcomes: outcomes.toSorted(),
+        // Refused at its seal, once the other's change was in, or as its
+        // batch lost to the other's.
+        refused: ["migration.required", "app.conflict"].includes(refused ?? ""),
+        made,
         current: await currentOf(app),
       }).toStrictEqual({
-        outcomes: ["migration.required", "ok"],
+        refused: true,
+        made: "ok",
         current: winner,
       });
     });

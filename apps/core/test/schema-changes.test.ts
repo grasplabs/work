@@ -5,7 +5,7 @@ import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { SchemaAccess, SchemaAnswer } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { StoreFields } from "@grasp-os/shared/stores";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -39,9 +39,10 @@ import { newRecordId } from "./store-schemas.ts";
 // Durable Object. The cases follow the threat model: no value overwritten
 // or guessed, no partial migration (a failure, a crash, a write between
 // the dry run and the activation), no rule bypassed by an older version,
-// by a backfill pending meanwhile, or by a version D1 never made current,
-// no live query left showing rows a rule now hides, and no hidden row's
-// value in a dry run's answer.
+// by a backfill pending meanwhile, or by a version D1 never made current
+// (rules follow D1's commit, by the store's alarm if core stops after
+// it), no live query left showing rows a rule now hides, and no hidden
+// row's value in a dry run's answer.
 
 /** Notes with a title and, as `priority` declares it, a priority. */
 const prioritised = (priority: ValueShape[string]) =>
@@ -796,38 +797,100 @@ export default app({
 });
 `;
 
+/**
+ * The Notes App made current at version 1 with its notes the owner's,
+ * Ada's and Grace's notes in its store, and version 2 sealed sharing them
+ * with every member.
+ */
+const sharedNext = async () => {
+  const fixture = await appWith({
+    "schema.ts": v1Schema,
+    "app.ts": notesApp("owner"),
+  });
+  const first = await seal(fixture);
+  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  const store = await openStore(env, fixture.store);
+  const owned = first.manifest.schemaHash;
+  await insert(store, owned, { title: "Ada's" }, "ada");
+  await insert(store, owned, { title: "Grace's" }, "grace");
+  await commitFiles(
+    env,
+    fixture.owner,
+    fixture.app,
+    { "app.ts": notesApp("appMembers") },
+    "Shared notes"
+  );
+  const second = await seal(fixture, 2);
+  return {
+    fixture,
+    store,
+    owned,
+    shared: second.manifest.schemaHash,
+  };
+};
+
+/** The version of App `app` that D1 has current. */
+const currentOf = async (app: string) => {
+  const row = await env.DB.prepare(
+    "SELECT current_version AS version FROM apps WHERE id = ?"
+  )
+    .bind(app)
+    .first<{ version: number }>();
+  return row?.version;
+};
+
+/**
+ * D1 as core sees it when it stops right after the batch that `writes`
+ * matches went through (a crash, a lost isolate): every call after it
+ * fails.
+ */
+const stoppingAfter = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  let stopped = false;
+  const going = () => {
+    if (stopped) {
+      throw new Error("Core stopped");
+    }
+  };
+  return {
+    prepare: (query) => {
+      going();
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      going();
+      const done = await real.batch<T>(statements);
+      stopped = writing;
+      return done;
+    },
+    exec: async (query) => {
+      going();
+      return await real.exec(query);
+    },
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
+/** The batch that makes a version current. */
+const makingCurrent = /update "apps" set "current_version"/iu;
+
 describe("making the release current", { timeout: 180_000 }, () => {
-  it("puts the store back on the version still current when the version isn't made current after all", async () => {
-    const fixture = await appWith({
-      "schema.ts": v1Schema,
-      "app.ts": notesApp("owner"),
-    });
-    const first = await seal(fixture);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
-    await commitFiles(
-      env,
-      fixture.owner,
-      fixture.app,
-      { "app.ts": notesApp("appMembers") },
-      "Shared notes"
-    );
-    const second = await seal(fixture, 2);
-    const object = env.DATA_STORES.getByName(fixture.store);
-    const statusOf = async (schemaHash: string, version: number) =>
-      await object.schemaStatus(fixture.store, schemaHash, {
-        resourceId: fixture.app,
-        resourceVersion: version,
-      });
+  it("never loosens a rule while D1 serves the version before, nor after its compare-and-set missed", async () => {
+    const { fixture, store, owned, shared } = await sharedNext();
     // The App is archived just before the batch that would make version 2
-    // current, after its store took version 2's shared notes: the batch
-    // matches nothing, and version 1 stays current.
-    const racing = racingDb(
-      async () =>
-        await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
-          .bind(fixture.app)
-          .run(),
-      /update "apps" set "current_version"/iu
-    );
+    // current, after its store took what version 2 checks records for:
+    // the batch matches nothing, and version 1 stays current.
+    let beforeBatch: string[] = [];
+    const racing = racingDb(async () => {
+      beforeBatch = await titles(store, owned, "grace");
+      await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
+        .bind(fixture.app)
+        .run();
+    }, makingCurrent);
     const refused = await failure(
       async () =>
         await setCurrentVersion(
@@ -837,25 +900,80 @@ describe("making the release current", { timeout: 180_000 }, () => {
           2
         )
     );
-    const current = await env.DB.prepare(
-      "SELECT current_version AS version FROM apps WHERE id = ?"
-    )
-      .bind(fixture.app)
-      .first<{ version: number }>();
-    const { state: waiting } = await statusOf(second.manifest.schemaHash, 2);
 
     expect({
       refused: refused === "ok",
-      current: current?.version,
-      // Version 1's owner-only notes are the contract's again; version 2's
-      // shared ones wait to be made current.
-      first: await statusOf(first.manifest.schemaHash, 1),
-      second: waiting,
+      current: await currentOf(fixture.app),
+      beforeBatch,
+      // Neither version reads past the owner: version 2's shared notes
+      // were never in force, D1 never having made it current.
+      first: await titles(store, owned, "grace"),
+      second: await titles(store, shared, "grace"),
+      stillWrites: await codeOf(insert(store, owned, { title: "x" }, "grace")),
     }).toStrictEqual({
       refused: false,
       current: 1,
-      first: { state: "active" },
-      second: "ready",
+      beforeBatch: ["Grace's"],
+      first: ["Grace's"],
+      second: ["Grace's"],
+      stillWrites: "ok",
+    });
+  });
+
+  it("applies the rules of the version made current once D1 committed it, by the store's alarm when core stopped right after", async () => {
+    const { fixture, store, owned, shared } = await sharedNext();
+    const stopping = stoppingAfter(makingCurrent);
+    await setCurrentVersion(
+      { ...env, DB: stopping },
+      fixture.owner,
+      fixture.app,
+      2
+    ).catch(() => {});
+    const stopped = {
+      current: await currentOf(fixture.app),
+      read: await titles(store, shared, "grace"),
+    };
+    // The store's alarm, once core is past due with them.
+    const object = objectOf(store);
+    await runInDurableObject(object, (_instance, state) => {
+      state.storage.sql.exec("UPDATE sdk_rules_owed SET due_at = 0");
+    });
+    await runDurableObjectAlarm(object);
+
+    expect({
+      stopped,
+      first: await titles(store, owned, "grace"),
+      second: await titles(store, shared, "grace"),
+      // Settled: the alarm has nothing left to apply.
+      owed: await runInDurableObject(
+        object,
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_rules_owed")
+            .one().n
+      ),
+    }).toStrictEqual({
+      // Committed, its rules not yet applied: still the owner's notes.
+      stopped: { current: 2, read: ["Grace's"] },
+      first: ["Ada's", "Grace's"],
+      second: ["Ada's", "Grace's"],
+      owed: 0,
+    });
+  });
+
+  it("applies the rules as the version is made current", async () => {
+    const { fixture, store, owned, shared } = await sharedNext();
+    const before = await notesGeneration(store);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 2);
+
+    expect({
+      first: await titles(store, owned, "grace"),
+      second: await titles(store, shared, "grace"),
+      moved: (await notesGeneration(store)) > before,
+    }).toStrictEqual({
+      first: ["Ada's", "Grace's"],
+      second: ["Ada's", "Grace's"],
+      moved: true,
     });
   });
 });

@@ -57,6 +57,7 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { PersonOrTeam } from "./sharing.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type {
@@ -160,12 +161,14 @@ export interface OpenStore {
   ) => Promise<DefinedTables>;
   /**
    * Applies the change schema `schemaHash` makes, for `consumer`, when it
-   * waits to be made current (`StoreHost.activateReady`); answers its
+   * waits to be made current (`StoreHost.activateReady`), its rules owed
+   * under `owed` until core's database committed the version; answers its
    * status after.
    */
   activate: (
     schemaHash: string,
-    consumer: SchemaConsumer
+    consumer: SchemaConsumer,
+    owed?: OwedRules
   ) => Promise<SchemaStatus>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
@@ -935,8 +938,8 @@ const storeClient = (
     id: storeId,
     defineTables: async (manifest, consumer, migrations, answers) =>
       await stub.defineTables(storeId, manifest, consumer, migrations, answers),
-    activate: async (schemaHash, consumer) =>
-      await stub.activateReady(storeId, schemaHash, consumer),
+    activate: async (schemaHash, consumer, owed) =>
+      await stub.activateReady(storeId, schemaHash, consumer, owed),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
     commit: async (commit) =>

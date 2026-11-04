@@ -29,7 +29,11 @@ import { validates } from "./store-queries.ts";
 // It runs twice: as the release is sealed, a dry run over every record
 // that writes nothing and answers what doesn't fit; and as the release is
 // made current, in the one transaction that gives records what they lack
-// and moves the contract. Threat model, and how each is closed:
+// and moves the contract. A changed access mode or row rule checks no
+// record: as core makes an App's version current or publishes a
+// workflow's, it is left out here and applied once core's database
+// committed it (store-backfill.ts, `applyCurrentRules`). Threat model,
+// and how each is closed:
 //
 // - Data lost or a value guessed: the platform never writes over a value
 //   a record holds. It only gives a record what it lacks (a field it

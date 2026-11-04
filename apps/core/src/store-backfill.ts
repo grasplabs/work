@@ -15,9 +15,16 @@ import type {
 } from "@grasp-os/shared/stores";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import type { OpenStore } from "./data-stores.ts";
-import { sdkReleaseManifests, sdkResourceBindings } from "./db/core/schema.ts";
+import {
+  apps,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+  workflowResources,
+} from "./db/core/schema.ts";
+import { owedResourceKinds } from "./db/data-store/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type {
   BackfillRestart,
@@ -47,6 +54,12 @@ import { runEngine } from "./workflows/engine.ts";
 // longer covers are left behind there, so a release another one's
 // activation left behind meanwhile writes nothing on the store
 // (`migration.incompatible_write`) rather than records that don't fit.
+// Access modes and row rules are the exception: a change of them checks
+// no record and can't be refused, so a store applies them only once
+// core's database made the version current or published it
+// (`applyCurrentRules`), never before, and no version reads under rules
+// that database never made current.
+//
 // Threat model, and how each is closed:
 //
 // - The backfill stops for good (its run ran out of retries, its start
@@ -81,6 +94,18 @@ import { runEngine } from "./workflows/engine.ts";
 //   versions on the store that still fit (spec 17.4). The names come from
 //   the store's contract and core's own retained releases, for the App's
 //   builder making it current, who sees every version of it already.
+// - Rules applied for a version core's database doesn't make current
+//   after all (a lost compare-and-set, an archived App, a failed batch):
+//   none is applied before the commit; after it, the store takes the
+//   rules of whichever version that database has current then, read again
+//   after applying until it holds still, so a make-current racing another
+//   is never undone by a slower one. What checks records goes first and
+//   fails closed: a version it leaves behind is refused its writes
+//   (`migration.incompatible_write`), never let read more.
+// - Core stops between its commit and the rules (a crash, a lost isolate,
+//   its database failing): the store owes them from before the commit
+//   (`StoreHost.activateReady` with `owed`), and its alarm applies them
+//   once core is past due.
 
 /** The store `storeId`'s object, for core's own questions of it. */
 const storeObject = (
@@ -392,17 +417,19 @@ export const schemaRefusal = (
 
 /**
  * Applies the change schema `schemaHash` makes on `store` for `consumer`,
- * a version that runs at once (a workflow's, as it is published), and
- * refuses it (`schemaRefusal`) unless the store then holds it in force,
- * keeping a pending backfill going.
+ * a version that runs once it is written (a workflow's, as it is
+ * published), its rules owed under `owed` until it is
+ * (`applyRulesAfterCommit`), and refuses it (`schemaRefusal`) unless the
+ * store then holds it in force, keeping a pending backfill going.
  */
 export const activateOnStore = async (
   env: Env,
   store: OpenStore,
   schemaHash: string,
-  consumer: SchemaConsumer
+  consumer: SchemaConsumer,
+  owed: OwedRules
 ): Promise<void> => {
-  const status = await store.activate(schemaHash, consumer);
+  const status = await store.activate(schemaHash, consumer, owed);
   if (status.state === "active") {
     return;
   }
@@ -445,15 +472,17 @@ export const storeBindings = async (
  * hold its schema in force, keeping its backfill going. A ready explicit
  * migration passes; with `activate` (the last step before the version is
  * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
- * with the change its schema checks records for, refused as pending if
- * work came back (`schemaRefusal`), or naming the versions that still fit
- * for a rollback past a migration. A release without a store passes.
+ * with the change its schema checks records for, its rules owed under
+ * `activate` until the version is current (`applyRulesAfterCommit`),
+ * refused as pending if work came back (`schemaRefusal`), or naming the
+ * versions that still fit for a rollback past a migration. A release
+ * without a store passes.
  */
 export const requireStoreSchemaActive = async (
   env: Env,
   app: AppId,
   version: number,
-  { activate = false }: { activate?: boolean } = {}
+  { activate }: { activate?: OwedRules } = {}
 ): Promise<void> => {
   const [bound] = await storeBindings(env, app, version);
   if (bound === undefined) {
@@ -462,17 +491,22 @@ export const requireStoreSchemaActive = async (
   const { storeId, schemaHash } = bound;
   const consumer = { resourceId: app, resourceVersion: version };
   let status = await schemaStatus(env, storeId, schemaHash, consumer);
-  if (status.state === "ready" && !activate) {
+  if (status.state === "ready" && activate === undefined) {
     // Its explicit migration is done: it may be made current, and takes
     // over only as it is (`activate`), once every other gate passed.
     return;
   }
-  if (status.state === "ready") {
-    // It takes over now, unless a write queued work meanwhile.
+  if (
+    activate !== undefined &&
+    (status.state === "ready" || status.state === "active")
+  ) {
+    // It takes over now, unless a write queued work meanwhile; in force
+    // already, it may still owe its rules.
     status = await storeObject(env, storeId).activateReady(
       storeId,
       schemaHash,
-      consumer
+      consumer,
+      activate
     );
   }
   if (status.state === "active") {
@@ -501,49 +535,131 @@ export const requireStoreSchemaActive = async (
   throw schemaRefusal(after);
 };
 
+/** Rules a store owes a version until core's database committed it. */
+export const owedRulesSchema = z
+  .object({
+    /** The make-current's or publication's own. */
+    id: z.uuid(),
+    kind: z.enum(owedResourceKinds),
+  })
+  .strict();
+
+export type OwedRules = z.output<typeof owedRulesSchema>;
+
+/** What owes rules: an App or a workflow, by ID. */
+export interface OwedResource {
+  kind: OwedRules["kind"];
+  id: string;
+}
+
 /**
- * Puts `stores` back on the schemas of the version of `resourceId` that
- * D1 has current (`current`), after a version's schema was applied on
- * them (`activateReady`) and the D1 write making that version current or
- * publishing it didn't commit: a lost compare-and-set (another version
- * made current meanwhile, the App archived) or a failure. A store's
- * contract moves before D1 does, since applying a change can still be
- * refused (a write since the dry run) and D1's write can't be taken back
- * once it queued events and webhooks. Applying the current version's
- * schema again plans the contract back: a rule change or a narrowing is
- * planned onto it like any (a rollback, store-schema-changes.ts), so no
- * version reads under rules D1 never made current. Nothing to put back
- * when no version is current, or it binds none of `stores`. A store that
- * can't be put back is logged and stays ahead until a version is made
- * current again; the caller's own error is what it answers.
+ * What applying rules asks of a store: core reaches it over RPC, its own
+ * alarm calls its host directly.
  */
-export const activateCurrentSchemas = async (
+export interface RulesStore {
+  readonly id: StoreId;
+  applyRules: (schemaHash: string) => Promise<boolean>;
+}
+
+/** The version of `resource` core's database has current, if any. */
+const currentVersionOf = async (
   env: Env,
+  resource: OwedResource
+): Promise<number | null> => {
+  const db = drizzle(env.DB);
+  const row =
+    resource.kind === "app"
+      ? await db
+          .select({ version: apps.currentVersion })
+          .from(apps)
+          .where(eq(apps.id, resource.id))
+          .get()
+      : await db
+          .select({ version: workflowResources.currentVersion })
+          .from(workflowResources)
+          .where(eq(workflowResources.id, resource.id))
+          .get();
+  return row?.version ?? null;
+};
+
+/** How often applying rules reads the current version before it gives up. */
+const rulesReads = 3;
+
+/**
+ * Applies to `store` the access modes and row rules of the version of
+ * `resource` that core's database has current (`StoreHost.applyRules`),
+ * then reads it again: a version made current meanwhile is applied in
+ * turn, so a slower call never leaves the rules of the one before it.
+ * True once the rules are those of a version still current after (or
+ * none is current, or it binds no such store); false while the store
+ * waits on a pending target, or the version kept moving, for the store's
+ * alarm to try again.
+ */
+export const applyCurrentRules = async (
+  env: Env,
+  store: RulesStore,
+  resource: OwedResource
+): Promise<boolean> => {
+  for (let read = 0; read < rulesReads; read += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    const current = await currentVersionOf(env, resource);
+    if (current === null) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    const bound = await storeBindings(env, resource.id, current);
+    const binding = bound.find(({ storeId }) => storeId === store.id);
+    if (binding === undefined) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    if (!(await store.applyRules(binding.schemaHash))) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    if ((await currentVersionOf(env, resource)) === current) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * After core's database made a version of `resourceId` current or
+ * published it, or failed to: applies on `stores` the rules of whichever
+ * version it has current (`applyCurrentRules`), and settles what each
+ * owed under `owed` (`StoreHost.activateReady`). Never throws, as the
+ * commit stands either way: a store it can't reach, or that waits on a
+ * pending target, keeps owing them, and its alarm applies them.
+ */
+export const applyRulesAfterCommit = async (
+  env: Env,
+  owed: OwedRules,
   resourceId: string,
-  current: number | null,
   stores: readonly StoreId[]
 ): Promise<void> => {
-  if (current === null || stores.length === 0) {
-    return;
-  }
-  const consumer = { resourceId, resourceVersion: current };
-  const bound = await storeBindings(env, resourceId, current);
-  for (const { storeId, schemaHash } of bound) {
-    if (!stores.includes(storeId)) {
-      continue;
-    }
+  const resource = { kind: owed.kind, id: resourceId };
+  for (const storeId of stores) {
+    const stub = storeObject(env, storeId);
     try {
       // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await storeObject(env, storeId).activateReady(
-        storeId,
-        schemaHash,
-        consumer
+      const applied = await applyCurrentRules(
+        env,
+        {
+          id: storeId,
+          applyRules: async (schemaHash) =>
+            await stub.applyRules(storeId, schemaHash),
+        },
+        resource
       );
+      if (applied) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await stub.settleRules(storeId, [owed.id]);
+      }
     } catch (error) {
-      log.error("store.schema_restore_failed", {
+      log.error("store.rules_apply_failed", {
         storeId,
         resourceId,
-        version: current,
         ...errorFields(error),
       });
     }
