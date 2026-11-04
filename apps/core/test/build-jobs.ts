@@ -162,13 +162,22 @@ export const writtenMeanwhile = async (
 };
 
 /**
- * A job's check, building the draft's screens: no code run builds them.
- * Held where it reads a kept build, or keeps the one it built.
+ * A job's check, reading the draft's screens' build: held where it reads
+ * a build the draft's write read or kept first (every write builds the
+ * draft, so its own read and keeping go through). Made anew for each
+ * hold, as it remembers what was read.
  */
-export const screenBuilds = (method: string, key: unknown): boolean =>
-  (method === "get" || method === "put") &&
-  typeof key === "string" &&
-  key.startsWith("screen-builds/");
+export const screenBuilds = (): ((method: string, key: unknown) => boolean) => {
+  const seen = new Set<string>();
+  return (method, key) => {
+    if (typeof key !== "string" || !key.startsWith("screen-builds/")) {
+      return false;
+    }
+    const again = seen.has(key);
+    seen.add(key);
+    return method === "get" && again;
+  };
+};
 
 export const jobRowSchema = z.object({ id: z.string(), status: z.string() });
 

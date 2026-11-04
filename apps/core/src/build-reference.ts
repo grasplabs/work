@@ -6,7 +6,7 @@ import { referenceFiles } from "@grasp-os/compiler";
 // blueprints' files (apps/core/blueprints/), complete Apps that pass every
 // check, as examples. Read with `readFile` and `searchFiles` without an
 // App (agent-tools.ts). Nothing here is written by hand, so it can't drift
-// from what `env.build.check` holds code to.
+// from what every `env.build.write` holds code to.
 
 /** Where the built-in blueprints' files are in the reference. */
 const blueprintsFolder = "blueprints/";

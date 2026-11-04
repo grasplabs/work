@@ -58,7 +58,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       readCollection(chat.agent, collectionId, "HANDBOOK")
     );
 
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Build an invoice desk for invoices@");
@@ -192,7 +192,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Build an invoice desk for invoices@");

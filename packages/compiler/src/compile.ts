@@ -147,21 +147,31 @@ export const stripTypes = (
     babelrc: false,
     configFile: false,
     sourceType: "module",
+    // Each line where the source has it, so a stack trace of the module
+    // names the line of the file to fix (`transformModule`).
+    retainLines: true,
     plugins,
     presets: [["typescript", { allExtensions: true }]],
   }).code ?? "";
 
-/** Runs Babel plugins over a JavaScript module, e.g. to rewrite its imports. */
+/**
+ * Runs Babel plugins over a JavaScript module, e.g. to rewrite its
+ * imports. With `retainLines`, each line stays where the source has it
+ * (Babel's own option, in place of a source map the runtime can't read),
+ * so what server code throws as it registers is located in its file;
+ * otherwise the module is compact.
+ */
 export const transformModule = (
   code: string,
   filename: string,
-  plugins: unknown[]
+  plugins: unknown[],
+  { retainLines = false }: { retainLines?: boolean } = {}
 ): string =>
   Babel.transform(code, {
     filename,
     babelrc: false,
     configFile: false,
     sourceType: "module",
-    compact: true,
+    ...(retainLines ? { retainLines } : { compact: true }),
     plugins,
   }).code ?? "";

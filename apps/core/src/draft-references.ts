@@ -1,5 +1,9 @@
 import { isAppLayout } from "@grasp-os/compiler";
-import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
+import {
+  generatedPaths,
+  generateModules,
+  symbolicModules,
+} from "@grasp-os/sdk/host";
 import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -116,6 +120,12 @@ export const withReferencesOf = async (
  * the references their own server code generates: inspected as they are,
  * never read from a sealed release, which may hold other code, with the
  * workflows they declare as the App binds them now.
+ *
+ * While that server code doesn't build or register (an expected error),
+ * its screens import the symbolic stand-ins inspection loads, typed `any`
+ * (`symbolicModules`), and `standIn` says so: the server build names the
+ * one reason, and a screen is checked for everything else rather than
+ * failing on each import of `#grasp`.
  */
 export const withDraftReferences = async (
   env: Env,
@@ -128,11 +138,22 @@ export const withDraftReferences = async (
    * nor inspection, and it throws its reason.
    */
   options?: BuildOptions
-): Promise<Record<string, string>> =>
-  await withReferencesFrom(app, version, files, async () => {
-    const manifest = await filesManifest(env, files, app, options);
-    return {
-      manifest,
-      workflows: await boundWorkflowsOf(env, app, manifest),
-    };
+): Promise<{ files: Record<string, string>; standIn: boolean }> => {
+  let standIn = false;
+  const withReferences = await withReferencesText(files, async () => {
+    try {
+      const manifest = await filesManifest(env, files, app, options);
+      return await referencesOf(app, version, {
+        manifest,
+        workflows: await boundWorkflowsOf(env, app, manifest),
+      });
+    } catch (error) {
+      if (!isExpectedError(error)) {
+        throw error;
+      }
+      standIn = true;
+      return symbolicModules()[generatedPaths.references];
+    }
   });
+  return { files: withReferences, standIn };
+};

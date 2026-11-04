@@ -130,10 +130,17 @@ export const shouting = query({
   };
 };
 
+/**
+ * Checks the draft as proposing it would, without proposing it: a check
+ * job (`env.build.submit`), followed until it ends, in a code step's code.
+ */
+const checkJob =
+  '(async () => { const { job } = await env.build.submit(app.id, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })()';
+
 /** Checks the draft, with what its functions wrote in the preview. */
 const checkLogs = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-  const { preview } = await env.build.check(app.id);
+  const { preview } = await ${checkJob};
   return {
     messages: preview.logs.map(({ message }) => message),
     leftOut: preview.logsLeftOut,
@@ -152,10 +159,9 @@ const write = (
 /** Checks the draft, with what its preview reported. */
 const check = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-  const checked = await env.build.check(app.id);
+  const checked = await ${checkJob};
   return {
     passed: checked.passed,
-    failedInARow: checked.failedInARow,
     problems: checked.preview.problems.map(({ source, at, message }) => ({ source, at, message })),
   };
 };`;
@@ -376,7 +382,6 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       fixed: 7,
       failedCheck: {
         passed: false,
-        failedInARow: 1,
         problems: [
           {
             source: "server",
@@ -393,7 +398,6 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       },
       passedCheck: {
         passed: true,
-        failedInARow: 0,
         problems: [],
       },
       outsideResults: provider.requests.map(() => false),
@@ -407,7 +411,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, ${JSON.stringify(desk(false))});
-        const checked = await env.build.check(app.id);
+        const checked = await ${checkJob};
         return {
           passed: checked.passed,
           seen: checked.preview.seen,
@@ -453,7 +457,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem, however many warnings came first", async () => {
     const kinds = `export default async (self, env) => {
       const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-      const checked = await env.build.check(app.id);
+      const checked = await ${checkJob};
       return { passed: checked.passed, kinds: checked.preview.problems.map(({ kind }) => kind) };
     };`;
     const { builder, app, chatId, stub } = await setUp([
@@ -516,7 +520,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, { "screens/desk.tsx": "export default function Desk() { return (" });
         const started = Date.now();
-        const checked = await env.build.check(app.id);
+        const { check: checked } = await env.build.propose(app.id, "A desk");
         return {
           passed: checked.passed,
           screens: checked.screens.status,

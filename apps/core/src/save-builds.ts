@@ -22,13 +22,13 @@ import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
+import { z } from "zod";
 
 import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { withDraftReferences } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
 import {
-  buildAppCode,
   buildScreens,
   buildWorkflows,
   checkAppCode,
@@ -140,6 +140,35 @@ const savedBuild = async (
 };
 
 /**
+ * What TypeScript says of a value it can only type `any`: a callback's
+ * parameter, or a name destructured from it. Against the stand-ins typed
+ * `any` (`symbolicModules`), every callback over what a reference returns
+ * says it; what the stand-ins stand in for says why.
+ */
+const implicitAny: ReadonlySet<string> = new Set(["TS7006", "TS7031"]);
+
+/**
+ * `built`, checked against the stand-ins for references its server code
+ * couldn't generate (`withDraftReferences`), less what only they make it
+ * say (`implicitAny`): failed only for what remains.
+ */
+const withoutStandInNoise = (built: {
+  ok: boolean;
+  diagnostics?: Diagnostic[];
+}): { ok: boolean; diagnostics?: Diagnostic[] } => {
+  if (built.ok || built.diagnostics === undefined) {
+    return built;
+  }
+  const diagnostics = built.diagnostics.filter(
+    ({ rule }) => !implicitAny.has(rule)
+  );
+  return {
+    ok: !diagnostics.some(({ severity }) => severity === "error"),
+    diagnostics,
+  };
+};
+
+/**
  * Builds a saved version's screens and workflows, both at once, into the
  * build cache (screens.ts), so the version opens and runs without
  * building. Answers once both are done with how each
@@ -174,19 +203,22 @@ export const buildOnSave = async (
       buildFiles,
       // With the references its screens import, generated from these
       // files themselves: neither a save nor a draft is sealed yet.
-      async () =>
-        await buildScreens(
+      async () => {
+        const { files: withReferences, standIn } = await withDraftReferences(
           env,
-          await withDraftReferences(
-            env,
-            source.app,
-            source.version,
-            files,
-            options
-          ),
+          source.app,
+          source.version,
+          files,
+          options
+        );
+        const built = await buildScreens(
+          env,
+          withReferences,
           source.app,
           options
-        ),
+        );
+        return standIn ? withoutStandInNoise(built) : built;
+      },
       env,
       signal
     ),
@@ -213,23 +245,27 @@ const layoutProblem = (file: string, message: string): BuildDiagnostic => ({
   message,
 });
 
+/** Where inspecting server code located what it threw (app-inspection.ts). */
+const inspectionDetailsSchema = z.object({
+  message: z.string().optional(),
+  file: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
+});
+
 /**
  * Why inspecting server code that builds refused it, as one diagnostic:
- * what its registration threw, or the SDK's reason its manifest doesn't
+ * what its registration threw, at the line of the App's file it threw
+ * from when its stack named one, or the SDK's reason its manifest doesn't
  * read.
  */
 const inspectionProblem = (
   error: Error & { details?: unknown }
 ): Diagnostic => {
-  const { details } = error;
-  const said =
-    typeof details === "object" &&
-    details !== null &&
-    "message" in details &&
-    typeof details.message === "string"
-      ? details.message
-      : "";
+  const details = inspectionDetailsSchema.safeParse(error.details);
+  const { message: said = "", ...at } = details.success ? details.data : {};
   return {
+    ...at,
     rule: "server",
     severity: "error",
     message: said === "" ? error.message : `${error.message} ${said}`,
@@ -242,9 +278,13 @@ const inspectionProblem = (
  * generates: from what its registration answers, inspected in the sandbox
  * as a save inspects it for its screens (`filesManifest`), with the
  * workflows it declares as the App binds them now. So what a check passes,
- * the seal's type check passes too. Server code that doesn't build or
- * register fails on what its build says, or, when it builds, on why its
- * inspection refused it.
+ * the seal's type check passes too.
+ *
+ * Server code that doesn't build or register is type-checked all the same,
+ * against the stand-ins inspection loads (`symbolicModules`, typed `any`):
+ * what doesn't build, its type errors, and why its registration threw
+ * come back together, never one hiding another, and never one error per
+ * file that names a reference.
  */
 const checkedDraftCode = async (
   env: Env,
@@ -263,21 +303,29 @@ const checkedDraftCode = async (
     if (!isExpectedError(error)) {
       throw error;
     }
-    // Its build, as inspection built it (from the build cache): what fails
-    // there, or else why inspection refused it.
-    const built = await buildAppCode(
-      env,
-      {
-        ...code,
-        ...symbolicModules(),
-        [generatedPaths.server]: serverModuleSource,
-      },
-      app,
-      options
+    const checked = withoutStandInNoise(
+      await checkAppCode(
+        env,
+        {
+          ...code,
+          ...symbolicModules(),
+          [generatedPaths.server]: serverModuleSource,
+        },
+        app,
+        options
+      )
     );
-    return built.ok
-      ? { ok: false, diagnostics: [inspectionProblem(error)] }
-      : built;
+    // What doesn't build, the check names with its type errors; what
+    // built but didn't register, inspection says.
+    return Reflect.get(error, "code") === "version.build_failed"
+      ? checked
+      : {
+          ok: false,
+          diagnostics: [
+            inspectionProblem(error),
+            ...(checked.diagnostics ?? []),
+          ],
+        };
   }
   const generated = await generateModules(
     manifest,

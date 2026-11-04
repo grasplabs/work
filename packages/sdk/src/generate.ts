@@ -1188,7 +1188,27 @@ const symbolicTree = (visibility: "public" | "internal"): string =>
  * gets symbolic references, which grant nothing and resolve only against
  * that registration. Sealing then generates the real modules and inspects
  * again with them; nothing symbolic survives into a release.
+ *
+ * Typed `any`, they also stand in for the real modules in a draft's type
+ * check while its server code doesn't register (core's save-builds.ts):
+ * what imports them is checked for everything else, and the one reason
+ * the server code doesn't register is the one error, never one per file
+ * that names a reference.
  */
+/** The SDK's type the stand-in trees name, imported as a type. */
+const standInImport =
+  'import type { OperationReference } from "@grasp-os/sdk";\n';
+
+/**
+ * The stand-in trees' type: at every path, a reference that takes and
+ * answers `any`, so a call through one (`useQuery`, `ctx.runQuery`) types
+ * its answer `any` too, never `unknown`, and nothing that uses it fails
+ * for want of the real references.
+ */
+const standInTree = `
+type StandIn = OperationReference<any, any, any, any> & { readonly [name: string]: StandIn };
+`;
+
 export const symbolicModules = (): Record<string, string> => {
   const prelude = `${banner}const symbolic = (visibility: string) => {
   const nodes = new Map<string, object>();
@@ -1219,7 +1239,7 @@ export const symbolicModules = (): Record<string, string> => {
 };
 `;
   return {
-    [generatedPaths.serverReferences]: `${prelude}\nexport const internal = ${symbolicTree("internal")};\n`,
-    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\nexport const preferences = Object.freeze({});\n`,
+    [generatedPaths.serverReferences]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree("internal")} as unknown as StandIn;\n`,
+    [generatedPaths.references]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const resources: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
   };
 };

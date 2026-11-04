@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
@@ -24,7 +23,6 @@ import type { jobRowSchema } from "./build-jobs.ts";
 import {
   appName,
   desk,
-  restyled,
   errorCode,
   returned,
   submitProposal,
@@ -73,7 +71,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("The invoice desk is proposed for review."),
     ]);
 
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     let run: { ended_at: number | null } | undefined;
     const answering = chat.ask("Build an invoice desk for invoices@");
@@ -155,7 +153,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       later.reply,
     ]);
 
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let answering: ReturnType<typeof chat.ask>;
     let job: z.infer<typeof jobRowSchema>;
     try {
@@ -198,7 +196,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       waiting.reply,
     ]);
 
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     const answering = chat.ask("Build an invoice desk for invoices@");
     let job: z.infer<typeof jobRowSchema>;
     try {
@@ -219,58 +217,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
       ended: { status: "cancelled", version: null, result: null },
       versions: [],
     });
-  });
-
-  it("counts job checks with the repair loop, and refuses a fifth once four failed in a row", async () => {
-    const waitForJob = (
-      submit: string
-    ) => `export default async (self, env) => {
-      ${findApp}
-      const { job } = await env.build.submit(app.id, ${submit});
-      for (let poll = 0; poll < 80; poll += 1) {
-        const view = await env.build.job(job);
-        if (view.status !== "running") {
-          return { status: view.status, passed: view.result.passed, failedInARow: view.result.failedInARow };
-        }
-        await scheduler.wait(300);
-      }
-      return "still running";
-    };`;
-    const failingCheck = codeStep(waitForJob('{ kind: "check" }'));
-    const { chat } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
-        return app.id;
-      };`),
-      failingCheck,
-      codeStep(waitForJob('{ kind: "check" }')),
-      codeStep(waitForJob('{ kind: "check" }')),
-      codeStep(waitForJob('{ kind: "check" }')),
-      codeStep(`export default async (self, env) => {
-        ${findApp}
-        const tried = async (call) => { try { await call(); return "done"; } catch (error) { return error.message; } };
-        return {
-          submit: await tried(() => env.build.submit(app.id, { kind: "check" })),
-          propose: await tried(() => env.build.submit(app.id, { kind: "propose", message: "A desk" })),
-          check: await tried(() => env.build.check(app.id)),
-        };
-      };`),
-      says("The desk still fails its checks: the button is restyled."),
-    ]);
-
-    await chat.ask("Build an invoice desk for invoices@");
-
-    const results = await codeResults(chat.stub, chat.chat.id);
-    const exhausted = appErrors.create("app.checks_exhausted").message;
-    expect(results.slice(1).map(({ text }) => returned(text))).toStrictEqual([
-      ...[1, 2, 3, 4].map((failedInARow) => ({
-        status: "completed",
-        passed: false,
-        failedInARow,
-      })),
-      { submit: exhausted, propose: exhausted, check: exhausted },
-    ]);
   });
 
   it("holds a chat to three running jobs, submitted at once too, and frees the place of one whose instance ended", async () => {
@@ -297,7 +243,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("Checking."),
     ]);
     const exhausted = agentErrors.create("agent.jobs_exhausted").message;
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let submitted: unknown;
     let fifth: unknown;
     let ended: Awaited<ReturnType<typeof endedJob>>;
@@ -358,7 +304,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       id: builder.userId,
       role: "builder",
     });
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check the shared App");
@@ -476,7 +422,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       };`),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check an invoice desk");
@@ -583,7 +529,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     let { stub } = chat;
     try {
@@ -632,7 +578,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       admin,
       readCollection(chat.agent, collectionId, "HANDBOOK")
     );
-    const checking = holdFiles(screenBuilds);
+    const checking = holdFiles(screenBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check an invoice desk");

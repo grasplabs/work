@@ -407,6 +407,84 @@ export default function Peers() {
     ).toBeTruthy();
   });
 
+  it("fails a plain form, which never submits in a screen's frame, naming the kit's form", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        "screens/ask.tsx": `export default function Ask() {
+  return (
+    <form onSubmit={(event) => event.preventDefault()}>
+      <button type="submit">Ask</button>
+    </form>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect({
+      ok: built.ok,
+      forms: built.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-bare-forms")
+        .map(({ file, line, column, fix }) => ({
+          file,
+          line,
+          column,
+          kit: fix?.includes("@grasp-os/ui/form"),
+        })),
+    }).toStrictEqual({
+      ok: false,
+      forms: [
+        {
+          file: "screens/ask.tsx",
+          line: 3,
+          column: 5,
+          kit: true,
+        },
+      ],
+    });
+  });
+
+  it("fails a compile error, a type error and a restyle in one build, none hiding another", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        ...withLine(
+          `{ id: "T-2", title: "VPN drops at noon", status: "waiting", assignee: null },`,
+          `{ id: "T-2", title: "VPN drops at noon", status: "stuck", assignee: null },`
+        ),
+        // A hook called on a condition, which the React Compiler refuses.
+        "screens/when.tsx": `import { useState } from "react";
+import { Button } from "@grasp-os/ui/components/button";
+
+export default function When({ open }: { open: boolean }) {
+  if (open) {
+    useState(0);
+  }
+  return <Button className="rounded-full">Go</Button>;
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect({
+      ok: built.ok,
+      found: built.diagnostics
+        .filter(({ severity }) => severity === "error")
+        .map(({ file, rule }) => `${file} ${rule}`)
+        .toSorted(),
+    }).toStrictEqual({
+      ok: false,
+      found: [
+        "screens/tickets.tsx TS2322",
+        "screens/when.tsx compile",
+        "screens/when.tsx shadcn/no-restyle",
+      ],
+    });
+  });
+
   it("passes a screen that names the window's members, or only looks like WebRTC", async () => {
     const built = await buildScreens(
       env,

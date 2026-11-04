@@ -197,14 +197,6 @@ export const platformLimits = {
   /** One execution's result, logs, progress and error together. */
   codeModeOutputBytes: 64 * kib,
 
-  // Repair sessions.
-  /** Repair passes of one session. */
-  repairPasses: 4,
-  /** Model escalations of one session. */
-  repairEscalations: 1,
-  /** One session's active work in all. */
-  repairActiveMs: 10 * minute,
-
   // Previews.
   /** Updates of one preview session in flight. */
   previewUpdatesInFlight: 1,

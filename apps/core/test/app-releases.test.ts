@@ -2341,11 +2341,10 @@ describe("screens", { timeout: 120_000 }, () => {
         );
       expect({
         ok: built.ok,
-        // The four imports, as the import check refuses them before any
-        // type check; then, alone, the two directives, as the type check
-        // refuses them.
+        // The four imports, as the import check refuses them, and the two
+        // directives, as the type check refuses them, all at once.
         imports: refused.length,
-      }).toStrictEqual({ ok: false, imports: 4 });
+      }).toStrictEqual({ ok: false, imports: 6 });
       const directives = await buildScreens(
         env,
         {

@@ -22,3 +22,41 @@ export interface Diagnostic {
 
 export const isError = (diagnostic: Diagnostic): boolean =>
   diagnostic.severity === "error";
+
+/** TypeScript's syntax errors (TS1xxx). */
+const syntaxCode = /^TS1\d{3}$/u;
+
+/**
+ * Every gate's diagnostics together, none hiding another (GRA-1527):
+ * `first`, a file's compile and import errors, then `then`, the type
+ * check's and the lint's, less what only says `first` again: a diagnostic
+ * on a line `first` has an error on (TypeScript's "cannot find module"
+ * beside a refused import), and anything else of a file that didn't parse
+ * (a compile error, and a syntax error of TypeScript's own), whose types
+ * TypeScript only guessed past the break.
+ */
+export const together = (
+  first: readonly Diagnostic[],
+  then: readonly Diagnostic[]
+): Diagnostic[] => {
+  const failed = first.filter((diagnostic) => isError(diagnostic));
+  const lines = new Set(failed.map(({ file, line }) => `${file}:${line}`));
+  const compiled = new Set(
+    failed.filter(({ rule }) => rule === "compile").map(({ file }) => file)
+  );
+  const unparsed = new Set(
+    then
+      .filter(({ file, rule }) => syntaxCode.test(rule) && compiled.has(file))
+      .map(({ file }) => file)
+  );
+  return [
+    ...first,
+    ...then.filter(
+      ({ file, line }) =>
+        !(
+          unparsed.has(file) ||
+          (line !== undefined && lines.has(`${file}:${line}`))
+        )
+    ),
+  ];
+};
