@@ -350,6 +350,27 @@ const withheldFrom = (
   });
 };
 
+/** The tokens `copied`'s messages take, as pi estimates them. */
+const tokensOf = (copied: Copied): number =>
+  copied.model.reduce(
+    (sum, message) => sum + estimateMessageTokens(message),
+    0
+  );
+
+/** What a rebased context keeps of a result too large for the model's window. */
+export const tooLargeResult =
+  "[This result was too large to keep in the chat's context, so it was left out when the context was rebuilt.]";
+
+/** `copied` with each of its results read as {@link tooLargeResult}. */
+const tooLargeNoted = (copied: Copied): Copied => ({
+  ...copied,
+  model: copied.model.map((message) =>
+    message.role === "toolResult"
+      ? { ...message, content: [{ type: "text", text: tooLargeResult }] }
+      : message
+  ),
+});
+
 /**
  * Starts `conversation`'s context afresh without what `withheld` withholds,
  * keeping the rest: a pi reset, then its history since its last rebase
@@ -400,13 +421,14 @@ export const rebase = async (
       }
     }, context);
   };
-  for (const copied of history) {
-    pending.push(copied);
-    tokens += copied.model.reduce(
-      (sum, message) => sum + estimateMessageTokens(message),
-      0
-    );
-    if (tokens > room) {
+  for (const entry of history) {
+    // An entry the room can't hold on its own keeps its results as a note:
+    // nothing appended is past what pi's summarizer takes.
+    const copied = tokensOf(entry) > room ? tooLargeNoted(entry) : entry;
+    const size = tokensOf(copied);
+    // The context so far compacted first when this entry would take it
+    // past the room, so the prefix pi summarizes always fits.
+    if (tokens + size > room && tokens > 0) {
       // oxlint-disable-next-line no-await-in-loop -- appended before compacted
       await append();
       // oxlint-disable-next-line no-await-in-loop -- one compaction at a time
@@ -417,6 +439,8 @@ export const rebase = async (
       const view = await conversation.context(context);
       ({ tokens } = estimateContextTokens(view.messages));
     }
+    pending.push(copied);
+    tokens += size;
   }
   await append();
   await conversation.commit(async (tx) => {

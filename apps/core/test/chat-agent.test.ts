@@ -34,6 +34,7 @@ import {
   questionContent,
   questionKind,
   rebase,
+  tooLargeResult,
 } from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
 import type { CodeRunStatus } from "../src/code-run-statuses.ts";
@@ -529,6 +530,36 @@ describe("what a chat can no longer read", () => {
         .filter(({ role }) => role === "user")
         .map(({ content }) => content)
     ).toStrictEqual(["Read", "Again?"]);
+  });
+
+  it("keeps a result too large for the room as a note once rebased, so no summary takes more than the room", async () => {
+    const chat = await openChat();
+    const huge = "z".repeat(20_000);
+    await chat.ask("Small", [chat.reply(says("a".repeat(4000)))]);
+    await chat.ask("Read", [
+      chat.reply(
+        call("executeCode", {
+          // Built in the run, so only its result holds it.
+          code: 'export default async () => "z".repeat(20_000);',
+        })
+      ),
+      chat.reply(says("Read it")),
+    ]);
+    // A room of 2,000 tokens: the result alone is about 5,000.
+    await chat.rebased(2000);
+    await chat.ask("Again?", [chat.reply(says("ok"))]);
+    const sent = JSON.stringify(chat.requests.at(-1));
+    expect({
+      kept: sent.includes(huge.slice(0, 1000)),
+      noted: resultsIn(chat.requests.at(-1) ?? []).includes(tooLargeResult),
+      summarized: chat.summaries.map((summary) =>
+        JSON.stringify(summary).includes(huge.slice(0, 1000))
+      ),
+    }).toStrictEqual({
+      kept: false,
+      noted: true,
+      summarized: chat.summaries.map(() => false),
+    });
   });
 
   it("withholds what the model wrote after a withheld result once rebased, past a notice steered in mid-turn", async () => {
