@@ -50,10 +50,12 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   version's contract, as a start's.
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
-//   leaves its own sealed modules (resource-host.ts, `fixture`):
-//   connections, Knowledge, templates, files and actions. It holds no
-//   binding, approval or grant, and none is read or written. Its decisions
-//   ask its fixture's principals alone (fixture-decisions.ts); its model
+//   leaves its own sealed modules (resource-host.ts, `fixture`; on the run
+//   host, sealed-run.ts, `fixtureCalls`): connections, Knowledge,
+//   templates, files, actions and events. It holds no binding, approval or
+//   grant, and none is read or written. Its decisions ask its fixture's
+//   principals alone (fixture-decisions.ts; the run host opens none for it
+//   yet); its model
 //   calls are answered by its fixture, and its store calls run on its
 //   test's own fixture store, never a real model or store
 //   (fixture-calls.ts).

@@ -2564,9 +2564,8 @@ class SealedRun implements SealedRunKind {
       principal: calling.principal,
       createdAt,
     };
-    // Tried once as a real call is: marked as it goes to its test, so no
-    // later attempt of its step sends it again (`SentCalls`).
-    effect.sending?.();
+    // Tried once as a real call is: `fixtureCall` marks it as it goes out
+    // (`SentCalls`), so no later attempt of its step sends it again.
     return await fixtureCall(this.#env, run, built, effect);
   }
 
