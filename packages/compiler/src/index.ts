@@ -303,7 +303,7 @@ export const referenceFiles = async (
 /**
  * How the compiler's isolate runs: no bindings, no importable env, no
  * network (`globalOutbound: null` and no subrequests), and at most one
- * build task's CPU per call (spec 18.1, `compilerTaskCpuMs`: 20 s), many
+ * build task's CPU per call (spec 18.1, `compilerTaskCpuMs`: 60 s), many
  * times what a large App takes. `nodejs_compat` is for the React
  * Compiler, which is written for Node.
  */
@@ -433,7 +433,7 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
  * How the package builder's isolate runs: no bindings, no importable env,
  * no network (`globalOutbound: null` and no subrequests), no Node.js
  * compatibility (`isolateBase`), and at most one build task's CPU per call (spec 18.1,
- * `compilerTaskCpuMs`: 20 s), as the compiler's.
+ * `compilerTaskCpuMs`: 60 s), as the compiler's.
  */
 export const packageBuilderSettings = {
   ...isolateBase,

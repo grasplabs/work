@@ -341,18 +341,25 @@ const incrementalShaped = (
 const transformCpuMsPerCharacter = 0.045;
 
 /**
- * The share of one compiler call's CPU time a batch of transforms is sized
- * to: the rest is left to a cold isolate's start (loading Babel, the React
- * Compiler and the kit) and to a machine slower than measured.
+ * The CPU time on Cloudflare a batch of transforms is sized to: a few
+ * seconds, so a first build answers in steps and a stop costs little, far
+ * below a call's ceiling (`compilerTaskCpuMs`), which only stops failures.
+ */
+const batchCpuMs = 4000;
+
+/**
+ * The most of a call's CPU time a batch is sized to: the rest is left to a
+ * cold isolate's start (loading Babel, the React Compiler and the kit) and
+ * to a machine slower than measured.
  */
 const batchCpuShare = 0.2;
 
 /**
  * The most characters of source one batch of transforms takes
- * (`transformInBatches`): about 89,000 at a call's 20 s of CPU
- * (`compilerTaskCpuMs`), or fewer where tests set `COMPILER_TASK_CPU_MS`.
- * One file larger than that (up to the 200,000 a file may have) is a batch
- * of its own, still well within a call's CPU time.
+ * (`transformInBatches`): about 89,000 (`batchCpuMs`), or fewer where
+ * tests set a call's CPU time lower (`COMPILER_TASK_CPU_MS`). One file
+ * larger than that (up to the 200,000 a file may have) is a batch of its
+ * own, still well within a call's CPU time.
  */
 const batchCharacters = (env: BuildEnv): number => {
   const set = Number(env.COMPILER_TASK_CPU_MS);
@@ -360,7 +367,9 @@ const batchCharacters = (env: BuildEnv): number => {
     Number.isInteger(set) && set > 0 && set < platformLimits.compilerTaskCpuMs
       ? set
       : platformLimits.compilerTaskCpuMs;
-  return Math.floor((cpuMs * batchCpuShare) / transformCpuMsPerCharacter);
+  return Math.floor(
+    Math.min(batchCpuMs, cpuMs * batchCpuShare) / transformCpuMsPerCharacter
+  );
 };
 
 /**
@@ -399,8 +408,9 @@ const batchesOf = (
  * so a build stopped part way resumes where it stopped. A batch stopped at
  * a bound is split and each half tried again; one file stopped alone is
  * left to the build, which says why. Nothing when all that's missing fits
- * in one batch: the build transforms it itself. What the batches made, by
- * key, for the build to reuse, and how many calls they took.
+ * in one batch: the build transforms it itself. The build's lease is
+ * renewed as each batch starts (`renew`). What the batches made, by key,
+ * for the build to reuse, and how many calls they took.
  */
 const transformInBatches = async (
   env: BuildEnv,
@@ -411,12 +421,14 @@ const transformInBatches = async (
     preview,
     reuse,
     leaseMs,
+    renew,
   }: {
     files: AppFiles;
     target: string;
     preview: boolean;
     reuse: Increments;
     leaseMs: number;
+    renew: () => Promise<void>;
   }
 ): Promise<{ made: Increments["modules"]; calls: number }> => {
   const { sources, known, typeFiles } = screenSources(buildFiles(files));
@@ -436,6 +448,9 @@ const transformInBatches = async (
     Object.entries(keys).map(([path, key]) => [key, path])
   );
   const transform = async (batch: Record<string, string>): Promise<void> => {
+    // The build holds its lease while its batches run, each a lease's
+    // time from its start: one that died gives it up as one call would.
+    await renew();
     let answer: unknown;
     calls += 1;
     try {
@@ -489,9 +504,18 @@ const compiledIncrementally = async (
   env: BuildEnv,
   runner: PlatformRunner,
   files: AppFiles,
-  profile: BuildProfile,
-  checks: boolean,
-  leaseMs: number
+  {
+    profile,
+    checks,
+    leaseMs,
+    renew,
+  }: {
+    profile: BuildProfile;
+    checks: boolean;
+    leaseMs: number;
+    /** Renews the build's lease: as each batch ends. */
+    renew: () => Promise<void>;
+  }
 ): Promise<{ built: unknown; cache: boolean }> => {
   const preview = profile === "preview";
   const [, target] = compilerCallOf("screen", profile, checks);
@@ -504,11 +528,16 @@ const compiledIncrementally = async (
     preview,
     reuse: earlier,
     leaseMs,
+    renew,
   });
   const reuse: Increments = {
     modules: { ...earlier.modules, ...batched.made },
     checks: earlier.checks,
   };
+  if (batched.calls > 0) {
+    // A lease's time for the build's own call, after its batches.
+    await renew();
+  }
   const transformed = Date.now();
   let answer: unknown;
   const result = await compiled(runner, "screen", files, profile, async () => {
@@ -632,7 +661,7 @@ export const throughKeptCache = async (
   env: CacheEnv,
   cacheKey: string,
   leaseMs: number,
-  build: () => Promise<Built>,
+  build: (renew: () => Promise<void>) => Promise<Built>,
   signal?: AbortSignal
 ): Promise<CachedAnswer> => {
   const answer = await throughCache(
@@ -792,17 +821,15 @@ const cachedBuild = async <Build>(
         cacheKey,
         // Held as long as a build may take, and a little more.
         leaseMs,
-        async () => {
+        async (renew) => {
           const answer =
             kind === "screen"
-              ? await compiledIncrementally(
-                  env,
-                  runner,
-                  files,
+              ? await compiledIncrementally(env, runner, files, {
                   profile,
                   checks,
-                  leaseMs
-                )
+                  leaseMs,
+                  renew,
+                })
               : await compiled(runner, kind, files, profile);
           if (!isBuild(answer.built)) {
             throw new TypeError(

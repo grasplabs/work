@@ -58,7 +58,7 @@ import {
 //   and only that is kept.
 // - The input is made to stop the same way on Cloudflare and on-prem but
 //   is judged differently, so one path recompiles a screen on every view
-//   at 20 s of CPU, or refuses a package the other accepts. Both run
+//   at 60 s of CPU, or refuses a package the other accepts. Both run
 //   through one runner (`platformRunner`), whose stops map to the same
 //   verdicts.
 // - One shared build multiplies under load: every request waiting on one
@@ -264,14 +264,14 @@ export type PlatformProgram = "compiler" | "package-builder";
 
 /**
  * The wall-clock time a call of each program may take on the sandbox host,
- * loading it included: past its CPU time (20 s and 30 s), which bounds
- * the work. The compiler's is past the build wait too (screens.ts), so a
- * late build still lands in the cache; the builder's takes in the reads
- * of its tarballs and the writes of its artifact.
+ * loading it included: past its CPU time (`compilerTaskCpuMs`, 60 s, for
+ * both), which bounds the work. The compiler's is past the build wait too
+ * (screens.ts), so a late build still lands in the cache; the builder's
+ * takes in the reads of its tarballs and the writes of its artifact.
  */
 const programWallMs: Record<PlatformProgram, number> = {
-  compiler: 30_000,
-  "package-builder": 60_000,
+  compiler: 75_000,
+  "package-builder": 90_000,
 };
 
 /** What a runner reads from core's env. */

@@ -59,6 +59,90 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
     });
   });
 
+  it("holds the lease through a build of many calls longer than the lease, and only that build runs", async () => {
+    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const leaseMs = 300;
+    let builders = 0;
+    const started = Promise.withResolvers<boolean>();
+    // Six calls of 150 ms, renewing the lease as each starts: three
+    // leases' time in all.
+    const batched = async (renew: () => Promise<void>) => {
+      builders += 1;
+      started.resolve(true);
+      for (const _ of Array.from({ length: 6 })) {
+        // oxlint-disable-next-line no-await-in-loop -- one call after another
+        await renew();
+        // oxlint-disable-next-line no-await-in-loop -- one call after another
+        await scheduler.wait(150);
+      }
+      return { text: '{"ok":true,"by":"batched"}', cache: true };
+    };
+    const first = throughCache(env, key, leaseMs, batched, () => ({}));
+    await started.promise;
+    // Asked for again past the first lease's time, while it still builds.
+    await scheduler.wait(leaseMs + 100);
+    const second = await throughCache(
+      env,
+      key,
+      leaseMs,
+      async () => {
+        builders += 1;
+        return await Promise.resolve({
+          text: '{"ok":true,"by":"second"}',
+          cache: true,
+        });
+      },
+      () => ({})
+    );
+
+    const { outcome } = await first;
+
+    expect({
+      builders,
+      first: outcome,
+      second: second.text,
+    }).toStrictEqual({
+      builders: 1,
+      first: "built",
+      second: '{"ok":true,"by":"batched"}',
+    });
+  });
+
+  it("gives a build's renewed lease up a lease's time after its holder stopped renewing", async () => {
+    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const leaseMs = 300;
+    const renewed = Promise.withResolvers<boolean>();
+    const never = Promise.withResolvers<never>();
+    // Renews once, then hangs: as a build whose isolate died.
+    void throughCache(
+      env,
+      key,
+      leaseMs,
+      async (renew) => {
+        await renew();
+        renewed.resolve(true);
+        return await never.promise;
+      },
+      () => ({})
+    );
+    await renewed.promise;
+    const since = Date.now();
+
+    const taken = await throughCache(
+      env,
+      key,
+      10_000,
+      async () =>
+        await Promise.resolve({ text: '{"ok":true,"by":"next"}', cache: true }),
+      () => ({})
+    );
+
+    expect({
+      text: taken.text,
+      tookOver: Date.now() - since >= leaseMs - 50,
+    }).toStrictEqual({ text: '{"ok":true,"by":"next"}', tookOver: true });
+  });
+
   it("waits for another holder backing off, not polling core's database at a fixed rate", async () => {
     const key = `screen-builds/test/${crypto.randomUUID()}.json`;
     await env.DB.prepare(

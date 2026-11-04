@@ -1,5 +1,4 @@
 import { appCompilerName } from "@grasp-os/compiler";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -309,9 +308,10 @@ describe("a first screens build of a large App", () => {
   });
 
   it("transforms an App four times a 60-screen App's size in calls each within the CPU time", async () => {
-    // A 60-screen App at today's limit, with a quarter of the CPU time per
-    // call: batched as a 240-screen App is with all of it.
-    const quarter = platformLimits.compilerTaskCpuMs / 4;
+    // A 60-screen App at today's limit, with 5 s of CPU time per call:
+    // batches a quarter of their size (1 s of the 5 s, against 4 s), as a
+    // 240-screen App is batched with all of it.
+    const callCpuMs = 5000;
     const files = syntheticApp(60, 4);
     const whose = `app-${unique()}`;
     const { loader, calls } = recordingLoader();
@@ -319,7 +319,7 @@ describe("a first screens build of a large App", () => {
       ...env,
       LOADER: loader,
       RUNTIME_PROFILE: "cloudflare",
-      COMPILER_TASK_CPU_MS: String(quarter),
+      COMPILER_TASK_CPU_MS: String(callCpuMs),
     };
     // The App's isolate started first: its start (about a second here)
     // doesn't shrink with the CPU time, and fits the whole of it.
@@ -350,7 +350,7 @@ describe("a first screens build of a large App", () => {
       everyFileOnce:
         transforms.reduce((sum, { files: count }) => sum + count, 0) ===
         Object.keys(files).length,
-      withinCpuTime: slowest * cloudflareSlowdown < quarter,
+      withinCpuTime: slowest * cloudflareSlowdown < callCpuMs,
     }).toStrictEqual({
       ok: true,
       atTheLimit: true,
