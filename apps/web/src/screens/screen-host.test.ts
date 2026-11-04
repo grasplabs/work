@@ -1327,14 +1327,23 @@ describe("a screen's navigation, as the page takes it", () => {
  */
 const previewOver = (answer: unknown) => {
   const calls: number[] = [];
+  const cancels: number[] = [];
   const reports: string[] = [];
   const watches: { revision: number; released: boolean }[] = [];
-  const asked = { calls, reports, watches };
+  const asked = { calls, cancels, reports, watches };
   const relays: ((push: unknown) => Promise<unknown>)[] = [];
   const chats = {
     previewFunction: async (_chat: string, _app: string, revision: number) => {
       asked.calls.push(revision);
       return await Promise.resolve(answer);
+    },
+    previewCancelStream: async (
+      _chat: string,
+      _app: string,
+      revision: number
+    ) => {
+      asked.cancels.push(revision);
+      return await Promise.resolve({ requested: false });
     },
     previewReport: async (
       _chat: string,
@@ -1386,7 +1395,7 @@ const previewOver = (answer: unknown) => {
       followUpdates: () => {
         // The frame's receiver isn't handed over here.
       },
-      reportingAt: () => reporting.at,
+      runningAt: () => reporting.at,
     }
   );
   return { target, asked, relays, reporting, problems: () => problems };
@@ -1404,16 +1413,28 @@ describe("a preview's frame as its draft changes", () => {
     });
   });
 
-  it("files a report under the revision the frame ran it on as it arrives, the update it tried included", async () => {
+  it("names the revision the frame runs as each call and report arrives, the update it tries included", async () => {
     const { target, asked, reporting } = previewOver({ result: { ok: true } });
-    // The frame is trying revision 2: its failure comes before its answer.
+    // The frame is trying revision 2: its first render and mount effects
+    // call, and its failure comes before its answer.
     reporting.at = 2;
+    const called = target.callFunction("{}");
+    const cancelled = target.cancelStream("{}");
     const sent = target.report({ kind: "error", message: "The update broke" });
     // Rolled back before core was reached: still the update's.
     reporting.at = 1;
-    await sent;
+    await Promise.all([called, cancelled, sent]);
+    await target.callFunction("{}");
     await target.report({ kind: "error", message: "The screen shown broke" });
-    expect(asked.reports).toStrictEqual(["error at 2", "error at 1"]);
+    expect({
+      calls: asked.calls,
+      cancels: asked.cancels,
+      reports: asked.reports,
+    }).toStrictEqual({
+      calls: [2, 1],
+      cancels: [2],
+      reports: ["error at 2", "error at 1"],
+    });
   });
 
   it("counts a call the draft's own code failed as a problem, and not a refusal that isn't its fault", async () => {
@@ -1433,7 +1454,9 @@ describe("a preview's frame as its draft changes", () => {
   });
 
   it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {
-    const { target, asked, relays } = previewOver({ result: { ok: true } });
+    const { target, asked, relays, reporting } = previewOver({
+      result: { ok: true },
+    });
     const pushes: unknown[] = [];
     const frameCallback = new RpcStub(async (push: unknown) => {
       pushes.push(push);
@@ -1447,6 +1470,8 @@ describe("a preview's frame as its draft changes", () => {
       revision: 3,
       result: { ok: false, error: { code: "app.preview_outdated" } },
     });
+    // The frame took revision 2: it shows it, and runs it.
+    reporting.at = 2;
     target.moved(2);
     await target.callFunction("{}");
     await vi.waitFor(() => {

@@ -176,19 +176,19 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     const held: { updates?: PreviewUpdates } = {};
     const run = following([answered(refreshAt(2))], (part) => {
       // The frame reports the update's render error before it answers.
-      reportedAt.push(held.updates?.reportingAt() ?? -1);
+      reportedAt.push(held.updates?.runningAt() ?? -1);
       return part.revision === 2 ? "failed" : "applied";
     });
     const { updates } = run;
     held.updates = updates;
-    const before = updates.reportingAt();
+    const before = updates.runningAt();
     updates.follow(run.toFrame);
     updates.revise(2);
     await vi.waitFor(() => {
       expect(run.seen.handed).toStrictEqual([1, 2]);
     });
     // Rolled back: what the frame meets now is the version it shows.
-    expect({ before, reportedAt, after: updates.reportingAt() }).toStrictEqual({
+    expect({ before, reportedAt, after: updates.runningAt() }).toStrictEqual({
       before: 1,
       reportedAt: [1, 2],
       after: 1,

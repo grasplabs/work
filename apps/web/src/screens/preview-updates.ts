@@ -142,13 +142,15 @@ export class PreviewUpdates {
   }
 
   /**
-   * The revision what the frame reports now is of: the one it is trying
-   * while it is handed an update, whose failure it reports before it
-   * answers (and rolls back), or else the one it shows. Core files a
-   * report only under the draft's own revision, so an update that failed
+   * The revision of the screen code the frame runs now: the one it is
+   * trying while it is handed an update (its first render and mount
+   * effects run then, and its failure is reported before the frame
+   * answers and rolls back), or else the one it shows. What the frame
+   * calls and reports names it, and core files a problem, or a screen
+   * seen, only under the draft's own revision: an update that failed
    * fails that revision's check, and an earlier screen's never does.
    */
-  reportingAt(): number {
+  runningAt(): number {
     return this.#trying ?? this.#shown;
   }
 

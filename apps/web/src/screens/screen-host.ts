@@ -875,8 +875,8 @@ const handedClosed = async (
 export interface PreviewFollow {
   problem: () => void;
   followUpdates: NonNullable<FrameTarget["followUpdates"]>;
-  /** The revision what the frame reports now is of (preview-updates.ts). */
-  reportingAt: () => number;
+  /** The revision of the screen code the frame runs now (preview-updates.ts). */
+  runningAt: () => number;
 }
 
 /** Whether `answer`, a preview call's, failed through the draft's own fault. */
@@ -955,6 +955,13 @@ export const previewTarget = (
   const { app, screen } = bundle;
   let { revision } = bundle;
   const watches = new Set<PreviewWatch>();
+  /**
+   * The revision of the screen code running now, read as each call or
+   * report arrives: while the frame tries an update, its first render and
+   * mount effects run that update's code, and what they call or report is
+   * that revision's, a failure too; otherwise the revision it shows.
+   */
+  const runningAt = (): number => follow?.runningAt() ?? revision;
   /** Ends `watch` for good: the frame hears its query is no longer followed. */
   const endWatch = (watch: PreviewWatch): void => {
     if (!watch.ended) {
@@ -1017,10 +1024,11 @@ export const previewTarget = (
       }
     },
     callFunction: async (request) => {
+      const at = runningAt();
       const answer = await on(
         link,
         async ({ chats }) =>
-          await chats.previewFunction(chatId, app, revision, request)
+          await chats.previewFunction(chatId, app, at, request)
       );
       if (failedByDraft(answer)) {
         follow?.problem();
@@ -1030,8 +1038,9 @@ export const previewTarget = (
     // A streaming action runs in the draft's preview too, on its draft
     // release and store (core's sealed-previews.ts), relayed over the
     // page's connection while the person may still have it.
-    streamFunction: async (what, request, onFrame, onEnded) =>
-      await on(link, async ({ chats }) => {
+    streamFunction: async (what, request, onFrame, onEnded) => {
+      const at = runningAt();
+      return await on(link, async ({ chats }) => {
         let ended = false;
         // A last frame came, even if the frame hasn't taken it yet: no
         // `closed` goes after it.
@@ -1045,7 +1054,7 @@ export const previewTarget = (
         const subscription = await chats.previewStream(
           chatId,
           app,
-          revision,
+          at,
           what,
           request,
           forCore(async (frame: unknown) => {
@@ -1078,17 +1087,18 @@ export const previewTarget = (
             void subscription.release();
           },
         };
-      }),
-    cancelStream: async (request) =>
-      await on(
+      });
+    },
+    cancelStream: async (request) => {
+      const at = runningAt();
+      return await on(
         link,
         async ({ chats }) =>
-          await chats.previewCancelStream(chatId, app, revision, request)
-      ),
+          await chats.previewCancelStream(chatId, app, at, request)
+      );
+    },
     report: async (problem) => {
-      // Of the revision the frame ran it on, read as it arrives: an
-      // update's failure comes before the frame answers for it.
-      const at = follow?.reportingAt() ?? revision;
+      const at = runningAt();
       // The screen's own failures, never a library's warnings, are
       // problems to fix.
       if (problem.kind !== "warning") {
@@ -1767,7 +1777,7 @@ export const runPreview = (
           followUpdates: (toFrame) => {
             updates.follow(toFrame);
           },
-          reportingAt: () => updates.reportingAt(),
+          runningAt: () => updates.runningAt(),
         });
         moves.to = target.moved;
         revisions.listener = (next) => {
