@@ -1269,13 +1269,6 @@ const enterPause = (until: string): string =>
 const sleepPause = (until: string): string =>
   `await step.sleepUntil("pause", { key: "task", description: "Its sleep", until: ${until} });`;
 
-/** A round's own failure, its retry's decision refused as tampering. */
-const roundFailedRefused = {
-  ended: "internal.unexpected",
-  why: "Something went wrong.",
-  tampered: ["workflow.invalid"],
-};
-
 /** A retry choice naming `by`'s catch, retrying. */
 const retryingBy = (by: string): string =>
   `, retry: async () => ({ by: ${JSON.stringify(by)}, retry: true })`;
@@ -1340,6 +1333,13 @@ try {
         `return ${taskStep("stop", '(() => { throw new Error("not raised"); })()')};`
       )
     );
+    // Its code rejects as the Loader's CPU kill would: its sealed error.
+    const cutOff = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("stop", '(() => { throw { get name() { throw new Error("Worker exceeded CPU time limit."); } }; })()')};`
+      )
+    );
     // A catch further in with no conditions takes it: one further out,
     // asked in its place, is offered nothing.
     const passedOver = await ranAs(
@@ -1351,7 +1351,14 @@ try {
   return { caught: (${catchStep("wrapped", "async () => true")}) ?? null };
 }`)
     );
-    expect({ caught, uncaught, skipped, thrown, passedOver }).toStrictEqual({
+    expect({
+      caught,
+      uncaught,
+      skipped,
+      thrown,
+      cutOff,
+      passedOver,
+    }).toStrictEqual({
       caught: {
         ended: { outer: stopped, asked: [stopped] },
         tampered: [],
@@ -1359,6 +1366,7 @@ try {
       uncaught: failedWith("workflow.raised"),
       skipped: { ended: { skipped: true }, tampered: [] },
       thrown: failedWith("workflow.raised"),
+      cutOff: failedWith("workflow.raised"),
       passedOver: { ended: { caught: null }, tampered: [], untaken: true },
     });
   });
@@ -1416,12 +1424,13 @@ try {
 }`)
     );
     // Its step's function rejects rather than reporting, as code that
-    // throws what can't be described makes it.
+    // throws what can't be described makes it, and as the Loader's CPU
+    // kill would (a task in no try, which nothing retries).
     const rejected = await ranAs(
       rejecting,
       moduleOf(`
 try {
-  return ${taskStep("fetch", '(async () => { try { await env.mail.call("mail.send", { to: input.who, subject: "x" }); } catch {} throw { get name() { throw new Error("undescribable"); } }; })()')};
+  return ${taskStep("send", '(async () => { try { await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch {} throw { get name() { throw new Error("Worker exceeded CPU time limit."); } }; })()')};
 } catch (thrown) {
   return { code: thrown.code };
 }`)
@@ -1490,6 +1499,14 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
       ran: retrySteps(tries, "run"),
       timeout: timeouts.get("key:fetch:task"),
     };
+    // Its policy has no conditions: it retries with no retry function.
+    const withheld = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+let rounds = 0;
+return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Error("not yet"); return { output: rounds }; })()')};`),
+      { engine: retryingEngine() }
+    );
     const always = new Map<string, number>();
     const never = await ranAs(
       await waitingRun(sealed),
@@ -1500,11 +1517,13 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
     );
     expect({
       third,
+      withheld,
       thirdSteps,
       never,
       neverRan: retrySteps(always, "run"),
     }).toStrictEqual({
       third: { ended: { output: 3 }, tampered: [] },
+      withheld: { ended: { output: 3 }, tampered: [] },
       thirdSteps: { decided: 2, ran: 2, timeout: 10_000 },
       // Its policy's three rounds, then the failure goes on.
       never: failedWith("internal.unexpected"),
@@ -1512,7 +1531,7 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
     });
   });
 
-  it("retries nothing a retry may not fix, nor by a catch that can't take the failure", async () => {
+  it("retries nothing a retry may not fix, and what a policy with no conditions retries whatever its code chooses", async () => {
     const asked = new Map<string, number>();
     const notTransient = await ranAs(
       await waitingRun(sealed),
@@ -1546,10 +1565,10 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
     }).toStrictEqual({
       notTransient: failedWith("expression.failed"),
       notTransientDecided: 0,
-      // Refused, which ends the run; the step fails as its round did.
-      failing: roundFailedRefused,
-      forged: roundFailedRefused,
-      forgedRan: 0,
+      // The policy's rounds, its code never asked.
+      failing: failedWith("internal.unexpected"),
+      forged: failedWith("internal.unexpected"),
+      forgedRan: 2,
     });
   });
 
@@ -1641,6 +1660,10 @@ try {
       ),
       unrecorded: await run(`${sleepPause("Date.now()")} return "woke";`),
       asDo: await run(`return ${taskStep("pause", "{ output: null }")};`),
+      notADuration: await ranAs(
+        await waitingRun(sleeping),
+        `export default { run: async (engine) => { try { await engine.sleep("pause:task", "x"); return "slept"; } catch (error) { return error.code; } } };`
+      ),
       tooFar: await run(
         `${enterPause("Date.now() + 2 * 365 * 86400000")} return "entered";`
       ),
@@ -1651,6 +1674,10 @@ try {
       otherDeadline: refusedAs(`Step "pause:task" isn't one the build seals.`),
       unrecorded: refusedAs(`Step "pause:task" isn't one the build seals.`),
       asDo: refusedAs(`Step "pause:task" isn't one the build seals.`),
+      notADuration: {
+        ended: "workflow.invalid",
+        tampered: ["workflow.invalid"],
+      },
       tooFar: failedWith("workflow.call_invalid"),
     });
   });

@@ -958,7 +958,12 @@ class SealedRun implements SealedRunKind {
       return kind === "catch" && task?.kind === "try";
     }
     if (use === "sleep") {
-      return sleeps && task?.kind === "wait" && time === task.milliseconds;
+      return (
+        sleeps &&
+        task?.kind === "wait" &&
+        time !== undefined &&
+        time === task.milliseconds
+      );
     }
     if (use === "sleepUntil") {
       return (
@@ -1040,30 +1045,40 @@ class SealedRun implements SealedRunKind {
    */
   async attemptSettled(
     attempt: StepAttempt,
-    result: Settled<unknown>
+    result: Settled<unknown>,
+    cut = false
   ): Promise<Settled<unknown>> {
     const made = this.#hostFailures.get(attempt);
     if (made !== undefined) {
       return { ok: false, error: made };
     }
     if (!result.ok) {
-      return { ok: false, error: this.#reportedFailure(attempt, result.error) };
+      return {
+        ok: false,
+        error: this.#reportedFailure(attempt, result.error, cut),
+      };
     }
     return await this.#recordChecked(attempt, result.value);
   }
 
   /**
-   * A failure only `attempt`'s code reports, `error`, as the host takes
-   * it: once a call of it took effect, `workflow.failed_after_effect`,
+   * A failure only `attempt`'s code reports, `error` (or its cut-off past
+   * its CPU time), as the host takes it: once a call of it took effect,
+   * `workflow.failed_after_effect`,
    * which no catch takes, as a catch would take it as a call that didn't;
    * of a raise's step, its sealed error, unless its `if` failed as an
    * expression; otherwise as `isolateFailure` maps it.
    */
-  #reportedFailure(attempt: StepAttempt, error: StepError): StepError {
+  #reportedFailure(
+    attempt: StepAttempt,
+    error: StepError,
+    /** Whether the Loader cut it off: `error` is core's timeout. */
+    cut: boolean
+  ): StepError {
     if (this.#effected.has(attempt)) {
       return failedAfterEffect;
     }
-    const reported = isolateFailure(error);
+    const reported = cut ? error : isolateFailure(error);
     const { task, kind } = this.#steps.get(attempt.step) ?? {};
     return kind === "task" &&
       task?.kind === "raise" &&
@@ -1194,10 +1209,27 @@ class SealedRun implements SealedRunKind {
     if (!roundsLeft || !failure.catchable || !retryable(failure, task)) {
       return undefined;
     }
+    const forced = forcedOf(tries, failure.error);
+    const firstTaking = tries.findIndex((around) =>
+      matchesFilter(failure.error, around.catch.errors)
+    );
+    const alone = forced === firstTaking ? tries[forced] : undefined;
     return {
       error: { ...failure.error },
       decided: (choice, firstFailedAt) =>
         retryDecided(tries, failure.error, round, choice, firstFailedAt),
+      ...(alone !== undefined && forcedRetry(alone, round)
+        ? {
+            alone: (firstFailedAt: number) =>
+              retryDecided(
+                tries,
+                failure.error,
+                round,
+                { by: alone.id, retry: true },
+                firstFailedAt
+              ),
+          }
+        : {}),
     };
   }
 

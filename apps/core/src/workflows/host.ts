@@ -1388,7 +1388,9 @@ export interface RunKind {
    */
   attemptSettled?: (
     attempt: StepAttempt,
-    result: Settled<unknown>
+    result: Settled<unknown>,
+    /** Whether the Loader cut it off past its CPU time: `result` is core's. */
+    cut?: boolean
   ) => Promise<Settled<unknown>>;
   /**
    * The error `attempt`, of a catch step (`RunHost.caught`), offers its
@@ -1455,6 +1457,12 @@ export interface RetryDecision {
  */
 export interface RetryOffer {
   readonly error: Json;
+  /**
+   * The decision when the build leaves its code nothing to decide (a
+   * catch and a policy with no conditions): the host takes it without
+   * asking, so no code can withhold it.
+   */
+  readonly alone?: (firstFailedAt: number) => RetryDecision;
   /** `choice` is `undefined` when its code failed to choose. */
   decided: (choice: unknown, firstFailedAt: number) => RetryDecision;
 }
@@ -2267,7 +2275,7 @@ export class RunHost extends RpcTarget {
           value = await rounds(base);
           break;
         } catch (error) {
-          if (retry === undefined) {
+          if (this.#kind.retryOffer === undefined) {
             throw error;
           }
           // As the engine journaled it, so a replay decides the same.
@@ -2372,27 +2380,33 @@ export class RunHost extends RpcTarget {
       stepDone: Promise<unknown>;
     }
   ): Promise<number | undefined> {
-    const offer =
-      retry === undefined
-        ? undefined
-        : this.#kind.retryOffer?.(step, error, round);
-    if (retry === undefined || offer === undefined) {
+    const offer = this.#kind.retryOffer?.(step, error, round);
+    if (offer === undefined) {
+      return undefined;
+    }
+    // Taken alone where the build leaves nothing to decide; else asked of
+    // its code, if it gave a way to ask.
+    const { alone } = offer;
+    let decide: ((context: unknown) => Promise<RetryDecision>) | undefined;
+    if (alone !== undefined) {
+      decide = async () =>
+        await Promise.resolve(alone(firstFailedAt ?? Date.now()));
+    } else if (retry !== undefined) {
+      decide = async (context) =>
+        await this.#decideRetry(step, context, offer, {
+          retry,
+          firstFailedAt,
+          stepDone,
+        });
+    }
+    if (decide === undefined) {
       return undefined;
     }
     const prefix = waitStep(await waitKeyOf(step), "retry", round + 1);
     let decided: RetryDecision;
     try {
       decided = retryDecisionSchema.parse(
-        await this.#step.do(
-          `${prefix}:decide`,
-          stepConfig({}),
-          async (context) =>
-            await this.#decideRetry(step, context, offer, {
-              retry,
-              firstFailedAt,
-              stepDone,
-            })
-        )
+        await this.#step.do(`${prefix}:decide`, stepConfig({}), decide)
       );
     } catch {
       // The round's failure goes on unchanged, whatever its decision
@@ -2510,17 +2524,25 @@ export class RunHost extends RpcTarget {
     try {
       reported = fromIsolate(await call);
     } catch (error) {
-      if (isCpuLimitKill(error)) {
+      const cut = isCpuLimitKill(error);
+      if (cut) {
         this.#isolateStopped = true;
-        return { ok: false, error: forIsolate(error) };
       }
-      // Its function rejected rather than reported: a kind that checks
-      // what its attempts settle with checks this too, so no rejection
-      // gets past it; any other's engine tries it again as it threw.
+      // Cut off, or its function rejected rather than reported: a kind
+      // that checks what its attempts settle with checks this too, so
+      // nothing gets past it; any other's step fails, or its engine
+      // tries it again, as it did.
       if (this.#kind.attemptSettled === undefined) {
+        if (cut) {
+          return { ok: false, error: forIsolate(error) };
+        }
         throw error;
       }
-      reported = { ok: false, error: forIsolate(error) };
+      return await this.#kind.attemptSettled(
+        attempt,
+        { ok: false, error: forIsolate(error) },
+        cut
+      );
     }
     return (await this.#kind.attemptSettled?.(attempt, reported)) ?? reported;
   }
