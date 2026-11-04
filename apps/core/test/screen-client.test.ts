@@ -560,6 +560,17 @@ describe("the session client", { timeout: 120_000 }, () => {
         refusal: "screen.revoked",
       },
     });
+    // It answered, after the revoke: its receipt holds the answer withheld.
+    const [row] = await drizzle(env.DB)
+      .select({ name: actionInvocations.name })
+      .from(actionInvocations)
+      .where(eq(actionInvocations.appId, opened.app));
+    await expect(
+      runInDurableObject(
+        actionInvocation(env, row?.name ?? ""),
+        (_instance, state) => state.storage.kv.get("invocation")
+      )
+    ).resolves.toMatchObject({ state: "settled", result: { ok: true } });
   });
 
   it("answers an action whose receipt is larger than a screen takes as uncertain, with its key", async () => {
