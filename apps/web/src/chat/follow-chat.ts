@@ -115,14 +115,15 @@ const releaseQuietly = async (subscription: {
 
 /**
  * Follows `chatId` over `core`: `onUpdate` gets every update, `onFailed`
- * why following stopped for good (the chat is gone, say). Returns what
+ * why following stopped for good (the chat is gone, say), and whether core
+ * refused it (`refused`) rather than being out of reach. Returns what
  * stops it.
  */
 export const followChat = (
   core: CoreConnection,
   chatId: string,
   onUpdate: (update: ChatUpdate) => void,
-  onFailed: (reason: string) => void
+  onFailed: (reason: string, refused: boolean) => void
 ): (() => void) => {
   let closed = false;
   let after: number | null = null;
@@ -168,7 +169,7 @@ export const followChat = (
       }
     } catch (error) {
       if (!closed) {
-        onFailed(failureText(error));
+        onFailed(failureText(error), !isTransient(error));
       }
     }
   };

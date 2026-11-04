@@ -631,10 +631,12 @@ const setCurrentOf = async (
   session: Session,
   app: string,
   version: number,
-  publish: boolean
+  publish: boolean,
+  /** The version current as the review compared it: refused if another is now. */
+  expected: number | null
 ): Promise<MadeCurrent> => {
   try {
-    await session.apps.versions.setCurrent(app, version);
+    await session.apps.versions.setCurrent(app, version, expected);
     if (publish) {
       await session.apps.publish(app);
     }
@@ -648,7 +650,7 @@ const setCurrentOf = async (
  * An App's version up for review: what it changes, and making it current;
  * nothing for an App the person doesn't build.
  */
-const PendingVersion = ({
+export const PendingVersion = ({
   app,
   version,
   onDone,
@@ -714,7 +716,14 @@ const PendingVersion = ({
   const makeCurrent = async (publish: boolean): Promise<void> => {
     setRefused(undefined);
     const made = await run(
-      async (session) => await setCurrentOf(session, app.id, version, publish)
+      async (session) =>
+        await setCurrentOf(
+          session,
+          app.id,
+          version,
+          publish,
+          loaded?.current ?? null
+        )
     );
     if (made === undefined) {
       return;
@@ -783,7 +792,7 @@ const PendingVersion = ({
               className="underline underline-offset-3"
               hash={storeChangesAnchor}
               params={{ app: app.id }}
-              to="/apps/$app/details"
+              to="/apps/$app/settings"
             >
               {refused.link}
             </Link>
@@ -861,12 +870,20 @@ export interface ChatBuildsRead {
  * once, for the studio and the side panel both.
  */
 export const useChatBuilds = (
-  chatId: string,
+  /** The chat; none while it is found, and nothing is read. */
+  chatId: string | undefined,
   running: boolean,
   drafts: number
 ): ChatBuildsRead => {
-  const [builds, setBuilds] = useState<Builds>();
-  const [failure, setFailure] = useState<BuildsFailed>();
+  // Each answer with the chat it is of: another chat's never shows.
+  const [answer, setAnswer] = useState<{
+    chatId: string;
+    builds?: Builds;
+    failure?: BuildsFailed;
+  }>();
+  const ofChat = answer?.chatId === chatId ? answer : undefined;
+  const builds = ofChat?.builds;
+  const failure = ofChat?.failure;
   const [reads, setReads] = useState(0);
   // The read the person asked for last, until it ends.
   const [retried, setRetried] = useState<number>();
@@ -875,6 +892,8 @@ export const useChatBuilds = (
   );
   // Only the latest read shows, whichever ends last.
   const latest = useRef(0);
+  // The chat the reads are of: another one starts afresh.
+  const readFor = useRef<string | null>(null);
   // The reads asked for (after making a version current, or again after
   // a failure) done so far: those go whether the agent works or not.
   const handledReads = useRef(0);
@@ -883,6 +902,15 @@ export const useChatBuilds = (
   const handledDrafts = useRef(-1);
   const core = useCore();
   useEffect(() => {
+    // A read under way for a chat no longer shown never lands.
+    if ((chatId ?? null) !== readFor.current) {
+      readFor.current = chatId ?? null;
+      latest.current += 1;
+      handledReads.current = -1;
+    }
+    if (chatId === undefined) {
+      return;
+    }
     if (
       running &&
       reads === handledReads.current &&
@@ -901,11 +929,17 @@ export const useChatBuilds = (
       }
       setRetried(undefined);
       if (found.state === "ready") {
-        setBuilds(found.data);
-        setFailure(undefined);
+        setAnswer({ chatId, builds: found.data });
         setMadeCurrent((made) => stillMadeCurrent(made, found.data.apps));
       } else {
-        setFailure(found);
+        // A read that fails later leaves the builds read before.
+        setAnswer((before) => ({
+          chatId,
+          ...(before?.chatId === chatId && before.builds !== undefined
+            ? { builds: before.builds }
+            : {}),
+          failure: found,
+        }));
       }
     };
     void load();

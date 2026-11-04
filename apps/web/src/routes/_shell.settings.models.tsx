@@ -111,7 +111,7 @@ const BindingSpend = ({
                   <Link
                     className="underline underline-offset-4"
                     params={{ app: binding.appId }}
-                    to="/apps/$app/details"
+                    to="/apps/$app/settings"
                   >
                     {binding.appName}
                   </Link>

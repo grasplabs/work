@@ -1,219 +1,42 @@
-import type { App, AppContents, ViewedApp } from "@grasp-os/shared/apps";
+import type { AppContents, ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { buttonVariants, Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
   ArchiveIcon,
-  ChevronDownIcon,
-  CodeIcon,
-  DatabaseIcon,
-  GlobeIcon,
-  InfoIcon,
   LayoutGridIcon,
-  LinkIcon,
-  MessageSquareIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
   SettingsIcon,
 } from "lucide-react";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { appSlot, setActiveChat } from "../chat/active-chat.ts";
-import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
-import { ErrorText } from "../error-text.tsx";
-import { useCoreAction } from "../use-core-action.ts";
-import { AppCode } from "./app-code.tsx";
-import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { buildsApp } from "./app-role.ts";
-import { useStatusMove } from "./app-status.tsx";
+import { StatusBadge } from "./app-status.tsx";
 
-// An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
-// with its name, its pages (core's screens) as tabs, its details, its
-// settings and the Publish menu; under the bar, that it is archived, with
-// Restore; then the open page, or, while it has none, that it is only
-// described, with the way to design it in the chat. Each app people see is
-// one App, with its own data, sharing and versions: the prototype's app is
-// our App, its tabs our App's pages.
-//
-// Changing it is the chat's, with no Edit button: for whoever changes it,
-// the chat bottom right is the App's own (the shell's dock, chat-dock.tsx),
-// the one core keeps for the person and the App (`chats.forApp`), where
-// Grasp changes the App with them, as the prototype's does. The page makes
-// room for it as a drawer. The Publish menu also gives the App its own
-// link (app-own-link.tsx); saving it as a blueprint, as the prototype's
-// does, waits on the blueprints page.
-//
-// Beside the App itself, its Details (_shell.apps.$app_.details.tsx): its
-// workflows, integrations, members, versions and the rest. Its builders
-// also have its Code (app-code.tsx): its files, read-only, and a draft's
-// changes. Nobody else gets that tab, as core refuses them the App's files
-// all the same.
-
-/**
- * Opens the App's own chat in the dock, to change the App there: the
- * person's chat for it, which core makes the first time, in the dock's
- * slot for the App, so their other chats stay as they were. Says why when
- * core refuses (they no longer build it, say).
- */
-const useAppChat = (app: string) => {
-  const { busy, failure, run } = useCoreAction();
-  const open = async (): Promise<void> => {
-    const chat = await run(async (session) => await session.chats.forApp(app));
-    if (chat === undefined) {
-      return;
-    }
-    setActiveChat(chat.id, appSlot(app));
-    setDockMode("frame");
-  };
-  return {
-    busy,
-    failure,
-    handleOpen: () => {
-      void open();
-    },
-  };
-};
-
-/**
- * Publish, for a builder: a draft is published for the people it is shared
- * with, a published App goes back to a draft. Off while it has no version
- * to publish, as core refuses that. Its link is set from here too.
- */
-const PublishMenu = ({ app }: { app: App }) => {
-  const { busy, failure, move } = useStatusMove(app.id);
-  const [linking, setLinking] = useState(false);
-  const published = app.status === "published";
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          disabled={busy || app.currentVersion === null}
-          render={<Button size="sm" />}
-        >
-          <GlobeIcon data-icon="inline-start" />
-          {published ? <Trans>Published</Trans> : <Trans>Publish</Trans>}
-          <ChevronDownIcon data-icon="inline-end" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          {published ? (
-            <DropdownMenuItem
-              onClick={() => {
-                move("unpublish");
-              }}
-            >
-              <ArchiveIcon />
-              <span className="flex flex-col">
-                <Trans>Unpublish</Trans>
-                <span className="text-muted-foreground text-xs">
-                  <Trans>Back to a draft, for its builders alone</Trans>
-                </span>
-              </span>
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem
-              onClick={() => {
-                move("publish");
-              }}
-            >
-              <GlobeIcon />
-              <span className="flex flex-col">
-                <Trans>Publish</Trans>
-                <span className="text-muted-foreground text-xs">
-                  <Trans>For the people it is shared with</Trans>
-                </span>
-              </span>
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            onClick={() => {
-              setLinking(true);
-            }}
-          >
-            <LinkIcon />
-            <span className="flex min-w-0 flex-col">
-              <Trans>Link</Trans>
-              <span className="text-muted-foreground truncate text-xs">
-                {app.link === null ? (
-                  <Trans>None yet</Trans>
-                ) : (
-                  linkAddress(app.link)
-                )}
-              </span>
-            </span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ErrorText>{failure}</ErrorText>
-      <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
-    </div>
-  );
-};
-
-/** That the App is archived, under its bar; a builder can restore it. */
-const ArchivedNotice = ({ app, builds }: { app: App; builds: boolean }) => {
-  const { busy, failure, move } = useStatusMove(app.id);
-  return (
-    <div className="bg-muted flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2">
-      <ArchiveIcon
-        aria-hidden="true"
-        className="text-muted-foreground size-4 flex-none"
-      />
-      <span className="min-w-0 flex-1 basis-64">
-        <Trans>
-          This App is archived. It is kept as it was, and nobody works on it.
-        </Trans>
-      </span>
-      {builds ? (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            move("restore");
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Restore</Trans>
-        </Button>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
-
-/** An App with no screen yet: only described, and designed in the chat. */
-const OnlyDescribed = ({
-  editable,
-  onOpenChat,
-}: {
-  editable: boolean;
-  onOpenChat: () => void;
-}) => (
-  <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
-    <div className="flex max-w-prose flex-col gap-1">
-      <span className="font-medium">
-        <Trans>Only described</Trans>
-      </span>
-      <p className="text-muted-foreground">
-        <Trans>
-          This App has no page yet. Grasp designs it with you in the chat.
-        </Trans>
-      </p>
-    </div>
-    {editable ? (
-      <Button onClick={onOpenChat}>
-        <MessageSquareIcon data-icon="inline-start" />
-        <Trans>Design it in the chat</Trans>
-      </Button>
-    ) : null}
-  </div>
-);
+// An App as its people use it (/apps/$app): the live App, its current
+// version, full width, under a slim bar with its name and its pages
+// (core's screens) as tabs. Nothing here builds it: its builders get Edit,
+// which opens its workspace (/apps/$app/edit, app-workspace.tsx), where the
+// chat builds a preview and Publish makes it live. Its settings, under
+// "…", are for everyone who opens it, each section as they may see it
+// (app-settings.tsx).
 
 /** The App's pages (its screens) as tabs in its bar, the open one marked; none for one. */
 const ScreenTabs = ({
@@ -254,196 +77,171 @@ const ScreenTabs = ({
   );
 };
 
-/** What the page shows: the App itself, or its code. */
-export type AppPageView = "app" | "code";
-
-/**
- * The App, its Details and, for a builder (`builds`), its Code, the shown
- * one marked. Details is a page of its own.
- */
-const ViewTabs = ({
+/** "…": the open page at full size, and the App's settings. */
+const MoreMenu = ({
   app,
-  view,
+  name,
+  fullPage,
   builds,
 }: {
   app: string;
-  view: AppPageView;
+  name: string;
+  fullPage: ReactNode;
   builds: boolean;
 }) => {
   const { t } = useLingui();
   return (
-    <nav aria-label={t`App views`} className="flex gap-1">
-      <Link
-        aria-current={view === "app" ? "page" : undefined}
-        className={buttonVariants({
-          size: "sm",
-          variant: view === "app" ? "secondary" : "ghost",
-        })}
-        params={{ app }}
-        replace
-        // Only the view changes: the open screen stays open.
-        search={(held) => ({ ...held, view: undefined })}
-        to="/apps/$app"
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            aria-label={t`More for ${name}`}
+            size="icon-sm"
+            variant="ghost"
+          />
+        }
       >
-        <LayoutGridIcon data-icon="inline-start" />
-        <Trans>App</Trans>
-      </Link>
-      <Link
-        className={buttonVariants({ size: "sm", variant: "ghost" })}
-        params={{ app }}
-        to="/apps/$app/details"
-      >
-        <InfoIcon data-icon="inline-start" />
-        <Trans>Details</Trans>
-      </Link>
-      {builds ? (
-        <Link
-          aria-current={view === "code" ? "page" : undefined}
-          className={buttonVariants({
-            size: "sm",
-            variant: view === "code" ? "secondary" : "ghost",
-          })}
-          params={{ app }}
-          replace
-          search={(held) => ({ ...held, view: "code" as const })}
-          to="/apps/$app"
+        <MoreHorizontalIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {fullPage}
+        <DropdownMenuItem
+          render={
+            // Its builders change the settings beside the chat.
+            builds ? (
+              <Link
+                params={{ app }}
+                search={{ view: "settings" }}
+                to="/apps/$app/edit"
+              />
+            ) : (
+              <Link params={{ app }} to="/apps/$app/settings" />
+            )
+          }
         >
-          <CodeIcon data-icon="inline-start" />
-          <Trans>Code</Trans>
-        </Link>
-      ) : null}
-    </nav>
+          <SettingsIcon />
+          <Trans>Settings</Trans>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
-/** Under the bar, unless the code is shown: the open screen, or that it has none. */
-const AppBody = ({
-  open,
+/** No page to show: archived, or nothing built yet. */
+const NoPage = ({
+  app,
   archived,
   editable,
-  onOpenChat,
-  children,
 }: {
-  open: string | undefined;
+  app: string;
   archived: boolean;
   editable: boolean;
-  onOpenChat: () => void;
-  children: ReactNode;
-}) =>
-  open === undefined ? (
-    <div className="px-4 pt-4 md:px-6">
-      {archived ? null : (
-        <OnlyDescribed editable={editable} onOpenChat={onOpenChat} />
-      )}
-    </div>
-  ) : (
-    <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-  );
+}) => (
+  <div className="flex flex-1 items-center justify-center p-6">
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {archived ? <ArchiveIcon /> : <LayoutGridIcon />}
+        </EmptyMedia>
+        <EmptyTitle>
+          {archived ? (
+            <Trans>This App is archived</Trans>
+          ) : (
+            <Trans>No page yet</Trans>
+          )}
+        </EmptyTitle>
+        <EmptyDescription>
+          {archived ? (
+            <Trans>
+              It is kept as it was, and nobody works on it, until a builder
+              restores it.
+            </Trans>
+          ) : (
+            <Trans>This App has nothing to open yet.</Trans>
+          )}
+        </EmptyDescription>
+      </EmptyHeader>
+      {editable ? (
+        <EmptyContent>
+          <Link
+            className={buttonVariants()}
+            params={{ app }}
+            to="/apps/$app/edit"
+          >
+            <PencilIcon data-icon="inline-start" />
+            {archived ? <Trans>Restore it</Trans> : <Trans>Build it</Trans>}
+          </Link>
+        </EmptyContent>
+      ) : null}
+    </Empty>
+  </div>
+);
 
 /**
- * The App's page: its bar, then under it that it is archived, then its
- * open screen (`children`), or that it has none. Only one who builds it
- * (`buildsApp`, by their role in this App) edits, publishes and restores
- * it.
+ * The live App: its bar, then its open screen (`children`), or that it
+ * has none. Only one who builds it (`buildsApp`, by their role in this
+ * App) gets Edit.
  */
 export const AppPage = ({
   app,
   contents,
   open,
-  view = "app",
   identity,
+  fullPage,
   children,
 }: {
   app: ViewedApp;
   contents: AppContents;
   /** The screen open, of `contents.screens`; none while it has none. */
   open: string | undefined;
-  /** The App itself, or its code: the code only for its builders. */
-  view?: AppPageView;
   identity: Pick<Identity, "staff">;
+  /** "Open full page", as a menu item, while a page is open. */
+  fullPage: ReactNode;
   children: ReactNode;
 }) => {
-  const { t } = useLingui();
   const { name } = app;
   const builds = buildsApp(app, identity);
   const archived = app.status === "archived";
-  const editable = builds && !archived;
-  const code = builds && view === "code";
-  const chat = useAppChat(app.id);
-  // The App's chat as a drawer down the right takes its room from the page.
-  const drawer = useDockMode() === "drawer" && editable;
   return (
-    <div
-      className={
-        drawer
-          ? `flex min-h-0 flex-1 flex-col text-sm ${dockDrawerRoom}`
-          : "flex min-h-0 flex-1 flex-col text-sm"
-      }
-    >
-      <div className="bg-background flex flex-none flex-wrap items-center gap-x-6 gap-y-2 border-b px-4 py-3 md:px-6">
+    <div className="flex min-h-0 flex-1 flex-col text-sm">
+      <div className="bg-background flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 md:px-6">
         <span className="flex min-w-0 items-center gap-2.5">
           <span
             aria-hidden="true"
-            className="bg-muted text-foreground inline-flex size-8 flex-none items-center justify-center rounded-lg"
+            className="bg-muted text-foreground inline-flex size-7 flex-none items-center justify-center rounded-lg"
           >
             <LayoutGridIcon className="size-4" />
           </span>
-          {/* No status beside it, as in the prototype: Publish says it for
-              its builders, and an archived App says so under the bar. */}
           <h1 className="truncate text-base font-medium">{name}</h1>
+          {/* Who uses it sees it only published; its builders see when it isn't. */}
+          {app.status === "published" ? null : (
+            <StatusBadge status={app.status} />
+          )}
         </span>
-        <ViewTabs app={app.id} builds={builds} view={code ? "code" : "app"} />
-        {code ? null : (
-          <ScreenTabs app={app.id} open={open} screens={contents.screens} />
-        )}
-        <span className="ml-auto flex items-start gap-2">
-          {/* Its data, for whoever builds it: core refuses anyone else. */}
+        <ScreenTabs app={app.id} open={open} screens={contents.screens} />
+        <span className="ml-auto flex items-center gap-1">
           {builds ? (
             <Link
-              aria-label={t`Data of ${name}`}
-              className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
+              className={buttonVariants({ size: "sm", variant: "outline" })}
               params={{ app: app.id }}
-              title={t`Data`}
-              to="/apps/$app/data"
+              to="/apps/$app/edit"
             >
-              <DatabaseIcon />
+              <PencilIcon data-icon="inline-start" />
+              <Trans>Edit</Trans>
             </Link>
           ) : null}
-          <Link
-            aria-label={t`Settings of ${name}`}
-            className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-            params={{ app: app.id }}
-            title={t`Settings`}
-            to="/apps/$app/settings"
-          >
-            <SettingsIcon />
-          </Link>
-          {editable ? <PublishMenu app={app} /> : null}
+          <MoreMenu
+            app={app.id}
+            builds={builds}
+            fullPage={fullPage}
+            name={name}
+          />
         </span>
       </div>
-      {chat.failure === undefined ? null : (
-        <div className="px-4 pt-4 md:px-6">
-          <ErrorText>{chat.failure}</ErrorText>
-        </div>
-      )}
-      {archived ? (
-        <div className="px-4 pt-4 md:px-6">
-          <ArchivedNotice app={app} builds={builds} />
-        </div>
-      ) : null}
-      {code ? (
-        <div className="flex min-h-0 flex-1 flex-col p-4 md:px-6">
-          <AppCode app={app} />
-        </div>
+      {open === undefined ? (
+        <NoPage app={app.id} archived={archived} editable={builds} />
       ) : (
-        <AppBody
-          archived={archived}
-          editable={editable}
-          onOpenChat={chat.handleOpen}
-          open={open}
-        >
-          {children}
-        </AppBody>
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       )}
     </div>
   );

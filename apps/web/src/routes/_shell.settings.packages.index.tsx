@@ -118,7 +118,8 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
                   <Link
                     className="hover:underline focus-visible:underline"
                     params={{ app: subject.id }}
-                    to="/apps/$app/details"
+                    search={{ section: "packages" }}
+                    to="/apps/$app/settings"
                   >
                     {subject.name}
                   </Link>

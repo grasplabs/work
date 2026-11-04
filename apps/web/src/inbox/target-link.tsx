@@ -39,8 +39,8 @@ export const TargetLink = ({
     return (
       <Link
         params={{ app }}
-        search={place === "versions" ? { tab: "versions" } : {}}
-        to="/apps/$app/details"
+        search={{ section: place }}
+        to="/apps/$app/settings"
         {...props}
       />
     );

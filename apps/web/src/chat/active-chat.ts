@@ -73,6 +73,36 @@ export const setActiveChat = (
 };
 
 /**
+ * Forgets chat `chatId` wherever the tab holds it open: in the person's
+ * slot, the brain's or an App's, as after it was deleted, so the next
+ * question there starts afresh (an App's slot asks core for its chat again).
+ */
+export const forgetChat = (chatId: string): void => {
+  for (const slot of new Set<ChatSlot>(["chat", "brain", ...active.keys()])) {
+    if (activeIn(slot) === chatId) {
+      setActiveChat(undefined, slot);
+    }
+  }
+  // Apps' chats this tab kept before this page loaded, too.
+  try {
+    const kept = Array.from(
+      { length: sessionStorage.length },
+      (_, index) => sessionStorage.key(index) ?? ""
+    );
+    for (const key of kept) {
+      if (
+        key.startsWith(keyOf(appSlot(""))) &&
+        sessionStorage.getItem(key) === chatId
+      ) {
+        setActiveChat(undefined, appSlot(key.slice(keyOf(appSlot("")).length)));
+      }
+    }
+  } catch {
+    // See `read`: nothing was kept.
+  }
+};
+
+/**
  * Forgets every open chat, and what the tab saw and read of their thinking
  * (brain/thinking/log.ts, card-ground.ts): they were the person's who
  * signed out.

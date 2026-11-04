@@ -301,20 +301,17 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   }
 
   const page = await pageOf(admin);
-  // The engine's Integrations tab lists the integrations of the
-  // connections it may use, in those connections' state.
-  await page.goto(`/apps/${appId}/details`);
-  await page.getByRole("tab", { name: "Integrations" }).click();
-  const used = page
-    .getByRole("tabpanel")
-    .getByRole("listitem")
-    .filter({ hasText: "Microsoft 365" });
+  // The App's Connections list the integrations of the connections it
+  // may use, in those connections' state.
+  await page.goto(`/apps/${appId}/settings?section=connections`);
+  const inUse = page.getByRole("region", { name: "Connections in use" });
+  const used = inUse.getByRole("listitem").filter({ hasText: "Microsoft 365" });
   await expect(
     used.getByRole("button", {
       name: "Manage Microsoft 365, connected for everyone",
     })
   ).toBeVisible();
-  await expect(page.getByRole("tabpanel").getByRole("listitem")).toHaveCount(1);
+  await expect(inUse.getByRole("listitem")).toHaveCount(1);
 
   await accountOf(page, "native:microsoft");
   const mailboxCard = cardOf(page, "Microsoft 365", mailbox);

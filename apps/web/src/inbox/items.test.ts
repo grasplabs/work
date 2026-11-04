@@ -380,7 +380,7 @@ describe(inboxItems, () => {
         { label: "Package", value: "left-pad@1.3.0" },
         { label: "Advisory", value: "MAL-2026-1" },
       ],
-      about: { kind: "engine", engine: "app-invoices", place: "details" },
+      about: { kind: "engine", engine: "app-invoices", place: "packages" },
       urgent: true,
     });
   });
@@ -590,7 +590,7 @@ const hrefOf = async (about: Target | undefined): Promise<string | null> => {
 };
 
 describe(TargetLink, () => {
-  it("opens an App's details for what is decided there, its Versions for a version to make live, and its page otherwise", async () => {
+  it("opens the section of an App's settings where what it is about is decided, and its page otherwise", async () => {
     const items = inboxItems(waiting(), admin, readAt);
     const about = (id: string) => items.find((item) => item.id === id)?.about;
 
@@ -601,9 +601,9 @@ describe(TargetLink, () => {
       goLive: await hrefOf(about("goLive:app-invoices:4")),
       app: await hrefOf({ kind: "engine", engine: app }),
     }).toStrictEqual({
-      packages: `/apps/${app}/details`,
-      revoked: `/apps/${app}/details`,
-      goLive: `/apps/${app}/details?tab=versions`,
+      packages: `/apps/${app}/settings?section=packages`,
+      revoked: `/apps/${app}/settings?section=packages`,
+      goLive: `/apps/${app}/settings?section=versions`,
       app: `/apps/${app}`,
     });
   });

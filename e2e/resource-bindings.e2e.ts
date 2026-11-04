@@ -106,16 +106,15 @@ const engineOf = async (
   }
 };
 
-/** The engine's resource `alias`, on its page's Resources tab. */
+/** The App's resource `alias`, under Connections in its settings. */
 const resourceOn = async (page: Page, app: string, alias: string) => {
-  await page.goto(`/apps/${app}/details`);
-  await page.getByRole("tab", { name: "Resources" }).click();
+  await page.goto(`/apps/${app}/settings?section=connections`);
   return page
     .getByRole("region", { name: "Resources" })
     .getByRole("article", { name: alias });
 };
 
-/** The engine's `letter` resource, on its page's Resources tab. */
+/** The App's `letter` resource, under Connections in its settings. */
 const letterOn = async (page: Page, app: string) =>
   await resourceOn(page, app, "letter");
 
@@ -177,7 +176,6 @@ test("an admin binds an engine's declared template and revokes it; its builder o
   await expect(letter).toContainText(unbound);
   await expect(letter).not.toContainText("Bound to");
   await building.reload();
-  await building.getByRole("tab", { name: "Resources" }).click();
   await expect(
     building
       .getByRole("region", { name: "Resources" })
@@ -203,7 +201,6 @@ test("an admin binds an engine's model, with no budget of its own, and it stays 
     form.getByRole("button", { name: "Replace the binding of writer" })
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("tab", { name: "Resources" }).click();
   await expect(
     page
       .getByRole("region", { name: "Resources" })

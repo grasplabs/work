@@ -68,11 +68,15 @@ export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   /**
-   * An App: its own page, or its details (`details`), or the Versions tab
-   * there (`versions`), where what the item is about is decided. Details
-   * also show the packages alone to an approver with no role in the App.
+   * An App: its own page, or the section of its settings where what the
+   * item is about is decided. Its settings also show the packages alone to
+   * an approver with no role in the App.
    */
-  | { kind: "engine"; engine: string; place?: "details" | "versions" }
+  | {
+      kind: "engine";
+      engine: string;
+      place?: "connections" | "packages" | "versions";
+    }
   | { kind: "app"; app: string; screen?: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -316,7 +320,11 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.appId, place: "details" }
+          ? {
+              kind: "engine",
+              engine: request.subject.appId,
+              place: "connections",
+            }
           : undefined,
       date: request.requestedAt,
       urgent: false,
@@ -357,7 +365,7 @@ const packageItems = (
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.id, place: "details" }
+          ? { kind: "engine", engine: request.subject.id, place: "packages" }
           : undefined,
       forWhom: { role: t`package approvers` },
       date: request.requestedAt,
@@ -366,7 +374,7 @@ const packageItems = (
     };
   });
 
-/** A version of an App the person answers for, up for review: made current under Versions in its details. */
+/** A version of an App the person answers for, up for review: made current under Versions in its settings. */
 const versionItems = (
   versions: readonly GoLiveItem[],
   me: string,
@@ -381,7 +389,7 @@ const versionItems = (
       title: t`Make version ${version} of ${name} live?`,
       context: name,
       body: [
-        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's details.`,
+        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's settings.`,
       ],
       facts: [{ label: t`Version`, value: String(version) }],
       about: { kind: "engine", engine: app.id, place: "versions" },
@@ -543,7 +551,7 @@ const revokedSubject = (
   subject.type === "app"
     ? {
         name: subject.appName,
-        about: { kind: "engine", engine: subject.app, place: "details" },
+        about: { kind: "engine", engine: subject.app, place: "packages" },
       }
     : {
         name: subject.workflowName,

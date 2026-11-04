@@ -12,7 +12,7 @@ import { useNavigate, useRouter } from "@tanstack/react-router";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { activeChat, setActiveChat } from "./active-chat.ts";
+import { forgetChat } from "./active-chat.ts";
 
 // Deleting a chat, from its row in the list of chats or from the menu in
 // the open chat's header: the same question first, either way.
@@ -41,10 +41,8 @@ export const DeleteChatDialog = ({
     });
     if (removed === true) {
       onOpenChange(false);
-      // A deleted chat is nobody's open chat any more.
-      if (activeChat() === chat.id) {
-        setActiveChat(undefined);
-      }
+      // A deleted chat is nobody's open chat any more, an App's included.
+      forgetChat(chat.id);
       if (active) {
         await navigate({ to: "/", search: {} });
       }
