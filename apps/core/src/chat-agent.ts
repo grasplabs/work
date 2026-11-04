@@ -1,17 +1,28 @@
 import type { Context } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import { retryAssistantCall } from "@earendil-works/pi-ai/utils/retry";
 import {
-  AgentDoc,
+  estimateContextTokens,
+  estimateMessageTokens,
+} from "@earendil-works/pi-ai/utils/estimate";
+import {
+  CompactionEntry,
   CompactionTask,
-  DEFAULT_RETRY_POLICY,
+  defineDoc,
   defineExtension,
   GenerationTask,
   hook,
+  ResetEntry,
   section,
+  SystemEntry,
 } from "@earendil-works/pi-durable";
-import type { Extension, HookApi } from "@earendil-works/pi-durable";
+import type {
+  Conversation,
+  EntryId,
+  EntryRecord,
+  Extension,
+  HookApi,
+} from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -22,12 +33,8 @@ import {
   instructions,
   latestSections,
   readApi,
-  readsUnderWay,
-  resultRunId,
   sectionNames,
   sectionsOf,
-  withheldAssistant,
-  withheldResult,
   withholdRuns,
 } from "./agent.ts";
 import type { CodeRuns, TurnContext } from "./agent.ts";
@@ -50,6 +57,18 @@ import type { CodeRuns, TurnContext } from "./agent.ts";
 // asks to (`askQuestions`) ends a run without another request. Whether
 // the person may still take a turn is the host's to check, as the gateway
 // admits each request.
+//
+// What the chat can no longer read never reaches the model, and the chat
+// keeps its context: once a code run whose result the chat holds read
+// what its agent may no longer read for its person (a revoked grant, a
+// team left, a document erased), the host starts the chat's context afresh
+// with a pi reset and appends the chat's history again after it, each
+// entry as it was but that run's result, and what the model wrote after it
+// in its turn, as a note (`rebase`). Nothing from before the reset is sent
+// again, a summary pi made of it included; pi's own compaction summarizes
+// the history again as it needs to, from what may be read. Until the host
+// has done so, no request carries what the chat read and no compaction
+// summarizes it: pi's hooks can't append to a transcript, only the host can.
 
 /** What a chat's turn runs with: the tools' APIs, whom they act for, and its guards. */
 export interface ChatAgent {
@@ -74,147 +93,208 @@ export interface ChatAgent {
   /** The tool that shows the turn's thinking in the brain (agent-thinking.ts), if it may. */
   thinking?: AgentTool;
   /**
-   * The code runs whose results may not reach the model now (workspace.ts),
-   * asked before every model request.
+   * The code runs whose results the chat may no longer send (workspace.ts),
+   * asked before every model request and every compaction.
    */
   withheld: () => Promise<ReadonlySet<string>>;
-  /** What the chat's summaries rest on, kept by the host (`SummaryRecords`). */
-  summaries: SummaryRecords;
   /**
    * Stops the turn, for `reason`: a hook can't end a run itself, so the
-   * host aborts the chat's conversation (`Conversation.abort`). The request
-   * being prepared goes out withheld as the hook left it, or not at all.
+   * host aborts the chat's conversation (`Conversation.abort`), and for
+   * `agent.history_revoked` rebases its context (`rebase`). The request
+   * being prepared goes out with nothing the chat read.
    */
   stop: (reason: Error) => void;
-}
-
-/**
- * The code runs each of a chat's compaction summaries rests on, by the ID
- * its text names: kept by the host, as a hook can't write to pi's storage
- * and the model needn't read them. A summary whose record is missing rests
- * on everything.
- */
-export interface SummaryRecords {
-  keep: (id: string, runs: readonly string[]) => Promise<void>;
-  runs: (id: string) => Promise<readonly string[] | undefined>;
 }
 
 /** The extension's name: one per chat, so each conversation selects only its own. */
 export const chatAgentName = (chatId: string): string => `grasp.chat.${chatId}`;
 
-/** Every code run whose result `messages` hold. */
-const runsIn = (messages: readonly Message[]): Set<string> =>
-  new Set(messages.flatMap((message) => resultRunId(message) ?? []));
+/**
+ * Where a conversation's context starts (`rebase`): the reset of its last
+ * rebase, the runs whose results it left out, and whether a rebase is
+ * under way, one a restart cut short being done again.
+ */
+const BaseDoc = defineDoc<{
+  base: EntryId | null;
+  dropped: string[];
+  rebasing: boolean;
+}>({
+  kind: "grasp.base",
+  version: 1,
+  scope: "conversation",
+  history: "latest",
+  fork: "current",
+  initial: () => ({ base: null, dropped: [], rebasing: false }),
+  checkpointWhen: () => true,
+});
 
-/** The text of a user message. */
-const userText = (message: Message): string => {
-  if (message.role !== "user") {
-    return "";
+/** An entry of the history a rebase appended again. */
+export const historyKind = "grasp.history";
+
+/** Whether every run in `withheld` was left out of the context. */
+const leftOut = (
+  withheld: ReadonlySet<string>,
+  dropped: readonly string[]
+): boolean => [...withheld].every((run) => dropped.includes(run));
+
+/** Whether the model may read the context as it is: nothing withheld in it. */
+const mayRead = async (
+  agent: Pick<ChatAgent, "withheld">,
+  api: HookApi,
+  context: Context
+): Promise<boolean> => {
+  const withheld = await agent.withheld();
+  if (withheld.size === 0) {
+    return true;
   }
-  return typeof message.content === "string"
-    ? message.content
-    : message.content
-        .flatMap((part) => (part.type === "text" ? [part.text] : []))
-        .join("\n");
+  const base = await api.snapshot(BaseDoc, api.conversationId, context);
+  return leftOut(withheld, base?.dropped ?? []);
 };
-
-// A compaction's summary is the chat's own (`summarize`): it ends with an
-// ID the host keeps the code runs it rests on by (`SummaryRecords`), so a
-// later revocation of any of them withholds it whole. pi's summarizer can
-// do neither: it reads the transcript as stored, results the chat can no
-// longer read included, and says nothing of what it read.
-
-const summaryMark = "[Summary ";
-
-const summaryLine = (id: string): string => `${summaryMark}${id}]`;
-
-const summaryPattern = /\[Summary (?<id>[0-9a-f-]{36})\]/gu;
-
-/** The IDs of the summaries `message` holds: its own, and any it was folded from. */
-const summaryIds = (message: Message): string[] =>
-  [...userText(message).matchAll(summaryPattern)].flatMap(
-    (line) => line.groups?.id ?? []
-  );
-
-/** What a summary rests on: those runs, or anything, when its record is missing. */
-type RestsOn = ReadonlySet<string> | "everything";
 
 /**
- * What each summary `messages` hold rests on, by its ID. A person who
- * typed such a line only gets their message withheld with what it names.
+ * Whether `conversation`'s context must be rebased before its next turn:
+ * it holds what `withheld` withholds, or a rebase was cut short.
  */
-const summariesIn = async (
-  records: SummaryRecords,
-  messages: readonly Message[]
-): Promise<Map<string, RestsOn>> => {
-  const ids = new Set(messages.flatMap(summaryIds));
-  const found = await Promise.all(
-    [...ids].map(async (id) => {
-      const runs = await records.runs(id);
-      return [id, runs === undefined ? "everything" : new Set(runs)] as const;
-    })
-  );
-  return new Map(found);
+export const needsRebase = async (
+  conversation: Conversation,
+  withheld: ReadonlySet<string>,
+  context: Context
+): Promise<boolean> =>
+  await conversation.commit(async (tx) => {
+    const base = await tx.doc(BaseDoc, conversation.id);
+    return base.rebasing || !leftOut(withheld, base.dropped);
+  }, context);
+
+/**
+ * The entries of `conversation`'s history since `base`, the reset of its
+ * last rebase: the model's messages of each, without pi's own system
+ * entries, resets and summaries, nor what a rebase cut short appended.
+ */
+const historySince = async (
+  conversation: Conversation,
+  base: EntryId | null,
+  context: Context
+): Promise<EntryRecord[]> => {
+  const history: EntryRecord[] = [];
+  let afterLaterReset = false;
+  let cursor;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await conversation.entries(
+      { order: "ascending", ...(base === null ? {} : { minEntryId: base }) },
+      200,
+      cursor,
+      context
+    );
+    for (const entry of page.items) {
+      if (ResetEntry.is(entry)) {
+        afterLaterReset ||= entry.id !== base;
+      } else if (
+        !SystemEntry.is(entry) &&
+        !CompactionEntry.is(entry) &&
+        !(entry.kind === historyKind && afterLaterReset) &&
+        (entry.model?.length ?? 0) > 0
+      ) {
+        history.push(entry);
+      }
+    }
+    cursor = page.next;
+  } while (cursor !== undefined);
+  return history;
 };
 
-/** Whether a summary resting on `on` must be withheld while `withheld` is. */
-const restsOnWithheld = (
-  on: RestsOn | undefined,
+/** Each entry's messages, as `withholdRuns` withholds them while `withheld` is. */
+const withheldFrom = (
+  history: readonly EntryRecord[],
   withheld: ReadonlySet<string>
-): boolean =>
-  on === "everything"
-    ? withheld.size > 0
-    : [...(on ?? [])].some((id) => withheld.has(id));
-
-/** What a summary resting on what the chat can no longer read reads as. */
-export const withheldSummary =
-  "(summary withheld: it rests on what this chat can no longer read)";
-
-/**
- * `messages` with each summary that rests on a run in `withheld` read as
- * a note, and what follows it in its turn as `withholdRuns` withholds what
- * follows a result; and whether the turn under way starts at one, which
- * stops it as a withheld result of its own would.
- */
-const withholdSummaries = (
-  messages: readonly Message[],
-  withheld: ReadonlySet<string>,
-  summaries: ReadonlyMap<string, RestsOn>
-): { messages: Message[]; underWay: boolean } => {
-  let after = false;
-  let underWay = false;
-  const shown = messages.map((message): Message => {
-    if (message.role === "user") {
-      after = summaryIds(message).some((id) =>
-        restsOnWithheld(summaries.get(id), withheld)
-      );
-      underWay = after;
-      return after
-        ? { ...message, content: [{ type: "text", text: withheldSummary }] }
-        : message;
+): Message[][] => {
+  const flat = history.flatMap((entry, index) =>
+    (entry.model ?? []).map((message) => ({ index, message }))
+  );
+  const noted = withholdRuns(
+    flat.map(({ message }) => message),
+    withheld
+  );
+  const grouped: Message[][] = history.map(() => []);
+  for (const [at, { index }] of flat.entries()) {
+    const message = noted[at];
+    if (message !== undefined) {
+      grouped[index]?.push(message);
     }
-    if (!after) {
-      return message;
-    }
-    if (message.role === "toolResult") {
-      return { ...message, content: [{ type: "text", text: withheldResult }] };
-    }
-    return message.role === "assistant" ? withheldAssistant(message) : message;
-  });
-  return { messages: shown, underWay };
+  }
+  return grouped;
 };
 
-/** `messages` as one request may send them while `withheld` is withheld. */
-const withholding = (
-  messages: readonly Message[],
+/**
+ * Starts `conversation`'s context afresh without what `withheld` withholds,
+ * keeping the rest: a pi reset, then its history since its last rebase
+ * again, entry by entry, each run in `withheld` read as a note in place of
+ * its result (`withholdRuns`). The history is compacted by pi as it is
+ * appended, whenever it holds more than `room` tokens (the model's window
+ * less pi's reserve), so pi's summarizer never takes more than a window.
+ * Only while the conversation is idle. A rebase a restart cut short is
+ * done again from the same history (`needsRebase`).
+ */
+export const rebase = async (
+  conversation: Conversation,
   withheld: ReadonlySet<string>,
-  records: ReadonlyMap<string, RestsOn>
-): { messages: Message[]; underWay: boolean } => {
-  const summaries = withholdSummaries(messages, withheld, records);
-  return {
-    messages: withholdRuns(summaries.messages, withheld),
-    underWay: summaries.underWay || readsUnderWay(summaries.messages, withheld),
+  room: number,
+  context: Context
+): Promise<void> => {
+  const start = await conversation.commit(async (tx) => {
+    const base = await tx.doc(BaseDoc, conversation.id);
+    return { base: base.base, dropped: [...base.dropped] };
+  }, context);
+  const history = withheldFrom(
+    await historySince(conversation, start.base, context),
+    withheld
+  );
+  const reset = await conversation.commit(async (tx) => {
+    const entry = await tx.appendEntry(conversation.id, {
+      kind: ResetEntry.kind,
+      head: "self",
+    });
+    const base = await tx.doc(BaseDoc, conversation.id);
+    base.dropped = [...new Set([...start.dropped, ...withheld])];
+    base.rebasing = true;
+    return entry.id;
+  }, context);
+  let pending: Message[][] = [];
+  let tokens = 0;
+  const append = async (): Promise<void> => {
+    const drafts = pending;
+    pending = [];
+    await conversation.commit(async (tx) => {
+      for (const model of drafts) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await tx.appendEntry(conversation.id, { kind: historyKind, model });
+      }
+    }, context);
   };
+  for (const messages of history) {
+    pending.push(messages);
+    tokens += messages.reduce(
+      (sum, message) => sum + estimateMessageTokens(message),
+      0
+    );
+    if (tokens > room) {
+      // oxlint-disable-next-line no-await-in-loop -- appended before compacted
+      await append();
+      // oxlint-disable-next-line no-await-in-loop -- one compaction at a time
+      await conversation.compact(undefined, context);
+      // oxlint-disable-next-line no-await-in-loop -- its summary placed first
+      await conversation.waitForIdle(context);
+      // oxlint-disable-next-line no-await-in-loop -- what is left of the context
+      const view = await conversation.context(context);
+      ({ tokens } = estimateContextTokens(view.messages));
+    }
+  }
+  await append();
+  await conversation.commit(async (tx) => {
+    const base = await tx.doc(BaseDoc, conversation.id);
+    base.base = reset;
+    base.rebasing = false;
+  }, context);
 };
 
 /** Why a turn stops when what it may read can't be told. */
@@ -224,194 +304,37 @@ const unreadable = (error: unknown): Error =>
     : new Error("What this chat may read could not be told.");
 
 /**
- * `messages` with every result and every summary blanked, and what the
- * model wrote after a result in its turn: for when what is withheld
- * can't be told. A plain pass that can't fail on any message.
- */
-const blanked = (messages: readonly Message[]): Message[] => {
-  let after = false;
-  return messages.map((message): Message => {
-    if (message.role === "toolResult") {
-      after = true;
-      return { ...message, content: [{ type: "text", text: withheldResult }] };
-    }
-    if (message.role === "assistant") {
-      return after ? withheldAssistant(message) : message;
-    }
-    if (message.role !== "user") {
-      return message;
-    }
-    after = false;
-    const summary =
-      typeof message.content !== "string" &&
-      message.content.some(
-        (part) => part.type === "text" && part.text.includes(summaryMark)
-      );
-    return summary
-      ? { ...message, content: [{ type: "text", text: withheldSummary }] }
-      : message;
-  });
-};
-
-/**
  * What a request may send of `messages`, and why the turn must stop, if
- * it must. Results of runs the chat can no longer read are withheld, so
- * are summaries resting on them, and each section is given only where it
- * was given last, so a stale one (memory a person lost) never reaches the
- * model. One of these in the turn under way stops the turn: the provider
- * takes the latest response whole. Never throws, as pi sends the request
- * unchanged past a hook that throws: should anything fail, every result
- * and every summary is blanked, with a plain map, and the turn stops.
+ * it must. While the context holds nothing withheld: everything, each
+ * section of the system prompt given only where it was given last, so a
+ * stale one (memory a person lost) never reaches the model. Once it does,
+ * until the host rebased it, or when that can't be told: only the system
+ * prompt and the person's last words, and the turn stops. Never throws, as
+ * pi sends the request unchanged past a hook that throws.
  */
 const guarded = async (
-  agent: Pick<ChatAgent, "withheld" | "summaries">,
-  messages: readonly Message[]
-): Promise<{ messages: Message[]; stop?: Error }> => {
-  try {
-    const sent = withholding(
-      messages,
-      await agent.withheld(),
-      await summariesIn(agent.summaries, messages)
-    );
-    return {
-      messages: latestSections(sent.messages),
-      ...(sent.underWay
-        ? { stop: agentErrors.create("agent.history_revoked") }
-        : {}),
-    };
-  } catch (error) {
-    return { messages: blanked(messages), stop: unreadable(error) };
-  }
-};
-
-/** Most tokens a summary takes, as pi's summarizer allows itself. */
-const summaryMaxTokens = 13_000;
-
-/** Most characters of a tool result a summary reads, as pi's summarizer does. */
-const summaryResultChars = 2000;
-
-/** The conversation a summary is made of, as plain text, system messages left out. */
-const transcriptOf = (messages: readonly Message[]): string =>
-  messages
-    .flatMap((message) => {
-      if (message.role === "user") {
-        return [`[Person]: ${userText(message)}`];
-      }
-      if (message.role === "toolResult") {
-        const text = message.content
-          .flatMap((part) => (part.type === "text" ? [part.text] : []))
-          .join("\n");
-        return [`[Tool result]: ${text.slice(0, summaryResultChars)}`];
-      }
-      if (message.role === "assistant") {
-        return message.content.flatMap((part) => {
-          if (part.type === "text") {
-            return [`[Assistant]: ${part.text}`];
-          }
-          return part.type === "toolCall"
-            ? [
-                `[Assistant called ${part.name}]: ${JSON.stringify(part.arguments)}`,
-              ]
-            : [];
-        });
-      }
-      return [];
-    })
-    .join("\n\n");
-
-const summarySystem =
-  "You summarize a conversation between a person and an AI assistant, so the assistant can go on from the summary alone. Don't continue the conversation or answer anything in it: write only the summary.";
-
-const summaryAsk = (focus: string | undefined): string =>
-  [
-    "Summarize the conversation above as a checkpoint the assistant goes on from: what the person wants and asked, what was done and found (with exact IDs, file paths, names and error messages), what was decided, and what is still open. If it starts with an earlier summary, keep what it holds and fold the newer messages into it. Leave out what reads as withheld.",
-    ...(focus === undefined ? [] : [`Also: ${focus}`]),
-  ].join("\n\n");
-
-/**
- * The summary of the part of a chat a compaction replaces, made from what
- * a request may send of it now (`withholding`), ending with its ID. What
- * it rests on is kept by that ID: the runs whose results it read, and
- * those its earlier summary rested on, less any withheld now, whose
- * content it never saw. An earlier summary that rests on everything (its
- * record lost) leaves this one without a record, so it does too. Through
- * the conversation's own model, as pi's summarizer would call it, its
- * retryable errors retried as pi retries a model request. None when the
- * model gives no summary.
- */
-const summarize = async (
-  agent: Pick<ChatAgent, "withheld" | "summaries">,
-  part: { messages: readonly Message[]; instructions?: string },
+  agent: Pick<ChatAgent, "withheld">,
+  messages: readonly Message[],
   api: HookApi,
   context: Context
-): Promise<string | undefined> => {
-  const withheld = await agent.withheld();
-  const agentState = await api.snapshot(AgentDoc, api.conversationId, context);
-  const ref = agentState?.model;
-  const model =
-    ref === undefined
-      ? undefined
-      : api.models.getModel(ref.provider, ref.modelId);
-  if (model === undefined) {
-    return undefined;
-  }
-  const earlier = await summariesIn(agent.summaries, part.messages);
-  const covered = runsIn(part.messages);
-  let everything = false;
-  for (const on of earlier.values()) {
-    if (on === "everything") {
-      everything = true;
-    } else {
-      for (const id of on) {
-        covered.add(id);
-      }
+): Promise<{ messages: Message[]; stop?: Error }> => {
+  let stop: Error | undefined;
+  try {
+    if (await mayRead(agent, api, context)) {
+      return { messages: latestSections(messages) };
     }
+    stop = agentErrors.create("agent.history_revoked");
+  } catch (error) {
+    stop = unreadable(error);
   }
-  const shown = withholding(part.messages, withheld, earlier).messages;
-  const now = Date.now();
-  const ask = async () =>
-    await api.models.completeSimple(
-      model,
-      {
-        messages: [
-          { role: "system", content: summarySystem, timestamp: now },
-          {
-            role: "user",
-            content: `<conversation>\n${transcriptOf(shown)}\n</conversation>\n\n${summaryAsk(part.instructions)}`,
-            timestamp: now,
-          },
-        ],
-      },
-      {
-        maxTokens:
-          model.maxTokens > 0
-            ? Math.min(summaryMaxTokens, model.maxTokens)
-            : summaryMaxTokens,
-        ...(context.abortSignal === undefined
-          ? {}
-          : { signal: context.abortSignal }),
-      }
-    );
-  const answer = await retryAssistantCall(
-    ask,
-    DEFAULT_RETRY_POLICY,
-    context.abortSignal
-  );
-  const text = answer.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("")
-    .trim();
-  if (answer.stopReason !== "stop" || text === "") {
-    return undefined;
-  }
-  const id = crypto.randomUUID();
-  if (!everything) {
-    await agent.summaries.keep(
-      id,
-      [...covered].filter((run) => !withheld.has(run))
-    );
-  }
-  return `${text}\n\n${summaryLine(id)}`;
+  const asked = messages.findLast(({ role }) => role === "user");
+  return {
+    messages: [
+      ...messages.filter(({ role }) => role === "system"),
+      ...(asked === undefined ? [] : [asked]),
+    ],
+    stop,
+  };
 };
 
 /**
@@ -419,8 +342,8 @@ const summarize = async (
  * and the chat's sections (each tagged by itself, as the model has always
  * read them), `executeCode` in our locked isolate, `readApi`, the
  * dedicated tools the chat's APIs allow, the thinking tool where it may,
- * `askQuestions` in Grasp's own chat only, and the guard before every
- * request.
+ * `askQuestions` in Grasp's own chat only, and the guards before every
+ * request and compaction.
  */
 export const chatAgent = (agent: ChatAgent): Extension => {
   const { apis, scope, runs, assets } = agent;
@@ -446,8 +369,8 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     ],
     hooks: [
       hook(GenerationTask, {
-        beforeRequest: async ({ messages }) => {
-          const sent = await guarded(agent, messages);
+        beforeRequest: async ({ messages }, api, context) => {
+          const sent = await guarded(agent, messages, api, context);
           if (sent.stop !== undefined) {
             try {
               agent.stop(sent.stop);
@@ -458,14 +381,14 @@ export const chatAgent = (agent: ChatAgent): Extension => {
           return { messages: sent.messages };
         },
       }),
-      // Every compaction is summarized here, from what a request may send,
-      // or declined: pi's own summarizer, which a hook that throws falls
-      // back to, would read what the chat can no longer read.
+      // pi's summarizer reads the context as stored: declined while it
+      // holds what is withheld, until the host rebased it.
       hook(CompactionTask, {
-        beforeCompact: async (part, api, context) => {
+        beforeCompact: async (_part, api, context) => {
           try {
-            const summary = await summarize(agent, part, api, context);
-            return summary === undefined ? { decline: true } : { summary };
+            return (await mayRead(agent, api, context))
+              ? undefined
+              : { decline: true };
           } catch {
             return { decline: true };
           }

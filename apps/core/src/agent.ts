@@ -992,7 +992,7 @@ export const withheldResponse =
 const withheldCode = `// ${withheldResponse}`;
 
 /** The run a code step's result is of, as its details name it. */
-export const resultRunId = (message: Message): string | undefined => {
+const resultRunId = (message: Message): string | undefined => {
   if (message.role !== "toolResult") {
     return undefined;
   }
@@ -1050,9 +1050,7 @@ const thinkingClock = () => {
  * turn, which the provider takes without its thinking: one of the turn
  * under way stops the turn instead (`readsUnderWay`).
  */
-export const withheldAssistant = (
-  message: AssistantMessage
-): AssistantMessage => {
+const withheldAssistant = (message: AssistantMessage): AssistantMessage => {
   const said = message.content.some(({ type }) => type === "text");
   return {
     ...message,
@@ -1118,7 +1116,7 @@ export const withholdRuns = (
  * Whether a result of the turn under way (after its question) is of one
  * of the code runs `runs`.
  */
-export const readsUnderWay = (
+const readsUnderWay = (
   messages: readonly AgentMessage[],
   runs: ReadonlySet<string>
 ): boolean => {

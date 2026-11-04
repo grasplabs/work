@@ -27,7 +27,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
 import { instructions, withheldResult } from "../src/agent.ts";
-import { chatAgent, withheldSummary } from "../src/chat-agent.ts";
+import { chatAgent, needsRebase, rebase } from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
 import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 
@@ -36,10 +36,10 @@ import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 // code it runs in our isolate, and what a chat can no longer read never
 // reaching it. Starts from the ways it can fail: a revoked result read
 // again on a later request, or by the turn that read it; a guard that
-// fails open; a compaction that summarizes what was withheld, or keeps a
-// summary of what was revoked since; a code step a restart cut short that
-// loses the run it was; a stale section kept in the prompt; and a turn cut
-// off by a limit Claude Code and Codex don't have.
+// fails open; a compaction that summarizes what was revoked, or a summary
+// of it sent after; a chat that loses its context to a revocation; a code
+// step a restart cut short; a stale section kept in the prompt; and a turn
+// cut off by a limit Claude Code and Codex don't have.
 
 const context = BACKGROUND_CONTEXT;
 
@@ -77,13 +77,13 @@ const secretWord = "marigold";
 /** Code whose result holds {@link secretWord}, which the code itself doesn't. */
 const readsSecretWord = 'export default async () => ["mari", "gold"].join("");';
 
-/** Whether a request is a compaction's summary, as `summarize` asks for one. */
+/** Whether a request is pi's compaction summarizer's. */
 const isSummaryRequest = (messages: readonly Message[]): boolean => {
   const [first] = messages;
   return (
     first?.role === "system" &&
     typeof first.content === "string" &&
-    first.content.startsWith("You summarize a conversation")
+    first.content.startsWith("You are a context summarization assistant")
   );
 };
 
@@ -123,13 +123,7 @@ const openChat = async (
   {
     contextWindow = 200_000,
     settings,
-    failedSummaries = 0,
-  }: {
-    contextWindow?: number;
-    settings?: HarnessSettings;
-    /** How many summary requests fail first, as an overloaded provider does. */
-    failedSummaries?: number;
-  } = {}
+  }: { contextWindow?: number; settings?: HarnessSettings } = {}
 ) => {
   const faux = fauxProvider({
     provider: "grasp",
@@ -143,12 +137,6 @@ const openChat = async (
   const answer: FauxResponseStep = async (request, ...rest) => {
     if (isSummaryRequest(request.messages)) {
       summaries.push(structuredClone(request.messages));
-      if (summaries.length <= failedSummaries) {
-        return fauxAssistantMessage([], {
-          stopReason: "error",
-          errorMessage: "529 overloaded",
-        });
-      }
       return says(
         JSON.stringify(request.messages).includes(secretWord)
           ? `summary saw ${secretWord}`
@@ -160,7 +148,9 @@ const openChat = async (
   };
   faux.setResponses(Array.from({ length: 1000 }, () => answer));
   const stopped: Error[] = [];
-  const records = new Map<string, readonly string[]>();
+  // The runs whose results the chat may no longer send, as the Workspace
+  // tells them.
+  const revoked = new Set<string>();
   const runs: Runs = { opened: [], revoked: new Set(), lines: [] };
   const agent: ChatAgent = {
     apis: [notes],
@@ -187,14 +177,7 @@ const openChat = async (
     assets: env.ASSETS,
     codeTimeoutMs: 10_000,
     history: [],
-    withheld: async () => await Promise.resolve(new Set<string>()),
-    summaries: {
-      keep: async (id, kept) => {
-        records.set(id, kept);
-        await Promise.resolve();
-      },
-      runs: async (id) => await Promise.resolve(records.get(id)),
-    },
+    withheld: async () => await Promise.resolve(revoked),
     stop: (reason) => {
       stopped.push(reason);
     },
@@ -258,15 +241,24 @@ const openChat = async (
     opened.harness.resume();
     await opened.root.waitForIdle(context);
   };
+  /** The chat's conversation, rebased as the Workspace does once it is idle. */
+  const rebased = async (room = 150_000): Promise<void> => {
+    await rebase(opened.root, revoked, room, context);
+  };
+  /** Whether the chat's context must be rebased before its next turn. */
+  const mustRebase = async (): Promise<boolean> =>
+    await needsRebase(opened.root, revoked, context);
   return {
     ask,
+    rebased,
+    mustRebase,
     submit,
     next,
     reply,
     restart,
     requests,
     summaries,
-    records,
+    revoked,
     runs,
     stopped,
   };
@@ -471,44 +463,62 @@ describe("the chat agent's tools", () => {
 });
 
 describe("what a chat can no longer read", () => {
-  it("withholds a result of an earlier turn, and what the model wrote after it, from every request", async () => {
-    const withheld = new Set<string>();
-    const chat = await openChat({
-      withheld: async () => await Promise.resolve(withheld),
-    });
+  it("stops a turn and sends none of what the chat read once a run it rests on is revoked", async () => {
+    const chat = await openChat();
     await chat.ask("Read", [
       chat.reply(call("executeCode", { code: readsSecret })),
       chat.reply(says("It says secret")),
     ]);
-    withheld.add("run-1");
-    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    chat.revoked.add("run-1");
+    await chat.ask("Again?", [chat.reply(says("Stopped"))]);
     const request = chat.requests[2] ?? [];
-    expect(resultsIn(request)).toStrictEqual([withheldResult]);
     expect(JSON.stringify(request)).not.toContain("secret");
-    expect(chat.stopped).toStrictEqual([]);
-  });
-
-  it("stops a turn whose own result was revoked, and the request carries none of it", async () => {
-    // Every run is revoked once it ran: the request after it is the first
-    // to know, in the same turn.
-    let ran: readonly string[] = [];
-    const chat = await openChat({
-      withheld: async () => await Promise.resolve(new Set(ran)),
-    });
-    ran = chat.runs.opened;
-    await chat.ask("Read", [
-      chat.reply(call("executeCode", { code: readsSecret })),
-      chat.reply(says("Stopped")),
-    ]);
-    const request = chat.requests[1] ?? [];
-    expect(resultsIn(request)).toStrictEqual([withheldResult]);
-    expect(JSON.stringify(request)).not.toContain("secret");
+    expect(request.at(-1)).toMatchObject({ role: "user", content: "Again?" });
     expect(chat.stopped.map(({ message }) => message)).toStrictEqual([
       agentErrors.create("agent.history_revoked").message,
     ]);
   });
 
-  it("fails closed: when it can't tell what is withheld, every result is, and the turn stops", async () => {
+  it("keeps the chat's context once rebased, the revoked run's result and what was written after it as a note", async () => {
+    const chat = await openChat();
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecret })),
+      chat.reply(says("It says secret")),
+    ]);
+    chat.revoked.add("run-1");
+    const before = await chat.mustRebase();
+    await chat.rebased();
+    expect({ before, after: await chat.mustRebase() }).toStrictEqual({
+      before: true,
+      after: false,
+    });
+    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    const request = chat.requests.at(-1) ?? [];
+    expect(JSON.stringify(request)).not.toContain("secret");
+    expect(resultsIn(request)).toStrictEqual([withheldResult]);
+    expect(
+      request
+        .filter(({ role }) => role === "user")
+        .map(({ content }) => content)
+    ).toStrictEqual(["Read", "Again?"]);
+  });
+
+  it("stops a turn whose own result was revoked, and the request carries none of it", async () => {
+    const chat = await openChat();
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecret })),
+      (request) => {
+        chat.revoked.add("run-1");
+        chat.requests.push(structuredClone(request.messages));
+        return call("executeCode", { code: returnsTwo });
+      },
+      chat.reply(says("Stopped")),
+    ]);
+    expect(JSON.stringify(chat.requests.at(-1))).not.toContain("secret");
+    expect(chat.stopped).toHaveLength(1);
+  });
+
+  it("fails closed: when it can't tell what is withheld, it sends none of what the chat read, and the turn stops", async () => {
     let failing = false;
     const chat = await openChat({
       withheld: async () => {
@@ -524,8 +534,7 @@ describe("what a chat can no longer read", () => {
     ]);
     failing = true;
     await chat.ask("Again?", [chat.reply(says("Nothing"))]);
-    const request = chat.requests[2] ?? [];
-    expect(JSON.stringify(request)).not.toContain("secret");
+    expect(JSON.stringify(chat.requests[2])).not.toContain("secret");
     expect(chat.stopped.map(({ message }) => message)).toStrictEqual([
       "revocations unreadable",
     ]);
@@ -546,29 +555,43 @@ const fillUntilCompacted = async (
 };
 
 describe("compaction", () => {
-  it("summarizes without what is withheld, and no later request carries it", async () => {
-    const withheld = new Set<string>();
+  it("is pi's own while the chat may read what it holds", async () => {
     const chat = await openChat(
-      { withheld: async () => await Promise.resolve(withheld) },
+      {},
       { contextWindow: 4000, settings: compacting }
     );
     await chat.ask("Read", [
       chat.reply(call("executeCode", { code: readsSecretWord })),
       chat.reply(says("Read")),
     ]);
-    withheld.add("run-1");
     await fillUntilCompacted(chat);
     expect(chat.summaries.length).toBeGreaterThan(0);
-    expect(JSON.stringify(chat.summaries)).not.toContain(secretWord);
-    const after = JSON.stringify(chat.requests.slice(2));
-    expect(after).toContain("summary saw nothing");
-    expect(after).not.toContain(secretWord);
+    expect(JSON.stringify(chat.requests.at(-1))).toContain(
+      `summary saw ${secretWord}`
+    );
   });
 
-  it("withholds a whole summary once a run it rests on is revoked", async () => {
-    const withheld = new Set<string>();
+  it("is declined once a run the chat rests on is revoked, and no summary of it is sent", async () => {
     const chat = await openChat(
-      { withheld: async () => await Promise.resolve(withheld) },
+      {},
+      { contextWindow: 4000, settings: compacting }
+    );
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecretWord })),
+      chat.reply(says("Read")),
+    ]);
+    // The first request may already compact: the instructions alone fill
+    // much of the small window.
+    const before = chat.summaries.length;
+    chat.revoked.add("run-1");
+    await fillUntilCompacted(chat);
+    expect(chat.summaries.slice(before)).toStrictEqual([]);
+    expect(JSON.stringify(chat.requests.slice(2))).not.toContain(secretWord);
+  });
+
+  it("sends no summary made before a revocation once rebased, and summarizes again from what may be read", async () => {
+    const chat = await openChat(
+      {},
       { contextWindow: 4000, settings: compacting }
     );
     await chat.ask("Read", [
@@ -579,75 +602,29 @@ describe("compaction", () => {
     expect(JSON.stringify(chat.requests.at(-1))).toContain(
       `summary saw ${secretWord}`
     );
+    chat.revoked.add("run-1");
     const before = {
       requests: chat.requests.length,
       summaries: chat.summaries.length,
     };
-    withheld.add("run-1");
+    await chat.rebased(2000);
     await chat.ask("Again?", [chat.reply(says("Withheld"))]);
-    // What the model, and a compaction's summarizer, got since: the old
-    // summary only as a note, whether it was sent or folded into a new one.
     const since = JSON.stringify([
       ...chat.requests.slice(before.requests),
       ...chat.summaries.slice(before.summaries),
     ]);
+    expect(chat.summaries.length).toBeGreaterThan(before.summaries);
     expect(since).not.toContain(secretWord);
-    expect(since).toContain(withheldSummary);
-  });
-});
-
-describe("compaction, further", () => {
-  it("keeps what a summary rests on out of the model's text, by an ID", async () => {
-    const chat = await openChat(
-      {},
-      { contextWindow: 4000, settings: compacting }
-    );
-    await chat.ask("Read", [
-      chat.reply(call("executeCode", { code: readsSecretWord })),
-      chat.reply(says("Read")),
-    ]);
-    await fillUntilCompacted(chat);
-    expect([...chat.records.values()].flat()).toContain("run-1");
-    expect(JSON.stringify(chat.requests.at(-1))).not.toContain("run-1");
-  });
-
-  it("withholds a summary whose record is lost once anything is withheld", async () => {
-    const withheld = new Set<string>();
-    const chat = await openChat(
-      { withheld: async () => await Promise.resolve(withheld) },
-      { contextWindow: 4000, settings: compacting }
-    );
-    await chat.ask("Read", [
-      chat.reply(call("executeCode", { code: readsSecretWord })),
-      chat.reply(says("Read")),
-    ]);
-    await fillUntilCompacted(chat);
-    chat.records.clear();
-    withheld.add("another-run");
-    const before = chat.requests.length;
-    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
-    const since = JSON.stringify(chat.requests.slice(before));
-    expect(since).not.toContain(secretWord);
-    expect(since).toContain(withheldSummary);
-  });
-
-  it("retries a summary a transient provider error failed, as pi retries a request", async () => {
-    const chat = await openChat(
-      {},
-      { contextWindow: 4000, settings: compacting, failedSummaries: 1 }
-    );
-    await fillUntilCompacted(chat);
-    expect(chat.summaries.length).toBeGreaterThan(1);
-    expect(JSON.stringify(chat.requests.at(-1))).toContain("summary saw");
+    expect(since).toContain("summary saw nothing");
   });
 });
 
 describe("a restart", () => {
-  it("withholds the result of a code step it cut short once that run is revoked", async () => {
-    const withheld = new Set<string>();
+  it("sends nothing a code step it cut short logged once that run is revoked", async () => {
     const logged = Promise.withResolvers<boolean>();
+    const revoked = new Set<string>();
     const chat = await openChat({
-      withheld: async () => await Promise.resolve(withheld),
+      withheld: async () => await Promise.resolve(revoked),
       runs: {
         open: () => "run-1",
         close: async (_runId, status) => await Promise.resolve(status),
@@ -666,7 +643,7 @@ describe("a restart", () => {
     await logged.promise;
     // Past pi's progress commits, which would store what the step logged.
     await scheduler.wait(300);
-    withheld.add("run-1");
+    revoked.add("run-1");
     await chat.restart([chat.reply(says("Cut short"))]);
     await submitted;
     expect(chat.requests).toHaveLength(2);
