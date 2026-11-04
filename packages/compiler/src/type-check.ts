@@ -225,6 +225,63 @@ const toDiagnostic = (diagnostic: ts.Diagnostic): Diagnostic | undefined => {
   return result;
 };
 
+/** TypeScript's "implicitly has an 'any' type", of a parameter and of a name destructured in one. */
+const implicitAnyCodes: ReadonlySet<number> = new Set([7006, 7031]);
+
+/** The innermost node of `file` that spans `position`. */
+const nodeAt = (file: ts.SourceFile, position: number): ts.Node | undefined => {
+  let found: ts.Node | undefined;
+  const visit = (node: ts.Node): void => {
+    if (position >= node.getStart(file) && position < node.getEnd()) {
+      found = node;
+      ts.forEachChild(node, visit);
+    }
+  };
+  ts.forEachChild(file, visit);
+  return found;
+};
+
+/**
+ * Whether `diagnostic` is an implicit `any` only because a callback was
+ * passed to a callee typed `any`, which gives its parameters no type to
+ * take: `rows.map((row) => …)` where `rows` is `any`. The `any` is what
+ * there is to fix, where it comes from (core checks screens against
+ * stand-ins typed `any` while their server code doesn't register, and
+ * the server says why), never each callback after it. A parameter with no
+ * type anywhere else (a helper's, a callback a typed callee is given) is
+ * still reported.
+ */
+const followsAnyCallee = (
+  diagnostic: ts.Diagnostic,
+  file: ts.SourceFile,
+  checker: ts.TypeChecker
+): boolean => {
+  if (
+    !implicitAnyCodes.has(diagnostic.code) ||
+    diagnostic.start === undefined
+  ) {
+    return false;
+  }
+  let node = nodeAt(file, diagnostic.start);
+  while (node !== undefined && !ts.isParameter(node)) {
+    node = node.parent;
+  }
+  const callback = node?.parent;
+  if (
+    callback === undefined ||
+    !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+  ) {
+    return false;
+  }
+  const call = callback.parent;
+  return (
+    ts.isCallExpression(call) &&
+    call.arguments.some((argument) => argument === callback) &&
+    // The `any` type is that flag alone.
+    checker.getTypeAtLocation(call.expression).flags === ts.TypeFlags.Any
+  );
+};
+
 /**
  * Whether an App file's import of `name` may resolve where it did: to
  * one of the App's files by a relative path or by the `#grasp` mapping,
@@ -451,6 +508,7 @@ export const typeProgram = (
         }),
   };
   const program = ts.createProgram([...app.keys()], targetOptions, host);
+  const checker = program.getTypeChecker();
   const checked = program
     .getSourceFiles()
     .filter((file) => app.has(file.fileName));
@@ -491,7 +549,11 @@ export const typeProgram = (
             {
               found: diagnosticsOf([
                 ...program.getSyntacticDiagnostics(file),
-                ...program.getSemanticDiagnostics(file),
+                ...program
+                  .getSemanticDiagnostics(file)
+                  .filter(
+                    (diagnostic) => !followsAnyCallee(diagnostic, file, checker)
+                  ),
               ]),
               references: referenceErrors(file, app),
             },

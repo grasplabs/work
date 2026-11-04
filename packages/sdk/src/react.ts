@@ -244,9 +244,18 @@ export const useQuery = <Reference extends QueryReference>(
   return snapshot.value as ReturnOf<Reference> | undefined;
 };
 
-/** The record a query of pages answers each of. */
-export type PageItemOf<Reference> =
-  ReturnOf<Reference> extends PaginationResult<infer Item> ? Item : never;
+/**
+ * The record a query of pages answers each of: `any` for a query whose
+ * answer is `any` (core's stand-ins while an App's server code doesn't
+ * register, generate.ts `symbolicModules`), as its other answers are,
+ * where inferring from `any` would make it `unknown`.
+ */
+export type PageItemOf<Reference> = 0 extends 1 & ReturnOf<Reference>
+  ? // oxlint-disable-next-line typescript/no-explicit-any -- as its answer is
+    any
+  : ReturnOf<Reference> extends PaginationResult<infer Item>
+    ? Item
+    : never;
 
 /**
  * What a paginated list of `Reference` takes besides its options: the

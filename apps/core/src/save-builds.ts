@@ -11,7 +11,6 @@ import {
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -19,16 +18,15 @@ import type {
 } from "@grasp-os/shared/apps";
 import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
+import { z } from "zod";
 
-import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
-import { withDraftReferences } from "./draft-references.ts";
+import { inspectDraft, withDraftReferences } from "./draft-references.ts";
+import type { DraftInspection } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
 import {
-  buildAppCode,
   buildScreens,
   buildWorkflows,
   checkAppCode,
@@ -54,6 +52,14 @@ const maxLeftoversNamed = 20;
  * apart, without logging a long message whole.
  */
 const maxLoggedMessage = 300;
+
+/**
+ * What a save says of screens checked against stand-ins for the references
+ * their server code didn't generate (`standIn`): checked for everything
+ * else, never for their calls, so not checked as a whole.
+ */
+const checkedOnStandIns =
+  "Checked without the references the server code generates, as it doesn't register yet: fix the server code and save again.";
 
 /** What a save says of a build that didn't answer within its wait. */
 const tookTooLong =
@@ -101,7 +107,11 @@ const savedBuild = async (
   kind: keyof SavedBuilds | "server",
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
   select: (files: Record<string, string>) => Record<string, string>,
-  build: () => Promise<{ ok: boolean; diagnostics?: Diagnostic[] }>,
+  build: () => Promise<{
+    ok: boolean;
+    diagnostics?: Diagnostic[];
+    standIn?: true;
+  }>,
   env: Env,
   signal?: AbortSignal
 ): Promise<SavedBuild> => {
@@ -114,10 +124,20 @@ const savedBuild = async (
       log.warn("app.save_build_timed_out", { appId: app, version, kind });
       return { status: "error", diagnostics: [], error: tookTooLong };
     }
-    return {
-      status: built.ok ? "ok" : "failed",
-      diagnostics: (built.diagnostics ?? []).map((item) => toDiagnostic(item)),
-    };
+    const diagnostics = (built.diagnostics ?? []).map((item) =>
+      toDiagnostic(item)
+    );
+    // Never `ok` on stand-ins, so whoever reads the status alone isn't
+    // misled: `error` (not checked) with why, or `failed` for what it found.
+    if (built.standIn === true) {
+      return {
+        status: built.ok ? "error" : "failed",
+        diagnostics,
+        error: checkedOnStandIns,
+        standIn: true,
+      };
+    }
+    return { status: built.ok ? "ok" : "failed", diagnostics };
   } catch (error) {
     // Given up on, not failed: whoever gave up on it hears why.
     if (signal?.aborted === true) {
@@ -153,9 +173,16 @@ export const buildOnSave = async (
   {
     profile,
     signal,
+    inspection,
   }: {
     /** `preview` for a chat's draft, `production` for a saved version. */
     readonly profile: BuildProfile;
+    /**
+     * The inspection of its server code the references its screens import
+     * are generated from (`inspectDraft`), when its caller shares one with
+     * the server check: its own otherwise.
+     */
+    readonly inspection?: () => Promise<DraftInspection>;
     /**
      * Aborted once the build is no one's (a build job's lease lost): no
      * build starts the compiler after, and it throws its reason, rather
@@ -174,19 +201,23 @@ export const buildOnSave = async (
       buildFiles,
       // With the references its screens import, generated from these
       // files themselves: neither a save nor a draft is sealed yet.
-      async () =>
-        await buildScreens(
+      async () => {
+        const { files: withReferences, standIn } = await withDraftReferences(
           env,
-          await withDraftReferences(
-            env,
-            source.app,
-            source.version,
-            files,
-            options
-          ),
+          source.app,
+          source.version,
+          files,
+          options,
+          inspection
+        );
+        const built = await buildScreens(
+          env,
+          withReferences,
           source.app,
           options
-        ),
+        );
+        return standIn ? { ...built, standIn: true as const } : built;
+      },
       env,
       signal
     ),
@@ -213,23 +244,27 @@ const layoutProblem = (file: string, message: string): BuildDiagnostic => ({
   message,
 });
 
+/** Where inspecting server code located what it threw (app-inspection.ts). */
+const inspectionDetailsSchema = z.object({
+  message: z.string().optional(),
+  file: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
+});
+
 /**
  * Why inspecting server code that builds refused it, as one diagnostic:
- * what its registration threw, or the SDK's reason its manifest doesn't
+ * what its registration threw, at the line of the App's file it threw
+ * from when its stack named one, or the SDK's reason its manifest doesn't
  * read.
  */
 const inspectionProblem = (
   error: Error & { details?: unknown }
 ): Diagnostic => {
-  const { details } = error;
-  const said =
-    typeof details === "object" &&
-    details !== null &&
-    "message" in details &&
-    typeof details.message === "string"
-      ? details.message
-      : "";
+  const details = inspectionDetailsSchema.safeParse(error.details);
+  const { message: said = "", ...at } = details.success ? details.data : {};
   return {
+    ...at,
     rule: "server",
     severity: "error",
     message: said === "" ? error.message : `${error.message} ${said}`,
@@ -242,13 +277,19 @@ const inspectionProblem = (
  * generates: from what its registration answers, inspected in the sandbox
  * as a save inspects it for its screens (`filesManifest`), with the
  * workflows it declares as the App binds them now. So what a check passes,
- * the seal's type check passes too. Server code that doesn't build or
- * register fails on what its build says, or, when it builds, on why its
- * inspection refused it.
+ * the seal's type check passes too. `inspection` is the one its screens'
+ * references come from too, when its caller shares one (`inspectDraft`).
+ *
+ * Server code that doesn't build or register is type-checked all the same,
+ * against the stand-ins inspection loads (`symbolicModules`, typed `any`):
+ * what doesn't build, its type errors, and why its registration threw
+ * come back together, never one hiding another, and never one error per
+ * file that names a reference.
  */
 const checkedDraftCode = async (
   env: Env,
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
+  inspection: () => Promise<DraftInspection>,
   signal?: AbortSignal
 ): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
   // Whatever the draft holds under `.grasp/` is the host's to generate.
@@ -256,16 +297,10 @@ const checkedDraftCode = async (
     Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
   );
   const options = { profile: "preview", signal } as const;
-  let manifest: AppManifest;
-  try {
-    manifest = await filesManifest(env, code, app, options);
-  } catch (error) {
-    if (!isExpectedError(error)) {
-      throw error;
-    }
-    // Its build, as inspection built it (from the build cache): what fails
-    // there, or else why inspection refused it.
-    const built = await buildAppCode(
+  const inspected = await inspection();
+  if ("failed" in inspected) {
+    const { failed: error } = inspected;
+    const checked = await checkAppCode(
       env,
       {
         ...code,
@@ -275,10 +310,19 @@ const checkedDraftCode = async (
       app,
       options
     );
-    return built.ok
-      ? { ok: false, diagnostics: [inspectionProblem(error)] }
-      : built;
+    // What doesn't build, the check names with its type errors; what
+    // built but didn't register, inspection says.
+    return Reflect.get(error, "code") === "version.build_failed"
+      ? checked
+      : {
+          ok: false,
+          diagnostics: [
+            inspectionProblem(error),
+            ...(checked.ok ? [] : checked.diagnostics),
+          ],
+        };
   }
+  const { manifest } = inspected;
   const generated = await generateModules(
     manifest,
     { resourceId: app, resourceVersion: version },
@@ -296,12 +340,18 @@ const checkedDraftCode = async (
  * no app.ts and schema.ts fails there, saying so). Failed too when it
  * holds files under `app/`, which no commit takes (`app.v1_server`), each
  * named; `none` when it has no server code. Never throws, unless `signal`
- * gave up on it, as `buildOnSave`.
+ * gave up on it, as `buildOnSave`. `inspection` is the one its caller
+ * shares with the screens' build (`inspectDraft`), its own otherwise.
  */
 export const draftServerBuild = async (
   env: Env,
   source: Pick<SavedSource, "app" | "version" | "files">,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  inspection: () => Promise<DraftInspection> = async () =>
+    await inspectDraft(env, source.app, source.files, {
+      profile: "preview",
+      signal,
+    })
 ): Promise<SavedBuild> => {
   const { files } = source;
   const leftovers = Object.keys(files)
@@ -320,7 +370,7 @@ export const draftServerBuild = async (
     "server",
     source,
     appCodeFiles,
-    async () => await checkedDraftCode(env, source, signal),
+    async () => await checkedDraftCode(env, source, inspection, signal),
     env,
     signal
   );

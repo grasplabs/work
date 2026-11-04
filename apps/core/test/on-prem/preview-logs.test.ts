@@ -90,7 +90,8 @@ describe(
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
           await env.build.write(app.id, ${JSON.stringify(drafted)});
           const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
-          const { preview } = await env.build.check(app.id);
+          // Checked as proposing it would, without proposing it.
+          const { preview } = await (async () => { const { job } = await env.build.submit(app.id, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })();
           return {
             created: created.ok,
             logs: preview.logs.map(({ level, message, method }) => ({ level, message, method })),

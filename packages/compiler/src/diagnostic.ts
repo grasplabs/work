@@ -22,3 +22,42 @@ export interface Diagnostic {
 
 export const isError = (diagnostic: Diagnostic): boolean =>
   diagnostic.severity === "error";
+
+/** What TypeScript names its diagnostics by: `TS` and its code. */
+const typeCode = /^TS\d+$/u;
+
+/**
+ * Every gate's diagnostics together, none hiding another (GRA-1527):
+ * `first`, a file's compile and import errors, then `then`, the type
+ * check's and the lint's, less what only says `first` again: a diagnostic
+ * on a line `first` has an error on (TypeScript's "cannot find module"
+ * beside a refused import), anything else of a file in `unparsed`, which
+ * the parser refused (its compile error says where), whose types and lint
+ * would only be guessed past the break, and TypeScript's diagnostics of a
+ * file in `untyped`, whose JSX runtime was refused (a `@jsxImportSource`
+ * pragma), so every element of it is typed against a runtime it never
+ * gets: the refusal says what to fix.
+ */
+export const together = (
+  first: readonly Diagnostic[],
+  then: readonly Diagnostic[],
+  unparsed: ReadonlySet<string>,
+  untyped: ReadonlySet<string> = new Set()
+): Diagnostic[] => {
+  const lines = new Set(
+    first
+      .filter((diagnostic) => isError(diagnostic))
+      .map(({ file, line }) => `${file}:${line}`)
+  );
+  return [
+    ...first,
+    ...then.filter(
+      ({ file, line, rule }) =>
+        !(
+          (file !== undefined && unparsed.has(file)) ||
+          (file !== undefined && untyped.has(file) && typeCode.test(rule)) ||
+          (line !== undefined && lines.has(`${file}:${line}`))
+        )
+    ),
+  ];
+};

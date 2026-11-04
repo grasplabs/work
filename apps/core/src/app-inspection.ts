@@ -95,6 +95,36 @@ const withoutStack = (message: string): string =>
     .filter((line) => !stackLine.test(line))
     .join("\n");
 
+/** A frame of a stack trace in one of the App's modules: `app~app.js:12:5`. */
+const appFrame = /\b(?<module>app~[^\s:()]+\.js):(?<line>\d+):(?<column>\d+)/u;
+
+/**
+ * Where in the App's own files `error` was thrown, by the first frame of
+ * its stack (or of its message, which carries the stack when it crossed
+ * from the sandbox host) in one of `modules`: their lines are the
+ * source's (`retainLines`, the compiler's compile.ts), so the line is the
+ * file's; the column is the compiled code's, so it is left out. Nothing
+ * when no frame names one of them.
+ */
+const thrownAt = (
+  error: unknown,
+  modules: Readonly<Record<string, string>>
+): { file: string; line: number } | Record<string, never> => {
+  const text = [
+    error instanceof Error ? error.message : "",
+    error instanceof Error ? (error.stack ?? "") : "",
+  ].join("\n");
+  for (const candidate of text.split("\n")) {
+    const frame = appFrame.exec(candidate)?.groups;
+    if (frame?.module !== undefined && Object.hasOwn(modules, frame.module)) {
+      // Server code is TypeScript (`.ts`), each folder a `~` in its name.
+      const file = `${frame.module.slice("app~".length, -".js".length).replaceAll("~", "/")}.ts`;
+      return { file, line: Number(frame.line) };
+    }
+  }
+  return {};
+};
+
 /** The details of a refused build: where and why, as diagnostics say. */
 const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
   diagnostics: diagnostics
@@ -187,6 +217,7 @@ export const inspected = async (
         0,
         maxFailure
       ),
+      ...thrownAt(error, modules),
     });
   }
   if (typeof text !== "string") {

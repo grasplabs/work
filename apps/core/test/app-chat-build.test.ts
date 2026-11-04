@@ -151,9 +151,13 @@ const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
 const calling = (app: string) =>
   `export default async (self, env) => await env.build.call(${JSON.stringify(app)}, "cards.list", {});`;
 
-/** Code that checks the draft of `app` and calls its `cards.list`. */
+/**
+ * Code that checks the draft of `app` as proposing it would, without
+ * proposing it (a check job, followed until it ends), and calls its
+ * `cards.list`.
+ */
 const checking = (app: string) => `export default async (self, env) => {
-  const check = await env.build.check(${JSON.stringify(app)});
+  const check = await (async () => { const { job } = await env.build.submit(${JSON.stringify(app)}, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })();
   const called = await env.build.call(${JSON.stringify(app)}, "cards.list", {});
   return {
     passed: check.passed,
@@ -261,7 +265,12 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       passed: false,
       server: "failed",
-      diagnostics: [{ file: null, line: null, refused: true }],
+      // Where its registration threw, the call of app(), and the type
+      // error that says why, together.
+      diagnostics: [
+        { file: "app.ts", line: 6, refused: true },
+        { file: "app.ts", line: 9, refused: false },
+      ],
       called: { ok: false, code: "version.inspection_failed", refused: true },
     });
     // A type error, as the seal's build names it: its file and line.

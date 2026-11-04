@@ -10,11 +10,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { maxFailedChecks } from "../src/agent-builds.ts";
 import {
   chatOf,
   codeResults,
   codeStep,
+  openTestRun,
   says,
   setObjectEnv,
   testRunOpening,
@@ -85,42 +85,26 @@ export default workflowTests(definition, [
 /** Code that finds the App the agent created, by its name, as `app`. */
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
-/** Creates the App, writes the restyled screen, and checks. */
+/** Creates the App and writes the restyled screen: the write says what fails. */
 const firstTry = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
-  const check = await env.build.check(app.id);
+  const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
   return {
-    passed: check.passed,
-    screens: check.screens.status,
-    rules: check.screens.diagnostics.map(({ rule }) => rule),
-    tests: check.tests.status,
-    failedInARow: check.failedInARow,
+    errors: written.errors,
+    found: written.diagnostics.map(({ file, line, rule }) => ({ file, line, rule })),
   };
 };`;
 
-/** Writes the fixed screen, and checks again. */
+/** Writes the fixed screen: nothing fails. */
 const repair = `export default async (self, env) => {
   ${findApp}
   const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
-  const check = await env.build.check(app.id);
   const draft = await env.build.files(app.id);
-  return {
-    changed: written.changed,
-    passed: check.passed,
-    screens: check.screens.status,
-    tests: check.tests.status,
-    failedInARow: check.failedInARow,
-    screen: draft.files["screens/desk.tsx"],
-  };
+  return { ...written, screen: draft.files["screens/desk.tsx"] };
 };`;
 
-/** A diagnostic of the App's layout about `file`, as a check reports it. */
-const layout = (file: string | null) => ({
-  file,
-  rule: "server",
-  category: "structure",
-});
+/** A diagnostic of the App's layout about `file`, as a write reports it. */
+const layout = (file: string | null) => ({ file, rule: "server" });
 
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
@@ -401,18 +385,17 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(results.map(({ isError }) => isError)).toStrictEqual([false, false]);
     const [first, second] = results;
     expect(returned(first?.text)).toStrictEqual({
-      passed: false,
-      screens: "failed",
-      rules: ["shadcn/no-restyle"],
-      tests: "none",
-      failedInARow: 1,
+      errors: 1,
+      found: [{ file: "screens/desk.tsx", line: 6, rule: "shadcn/no-restyle" }],
     });
     expect(returned(second?.text)).toStrictEqual({
+      base: null,
       changed: ["screens/desk.tsx"],
-      passed: true,
-      screens: "ok",
-      tests: "none",
-      failedInARow: 0,
+      errors: 0,
+      warnings: 0,
+      diagnostics: [],
+      leftOut: 0,
+      notChecked: {},
       screen: fixed,
     });
 
@@ -518,32 +501,25 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(steps).toHaveLength(2);
   });
 
-  it("stops the repair loop after four failed checks in a row, until the next question", async () => {
-    const checks = `export default async (self, env) => {
-      ${findApp}
-      const outcomes = [];
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-          const check = await env.build.check(app.id);
-          outcomes.push(check.failedInARow);
-        } catch (error) {
-          outcomes.push(error.message);
-        }
-      }
-      return outcomes;
-    };`;
+  it("answers every write with what fails, however often the same error comes back, and never locks the agent out", async () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
+        const errors = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const written = await env.build.write(app.id, { "screens/desk.tsx": ${JSON.stringify(restyled)} + "// " + attempt + "\\n" });
+          errors.push(written.errors);
+        }
+        return errors;
       };`),
-      codeStep(checks),
-      says("It still fails: the button is restyled."),
+      says("The button is still restyled: I'm stuck on it."),
       codeStep(`export default async (self, env) => {
         ${findApp}
-        return (await env.build.check(app.id)).failedInARow;
+        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+        const proposal = await env.build.propose(app.id, "A desk");
+        return { errors: written.errors, version: proposal.version };
       };`),
-      says("Checked again."),
+      says("Fixed and proposed."),
     ]);
     await grant();
 
@@ -551,99 +527,166 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Try once more");
 
     const results = await codeResults(chat.stub, chat.chat.id);
-    const exhausted = appErrors.create("app.checks_exhausted").message;
-    // Spec 18.1's four passes: the fourth runs, the fifth is refused.
-    expect(returned(results[1]?.text)).toStrictEqual([1, 2, 3, 4, exhausted]);
-    // A new question gives the loop its count back.
-    expect(returned(results[2]?.text)).toBe(1);
+    expect(returned(results[0]?.text)).toStrictEqual(
+      Array.from({ length: 8 }, () => 1)
+    );
+    expect(returned(results[1]?.text)).toStrictEqual({ errors: 0, version: 1 });
   });
 
-  it("starts a repair session's ten minutes again at a passing check, while others still run", async () => {
-    const { chat } = await setUp([]);
-    const started = Date.parse("2026-10-20T09:00:00Z");
-    const minutes = 60_000;
+  it("answers a write tool with a type error and a lint error together, by file", async () => {
+    const mistyped = restyled.replace(
+      "export default function Desk() {",
+      'const count: number = "seven";\n\nexport default function Desk() {\n  void count;'
+    );
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", { app, files: { "screens/desk.tsx": mistyped } }),
+      says("Two things fail."),
+    ]);
 
-    const taken = await runInDurableObject(chat.stub, (instance) => {
-      const take = () => instance.takeCheck(chat.chat.id, "draft", 4);
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(started);
-      try {
-        take();
-        take();
-        // One passes five minutes in, while the other still runs, then fails.
-        vi.setSystemTime(started + 5 * minutes);
-        instance.settleCheck(chat.chat.id, "draft", true);
-        instance.settleCheck(chat.chat.id, "draft", false);
-        vi.setSystemTime(started + 15 * minutes);
-        const atLimit = take();
-        vi.setSystemTime(started + 15 * minutes + 1);
-        return { atLimit, past: take() };
-      } finally {
-        vi.useRealTimers();
-      }
+    await chat.ask("Add a desk screen to the Ledger");
+
+    const [written] = await toolResults(chat.stub, chat.chat.id);
+    expect(written?.isError).toBeFalsy();
+    expect(returned(written?.text)).toMatchObject({
+      errors: 2,
+      diagnostics: [
+        { file: "screens/desk.tsx", line: 3, rule: "TS2322" },
+        { file: "screens/desk.tsx", line: 9, rule: "shadcn/no-restyle" },
+      ],
+      leftOut: 0,
     });
-
-    // Ten minutes from the pass, not from the session's first check.
-    expect(taken).toStrictEqual({ atLimit: true, past: false });
   });
 
-  it("holds checks started at once to the repair loop's limit", async () => {
+  it("reports server code that throws as it registers as one error at its line, not one per screen", async () => {
+    const throwing = (notesFiles["app.ts"] ?? "").replace(
+      "\nexport default app({",
+      'if (schema !== undefined) throw new Error("No notes today");\nexport default app({'
+    );
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
-        const tried = async () => { try { return (await env.build.check(app.id)).passed; } catch (error) { return error.message; } };
-        return await Promise.all(Array.from({ length: 12 }, tried));
+        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesFiles, "app.ts": throwing })});
+        const proposal = await env.build.propose(app.id, "Notes");
+        // Then an operations file that doesn't parse, its registration fixed.
+        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "app.ts": notesFiles["app.ts"], "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}\nexport const broken = query({ args: {` })});
+        return {
+          errors: written.errors,
+          diagnostics: written.diagnostics.map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
+          version: proposal.version,
+          unparsed: { errors: unparsed.errors, files: [...new Set(unparsed.diagnostics.map(({ file }) => file))] },
+        };
       };`),
-      says("It still fails."),
+      says("The registration throws."),
     ]);
     await grant();
 
-    await chat.ask("Build an invoice desk");
+    await chat.ask("Build a notes App");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    const outcomes = z.array(z.unknown()).parse(returned(result?.text));
-    const exhausted = appErrors.create("app.checks_exhausted").message;
-    // Four ran and failed; the other eight were refused before they ran.
-    expect({
-      ran: outcomes.filter((outcome) => outcome === false).length,
-      refused: outcomes.filter((outcome) => outcome === exhausted).length,
-    }).toStrictEqual({ ran: 4, refused: 8 });
+    expect(returned(result?.text)).toStrictEqual({
+      errors: 1,
+      diagnostics: [
+        {
+          file: "app.ts",
+          line: 4,
+          rule: "server",
+          severity: "error",
+          says: true,
+        },
+      ],
+      version: null,
+      // Its compile error, and nothing of the screens that import it.
+      unparsed: { errors: 1, files: ["operations/notes.ts"] },
+    });
   });
 
-  it("ends a repair session after ten minutes of checks, counted from its first", async () => {
-    // At the Workspace object's own boundary, which counts the checks:
-    // the agent's turn signs each model request by the clock, which connect
-    // checks by its own, so a clock moved ten minutes on can't run a turn.
-    const { chat } = await setUp([]);
+  it("never proposes screens checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
+    // The attack, under load: the sandbox ends one inspection of the
+    // server code (its deadline), so the screens fall back to the
+    // permissive stand-ins, while another inspection of the same code
+    // registers and passes the server check. Proposed then, a screen with
+    // calls that don't exist would be committed. The draft's builds
+    // inspect once, for both, and a stand-in check never passes.
+    const { person, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${findApp}
+        const proposal = await env.build.propose(app.id, "Notes");
+        return {
+          version: proposal.version,
+          passed: proposal.check.passed,
+          standIn: proposal.check.screens.standIn ?? false,
+          server: proposal.check.server.status,
+        };
+      };`),
+      says("It doesn't pass yet."),
+    ]);
+    await grant();
+    const { id: app } = await person.api.apps.create({ name: appName });
     const chatId = chatIdSchema.parse(chat.chat.id);
-    const app = crypto.randomUUID();
-    const started = Date.parse("2026-10-20T09:00:00Z");
-    const minutes = 60_000;
-    const checkAt = async (at: number) => {
-      vi.setSystemTime(at);
-      const taken = await chat.stub.takeCheck(chatId, app, maxFailedChecks);
-      if (taken) {
-        await chat.stub.settleCheck(chatId, app, false);
-      }
-      return taken;
+    // Never inspected before, so no kept registration serves it.
+    const files = {
+      ...notesFiles,
+      "app.ts": `${notesFiles["app.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     };
-
-    vi.useFakeTimers({ toFake: ["Date"] });
-    let taken: boolean[] = [];
+    await chat.stub.saveDraft(
+      chatId,
+      app,
+      null,
+      files,
+      [],
+      0,
+      await openTestRun(chat.stub, chatId)
+    );
+    // The sandbox ends the first inspection only, as its deadline would.
+    const { LOADER: loader } = env;
+    let inspections = 0;
+    const ending: WorkerLoader = {
+      // Unnamed: an isolate of the sandbox's, whose code is read when it
+      // starts, wrapped (shared/quiet-loader.ts) around its own main.
+      get: (name, code) =>
+        loader.get(
+          name,
+          name === null
+            ? async () => {
+                const worker = await code();
+                if (!Object.hasOwn(worker.modules, "grasp-inspect.js")) {
+                  return worker;
+                }
+                inspections += 1;
+                return inspections === 1
+                  ? {
+                      ...worker,
+                      modules: {
+                        ...worker.modules,
+                        "grasp-inspect.js":
+                          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class Inspect extends WorkerEntrypoint { manifest() { throw new Error("The sandbox ended it: past its deadline."); } }\n',
+                      },
+                    }
+                  : worker;
+              }
+            : code
+        ),
+      load: (code) => loader.load(code),
+    };
     try {
-      taken = [
-        await checkAt(started),
-        await checkAt(started + 10 * minutes),
-        await checkAt(started + 10 * minutes + 1),
-      ];
+      env.LOADER = ending;
+      await chat.ask("Propose the notes App");
     } finally {
-      vi.useRealTimers();
+      env.LOADER = loader;
     }
 
-    // A check exactly ten minutes in still runs; a millisecond past, the
-    // session is over though it has passes left.
-    expect(taken).toStrictEqual([true, true, false]);
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect({ inspections, proposal: returned(result?.text) }).toStrictEqual({
+      // One inspection, read by the screens and the server check alike.
+      inspections: 1,
+      proposal: {
+        version: null,
+        passed: false,
+        standIn: true,
+        server: "failed",
+      },
+    });
+    await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
   });
 
   it("caps the Apps a turn creates, counting none that wasn't created", async () => {
@@ -1228,22 +1271,24 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("fails a check whose build couldn't run, saying so, and passes it once the build can", async () => {
-    const check = `export default async (self, env) => {
+  it("says a write's build couldn't run, proposes nothing then, and checks it at the next write once it can", async () => {
+    const write = `export default async (self, env) => {
       ${findApp}
-      const check = await env.build.check(app.id);
-      return { passed: check.passed, screens: check.screens, failedInARow: check.failedInARow };
+      const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+      const proposal = await env.build.propose(app.id, "A desk");
+      return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
     };`;
     // Never built before, so no build of it is in the cache to serve.
     const unbuilt = `${fixed}\n// ${crypto.randomUUID()}\n`;
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": unbuilt })});
+        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": unbuilt })});
+        const proposal = await env.build.propose(app.id, "A desk");
+        return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
       };`),
-      codeStep(check),
       says("It couldn't be built now."),
-      codeStep(check),
+      codeStep(write),
       says("Built."),
     ]);
     await grant();
@@ -1268,36 +1313,31 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Check it again");
 
     const results = await codeResults(chat.stub, chat.chat.id);
-    // Not passed, so never proposed, and counted by the repair loop as any
-    // check that didn't pass: a build that can't run can't be checked
-    // without end.
-    expect(returned(results[1]?.text)).toStrictEqual({
-      passed: false,
-      screens: {
-        status: "error",
-        diagnostics: [],
-        error:
+    // No error found, but not checked either: never proposed.
+    expect(returned(results[0]?.text)).toStrictEqual({
+      errors: 0,
+      notChecked: {
+        screens:
           "The build couldn't run now. It runs again when this is first used.",
       },
-      failedInARow: 1,
+      version: null,
     });
-    expect(returned(results[2]?.text)).toStrictEqual({
-      passed: true,
-      screens: { status: "ok", diagnostics: [] },
-      failedInARow: 0,
+    expect(returned(results[1]?.text)).toStrictEqual({
+      errors: 0,
+      notChecked: {},
+      version: 1,
     });
   });
 
-  it("fails a check whose build doesn't finish within its bound, and proposes nothing", async () => {
+  it("says a write's build didn't finish within its bound, and proposes nothing", async () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
-        const check = await env.build.check(app.id);
+        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
         const proposal = await env.build.propose(app.id, "Fixed the button");
         return {
-          check: { passed: check.passed, screens: check.screens, failedInARow: check.failedInARow },
-          proposal: { version: proposal.version, passed: proposal.check.passed, failedInARow: proposal.check.failedInARow },
+          written: { errors: written.errors, notChecked: written.notChecked },
+          proposal: { version: proposal.version, passed: proposal.check.passed, screens: proposal.check.screens },
         };
       };`),
       says("It couldn't be built in time."),
@@ -1334,19 +1374,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     }
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
+    const late =
+      "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
-      check: {
+      written: { errors: 0, notChecked: { screens: late } },
+      proposal: {
+        version: null,
         passed: false,
-        screens: {
-          status: "error",
-          diagnostics: [],
-          error:
-            "The build didn't finish in time. It runs again when this is first used.",
-        },
-        failedInARow: 1,
+        screens: { status: "error", diagnostics: [], error: late },
       },
-      // Counted as failed too, and not proposed.
-      proposal: { version: null, passed: false, failedInARow: 2 },
     });
   });
 
@@ -1602,21 +1638,14 @@ export const titles = action({
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const server = async () => {
-          const checked = await env.build.check(app.id);
-          return { passed: checked.passed, status: checked.server.status, diagnostics: checked.server.diagnostics.map(({ file, rule, category }) => ({ file, rule, category })) };
-        };
-        await env.build.write(app.id, ${JSON.stringify({ ...sound, "operations/notes.ts": wrongCall })});
-        const wrongCall = await server();
-        await env.build.write(app.id, ${JSON.stringify(sound)});
-        const sound = await server();
-        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })});
-        const mistyped = await server();
+        // What each write says of the server code (its screens apart).
+        const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("screens/")).map(({ file, rule }) => ({ file, rule })) });
+        const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "operations/notes.ts": wrongCall })}));
+        const sound = server(await env.build.write(app.id, ${JSON.stringify(sound)}));
+        const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })}));
         const proposal = await env.build.propose(app.id, "Notes");
-        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })});
-        const leftover = await server();
-        await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })});
-        const unregistered = await server();
+        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })}));
+        const unregistered = server(await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })}));
         return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
       };`),
       says("Checked."),
@@ -1628,31 +1657,19 @@ export const titles = action({
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toMatchObject({
       wrongCall: {
-        passed: false,
-        status: "failed",
-        diagnostics: [
-          { file: "operations/notes.ts", rule: "TS2339", category: "types" },
-        ],
+        errors: 1,
+        diagnostics: [{ file: "operations/notes.ts", rule: "TS2339" }],
       },
-      sound: { passed: true, status: "ok", diagnostics: [] },
+      sound: { errors: 0, diagnostics: [] },
       mistyped: {
-        passed: false,
-        status: "failed",
-        diagnostics: [
-          { file: "operations/notes.ts", rule: "TS2322", category: "types" },
-        ],
+        errors: 1,
+        diagnostics: [{ file: "operations/notes.ts", rule: "TS2322" }],
       },
       proposed: { version: null, passed: false, server: "failed" },
       leftover: {
-        passed: false,
-        status: "failed",
         diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
       },
-      unregistered: {
-        passed: false,
-        status: "failed",
-        diagnostics: [layout(null)],
-      },
+      unregistered: { diagnostics: [layout(null)] },
     });
     const app = await createdApp(person.api);
     await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(

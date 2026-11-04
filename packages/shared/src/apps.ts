@@ -509,8 +509,18 @@ export interface BuildDiagnostic {
 export interface SavedBuild {
   status: "ok" | "failed" | "none" | "error";
   diagnostics: BuildDiagnostic[];
-  /** Why a build couldn't run, with `error`. */
+  /**
+   * Why a build couldn't run, with `error`; or why screens were checked
+   * only in part (`standIn`).
+   */
   error?: string;
+  /**
+   * Screens checked against stand-ins for the references their server code
+   * generates, because it doesn't build or register: never `ok` (`error`
+   * when nothing else failed, `failed` when something did), with why in
+   * `error`. Check again once the server code registers.
+   */
+  standIn?: true;
 }
 
 /** A committed version, with how its builds went (`AppFilesApi.commit`). */
@@ -1081,8 +1091,6 @@ export const appErrors = defineErrorFamily({
   "app.failed": "The App's server code failed.",
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
-  "app.checks_exhausted":
-    "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may: checking opens again at the person's next message. Fix what the last check named, reading how it is written in Grasp's reference (readFile without an App: @grasp-os/sdk/src/app.ts, and a working App in blueprints/board-page/), then tell the person what you changed and what still fails.",
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":

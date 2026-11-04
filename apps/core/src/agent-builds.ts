@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors, commitMessageSchema } from "@grasp-os/shared/apps";
 import type {
   App,
+  BuildDiagnostic,
   Blueprint,
   CreatedFromBlueprint,
   SavedBuild,
@@ -14,7 +15,6 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ServerLog } from "@grasp-os/shared/screens";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
@@ -38,6 +38,8 @@ import type { Acting, Member } from "./auth/identity.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
+import { inspectDraft } from "./draft-references.ts";
+import type { DraftInspection } from "./draft-references.ts";
 import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
@@ -72,15 +74,15 @@ import type { Draft } from "./workspace.ts";
 // reaches a binding that no review lists. A workflow a builder wrote stays
 // in the draft as it is: the agent may delete it, never change it.
 //
-// It checks a draft as a save does (screens and
-// workflows: type errors, @shadcn/lint and build errors), and its server
-// code as its seal type-checks it, against the references the seal
-// generates, only its registration run (`draftServerBuild`),
-// and runs its workflows' tests; what fails only once it runs, the preview
-// reports as it seals it. A check also reads
-// what the preview of the draft in the person's side panel ran into so far
-// (preview-reports.ts): runtime errors fail it as build errors do, so the
-// repair loop fixes them within the same limits. The agent can also call
+// Every write answers with what the whole draft builds to (`draftBuilds`),
+// as a save builds it (screens and workflows: compile, type errors,
+// @shadcn/lint and the React Compiler) and its server code as its seal
+// type-checks it, every gate at once and none hiding another: sorted by
+// file, each named once (`writtenDiagnostics`). There is no check of its
+// own to call: proposing checks the draft again, runs its workflows'
+// tests and reads what the preview of the draft in the person's side
+// panel ran into so far (preview-reports.ts), and refuses it while
+// anything fails. The agent can also call
 // the draft's server code itself (`call`), in that same preview: the draft
 // sealed into a draft release, with its own empty store, never the App's
 // live data (sealed-previews.ts). Tests run in isolates with an empty
@@ -91,15 +93,12 @@ import type { Draft } from "./workspace.ts";
 // version current, or can: a builder of the App does, in Grasp, and what
 // the App asks for waits for an admin to grant it.
 //
-// The repair loop is the agent loop itself: a check answers with what
-// fails, the agent writes a fix and checks again, until it passes or
-// `maxFailedChecks` checks of one draft failed in a row in one turn, when
-// checking refuses and the agent tells the person what still fails. Each
-// check takes its place against the limit before it runs (in the
-// Workspace object, so checks started at once can't pass it). A turn
-// creates at most `maxCreatesPerTurn` Apps. Nothing else of a turn's
-// building has a limit of its own: its code runs, and the calls one run may
-// make (code-mode.ts), bound the rest.
+// The repair loop is the agent loop itself: a write answers with what
+// fails, the agent writes a fix, until nothing does. It has no count of
+// its own that locks the agent out: its instructions tell it to stop and
+// say what it is stuck on once the same error comes back three times, and
+// a turn's code runs and tool calls (agent.ts) bound it. A turn creates at
+// most `maxCreatesPerTurn` Apps.
 //
 // A check or a proposal that takes longer than a code run may live goes to
 // a durable job instead (`submit`, build-jobs.ts): a workflow of core's
@@ -123,18 +122,6 @@ import type { Draft } from "./workspace.ts";
 // the person.
 
 /**
- * Most checks of one draft that may fail in a row in one turn: a repair
- * session's passes (spec 18.1, `repairPasses`), whose active time is
- * bounded too (`repairActiveMs`, workspace.ts). Checks running at once
- * count against it before they run. A turn has at most 30 code runs
- * (agent.ts), so this leaves it room to answer: without it a draft that
- * never passes would take every run the turn has before the person hears
- * it can't be fixed. The agent's model is the chat's, so a session has no
- * model escalation to bound (`repairEscalations`).
- */
-export const maxFailedChecks = platformLimits.repairPasses;
-
-/**
  * Most Apps the chat's agent may create in one turn. An App can't be
  * deleted, and a turn's code runs and their calls would let one turn
  * create thousands: this is what keeps a turn that runs away from leaving
@@ -142,7 +129,10 @@ export const maxFailedChecks = platformLimits.repairPasses;
  */
 export const maxCreatesPerTurn = 3;
 
-/** Most diagnostics or test failures a check answers with, of each kind. */
+/**
+ * Most diagnostics or test failures a check answers with, of each kind,
+ * and most diagnostics a write answers with in all.
+ */
 const maxReported = 50;
 
 /**
@@ -331,7 +321,30 @@ export interface DraftFiles {
   files: Record<string, string>;
 }
 
-/** How a check of a draft went. */
+/** One of a write's diagnostics, as the model reads it. */
+export type WrittenDiagnostic = Omit<BuildDiagnostic, "category">;
+
+/** What a write of a draft answers: what it changed, and what fails now. */
+export interface DraftWrite {
+  /** The version it is over; null for an App with none yet. */
+  base: number | null;
+  /** The paths it changed (null content: deleted), sorted. */
+  changed: string[];
+  /** Errors in the whole draft now: none is what proposing needs. */
+  errors: number;
+  warnings: number;
+  /**
+   * Every gate's diagnostics of the whole draft (`writtenDiagnostics`):
+   * by file, each once, the first {@link maxReported}.
+   */
+  diagnostics: WrittenDiagnostic[];
+  /** How many more there were. */
+  leftOut: number;
+  /** A build that couldn't run now, by kind, with why: write again. */
+  notChecked: Partial<Record<keyof DraftBuilds, string>>;
+}
+
+/** How a check of a draft went: what proposing it checks. */
 export interface DraftCheck {
   /**
    * It all builds and every workflow test passes: what proposing needs. A
@@ -367,10 +380,6 @@ export interface DraftCheck {
     seen: boolean;
     note: string;
   };
-  /** Checks of this draft that failed in a row this turn. */
-  failedInARow: number;
-  /** How many may fail in a row before checking refuses. */
-  maxFailedChecks: number;
 }
 
 /** The chat's draft of `app`, with the version it starts over when new. */
@@ -386,9 +395,13 @@ export const draftOf = async (
     : draft;
 };
 
-/** Whether a build lets a draft through: it built, or had nothing to. */
-const buildPassed = ({ status }: SavedBuild): boolean =>
-  status === "ok" || status === "none";
+/**
+ * Whether a build lets a draft through: it built, or had nothing to, and
+ * never against stand-ins for references its server code didn't generate
+ * (`standIn`): screens checked against those accept any call.
+ */
+const buildPassed = ({ status, standIn }: SavedBuild): boolean =>
+  (status === "ok" || status === "none") && standIn !== true;
 
 /** A build as a check answers it: its first diagnostics only. */
 const reported = (build: SavedBuild): SavedBuild => ({
@@ -437,9 +450,12 @@ export const afterProposal =
     return undefined;
   };
 
-/** Logs a turn's count that couldn't be settled; the call's own error goes on. */
-const logCountFailure = (failure: unknown): void => {
-  log.warn("agent.check_settle_failed", errorFields(failure));
+/**
+ * Logs what this turn took that couldn't be given back (an App it may
+ * create, a build job's place); the call's own error goes on.
+ */
+const logReleaseFailure = (failure: unknown): void => {
+  log.warn("agent.turn_release_failed", errorFields(failure));
 };
 
 /**
@@ -474,6 +490,93 @@ const previewOf = async (
   };
 };
 
+/** A draft's builds: its screens, its server code and its workflows. */
+export type DraftBuilds = Pick<DraftCheck, "screens" | "server" | "workflows">;
+
+/**
+ * Builds a draft's `files` as a save does (`buildOnSave`: screens and
+ * workflows) and its server code as its seal type-checks it
+ * (`draftServerBuild`), all at once: every gate of each, none hiding
+ * another. Typed by the App's permissions now, as a version committed
+ * from it would be. Its server code is inspected once, at most, for both
+ * (`inspectDraft`): the screens' references and the server check read the
+ * same registration, so a sandbox that ends one inspection can't check
+ * the screens against stand-ins while the server passes.
+ */
+const draftBuilds = async (
+  env: Env,
+  app: AppId,
+  base: number | null,
+  files: Record<string, string>,
+  signal?: AbortSignal
+): Promise<DraftBuilds> => {
+  const version = base ?? 0;
+  let inspecting: Promise<DraftInspection> | undefined;
+  // Only once something reads it: a draft with no server code nor screens
+  // that import its references inspects nothing.
+  const inspection = async (): Promise<DraftInspection> => {
+    inspecting ??= inspectDraft(env, app, files, {
+      profile: "preview",
+      signal,
+    });
+    return await inspecting;
+  };
+  const [saved, server] = await Promise.all([
+    buildOnSave(
+      env,
+      { app, version, files, bindings: await appBindingKinds(env, app) },
+      { profile: "preview", signal, inspection }
+    ),
+    draftServerBuild(env, { app, version, files }, signal, inspection),
+  ]);
+  return { screens: saved.screens, server, workflows: saved.workflows };
+};
+
+/** Where a diagnostic is, to sort by: its file (the App's own last), line and column. */
+const placeOf = ({ file, line, column }: BuildDiagnostic): string =>
+  `${file ?? "\uFFFF"}\u0000${String(line ?? 0).padStart(8, "0")}\u0000${String(column ?? 0).padStart(8, "0")}`;
+
+/**
+ * The diagnostics of `builds` as a write answers them: all together,
+ * sorted by file, line and column, each said once (a screen's and a
+ * workflow's check may both name a file they share), within
+ * {@link maxReported}, errors first where that cuts some off.
+ */
+const writtenDiagnostics = (
+  builds: DraftBuilds
+): Pick<DraftWrite, "errors" | "warnings" | "diagnostics" | "leftOut"> => {
+  const seen = new Set<string>();
+  const all: BuildDiagnostic[] = [];
+  for (const build of [builds.screens, builds.server, builds.workflows]) {
+    for (const diagnostic of build.diagnostics) {
+      const key = JSON.stringify([
+        diagnostic.file,
+        diagnostic.line,
+        diagnostic.column,
+        diagnostic.rule,
+        diagnostic.message,
+      ]);
+      if (!seen.has(key)) {
+        seen.add(key);
+        all.push(diagnostic);
+      }
+    }
+  }
+  const errors = all.filter(({ severity }) => severity === "error");
+  const warnings = all.filter(({ severity }) => severity === "warning");
+  const kept = [...errors, ...warnings]
+    .slice(0, maxReported)
+    .toSorted((a, b) => placeOf(a).localeCompare(placeOf(b)));
+  return {
+    errors: errors.length,
+    warnings: warnings.length,
+    diagnostics: kept.map(
+      ({ category: _category, ...diagnostic }) => diagnostic
+    ),
+    leftOut: all.length - kept.length,
+  };
+};
+
 /**
  * Builds a draft's `files` and runs their workflows' tests (`check`), and
  * reads what the preview of its revision ran into: a check fails while
@@ -493,33 +596,22 @@ export const checkFiles = async (
    * have outlived the lease.
    */
   signal?: AbortSignal
-): Promise<Omit<DraftCheck, "failedInARow" | "maxFailedChecks">> => {
+): Promise<DraftCheck> => {
   signal?.throwIfAborted();
-  const version = base ?? 0;
-  // Its server code checked beside the save's builds, all at once.
-  const [saved, server] = await Promise.all([
-    buildOnSave(
-      env,
-      // Typed by the App's permissions now, as a version committed from it
-      // would be.
-      { app, version, files, bindings: await appBindingKinds(env, app) },
-      { profile: "preview", signal }
-    ),
-    draftServerBuild(env, { app, version, files }, signal),
-  ]);
+  const builds = await draftBuilds(env, app, base, files, signal);
   signal?.throwIfAborted();
-  const tests = await testsOf(env, app, base, files, saved.workflows, signal);
+  const tests = await testsOf(env, app, base, files, builds.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [saved.screens, server, saved.workflows].every(buildPassed) &&
+    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
-    screens: reported(saved.screens),
-    server: reported(server),
-    workflows: reported(saved.workflows),
+    screens: reported(builds.screens),
+    server: reported(builds.server),
+    workflows: reported(builds.workflows),
     tests,
     preview,
   };
@@ -619,9 +711,9 @@ export interface Proposal {
 
 /**
  * Proposes the chat's draft of `app` for review, by `by`: checks it over
- * the App's latest version (`checkFiles`, through `counted` when its
- * checks are counted), and once it passes commits it as the App's next
- * version, pending, with `message`, and drops the draft. A draft that
+ * the App's latest version (`checkFiles`), and once it passes commits it
+ * as the App's next version, pending, with `message`, and drops the
+ * draft. A draft that
  * fails isn't proposed: what fails comes back instead. The chat's agent
  * proposes this way (`env.build.propose`), and so does its person, as
  * themselves, from the App's workspace (`ChatsApi.proposeDraft`).
@@ -633,17 +725,8 @@ export const proposeChatDraft = async (
   app: AppId,
   message: unknown,
   {
-    counted = async (_app, run) => ({
-      result: await run(),
-      failedInARow: 0,
-    }),
     admit,
   }: {
-    /** Runs the check as one of the draft's counted checks. */
-    counted?: <T extends Pick<DraftCheck, "passed">>(
-      app: AppId,
-      run: () => Promise<T>
-    ) => Promise<{ result: T; failedInARow: number }>;
     /** Admits the commit: before it starts, and right before it is written. */
     admit?: () => Promise<void>;
   } = {}
@@ -653,16 +736,13 @@ export const proposeChatDraft = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   const over = await draftOverLatest(env, app, draft);
-  const checked = await counted(
+  const check = await checkFiles(
+    env,
+    scope,
     app,
-    async () =>
-      await checkFiles(env, scope, app, draft, Object.fromEntries(over.files))
+    draft,
+    Object.fromEntries(over.files)
   );
-  const check = {
-    ...checked.result,
-    failedInARow: checked.failedInARow,
-    maxFailedChecks,
-  };
   if (!check.passed) {
     return { version: null, check, review: null, reviewUnavailable: false };
   }
@@ -870,38 +950,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       // Refused (the person's role, say): it created nothing.
       await workspace(this.env, workspaceId)
         .releaseCreate(chatId)
-        .catch(logCountFailure);
+        .catch(logReleaseFailure);
       throw error;
     }
-  }
-
-  /**
-   * Runs `run`, one check of the chat's draft of App `app`,
-   * once it takes one of the draft's checks this turn (`takeCheck`, before
-   * anything runs, so checks started at once can't pass the limit), and
-   * settles it however it ends: passed only when `run` says so.
-   */
-  async #counted<T extends Pick<DraftCheck, "passed">>(
-    app: AppId,
-    run: () => Promise<T>
-  ): Promise<{ result: T; failedInARow: number }> {
-    const { workspaceId, chatId } = this.ctx.props;
-    const chats = workspace(this.env, workspaceId);
-    const taken = await chats.takeCheck(chatId, app, maxFailedChecks);
-    if (!taken) {
-      throw appErrors.create("app.checks_exhausted");
-    }
-    let result: T;
-    try {
-      result = await run();
-    } catch (error) {
-      // Settled as failed; a failure to settle is logged, never in the way
-      // of why the check failed.
-      await chats.settleCheck(chatId, app, false).catch(logCountFailure);
-      throw error;
-    }
-    const failedInARow = await chats.settleCheck(chatId, app, result.passed);
-    return { result, failedInARow };
   }
 
   /** The chat's draft of `app`: all its files, and what it changed. */
@@ -933,12 +984,15 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * what it changed. With `over`, only over that revision of the draft
    * (`files`): refused if it moved since, so a write made from what was
    * read never lands over a discard or a restore after the read.
+   *
+   * Answers with what fails in the whole draft now, every gate at once
+   * (`draftBuilds`, `writtenDiagnostics`): what the agent fixes next.
    */
   async write(
     app: unknown,
     changes: unknown,
     over?: unknown
-  ): Promise<Omit<DraftFiles, "files" | "revision">> {
+  ): Promise<DraftWrite> {
     return await this.#build(
       "build.write",
       async (by) => {
@@ -952,11 +1006,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           base: draft.base,
           changes: {},
         });
-        const written = applyChanges(
-          this.env,
-          await draftFiles(this.env, id, draft),
-          changes
-        );
+        // Changed in place (\`applyChanges\`): the draft as it is written.
+        const files = await draftFiles(this.env, id, draft);
+        const written = applyChanges(this.env, files, changes);
         refuseAppWorkflows(
           written.flatMap(([path, content]) => (content === null ? [] : [path]))
         );
@@ -993,11 +1045,32 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         for (const path of unchanged) {
           changed.delete(path);
         }
-        return { base: draft.base, changed: [...changed].toSorted() };
+        // The draft as saved: its files, with the changes applied.
+        const builds = await draftBuilds(
+          this.env,
+          id,
+          draft.base,
+          Object.fromEntries(files)
+        );
+        const notChecked: DraftWrite["notChecked"] = {};
+        for (const kind of ["screens", "server", "workflows"] as const) {
+          const { status, error } = builds[kind];
+          // Couldn't run, or checked on stand-ins (`standIn`): both say why.
+          if (status === "error" || error !== undefined) {
+            notChecked[kind] = error ?? "The build couldn't run now.";
+          }
+        }
+        return {
+          base: draft.base,
+          changed: [...changed].toSorted(),
+          ...writtenDiagnostics(builds),
+          notChecked,
+        };
       },
       (written) => ({
         app: typeof app === "string" ? app : null,
         files: written.changed.length,
+        errors: written.errors,
       })
     );
   }
@@ -1019,39 +1092,12 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Checks the chat's draft of `app`: builds its screens and workflows,
-   * type-checks its server code, and runs its workflows' tests. Refused once
-   * {@link maxFailedChecks} checks of it failed in a row this turn, those
-   * still running counted.
-   */
-  async check(app: unknown): Promise<DraftCheck> {
-    return await this.#build(
-      "build.check",
-      async (by) => {
-        const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, this.ctx.props, id);
-        const files = Object.fromEntries(await draftFiles(this.env, id, draft));
-        const { result, failedInARow } = await this.#counted(
-          id,
-          async () =>
-            await checkFiles(this.env, this.ctx.props, id, draft, files)
-        );
-        return { ...result, failedInARow, maxFailedChecks };
-      },
-      (result) => ({
-        app: typeof app === "string" ? app : null,
-        passed: result.passed,
-        failedInARow: result.failedInARow,
-      })
-    );
-  }
-
-  /**
    * Proposes the chat's draft of `app` for review: checks it over the
-   * App's latest version (as `check` does, and counted with its checks),
-   * and once it passes commits it as the App's next version, pending, with
-   * `message`, and drops the draft. A builder makes it current, in Grasp.
-   * A draft that fails isn't proposed: what fails comes back instead.
+   * App's latest version (its builds, its workflows' tests and what its
+   * preview ran into), and once it passes commits it as the App's next
+   * version, pending, with `message`, and drops the draft. A builder makes
+   * it current, in Grasp. A draft that fails isn't proposed: what fails
+   * comes back instead, so nothing that fails is ever proposed.
    */
   async propose(app: unknown, message: unknown): Promise<Proposal> {
     return await this.#build(
@@ -1063,11 +1109,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           this.ctx.props,
           await this.#buildable(by, app),
           message,
-          {
-            counted: async (id, run) => await this.#counted(id, run),
-            // The commit is admitted only while the run is still open.
-            admit: this.#admit,
-          }
+          // The commit is admitted only while the run is still open.
+          { admit: this.#admit }
         ),
       (proposal) => ({
         app: typeof app === "string" ? app : null,
@@ -1172,16 +1215,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         // A job whose instance is gone holds no place.
         await failDeadJobs(this.env, workspaceId, chatId);
         await admitEffect(this.env, this.ctx.props);
-        const opened = await chats.openBuildJob(
-          chatId,
-          runId,
-          { appId: id, kind, message: message ?? null },
-          maxFailedChecks
-        );
+        const opened = await chats.openBuildJob(chatId, runId, {
+          appId: id,
+          kind,
+          message: message ?? null,
+        });
         if ("refused" in opened) {
-          throw opened.refused === "jobs"
-            ? agentErrors.create("agent.jobs_exhausted")
-            : appErrors.create("app.checks_exhausted");
+          throw agentErrors.create("agent.jobs_exhausted");
         }
         try {
           await runEngine(this.env).createInternal({
@@ -1198,7 +1238,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           });
           await chats
             .endBuildJob(chatId, opened.id, brokenOff(null))
-            .catch(logCountFailure);
+            .catch(logReleaseFailure);
           throw error;
         }
         return { job: opened.id, status: "running", revision: opened.revision };
@@ -1322,16 +1362,20 @@ interface Build {
     /** A change that would fix it, when the check suggests one. */
     fix?: string;
   }[];
-  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. */
+  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. With \`standIn\`, why the screens were checked only in part. */
   error?: string;
+  /** Screens checked without the references the server code generates, as it doesn't register: never passes; fix the server code and write again. */
+  standIn?: true;
 }`;
 
 /** What the model reads of `env.build`. */
 const buildDeclaration = `/**
  * Building Apps for the person: create one, or change one they build, in
- * this chat's own draft of it (the App never sees it until proposed). Write
- * files, check them, fix what fails and check again. Nothing here makes a
- * change live: a builder of the App does that in Grasp.
+ * this chat's own draft of it (the App never sees it until proposed). Each
+ * write answers with what fails in the whole draft: fix it and write again.
+ * If the same error comes back three times, stop and tell the person in
+ * plain words what you're stuck on. Nothing here makes a change live: a
+ * builder of the App does that in Grasp.
  *
  * Screens are \`screens/<name>.tsx\` on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
@@ -1440,7 +1484,7 @@ const buildDeclaration = `/**
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
  * this. A visitor's call can't tell anyone. For the rest, read Grasp's
  * reference (\`readFile\` without \`app\`): the SDK's sources, which
- * \`check\` type-checks against (\`@grasp-os/sdk/src/app.ts\`), and a
+ * every write type-checks against (\`@grasp-os/sdk/src/app.ts\`), and a
  * complete App (\`blueprints/board-page/\`).
  *
  * An outside API is reached only as an HTTP connection an admin approved
@@ -1483,53 +1527,25 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
+   * Answers with what fails in the whole draft now, its screens, server code
+   * and workflows checked at once (compile, types, lint, React Compiler),
+   * sorted by file, each once: fix the errors and write again; proposing
+   * needs none. A build that couldn't run now, or screens checked without
+   * the server code's references while it doesn't register, is in
+   * \`notChecked\`: proposing refuses it until a write checks it.
    */
-  write(app: string, changes: Record<string, string | null>, over?: { revision: number }): Promise<{ base: number | null; changed: string[] }>;
+  write(app: string, changes: Record<string, string | null>, over?: { revision: number }): Promise<{
+    base: number | null;
+    changed: string[];
+    errors: number;
+    warnings: number;
+    diagnostics: Build["diagnostics"];
+    /** Diagnostics past the first 50. */
+    leftOut: number;
+    notChecked: { screens?: string; server?: string; workflows?: string };
+  }>;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
-  /**
-   * Builds the draft's screens and workflows (type errors, lint and build
-   * errors), type-checks its server code (app.ts, schema.ts, values.ts,
-   * operations/, migrations/) as its seal does, without running its operations, and runs
-   * its workflows' tests, and reads what its
-   * screens ran into so far in the person's preview (runtime errors). Fix what fails
-   * and check again; after ${maxFailedChecks} checks in a row that didn't pass, checking
-   * refuses: stop and tell the person what still fails.
-   */
-  check(app: string): Promise<{
-    passed: boolean;
-    screens: Build;
-    server: Build;
-    workflows: Build;
-    tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
-    /**
-     * What the draft ran into so far in the preview in the person's side
-     * panel (empty while nobody has it open): any problem fails the check,
-     * so fix what it says and check again, but a \`warning\` (React's
-     * development warnings, such as a list without keys), which fails
-     * nothing: fix it when you can. A preview reaches nothing
-     * outside it: a function's resource call (a connection, another App,
-     * Knowledge, a model) rejects with \`resource.unavailable\`, and a
-     * screen's workflow run with \`app.preview_side_effect\`. Handle either
-     * as a failed call, as a screen must live. \`seen\` is false when the preview reported
-     * nothing on this write within a few seconds: nobody has it open, or
-     * its screens neither called the server nor failed. Its screens then
-     * weren't checked at run time: say so, or \`call\` the server yourself.
-     * \`logs\`: the newest lines the draft's server code wrote with
-     * \`console\` there, your \`call\`s included, at most 20 and 4,000
-     * characters together; \`logsLeftOut\` counts the older ones left
-     * out. They fail nothing.
-     */
-    preview: {
-      problems: { source: "screen" | "server"; at: string; kind: string; message: string; stack?: string }[];
-      seen: boolean;
-      logs: { at: string; level: string; message: string; method: string | null }[];
-      logsLeftOut: number;
-      note: string;
-    };
-    failedInARow: number;
-    maxFailedChecks: number;
-  }>;
   /**
    * Calls the draft as a screen would, to see it run, in a preview that
    * never touches the App's live data: \`method\` is a public function's
@@ -1537,7 +1553,7 @@ build: {
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
    * connections, Knowledge or models (\`resource.unavailable\`); what it
-   * wrote with \`console\`, in the next check's \`preview.logs\`. A failure
+   * wrote with \`console\`, in the next proposal's \`check.preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal (\`message\` names why: each
    * diagnostic as \`file:line: message\`, or what its registration threw),
@@ -1552,17 +1568,40 @@ build: {
   >;
   /**
    * Proposes the draft for review: checks it over the App's latest version
-   * and, once it passes, makes it the App's next version, pending, with
-   * \`message\` (what changed and why, for the reviewer). A builder of the App
-   * reviews what it changes and makes it current in Grasp: tell the person
-   * so. One that fails isn't proposed: \`version\` is null, and \`check\` says why.
+   * (its builds, its workflows' tests, and what its screens ran into so far
+   * in the person's preview (runtime errors)) and, once it passes, makes it the App's next
+   * version, pending, with \`message\` (what changed and why, for the
+   * reviewer). A builder of the App reviews what it changes and makes it
+   * current in Grasp: tell the person so. One that fails isn't proposed:
+   * \`version\` is null, and \`check\` says why. A preview problem fails it
+   * but a \`warning\` (React's development warnings); \`check.preview.seen\` is
+   * false when nobody has the preview open, so its screens weren't run:
+   * say so, or \`call\` the server yourself. A preview reaches nothing
+   * outside it: a function's resource call (a connection, another App,
+   * Knowledge, a model) rejects with \`resource.unavailable\`, and a
+   * screen's workflow run with \`app.preview_side_effect\`. Handle either
+   * as a failed call, as a screen must live.
    * Once \`version\` is set, it is proposed: don't propose it again. When
    * \`reviewUnavailable\`, its review couldn't be worked out now; the
    * builder reads it in Grasp.
    */
   propose(app: string, message: string): Promise<{
     version: number | null;
-    check: { passed: boolean; screens: Build; server: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
+    check: {
+      passed: boolean;
+      screens: Build;
+      server: Build;
+      workflows: Build;
+      tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
+      preview: {
+        problems: { source: "screen" | "server"; at: string; kind: string; message: string; stack?: string }[];
+        seen: boolean;
+        /** The newest lines the draft's server code wrote with \`console\` there, your \`call\`s included: at most 20 and 4,000 characters together. They fail nothing. */
+        logs: { at: string; level: string; message: string; method: string | null }[];
+        logsLeftOut: number;
+        note: string;
+      };
+    };
     /** What the version changes, as its reviewer reads it; null when not proposed. */
     review: {
       current: number | null;
@@ -1596,8 +1635,8 @@ build: {
   }>;
   /**
    * Hands a check or a proposal of the draft to a build job, which goes on
-   * after this code run ends: for an App whose check or proposal takes
-   * longer than a run may. It checks or proposes the draft as it is now,
+   * after this code run ends: for an App whose check (what \`propose\`
+   * checks, without proposing) or proposal takes longer than a run may. It checks or proposes the draft as it is now,
    * and fails with \`app.conflict\` if you write to the draft before it
    * ends. When it ends while this question is still being answered, you
    * are told so in this chat; read what it came to with \`job\`. At most 3
@@ -1611,8 +1650,8 @@ build: {
   }>;
   /**
    * A build job this chat submitted: how it stands and, once completed,
-   * what it came to: for a check, what \`check\` returns; for a proposal,
-   * what \`propose\` returns. \`version\` is the version it proposed, if it
+   * what it came to: for a check, what \`propose\` returns as \`check\`; for
+   * a proposal, what \`propose\` returns. \`version\` is the version it proposed, if it
    * did. A cancelled or revoked job does nothing more. A running job may
    * wait a while for a free build slot: it isn't failed.
    */
@@ -1672,7 +1711,7 @@ build: {
 export const buildApi: AgentApi = {
   name: "build",
   summary:
-    "Building Apps in this chat's draft: write, check and propose their files, and ask for the permissions they need. Nothing goes live until a builder makes it current, and no permission holds until an admin grants it.",
+    "Building Apps in this chat's draft: write their files (each write answers with what fails) and propose them, and ask for the permissions they need. Nothing goes live until a builder makes it current, and no permission holds until an admin grants it.",
   types: buildTypes,
   declaration: buildDeclaration,
   stub: (scope) => exports.BuildApi({ props: scope }),

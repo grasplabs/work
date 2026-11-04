@@ -210,13 +210,17 @@ const readAppParameter = Type.Optional(
     minLength: 1,
     maxLength: maxNameChars,
     description:
-      "The App's ID, as `createApp` or `env.apps.list()` gives it. Leave it out to read Grasp's reference instead: the SDK's sources (`@grasp-os/sdk/src/…`, what `env.build.check` type-checks against), the UI kit's (`@grasp-os/ui/src/…`), and complete working Apps (`blueprints/<id>/…`).",
+      "The App's ID, as `createApp` or `env.apps.list()` gives it. Leave it out to read Grasp's reference instead: the SDK's sources (`@grasp-os/sdk/src/…`, what every write type-checks against), the UI kit's (`@grasp-os/ui/src/…`), and complete working Apps (`blueprints/<id>/…`).",
   })
 );
 
 /** What the tools that read say of Grasp's reference, where to start. */
 const referenceStart =
   "Start with @grasp-os/sdk/src/app.ts (what app() takes), and a complete App: blueprints/board-page/app.ts, schema.ts, operations/ and screens/.";
+
+/** What `writeFile` and `editFile` say of what they answer with (`env.build.write`). */
+const answersWithDiagnostics =
+  "Answers with what fails in the whole App now (`errors`, and `diagnostics` by file: compile, types, lint and the React Compiler, all at once): fix the errors and write again. If the same error comes back three times, stop and tell the person in plain words what you're stuck on. Proposing refuses while any error remains.";
 
 /** One of the tools here, as `dedicatedTools` makes it for a turn. */
 interface Definition<P extends TSchema> {
@@ -469,7 +473,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "writeFile",
     label: "Write files",
     api: "build",
-    description: `Writes whole files into this chat's draft of an App, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. Check the draft with \`env.build.check\` once you have written what you meant to.`,
+    description: `Writes whole files into this chat's draft of an App, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. ${answersWithDiagnostics}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -499,8 +503,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "editFile",
     label: "Edit a file",
     api: "build",
-    description:
-      "Replaces `oldText`, which must occur exactly once in the file, with `newText`, in this chat's draft of an App. Read the file with `readFile` first: a file you haven't read or written in this chat is refused. For several edits, make several calls.",
+    description: `Replaces \`oldText\`, which must occur exactly once in the file, with \`newText\`, in this chat's draft of an App. Read the file with \`readFile\` first: a file you haven't read or written in this chat is refused. For several edits, make several calls. ${answersWithDiagnostics}`,
     parameters: Type.Object(
       {
         app: appParameter,

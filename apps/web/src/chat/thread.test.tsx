@@ -318,7 +318,12 @@ describe(ChatThread, () => {
         role: "assistant",
         text: "",
         citations: [],
-        code: [{ callId: "check", code: "await env.build.check('app_1')" }],
+        code: [
+          {
+            callId: "call",
+            code: "await env.build.call('app_1', 'notes.list')",
+          },
+        ],
         tools: [
           {
             callId: "write",
@@ -340,7 +345,7 @@ describe(ChatThread, () => {
         at,
       },
       done(3, "write"),
-      done(4, "check"),
+      done(4, "call"),
       done(5, "edit"),
     ]);
 

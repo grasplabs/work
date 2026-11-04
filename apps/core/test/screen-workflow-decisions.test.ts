@@ -1645,11 +1645,15 @@ describe(
 
     it("follow the App's bindings in a draft, and fail a screen's type check on a decision the workflow doesn't have", async () => {
       const { fixture, binding } = await boundApp();
-      const draftErrors = async (key: string) =>
-        await screenErrors(
-          fixture,
-          await withDraftReferences(env, fixture.app, 1, files(screenOf(key)))
+      const draftErrors = async (key: string) => {
+        const drafted = await withDraftReferences(
+          env,
+          fixture.app,
+          1,
+          files(screenOf(key))
         );
+        return await screenErrors(fixture, drafted.files);
+      };
       const bound = await draftErrors("approval");
       const missing = await draftErrors("missing");
       await unbindWorkflowFromApp(env, fixture.owner, binding);

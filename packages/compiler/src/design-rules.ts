@@ -783,6 +783,61 @@ const noImportant: Rule.RuleModule = {
   },
 };
 
+/**
+ * A plain `<form>` in a screen (GRA-1520): the screen's frame is sandboxed
+ * without `allow-forms`, which stays off, so the browser never submits it
+ * and its `onSubmit` never runs. The kit's `Form` handles a submit itself.
+ * ESLint's `no-restricted-syntax` would say it, but its options need a JSON
+ * schema compiled at run time, which Workers forbid (lint.ts), and the
+ * bundled linter parses no selectors: so a rule of its own, beside the
+ * others, on the JSX element's name.
+ */
+const noBareForms: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: { description: "Refuse a plain <form> in a screen" },
+    schema: false,
+    hasSuggestions: true,
+    messages: {
+      form: "A plain <form> never submits in a screen: its frame doesn't allow forms, so its onSubmit never runs.",
+      kit: "Use Form from @grasp-os/ui/form (with useForm, the form's fields and SubmitButton), which submits itself.",
+    },
+  },
+  create: (context) => ({
+    JSXOpeningElement: (node: Rule.Node) => {
+      const name = get(node, "name");
+      if (
+        get(name, "type") !== "JSXIdentifier" ||
+        get(name, "name") !== "form"
+      ) {
+        return;
+      }
+      const element = get(node, "parent");
+      const tags = [
+        get(node, "name"),
+        get(get(element, "closingElement"), "name"),
+      ];
+      context.report({
+        node,
+        messageId: "form",
+        suggest: [
+          {
+            messageId: "kit",
+            // The tag renamed; the kit's Form takes its own props.
+            fix: (fixer) =>
+              tags.flatMap((tag) => {
+                if (typeof tag !== "object" || tag === null) {
+                  return [];
+                }
+                return [fixer.replaceText(tag, "Form")];
+              }),
+          },
+        ],
+      });
+    },
+  }),
+};
+
 /** The rules, as an ESLint plugin named `grasp`. */
 export const designRules = {
   rules: {
@@ -790,6 +845,7 @@ export const designRules = {
     "no-remote-resources": noRemoteResources,
     "no-peer-connections": noPeerConnections,
     "no-important": noImportant,
+    "no-bare-forms": noBareForms,
   },
 };
 
@@ -799,4 +855,5 @@ export const designRuleLevels = {
   "grasp/no-remote-resources": "error",
   "grasp/no-peer-connections": "error",
   "grasp/no-important": "error",
+  "grasp/no-bare-forms": "error",
 } as const;

@@ -13,7 +13,6 @@ import {
   buildingAs,
   checkFiles,
   draftOf,
-  maxFailedChecks,
 } from "./agent-builds.ts";
 import type { DraftCheck, Proposal } from "./agent-builds.ts";
 import { auditAgentCall, auditedCall, revokedSince } from "./agent-scope.ts";
@@ -98,9 +97,6 @@ import type { BuildJob, Draft } from "./workspace.ts";
 // - Rights lost while it commits: the person's build rights for the App
 //   and restricted mode are checked again right before the commit lands,
 //   not only revocations of the agent's permissions.
-// - The repair loop: each job takes one of its draft's checks this turn,
-//   as an in-call check does, and settles it as it ends (workspace.ts), so
-//   jobs can't get the agent past the checks failed in a row it may make.
 // - Builds of other chats and Apps: each step that builds (its check, its
 //   commit) holds one of the few leases of builds running at once while
 //   it runs (build-admission.ts). A step with none free sleeps, journaled,
@@ -427,12 +423,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
     );
     // A check of files the draft no longer has says nothing of it.
     await submittedDraft(env, step);
-    return {
-      // The checks failed in a row are settled as the job ends, and set
-      // in its result then (workspace.ts).
-      check: { ...check, failedInARow: 0, maxFailedChecks },
-      over: null,
-    };
+    return { check, over: null };
   }
   if (Object.keys(draft.changes).length === 0) {
     throw appErrors.create("app.nothing_to_commit");
@@ -448,10 +439,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
   );
   const { tree } = await versionTree(over.files);
   await submittedDraft(env, step);
-  return {
-    check: { ...check, failedInARow: 0, maxFailedChecks },
-    over: { parent: over.parent, tree },
-  };
+  return { check, over: { parent: over.parent, tree } };
 };
 
 /**
