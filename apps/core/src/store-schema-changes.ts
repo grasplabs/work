@@ -84,13 +84,16 @@ import { validates } from "./store-queries.ts";
 //   checks it fails. A question lists at most `schemaQuestionRecordsMax`
 //   records, and counts the rest.
 // - An undo overwriting what was written since: it puts back what a
-//   record's fields held only where the record is still at the revision
-//   the change wrote (no change of it recorded since: every write that
-//   moves a revision records one, and a fill or a transform, which don't,
-//   can't run while the contract is the change's own); every other record
-//   of the tables it changed must fit the contract before as it is, or the
-//   undo is refused, naming them, with nothing written. A record deleted
-//   since stays deleted.
+//   record's fields held only where the fields the change wrote still hold
+//   exactly what it wrote (its history row's `after`), whoever wrote
+//   since and whether or not they kept history (a fill or a transform
+//   doesn't); every other record of the tables it changed must fit the
+//   contract before as it is, or the undo is refused, naming them, with
+//   nothing written. A record deleted since stays deleted.
+// - The undo's history crowded out, or crowding out the store's edits: a
+//   change's rows are held outside the history's bounds and retention
+//   while it can be undone, and removed as the contract moves past it
+//   (store-changes.ts, `releaseHeld`).
 // - What an undo puts back outliving the rules that govern it: it is read
 //   from the change history, never kept apart, so its own rules hold. A
 //   sensitive table's history keeps no values, a person's erasure clears
@@ -386,6 +389,7 @@ const rewrite = (
       actor: { type: "system" },
       commit: write.commit,
       principal: record.ownerId,
+      held: true,
     },
     write.now
   );
@@ -471,57 +475,88 @@ const firstMisfit = (
 
 const fieldNamesSchema = z.array(z.string());
 
+/** Field `name` of `fields` as canonical text; undefined when absent. */
+const holds = (fields: StoreFields, name: string): string | undefined =>
+  Object.hasOwn(fields, name) ? canonicalJson(fields[name] ?? null) : undefined;
+
 /**
  * What `record` held before the change whose history row is `row`, as
  * the history keeps it: its fields with the changed ones put back as they
- * were. None when the history kept no values (a sensitive table, values
- * too large, or erased), when an earlier change of the record had its
- * values erased (what the record held came from a person since erased),
- * or when the record changed since.
+ * were. Only while the fields the change wrote still hold exactly what it
+ * wrote (its `after`): a write since, or a fill or a transform, which keep
+ * no history, leaves it to be checked as it is. None too when the history
+ * kept no values (a sensitive table, values too large, or erased), or
+ * when `erased`: an earlier change of the record had its values erased,
+ * so what it held came from a person since erased.
  */
 const heldBefore = (
-  db: Db,
   record: typeof records.$inferSelect,
-  row: typeof recordChanges.$inferSelect | undefined
+  row: typeof recordChanges.$inferSelect | undefined,
+  erased: boolean
 ): StoreFields | undefined => {
-  if (row === undefined || row.beforeJson === null) {
+  if (
+    row === undefined ||
+    row.beforeJson === null ||
+    row.afterJson === null ||
+    erased
+  ) {
     return undefined;
   }
-  const ofRecord = and(
-    eq(recordChanges.tableId, record.tableId),
-    eq(recordChanges.recordId, record.recordId)
-  );
-  const changedSince = db
-    .select({ id: recordChanges.id })
-    .from(recordChanges)
-    .where(and(ofRecord, gt(recordChanges.id, row.id)))
-    .limit(1)
-    .get();
-  const erasedBefore = db
-    .select({ id: recordChanges.id })
-    .from(recordChanges)
-    .where(
-      and(
-        ofRecord,
-        lt(recordChanges.id, row.id),
-        eq(recordChanges.valuesLeftOut, "erased")
-      )
-    )
-    .limit(1)
-    .get();
-  if (changedSince !== undefined || erasedBefore !== undefined) {
+  const current = storedFieldsSchema.parse(JSON.parse(record.valueJson));
+  const names = fieldNamesSchema.parse(JSON.parse(row.fields));
+  const written = storedFieldsSchema.parse(JSON.parse(row.afterJson));
+  if (names.some((name) => holds(current, name) !== holds(written, name))) {
     return undefined;
   }
-  const held: Record<string, unknown> = {
-    ...storedFieldsSchema.parse(JSON.parse(record.valueJson)),
-  };
-  for (const name of fieldNamesSchema.parse(JSON.parse(row.fields))) {
+  const held: Record<string, unknown> = { ...current };
+  for (const name of names) {
     Reflect.deleteProperty(held, name);
   }
   return storedFieldsSchema.parse({
     ...held,
     ...storedFieldsSchema.parse(JSON.parse(row.beforeJson)),
   });
+};
+
+/**
+ * The change's history rows of table `tableId`, by record, and the
+ * records an earlier change of had its values erased: one read each.
+ */
+const historyOfChange = (db: Db, commit: number, tableId: string) => {
+  const rows = new Map(
+    db
+      .select()
+      .from(recordChanges)
+      .where(
+        and(
+          eq(recordChanges.source, "schema_change"),
+          eq(recordChanges.commit, commit),
+          eq(recordChanges.tableId, tableId)
+        )
+      )
+      .all()
+      .map((row) => [row.recordId, row])
+  );
+  // The change's rows were recorded in one transaction: every change of
+  // its records before it has a lower ID than its first.
+  const first = Math.min(...[...rows.values()].map(({ id }) => id));
+  const erased = new Set(
+    rows.size === 0
+      ? []
+      : db
+          .selectDistinct({ recordId: recordChanges.recordId })
+          .from(recordChanges)
+          .where(
+            and(
+              eq(recordChanges.tableId, tableId),
+              lt(recordChanges.id, first),
+              eq(recordChanges.valuesLeftOut, "erased")
+            )
+          )
+          .all()
+          .map(({ recordId }) => recordId)
+  );
+  return { rows, erased };
 };
 
 /**
@@ -546,22 +581,13 @@ export const undoChange = (
     const declared = Object.hasOwn(change.base.tables, table)
       ? (change.base.tables[table]?.fields ?? {})
       : {};
-    const rows = new Map(
-      db
-        .select()
-        .from(recordChanges)
-        .where(
-          and(
-            eq(recordChanges.source, "schema_change"),
-            eq(recordChanges.commit, change.commit),
-            eq(recordChanges.tableId, tableId)
-          )
-        )
-        .all()
-        .map((row) => [row.recordId, row])
-    );
+    const { rows, erased } = historyOfChange(db, change.commit, tableId);
     eachRecord(db, tableId, (record) => {
-      const before = heldBefore(db, record, rows.get(record.recordId));
+      const before = heldBefore(
+        record,
+        rows.get(record.recordId),
+        erased.has(record.recordId)
+      );
       if (before !== undefined && fitsTable(declared, before)) {
         if (questions.empty) {
           rewrite(db, table, record, before, write);

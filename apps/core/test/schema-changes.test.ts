@@ -521,7 +521,8 @@ describe("an undo", () => {
       edited: { title: "B", status: "done" },
       added: { title: "D", status: "done" },
       contract: true,
-      changes: { changes: [{ undone: true, rewritten: 2 }], history: 3 },
+      // The change's two rows go with it; the undo's own one is held.
+      changes: { changes: [{ undone: true, rewritten: 2 }], history: 1 },
       oldWrites: "ok",
       newWrites: "migration.not_current",
     });
@@ -612,6 +613,74 @@ describe("an undo", () => {
           ],
         },
       },
+    });
+  });
+
+  it("never overwrites what a fill or a transform wrote since, which keeps no history", async () => {
+    const { store, first, ids } = await storeOf(todo, [
+      { title: "A", status: "todo" },
+      { title: "B", status: "todo" },
+    ]);
+    const second = await store.defineTables(open, consumer(2), [], [mapTodo]);
+    await activate(store, second.schemaHash, 2);
+    // As a pending target's fill or transform writes a record: in place,
+    // its revision moved on, and nothing in the change history.
+    await runInDurableObject(objectOf(store), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE sdk_records SET value_json = ?, revision = revision + 1 WHERE record_id = ?",
+        JSON.stringify({ status: "done", title: "A" }),
+        ids[0] ?? ""
+      );
+    });
+
+    await activate(store, first, 1);
+    const after = await notesOf(store);
+    expect({
+      transformed: after.get(ids[0] ?? "")?.fields,
+      restored: after.get(ids[1] ?? "")?.fields,
+    }).toStrictEqual({
+      // Checked as it is, and it fits version 1: kept.
+      transformed: { status: "done", title: "A" },
+      restored: { title: "B", status: "todo" },
+    });
+  });
+
+  it("holds its history outside the store's bounds while it can be undone, and lets it go once the contract moves on", async () => {
+    const { store, first } = await storeOf(
+      todo,
+      Array.from({ length: 50 }, (_, index) => ({
+        title: `Note ${index}`,
+        status: "todo",
+      }))
+    );
+    const counts = async () =>
+      await runInDurableObject(objectOf(store), (_instance, state) =>
+        state.storage.sql
+          .exec<{ bytes: number; held: number; rows: number }>(
+            "SELECT history_bytes AS bytes, history_held AS held, (SELECT count(*) FROM sdk_record_changes WHERE source = 'schema_change') AS rows FROM sdk_store"
+          )
+          .one()
+      );
+    const before = await counts();
+    const second = await store.defineTables(open, consumer(2), [], [mapTodo]);
+    await activate(store, second.schemaHash, 2);
+    const held = await counts();
+    // A later version adds an optional field: the contract moves on.
+    await store.defineTables(
+      status(["open", "done"], { due: v.string().optional() }),
+      consumer(3)
+    );
+    const released = await counts();
+
+    expect({
+      held: { ...held, bytes: held.bytes === before.bytes },
+      released: { ...released, bytes: released.bytes === before.bytes },
+      undo: await activate(store, first, 1),
+    }).toStrictEqual({
+      held: { bytes: true, held: 50, rows: 50 },
+      released: { bytes: true, held: 0, rows: 0 },
+      // No undo reaches it any more.
+      undo: { state: "incompatible" },
     });
   });
 

@@ -616,6 +616,28 @@ describe("changes that need a migration", () => {
     ).toStrictEqual(refusal);
   });
 
+  test("a defaulted field a row rule reads is refused: filling it in would choose who sees records", () => {
+    const shared: SchemaAccess = {
+      tables: { notes: { read: "appMembers", write: "appMembers" } },
+    };
+    const plain = schemaManifest(
+      defineSchema({ notes: defineTable({ title: v.string() }) }),
+      shared
+    );
+    const byTeam = schemaManifest(
+      defineSchema({
+        notes: defineTable({
+          title: v.string(),
+          team: v.string().default("sales"),
+        }).access({ read: [rows.team("team")] }),
+      }),
+      shared
+    );
+    expect(refusedOf(planSchemaChange(plain, byTeam))).toStrictEqual([
+      { table: "notes", field: "team", reason: "rule_field_rewritten" },
+    ]);
+  });
+
   test("an answer or a rename that would rewrite a field a row rule reads is refused", () => {
     const shared: SchemaAccess = {
       tables: { notes: { read: "appMembers", write: "appMembers" } },

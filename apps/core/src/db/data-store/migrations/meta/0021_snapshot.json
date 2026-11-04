@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "808bbee5-13fa-47f4-a6d0-aceacf45e5b9",
+  "id": "5b88e5de-bc98-4b16-9391-1845b27ec4bc",
   "prevId": "bff2a725-89aa-4112-9648-83e313ec86a5",
   "tables": {
     "sdk_abandoned_targets": {
@@ -1577,6 +1577,15 @@
             "changed_at"
           ],
           "isUnique": false
+        },
+        "sdk_record_changes_held": {
+          "name": "sdk_record_changes_held",
+          "columns": [
+            "commit",
+            "table_id"
+          ],
+          "isUnique": false,
+          "where": "source = 'schema_change'"
         }
       },
       "foreignKeys": {},
@@ -2177,6 +2186,14 @@
         },
         "history_bytes": {
           "name": "history_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "history_held": {
+          "name": "history_held",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

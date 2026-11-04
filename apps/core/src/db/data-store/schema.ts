@@ -76,6 +76,12 @@ export const store = sqliteTable(
      * and removed, so retention's byte bound costs no scan.
      */
     historyBytes: integer("history_bytes").notNull().default(0),
+    /**
+     * How many changes the history holds for a schema change's undo
+     * (store-changes.ts, `ChangeOrigin.held`): outside its bounds, so its
+     * count of entries leaves them out.
+     */
+    historyHeld: integer("history_held").notNull().default(0),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -962,6 +968,12 @@ export const recordChanges = sqliteTable(
     ),
     // What retention removes first.
     index("sdk_record_changes_changed_at").on(table.changedAt),
+    // A schema change's held rows, by commit and table: what its undo
+    // reads and what moving the contract past it removes
+    // (store-changes.ts, `releaseHeld`).
+    index("sdk_record_changes_held")
+      .on(table.commit, table.tableId)
+      .where(sql`source = 'schema_change'`),
   ]
 );
 

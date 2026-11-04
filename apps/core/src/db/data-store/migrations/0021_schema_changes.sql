@@ -13,4 +13,6 @@ CREATE TABLE `sdk_schema_changes` (
 );
 --> statement-breakpoint
 CREATE INDEX `sdk_schema_changes_contract` ON `sdk_schema_changes` (`contract_hash`);--> statement-breakpoint
-ALTER TABLE `sdk_schema_activations` ADD `answers` text DEFAULT '[]' NOT NULL;
+ALTER TABLE `sdk_schema_activations` ADD `answers` text DEFAULT '[]' NOT NULL;--> statement-breakpoint
+ALTER TABLE `sdk_store` ADD `history_held` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE INDEX `sdk_record_changes_held` ON `sdk_record_changes` (`commit`,`table_id`) WHERE source = 'schema_change';

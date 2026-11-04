@@ -80,9 +80,10 @@ import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 // - a field that can hold a record ID or a file, changed in a way that
 //   isn't the same up to enum order (the store's reference and file
 //   indexes would have to follow), or added as required;
-// - an answer or a rename that would rewrite a field a row rule reads
-//   (`rule_field_rewritten`): who sees a record changes only through
-//   writes, which pass the rules before and after (store-rules.ts);
+// - an answer, a rename or a default fill that would write a field a row
+//   rule reads (`rule_field_rewritten`): who sees a record changes only
+//   through writes, which pass the rules before and after
+//   (store-rules.ts);
 // - a field the store reserved (`reserved`: one a pending target added
 //   before an admin abandoned it, whose values the records it filled in
 //   keep), added again with another descriptor than it had
@@ -664,6 +665,9 @@ const classifyAdded = (
     addedFields.push({ table, field });
   } else if (after.presence === "default" && holdsId(after)) {
     refused.push({ table, field, reason: "defaulted_reference_added" });
+  } else if (after.presence === "default" && context.ruleFields.has(field)) {
+    // Filled in, it would decide who sees records no write moved.
+    refused.push({ table, field, reason: "rule_field_rewritten" });
   } else if (after.presence === "default") {
     addedFields.push({ table, field });
     filledFields.push({ table, field });

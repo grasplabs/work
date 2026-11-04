@@ -145,6 +145,7 @@ import { keepStoreBackfillGoing } from "./store-backfill.ts";
 import {
   historyDueAt,
   admittedHistoryOf,
+  releaseHeld,
   historyOf,
   pruneHistory,
   recordChangesIn,
@@ -2465,6 +2466,7 @@ export class StoreHost {
         .update(store)
         .set({ contractHash: change.hash, contractManifest: change.text })
         .run();
+      releaseHeld(this.#db);
     }
   }
 
@@ -2502,6 +2504,7 @@ export class StoreHost {
       .update(store)
       .set({ contractHash: change.hash, contractManifest: change.text })
       .run();
+    releaseHeld(this.#db);
     this.#supersede(readSchemaManifest(change.text).manifest, now);
   }
 
@@ -6034,6 +6037,8 @@ export class StoreHost {
     if (base?.manifest === null || base?.manifest === undefined) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
+    // Past the newest change: no undo reaches the one before any more.
+    releaseHeld(this.#db);
     const commit = this.#nextCommit();
     const recorded = this.#db
       .insert(schemaChanges)
@@ -6144,6 +6149,7 @@ export class StoreHost {
       .set({ undoneAt: now })
       .where(eq(schemaChanges.changeId, change.changeId))
       .run();
+    releaseHeld(this.#db, change.commit);
     this.#rewrote(run.changedTables);
   }
 
@@ -6837,6 +6843,7 @@ export class StoreHost {
     if (moved === undefined) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
+    releaseHeld(this.#db);
     if (pending.migrations !== null) {
       this.#supersede(pending.manifest, Date.now());
       this.#db

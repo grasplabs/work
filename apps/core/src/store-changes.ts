@@ -9,7 +9,7 @@ import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -52,8 +52,15 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   history is rebuilt through admit the same people across it. A schema
 //   change's rewrite keeps one (source `schema_change`, for the record's
 //   owner, its undo's only source of what the record held), and never
-//   moves a field a rule reads either (sdk schema-plan.ts,
-//   `rule_field_rewritten`).
+//   moves a field a rule reads either, nor fills one in (sdk
+//   schema-plan.ts, `rule_field_rewritten`), so removing it later
+//   (`releaseHeld`) changes no state's audience.
+// - A schema change of a large table crowding the store's edits out of
+//   the history, or its own rows out before its undo reads them: its rows
+//   are held (`ChangeOrigin.held`): outside the entry and byte bounds and
+//   retention while its change can be undone, and removed, all of them,
+//   as the contract moves past it (`releaseHeld`). `sdk_store.history_held`
+//   counts them, so the bounds stay a seek, never a scan.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -87,6 +94,11 @@ export interface ChangeOrigin {
   readonly commit: number | null;
   /** The person they were made for, whoever acted. */
   readonly principal: string;
+  /**
+   * Held for a schema change's undo: outside the bounds and retention
+   * until `releaseHeld` removes them.
+   */
+  readonly held?: true;
 }
 
 /** `fields`' values of `names` that it holds. */
@@ -159,6 +171,7 @@ export const recordChangesIn = (
 ): void => {
   const actor = JSON.stringify(auditActorSchema.parse(origin.actor));
   let added = 0;
+  let recorded = 0;
   for (const change of changes) {
     const op = opOf(change);
     const fields =
@@ -196,6 +209,7 @@ export const recordChangesIn = (
       bytesOf(beforeJson) +
       bytesOf(afterJson);
     added += bytes;
+    recorded += 1;
     db.insert(recordChanges)
       .values({
         changedAt: now,
@@ -215,9 +229,45 @@ export const recordChangesIn = (
       })
       .run();
   }
-  if (added > 0) {
+  if (added > 0 && origin.held === true) {
+    db.update(store)
+      .set({ historyHeld: sql`${store.historyHeld} + ${recorded}` })
+      .run();
+  } else if (added > 0) {
     db.update(store)
       .set({ historyBytes: sql`${store.historyBytes} + ${added}` })
+      .run();
+  }
+};
+
+/** Whether a change is held for a schema change's undo (`ChangeOrigin.held`). */
+const isHeld = eq(recordChanges.source, "schema_change");
+
+/** Not held: what the bounds and retention count and remove. */
+const notHeld = ne(recordChanges.source, "schema_change");
+
+/**
+ * Removes the changes held for a schema change's undo (`ChangeOrigin.held`)
+ * that were recorded under `commit`, or all of them: called in the
+ * transaction that moves the store's contract past the change, when no
+ * undo can reach them any more.
+ */
+export const releaseHeld = (
+  db: DrizzleSqliteDODatabase,
+  commit?: number
+): void => {
+  const gone = db
+    .delete(recordChanges)
+    .where(
+      commit === undefined
+        ? isHeld
+        : and(isHeld, eq(recordChanges.commit, commit))
+    )
+    .returning({ id: recordChanges.id })
+    .all().length;
+  if (gone > 0) {
+    db.update(store)
+      .set({ historyHeld: sql`max(0, ${store.historyHeld} - ${gone})` })
       .run();
   }
 };
@@ -240,10 +290,16 @@ const overBound = (db: DrizzleSqliteDODatabase): boolean => {
       .get()?.id;
   const first = end(asc);
   const last = end(desc);
-  const bytes =
-    db.select({ bytes: store.historyBytes }).from(store).get()?.bytes ?? 0;
+  const row = db
+    .select({ bytes: store.historyBytes, held: store.historyHeld })
+    .from(store)
+    .get();
+  const bytes = row?.bytes ?? 0;
+  // Held changes don't count (`ChangeOrigin.held`).
   const count =
-    first === undefined || last === undefined ? 0 : last - first + 1;
+    first === undefined || last === undefined
+      ? 0
+      : last - first + 1 - (row?.held ?? 0);
   return (
     count > recordChangeLimits.maxEntries || bytes > recordChangeLimits.maxBytes
   );
@@ -262,6 +318,7 @@ export const historyDueAt = (
   const oldest = db
     .select({ at: recordChanges.changedAt })
     .from(recordChanges)
+    .where(notHeld)
     .orderBy(asc(recordChanges.changedAt))
     .limit(1)
     .get()?.at;
@@ -295,7 +352,11 @@ export const pruneHistory = (
       const oldest = db
         .select({ id: recordChanges.id })
         .from(recordChanges)
-        .where(overBound(db) ? undefined : lt(recordChanges.changedAt, cutoff))
+        .where(
+          overBound(db)
+            ? notHeld
+            : and(notHeld, lt(recordChanges.changedAt, cutoff))
+        )
         .orderBy(asc(recordChanges.id))
         .limit(prunePage);
       const gone = db
