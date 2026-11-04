@@ -628,9 +628,11 @@ export const applyCurrentRules = async (
  * After core's database made a version of `resourceId` current or
  * published it, or failed to: applies on `stores` the rules of whichever
  * version it has current (`applyCurrentRules`), and settles what each
- * owed under `owed` (`StoreHost.activateReady`). Never throws, as the
- * commit stands either way: a store it can't reach, or that waits on a
- * pending target, keeps owing them, and its alarm applies them.
+ * owed under `owed` (`StoreHost.activateReady`). A store that recorded
+ * nothing under `owed` (its activation refused as busy, or never asked)
+ * applies nothing (`StoreHost.applyRules`). Never throws, as the commit
+ * stands either way: a store it can't reach, or that waits on a pending
+ * target, keeps owing them, and its alarm applies them.
  */
 export const applyRulesAfterCommit = async (
   env: Env,
@@ -648,7 +650,7 @@ export const applyRulesAfterCommit = async (
         {
           id: storeId,
           applyRules: async (schemaHash) =>
-            await stub.applyRules(storeId, schemaHash),
+            await stub.applyRules(storeId, schemaHash, owed.id),
         },
         resource
       );

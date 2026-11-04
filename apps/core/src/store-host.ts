@@ -6212,20 +6212,33 @@ export class StoreHost {
    * a schema the store never recorded. False, changing nothing, while a
    * target is pending: it activates from the contract it was planned on,
    * so the rules follow once it is in force.
+   *
+   * Only for whoever holds the rules owed under `owedId`, still held in
+   * the transaction that moves the contract: one refused before it was
+   * recorded (`migration.busy`), or settled since, applies nothing. Only
+   * one version at a time holds them (`activateReady`), and its own
+   * make-current or the alarm applies them, so a caller that read the
+   * version current before another committed never puts back the rules
+   * that one replaced.
    */
-  async applyRules(storeId: StoreId, schemaHash: string): Promise<boolean> {
+  async applyRules(
+    storeId: StoreId,
+    schemaHash: string,
+    owedId: string
+  ): Promise<boolean> {
     const hash = dataErrors.parse(
       "data.invalid",
       backfillTargetSchema,
       schemaHash
     );
+    const holder = dataErrors.parse("data.invalid", z.uuid(), owedId);
     // Hashing is asynchronous and a transaction isn't: planned, then
     // planned again in the transaction, which applies it only if the
     // contract is still the one it was planned from.
     for (let attempt = 1; ; attempt += 1) {
       const planned = this.ctx.storage.transactionSync(() => {
         this.#bind(storeId, false);
-        return this.#rulesStep(hash);
+        return this.#rulesStep(hash, holder);
       });
       if (planned === "pending") {
         return false;
@@ -6237,7 +6250,7 @@ export class StoreHost {
       const contractHash = await sha256Hex(planned.text);
       const done = this.ctx.storage.transactionSync((): boolean => {
         this.#bind(storeId, false);
-        const step = this.#rulesStep(hash);
+        const step = this.#rulesStep(hash, holder);
         if (
           step === "pending" ||
           step === null ||
@@ -6268,12 +6281,22 @@ export class StoreHost {
   /**
    * `applyRules`' change for schema `hash`: the contract it moves from,
    * the contract with the schema's rules (`underContractRules`, the other
-   * way round), and the tables whose rules change; null for none,
-   * `pending` while a target is. Call it inside a transaction.
+   * way round), and the tables whose rules change; null for none, or
+   * once the rules owed under `owedId` aren't held, `pending` while a
+   * target is. Call it inside a transaction.
    */
   #rulesStep(
-    hash: string
+    hash: string,
+    owedId: string
   ): { baseHash: string; text: string; tables: string[] } | "pending" | null {
+    const held = this.#db
+      .select({ owedId: rulesOwed.owedId })
+      .from(rulesOwed)
+      .where(eq(rulesOwed.owedId, owedId))
+      .get();
+    if (held === undefined) {
+      return null;
+    }
     const recorded = this.#db
       .select({ manifest: schemas.manifest })
       .from(schemas)
@@ -6355,10 +6378,10 @@ export class StoreHost {
     }
     const storeId = this.#storeId();
     const owners = new Map(due.map((owed) => [owedKey(owed), owed]));
-    for (const [key, { kind, resourceId, version }] of owners) {
+    for (const [key, { kind, resourceId, version, owedId }] of owners) {
       const ids = due
         .filter((owed) => owedKey(owed) === key)
-        .map(({ owedId }) => owedId);
+        .map((owed) => owed.owedId);
       const resource = { kind, id: resourceId };
       let settled = false;
       try {
@@ -6372,7 +6395,7 @@ export class StoreHost {
             {
               id: storeId,
               applyRules: async (schemaHash) =>
-                await this.applyRules(storeId, schemaHash),
+                await this.applyRules(storeId, schemaHash, owedId),
             },
             resource
           ));

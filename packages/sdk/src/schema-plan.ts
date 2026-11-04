@@ -11,6 +11,7 @@ import { managedFields, SchemaDefinitionError } from "./schema.ts";
 import type { RowRules } from "./schema.ts";
 import { descriptorVersion, ValueDefinitionError } from "./value-descriptor.ts";
 import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
+import { validateValue } from "./value-interpreter.ts";
 
 // How a store's data contract changes when it is handed a new schema
 // (spec 17.1, 17.4): which changes apply on their own, which the store
@@ -377,18 +378,52 @@ const presenceWidens = (
   after: ValueDescriptor
 ): boolean => after.presence === "optional" || before.presence !== "optional";
 
+/** Whether `descriptor` has a defaulted field nested in it, at any depth. */
+const holdsNestedDefault = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.kind === "object") {
+    return Object.values(descriptor.fields).some(
+      (field) => field.presence === "default" || holdsNestedDefault(field)
+    );
+  }
+  if (descriptor.kind === "array") {
+    return holdsNestedDefault(descriptor.item);
+  }
+  if (descriptor.kind === "record") {
+    return holdsNestedDefault(descriptor.value);
+  }
+  return (
+    descriptor.kind === "union" && descriptor.members.some(holdsNestedDefault)
+  );
+};
+
 /**
  * Whether `after` gives a field nested in an object a default that
  * `before` didn't: a stored record may lack the field, and a read leaves
  * it missing (defaults are filled in as values are written, never made up
  * as they are read), so such a change fills it in first (`checks`,
- * `withDefaultsFilled`), never counts as a widening. Through objects,
- * array items and record values; a union's members are left as they are.
+ * `withDefaultsFilled`), never counts as a widening. Compared as stored,
+ * through objects, array items, record values and a union's members, each
+ * against the one in its place. Where the two don't line up (another
+ * kind, a union's members added or moved), any nested default `after`
+ * has counts as added: at worst the change is checked, never a widening a
+ * stored record doesn't fit.
  */
 const addsNestedDefault = (
   before: ValueDescriptor,
   after: ValueDescriptor
 ): boolean => {
+  if (before.kind !== after.kind) {
+    return holdsNestedDefault(after);
+  }
+  if (before.kind === "union" && after.kind === "union") {
+    return (
+      before.members.length !== after.members.length ||
+      after.members.some((member, at) => {
+        const was = before.members[at];
+        return was === undefined || addsNestedDefault(was, member);
+      })
+    );
+  }
   if (before.kind === "object" && after.kind === "object") {
     return Object.entries(after.fields).some(([name, field]) => {
       const was = own(before.fields, name);
@@ -425,8 +460,9 @@ export const fieldWidens = (
 /**
  * `value`, which fits `descriptor`, with every default of a field nested
  * in an object that it lacks filled in: through objects, array items and
- * record values, as a write would have stored them. Nothing it holds is
- * changed. A union's members are left as they are.
+ * record values, as a write would have stored them, and in the first of
+ * a union's members the value fits, the one a write and a read take it as
+ * (value-interpreter.ts). Nothing it holds is changed.
  */
 export const withDefaultsFilled = (
   descriptor: ValueDescriptor,
@@ -455,6 +491,12 @@ export const withDefaultsFilled = (
     return value.map((item: unknown) =>
       withDefaultsFilled(descriptor.item, item)
     );
+  }
+  if (descriptor.kind === "union") {
+    const member = descriptor.members.find(
+      (candidate) => !("issues" in validateValue(candidate, value))
+    );
+    return member === undefined ? value : withDefaultsFilled(member, value);
   }
   if (
     descriptor.kind === "record" &&

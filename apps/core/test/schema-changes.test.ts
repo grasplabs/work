@@ -893,6 +893,59 @@ const stoppingAfter = (writes: RegExp): D1Database => {
   };
 };
 
+/** Core's read of the version an App has current (store-backfill.ts). */
+const currentRead = /^select "current_version" from "apps"/iu;
+
+/**
+ * D1 whose first read matching `reads` answers, then waits for
+ * `meanwhile`; every later one fails, as a database gone away would.
+ */
+const readingThen = (
+  reads: RegExp,
+  meanwhile: () => Promise<void>
+): D1Database => {
+  const real = env.DB;
+  let seen = 0;
+  const executions = new Set(["all", "raw", "first", "run"]);
+  const watched = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, key) => {
+        const member: unknown = Reflect.get(target, key);
+        if (key === "bind") {
+          return (...values: unknown[]) => watched(target.bind(...values));
+        }
+        if (typeof member !== "function") {
+          return member;
+        }
+        if (typeof key !== "string" || !executions.has(key)) {
+          const bound: unknown = member.bind(target);
+          return bound;
+        }
+        return async (...args: unknown[]) => {
+          seen += 1;
+          if (seen > 1) {
+            throw new Error("D1 is unreachable");
+          }
+          const answered: unknown = await member.apply(target, args);
+          await meanwhile();
+          return answered;
+        };
+      },
+    });
+  return {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      return reads.test(query) ? watched(statement) : statement;
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
 /** The batch that makes a version current. */
 const makingCurrent = /update "apps" set "current_version"/iu;
 
@@ -1148,6 +1201,81 @@ describe("making the release current", { timeout: 180_000 }, () => {
       meanwhile: "migration.busy",
       applied: ["Ada's", "Grace's"],
       sealedAgain: "ok",
+    });
+  });
+
+  it("applies no rules for an activation refused as busy, so it never puts back the rules a winner tightened", async () => {
+    // Version 1 shares the notes; version 2 makes them their owner's, and
+    // version 3 narrows the titles.
+    const fixture = await appWith({
+      "schema.ts": v1Schema,
+      "app.ts": notesApp("appMembers"),
+    });
+    const first = await seal(fixture);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    const store = await openStore(env, fixture.store);
+    const shared = first.manifest.schemaHash;
+    await insert(store, shared, { title: "Ada's" }, "ada");
+    await insert(store, shared, { title: "Grace's" }, "grace");
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "app.ts": notesApp("owner") },
+      "Owner's notes"
+    );
+    await seal(fixture, 2);
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "schema.ts": shortTitles },
+      "Shorter titles"
+    );
+    await seal(fixture, 3);
+    // Version 2's make-current waits just before its batch, its store
+    // step done. Meanwhile version 3's is refused as busy; after its first
+    // read of the version current (still 1), version 2 commits, applies
+    // its rules and settles them, and D1 then fails version 3's next read.
+    const { promise: winnerWaits, resolve: releaseWinner } =
+      Promise.withResolvers<boolean>();
+    let winner: Promise<unknown> = Promise.resolve();
+    const loserDb = readingThen(currentRead, async () => {
+      releaseWinner(true);
+      await winner;
+    });
+    let loser: Promise<string> = Promise.resolve("");
+    winner = setCurrentVersion(
+      {
+        ...env,
+        DB: racingDb(async () => {
+          loser = failure(
+            async () =>
+              await setCurrentVersion(
+                { ...env, DB: loserDb },
+                fixture.owner,
+                fixture.app,
+                3
+              )
+          );
+          await winnerWaits;
+        }, makingCurrent),
+      },
+      fixture.owner,
+      fixture.app,
+      2
+    );
+    await winner;
+
+    expect({
+      loser: await loser,
+      current: await currentOf(fixture.app),
+      // Version 2's owner-only notes, as D1 has it current.
+      read: await titles(store, shared, "grace"),
+    }).toStrictEqual({
+      loser: "migration.busy",
+      current: 2,
+      read: ["Grace's"],
     });
   });
 

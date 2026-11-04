@@ -6,8 +6,10 @@ import {
   readSchemaManifest,
   schemaCovered,
   schemaManifest,
+  withDefaultsFilled,
 } from "../src/host.ts";
 import type { SchemaAccess, SchemaManifest, SchemaPlan } from "../src/host.ts";
+import { descriptorOf } from "../src/value-schema.ts";
 import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type { ValueShape } from "../src/values.ts";
 
@@ -364,6 +366,41 @@ describe("a widening", () => {
     ]);
     // A version without it writes records that lack it.
     expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
+  });
+
+  test("never adds a nested default inside a union's member either", () => {
+    const detail = (tone: ValueShape[string]) =>
+      notes({
+        ...noteFields,
+        detail: v.union(v.object({ tone }), v.string()).optional(),
+      });
+    const before = detail(v.string().optional());
+    const after = detail(v.string().default("plain"));
+    const plan = planSchemaChange(before, after);
+    expect(plan).toMatchObject({ accepted: true, activates: true });
+    expect(checksOf(plan)).toStrictEqual([
+      { table: "notes", field: "detail", answer: null },
+    ]);
+    expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
+  });
+
+  test("fills a default in the union member a value fits, as a read of it would", () => {
+    const detail = descriptorOf(
+      v.union(
+        v.object({ count: v.number() }),
+        v.object({ tone: v.string().default("plain") })
+      )
+    );
+    expect({
+      member: withDefaultsFilled(detail, {}),
+      first: withDefaultsFilled(detail, { count: 1 }),
+      held: withDefaultsFilled(detail, { tone: "warm" }),
+    }).toStrictEqual({
+      // `{}` fits only the second member, which defaults its tone.
+      member: { tone: "plain" },
+      first: { count: 1 },
+      held: { tone: "warm" },
+    });
   });
 
   test("applies at once, every record fitting it, and the version before stays covered", () => {

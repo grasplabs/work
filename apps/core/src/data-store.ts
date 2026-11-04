@@ -181,8 +181,12 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.applyRules`. */
-  async applyRules(storeId: StoreId, schemaHash: string): Promise<boolean> {
-    return await this.#live().applyRules(storeId, schemaHash);
+  async applyRules(
+    storeId: StoreId,
+    schemaHash: string,
+    owedId: string
+  ): Promise<boolean> {
+    return await this.#live().applyRules(storeId, schemaHash, owedId);
   }
 
   /** `StoreHost.settleRules`. */
