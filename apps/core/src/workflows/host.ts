@@ -579,6 +579,9 @@ const decisionWaitSchema = z.object({
   last: z.boolean(),
 });
 
+/** What a decision's wait step asks: which decision, how long, whether last. */
+export type DecisionWait = z.infer<typeof decisionWaitSchema>;
+
 /**
  * An error code the audit log may name: shaped like the platform's
  * (`permission.denied`), and short. Workflow code can put anything in an
@@ -1428,6 +1431,23 @@ export interface RunKind {
     error: StepError,
     round: number
   ) => RetryOffer | undefined;
+  /**
+   * The wait step `step` makes for one of the run's decisions, in place of
+   * what its code asked (`wait`), or a refusal of it: a sealed run waits
+   * only for the decision its task opened, until that decision's deadline
+   * (sealed-run.ts). An App's run waits as its code asks.
+   */
+  decisionWait?: (step: string, wait: DecisionWait) => DecisionWait | Error;
+  /**
+   * The outcome wait step `step` answers, from how its decision ended
+   * (`outcome`), inside the step that records it: a sealed run takes an
+   * answer only as its decision binding still allows it (sealed-run.ts),
+   * and fails the step otherwise. An App's run answers the outcome.
+   */
+  decisionTaken?: (
+    step: string,
+    outcome: DecisionOutcome
+  ) => Promise<DecisionOutcome>;
 }
 
 /** A step's engine retries, as a step's config has them. */
@@ -2965,11 +2985,19 @@ export class RunHost extends RpcTarget {
     name: unknown,
     options: unknown
   ): Promise<Settled<DecisionOutcome>> {
-    return await settle(async () => {
+    let step = "";
+    let started = false;
+    const waited = await settle(async () => {
       this.#requireUntampered();
-      const step = checked(stepNameSchema, name);
+      step = checked(stepNameSchema, name);
       await this.#requireStep(step, "waitForDecision");
-      const { decision, timeout, last } = checked(decisionWaitSchema, options);
+      started = true;
+      const asked = checked(decisionWaitSchema, options);
+      const held = this.#kind.decisionWait?.(step, asked) ?? asked;
+      if (held instanceof Error) {
+        return await this.#refuseStep(step, held);
+      }
+      const { decision, timeout, last } = held;
       // Whether it was answered when the run looked, and when that was:
       // recorded, so every replay decides as the first activation did
       // whether to wait, and for how long. The engine journals a wait's
@@ -3021,18 +3049,20 @@ export class RunHost extends RpcTarget {
       // Recorded too: an answer that comes after this can't change what a
       // replay of the run hears it ended with.
       return outcomeSchema.parse(
-        await this.#step.do(
-          `${prefix}:outcome`,
-          {},
-          async () =>
-            await decisionOutcome(
-              this.#env,
-              this.#kind.decisionRun,
-              decision,
-              last || Date.now() >= deadline
-            )
-        )
+        await this.#step.do(`${prefix}:outcome`, {}, async () => {
+          const outcome = await decisionOutcome(
+            this.#env,
+            this.#kind.decisionRun,
+            decision,
+            last || Date.now() >= deadline
+          );
+          return (await this.#kind.decisionTaken?.(step, outcome)) ?? outcome;
+        })
       );
     });
+    if (started) {
+      this.#kind.stepEnded?.(step, waited);
+    }
+    return waited;
   }
 }

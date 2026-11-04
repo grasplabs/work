@@ -25,6 +25,11 @@ import {
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  reviewDecision,
+} from "../src/decisions/decisions.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
@@ -1815,6 +1820,522 @@ try {
         tampered: ["workflow.invalid"],
       },
       tooFar: failedWith("workflow.call_invalid"),
+    });
+  });
+});
+
+// A sealed run's decisions (`grasp.decision`), from the threat model in
+// sealed-run.ts: deciders forged by the isolate, an answer forged or
+// taken from the run's own person, a wait for another decision or cut
+// short, an answer after the deadline, and a replay asking again.
+
+/** What a decision's answer may carry: nothing, or a comment. */
+const decisionAnswers = v.union(v.null(), v.object({ comment: v.string() }));
+
+/**
+ * A workflow of `by`'s, published and approved by `admin`: after an hour's
+ * wait, task `review` asks its input's `reviewer` to approve its input's
+ * invoice through decision binding `approval`, whose deciders are
+ * `reviewer` and anyone with the builder role.
+ */
+const decisionWorkflow = async () => {
+  const admin = await person("admin");
+  const by = await person("builder");
+  const reviewer = await person("user");
+  const builder = await person("builder");
+  const contract = `approval-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: contract,
+    kind: "decision",
+    input: descriptorOf(v.object({ invoice: v.string() })),
+    response: descriptorOf(decisionAnswers),
+  });
+  const workflow = await createWorkflowResource(env, by, `review-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { approval: { kind: "decision", contract } },
+          },
+        },
+      },
+      input: {
+        schema: objectSchema({
+          reviewer: { type: "string" },
+          invoice: { type: "string" },
+        }),
+      },
+      output: {
+        schema: objectSchema({
+          answered: { type: "boolean" },
+          approved: { type: "boolean" },
+          by: { type: "string" },
+          value: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                properties: { comment: { type: "string" } },
+                required: ["comment"],
+                additionalProperties: false,
+              },
+            ],
+          },
+        }),
+      },
+      do: [
+        { linger: { wait: "PT1H" } },
+        {
+          review: {
+            call: "grasp.decision",
+            with: {
+              binding: "approval",
+              recipients: ["${ $workflow.input.reviewer }"],
+              prompt: "Approve the invoice",
+              input: { invoice: "${ $workflow.input.invoice }" },
+            },
+            timeout: { after: { days: 7 } },
+          },
+        },
+      ],
+    }),
+    basedOn: null,
+  });
+  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "approval",
+    target: {
+      kind: "decision",
+      deciders: [`person:${reviewer.userId}`, "role:builder"],
+    },
+    reviewed: { version: 1 },
+  });
+  return { admin, by, reviewer, builder, workflow, approval };
+};
+
+type Reviewed = Awaited<ReturnType<typeof decisionWorkflow>>;
+
+/** A run of `reviewed` its builder started for `reviewer`, waiting its hour. */
+const reviewRun = async (
+  { by, workflow }: Reviewed,
+  reviewer: string
+): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    workflow.id,
+    { version: 1, input: { reviewer, invoice: "INV-7" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  await vi.waitFor(
+    async () => {
+      await expect(liveStatus(runId)).resolves.toBe("waiting");
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+  return runId;
+};
+
+/** A module of the test's own whose run on input `{ reviewer, invoice }` is `body`. */
+const reviewModuleOf = (body: string): string => `
+import { workflow, z } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: z.object({ reviewer: z.string(), invoice: z.string() }) }, async (step, { input }) => {
+${body}
+});
+`;
+
+/** Task `review`'s enter step, recording `record` (code) as what it asks. */
+const enterReview = (record: string): string =>
+  `const entered = await step.do("review", { key: "enter", description: "Its ask" }, async () => (${record}));`;
+
+/** What task `review`'s enter step records, as generated code records it. */
+const reviewAsks =
+  '{ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }';
+
+/**
+ * Task `review`'s decision, as generated code asks it (`from` code), its
+ * outcome and how many people its code was told of, returned.
+ */
+const decideReview = (from = "entered.recipients[0]"): string => `
+const told = [];
+const decided = await step.decision("review", { key: "task", description: entered.prompt, from: ${from}, timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
+return { decided, told };`;
+
+/** The decisions run `runId` opened, as their rows have them. */
+const decisionsOf = async (runId: string) => {
+  const rows = await env.DB.prepare(
+    "SELECT id, step, deciders, description, input, status FROM workflow_decisions WHERE resource_run_id = ? ORDER BY opened_at"
+  )
+    .bind(runId)
+    .all<{
+      id: string;
+      step: string;
+      deciders: string;
+      description: string;
+      input: string;
+      status: string;
+    }>();
+  return rows.results;
+};
+
+/** How many times run `runId` asked the people of a decision, as audited. */
+const asksAudited = async (runId: string): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(
+    ({ action, detail }) =>
+      action === "workflow.decision.asked" && detail?.run === runId
+  ).length;
+};
+
+/** `who`'s answer to `decision`, as the decision page gives it. */
+const answered = async (
+  who: Identity,
+  decision: string,
+  answer: { approved: boolean; payload?: { comment: string } | null }
+): Promise<void> => {
+  const review = await reviewDecision(env, who, decision, answer);
+  if (review.state === "recorded") {
+    return;
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    who,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  await answerDecision(env, who, decision, review.response, confirmation);
+};
+
+/** A decision's wait that ends as its deadline passes. */
+const deadlinePasses = async (): Promise<never> => {
+  const timedOut = new Error("Execution timed out");
+  timedOut.name = "WorkflowTimeoutError";
+  return await Promise.reject(timedOut);
+};
+
+/**
+ * `engine`, each of its waits for a decision's event running `waiting`
+ * on the run's only decision, then ending as woken, or as `waiting`
+ * throws.
+ */
+const decidingEngine = (
+  runId: string,
+  waiting: (decision: string) => Promise<void>,
+  engine: Engine = newerEngine()
+): Engine => ({
+  leaseOf: engine.leaseOf,
+  step: {
+    ...engine.step,
+    waitForEvent: async () => {
+      const [opened] = await decisionsOf(runId);
+      if (opened === undefined) {
+        throw new Error("No decision to wait for");
+      }
+      await waiting(opened.id);
+      return { payload: null };
+    },
+  },
+});
+
+/** The code a refused or failed step's error carries, as a run's code sees it. */
+const codeOf = async (work: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    return await work();
+  } catch (error) {
+    return error instanceof Error ? Reflect.get(error, "code") : error;
+  }
+};
+
+/**
+ * A refusal of step `step` its code caught and went on past: the run is
+ * tampered all the same, and the failure no catch took ends it.
+ */
+const refusedPastTheSdk = (step: string) => ({
+  ended: "workflow.invalid",
+  tampered: ["workflow.invalid"],
+  untaken: true,
+  refused: [{ step, errorCode: "workflow.invalid" }],
+});
+
+describe("a sealed run's decisions on the run host", () => {
+  let reviewed: Reviewed;
+
+  beforeAll(async () => {
+    reviewed = await decisionWorkflow();
+  });
+
+  afterAll(endLiveResourceRuns);
+
+  it("opens the decision its enter step recorded for whom the binding allows, asks them by the host's notice, and answers what they decided, from the decision's row", async () => {
+    const { reviewer } = reviewed;
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const ran = await ranAs(
+      runId,
+      reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+      {
+        engine: decidingEngine(runId, async (decision) => {
+          await answered(reviewer, decision, {
+            approved: true,
+            payload: { comment: "Fine" },
+          });
+        }),
+      }
+    );
+    const decisions = await decisionsOf(runId);
+    expect({
+      ran,
+      decisions: decisions.map(
+        ({ step, deciders, description, input, status }) => ({
+          step,
+          deciders,
+          description,
+          input: z.json().parse(JSON.parse(input)),
+          status,
+        })
+      ),
+      asked: await asksAudited(runId),
+    }).toStrictEqual({
+      ran: {
+        ended: {
+          decided: {
+            timedOut: false,
+            approved: true,
+            by: reviewer.userId,
+            payload: { comment: "Fine" },
+          },
+          // Its code learns nobody's address.
+          told: [0],
+        },
+        tampered: [],
+      },
+      decisions: [
+        {
+          step: "review:task",
+          deciders: `person:${reviewer.userId}`,
+          description: "Approve the invoice",
+          input: { invoice: "INV-7" },
+          status: "approved",
+        },
+      ],
+      asked: 1,
+    });
+  });
+
+  it("refuses an ask the build didn't seal, and opens none for deciders the binding doesn't cover or for the run's own person", async () => {
+    const { reviewer, by } = reviewed;
+    const outsider = await person("user");
+    const run = async (who: string, record: string) =>
+      await ranAs(
+        await reviewRun(reviewed, who),
+        reviewModuleOf(`${enterReview(record)} ${decideReview()}`)
+      );
+    const forReviewer = `person:${reviewer.userId}`;
+    expect({
+      otherPrompt: await run(
+        forReviewer,
+        '{ recipients: [input.reviewer], prompt: "Pay it now", input: { invoice: input.invoice } }'
+      ),
+      extraKey: await run(
+        forReviewer,
+        '{ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice, amount: 1 } }'
+      ),
+      moreRecipients: await run(
+        forReviewer,
+        '{ recipients: [input.reviewer, "role:admin"], prompt: "Approve the invoice", input: { invoice: input.invoice } }'
+      ),
+      uncovered: await run(`person:${outsider.userId}`, reviewAsks),
+      ownPerson: await run(`person:${by.userId}`, reviewAsks),
+    }).toStrictEqual({
+      otherPrompt: refusedAs("prompt isn't the value the build sealed."),
+      extraKey: refusedAs("input hasn't exactly the keys the build sealed."),
+      moreRecipients: refusedAs(
+        "recipients isn't a list of the 1 items the build sealed."
+      ),
+      uncovered: failedWith("workflow.call_denied"),
+      ownPerson: failedWith("workflow.call_invalid"),
+    });
+  });
+
+  it("opens a decision only as its enter step recorded it, and refuses a step recording one it didn't open, a reminder, or a wait for another decision", async () => {
+    const { reviewer } = reviewed;
+    const forReviewer = `person:${reviewer.userId}`;
+    // The engine itself, as code past the SDK has it, once task `review`
+    // entered as generated code enters it.
+    const pastTheSdk = async (body: string) => {
+      const runId = await reviewRun(reviewed, forReviewer);
+      const ran = await ranAs(
+        runId,
+        `export default { run: async (engine, input) => {
+  await engine.do("review:enter", {}, async () => ({ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }));
+  const open = async () => await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve the invoice", timeout: 1000 }));
+  try { ${body} } catch (error) { return error.code; }
+} };`
+      );
+      return { ...ran, refused: await refusalsOf(runId) };
+    };
+    const outsider = await person("user");
+    expect({
+      otherFrom: await ranAs(
+        await reviewRun(reviewed, forReviewer),
+        reviewModuleOf(
+          `${enterReview(reviewAsks)} ${decideReview(JSON.stringify(`person:${outsider.userId}`))}`
+        )
+      ),
+      unopened: await pastTheSdk(
+        'await engine.do("review:task", {}, async () => ({ decision: "forged", deadline: 1 })); return "recorded";'
+      ),
+      reminder: await pastTheSdk(
+        'const { decision } = await open(); await engine.do("review:task#ask", {}, async () => await engine.decisionRecipients(decision, true)); return "reminded";'
+      ),
+      otherDecision: await pastTheSdk(
+        `await open(); await engine.waitForDecision("review:task#answer", { decision: "${crypto.randomUUID()}", timeout: 1000, last: true }); return "waited";`
+      ),
+    }).toStrictEqual({
+      otherFrom: refusedAs(
+        'Task "review" opens its decision as its enter step recorded it.'
+      ),
+      unopened: refusedPastTheSdk("review:task"),
+      reminder: refusedPastTheSdk("review:task#ask"),
+      otherDecision: refusedPastTheSdk("review:task#answer"),
+    });
+  });
+
+  it("waits until the decision's deadline, whatever its code asks, and takes no answer after it", async () => {
+    const { reviewer } = reviewed;
+    const forReviewer = `person:${reviewer.userId}`;
+    // Code past the SDK asking to stop waiting at once: the host waits on.
+    const cutShort = await reviewRun(reviewed, forReviewer);
+    const waitedOn = await ranAs(
+      cutShort,
+      `export default { run: async (engine, input) => {
+  await engine.do("review:enter", {}, async () => ({ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }));
+  const { decision } = await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve the invoice", timeout: 1000 }));
+  return await engine.waitForDecision("review:task#answer", { decision, timeout: 0, last: false });
+} };`,
+      {
+        engine: decidingEngine(cutShort, async (decision) => {
+          await answered(reviewer, decision, { approved: false });
+        }),
+      }
+    );
+    const lapsed = await reviewRun(reviewed, forReviewer);
+    const timedOut = await ranAs(
+      lapsed,
+      reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+      { engine: decidingEngine(lapsed, deadlinePasses) }
+    );
+    const [closed] = await decisionsOf(lapsed);
+    expect({
+      waitedOn,
+      timedOut,
+      status: closed?.status,
+      lateAnswer: await codeOf(async () => {
+        await answered(reviewer, closed?.id ?? "", { approved: true });
+      }),
+    }).toStrictEqual({
+      waitedOn: {
+        ended: {
+          answered: true,
+          approved: false,
+          by: reviewer.userId,
+          payload: null,
+        },
+        tampered: [],
+      },
+      timedOut: {
+        ended: { decided: { timedOut: true }, told: [0] },
+        tampered: [],
+      },
+      status: "timed_out",
+      lateAnswer: "decision.closed",
+    });
+  });
+
+  it("never takes an answer from the run's own person, nor one its binding no longer allows", async () => {
+    // A workflow of its own: its binding is revoked.
+    const revocable = await decisionWorkflow();
+    const { by, builder, admin, workflow, approval } = revocable;
+    const own = await reviewRun(revocable, "role:builder");
+    let refused: unknown;
+    const ownRun = await ranAs(
+      own,
+      reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+      {
+        engine: decidingEngine(own, async (decision) => {
+          // The run's person holds the role the decision asks: still never.
+          refused = await codeOf(async () => {
+            await answered(by, decision, { approved: true });
+          });
+          await deadlinePasses();
+        }),
+      }
+    );
+    const revoked = await reviewRun(revocable, "role:builder");
+    const revokedRun = await ranAs(
+      revoked,
+      reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+      {
+        engine: decidingEngine(revoked, async (decision) => {
+          await answered(builder, decision, { approved: true });
+          await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+        }),
+      }
+    );
+    expect({ refused, ownRun, revokedRun }).toStrictEqual({
+      refused: "decision.forbidden",
+      ownRun: {
+        ended: { decided: { timedOut: true }, told: [0] },
+        tampered: [],
+      },
+      revokedRun: failedWith("workflow.call_denied"),
+    });
+  });
+
+  it("replays a decision as it ran: the same decision, asked once, and its recorded outcome", async () => {
+    const { reviewer } = reviewed;
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const journal = new Map<string, Journaled>();
+    const source = reviewModuleOf(
+      `${enterReview(reviewAsks)} ${decideReview()}`
+    );
+    const first = await ranAs(runId, source, {
+      engine: decidingEngine(
+        runId,
+        async (decision) => {
+          await answered(reviewer, decision, { approved: true });
+        },
+        journalingEngine(journal, [])
+      ),
+    });
+    const ran: string[] = [];
+    const replay = await ranAs(runId, source, {
+      engine: decidingEngine(
+        runId,
+        deadlinePasses,
+        journalingEngine(journal, ran)
+      ),
+    });
+    expect({
+      replayed: replay.ended,
+      ran,
+      decisions: await decisionsOf(runId),
+      asked: await asksAudited(runId),
+    }).toStrictEqual({
+      // Its people aren't told again: the ask is journaled.
+      replayed: { ...z.object({}).loose().parse(first.ended), told: [] },
+      ran: [],
+      decisions: [expect.objectContaining({ step: "review:task" })],
+      asked: 1,
     });
   });
 });

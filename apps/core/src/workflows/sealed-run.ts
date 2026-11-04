@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { memberRole } from "../auth/identity.ts";
+import type { DecisionOutcome } from "../decisions/decisions.ts";
 import { generatedModule, loadWorkflowBuild } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
@@ -45,6 +46,7 @@ import {
   unbilledAiWaitOf,
 } from "./host.ts";
 import type {
+  DecisionWait,
   HostControls,
   HostHooks,
   HostedRun,
@@ -63,7 +65,15 @@ import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
-import { decisionRunOf } from "./resource-decisions.ts";
+import {
+  askDeciders,
+  callInvalid,
+  decisionRunOf,
+  openRunDecision,
+  promptOf,
+  recipientsOf,
+  takeDecision,
+} from "./resource-decisions.ts";
 import {
   failureOf,
   matchesFilter,
@@ -188,6 +198,32 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   deadline its task's enter step recorded, at most a year ahead. The
 //   isolate computes that deadline as it does any expression (decision
 //   1), and leaving a wait out is flow, as an `if` is.
+// - A decision asked of someone the binding doesn't allow, answered by
+//   anyone else, or taken otherwise than it was answered. A decision task
+//   (`grasp.decision`) runs as the SDK's `step.decision` does: its enter
+//   step records what it asks, its task step opens it, a step of its own
+//   asks its people, and a wait takes the answer. The enter step's record
+//   is held to the build's templates as a call's arguments are (`matched`):
+//   every literal exact, a slot any JSON, never a sensitive parameter. The
+//   host opens the decision from that record alone, on the binding the
+//   build seals (resource-decisions.ts, `openRunDecision`): each recipient
+//   one the binding's frozen deciders cover now, never the run's own
+//   person, who can't answer it as a member of a team or role either; its
+//   authority decided again; its deadline the sealed timeout's (else what
+//   is left of the run's age), whatever its code asks. Its task step must
+//   record exactly the decision the host opened in it, its asking step
+//   asks only that one, by the host's own notice (`askDeciders`: the
+//   isolate learns nobody's address), and never reminds, and its wait is
+//   for that decision only, until its deadline (`decisionWait`). The
+//   outcome is read from the decision's row, never from the event that
+//   wakes the run nor from the isolate, and taken only as the binding
+//   still allows it (`takeDecision`: authority decided again, whoever
+//   answered still covered and never the run's person, what they answered
+//   held to the contract's response schema), in the step that records it,
+//   so a replay takes it alike. A decision nobody answered before its
+//   deadline closes as timed out, and an answer after that is refused by
+//   the decision service. A step run again opens the decision it opened
+//   (one per run and step). A test run of a draft opens none here yet.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.
@@ -214,6 +250,8 @@ const generatedForRunHost = (build: LoadedBuild): boolean =>
 export interface HostedSealedRun extends HostedRun {
   readonly workflowId: string;
   readonly version: number;
+  /** When it was admitted, in ms: a decision with no timeout waits out its age. */
+  readonly createdAt: number;
   /** Its sealed build, checked against the hash its row pins. */
   readonly build: LoadedBuild;
   /**
@@ -259,6 +297,21 @@ export interface SealedRunMemory {
   sessionId?: () => string | undefined;
 }
 
+/** A `grasp.decision` call task. */
+type DecisionTask = Extract<SealedTask, { kind: "call" }> & {
+  call: Extract<SealedCall, { name: "grasp.decision" }>;
+};
+
+const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
+  task?.kind === "call" && task.call.name === "grasp.decision";
+
+/**
+ * The parts `step.decision` runs of a decision task's step besides its
+ * opening: asking its people, noting when, and waiting for the answer. A
+ * reminder is none: a sealed decision never reminds.
+ */
+const decisionParts = ["ask", "asked", "answer"] as const;
+
 /** A step of the sealed table: its task (none for the workflow's own). */
 interface SealedStep {
   readonly task?: SealedTask;
@@ -282,6 +335,13 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
     if (task.scope.length === 0) {
       for (const kind of task.steps) {
         table.set(`${task.id}:${kind}`, { task, kind });
+      }
+      // `step.decision`'s parts of a decision task's own step (the SDK's
+      // `#part`): its asking, when it asked, and its wait for the answer.
+      if (isDecisionTask(task) && task.steps.includes("task")) {
+        for (const part of decisionParts) {
+          table.set(`${task.id}:task#${part}`, { task, kind: part });
+        }
       }
     }
   }
@@ -466,6 +526,39 @@ const skippedSchema = z.strictObject({ skipped: z.literal(true) });
 
 /** What a deadline's enter step records, when not skipped. */
 const deadlineRecordSchema = z.object({ until: z.int().min(0) });
+
+/** What a decision task's enter step records, when not skipped. */
+const decisionRecordSchema = z.strictObject({
+  recipients: z.json(),
+  prompt: z.json(),
+  input: z.json(),
+});
+
+/** What a decision task's step records: the decision the host opened. */
+const openedSchema = z.strictObject({
+  decision: z.string(),
+  deadline: z.number(),
+});
+
+/** How the SDK opens a decision (`step.decision`). */
+const openingSchema = z.strictObject({
+  step: z.string(),
+  from: z.string(),
+  description: z.string().optional(),
+  // The host's own: its deadline is the sealed timeout's.
+  timeout: z.unknown(),
+});
+
+/** As long as a decision's wait may be: its deadline comes first. */
+const maxDecisionWaitMs = 365 * 86_400_000;
+
+/** What a decision asks, as its task's enter step recorded it. */
+interface DecisionAsks {
+  /** Its recipients as deciders (`recipientsOf`). */
+  readonly recipients: readonly string[];
+  readonly prompt: string;
+  readonly input: Json;
+}
 
 /** What a catch step journals (`RunHost.caught`): what it took, if any. */
 const caughtJournalSchema = z.union([
@@ -861,6 +954,15 @@ class SealedRun implements SealedRunKind {
   #pendingBy: string | null | undefined;
   /** Each sleeping task's deadline, as its enter step recorded it. */
   readonly #deadlines = new Map<string, number>();
+  /** What each decision task asks, as its enter step recorded it. */
+  readonly #asks = new Map<string, DecisionAsks>();
+  /** The decision each decision task's step opened, as it recorded it. */
+  readonly #opened = new Map<string, string>();
+  /** The decision each attempt of a decision task's step opened. */
+  readonly #openings = new WeakMap<
+    StepAttempt,
+    { decision: string; deadline: number }
+  >();
   /**
    * The step running now, from when the host let it start until it ended
    * (`stepEnded`): the build's code runs its steps one at a time, so none
@@ -954,29 +1056,34 @@ class SealedRun implements SealedRunKind {
     const { task, kind } = sealed;
     const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
     if (use === "do") {
-      return kind !== "catch" && !sleeps;
+      return kind !== "catch" && kind !== "answer" && !sleeps;
+    }
+    if (use === "waitForDecision") {
+      return kind === "answer";
     }
     if (use === "caught") {
       return kind === "catch" && task?.kind === "try";
     }
+    return sleeps && task !== undefined && this.#sleepsAs(task, use, time);
+  }
+
+  /** `#runsAs`'s check of sleeping task `task`'s own step's sleep. */
+  #sleepsAs(
+    task: SealedTask,
+    use: HostStepUse,
+    time: number | undefined
+  ): boolean {
+    if (time === undefined) {
+      return false;
+    }
     if (use === "sleep") {
-      return (
-        sleeps &&
-        task?.kind === "wait" &&
-        time !== undefined &&
-        time === task.milliseconds
-      );
+      return task.kind === "wait" && time === task.milliseconds;
     }
-    if (use === "sleepUntil") {
-      return (
-        sleeps &&
-        task !== undefined &&
-        sleepsUntil(task) &&
-        time !== undefined &&
-        time === this.#deadlines.get(task.id)
-      );
-    }
-    return false;
+    return (
+      use === "sleepUntil" &&
+      sleepsUntil(task) &&
+      time === this.#deadlines.get(task.id)
+    );
   }
 
   /**
@@ -991,9 +1098,12 @@ class SealedRun implements SealedRunKind {
       return { retries: sealedRetries };
     }
     const limits = [
-      // A listen's timeout is how long it waits for its events, never
-      // how long an attempt of its steps may take.
-      ...(task.timeoutMs === undefined || task.kind === "listen"
+      // A listen's timeout is how long it waits for its events, and a
+      // decision's how long it takes answers, never how long an attempt
+      // of its steps may take.
+      ...(task.timeoutMs === undefined ||
+      task.kind === "listen" ||
+      isDecisionTask(task)
         ? []
         : [task.timeoutMs]),
       ...triesAround(this.run.build, task).flatMap((around) =>
@@ -1153,6 +1263,14 @@ class SealedRun implements SealedRunKind {
       return await this.#caughtChecked(attempt, task, value);
     }
     const skipped = skippedSchema.safeParse(value).success;
+    if (isDecisionTask(task)) {
+      return await this.#decisionRecordChecked(
+        attempt,
+        task,
+        kind === "enter" && skipped ? undefined : kind,
+        value
+      );
+    }
     if (kind === "task" && task?.kind === "raise" && !skipped) {
       return { ok: false, error: raisedBy(task) };
     }
@@ -1163,6 +1281,78 @@ class SealedRun implements SealedRunKind {
     return unfit === undefined
       ? { ok: true, value }
       : { ok: false, error: unfit };
+  }
+
+  /**
+   * `#recordChecked`'s checks of what a step of kind `kind` of decision
+   * task `task` records, `value` (no kind for an enter step its `if`
+   * skipped): its enter step's (`#decisionEntered`), and its task step's,
+   * exactly the decision the host opened in that attempt.
+   */
+  async #decisionRecordChecked(
+    attempt: StepAttempt,
+    task: DecisionTask,
+    kind: string | undefined,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    if (kind === "enter") {
+      return await this.#decisionEntered(attempt, task, value);
+    }
+    if (kind !== "task") {
+      return { ok: true, value };
+    }
+    const opened = this.#openings.get(attempt);
+    const recorded = z.json().safeParse(value);
+    return opened !== undefined &&
+      recorded.success &&
+      canonicalJson(recorded.data) === canonicalJson(opened)
+      ? { ok: true, value }
+      : await this.#refused(
+          attempt,
+          `Task "${task.id}"'s step records the decision it opened.`,
+          "decision"
+        );
+  }
+
+  /**
+   * A decision task's enter step's record, `value`: what its decision
+   * asks, `{ recipients, prompt, input }`, each held to the build's
+   * template as a call's arguments are (`matched`, no sensitive
+   * parameter anywhere); anything else is tampering. Recipients or a
+   * prompt no decision takes fail the step as the call's would.
+   */
+  async #decisionEntered(
+    attempt: StepAttempt,
+    task: DecisionTask,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    const record = decisionRecordSchema.safeParse(value);
+    if (!record.success) {
+      return await this.#refused(
+        attempt,
+        `Task "${task.id}"'s enter step records { recipients, prompt, input }.`,
+        "decision"
+      );
+    }
+    const { call } = task;
+    try {
+      for (const part of ["recipients", "prompt", "input"] as const) {
+        matched(call[part], record.data[part], part, undefined, []);
+      }
+    } catch (error) {
+      return await this.#refused(
+        attempt,
+        error instanceof Error ? error.message : "The decision isn't sealed.",
+        "decision"
+      );
+    }
+    try {
+      recipientsOf(record.data.recipients);
+      promptOf(record.data.prompt);
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+    return { ok: true, value };
   }
 
   /**
@@ -1195,11 +1385,92 @@ class SealedRun implements SealedRunKind {
       }
       return;
     }
+    if (isDecisionTask(task)) {
+      this.#decisionEnded(task, sealed?.kind, outcome.value);
+      return;
+    }
     if (sealed?.kind === "enter" && task !== undefined && sleepsUntil(task)) {
       const until = deadlineRecordSchema.safeParse(outcome.value).data?.until;
       if (until !== undefined) {
         this.#deadlines.set(task.id, until);
       }
+    }
+  }
+
+  /**
+   * Keeps what decision task `task`'s step of kind `kind` recorded,
+   * `value`, as checked when it ran (`#recordChecked`): what its enter
+   * step asks, and the decision its task step opened.
+   */
+  #decisionEnded(
+    task: DecisionTask,
+    kind: string | undefined,
+    value: unknown
+  ): void {
+    if (kind === "enter") {
+      const record = decisionRecordSchema.safeParse(value);
+      if (record.success) {
+        this.#asks.set(task.id, {
+          recipients: recipientsOf(record.data.recipients),
+          prompt: promptOf(record.data.prompt),
+          input: record.data.input,
+        });
+      }
+    } else if (kind === "task") {
+      const opened = openedSchema.safeParse(value);
+      if (opened.success) {
+        this.#opened.set(task.id, opened.data.decision);
+      }
+    }
+  }
+
+  /**
+   * The wait of step `step` (a decision task's `#answer`) as the host
+   * runs it: for exactly the decision its task step opened, until that
+   * decision's deadline, closing it then, whatever its code asked.
+   */
+  decisionWait(step: string, wait: DecisionWait): DecisionWait | Error {
+    const task = this.#steps.get(step)?.task;
+    const opened = task === undefined ? undefined : this.#opened.get(task.id);
+    if (opened === undefined || wait.decision !== opened) {
+      return tampering(
+        `Step "${step}" waits only for the decision its task opened.`
+      );
+    }
+    return { decision: opened, timeout: maxDecisionWaitMs, last: true };
+  }
+
+  /**
+   * What step `step`'s decision answers, once it ended as `outcome`: an
+   * answer taken only as its binding still allows it (`takeDecision`),
+   * its value held to the contract's response schema; a refusal fails
+   * the step for good. A timeout is the outcome as it is.
+   */
+  async decisionTaken(
+    step: string,
+    outcome: DecisionOutcome
+  ): Promise<DecisionOutcome> {
+    const task = this.#steps.get(step)?.task;
+    if (!isDecisionTask(task)) {
+      throw new Error(`Step "${step}" is no decision task's`);
+    }
+    if (!outcome.answered) {
+      return outcome;
+    }
+    try {
+      const { approved, by, value } = await takeDecision(
+        this.#env,
+        this.run.calling,
+        task.id,
+        task.call.binding,
+        outcome
+      );
+      return { answered: true, approved, by, payload: value };
+    } catch (error) {
+      // Decided: trying again takes nothing else.
+      throw isExpectedError(error)
+        ? namedError("NonRetryableError", error.message, error.code)
+        : error;
     }
   }
 
@@ -1265,11 +1536,11 @@ class SealedRun implements SealedRunKind {
   /** Refuses `attempt` as tampering, `message` its refusal: its failure. */
   async #refused(
     attempt: StepAttempt,
-    message: string
+    message: string,
+    call = "caught"
   ): Promise<Settled<never>> {
     return await settle(
-      async () =>
-        await this.#host.refuseIn(attempt, tampering(message), "caught")
+      async () => await this.#host.refuseIn(attempt, tampering(message), call)
     );
   }
 
@@ -1320,9 +1591,13 @@ class SealedRun implements SealedRunKind {
         await refused(attemptCallLabels.callCollection),
       callBrain: async () => await refused(attemptCallLabels.callBrain),
       callFunction: async () => await refused(attemptCallLabels.callFunction),
-      openDecision: async () => await refused(attemptCallLabels.openDecision),
-      decisionRecipients: async () =>
-        await refused(attemptCallLabels.decisionRecipients),
+      openDecision: async (request) =>
+        this.#noted(attempt, await this.#openDecision(attempt, request)),
+      decisionRecipients: async (decision, reminder) =>
+        this.#noted(
+          attempt,
+          await this.#askDecision(attempt, decision, reminder)
+        ),
       readAttachment: async () =>
         await refused(attemptCallLabels.readAttachment),
     };
@@ -1336,6 +1611,132 @@ class SealedRun implements SealedRunKind {
           await this.#host.hostCallRefusal(attempt, admission, call)
         )
     );
+  }
+
+  /**
+   * The decision task's step `attempt` is, if it runs now and calls the
+   * host for the first time, of kind `kind`; refused as tampering
+   * otherwise.
+   */
+  async #decisionStep(
+    attempt: StepAttempt,
+    kind: string
+  ): Promise<DecisionTask> {
+    const refuse = async (message: string): Promise<never> =>
+      await this.#host.refuseIn(attempt, tampering(message), "decision");
+    const sealed = this.#steps.get(attempt.step);
+    const task = sealed?.task;
+    if (!isDecisionTask(task) || sealed?.kind !== kind) {
+      return await refuse(
+        `Step "${attempt.step}" makes no such decision call.`
+      );
+    }
+    if (this.#host.running(attempt) !== attempt) {
+      return await refuse(`Step "${attempt.step}" calls only while it runs.`);
+    }
+    if (this.#called.has(attempt)) {
+      return await refuse(`Step "${attempt.step}" makes its call once.`);
+    }
+    this.#called.add(attempt);
+    return task;
+  }
+
+  /**
+   * Opens the decision of decision task step `attempt`, as `step.decision`
+   * asks (`request`), from what its enter step recorded alone
+   * (`openRunDecision`): its recipients the binding covers, never the
+   * run's person, its deadline the sealed timeout's. Its code's `from`
+   * and description must be what was recorded; its timeout isn't read.
+   */
+  async #openDecision(
+    attempt: StepAttempt,
+    request: unknown
+  ): Promise<Settled<{ decision: string; deadline: number }>> {
+    return await settle(async () => {
+      this.#host.requireUntampered();
+      await this.#host.requireCurrent(attempt, "decision");
+      const task = await this.#decisionStep(attempt, "task");
+      const asks = this.#asks.get(task.id);
+      const opening = openingSchema.safeParse(request);
+      if (
+        asks === undefined ||
+        !opening.success ||
+        opening.data.step !== attempt.step ||
+        opening.data.from !== asks.recipients[0] ||
+        opening.data.description !== asks.prompt
+      ) {
+        return await this.#host.refuseIn(
+          attempt,
+          tampering(
+            `Task "${task.id}" opens its decision as its enter step recorded it.`
+          ),
+          "decision"
+        );
+      }
+      const { call } = task;
+      // Not yet in v1: its own action telling them, and a reminder.
+      if (call.ask !== undefined || call.remindAfterMs !== undefined) {
+        throw callInvalid(
+          "ask: A sealed run's decision asks by the host's notice alone, once."
+        );
+      }
+      const { calling, createdAt } = this.run;
+      if (calling.candidate !== undefined) {
+        throw callInvalid(
+          "binding: A test run of a draft opens no decision on the run host yet."
+        );
+      }
+      // Its input is shown to people other than the run's person.
+      await requireResourceRunEvidenceReadable(this.#env, calling);
+      this.#requireHolds(attempt);
+      const opened = await openRunDecision(
+        this.#env,
+        { ...calling, createdAt },
+        task.id,
+        attempt.step,
+        {
+          binding: call.binding,
+          recipients: [...asks.recipients],
+          prompt: asks.prompt,
+          input: asks.input,
+          ...(call.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: call.timeoutMs }),
+        }
+      );
+      this.#requireHolds(attempt);
+      this.#openings.set(attempt, opened);
+      return opened;
+    });
+  }
+
+  /**
+   * Asks the people of the decision decision task step `attempt` (its
+   * `#ask`) is for, by the host's own notice (`askDeciders`): only the
+   * decision its task step opened, and never as a reminder. Its code
+   * learns nobody's address: it is answered no recipients.
+   */
+  async #askDecision(
+    attempt: StepAttempt,
+    decision: unknown,
+    reminder: unknown
+  ): Promise<Settled<[]>> {
+    return await settle(async () => {
+      this.#host.requireUntampered();
+      await this.#host.requireCurrent(attempt, "decision");
+      const task = await this.#decisionStep(attempt, "ask");
+      const opened = this.#opened.get(task.id);
+      if (opened === undefined || decision !== opened || reminder !== false) {
+        return await this.#host.refuseIn(
+          attempt,
+          tampering(`Task "${task.id}" asks once, for the decision it opened.`),
+          "decision"
+        );
+      }
+      this.#requireHolds(attempt);
+      await askDeciders(this.#env, this.run.calling, opened);
+      return [];
+    });
   }
 
   /**
@@ -1823,6 +2224,7 @@ export const sealedRunOf = async (
     shareSubject: calling.principal,
     workflowId: row.workflowResourceId,
     version: row.version,
+    createdAt: row.createdAt.getTime(),
     build,
     params: z.record(z.string(), z.json()).parse(JSON.parse(receipt.params)),
     input: z.json().parse(JSON.parse(receipt.input)),

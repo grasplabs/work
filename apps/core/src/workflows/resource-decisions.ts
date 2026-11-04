@@ -503,7 +503,11 @@ export const takeDecision = async (
     if (!outcome.answered) {
       throw workflowResourceErrors.create("workflow.decision_timed_out");
     }
-    if (!(await covers(env, binding.deciders, `person:${outcome.by}`))) {
+    // Never the run's own person (R8), whom its decision excludes too.
+    if (
+      outcome.by === run.principal ||
+      !(await covers(env, binding.deciders, `person:${outcome.by}`))
+    ) {
       throw callDenied();
     }
     const contract = await contractOf(env, binding);
