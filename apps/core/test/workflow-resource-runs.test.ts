@@ -1212,6 +1212,7 @@ const evaluatedWith = async (
       principal: by.userId,
       input: { who: "Ada" },
       params: { greeting: "Hello" },
+      state: {},
       createdAt: Date.now(),
       build,
       calling: {
@@ -1324,6 +1325,7 @@ describe("an activation's share of core's CPU", () => {
           principal: by.userId,
           input: { who: "Ada" },
           params: {},
+          state: {},
           createdAt: Date.now(),
           build,
           calling: {
@@ -1452,6 +1454,7 @@ describe("an activation's share of core's CPU", () => {
           principal: by.userId,
           input: { who: "Ada" },
           params: { greeting: "Hello" },
+          state: {},
           createdAt: Date.now(),
           build,
           calling: {
@@ -2277,6 +2280,7 @@ describe(
             principal: by.userId,
             input: { who: "Ada" },
             params: {},
+            state: {},
             createdAt: Date.now(),
             build,
             calling: {
@@ -2724,6 +2728,7 @@ describe(
           principal: by.userId,
           input: { who: "Ada" },
           params: { greeting: "Hello" },
+          state: {},
           createdAt: Date.now(),
           build,
           calling: {

@@ -56,6 +56,7 @@ import { isPaused } from "./workflow-lifecycle.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
+import { workflowStateOf } from "./workflow-state.ts";
 import {
   packagesHoldSql,
   manifestPackagesSchema,
@@ -225,6 +226,19 @@ export interface ParentRun {
 }
 
 /**
+ * What workflow `id` keeps between its runs (`workflowStateOf`), read once
+ * as a start that admits a run (`buildHash`) is decided and frozen with
+ * it, for its run alone: a write landing after this is the next start's to
+ * read. Null for a start that admits no run.
+ */
+const frozenState = async (
+  env: Env,
+  id: string,
+  buildHash: string | null
+): Promise<string | null> =>
+  buildHash === null ? null : canonicalJson(await workflowStateOf(env, id));
+
+/**
  * A new start the host decided on: what it freezes, and what admitting it
  * requires to still hold.
  */
@@ -247,6 +261,12 @@ export interface StartAuthorization {
   paramsRevision: number;
   /** The bindings it froze (canonical JSON). */
   bindings: string;
+  /**
+   * What the workflow kept between its runs as it was decided (canonical
+   * JSON, `workflowStateOf`), which its run reads in every activation;
+   * null for a start that admits no run.
+   */
+  state: string | null;
   /**
    * Whether it starts in restricted mode (`restrictedStart`): its run is
    * restricted for good.
@@ -1367,6 +1387,7 @@ export const decideWorkflowStart = async (
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
   const bindings = await frozenBindings(env, id, version);
+  const state = await frozenState(env, id, buildHash);
   // Read again as the admitting statement runs: the workflow live at the
   // same policy generation and parameter revision, the same version and
   // manifest, everything its bindings need, and the invoker's own rule.
@@ -1425,6 +1446,7 @@ export const decideWorkflowStart = async (
       params,
       paramsRevision: configRevision,
       bindings: bindings.text,
+      state,
       restricted,
       buildHash,
       actor: rule.actor,
@@ -1533,6 +1555,7 @@ export const admitWorkflowStart = async (
     createdAt.getTime(),
     null,
     authorization.restricted ? 1 : 0,
+    authorization.state,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,

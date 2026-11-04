@@ -57,6 +57,7 @@ import {
   requireWorkflowRole,
 } from "../workflow-resources.ts";
 import { acceptedInput } from "../workflow-starts.ts";
+import { workflowStateOf } from "../workflow-state.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
@@ -333,6 +334,10 @@ export const startCandidateRun = async (
   }
   const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
   const paramsText = candidateParams(built.contract, params);
+  // What the workflow keeps between its runs, read once and frozen with
+  // the row, as a start's receipt freezes it: the test reads it, and
+  // writes nothing back (sealed-run.ts, `stepRecording`).
+  const stateText = canonicalJson(await workflowStateOf(env, workflow.id));
   const runId = crypto.randomUUID();
   const reservation = reservationOf(workflow.id, runId);
   const manifest = canonicalJson({
@@ -386,6 +391,7 @@ export const startCandidateRun = async (
         principalId: by.userId,
         input: inputText,
         params: paramsText,
+        state: stateText,
         fixtures: canonicalJson(fixtures),
         status: "starting",
         createdAt,
@@ -447,7 +453,7 @@ export const startCandidateRun = async (
 
 /**
  * What an activation of test run `runId` runs, checked against its pin:
- * its row, its build (`loadCandidateBuild`), the input and parameters its
+ * its row, its build (`loadCandidateBuild`), the input, parameters and state its
  * start froze, and a calling context whose every call is answered from its
  * fixtures.
  */
@@ -464,7 +470,8 @@ const loadedCandidateRun = async (
   if (
     row === undefined ||
     row.workflowResourceId !== pin.workflow ||
-    row.manifestHash !== pin.manifest
+    row.manifestHash !== pin.manifest ||
+    row.state === null
   ) {
     throw new Error(`Test run ${runId} doesn't match its record`);
   }
@@ -504,6 +511,7 @@ const loadedCandidateRun = async (
       principal: row.principalId,
       input: z.json().parse(JSON.parse(row.input)),
       params: jsonObjectSchema.parse(JSON.parse(row.params)),
+      state: jsonObjectSchema.parse(JSON.parse(row.state)),
       createdAt: row.createdAt.getTime(),
       build,
       calling: {

@@ -399,6 +399,8 @@ const runWorkflow = async (
         runId,
         params: Object.fromEntries(params),
         input: event.payload,
+        // An App's workflow keeps its data in its App: no state of its own.
+        state: {},
         collections: Object.keys(bindings),
         connections: Object.keys(connections),
         brains: Object.keys(brains),

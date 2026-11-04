@@ -19,6 +19,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -39,6 +40,7 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
+import type { SealedTemplate } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
@@ -46,6 +48,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { resetWorkflowState, workflowStateOf } from "../src/workflow-state.ts";
 import {
   attemptMethods,
   loadRunIsolate,
@@ -631,11 +634,11 @@ const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 /**
  * A module of the test's own in place of the build's generated one: a
  * workflow on input `{ who }` whose run is `body`, with `step`, `env`,
- * `input` and `sensitiveParam` in scope.
+ * `input`, `state` and `sensitiveParam` in scope.
  */
 const moduleOf = (body: string): string => `
 import { sensitiveParam, workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { env, input }) => {
+export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { env, input, state }) => {
 ${body}
 });
 `;
@@ -885,6 +888,7 @@ const ranAs = async (
     maxModelCalls,
     calling,
     maxSleepMs,
+    keeps,
   }: {
     /** How its attempts are admitted, from the run; at once if not given. */
     admitAttempt?: (
@@ -897,11 +901,28 @@ const ranAs = async (
     calling?: (frozen: CallingRun) => CallingRun;
     /** Its waits' limit, as a test run's. */
     maxSleepMs?: number;
+    /**
+     * What tasks keep in the workflow's state, by task, as a build of the
+     * format to come seals it (`SealedTask.state`).
+     */
+    keeps?: Readonly<Record<string, Record<string, SealedTemplate>>>;
   } = {}
 ) => {
   const loaded = await sealedRunOf(runId);
   const run = {
     ...loaded,
+    ...(keeps === undefined
+      ? {}
+      : {
+          build: {
+            ...loaded.build,
+            tasks: loaded.build.tasks.map((task) =>
+              Object.hasOwn(keeps, task.id)
+                ? { ...task, state: keeps[task.id] }
+                : task
+            ),
+          },
+        }),
     ...(maxModelCalls === undefined ? {} : { maxModelCalls }),
     ...(calling === undefined ? {} : { calling: calling(loaded.calling) }),
     ...(maxSleepMs === undefined ? {} : { maxSleepMs }),
@@ -3319,6 +3340,280 @@ return await step.do("mark", { key: "task@0/0", description: "Its task" }, async
       withoutItemStep: refusedAs(
         `Item 0 of loop "lines" doesn't run now: its items run in increasing order, each once.`
       ),
+    });
+  });
+});
+
+/**
+ * What `finish` keeps in the tests below, as a build sealing state does:
+ * two expressions' values and a literal.
+ */
+const finishKeeps = {
+  finish: {
+    count: { slot: 0 },
+    seen: { slot: 1 },
+    kind: { literal: "visit" },
+  },
+} satisfies Record<string, Record<string, SealedTemplate>>;
+
+/** `finish`'s own step, keeping `state` beside its output. */
+const keepFinish = (state: string): string =>
+  `return ${taskStep("finish", `{ output: { status: "done" }, state: ${state} }`)};`;
+
+/** How many times run `runId`'s steps' state was written, and withheld. */
+const stateEvents = async (runId: string) => {
+  const events = await allEvents();
+  const of = (action: string) =>
+    events.filter(
+      (event) => event.action === action && event.target?.id === runId
+    ).length;
+  return {
+    written: of("workflow.state.written"),
+    withheld: of("workflow.state.withheld"),
+  };
+};
+
+// What a sealed run keeps between its workflow's runs (workflow-state.ts),
+// from its threat model: state the build didn't seal (a key more or
+// less, a literal changed, a sensitive parameter, a record of another
+// shape); a write by an attempt that failed, or a round its retry ran
+// again; a write repeated when its step runs again or is replayed; a test
+// run, or a restricted one, writing; a state too large; and a run's
+// snapshot changing under it as other runs write.
+describe("a sealed run's state between runs on the run host", () => {
+  let sealed: Sealed;
+
+  beforeAll(async () => {
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+    sealed = await sealedWorkflow();
+  });
+
+  beforeEach(async () => {
+    await resetWorkflowState(env, sealed.by, sealed.workflow.id);
+  });
+
+  afterEach(endLiveResourceRuns);
+
+  it("keeps what its step's sealed state names once it succeeded, once by its step's key, whatever a later run of the step sends", async () => {
+    const runId = await waitingRun(sealed);
+    const first = await ranAs(
+      runId,
+      moduleOf(keepFinish('{ count: 1, seen: input.who, kind: "visit" }')),
+      { keeps: finishKeeps }
+    );
+    // Its activation lost before the engine journaled the step: the step
+    // runs again, its code sending other values, and writes nothing.
+    const again = await ranAs(
+      runId,
+      moduleOf(keepFinish('{ count: 2, seen: "Bob", kind: "visit" }')),
+      { keeps: finishKeeps }
+    );
+    expect({
+      first,
+      again: again.tampered,
+      state: await workflowStateOf(env, sealed.workflow.id),
+      events: await stateEvents(runId),
+    }).toStrictEqual({
+      first: {
+        ended: {
+          output: { status: "done" },
+          state: { count: 1, seen: "Ada", kind: "visit" },
+        },
+        tampered: [],
+      },
+      again: [],
+      state: { count: 1, seen: "Ada", kind: "visit" },
+      events: { written: 1, withheld: 0 },
+    });
+  });
+
+  it("refuses state the build didn't seal, and keeps none of it", async () => {
+    const refused = async (
+      record: string,
+      keeps: Record<string, Record<string, SealedTemplate>> = finishKeeps
+    ) => {
+      const { ended, tampered } = await ranAs(
+        await waitingRun(sealed),
+        moduleOf(`return ${taskStep("finish", record)};`),
+        { keeps }
+      );
+      return { ended, tampered };
+    };
+    const asTampering = {
+      ended: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+    };
+    expect({
+      extraKey: await refused(
+        '{ output: null, state: { count: 1, seen: "Ada", kind: "visit", more: 1 } }'
+      ),
+      missingKey: await refused(
+        '{ output: null, state: { count: 1, seen: "Ada" } }'
+      ),
+      literalChanged: await refused(
+        '{ output: null, state: { count: 1, seen: "Ada", kind: "other" } }'
+      ),
+      noState: await refused("{ output: null }"),
+      extraField: await refused(
+        '{ output: null, state: { count: 1, seen: "Ada", kind: "visit" }, also: 1 }'
+      ),
+      sensitive: await refused(
+        '{ output: null, state: { secret: sensitiveParam("token") } }',
+        { finish: { secret: { param: "token" } } }
+      ),
+      state: await workflowStateOf(env, sealed.workflow.id),
+    }).toStrictEqual({
+      extraKey: asTampering,
+      missingKey: asTampering,
+      literalChanged: asTampering,
+      noState: asTampering,
+      extraField: asTampering,
+      sensitive: asTampering,
+      state: {},
+    });
+  });
+
+  it("writes nothing for a failed round: only the round that succeeded keeps its state", async () => {
+    const runId = await waitingRun(sealed);
+    const tries: Tries = new Map();
+    // `fetch`'s try retries it: its first two rounds fail, each having
+    // made what it would keep.
+    const retried = await ranAs(
+      runId,
+      moduleOf(`
+let rounds = 0;
+return ${taskStep("fetch", '(() => { rounds += 1; const record = { output: null, state: { count: rounds, seen: input.who, kind: "visit" } }; if (rounds < 3) throw new Error("not yet"); return record; })()')};`),
+      { keeps: { fetch: finishKeeps.finish }, engine: retryingEngine(tries) }
+    );
+    // A step that fails for good, its code going on past it: no write.
+    const failed = await waitingRun(sealed);
+    await ranAs(
+      failed,
+      moduleOf(`
+try {
+  ${taskStep("finish", '(() => { throw new Error("never"); })()')};
+} catch {}
+return null;`),
+      { keeps: finishKeeps, engine: retryingEngine() }
+    );
+    expect({
+      retried: retried.ended,
+      rounds: retrySteps(tries, "run"),
+      state: await workflowStateOf(env, sealed.workflow.id),
+      events: await stateEvents(runId),
+      failed: await stateEvents(failed),
+    }).toStrictEqual({
+      retried: {
+        output: null,
+        state: { count: 3, seen: "Ada", kind: "visit" },
+      },
+      rounds: 2,
+      state: { count: 3, seen: "Ada", kind: "visit" },
+      events: { written: 1, withheld: 0 },
+      failed: { written: 0, withheld: 0 },
+    });
+  });
+
+  it("fails the step whose state is too large, keeping none of it", async () => {
+    const runId = await waitingRun(sealed);
+    const big = await ranAs(
+      runId,
+      moduleOf(
+        keepFinish('{ count: 1, seen: "x".repeat(70000), kind: "visit" }')
+      ),
+      { keeps: finishKeeps }
+    );
+    expect({
+      big: { ended: big.ended, tampered: big.tampered },
+      state: await workflowStateOf(env, sealed.workflow.id),
+      events: await stateEvents(runId),
+    }).toStrictEqual({
+      big: { ended: "workflow.state_too_large", tampered: [] },
+      state: {},
+      events: { written: 0, withheld: 0 },
+    });
+  });
+
+  it("writes nothing for a test run or a restricted one, which still checks its state; a restricted run's skip is audited", async () => {
+    const as = async (calling: (frozen: CallingRun) => CallingRun) => {
+      const runId = await waitingRun(sealed);
+      const valid = await ranAs(
+        runId,
+        moduleOf(keepFinish('{ count: 1, seen: input.who, kind: "visit" }')),
+        { keeps: finishKeeps, calling }
+      );
+      const tampered = await ranAs(
+        await waitingRun(sealed),
+        moduleOf(keepFinish('{ count: 1, seen: input.who, kind: "other" }')),
+        { keeps: finishKeeps, calling }
+      );
+      return {
+        ended: valid.tampered,
+        tampered: tampered.tampered,
+        events: await stateEvents(runId),
+      };
+    };
+    expect({
+      draft: await as((frozen) => ({ ...frozen, candidate: new Map() })),
+      appTest: await as((frozen) => ({ ...frozen, fixture: true })),
+      restricted: await as((frozen) => ({ ...frozen, restricted: true })),
+      state: await workflowStateOf(env, sealed.workflow.id),
+    }).toStrictEqual({
+      draft: {
+        ended: [],
+        tampered: ["workflow.invalid"],
+        events: { written: 0, withheld: 0 },
+      },
+      appTest: {
+        ended: [],
+        tampered: ["workflow.invalid"],
+        events: { written: 0, withheld: 0 },
+      },
+      restricted: {
+        ended: [],
+        tampered: ["workflow.invalid"],
+        events: { written: 0, withheld: 1 },
+      },
+      state: {},
+    });
+  });
+
+  it("hands every activation of a run the snapshot its start froze, frozen, whatever other runs write since", async () => {
+    await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        keepFinish('{ count: 1, seen: { who: input.who }, kind: "visit" }')
+      ),
+      { keeps: finishKeeps }
+    );
+    const reader = await waitingRun(sealed);
+    // Another run writes after the reader's start.
+    await ranAs(
+      await waitingRun(sealed),
+      moduleOf(keepFinish('{ count: 3, seen: { who: "Bob" }, kind: "visit" }')),
+      { keeps: finishKeeps }
+    );
+    const reads = `return { state, frozen: Object.isFrozen(state) && Object.isFrozen(state.seen) };`;
+    // Two activations, each loading the run afresh, as after a restart.
+    const first = await ranAs(reader, moduleOf(reads));
+    const second = await ranAs(reader, moduleOf(reads));
+    const snapshot = {
+      ended: {
+        state: { count: 1, seen: { who: "Ada" }, kind: "visit" },
+        frozen: true,
+      },
+      tampered: [],
+    };
+    expect({
+      first,
+      second,
+      now: await workflowStateOf(env, sealed.workflow.id),
+    }).toStrictEqual({
+      first: snapshot,
+      second: snapshot,
+      now: { count: 3, seen: { who: "Bob" }, kind: "visit" },
     });
   });
 });

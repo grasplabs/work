@@ -1091,6 +1091,7 @@ const hostOf = async (
       principal: by.userId,
       input: { who: "Ada" },
       params: {},
+      state: {},
       createdAt: Date.now(),
       build,
       calling: {

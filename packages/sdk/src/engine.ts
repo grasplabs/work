@@ -176,6 +176,12 @@ export interface WorkflowEngine {
    * started with even when people change them before it resumes.
    */
   readonly params: Readonly<Record<string, unknown>>;
+  /**
+   * What the workflow kept between its runs, by key, as the run's start
+   * froze it: the same in every execution of the run, whatever later
+   * runs write meanwhile.
+   */
+  readonly state: Readonly<Record<string, Json>>;
   /** The run's bindings, built for this execution of it (see `WorkflowEnv`). */
   readonly env: WorkflowEnv;
   /**

@@ -103,6 +103,17 @@ export type {
  */
 const { freeze } = Object;
 
+/** `value` frozen all the way down: JSON a run reads and never changes. */
+const frozenJson = <Value extends Json | undefined>(value: Value): Value => {
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) {
+      frozenJson(item);
+    }
+    freeze(value);
+  }
+  return value;
+};
+
 const workflowErrorCodes = [
   "workflow.invalid_definition",
   "workflow.invalid_step_call",
@@ -732,6 +743,14 @@ export interface WorkflowContext<P extends Params, Input> {
   runId: RunId;
   input: Input;
   params: ParamValues<P>;
+  /**
+   * What the workflow kept between its runs, by key, as this run's start
+   * found it: the same in every execution of the run, whatever later runs
+   * write meanwhile, and frozen. A step sets it only as its definition
+   * seals, once it succeeded; an App's workflow keeps its data in its App
+   * and has none.
+   */
+  state: Readonly<Record<string, Json>>;
   /**
    * The App's connections and other permissions, and its own functions,
    * by binding name; call them in a step's own function, each written out
@@ -1520,6 +1539,7 @@ export const workflow = <
         // schema of its kind, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
+        state: frozenJson(engine.state),
         // The host builds the run's bindings from its App's permissions
         // (connections, collections) and its App
         // (`APP`), which is what `WorkflowBindings` declares where the App's

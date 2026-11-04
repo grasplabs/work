@@ -320,6 +320,9 @@ export const runFixtureWorkflow = async (
       principal: row.principal,
       input: z.json().parse(JSON.parse(row.input)),
       params: jsonObjectSchema.parse(JSON.parse(row.params)),
+      // An App's test reads nothing of the organization's: none of what
+      // the workflow keeps between its runs either.
+      state: {},
       createdAt: row.createdAt.getTime(),
       build,
       // Its calls go nowhere real (resource-host.ts, `fixture`;

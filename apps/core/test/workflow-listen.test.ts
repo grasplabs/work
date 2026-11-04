@@ -1068,6 +1068,7 @@ const hostOf = async (
       principal: by.userId,
       input: { jobId: "job-1" },
       params: {},
+      state: {},
       createdAt: Date.now(),
       build,
       calling: {

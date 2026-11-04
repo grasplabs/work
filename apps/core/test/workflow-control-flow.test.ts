@@ -591,6 +591,7 @@ const hostOf = async (
       principal: by.userId,
       input: { who: "Ada" },
       params: z.record(z.string(), z.json()).parse(params ?? { limit: 5 }),
+      state: {},
       createdAt: Date.now(),
       build,
       calling: {

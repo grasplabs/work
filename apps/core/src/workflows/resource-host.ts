@@ -447,6 +447,11 @@ export interface HostedResourceRun {
   input: Json;
   /** The parameter values its start froze: `$params`. */
   params: Record<string, Json>;
+  /**
+   * What its workflow kept between runs, as its start froze it
+   * (workflow-state.ts): `$state`. A test an App started reads none.
+   */
+  state: Readonly<Record<string, Json>>;
   /** When it was admitted, in ms: `$workflow.startedAt`. */
   createdAt: number;
   /**

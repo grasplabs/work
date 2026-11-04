@@ -35,6 +35,7 @@ import {
 import {
   openWorkflowProtocol,
   workflowResourceErrors,
+  workflowStateKeySchema,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
@@ -175,33 +176,6 @@ const sealedTaskIdSchema = z
  */
 export const maxTaskScopes = 8;
 
-const taskBase = {
-  id: z.string().min(1).max(64),
-  pointer: z.string().max(maxSealedPointerLength),
-  /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
-  steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
-  /**
-   * The `for` and `fork` tasks around it, outermost first: each of its
-   * steps runs in an item, or a branch, of each (generate.ts,
-   * `GeneratedTask.scope`).
-   */
-  scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
-  /**
-   * Beside `scope`: for each `fork` around it, the branch it is in, and
-   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
-   * runs its steps only in that branch of each fork.
-   */
-  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
-  /** The descriptors of its input, output and export schemas. */
-  schemas: z.strictObject({
-    input: descriptorSchema.optional(),
-    output: descriptorSchema.optional(),
-    export: descriptorSchema.optional(),
-  }),
-  /** The most an attempt of its steps may take, from its `timeout`. */
-  timeoutMs: z.int().positive().optional(),
-};
-
 /**
  * A value the host builds at call time (generate.ts, `CallTemplate`): a
  * literal, a sealed expression's slot, a sensitive parameter as a binding
@@ -227,6 +201,47 @@ const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
     z.strictObject({ array: z.array(templateSchema).max(maxTemplateItems) }),
   ])
 );
+
+/** The most keys one task keeps in its workflow's state. */
+const maxStateKeys = 64;
+
+const taskBase = {
+  id: z.string().min(1).max(64),
+  pointer: z.string().max(maxSealedPointerLength),
+  /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
+  steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
+  /**
+   * The `for` and `fork` tasks around it, outermost first: each of its
+   * steps runs in an item, or a branch, of each (generate.ts,
+   * `GeneratedTask.scope`).
+   */
+  scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
+  /**
+   * Beside `scope`: for each `fork` around it, the branch it is in, and
+   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
+   * runs its steps only in that branch of each fork.
+   */
+  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
+  /** The descriptors of its input, output and export schemas. */
+  schemas: z.strictObject({
+    input: descriptorSchema.optional(),
+    output: descriptorSchema.optional(),
+    export: descriptorSchema.optional(),
+  }),
+  /** The most an attempt of its steps may take, from its `timeout`. */
+  timeoutMs: z.int().positive().optional(),
+  /**
+   * What it keeps in its workflow's state once it succeeded, by key: each
+   * value's template, as a call's (`templateSchema`: its expressions'
+   * slots, its literals exact), which never names a
+   * sensitive parameter. Its state step (its leave step, else its task
+   * step) records `{ output, state }` (sealed-run.ts, `stateStepOf`).
+   */
+  state: z
+    .record(workflowStateKeySchema, templateSchema)
+    .refine((state) => Object.keys(state).length <= maxStateKeys)
+    .optional(),
+};
 
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 

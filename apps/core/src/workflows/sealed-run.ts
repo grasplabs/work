@@ -6,6 +6,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -34,6 +35,7 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
+import { writeWorkflowState } from "../workflow-state.ts";
 import { AttemptHost, attemptCallLabels } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
@@ -282,6 +284,31 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   as recorded), its event waits' deadlines and its retries' backoffs are
 //   held to its `maxSleepMs`
 //   (`requireWait`): one past it fails the run, and no catch takes it.
+// - State a step keeps between its workflow's runs (workflow-state.ts)
+//   that the build didn't seal, or kept by a step that didn't succeed. A
+//   task keeps only its sealed `state`'s keys, by its state step alone
+//   (`stateStepOf`: its leave step, else its task step), whose record
+//   must be exactly `{ output, state }` with exactly those keys, each
+//   value held to its template as a call's (`matched`: literals exact, an
+//   expression's value any JSON, never a sensitive parameter), within a
+//   step's record and no marker of core's (`#stateChecked`); anything else
+//   is tampering. It is written only as the host records the step
+//   (host.ts, `RunKind.stepRecording`): after the host's last check of
+//   the attempt, its lease held, so never by a failed, refused, caught or
+//   held attempt, nor a failed retry round. It writes under the step's
+//   idempotency key, the same on every attempt, round and replay, so a
+//   crash between the write and the journal writes nothing twice, and a
+//   replay of a journaled step writes nothing at all. A refused write
+//   (too large, a run that ended) fails the step, after its call's
+//   effect as `workflow.failed_after_effect`. A test run, a draft's or one
+//   an App's test started, writes nothing, and nor does a restricted run,
+//   whose state would carry what it read to the workflow's other runs
+//   (restricted.ts): its skip is audited (`workflow.state.withheld`).
+// - State changing under a run. A run reads its workflow's state once,
+//   as its start is decided, frozen with its start's receipt (a draft's
+//   test run with its row), and every activation hands the isolate that
+//   same snapshot (`sealedRunStart`), whatever other runs write since. A
+//   run an App's test started reads none: nothing of the organization's.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.
@@ -322,6 +349,11 @@ export interface HostedSealedRun extends HostedRun {
   readonly params: Readonly<Record<string, Json>>;
   /** Its input, as its start admitted it. */
   readonly input: Json;
+  /**
+   * What its workflow kept between runs as its start was admitted, frozen
+   * with the start: the same in every activation (`$state`).
+   */
+  readonly state: Readonly<Record<string, Json>>;
   /** What its calls go by: its principal, invoker and frozen bindings. */
   readonly calling: CallingRun;
   /** The most model calls it may make: its build's and the host's lower. */
@@ -1015,6 +1047,51 @@ const recordable = (value: unknown): boolean => {
   );
 };
 
+/**
+ * The step of `task` that records what it keeps in its workflow's state
+ * (`SealedTask.state`): its leave step, else its own task step, where its
+ * code records it; none for a decision task, a sleep's own step or an
+ * event wait's, which its code doesn't record.
+ */
+const stateStepOf = (task: SealedTask): string | undefined => {
+  if (task.steps.includes("leave")) {
+    return "leave";
+  }
+  return task.steps.includes("task") &&
+    !isDecisionTask(task) &&
+    !sleepsOf(task) &&
+    !isEventWait(task)
+    ? "task"
+    : undefined;
+};
+
+/** A task that keeps something in its workflow's state, and what. */
+interface Keeps {
+  readonly task: SealedTask;
+  readonly kept: Readonly<Record<string, SealedTemplate>>;
+}
+
+/**
+ * What the step of kind `kind` of `task` keeps in its workflow's state:
+ * nothing but for its state step (`stateStepOf`) of a task whose sealed
+ * `state` names a key.
+ */
+const keepsOf = (
+  task: SealedTask | undefined,
+  kind: string | undefined
+): Keeps | undefined =>
+  task?.state === undefined ||
+  Object.keys(task.state).length === 0 ||
+  kind !== stateStepOf(task)
+    ? undefined
+    : { task, kept: task.state };
+
+/** What a state step records: its output, and what it keeps by key. */
+const stateRecordSchema = z.strictObject({
+  output: z.json(),
+  state: z.record(z.string(), z.json()),
+});
+
 /** Whether `value` is a list. */
 const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
 
@@ -1138,6 +1215,8 @@ class SealedRun implements SealedRunKind {
   readonly #hostFailures = new WeakMap<StepAttempt, StepError>();
   /** The attempts a call of which took effect: it answered. */
   readonly #effected = new WeakSet<StepAttempt>();
+  /** What each state step's accepted attempt keeps (`#stateChecked`). */
+  readonly #keeps = new WeakMap<StepAttempt, Record<string, Json>>();
   /** The error each catch step's attempt was offered (`caughtOffer`). */
   readonly #offers = new WeakMap<StepAttempt, CaughtError>();
   /**
@@ -1630,9 +1709,123 @@ class SealedRun implements SealedRunKind {
         unfit = itemsUnfit(value);
       }
     }
-    return unfit === undefined
+    if (unfit !== undefined) {
+      return { ok: false, error: unfit };
+    }
+    const keeps = skipped ? undefined : keepsOf(task, kind);
+    return keeps === undefined
       ? { ok: true, value }
-      : { ok: false, error: unfit };
+      : await this.#stateChecked(attempt, keeps, value);
+  }
+
+  /**
+   * A state step's record, `value`, of task `task`, which keeps `kept`
+   * (`keepsOf`):
+   * `{ output, state }`, `state` with exactly the sealed keys, each value
+   * held to its template as a call's arguments are (`matched`, no
+   * sensitive parameter anywhere), and the whole within a step's record,
+   * no marker of core's in it. Anything else is tampering. What it keeps
+   * is written once its step is recorded (`stepRecording`).
+   */
+  async #stateChecked(
+    attempt: StepAttempt,
+    { task, kept }: Keeps,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    const record = stateRecordSchema.safeParse(value);
+    const sealed = Object.keys(kept);
+    const given = record.success ? Object.entries(record.data.state) : [];
+    if (
+      !record.success ||
+      !recordable(value) ||
+      given.length !== sealed.length ||
+      given.some(
+        ([key, each]) => !Object.hasOwn(kept, key) || isCoreMarker(each)
+      )
+    ) {
+      return await this.#refused(
+        attempt,
+        `Task "${task.id}"'s ${stateStepOf(task) ?? "task"} step records { output, state }, its state with exactly the keys the build sealed.`,
+        "state"
+      );
+    }
+    try {
+      for (const [key, each] of given) {
+        matched(
+          kept[key] ?? { literal: null },
+          each,
+          `state.${key}`,
+          undefined,
+          []
+        );
+      }
+    } catch (error) {
+      return await this.#refused(
+        attempt,
+        error instanceof Error ? error.message : "The state isn't sealed.",
+        "state"
+      );
+    }
+    this.#keeps.set(attempt, Object.fromEntries(given));
+    return { ok: true, value };
+  }
+
+  /**
+   * Writes what `attempt`'s state step keeps (`#stateChecked`) in its
+   * workflow's state, as the host records the step: only for an attempt
+   * whose record the host and this run accepted, its lease held, never a
+   * failed, refused, caught or held one. Under the step's idempotency key,
+   * the same on every attempt, round and replay, so it lands once
+   * (workflow-state.ts). A test run writes nothing, and nor does a
+   * restricted one, whose state would flow to the workflow's other runs
+   * (restricted.ts): its skip is audited (`workflow.state.withheld`).
+   * The write's refusal fails the step: after its call took effect, as
+   * `workflow.failed_after_effect`.
+   */
+  async stepRecording(attempt: StepAttempt): Promise<StepError | undefined> {
+    const values = this.#keeps.get(attempt);
+    const { calling, runId, workflowId } = this.run;
+    if (
+      values === undefined ||
+      calling.candidate !== undefined ||
+      calling.fixture === true
+    ) {
+      return undefined;
+    }
+    const { step } = attempt;
+    if (calling.restricted) {
+      const db = drizzle(this.#env.DB);
+      await auditedBatch(this.#env, db, [
+        outboxed(db, {
+          actor: { type: "system" },
+          action: "workflow.state.withheld",
+          target: { type: "workflow_run", id: runId },
+          detail: {
+            workflow: workflowId,
+            ...(step.length <= identifierMaxLength ? { step } : {}),
+            keys: Object.keys(values).length,
+            reason: "restricted",
+          },
+        }),
+      ]);
+      return undefined;
+    }
+    try {
+      await writeWorkflowState(
+        this.#env,
+        runId,
+        stepIdempotencyKey(runId, step),
+        values
+      );
+      return undefined;
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === undefined) {
+        throw error;
+      }
+      return this.#effected.has(attempt)
+        ? failedAfterEffect
+        : forIsolate(error);
+    }
   }
 
   /**
@@ -2650,6 +2843,7 @@ export const sealedRunFrom = (
     | "build"
     | "params"
     | "input"
+    | "state"
     | "createdAt"
     | "calling"
     | "maxModelCalls"
@@ -2672,6 +2866,7 @@ export const sealedRunFrom = (
     build: run.build,
     params: run.params,
     input: run.input,
+    state: run.state,
     createdAt: run.createdAt,
     calling,
     maxModelCalls: run.maxModelCalls,
@@ -2707,7 +2902,7 @@ export const sealedRunModules = ({
 
 /**
  * What a sealed run's main module starts with: its input, only the
- * parameters the build lists as not sensitive, and its frozen catalog
+ * parameters the build lists as not sensitive, its state's snapshot, and its frozen catalog
  * bindings by alias, each a binding whose `call` goes to the host.
  */
 export const sealedRunStart = (run: HostedSealedRun) => ({
@@ -2718,6 +2913,7 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
     )
   ),
   input: run.input,
+  state: run.state,
   connections: [...run.calling.bindings.keys()],
   collections: [],
   brains: [],

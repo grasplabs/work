@@ -4065,6 +4065,14 @@ export const workflowStartReceipts = sqliteTable(
      * it, had read restricted data. Its run is restricted for good.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * What the workflow kept between its runs as the start was admitted
+     * (canonical JSON, workflow-state.ts), read once and frozen, which
+     * every activation of its run reads (`$state`); null for a start that
+     * admits no run, and once retention removed its details. Last, as the
+     * admitting statement writes every column in order.
+     */
+    state: text(),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -4849,6 +4857,12 @@ export const workflowCandidateRuns = sqliteTable(
     principalId: text("principal_id").notNull(),
     input: text().notNull(),
     params: text().notNull(),
+    /**
+     * What its workflow kept between its runs as it started (canonical
+     * JSON, workflow-state.ts), frozen for every activation. A test run
+     * writes none back.
+     */
+    state: text(),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],

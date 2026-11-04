@@ -533,7 +533,7 @@ const startDetailsRemoved = async (
       ),
     db
       .update(receipts)
-      .set({ input: null, params: null, detailsRemovedAt: now })
+      .set({ input: null, params: null, state: null, detailsRemovedAt: now })
       // Another sweep may have marked some meanwhile: marked once.
       .where(and(inArray(receipts.id, due), isNull(receipts.detailsRemovedAt))),
   ]);

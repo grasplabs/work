@@ -104,6 +104,8 @@ export interface RunStart {
   runId: RunId;
   params: Record<string, string | number>;
   input: unknown;
+  /** What its workflow kept between runs, frozen with its start. */
+  state: Readonly<Record<string, Json>>;
   collections: string[];
   connections: string[];
   brains: string[];
@@ -575,7 +577,7 @@ import definition from ${JSON.stringify(module)};
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, params, input, connections, collections, brains }) {
+  async run(host, { runId, params, input, state, connections, collections, brains }) {
     return await settled(async () => {
       if (${id === undefined ? "" : `definition?.metadata?.id !== ${JSON.stringify(id)} || `}typeof definition?.run !== "function") {
         throw new Error(${JSON.stringify(refusal)});
@@ -583,6 +585,7 @@ export class Run extends WorkerEntrypoint {
       const engine = {
         runId,
         params,
+        state,
         env: bindings({ connections, collections, brains }),
         do: async (name, options, fn, retry) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)), ...(typeof retry === "function" ? [async (error) => await settled(async () => await retry(error))] : []))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
