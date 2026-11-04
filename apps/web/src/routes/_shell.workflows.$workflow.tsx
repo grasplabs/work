@@ -66,7 +66,6 @@ import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { ShareWorkflow } from "../workflows/share-workflow.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
-import { definitionTitle } from "../workflows/step-body.ts";
 import { TracedRun } from "../workflows/traced-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
@@ -615,22 +614,6 @@ const DraftTabs = ({
   );
 };
 
-/**
- * What a workflow named `name` is headed with: its definition's title, as
- * its draft has it (or the latest that passed, while the draft's text
- * isn't JSON); its name without one, as for whoever doesn't read its draft.
- */
-const headingOf = (draft: WorkflowDraft | undefined, name: string): string => {
-  if (draft === undefined) {
-    return name;
-  }
-  return (
-    definitionTitle(draft.source) ??
-    definitionTitle(draft.checkpoint?.source) ??
-    name
-  );
-};
-
 /** The later of two ISO times, either of which may be missing. */
 const laterOf = (a: string | null, b: string | null): string | null => {
   if (a === null || (b !== null && b > a)) {
@@ -721,7 +704,7 @@ const WorkflowResourceView = ({
             }}
             resource={resource}
             status={status}
-            title={headingOf(latest, resource.name)}
+            title={resource.name}
           />
           <div className="flex flex-wrap items-end justify-between gap-x-4">
             <WorkflowTabs

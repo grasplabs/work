@@ -47,13 +47,13 @@ export interface DiagramDoor {
 
 /** One task, as declared, with the scopes it holds. */
 export interface DiagramTask {
-  /** Its stable ID: the key of its single-key object. */
+  /** Its stable ID. */
   id: string;
   /** JSON Pointer to it in the definition. */
   pointer: string;
-  /** Its task kind (`call`, `set`, `switch`, `for`, `fork`, `try`, …). */
+  /** Its step type (`do`, `agent`, `wait`, `if`, `try`, `raise`). */
   kind: string;
-  /** Its `metadata.grasp.label`, if any: display text only. */
+  /** Its `title`, if any: display text only. */
   label: string | null;
   /**
    * What it does, as literal source says it: the named call and binding,
@@ -78,9 +78,12 @@ export interface DiagramTask {
   doors?: DiagramDoor[];
 }
 
-/** A list of tasks a task holds, or a case of a switch. */
+/**
+ * A list of steps a step holds: an `if`'s `then` and `else`, a `try`'s
+ * `try` and its catch's steps.
+ */
 export interface DiagramScope {
-  kind: "do" | "each" | "branch" | "try" | "catch" | "case";
+  kind: "then" | "else" | "try" | "catch";
   /** A case's or branch's name, a loop's item variable. */
   name: string | null;
   /** Whether a case's `when`, or a loop's `while`, decides at run time. */

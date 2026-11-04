@@ -3271,10 +3271,6 @@ msgctxt "inbox filter"
 msgid "Brain"
 msgstr "Brein"
 
-#: src/workflows/workflow-diagram.tsx
-msgid "Branch {name}"
-msgstr "Tak {name}"
-
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
@@ -3485,10 +3481,6 @@ msgstr "Nu verdergaan"
 #: src/routes/interview.tsx
 msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
 msgstr "Ga daar verder. Heb je dat apparaat niet meer? Vraag degene die je de link stuurde om een nieuwe start."
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Case {name}, when it holds"
-msgstr "Geval {name}, als het geldt"
 
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
@@ -5771,14 +5763,6 @@ msgstr "Voor een adres dat uw bedrijf aan iemand anders heeft gegeven. Wie zich 
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Voor een beheerder"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}"
-msgstr "Voor elke {name}"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}, while it holds"
-msgstr "Voor elke {name}, zolang het geldt"
 
 #: src/dashboard/spend-widget.tsx
 msgid "for every model call this month"
@@ -9723,13 +9707,13 @@ msgctxt "the rest of a list of people"
 msgid "others"
 msgstr "anderen"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Otherwise"
+msgstr "Anders"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Anders:"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Otherwise: {name}"
-msgstr "Anders: {name}"
 
 #: src/onboarding/failed-mail.tsx
 msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
@@ -12731,10 +12715,6 @@ msgstr "Stephen praat met niemand totdat je de dag kiest waarop de interviews be
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Verzoeken aan Stephen"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Steps"
-msgstr "Stappen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -15763,6 +15743,10 @@ msgstr "Wanneer er een e-mail binnenkomt voor {localPart}"
 #: src/interview/words.ts
 msgid "When it goes differently"
 msgstr "Als het anders gaat"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "When it holds"
+msgstr "Als het klopt"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"

@@ -1,8 +1,3 @@
-import {
-  createCatalogBudget,
-  resolveContract,
-} from "@grasp-os/open-workflow/catalog";
-import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
@@ -19,6 +14,11 @@ import type {
   CatalogBindingKind,
   CatalogContractEntry,
 } from "@grasp-os/shared/workflow-resources";
+import {
+  createCatalogBudget,
+  resolveContract,
+} from "@grasp-os/workflow-schema/catalog";
+import type { CatalogContract } from "@grasp-os/workflow-schema/catalog";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -51,7 +51,7 @@ import { takesPageAnswers } from "./workflows/exact-values.ts";
 //   is a new key. A version pins a key and its fingerprint, the SHA-256 of
 //   the canonical contract.
 // - A contract the validator can't hold: published contracts are read by
-//   the profile's own catalog reader (`resolveContract`), with its limits,
+//   the catalog reader (`resolveContract`, workflow-schema), with its limits,
 //   before they are stored; one it refuses is never stored.
 // - Who publishes: only the organization's own admins, never Grasp staff,
 //   re-checked in the statement that stores it, and audited; and the
@@ -90,7 +90,7 @@ const storedSchema = z.strictObject({
     .optional(),
 });
 
-/** A catalog contract as `@grasp-os/open-workflow` reads it. */
+/** A catalog contract as `@grasp-os/workflow-schema/catalog` reads it. */
 export interface ResolvedCatalogContract {
   key: string;
   kind: CatalogBindingKind;

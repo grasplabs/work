@@ -3271,10 +3271,6 @@ msgctxt "inbox filter"
 msgid "Brain"
 msgstr "Cerebro"
 
-#: src/workflows/workflow-diagram.tsx
-msgid "Branch {name}"
-msgstr "Rama {name}"
-
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
@@ -3485,10 +3481,6 @@ msgstr "Seguir ahora"
 #: src/routes/interview.tsx
 msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
 msgstr "Sigue allí. ¿Ya no tienes ese dispositivo? Pide a quien te envió el enlace que lo vuelva a abrir para ti."
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Case {name}, when it holds"
-msgstr "Caso {name}, cuando se cumple"
 
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
@@ -5771,14 +5763,6 @@ msgstr "Para una dirección que tu empresa dio a otra persona. Quien inicie sesi
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Para un administrador"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}"
-msgstr "Para cada {name}"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}, while it holds"
-msgstr "Para cada {name}, mientras se cumpla"
 
 #: src/dashboard/spend-widget.tsx
 msgid "for every model call this month"
@@ -9723,13 +9707,13 @@ msgctxt "the rest of a list of people"
 msgid "others"
 msgstr "otros"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Otherwise"
+msgstr "Si no"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Si no:"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Otherwise: {name}"
-msgstr "En otro caso: {name}"
 
 #: src/onboarding/failed-mail.tsx
 msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
@@ -12731,10 +12715,6 @@ msgstr "Stephen no habla con nadie hasta que elijas el día en que empiezan las 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Solicitudes a Stephen"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Steps"
-msgstr "Pasos"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -15763,6 +15743,10 @@ msgstr "Cuando llega un correo para {localPart}"
 #: src/interview/words.ts
 msgid "When it goes differently"
 msgstr "Cuando va de otra manera"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "When it holds"
+msgstr "Cuando se cumple"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"

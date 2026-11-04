@@ -71,22 +71,16 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
   );
 };
 
-/** What a scope is, in words: a case and its condition, a branch, a loop. */
+/** What a scope is, in words: an `if`'s branches, a `try` and its catch. */
 const ScopeHeading = ({ scope }: { scope: DiagramScope }) => {
   const { t } = useLingui();
-  const name = scope.name ?? "";
-  const heading = {
-    case: scope.guarded
-      ? t`Case ${name}, when it holds`
-      : t`Otherwise: ${name}`,
-    branch: t`Branch ${name}`,
-    each: scope.guarded
-      ? t`For each ${name}, while it holds`
-      : t`For each ${name}`,
-    try: t`Try`,
-    catch: t`If it fails`,
-    do: t`Steps`,
-  }[scope.kind];
+  const headings = new Map<DiagramScope["kind"], string>([
+    ["then", t`When it holds`],
+    ["else", t`Otherwise`],
+    ["try", t`Try`],
+    ["catch", t`If it fails`],
+  ]);
+  const heading = headings.get(scope.kind);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-muted-foreground">{heading}</span>

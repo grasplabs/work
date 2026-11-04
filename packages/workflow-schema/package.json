@@ -6,6 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./catalog": "./src/catalog.ts",
     "./check": "./src/check.ts",
     "./data-schema": "./src/data-schema.ts",
     "./format": "./src/format.ts",

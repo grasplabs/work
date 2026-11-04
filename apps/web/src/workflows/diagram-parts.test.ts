@@ -12,8 +12,8 @@ import { doorsOf, partsOf } from "./diagram-parts.ts";
 
 const task = (id: string, more: Partial<DiagramTask> = {}): DiagramTask => ({
   id,
-  pointer: `/do/${id}`,
-  kind: "set",
+  pointer: `/steps/${id}`,
+  kind: "do",
   label: null,
   detail: null,
   guarded: false,
@@ -22,8 +22,7 @@ const task = (id: string, more: Partial<DiagramTask> = {}): DiagramTask => ({
   ...more,
 });
 
-const decision = (id: string) =>
-  task(id, { kind: "call", detail: "grasp.decision · approval" });
+const decision = (id: string) => task(id, { kind: "decision" });
 
 describe(partsOf, () => {
   it("draws a workflow with no named part in no parts", () => {
@@ -38,10 +37,10 @@ describe(partsOf, () => {
           section: { name: "Read", purpose: "Read it.", summary: null },
         }),
         task("check", {
-          kind: "do",
+          kind: "if",
           scopes: [
             {
-              kind: "do",
+              kind: "then",
               name: null,
               guarded: false,
               next: null,
@@ -84,9 +83,9 @@ describe(doorsOf, () => {
       ],
     });
     expect(doors).toStrictEqual([
-      { ...child, tasks: ["/do/first", "/do/again"] },
-      { ...unseen, tasks: ["/do/tell"] },
-      { ...unseen, tasks: ["/do/tell-too"] },
+      { ...child, tasks: ["/steps/first", "/steps/again"] },
+      { ...unseen, tasks: ["/steps/tell"] },
+      { ...unseen, tasks: ["/steps/tell-too"] },
     ]);
   });
 });

@@ -3271,10 +3271,6 @@ msgctxt "inbox filter"
 msgid "Brain"
 msgstr "Cerveau"
 
-#: src/workflows/workflow-diagram.tsx
-msgid "Branch {name}"
-msgstr "Branche {name}"
-
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Fil d’Ariane"
@@ -3485,10 +3481,6 @@ msgstr "Continuer maintenant"
 #: src/routes/interview.tsx
 msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
 msgstr "Continuez là-bas. Vous n’avez plus cet appareil ? Demandez à la personne qui vous a envoyé le lien de le rouvrir pour vous."
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Case {name}, when it holds"
-msgstr "Cas {name}, lorsqu'il s'applique"
 
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
@@ -5771,14 +5763,6 @@ msgstr "Pour une adresse que votre entreprise a donnée à quelqu’un d’autre
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Pour un administrateur"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}"
-msgstr "Pour chaque {name}"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "For each {name}, while it holds"
-msgstr "Pour chaque {name}, tant que cela s'applique"
 
 #: src/dashboard/spend-widget.tsx
 msgid "for every model call this month"
@@ -9723,13 +9707,13 @@ msgctxt "the rest of a list of people"
 msgid "others"
 msgstr "d’autres"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Otherwise"
+msgstr "Sinon"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Sinon :"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Otherwise: {name}"
-msgstr "Sinon : {name}"
 
 #: src/onboarding/failed-mail.tsx
 msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
@@ -12731,10 +12715,6 @@ msgstr "Stephen ne parle à personne tant que vous n’avez pas choisi le jour o
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Demandes à Stephen"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Steps"
-msgstr "Étapes"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -15763,6 +15743,10 @@ msgstr "Quand un e-mail arrive pour {localPart}"
 #: src/interview/words.ts
 msgid "When it goes differently"
 msgstr "Si ça se passe autrement"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "When it holds"
+msgstr "Quand c’est le cas"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"

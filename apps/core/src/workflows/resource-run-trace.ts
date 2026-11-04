@@ -1,4 +1,3 @@
-import { workflowDiagram } from "@grasp-os/open-workflow/diagram";
 import { isExpectedCode } from "@grasp-os/shared/errors";
 import type {
   TraceState,
@@ -16,11 +15,10 @@ import type {
 } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
 import { workflowStartReceipts } from "../db/core/schema.ts";
-import { withDoors } from "../workflow-doors.ts";
+import { workflowDiagram } from "../workflow-diagram.ts";
 import {
   requireWorkflowRole,
   workflowDefinition,
@@ -474,7 +472,9 @@ export const resourceRunTrace = async (
   runId: unknown,
   options?: unknown
 ): Promise<WorkflowRunTrace> => {
-  const { doors } = workflowResourceErrors.parse(
+  // grasp-workflow/1 has no step that leads to another workflow yet (a
+  // child run, an event), so no diagram has doors to draw.
+  workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowRunTraceOptionsSchema,
     options
@@ -487,10 +487,7 @@ export const resourceRunTrace = async (
     workflow.id,
     run.version
   );
-  const parsed = z.json().parse(JSON.parse(definition));
-  // Its doors once per trace view: a trace followed again draws none.
-  const drawn = workflowDiagram(parsed);
-  const diagram = doors ? await withDoors(env, by, drawn, parsed) : drawn;
+  const diagram = workflowDiagram(definition);
   // Past its retention, or once swept, no more of it is shown than of its
   // result (resource-runs.ts): the engine may still hold its journal a
   // moment longer, on its own clock.
