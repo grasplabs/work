@@ -45,6 +45,7 @@ import { readThinkingBrain } from "./brain-rpc.ts";
 import {
   chatAgent,
   needsRebase,
+  noteKind,
   noticeKind,
   questionContent,
   questionKind,
@@ -227,15 +228,6 @@ const liveSchema = z.object({
     .optional(),
 });
 
-/**
- * Whether the agent is still at work once `message` is the chat's latest:
- * after a question, a call or a tool's result, it goes on; after a
- * response that calls nothing, its turn is over. The chat's own copy, so
- * it holds through a restart of either object.
- */
-const atWorkAfter = (message: Message): boolean =>
-  message.role !== "assistant" || message.stopReason === "toolUse";
-
 /** How the chat ends a turn stopped before the model said anything: core's own. */
 const cancelledMessage = (): AssistantMessage => ({
   role: "assistant",
@@ -305,6 +297,23 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [{ message: withPlainDiagnostics(message, entry.data) }];
   }
   return entry.kind === "pi.assistant" ? [{ message }] : [];
+};
+
+/**
+ * Whether the agent is still at work once `entry` is the chat's latest,
+ * or `undefined` if it says nothing of that: after a question, a call, a
+ * tool's result or a notice it answers, it goes on; after a response that
+ * calls nothing, its turn is over. The chat's own transcript, so it holds
+ * through a restart of either object.
+ */
+const atWorkAt = (entry: EntryRecord): boolean | undefined => {
+  if (entry.kind === noticeKind) {
+    return true;
+  }
+  const latest = shownOf(entry).at(-1)?.message;
+  return latest === undefined
+    ? undefined
+    : latest.role !== "assistant" || latest.stopReason === "toolUse";
 };
 
 /**
@@ -460,8 +469,11 @@ export class ChatHarness {
     return opened;
   }
 
-  /** Whether the agent is at work, as the chat's latest message says. */
-  async #latestShown(): Promise<Message | undefined> {
+  /**
+   * The chat's latest entry that says whether the agent is at work
+   * (`atWorkAt`), and whether it is.
+   */
+  async #latest(): Promise<{ entry?: EntryRecord; atWork: boolean }> {
     const page = await this.#conversation.entries(
       { order: "descending" },
       8,
@@ -469,12 +481,12 @@ export class ChatHarness {
       context
     );
     for (const entry of page.items) {
-      const latest = shownOf(entry).at(-1);
-      if (latest !== undefined) {
-        return latest.message;
+      const atWork = atWorkAt(entry);
+      if (atWork !== undefined) {
+        return { entry, atWork };
       }
     }
-    return undefined;
+    return { atWork: false };
   }
 
   /** Takes in one of the agent's events (`watchEvents`). */
@@ -582,12 +594,10 @@ export class ChatHarness {
       }
       throw error;
     }
-    console.log("DEBUGSUBMITTED", this.#cancelled.has(request.turnId));
     if (this.#cancelled.delete(request.turnId)) {
       await this.#conversation.abort(context);
     }
     const settled = await submitted.wait(context);
-    console.log("DEBUGSETTLED", JSON.stringify(settled));
     this.#copySoon();
     await this.#copying;
     const end = await this.#endOf(settled);
@@ -595,20 +605,19 @@ export class ChatHarness {
       await this.#conversation.waitForIdle(context);
       await this.#rebaseIfNeeded(request, room);
     }
-    const latest = await this.#latestShown();
+    const latest = await this.#latest();
     // A turn stopped before the model said anything ends in the chat as
     // cancelled all the same: pi keeps no response of it.
-    if (end.outcome === "cancelled" && latest?.role !== "assistant") {
+    if (end.outcome === "cancelled" && latest.entry?.kind !== "pi.assistant") {
       await this.#host(request.scope).keepTurnMessages(request.scope.chatId, [
         { message: cancelledMessage() },
       ]);
     }
     // A turn that ended without a last word of the model's (cancelled,
     // failed, stopped) is over too. Told before the turn returns, so its
-    // Workspace shows it ended.
-    await this.#tell(
-      end.outcome === "answered" && latest !== undefined && atWorkAfter(latest)
-    );
+    // Workspace shows it ended. One that answered goes on while a notice
+    // it answers follows (`followUp`).
+    await this.#tell(end.outcome === "answered" && latest.atWork);
     return end;
   }
 
@@ -656,10 +665,11 @@ export class ChatHarness {
   }
 
   /**
-   * Tells the turn under way `text` before its next request, never shown
-   * as the person's: dropped once no turn runs.
+   * Tells the turn under way `text` for it to answer, never shown as the
+   * person's: pi's follow-up, placed once the run answers, which starts a
+   * run that answers it. Dropped once no turn runs.
    */
-  async steer(text: string): Promise<void> {
+  async followUp(text: string): Promise<void> {
     const live = await this.#harness.snapshot(
       LiveDoc,
       this.#conversation.id,
@@ -672,7 +682,7 @@ export class ChatHarness {
       {
         type: "input",
         content: text,
-        whenBusy: "steer",
+        whenBusy: "followUp",
         entry: { kind: noticeKind },
       },
       context
@@ -681,25 +691,20 @@ export class ChatHarness {
 
   /**
    * Tells the chat's agent `text`, never shown as the person's and starting
-   * no turn: the turn under way reads it before its next request, and
-   * otherwise the next turn does, as an entry of the context.
+   * no turn: pi's write, which the turn under way reads before its next
+   * request, and otherwise the next turn does.
    */
   async note(text: string): Promise<void> {
-    const live = await this.#harness.snapshot(
-      LiveDoc,
-      this.#conversation.id,
+    await this.#conversation.submit(
+      {
+        type: "write",
+        entry: {
+          kind: noteKind,
+          model: [{ role: "user", content: text, timestamp: Date.now() }],
+        },
+      },
       context
     );
-    if (live?.run !== undefined) {
-      await this.steer(text);
-      return;
-    }
-    await this.#conversation.commit(async (tx) => {
-      await tx.appendEntry(this.#conversation.id, {
-        kind: noticeKind,
-        model: [{ role: "user", content: text, timestamp: Date.now() }],
-      });
-    }, context);
   }
 
   /**
@@ -710,7 +715,6 @@ export class ChatHarness {
   async abort(turnId?: string): Promise<void> {
     if (turnId !== undefined) {
       this.#cancelled.add(turnId);
-      console.log("DEBUGCANCEL", turnId);
     }
     await this.#conversation.abort(context);
   }
@@ -903,6 +907,7 @@ export class ChatHarness {
     const shown: TurnMessage[] = [];
     const seen: EntryId[] = [];
     let last: EntryId | undefined;
+    let atWork: boolean | undefined;
     let cursor;
     do {
       // oxlint-disable-next-line no-await-in-loop -- page after page
@@ -919,6 +924,7 @@ export class ChatHarness {
         if (entry.id !== after) {
           last = entry.id;
           seen.push(entry.id);
+          atWork = atWorkAt(entry) ?? atWork;
           const thinkingMs = this.#thought.get(entry.id);
           for (const message of shownOf(entry)) {
             shown.push(
@@ -934,8 +940,9 @@ export class ChatHarness {
     }
     if (shown.length > 0) {
       await this.#host(scope).keepTurnMessages(scope.chatId, shown);
-      const latest = shown.at(-1);
-      await this.#tell(latest !== undefined && atWorkAfter(latest.message));
+    }
+    if (atWork !== undefined) {
+      await this.#tell(atWork);
     }
     const through = last;
     await this.#conversation.commit(async (tx) => {

@@ -243,7 +243,7 @@ export const createdApp = async (
   };
 };
 
-/** The system messages of the chat that name the job `id`. */
+/** The messages the chat shows that carry the notice of how job `id` ended. */
 export const jobEvents = async (
   stub: WorkspaceStub,
   chatId: string,
@@ -251,7 +251,7 @@ export const jobEvents = async (
 ) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message, index) =>
-    message.role === "system" && JSON.stringify(message.content).includes(id)
+    JSON.stringify(message.content).includes(`Build job ${id} (`)
       ? [{ index, content: JSON.stringify(message.content) }]
       : []
   );

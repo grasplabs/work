@@ -63,7 +63,7 @@ const { setUp } = buildJobsOf(idp);
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
 describe("build jobs", { timeout: 180_000 }, () => {
-  it("finishes a proposal after the run that submitted it ended, tells that turn how it ended, and no later turn", async () => {
+  it("finishes a proposal after the run that submitted it ended, has that turn answer how it ended, and tells no later turn", async () => {
     const waiting = pausedReply(says("I'll say once the build is done."), 3);
     const { builder, chat } = await setUp([
       codeStep(submitProposal),
@@ -101,28 +101,40 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }).toMatchObject({ status: "completed", version: 1, afterItsRun: true });
 
     // The turn is still answering: once its answer is in, it reads how
-    // the job ended, before it answers again.
+    // the job ended, and answers that too.
     waiting.release();
     const answer = await answering;
-    const messages = await transcript(chat.stub, chat.chat.id);
+    const followed = await vi.waitFor(
+      async () => {
+        const messages = await transcript(chat.stub, chat.chat.id);
+        expect(messages.at(-1)).toMatchObject({
+          role: "assistant",
+          content: [
+            { type: "text", text: "The invoice desk is proposed for review." },
+          ],
+        });
+        return messages;
+      },
+      { timeout: 30_000, interval: 50 }
+    );
     const { app, versions } = await createdApp(builder);
     const lastRequest = JSON.stringify(chat.provider.requests.at(-1)?.body);
     // A later turn of the chat.
     const later = await fakeProvider(says("Anything else?"));
     await chat.ask("Thanks.");
+    const notice = `Build job ${job.id} (`;
     expect({
       answer,
-      // The model was sent the notice with its last request of the turn,
+      // The model was sent the notice with the turn's last request,
       // naming the run that submitted it.
-      sent: lastRequest.includes(`Build job ${job.id}`),
+      sent: lastRequest.includes(notice),
       byItsRun: lastRequest.includes("submitted by code run"),
-      // It isn't stored with the chat, so no later request carries it.
+      // The chat doesn't show it: the person asked nothing.
       stored: await jobEvents(chat.stub, chat.chat.id, job.id),
-      // (Its ID is still there, in what the code that submitted it returned.)
-      laterSent: JSON.stringify(later.requests[0]?.body).includes(
-        `Build job ${job.id}`
-      ),
-      last: messages.at(-1)?.role,
+      // A later turn reads it as the history it is, and isn't told again.
+      laterSent:
+        JSON.stringify(later.requests[0]?.body).split(notice).length - 1,
+      last: followed.at(-1)?.role,
       // It proposed the draft once, as the chat's agent, for review.
       app: { pending: app.pendingVersion, current: app.currentVersion },
       versions: versions.map(({ version, proposedBy }) => ({
@@ -133,12 +145,12 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }).toMatchObject({
       answer: {
         outcome: "answered",
-        answer: "The invoice desk is proposed for review.",
+        answer: "I'll say once the build is done.",
       },
       sent: true,
       byItsRun: true,
       stored: [],
-      laterSent: false,
+      laterSent: 1,
       last: "assistant",
       app: { pending: 1, current: null },
       versions: [{ version: 1, chat: chat.chat.id, job: job.id }],

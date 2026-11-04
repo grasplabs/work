@@ -139,10 +139,17 @@ export const historyKind = "grasp.history";
 export const questionKind = "grasp.question";
 
 /**
- * What the host tells a turn under way between its steps (a build job's
- * end), steered in as a user message: no turn of its own.
+ * What the host tells the turn under way that it answers (a build job's
+ * end): pi's follow-up, placed once the run answers, starting a run of its
+ * own that answers it. Part of the turn, as the person asked nothing.
  */
 export const noticeKind = "grasp.notice";
+
+/**
+ * What the host tells the chat's agent that asks no answer (a held write
+ * decided): written into its context at the next boundary, starting no run.
+ */
+export const noteKind = "grasp.note";
 
 const copiedSchema = z.object({ kind: z.string() });
 

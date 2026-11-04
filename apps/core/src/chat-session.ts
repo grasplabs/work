@@ -63,16 +63,17 @@ export class ChatSession extends DurableObject<Env> {
     return await harness.run(request);
   }
 
-  /** Tells the turn under way `text` before its next request. */
-  async steer(text: string): Promise<void> {
+  /** Tells the turn under way `text` to answer once it has answered. */
+  async followUp(text: string): Promise<void> {
     const harness = await this.#harness();
     await this.#arm({ ...harness.wake(), active: true });
-    await harness.steer(text);
+    await harness.followUp(text);
   }
 
   /** Tells the chat's agent `text` for its turn under way or its next. */
   async note(text: string): Promise<void> {
     const harness = await this.#harness();
+    await this.#arm({ ...harness.wake(), active: true });
     await harness.note(text);
   }
 

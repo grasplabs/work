@@ -2712,10 +2712,10 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Ends the chat's running build job `id` as `end` says, once: `false`
    * when it had ended already. Its turn's agent is told how it ended, if
-   * that turn still runs, before its next model request, in a notice that
-   * is never stored with the chat (`LiveTurn`); no other turn ever is, and
-   * nothing of its result goes with it: the agent reads that with
-   * `env.build.job`.
+   * that turn still runs, in a notice it answers once it has answered
+   * (`ChatSession.followUp`), never shown as the person's; no other turn
+   * ever is, and nothing of its result goes with it: the agent reads that
+   * with `env.build.job`.
    */
   endBuildJob(chatId: unknown, id: string, end: BuildJobEnd): boolean {
     const chat = chatIdSchema.safeParse(chatId);
@@ -2727,13 +2727,12 @@ export class Workspace extends DurableObject<Env> {
     this.#jobs.end(job.chatId, id, end);
     if (turn?.id === job.turnId) {
       const content = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
-      // Before the turn's next request, never shown as the person's.
       this.ctx.waitUntil(
         chatSession(
           this.env,
           this.#scopeOf(this.#chat(job.chatId)).workspaceId,
           job.chatId
-        ).steer(content)
+        ).followUp(content)
       );
     }
     return true;
