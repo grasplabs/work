@@ -152,7 +152,12 @@ const decisionApproval = (
  * connections catalog answers only once `answerFirstCatalog` lets it, as a
  * cold catalog can take seconds.
  */
-const fakeCore = (initial: ListedWorkflowBindingApproval[] = []) => {
+const fakeCore = (
+  initial: ListedWorkflowBindingApproval[] = [],
+  people = [
+    { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
+  ]
+) => {
   const approved: { id: string; input: { alias: string } }[] = [];
   const revoked: { id: string; approval: string }[] = [];
   const active = [...initial];
@@ -223,10 +228,7 @@ const fakeCore = (initial: ListedWorkflowBindingApproval[] = []) => {
         await Promise.resolve([{ id: "team-finance", name: "Finance" }]),
     },
     members: {
-      list: async () =>
-        await Promise.resolve([
-          { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
-        ]),
+      list: async () => await Promise.resolve(people),
     },
   };
   return {
@@ -254,7 +256,10 @@ const settled = async (): Promise<void> => {
 /** The tab on `session`, for an admin who approves when `approves`. */
 const shown = async (
   session: ReturnType<typeof fakeCore>["session"],
-  approves: boolean
+  approves: boolean,
+  people: ReadonlyMap<string, string> = new Map([
+    ["user-grace", "Grace Hopper"],
+  ])
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -267,10 +272,7 @@ const shown = async (
         approves={approves}
         currentVersion={2}
         lifecycle={{ state: "ready", data: lifecycle }}
-        names={{
-          people: new Map([["user-grace", "Grace Hopper"]]),
-          me: "user-ada",
-        }}
+        names={{ people, me: "user-ada" }}
         versions={{ state: "ready", data: [versionTwo] }}
         workflow={workflow}
       />
@@ -406,6 +408,72 @@ describe("a workflow's Files and apps tab", () => {
       said: ["Approved: crm."],
       saidAfterRevoking: ["Revoked: crm."],
     });
+  });
+
+  it("tells apart deciders of the same name by the end of their ID, picked and to remove", async () => {
+    const { session, approved, answerFirstCatalog } = fakeCore(
+      [],
+      [
+        { userId: "user-111111", name: "Ada Lovelace", email: "ada@acme.test" },
+        {
+          userId: "user-222222",
+          name: "Ada Lovelace",
+          email: "a.lovelace@acme.test",
+        },
+      ]
+    );
+    answerFirstCatalog();
+    await shown(
+      session,
+      true,
+      new Map([
+        ["user-111111", "Ada Lovelace"],
+        ["user-222222", "Ada Lovelace"],
+      ])
+    );
+
+    await pick("ID …222222");
+    // The other Ada is still told apart from the one picked.
+    await pick("ID …111111");
+    const removable = [
+      button("Remove Ada Lovelace (ID …222222)") !== undefined,
+      button("Remove Ada Lovelace (ID …111111)") !== undefined,
+    ];
+    await press(button("Approve approval"));
+
+    expect({
+      removable,
+      deciders: approved.map(({ input }) =>
+        "target" in input ? input.target : undefined
+      ),
+    }).toStrictEqual({
+      removable: [true, true],
+      deciders: [
+        {
+          kind: "decision",
+          deciders: ["person:user-222222", "person:user-111111"],
+        },
+      ],
+    });
+  });
+
+  it("lists an approved decision's deciders of the same name apart", async () => {
+    const { session, answerFirstCatalog } = fakeCore([
+      decisionApproval(2, ["person:user-222222", "person:user-111111"]),
+    ]);
+    answerFirstCatalog();
+    await shown(
+      session,
+      true,
+      new Map([
+        ["user-111111", "Ada Lovelace"],
+        ["user-222222", "Ada Lovelace"],
+      ])
+    );
+
+    expect(listed("approval")).toContain(
+      "Answered by Ada Lovelace (ID …222222) and Ada Lovelace (ID …111111)"
+    );
   });
 
   it("keeps a connector approved once the tab's first, slower read of its apps lands after the approval", async () => {

@@ -27,6 +27,7 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import type { PeopleApart } from "./people-apart.ts";
 import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
@@ -106,6 +107,7 @@ export const SharePicker = ({
   roleHeading,
   roleName,
   empty,
+  hintOf,
   children,
 }: {
   offered: ShareOffer | undefined;
@@ -119,6 +121,11 @@ export const SharePicker = ({
   roleName: string;
   /** What the list says when nobody is left to offer. */
   empty: ReactNode;
+  /**
+   * What tells someone apart from a namesake (`usePeopleApart`), among
+   * everyone the page knows: those offered and those who have a role.
+   */
+  hintOf: PeopleApart["hint"];
   children: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -173,6 +180,7 @@ export const SharePicker = ({
                     {people.map((person) => (
                       <PersonOption
                         key={person.id}
+                        hint={hintOf(person)}
                         onSelect={() => {
                           pick({ type: "person", id: person.id });
                         }}

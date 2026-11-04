@@ -27,6 +27,7 @@ import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Sharing an independent workflow (GRA-1304): whom it is open to besides
@@ -117,6 +118,19 @@ export const ShareWorkflow = ({
   const everyone = (project: string): string => t`Everyone in ${project}`;
   const workflow = resource.id;
   const { name } = resource;
+  // Whom to share with: told apart among everyone in the organization,
+  // so from a namesake it is shared with already too. Whom it is shared
+  // with: among themselves, as an App's list is.
+  const apart = usePeopleApart(read?.candidates.people ?? []);
+  const sharedApart = usePeopleApart(
+    read === undefined
+      ? []
+      : read.members.flatMap((member) =>
+          member.type === "person"
+            ? [{ id: member.id, name: nameOf(member, read.candidates) }]
+            : []
+        )
+  );
 
   if (resource.role !== "builder") {
     return null;
@@ -227,7 +241,7 @@ export const ShareWorkflow = ({
                         key={person.id}
                         value={`person:${person.id}`}
                       >
-                        {person.name}
+                        {apart.named(person)}
                       </NativeSelectOption>
                     ))}
                   </NativeSelectOptGroup>
@@ -286,7 +300,12 @@ export const ShareWorkflow = ({
                   const memberName = nameOf(member, read.candidates);
                   const projectName = member.projectName ?? null;
                   let shown = memberName;
-                  if (member.type === "team") {
+                  if (member.type === "person") {
+                    shown = sharedApart.named({
+                      id: member.id,
+                      name: memberName,
+                    });
+                  } else if (member.type === "team") {
                     shown = t`${memberName} (team)`;
                   } else if (member.type === "project") {
                     shown =

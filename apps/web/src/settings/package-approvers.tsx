@@ -19,6 +19,7 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
 import {
   PeopleTeamsPicker,
   readPeopleAndTeams,
@@ -60,6 +61,13 @@ export const PackageApprovers = ({
   const [candidates, setCandidates] = useState<PeopleAndTeams | null>(null);
   const active = approvers.filter(({ status }) => status === "active");
   const holding = new Set(active.map(({ subject }) => keyOf(subject)));
+  const apart = usePeopleApart(
+    active.flatMap(({ subject, name }) =>
+      subject.type === "person" && name !== null
+        ? [{ id: subject.userId, name }]
+        : []
+    )
+  );
   const readCandidates = async (): Promise<void> => {
     if (candidates !== null) {
       return;
@@ -156,7 +164,10 @@ export const PackageApprovers = ({
             </TableHeader>
             <TableBody>
               {active.map(({ id, subject, name, grantedAt }) => {
-                const named = name ?? t`Removed`;
+                let named = name ?? t`Removed`;
+                if (subject.type === "person" && name !== null) {
+                  named = apart.named({ id: subject.userId, name });
+                }
                 return (
                   <TableRow key={id}>
                     <TableCell>{named}</TableCell>

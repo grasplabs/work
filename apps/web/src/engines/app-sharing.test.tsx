@@ -69,11 +69,14 @@ const candidates: ShareCandidates = {
 };
 
 /** Core's App members, kept as builders change them, and each change asked. */
-const fakeMembers = (initial: AppMember[] = []) => {
+const fakeMembers = (
+  initial: AppMember[] = [],
+  offering: ShareCandidates = candidates
+) => {
   const asked: unknown[][] = [];
   let kept = initial;
   const nameOf = ({ type, id }: AppMemberRef): string =>
-    (type === "team" ? candidates.teams : candidates.people).find(
+    (type === "team" ? offering.teams : offering.people).find(
       (each) => each.id === id
     )?.name ?? id;
   const members = {
@@ -83,7 +86,7 @@ const fakeMembers = (initial: AppMember[] = []) => {
     },
     candidates: async (): Promise<ShareCandidates> => {
       await Promise.resolve();
-      return candidates;
+      return offering;
     },
     add: async (_app: string, member: NewAppMember): Promise<AppMember> => {
       await Promise.resolve();
@@ -190,6 +193,21 @@ const offered = (): string[] =>
     (each) => each.querySelector("span.truncate")?.textContent ?? ""
   );
 
+/** Each offered option's name, and what it says under it. */
+const optionLines = (): (string | null)[][] =>
+  [...document.querySelectorAll("[cmdk-item]")].map((each) =>
+    [...each.querySelectorAll("span.truncate")].map((line) => line.textContent)
+  );
+
+/** Picks the offered option that says `text`. */
+const pickOption = async (text: string): Promise<void> => {
+  await press(
+    [...document.querySelectorAll("[cmdk-item]")].find((each) =>
+      each.textContent?.includes(text)
+    )
+  );
+};
+
 /** Who the table lists, as shown. */
 const listed = (): string[] =>
   [...document.querySelectorAll("tbody tr td:first-child")].map(
@@ -235,6 +253,43 @@ describe("Sharing an App's App", () => {
       ],
       listed: ["Ann", "Sales (team)"],
     });
+  });
+
+  it("tells apart people of the same name by the end of their ID, in the list and whom it is shared with", async () => {
+    const { session, asked } = fakeMembers([], {
+      people: [
+        { id: "user-eva-0000aaaaaa", name: "Eva de Vries" },
+        { id: "user-eva-1111bbbbbb", name: "eva  de \u200BVries" },
+        { id: "user-bo", name: "Bo" },
+      ],
+      teams: [],
+      projects: [],
+    });
+    await shown(session, app("builder"));
+
+    await press(button("Share"));
+    const first = optionLines();
+    await pickOption("bbbbbb");
+    await press(button("Share"));
+    // The other Eva is still told apart from the one it is shared with.
+    const second = optionLines();
+    await pickOption("aaaaaa");
+
+    expect({ first, second, asked, listed: listed() }).toStrictEqual({
+      // Bo's name is theirs alone, so it says nothing more.
+      first: [
+        ["Eva de Vries", "ID …aaaaaa"],
+        ["eva  de \u200BVries", "ID …bbbbbb"],
+        ["Bo"],
+      ],
+      second: [["Eva de Vries", "ID …aaaaaa"], ["Bo"]],
+      asked: [
+        ["add", "person", "user-eva-1111bbbbbb", "user"],
+        ["add", "person", "user-eva-0000aaaaaa", "user"],
+      ],
+      listed: ["eva  de \u200BVries (ID …bbbbbb)", "Eva de Vries (ID …aaaaaa)"],
+    });
+    expect(button("Stop sharing with Eva de Vries (ID …aaaaaa)")).toBeDefined();
   });
 
   it("lets a builder unshare it, only once they confirm", async () => {

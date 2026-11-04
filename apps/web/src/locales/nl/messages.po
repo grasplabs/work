@@ -814,6 +814,10 @@ msgctxt "a handover: the work passes between this team and these"
 msgid "{name} · with {teams}"
 msgstr "{name} · met {teams}"
 
+#: src/people/people-apart.ts
+msgid "{name} ({apart})"
+msgstr "{name} ({apart})"
+
 #: src/engines/resource-bindings.tsx
 msgid "{name} ({appId})"
 msgstr "{name} ({appId})"
@@ -6611,6 +6615,10 @@ msgstr "Ik heb genoeg gehoord om open te gaan. Ik heb eerst nog een paar dingen 
 #: src/projects/project-dialog.tsx
 msgid "Icon"
 msgstr "Icoon"
+
+#: src/people/people-apart.ts
+msgid "ID …{end}"
+msgstr "ID …{end}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"

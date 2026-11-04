@@ -18,6 +18,8 @@ import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
 import { initials } from "../frame/person-menu.tsx";
+import { usePeopleApart } from "./people-apart.ts";
+import type { PeopleApart } from "./people-apart.ts";
 
 // Who owns a thing, and the people it can be handed to, as the prototype
 // draws it (`components/owner-picker.tsx`): the owner's portrait, and
@@ -59,35 +61,60 @@ const PersonAvatar = ({ name }: { name: string }) => (
 
 /**
  * One person in a list of people to pick from: their portrait and name,
- * found by either their name or their email as typed.
+ * found by either their name or their email as typed, and under it what
+ * tells them apart from someone of the same name (`usePeopleApart`).
  */
 export const PersonOption = ({
   person,
   checked = false,
+  hint,
   onSelect,
 }: {
   person: Pickable;
   checked?: boolean;
+  /** What tells them apart from a namesake (`PeopleApart`'s `hint`). */
+  hint?: string;
   onSelect: () => void;
 }) => (
   <CommandItem
     data-checked={checked}
     onSelect={onSelect}
-    keywords={[person.name, person.email ?? ""]}
+    keywords={[person.name, person.email ?? "", hint ?? ""]}
     // Their ID keeps two people of the same name apart.
     value={`person:${person.id}`}
   >
     <PersonAvatar name={person.name} />
-    <span className="flex-1 truncate">{person.name}</span>
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate">{person.name}</span>
+      {hint === undefined ? null : (
+        <span className="text-muted-foreground truncate text-xs">{hint}</span>
+      )}
+    </span>
   </CommandItem>
 );
+
+/**
+ * The owner as their button names them: told apart from a namesake once
+ * the list is read and holds them.
+ */
+const ownerNamed = (
+  name: string | null,
+  id: string | null,
+  people: readonly Pickable[] | null,
+  apart: PeopleApart
+): string | null => {
+  const listed = people?.find((each) => each.id === id);
+  return name === null || listed === undefined
+    ? name
+    : apart.named({ ...listed, name });
+};
 
 /**
  * The owner's button and its list. `people` is null while they're being
  * read: the list says so, and the page reads them only when it opens.
  */
 export const PersonPicker = ({
-  owner,
+  owner: ownerName,
   ownerId,
   people,
   onOpen,
@@ -113,6 +140,8 @@ export const PersonPicker = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const apart = usePeopleApart(people ?? []);
+  const owner = ownerNamed(ownerName, ownerId, people, apart);
   const label =
     owner === null
       ? t`Owner: nobody yet. Change owner`
@@ -138,12 +167,12 @@ export const PersonPicker = ({
           />
         }
       >
-        {owner === null ? (
+        {ownerName === null ? (
           <Avatar size="sm">
             <AvatarFallback>?</AvatarFallback>
           </Avatar>
         ) : (
-          <PersonAvatar name={owner} />
+          <PersonAvatar name={ownerName} />
         )}
         {compact ? null : (owner ?? t`No owner yet`)}
         {compact || disabled ? null : (
@@ -168,6 +197,7 @@ export const PersonPicker = ({
                   <PersonOption
                     checked={person.id === ownerId}
                     key={person.id}
+                    hint={apart.hint(person)}
                     onSelect={() => {
                       setOpen(false);
                       if (person.id !== ownerId) {

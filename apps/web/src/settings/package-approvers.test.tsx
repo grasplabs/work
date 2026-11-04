@@ -39,14 +39,13 @@ const grace = {
 const platform = { id: "team-platform", name: "Platform" };
 
 /** Core as the page reaches it, keeping every grant, and each change asked. */
-const fakeCore = (refuse?: string) => {
+const fakeCore = (refuse?: string, people = [grace, ada]) => {
   const asked: unknown[] = [];
   const grants: DependencyApprover[] = [];
   const nameOf = (subject: DependencyApproverSubject): string | null =>
     subject.type === "team"
       ? platform.name
-      : ([ada, grace].find(({ userId }) => userId === subject.userId)?.name ??
-        null);
+      : (people.find(({ userId }) => userId === subject.userId)?.name ?? null);
   const dependencies = {
     approvers: async (): Promise<DependencyApprover[]> => {
       await Promise.resolve();
@@ -87,7 +86,7 @@ const fakeCore = (refuse?: string) => {
   const members = {
     list: async () => {
       await Promise.resolve();
-      return [grace, ada];
+      return people;
     },
   };
   const workflows = {
@@ -232,6 +231,39 @@ describe("Settings › Packages › Who approves packages", () => {
         ["revoke", "grant-1"],
       ],
       listed: [["Platform", "Team"]],
+    });
+  });
+
+  it("tells an admin apart people of the same name by the end of their ID", async () => {
+    const twin = {
+      userId: "user-ada-222222",
+      name: "Ada Lovelace",
+      email: "a.lovelace@acme.test",
+    };
+    const { session, asked } = fakeCore(undefined, [ada, twin, grace]);
+    await shown(session);
+
+    const names = await offered();
+    await add("ID …222222");
+    await add("ID …er-ada");
+
+    expect({ names, asked, listed: listed() }).toStrictEqual({
+      // Grace's name is hers alone, so it says nothing more.
+      names: [
+        expect.stringMatching(/Ada LovelaceID …er-ada$/u),
+        expect.stringMatching(/Ada LovelaceID …222222$/u),
+        expect.stringMatching(/Grace Hopper$/u),
+        "Platform",
+      ],
+      asked: [
+        ["grant", { type: "person", userId: twin.userId }],
+        ["grant", { type: "person", userId: ada.userId }],
+      ],
+      // Both approve, each named as the list named them.
+      listed: [
+        ["Ada Lovelace (ID …222222)", "Person"],
+        ["Ada Lovelace (ID …er-ada)", "Person"],
+      ],
     });
   });
 

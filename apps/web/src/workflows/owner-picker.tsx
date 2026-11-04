@@ -6,6 +6,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
 import { PersonPicker } from "../people/person-picker.tsx";
 import type { Pickable } from "../people/person-picker.tsx";
 import { useCore } from "../use-core.ts";
@@ -27,6 +28,7 @@ export const WorkflowOwnerPicker = ({
   const router = useRouter();
   const { t } = useLingui();
   const [people, setPeople] = useState<Pickable[] | null>(null);
+  const apart = usePeopleApart(people ?? []);
   const { owner } = workflow;
   const name = owner.name ?? owner.userId;
   const readPeople = async (): Promise<void> => {
@@ -88,7 +90,7 @@ export const WorkflowOwnerPicker = ({
         );
       });
     } catch (error) {
-      const chosen = person.name;
+      const chosen = apart.named(person);
       const named = workflow.workflow;
       toast.add({
         type: "error",
