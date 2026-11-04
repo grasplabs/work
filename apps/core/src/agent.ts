@@ -62,7 +62,7 @@ export const maxSteps = 20;
 export const maxRunsPerResponse = 5;
 export const maxRunsPerTurn = 30;
 
-const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them with your tools. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
+export const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them with your tools. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
 
 Use the tool made for what you do when there is one: \`createApp\`, \`readFile\`, \`writeFile\`, \`editFile\` and \`searchFiles\` for an App's files, \`searchBrain\` to find evidence in the brain (the organization's own knowledge, never Grasp's code), \`requestConnection\` to ask for a connection, \`editWorkflow\` to save a workflow's draft. The person sees each as one line saying what you did. Write code only to compute, to read what no tool reads, and to check and test what you built.
 
@@ -138,7 +138,7 @@ const readApiInputSchema = z.strictObject({
  * anyone's data; what the APIs return is data, as every request says.
  * An unknown name is refused with the names there are.
  */
-const readApi = (
+export const readApi = (
   apis: readonly AgentApi[]
 ): AgentTool<typeof readApiParameters> => ({
   name: "readApi",
@@ -207,7 +207,7 @@ const askParameters = Type.Object(
  * their message and nothing else, and a change the agent then makes still
  * waits for them to confirm it. Out of bounds is refused, never trimmed.
  */
-const askQuestions = (): AgentTool<typeof askParameters> => ({
+export const askQuestions = (): AgentTool<typeof askParameters> => ({
   name: "askQuestions",
   label: "Ask the person",
   description: `Asks the person up to ${chatAskLimits.questions} questions, each with ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} short answers to choose from, shown in place of their message box; they can also answer in their own words. Use it when you need them to choose between a few clear options before you go on. Call it on its own, as the last thing in your response: their answers come as their next message, each after the question it answers when you asked more than one. A choice only answers your question: it confirms nothing, and a change still waits for them to confirm it in Grasp.`,
@@ -312,7 +312,13 @@ export interface TurnContext {
 }
 
 /** The sections of the system prompt, in the order they first come. */
-const sectionNames = ["apis", "memory", "skills", "channel", "app"] as const;
+export const sectionNames = [
+  "apis",
+  "memory",
+  "skills",
+  "channel",
+  "app",
+] as const;
 
 /**
  * What an App's own chat tells the model: which App the person builds
@@ -328,7 +334,27 @@ const appSection = (app: string | undefined): string | null =>
       ].join("\n");
 
 /** The sections of the system prompt, `null` for one that is empty. */
-type Sections = Record<(typeof sectionNames)[number], string | null>;
+export type Sections = Record<(typeof sectionNames)[number], string | null>;
+
+/** How to answer in a chat that came through a chat platform; `null` in Grasp's own. */
+const channelSection = (channel: ChannelText | undefined): string | null =>
+  channel === undefined
+    ? null
+    : [`<channel mark="${channel.mark}">`, channel.text, "</channel>"].join(
+        "\n"
+      );
+
+/** The sections of the system prompt for a turn's APIs and context. */
+export const sectionsOf = (
+  apis: readonly AgentApi[],
+  context: TurnContext
+): Sections => ({
+  apis: apisSection(apis),
+  memory: memorySection(context.memory),
+  skills: skillsSection(context.skills),
+  channel: channelSection(context.channel),
+  app: appSection(context.app),
+});
 
 /**
  * The last value the transcript gave section `name`: `null` once removed,
@@ -360,20 +386,7 @@ const systemUpdates = (
   apis: readonly AgentApi[],
   context: TurnContext
 ): SystemMessage[] => {
-  const now: Sections = {
-    apis: apisSection(apis),
-    memory: memorySection(context.memory),
-    skills: skillsSection(context.skills),
-    channel:
-      context.channel === undefined
-        ? null
-        : [
-            `<channel mark="${context.channel.mark}">`,
-            context.channel.text,
-            "</channel>",
-          ].join("\n"),
-    app: appSection(context.app),
-  };
+  const now = sectionsOf(apis, context);
   const timestamp = Date.now();
   const changed: Partial<Sections> = {};
   for (const name of sectionNames) {
@@ -514,23 +527,8 @@ export interface CodeStepDetails {
   runId: string;
 }
 
-/** The run and logged line a code step's tool update carries, if one does. */
-const codeStepUpdateSchema = z.object({
-  content: z.tuple([z.object({ type: z.literal("text"), text: z.string() })]),
-  details: z.object({ status: z.literal("running"), runId: z.string() }),
-});
-
-const codeStepLine = (
-  update: unknown
-): { runId: string; text: string } | undefined => {
-  const parsed = codeStepUpdateSchema.safeParse(update);
-  return parsed.success
-    ? { runId: parsed.data.details.runId, text: parsed.data.content[0].text }
-    : undefined;
-};
-
 /** The one tool: runs code against the chat's APIs in a locked isolate. */
-const executeCode = ({
+export const executeCode = ({
   apis,
   scope,
   runs,
@@ -554,9 +552,11 @@ const executeCode = ({
       toolCallId,
       code,
       signal,
-      // Each line as the code logs it, as one of pi's tool updates: pi
-      // drops an update once the step has settled.
+      // Each line as the code logs it: to the chat, for the step it runs
+      // for, and as one of pi's tool updates, which pi drops once the step
+      // has settled.
       (from, line) => {
+        runs.output(from, toolCallId, line);
         onUpdate?.({
           content: [{ type: "text", text: line }],
           details: { status: "running", runId: from },
@@ -992,7 +992,7 @@ export const withheldResponse =
 const withheldCode = `// ${withheldResponse}`;
 
 /** The run a code step's result is of, as its details name it. */
-const resultRunId = (message: Message): string | undefined => {
+export const resultRunId = (message: Message): string | undefined => {
   if (message.role !== "toolResult") {
     return undefined;
   }
@@ -1116,7 +1116,7 @@ export const withholdRuns = (
  * Whether a result of the turn under way (after its question) is of one
  * of the code runs `runs`.
  */
-const readsUnderWay = (
+export const readsUnderWay = (
   messages: readonly AgentMessage[],
   runs: ReadonlySet<string>
 ): boolean => {
@@ -1480,13 +1480,6 @@ export const runTurn = async ({
         !event.isError
       ) {
         progress.thought += 1;
-      }
-      if (event.type === "tool_execution_update") {
-        const update: unknown = event.partialResult;
-        const line = codeStepLine(update);
-        if (line !== undefined) {
-          runs.output(line.runId, event.toolCallId, line.text);
-        }
       }
       if (
         event.type === "message_update" &&

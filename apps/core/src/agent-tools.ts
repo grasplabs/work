@@ -1,6 +1,8 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { isJsonValue } from "@earendil-works/chord";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import { exports } from "cloudflare:workers";
@@ -681,6 +683,61 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
         .edit(workflow, { expectedRevision, source, modules }),
   }),
 ];
+
+/**
+ * `agentTool`, written in pi-agent-core's shape, as a pi-durable tool
+ * (the chat agent's extension, chat-agent.ts): the same declaration,
+ * input check and execution, called with the call's ID and its context's
+ * abort signal. What it streams becomes the call's running output; its
+ * content is the result the model reads, its details (JSON, which every
+ * tool here keeps them to) what the chat shows, and `terminate` ends the
+ * run without another request. A throw is an error result, as in
+ * pi-agent-core.
+ */
+export const durableTool = <P extends TSchema>(
+  agentTool: AgentTool<P>
+): ToolRegistration<P> => ({
+  name: agentTool.name,
+  description: agentTool.description,
+  parameters: agentTool.parameters,
+  ...(agentTool.prepareArguments === undefined
+    ? {}
+    : { prepareArguments: agentTool.prepareArguments }),
+  ...(agentTool.executionMode === undefined
+    ? {}
+    : { executionMode: agentTool.executionMode }),
+  execute: async (args, api, context) => {
+    // pi-durable rejects output once the call has ended; pi-agent-core
+    // dropped late updates, and so does this.
+    let settled = false;
+    try {
+      const result: AgentToolResult<unknown> = await agentTool.execute(
+        api.callId,
+        args,
+        context.abortSignal,
+        (update) => {
+          if (settled) {
+            return;
+          }
+          for (const part of update.content) {
+            if (part.type === "text") {
+              api.output(`${part.text}\n`);
+            }
+          }
+        }
+      );
+      const { content, details, isError, terminate } = result;
+      return {
+        output: content,
+        ...(isJsonValue(details) ? { details } : {}),
+        ...(isError === true ? { isError } : {}),
+        ...(terminate === true ? { control: { terminate } } : {}),
+      };
+    } finally {
+      settled = true;
+    }
+  },
+});
 
 /**
  * The turn's dedicated tools: each whose API the chat has (a shared chat
