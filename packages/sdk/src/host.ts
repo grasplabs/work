@@ -61,7 +61,6 @@ export {
 } from "./schema-plan.ts";
 export type {
   AcceptedPlan,
-  ConversionTarget,
   PlanOptions,
   PlannedChanges,
   PlannedCheck,
@@ -73,11 +72,8 @@ export type {
   RefusedPlan,
   ReservedFields,
   SchemaAnswer,
-  SchemaAnswerKind,
   SchemaPlan,
 } from "./schema-plan.ts";
-export { answerValue } from "./schema-answer.ts";
-export type { AnsweredValue } from "./schema-answer.ts";
 export {
   manifestMaxBytes,
   manifestText,

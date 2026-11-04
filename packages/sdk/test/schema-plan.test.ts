@@ -445,49 +445,15 @@ describe("a change the store checks every record for", () => {
     ]);
   });
 
-  test("offers the answers that suit the change", () => {
-    const status = (values: [string, ...string[]]) =>
-      notes({ ...noteFields, status: v.enum(values) });
-    const renamed = planSchemaChange(
-      status(["todo", "done"]),
-      status(["open", "done"])
-    );
-    const typed = planSchemaChange(
-      notes({ ...noteFields, size: v.string() }),
-      notes({ ...noteFields, size: v.number() })
-    );
-    const added = planSchemaChange(
-      v1,
-      notes({ ...noteFields, size: v.number() })
-    );
-    expect({
-      renamed: renamed.checks.map(({ answers }) => answers),
-      typed: typed.checks.map(({ answers }) => answers),
-      added: added.checks.map(({ answers }) => answers),
-    }).toStrictEqual({
-      renamed: [["value", "field", "map"]],
-      typed: [["value", "field", "convert"]],
-      added: [["value", "field"]],
-    });
-  });
-
   test("carries the App's answer for the field, and ignores answers for other fields", () => {
     const status = (values: [string, ...string[]]) =>
       notes({ ...noteFields, status: v.enum(values) });
-    const answer = {
-      table: "notes",
-      field: "status",
-      kind: "map",
-      values: { todo: "open" },
-    } as const;
+    const answer = { table: "notes", field: "status", value: "open" };
     const plan = planSchemaChange(
       status(["todo", "done"]),
       status(["open", "done"]),
       {
-        answers: [
-          answer,
-          { table: "notes", field: "title", kind: "value", value: "x" },
-        ],
+        answers: [answer, { table: "notes", field: "title", value: "x" }],
       }
     );
     expect(checksOf(plan)).toStrictEqual([
@@ -549,12 +515,8 @@ describe("a change the store checks every record for", () => {
       renames,
       retainedFields: [{ table: "notes", field: "body" }],
     });
-    expect(checksOf(plan)).toStrictEqual([
-      {
-        table: "notes",
-        field: "text",
-        answer: { table: "notes", field: "text", kind: "field", from: "body" },
-      },
+    expect(plan.checks).toStrictEqual([
+      { table: "notes", field: "text", answer: null, from: "body" },
     ]);
     expect(contractOf(plan).tables.notes?.fields.body?.presence).toBe(
       "optional"
@@ -658,9 +620,7 @@ describe("changes that need a migration", () => {
     expect(
       refusedOf(
         planSchemaChange(before, after, {
-          answers: [
-            { table: "notes", field: "team", kind: "value", value: "all" },
-          ],
+          answers: [{ table: "notes", field: "team", value: "all" }],
         })
       )
     ).toStrictEqual([

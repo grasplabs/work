@@ -813,6 +813,17 @@ const contractOf = async (row: {
 };
 
 /** What a plan added and kept, as its receipt records it. */
+/** How a plan's check is answered, as its record names it. */
+const answerOf = (
+  answer: SchemaAnswer | null,
+  from: string | null
+): string | null => {
+  if (answer !== null) {
+    return "value";
+  }
+  return from === null ? null : `from:${from}`;
+};
+
 const planRecord = (
   plan: AcceptedPlan,
   identities: { base: string | null; schema: string; contract: string }
@@ -834,10 +845,10 @@ const planRecord = (
       index,
     ]),
     widenedFields: plan.widenedFields.map(({ table, field }) => [table, field]),
-    checks: plan.checks.map(({ table, field, answer }) => [
+    checks: plan.checks.map(({ table, field, answer, from }) => [
       table,
       field,
-      answer?.kind ?? null,
+      answerOf(answer, from),
     ]),
     renames: plan.renames.map(({ table, from, to }) => [table, from, to]),
     ruleChanges: [...plan.ruleChanges],

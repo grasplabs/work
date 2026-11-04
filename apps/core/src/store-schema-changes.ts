@@ -1,9 +1,7 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
-import { answerValue } from "@grasp-os/sdk/host";
 import type {
   AcceptedPlan,
   PlannedCheck,
-  SchemaAnswerKind,
   SchemaManifest,
 } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -39,9 +37,9 @@ import { validates } from "./store-queries.ts";
 // how each is closed:
 //
 // - Data lost to a narrowing, or a value guessed: a record that doesn't
-//   fit a checked field is rewritten only by the App's own answer for it
-//   (schema-answer.ts, which reads text, numbers and booleans as written
-//   and nothing else), and only when what the answer made fits the field;
+//   fit a checked field is rewritten only with the App's own value for it
+//   (a backfill's default; anything that reshapes a record is an explicit
+//   migration in code), and only when that value fits the field;
 //   otherwise the record is reported and nothing is applied. Nothing is
 //   removed: a field the schema leaves out stays in every record and in
 //   the contract, and every rewrite is recorded in the store's change
@@ -193,17 +191,16 @@ const settledField = (
   if (!present && descriptor.presence === "default") {
     return { value: descriptor.defaultValue ?? null };
   }
-  const answer = check?.answer ?? null;
-  if (answer === null) {
+  // A field renamed takes the old field's value; any other, the App's.
+  const from = check?.from ?? null;
+  if (from !== null && !Object.hasOwn(fields, from)) {
+    return { reason: "missing" };
+  }
+  const given = from === null ? check?.answer?.value : fields[from];
+  if (given === undefined) {
     return { reason: present ? "invalid" : "missing" };
   }
-  const answered = answerValue(answer, present, value, fields);
-  if (!answered.answered || answered.value === undefined) {
-    return { reason: "unanswered" };
-  }
-  return validates(descriptor, answered.value)
-    ? { value: answered.value }
-    : { reason: "unfit" };
+  return validates(descriptor, given) ? { value: given } : { reason: "unfit" };
 };
 
 /**
@@ -249,7 +246,7 @@ export class Questions {
     field: string,
     id: string,
     reason: SchemaCheckReason,
-    answers: readonly SchemaAnswerKind[]
+    answers: readonly "value"[]
   ): void {
     const key = canonicalJson([table, field]);
     const question = this.#byField.get(key) ?? {
@@ -414,9 +411,6 @@ export const runChange = (
   const changedTables = new Set<string>();
   const tally = { rewritten: 0 };
   for (const table of steps) {
-    const answersOf = new Map(
-      table.fields.map(({ field, check }) => [field, check?.answers ?? []])
-    );
     eachRecord(db, table.tableId, (record) => {
       const settled = settledRecord(
         table,
@@ -424,13 +418,7 @@ export const runChange = (
       );
       if ("failures" in settled) {
         for (const { field, reason } of settled.failures) {
-          questions.add(
-            table.table,
-            field,
-            record.recordId,
-            reason,
-            answersOf.get(field) ?? []
-          );
+          questions.add(table.table, field, record.recordId, reason, ["value"]);
         }
         return;
       }

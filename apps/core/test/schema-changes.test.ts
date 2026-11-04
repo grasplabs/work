@@ -42,11 +42,11 @@ const status = (values: [string, ...string[]], more: ValueShape = {}) =>
 const todo = status(["todo", "done"]);
 const open = status(["open", "done"]);
 
+/** `open` for every note whose status the new enum doesn't take. */
 const mapTodo: SchemaAnswer = {
   table: "notes",
   field: "status",
-  kind: "map",
-  values: { todo: "open" },
+  value: "open",
 };
 
 /** The details of the error `call` was refused with. */
@@ -237,7 +237,7 @@ describe("a dry run", () => {
             field: "title",
             rows: 1,
             records: [{ id: ids[0], reason: "invalid" }],
-            answers: ["value", "field", "migration"],
+            answers: ["value", "migration"],
           },
         ],
       },
@@ -329,17 +329,17 @@ describe("an answer", () => {
     });
   });
 
-  it("that can't convert a value reports it, and guesses nothing", async () => {
+  it("that doesn't fit the field either is reported, and nothing is guessed", async () => {
     const { store, ids } = await storeOf(sizes(v.string()), [
       { title: "A", size: "12" },
-      { title: "B", size: "twelve" },
     ]);
+    // "12" isn't a number; the value given for it isn't one either.
     const refused = await refusalOf(
       store.defineTables(
         sizes(v.number()),
         consumer(2),
         [],
-        [{ table: "notes", field: "size", kind: "convert", to: "number" }]
+        [{ table: "notes", field: "size", value: "twelve" }]
       )
     );
     expect(refused).toStrictEqual({
@@ -351,8 +351,8 @@ describe("an answer", () => {
             table: "notes",
             field: "size",
             rows: 1,
-            records: [{ id: ids[1], reason: "unanswered" }],
-            answers: ["value", "field", "convert", "migration"],
+            records: [{ id: ids[0], reason: "unfit" }],
+            answers: ["value", "migration"],
           },
         ],
       },
@@ -362,50 +362,35 @@ describe("an answer", () => {
 
 describe("all or nothing", () => {
   it("a record the version in force wrote since the dry run blocks the activation, writing nothing", async () => {
-    const { store, first } = await storeOf(todo, [
-      { title: "A", status: "todo" },
+    const { store, first } = await storeOf(notes({ title: v.string() }), [
+      { title: "Short" },
     ]);
-    const second = await store.defineTables(open, consumer(2), [], [mapTodo]);
-    // Passed the dry run; then version 1, still current, writes a value
-    // the answer doesn't map.
-    const late = await insert(store, first, { title: "B", status: "done" });
-    await commit(store, first, [
-      {
-        op: "patch",
-        table: "notes",
-        id: late,
-        expectedRevision: 1,
-        fields: { status: "todo" },
-      },
-    ]);
+    // Passed the dry run: every title fits.
+    const second = await store.defineTables(
+      notes({ title: v.string().max(10) }),
+      consumer(2)
+    );
+    // Then version 1, still current, writes one that doesn't.
+    const late = await insert(store, first, { title: "Far too long a title" });
     const before = await notesOf(store);
     const contract = await contractHash(store);
-    // An answer that maps `todo` but not what the late write holds.
-    const strict = notes({ title: v.string(), status: v.enum(["open"]) });
-    const third = await store.defineTables(strict, consumer(3), [], [mapTodo]);
-    await insert(store, first, { title: "C", status: "done" });
 
-    const refused = await refusalOf(activate(store, third.schemaHash, 3));
+    const refused = await refusalOf(activate(store, second.schemaHash, 2));
     expect({
       code: refused.code,
-      rows: questionsOf(refused)[0]?.rows,
+      records: questionsOf(refused)[0]?.records,
       contract: (await contractHash(store)) === contract,
       changes: await changeRows(store),
-      stillWrites: await codeOf(
-        insert(store, first, { title: "D", status: "todo" })
-      ),
+      records2: await notesOf(store),
+      stillWrites: await codeOf(insert(store, first, { title: "Another" })),
     }).toStrictEqual({
       code: "migration.required",
-      rows: 1,
+      records: [{ id: late, reason: "invalid" }],
       contract: true,
       changes: { changes: [], history: 0 },
+      records2: before,
       stillWrites: "ok",
     });
-    const after = await notesOf(store);
-    for (const [id, note] of before) {
-      expect(after.get(id)).toStrictEqual(note);
-    }
-    expect(second.contract.pending).toBeTruthy();
   });
 
   it("a crash halfway through leaves the change unapplied, and it applies whole once run again", async () => {

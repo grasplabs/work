@@ -909,8 +909,8 @@ describe("answers for a schema change", () => {
     const { manifest } = inspectApp(
       notes({
         answers: [
-          { table: "notes", field: "rank", kind: "convert", to: "number" },
-          { table: "notes", field: "body", kind: "value", value: "" },
+          { table: "notes", field: "rank", value: 0 },
+          { table: "notes", field: "body", value: "" },
         ],
       })
     );
@@ -922,15 +922,13 @@ describe("answers for a schema change", () => {
         canonicalText(manifest),
       unknownField: refusal(() =>
         looseNotes({
-          answers: [
-            { table: "notes", field: "colour", kind: "value", value: 1 },
-          ],
+          answers: [{ table: "notes", field: "colour", value: 1 }],
         })
       ),
     }).toStrictEqual({
       answers: [
-        { table: "notes", field: "rank", kind: "convert", to: "number" },
-        { table: "notes", field: "body", kind: "value", value: "" },
+        { table: "notes", field: "rank", value: 0 },
+        { table: "notes", field: "body", value: "" },
       ],
       none: false,
       readBack: true,

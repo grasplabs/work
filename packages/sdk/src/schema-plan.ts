@@ -60,12 +60,10 @@ import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 //   and a required or nullable-only field added (`checks`): every record
 //   must fit the new descriptor. When one doesn't, the change is a
 //   question (the store answers its rows and why, never their values),
-//   answered by a `SchemaAnswer` the App declares for the field: a value
-//   for the rows that don't fit, a field to take it from, a map of the
-//   values they hold (an enum's renamed or merged members), or one of the
-//   standard conversions between text, numbers and booleans. A value an
-//   answer can't turn into one that fits is reported, never guessed. A
-//   per-row function is an explicit migration (below);
+//   answered by a value the App declares for the field (`SchemaAnswer`,
+//   a backfill's default for the rows that don't fit), or by an explicit
+//   migration, a per-row function in code (below), the one way to
+//   reshape what records hold;
 // - a field renamed (`renames`, a seam for the App definition's stable
 //   field IDs): the new field takes the old one's value, which stays in
 //   the record, its field kept as optional;
@@ -139,45 +137,26 @@ export interface PlannedIndex {
 }
 
 /**
- * How the rows a narrowing doesn't fit get a value that does, as an App
- * declares it for one field (`SchemaAnswer`): only a row whose value
- * doesn't fit the field's new descriptor is rewritten, to what the answer
- * makes of it (schema-answer.ts, `answerValue`), which must fit in turn.
- *
- * - `value`: this value;
- * - `field`: the value of the record's field `from`;
- * - `map`: the value it holds, looked up as text (an enum's renamed or
- *   merged members); a value the map doesn't hold stays unanswered;
- * - `convert`: one of the standard conversions to text, a number or a
- *   boolean.
+ * An App's value for the records of one field a narrowing doesn't fit
+ * (`app({ answers })`): only a record whose value doesn't fit the field's
+ * new descriptor (or that lacks it) takes it, and it must fit in turn. A
+ * backfill's default, not a migration: anything that reshapes what a
+ * record holds is an explicit migration, a per-row function in code.
  */
-export type SchemaAnswerKind = "value" | "field" | "map" | "convert";
-
-/** The standard conversions an answer may ask for. */
-export type ConversionTarget = "string" | "number" | "boolean";
-
-/** An App's answer for the rows of one field a narrowing doesn't fit. */
-export type SchemaAnswer = PlannedField &
-  (
-    | { readonly kind: "value"; readonly value: FrozenJson }
-    | { readonly kind: "field"; readonly from: string }
-    | {
-        readonly kind: "map";
-        readonly values: Readonly<Record<string, FrozenJson>>;
-      }
-    | { readonly kind: "convert"; readonly to: ConversionTarget }
-  );
+export interface SchemaAnswer extends PlannedField {
+  readonly value: FrozenJson;
+}
 
 /**
  * A field whose records the store checks before the contract takes it
- * (see the header): every record must fit its new descriptor, rewritten
- * by `answer` where it doesn't. `answers` are the kinds of answer that
- * suit the change, besides an explicit migration: what the store offers
- * when records don't fit.
+ * (see the header): every record must fit its new descriptor, given the
+ * App's `answer` where it doesn't, or, for a field renamed, the value of
+ * the field it was renamed `from`. When records still don't fit, the
+ * store asks for a value or a migration.
  */
 export interface PlannedCheck extends PlannedField {
   readonly answer: SchemaAnswer | null;
-  readonly answers: readonly SchemaAnswerKind[];
+  readonly from: string | null;
 }
 
 /** A field renamed: `to` takes `from`'s value (see the header). */
@@ -421,34 +400,6 @@ const ruleFields = (rules: RowRules | undefined): Set<string> =>
     )
   );
 
-/** The scalar kinds a standard conversion goes between. */
-const convertible: ReadonlySet<ValueDescriptor["kind"]> = new Set([
-  "string",
-  "number",
-  "boolean",
-]);
-
-/**
- * The kinds of answer that suit a field going from `before` (undefined
- * for a field added) to `after`: a value or another field's always, a
- * map of values into an enum, and a standard conversion between text,
- * numbers and booleans when the kind changes.
- */
-const answersFor = (
-  before: ValueDescriptor | undefined,
-  after: ValueDescriptor
-): SchemaAnswerKind[] => [
-  "value",
-  "field",
-  ...(after.kind === "enum" && before !== undefined ? ["map" as const] : []),
-  ...(before !== undefined &&
-  before.kind !== after.kind &&
-  convertible.has(before.kind) &&
-  convertible.has(after.kind)
-    ? ["convert" as const]
-    : []),
-];
-
 /**
  * `kept`, the contract's table, with the target's version of it
  * (`declared`) merged in: every field it declares as it declares it (the
@@ -629,25 +580,18 @@ const checkOf = (
   { refused, checks }: FieldOutcomes
 ): void => {
   const { table, field } = change;
-  const from = context.renamedFrom.get(field);
-  const answer: SchemaAnswer | null =
-    from === undefined
-      ? (context.answers.get(field) ?? null)
-      : { table, field, kind: "field", from };
-  if (answer !== null && context.ruleFields.has(field)) {
+  const from = context.renamedFrom.get(field) ?? null;
+  const answer = from === null ? (context.answers.get(field) ?? null) : null;
+  const rewrites = answer !== null || from !== null;
+  if (rewrites && context.ruleFields.has(field)) {
     refused.push({ table, field, reason: "rule_field_rewritten" });
     return;
   }
-  if (answer !== null && holdsIndexed(change.after)) {
+  if (rewrites && holdsIndexed(change.after)) {
     refused.push({ table, field, reason: "field_changed" });
     return;
   }
-  checks.push({
-    table,
-    field,
-    answer,
-    answers: answersFor(change.before, change.after),
-  });
+  checks.push({ table, field, answer, from });
 };
 
 /** Classifies a field added to a table on both sides (see the header). */

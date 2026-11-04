@@ -633,7 +633,7 @@ export const compatibleVersionsMax = 100;
 
 export const migrationErrors = defineErrorFamily({
   "migration.required":
-    "This schema change can't be applied on its own. Each change it lists needs a migration; each question names records that don't fit a field it checks, and is answered for that field (a value, another field, a map of values, a conversion) or by a migration.",
+    "This schema change can't be applied on its own. Each change it lists needs a migration; each question names records that don't fit a field it checks, and is answered with a value for that field or by a migration.",
   "migration.preference_changed":
     "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
@@ -713,36 +713,14 @@ export interface MigrationFailure {
 }
 
 /**
- * An App's answer for the records of one field a narrowing doesn't fit
- * (the SDK's `SchemaAnswer`, schema-plan.ts): a value, another field's
- * value, a map of the values they hold, or a standard conversion.
+ * An App's value for the records of one field a narrowing doesn't fit
+ * (the SDK's `SchemaAnswer`, schema-plan.ts): a backfill's default.
  */
-export const schemaAnswerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    table: z.string().min(1).max(64),
-    field: z.string().min(1).max(64),
-    kind: z.literal("value"),
-    value: z.json(),
-  }),
-  z.strictObject({
-    table: z.string().min(1).max(64),
-    field: z.string().min(1).max(64),
-    kind: z.literal("field"),
-    from: z.string().min(1).max(64),
-  }),
-  z.strictObject({
-    table: z.string().min(1).max(64),
-    field: z.string().min(1).max(64),
-    kind: z.literal("map"),
-    values: z.record(z.string().max(1000), z.json()),
-  }),
-  z.strictObject({
-    table: z.string().min(1).max(64),
-    field: z.string().min(1).max(64),
-    kind: z.literal("convert"),
-    to: z.enum(["string", "number", "boolean"]),
-  }),
-]);
+export const schemaAnswerSchema = z.strictObject({
+  table: z.string().min(1).max(64),
+  field: z.string().min(1).max(64),
+  value: z.json(),
+});
 
 /** The most answers one schema is applied with. */
 export const schemaAnswersMax = 64;
@@ -750,30 +728,24 @@ export const schemaAnswersMax = 64;
 /**
  * Why a record doesn't fit a field a schema change checks: the field is
  * `missing` where it's required, holds a value that is `invalid` for it
- * with no answer to rewrite it, holds one the answer can't turn into a
- * value (`unanswered`), or one the answer turned into a value that still
- * doesn't fit (`unfit`); or the record would grow past what a record holds
+ * with no value given for it, or the value given doesn't fit it either
+ * (`unfit`); or the record would grow past what a record holds
  * (`too_large`). Never what the record holds.
  */
-export type SchemaCheckReason =
-  | "missing"
-  | "invalid"
-  | "unanswered"
-  | "unfit"
-  | "too_large";
+export type SchemaCheckReason = "missing" | "invalid" | "unfit" | "too_large";
 
 /**
  * A field a schema change checks that records don't fit, as the store
  * asks about it (`migration.required`, `details.questions`): how many
  * records don't, the first of them by ID with why, and what may answer
- * it: an answer of the App's for the field, or an explicit migration.
+ * it: a value the App gives the field for them, or an explicit migration.
  */
 export interface SchemaQuestion {
   table: string;
   field: string;
   rows: number;
   records: { id: string; reason: SchemaCheckReason }[];
-  answers: ("value" | "field" | "map" | "convert" | "migration")[];
+  answers: ("value" | "migration")[];
 }
 
 /** The most records a question lists. */

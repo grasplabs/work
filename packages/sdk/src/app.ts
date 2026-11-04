@@ -184,10 +184,10 @@ export interface AppDefinition<
   readonly migrations?: readonly Migration[];
   /**
    * Its answers for the records a change of its schema doesn't fit
-   * (schema-plan.ts, `SchemaAnswer`): for one field each, a value, another
-   * field's value, a map of the values they hold, or a standard
-   * conversion. The store checks every record as the version is made
-   * current, and rewrites only those that don't fit.
+   * (schema-plan.ts, `SchemaAnswer`): for one field each, a value they
+   * take, as a backfill's default. The store checks every record as the
+   * version is made current, and rewrites only those that don't fit.
+   * Anything that reshapes records is a migration (`migrations`).
    */
   readonly answers?: readonly SchemaAnswer[];
 }
