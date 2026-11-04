@@ -15,7 +15,10 @@ import {
   interviewProgressSchema,
   participationNotice,
 } from "@grasp-os/shared/interview-links";
-import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import type {
+  ApprovedFact,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
 import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import type {
   EarlyLine,
@@ -224,6 +227,7 @@ const interviewCall = async (body: unknown): Promise<unknown> => {
 };
 
 const savedSchema = z.object({ saved: z.boolean(), version: z.int() });
+const approvedSchema = z.object({ approved: z.boolean() });
 
 /** What a link opens, read as far as the lab needs it. */
 const sessionSchema = z.discriminatedUnion("state", [
@@ -245,6 +249,8 @@ export interface Link {
   open: (key?: string) => Promise<LinkSession>;
   /** Agrees to take part, as their page asks before anything they say is recorded (GRA-329). */
   participate: (key: string) => Promise<void>;
+  /** Approves the facts read back, each at the revision they saw: only then do they count (GRA-329). */
+  approve: (key: string, facts: readonly ApprovedFact[]) => Promise<void>;
   /** Keeps where the interview is; the version it was kept as. */
   save: (
     key: string,
@@ -343,6 +349,17 @@ export const linkOn = (link: string): Link => {
         key,
         notice: participationNotice.version,
       });
+    },
+    approve: async (key, facts) => {
+      const { approved } = approvedSchema.parse(
+        await interviewCall({ action: "approve", secret, key, facts })
+      );
+      if (!approved) {
+        throw new CoreCallError(
+          "The facts read back changed before they were approved.",
+          409
+        );
+      }
     },
     save: async (key, version, progress) => {
       const saved = savedSchema.parse(
