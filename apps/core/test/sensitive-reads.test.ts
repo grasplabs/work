@@ -240,10 +240,7 @@ const call = async (
     app,
     JSON.stringify({
       reference: {
-        resourceId: current.manifest.resourceId,
-        resourceVersion: current.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: current.fingerprints[path] ?? "",
+        name: path,
         kind: current.app.operations[path]?.kind ?? "query",
       },
       input,
