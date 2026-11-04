@@ -1,7 +1,7 @@
 /**
  * Type-checks a workflow's JavaScript expressions (`@grasp-os/sdk/expression-check`)
- * against the types of what they read, with the compiler's own TypeScript
- * check (`expressionProgram`): a reference to a field, step or method that isn't
+ * against the types of what they read, with the platform's type check
+ * (tsrs, type-check.ts): a reference to a field, step or method that isn't
  * there is an error at its line and column in the expression, as an
  * author wrote it.
  */
@@ -9,92 +9,37 @@ import {
   allowedMethods,
   checkExpression,
   checkRoots,
+  readAt,
   sourcePosition,
+  typeReadNames,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError, TypeForm } from "@grasp-os/sdk/expression-check";
-import ts from "typescript";
 
-import type { Diagnostic } from "./diagnostic.ts";
-import { serverTarget } from "./type-check.ts";
+import { serverTarget, typeCheck, typeCheckRequest } from "./type-check.ts";
 
 /** Where the expressions are checked, as one module of their own. */
 const modulePath = "expressions.ts";
 
-/** Where TypeScript's own declarations are among `kitTypes`. */
-export const libLocation = "/node_modules/typescript/lib";
+/** The expressions' module reads nothing of the kit, nor any module. */
+const noKit = { files: {}, resolved: {} };
 
 /**
- * The expressions' module as TypeScript 6 checks it, with App server
- * code's options (a worker's lib, no DOM) and no module to import. A
- * program of its own, not the App check's (tsrs, type-check.ts), which
- * answers diagnostics alone: a method read without a call is found by
- * its type (`methodReads`), which only a checker it can ask answers.
+ * The member read wrappers the type form calls (`typeReadNames`), as the
+ * module declares them: each answers what it reads, and refuses a value
+ * that is, or may be, a function. A method read without a call has no
+ * value (`$read` gives no function); a field of data named like a method
+ * (`at`, `map`) has a data type and is read. On a value typed `any`
+ * nothing is known: a read of a name an expression may call (`method`)
+ * is taken for a method, any other (`value`) for data.
  */
-const expressionProgram = (
-  code: string,
-  kitTypes: Readonly<Record<string, string>>
-): ts.Program => {
-  const { paths: _paths, ...json } = serverTarget({}, new Set()).options;
-  const { options } = ts.convertCompilerOptionsFromJson(json, "/");
-  const file = `/${modulePath}`;
-  const readFile = (path: string): string | undefined => {
-    if (path === file) {
-      return code;
-    }
-    return Object.hasOwn(kitTypes, path) ? kitTypes[path] : undefined;
-  };
-  const host: ts.CompilerHost = {
-    getSourceFile: (path, languageVersion) => {
-      const text = readFile(path);
-      return text === undefined
-        ? undefined
-        : ts.createSourceFile(path, text, languageVersion);
-    },
-    getDefaultLibFileName: (libOptions) =>
-      `${libLocation}/${ts.getDefaultLibFileName(libOptions)}`,
-    getDefaultLibLocation: () => libLocation,
-    writeFile: () => {
-      // Nothing is emitted.
-    },
-    getCurrentDirectory: () => "/",
-    getCanonicalFileName: (path) => path,
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => "\n",
-    fileExists: (path) => readFile(path) !== undefined,
-    readFile,
-  };
-  return ts.createProgram([file], options, host);
-};
+const readHelpers = `type $Function = (...args: never[]) => unknown;
+type $NoMethod<T> = [Extract<T, $Function>] extends [never] ? unknown : { readonly "expression.method": never };
+declare function ${typeReadNames.value}<T>(value: T & $NoMethod<T>): T;
+declare function ${typeReadNames.method}<T>(value: T & (0 extends 1 & T ? never : $NoMethod<T>)): T;
+`;
 
-/** The program's errors and the module's, as diagnostics. */
-const diagnosticsOf = (program: ts.Program): Diagnostic[] => {
-  const file = program.getSourceFile(`/${modulePath}`);
-  return [
-    ...program.getOptionsDiagnostics(),
-    ...program.getGlobalDiagnostics(),
-    ...(file === undefined
-      ? []
-      : [
-          ...program.getSyntacticDiagnostics(file),
-          ...program.getSemanticDiagnostics(file),
-        ]),
-  ]
-    .filter(({ category }) => category === ts.DiagnosticCategory.Error)
-    .map((diagnostic) => {
-      const at =
-        diagnostic.file === undefined || diagnostic.start === undefined
-          ? undefined
-          : diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-      return {
-        rule: `TS${diagnostic.code}`,
-        severity: "error",
-        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-        ...(at === undefined
-          ? {}
-          : { line: at.line + 1, column: at.character + 1 }),
-      };
-    });
-};
+/** TypeScript's refusal of an argument: a wrapper's, where it refuses a method read. */
+const refusedArgument = "TS2345";
 
 /**
  * The types of an expression's values, as TypeScript type text the
@@ -166,69 +111,6 @@ const fromSubset = ({
 });
 
 /**
- * Whether reading `node` without a call reads a method: its type, or
- * any member of its union, has call signatures. On an object typed
- * `any` nothing is known, so a read of an allowed method's name is
- * taken for one.
- */
-const readsMethod = (
-  checker: ts.TypeChecker,
-  node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
-  name: string
-): boolean => {
-  if (
-    allowedMethods.has(name) &&
-    checker.getTypeAtLocation(node.expression).flags === ts.TypeFlags.Any
-  ) {
-    return true;
-  }
-  const type = checker.getTypeAtLocation(node).getNonNullableType();
-  return (type.isUnion() ? type.types : [type]).some(
-    (member) => member.getCallSignatures().length > 0
-  );
-};
-
-/**
- * Where the module reads a method without calling it, by its 1-based
- * line and column: a member read that isn't a call's callee and whose
- * type is a function (`readsMethod`). Its value would be `undefined`
- * (`$read` gives no function), while a field of data named like a
- * method (`at`, `map`) has a data type and is read.
- */
-const methodReads = (
-  program: ts.Program
-): { line: number; column: number; name: string }[] => {
-  const file = program.getSourceFile(`/${modulePath}`);
-  if (file === undefined) {
-    return [];
-  }
-  const checker = program.getTypeChecker();
-  const found: { line: number; column: number; name: string }[] = [];
-  const visit = (node: ts.Node): void => {
-    if (
-      (ts.isPropertyAccessExpression(node) ||
-        ts.isElementAccessExpression(node)) &&
-      !(ts.isCallExpression(node.parent) && node.parent.expression === node)
-    ) {
-      const named = ts.isPropertyAccessExpression(node)
-        ? node.name
-        : node.argumentExpression;
-      const name =
-        ts.isStringLiteralLike(named) || ts.isIdentifier(named)
-          ? named.text
-          : named.getText(file);
-      if (readsMethod(checker, node, name)) {
-        const at = file.getLineAndCharacterOfPosition(named.getStart(file));
-        found.push({ line: at.line + 1, column: at.character + 1, name });
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return found;
-};
-
-/**
  * The refusal of a method read without a call: only an allowed method
  * is worth calling, and any other gets the SDK's own refusal of a
  * method an expression doesn't call.
@@ -252,15 +134,14 @@ const methodReadError = (
  * Checks each expression against the subset first, then the ones that
  * pass against `scope`'s types, each as the body of a function of
  * `input`, `steps`, `params`, `run` and `scope.roots`, as the generated
- * code runs it. `kitTypes` holds TypeScript's own declarations
- * (`libLocation`), as the kit does. Throws when a root of
+ * code runs it, with tsrs's `module`. Throws when a root of
  * `scope.roots` repeats one of the four or isn't one `checkExpression`
  * takes.
  */
 export const checkExpressionTypes = (
+  module: WebAssembly.Module,
   scope: ExpressionScopeTypes,
-  expressions: Readonly<Record<string, TypedExpression>>,
-  kitTypes: Record<string, string>
+  expressions: Readonly<Record<string, TypedExpression>>
 ): ExpressionTypeCheck => {
   const extra = Object.entries(scope.roots ?? {});
   const roots = extra.map(([name]) => name);
@@ -278,6 +159,7 @@ export const checkExpressionTypes = (
     )
     .join("\n");
   let code = [
+    readHelpers,
     `type Input = ${typeCode(scope.input)};`,
     `type Steps = {\n${steps}\n};`,
     `type Params = ${typeCode(scope.params)};`,
@@ -328,12 +210,21 @@ export const checkExpressionTypes = (
   if (placed.length === 0) {
     return { expressions: errors, scope: scopeErrors };
   }
-  const checking = expressionProgram(code, kitTypes);
-  for (const diagnostic of diagnosticsOf(checking)) {
+  const diagnostics = typeCheck(
+    module,
+    noKit,
+    typeCheckRequest(
+      { [modulePath]: code },
+      // A worker's lib, no DOM, and no module to import.
+      serverTarget({}, new Set())
+    )
+  );
+  for (const diagnostic of diagnostics) {
     if (diagnostic.severity !== "error") {
       continue;
     }
     const line = diagnostic.line ?? 0;
+    const column = diagnostic.column ?? 1;
     // On the opening parenthesis's line (a result of the wrong type): the
     // expression's start.
     const at = placed.find(
@@ -346,32 +237,30 @@ export const checkExpressionTypes = (
       column: 1,
     };
     if (at === undefined) {
-      scopeErrors.push({ ...error, line, column: diagnostic.column ?? 1 });
-    } else if (line < at.first) {
-      errors[at.name]?.push(error);
-    } else {
-      errors[at.name]?.push({
-        ...error,
-        ...sourcePosition(
-          at.form,
-          at.source,
-          line - at.first + 1,
-          diagnostic.column ?? 1
-        ),
-      });
-    }
-  }
-  for (const { line, column, name: method } of methodReads(checking)) {
-    const at = placed.find(
-      (expression) => line >= expression.first && line <= expression.last
-    );
-    if (at === undefined) {
+      scopeErrors.push({ ...error, line, column });
       continue;
     }
-    errors[at.name]?.push({
-      ...methodReadError(method),
-      ...sourcePosition(at.form, at.source, line - at.first + 1, column),
-    });
+    if (line < at.first) {
+      errors[at.name]?.push(error);
+      continue;
+    }
+    const formLine = line - at.first + 1;
+    const read =
+      diagnostic.rule === refusedArgument
+        ? readAt(at.form, at.source, formLine, column)
+        : undefined;
+    errors[at.name]?.push(
+      read === undefined
+        ? {
+            ...error,
+            ...sourcePosition(at.form, at.source, formLine, column),
+          }
+        : {
+            ...methodReadError(read.name),
+            line: read.line,
+            column: read.column,
+          }
+    );
   }
   return { expressions: errors, scope: scopeErrors };
 };

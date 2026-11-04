@@ -10,10 +10,19 @@ import {
 import type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
-export { runtimeNames, sourcePosition } from "./expression-lowering.ts";
-export type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
-// The methods an expression can call, for the type check's own refusal
-// of a method read without a call (`checkExpressionTypes`).
+export {
+  readAt,
+  runtimeNames,
+  sourcePosition,
+  typeReadNames,
+} from "./expression-lowering.ts";
+export type {
+  ExpressionRead,
+  TypeForm,
+  TypeRead,
+} from "./expression-lowering.ts";
+// The methods an expression can call, for the type check's refusal of a
+// method read without a call (`checkExpressionTypes`).
 export { allowedMethods } from "./expression-runtime.ts";
 
 /**

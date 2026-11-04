@@ -1,38 +1,31 @@
 /* oxlint-disable no-template-curly-in-string -- expressions are JavaScript source, template literals among them */
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import path from "node:path";
 
+import Babel from "@babel/standalone";
 import {
   allowedMethods,
   checkExpression,
 } from "@grasp-os/sdk/expression-check";
-import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 
-import { checkExpressionTypes, libLocation } from "./expression-types.ts";
+import { checkExpressionTypes } from "./expression-types.ts";
 import type {
   ExpressionScopeTypes,
   TypedExpression,
 } from "./expression-types.ts";
 
-// TypeScript's own declarations, where the kit has them: the check is
-// pure (in memory), so tested on its own, with nothing of the kit but
-// these.
-const libDirectory = path.join(
-  path.dirname(
-    createRequire(import.meta.url).resolve("typescript/package.json")
-  ),
-  "lib"
-);
-const kitTypes = Object.fromEntries(
-  readdirSync(libDirectory)
-    .filter((name) => name.startsWith("lib.") && name.endsWith(".d.ts"))
-    .map((name) => [
-      `${libLocation}/${name}`,
-      readFileSync(path.join(libDirectory, name), "utf-8"),
-    ])
-);
+// The check is pure (in memory, tsrs's WebAssembly), so tested on its own,
+// with nothing of the kit: tsrs carries TypeScript's own declarations.
+// Made as Node makes a module; the Workers types this package is checked
+// with type the class as one only the runtime makes.
+const made: unknown = Reflect.construct(WebAssembly.Module, [
+  readFileSync(createRequire(import.meta.url).resolve("@tsrs/wasm/tsrs.wasm")),
+]);
+if (!(made instanceof WebAssembly.Module)) {
+  throw new TypeError("tsrs's WebAssembly didn't compile");
+}
+const tsrs = made;
 
 const scope: ExpressionScopeTypes = {
   input: "{ lines: { amount: number; tags: string[] }[]; customer: string }",
@@ -44,32 +37,48 @@ const scope: ExpressionScopeTypes = {
   run: "{ id: string }",
 };
 
-/** How many type arguments TypeScript reads in an expression's code and type form. */
+/**
+ * How many type arguments a TypeScript parser (Babel's) reads in an
+ * expression's code and type form.
+ */
 const withTypeArguments = (source: string): number => {
   const checked = checkExpression(source);
   if (!checked.ok) {
     throw new Error(`${source} is refused`);
   }
   let found = 0;
-  const visit = (node: ts.Node): void => {
-    if (
-      (ts.isCallExpression(node) || ts.isExpressionWithTypeArguments(node)) &&
-      node.typeArguments !== undefined
-    ) {
-      found += 1;
-    }
-    ts.forEachChild(node, visit);
-  };
+  const count = () => ({
+    visitor: {
+      "CallExpression|OptionalCallExpression|NewExpression": ({
+        node,
+      }: {
+        node: { typeParameters?: unknown; typeArguments?: unknown };
+      }) => {
+        if (
+          node.typeParameters !== undefined ||
+          node.typeArguments !== undefined
+        ) {
+          found += 1;
+        }
+      },
+    },
+  });
   for (const code of [checked.code, checked.forTypes.code]) {
-    visit(
-      ts.createSourceFile("e.ts", `const e = ${code};`, ts.ScriptTarget.ES2022)
-    );
+    Babel.transform(`const e = ${code};`, {
+      filename: "e.ts",
+      babelrc: false,
+      configFile: false,
+      sourceType: "module",
+      code: false,
+      parserOpts: { plugins: ["typescript"] },
+      plugins: [count],
+    });
   }
   return found;
 };
 
 const check = (expressions: Record<string, TypedExpression>) =>
-  checkExpressionTypes(scope, expressions, kitTypes);
+  checkExpressionTypes(tsrs, scope, expressions);
 
 describe("type-checking a workflow's expressions", () => {
   it("passes what reads the values that are there", () => {
@@ -123,9 +132,9 @@ describe("type-checking a workflow's expressions", () => {
 
   it("reads what JavaScript reads: comparisons, never a generic call", () => {
     const { expressions } = checkExpressionTypes(
+      tsrs,
       { ...scope, input: "{ a: number; b: number; c: number; d: number }" },
-      { pair: { source: "[input.a < input.b, input.c > (input.d)]" } },
-      kitTypes
+      { pair: { source: "[input.a < input.b, input.c > (input.d)]" } }
     );
     expect(expressions.pair).toStrictEqual([]);
   });
@@ -179,6 +188,7 @@ describe("type-checking a workflow's expressions", () => {
 
   it("reads a data field named like a method, but no method without a call", () => {
     const { expressions } = checkExpressionTypes(
+      tsrs,
       {
         ...scope,
         input: "{ at: string; map: { join: number }; list: string[] }",
@@ -189,8 +199,7 @@ describe("type-checking a workflow's expressions", () => {
         method: { source: "input.list.map" },
         optional: { source: "[input.list?.join, input.at['trim']]" },
         inCallback: { source: "input.list.map((item) => item.trim)" },
-      },
-      kitTypes
+      }
     );
     expect(
       Object.fromEntries(
@@ -213,6 +222,7 @@ describe("type-checking a workflow's expressions", () => {
 
   it("refuses a read that may be a method, by a union or on `any`", () => {
     const { expressions } = checkExpressionTypes(
+      tsrs,
       {
         ...scope,
         input: "{ un: string[] | { map: number }; loose: any; list: string[] }",
@@ -222,8 +232,7 @@ describe("type-checking a workflow's expressions", () => {
         loose: { source: "input.loose.map" },
         looseField: { source: "input.loose.total" },
         notAllowed: { source: "input.list.push" },
-      },
-      kitTypes
+      }
     );
     expect(
       Object.fromEntries(
@@ -296,12 +305,12 @@ describe("type-checking a workflow's expressions", () => {
 
   it("reads a further root, such as a loop's item, by the type it is given", () => {
     const { expressions } = checkExpressionTypes(
+      tsrs,
       { ...scope, roots: { item: "{ amount: number }" } },
       {
         fine: { source: "item.amount > params.limit", result: "boolean" },
         wrong: { source: "item.amout" },
-      },
-      kitTypes
+      }
     );
     expect({
       fine: expressions.fine,
@@ -317,9 +326,9 @@ describe("type-checking a workflow's expressions", () => {
     ].filter((name) => {
       try {
         checkExpressionTypes(
+          tsrs,
           { ...scope, roots: { [name]: "unknown" } },
-          {},
-          kitTypes
+          {}
         );
         return true;
       } catch {

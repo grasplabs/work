@@ -2,6 +2,8 @@ import { generate } from "@babel/generator";
 import * as t from "@babel/types";
 import type { Comment, Node } from "@babel/types";
 
+import { allowedMethods } from "./expression-runtime.ts";
+
 /** A property's name as JavaScript reads it, when written as a literal. */
 export const literalKey = (node: Node): string | undefined => {
   if (node.type === "Identifier") {
@@ -391,18 +393,46 @@ export const lowerExpression = (
 };
 
 /**
+ * The names a type form wraps its member reads in (`TypeForm.reads`):
+ * `value` for any read, `method` for a read of a name an expression may
+ * call (`allowedMethods`), which on a value typed `any` may be a method.
+ * A type check declares them so that a read of a method, which has no
+ * value (`$read` gives no function), is a type error. Like the guards'
+ * (`runtimeNames`), no root or callback parameter can take them.
+ */
+export const typeReadNames = {
+  value: "$value",
+  method: "$method",
+} as const;
+
+/**
+ * A member read the type form wraps (`typeReadNames`): where its argument
+ * starts in the form's code, the name it reads, and where that name is in
+ * the source, so a type error of the wrapper leads back to it.
+ */
+export interface TypeRead {
+  readonly at: number;
+  readonly name: string;
+  readonly property: number;
+}
+
+/**
  * An expression as TypeScript type-checks it: its source with every
- * comparison in parentheses (`isComparison`), as its code has them, and
- * every comment blanked, so TypeScript reads what JavaScript does
- * (`[a < b, c > (d)]` as two comparisons, never a generic call) and no
- * `// @ts-ignore` reaches it. The source plus parentheses, not printed,
- * so a position in `code` leads back to the source exactly
- * (`sourcePosition`). It has no guards, so its types are the data's.
+ * comparison in parentheses (`isComparison`), as its code has them, every
+ * member read that isn't a call's callee wrapped in a helper
+ * (`typeReadNames`, `reads`), and every comment blanked, so TypeScript
+ * reads what JavaScript does (`[a < b, c > (d)]` as two comparisons, never
+ * a generic call) and no `// @ts-ignore` reaches it. The source plus what
+ * is inserted, not printed, so a position in `code` leads back to the
+ * source exactly (`sourcePosition`). It has no guards, so its types are
+ * the data's.
  */
 export interface TypeForm {
   readonly code: string;
-  /** Where in `code` the added parentheses are, in order. */
+  /** Where in `code` each inserted character is, in order. */
   readonly added: readonly number[];
+  /** The member reads it wraps. */
+  readonly reads: readonly TypeRead[];
 }
 
 /** JavaScript's line terminators, as Babel and TypeScript count lines. */
@@ -411,10 +441,76 @@ const lineBreak = /\r\n?|[\n\u2028\u2029]/u;
 /**
  * Each UTF-16 unit that isn't a line terminator, to blank a comment and
  * keep its lines and length: without `u`, an emoji's two units are two
- * spaces, as the parentheses' offsets count it.
+ * spaces, as the insertions' offsets count it.
  */
 // oxlint-disable-next-line eslint/require-unicode-regexp -- see above
 const notLineBreak = /[^\r\n\u2028\u2029]/g;
+
+const startOf = (node: Node): number => {
+  if (node.start === null || node.start === undefined) {
+    throw new Error("A parsed node has its position.");
+  }
+  return node.start;
+};
+
+const endOf = (node: Node): number => {
+  if (node.end === null || node.end === undefined) {
+    throw new Error("A parsed node has its position.");
+  }
+  return node.end;
+};
+
+const isMember = (
+  node: Node
+): node is t.MemberExpression | t.OptionalMemberExpression =>
+  node.type === "MemberExpression" || node.type === "OptionalMemberExpression";
+
+/**
+ * Whether the member read `node`, under `parent` at its `key`, is wrapped:
+ * not a call's callee (what is called is read by the call), and not a
+ * link inside an optional chain (`a?.b` in `a?.b.c`), which a wrapper
+ * would cut off from the chain's short circuit.
+ */
+const isWrapped = (
+  node: t.MemberExpression | t.OptionalMemberExpression,
+  parent: Node | undefined,
+  key: string | undefined
+): boolean => {
+  const calls =
+    parent?.type === "CallExpression" ||
+    parent?.type === "OptionalCallExpression";
+  if (calls && key === "callee") {
+    return false;
+  }
+  return !(
+    node.type === "OptionalMemberExpression" &&
+    parent?.type === "OptionalMemberExpression" &&
+    key === "object"
+  );
+};
+
+/** What `typeForm` inserts at one offset of the source. */
+interface Insertion {
+  readonly at: number;
+  readonly text: string;
+  /** The span it opens or closes: inner spans close first and open last. */
+  readonly start: number;
+  readonly end: number;
+  readonly read?: Omit<TypeRead, "at">;
+}
+
+/** Closings before openings; an outer opening first, an inner closing first. */
+const insertionOrder = (a: Insertion, b: Insertion): number => {
+  if (a.at !== b.at) {
+    return a.at - b.at;
+  }
+  const aOpens = a.text !== ")";
+  const bOpens = b.text !== ")";
+  if (aOpens !== bOpens) {
+    return aOpens ? 1 : -1;
+  }
+  return aOpens ? b.end - a.end : b.start - a.start;
+};
 
 /** The checked tree's source as `TypeForm` holds it. */
 export const typeForm = (
@@ -422,25 +518,35 @@ export const typeForm = (
   source: string,
   comments: readonly Comment[]
 ): TypeForm => {
-  // Parentheses to add, by source offset: closing before opening where
-  // one comparison ends as the next begins.
-  const insertions: { at: number; text: ")" | "(" }[] = [];
-  const wrap = (node: Node): void => {
-    if (node.start === null || node.start === undefined) {
-      throw new Error("A parsed node has its position.");
-    }
-    if (node.end === null || node.end === undefined) {
-      throw new Error("A parsed node has its position.");
-    }
-    insertions.push({ at: node.start, text: "(" }, { at: node.end, text: ")" });
-  };
-  t.traverseFast(checked, (node) => {
+  const insertions: Insertion[] = [];
+  t.traverse(checked, (node, ancestors) => {
+    const start = startOf(node);
+    const end = endOf(node);
     if (isComparison(node)) {
-      wrap(node);
+      insertions.push(
+        { at: start, text: "(", start, end },
+        { at: end, text: ")", start, end }
+      );
+    }
+    const above = ancestors.at(-1);
+    if (isMember(node) && isWrapped(node, above?.node, above?.key)) {
+      const name = node.computed
+        ? (literalKey(node.property) ??
+          source.slice(startOf(node.property), endOf(node.property)))
+        : (literalKey(node.property) ?? "");
+      insertions.push(
+        {
+          at: start,
+          text: `${allowedMethods.has(name) ? typeReadNames.method : typeReadNames.value}(`,
+          start,
+          end,
+          read: { name, property: startOf(node.property) },
+        },
+        { at: end, text: ")", start, end }
+      );
     }
   });
-  const order = { ")": 0, "(": 1 };
-  insertions.sort((a, b) => a.at - b.at || order[a.text] - order[b.text]);
+  insertions.sort(insertionOrder);
   let blanked = source;
   for (const { start, end } of comments) {
     blanked = `${blanked.slice(0, start)}${blanked.slice(start, end).replaceAll(notLineBreak, " ")}${blanked.slice(end)}`;
@@ -448,14 +554,20 @@ export const typeForm = (
   let code = "";
   let from = 0;
   const added: number[] = [];
-  for (const { at, text } of insertions) {
+  const reads: TypeRead[] = [];
+  for (const { at, text, read } of insertions) {
     code += blanked.slice(from, at);
-    added.push(code.length);
+    for (let unit = 0; unit < text.length; unit += 1) {
+      added.push(code.length + unit);
+    }
     code += text;
+    if (read !== undefined) {
+      reads.push({ ...read, at: code.length });
+    }
     from = at;
   }
   code += blanked.slice(from);
-  return { code, added };
+  return { code, added, reads };
 };
 
 /** A 1-based line and column in `text` as an offset. */
@@ -497,4 +609,23 @@ export const sourcePosition = (
   const offset = offsetOf(form.code, line, column);
   const shift = form.added.filter((at) => at < offset).length;
   return positionOf(source, Math.min(offset - shift, source.length));
+};
+
+/**
+ * The member read whose wrapper's argument starts at a position in a
+ * `TypeForm`'s code (1-based line and column), if one does: what a type
+ * error there refuses (`typeReadNames`), with where its name is in the
+ * expression's source.
+ */
+export const readAt = (
+  form: TypeForm,
+  source: string,
+  line: number,
+  column: number
+): { name: string; line: number; column: number } | undefined => {
+  const offset = offsetOf(form.code, line, column);
+  const read = form.reads.find(({ at }) => at === offset);
+  return read === undefined
+    ? undefined
+    : { name: read.name, ...positionOf(source, read.property) };
 };
