@@ -147,9 +147,8 @@ export interface RunStep {
  */
 export interface StepAttempt {
   /**
-   * Its lease ID, drawn here and never sent to the isolate: the statistics
-   * points the App calls of the attempt's code record are kept by it, and
-   * added up only if this attempt completes the step.
+   * Its lease ID, drawn here and never sent to the isolate: what tells this
+   * attempt from another of the same step.
    */
   leaseId: string;
   /** Its number, from 1, as the engine counts the step's attempts. */
@@ -2375,7 +2374,6 @@ export class RunHost extends RpcTarget {
       unknown: false,
       heldKeys: [],
       functionCalls: 0,
-      recorded: false,
       last,
     };
   }

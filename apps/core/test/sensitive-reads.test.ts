@@ -207,7 +207,6 @@ export default app({
   operations: { pay: { bundle, bundles, byPerson, find, highest, leak, lookup, note, notes, pay, probe, salaries, stuff } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/pay.tsx": `export default function Pay() {

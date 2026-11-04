@@ -83,7 +83,8 @@ import { outcome, unique } from "./sign-in.ts";
 
 // Starting independent workflows from an App's server functions
 // (operations.ts, workflow-start-intents.ts): an action's
-// `ctx.startWorkflow` and a mutation's `ctx.afterCommit.start`, from
+// `ctx.workflows.<alias>.start` and a mutation's
+// `ctx.afterCommit.workflows.<alias>.start`, from
 // their threat model. App code runs as the SDK's runner runs it, against
 // a real business store, its real outbox and the real start path; a
 // "rogue" runner stands for App code talking to its channel directly.
