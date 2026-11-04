@@ -105,7 +105,9 @@ export interface ManifestTable {
   readonly access: ManifestAccess;
   /**
    * Declared sensitive (`TableDefinition.sensitive`): its change history
-   * keeps field names only. Left out otherwise, so a table that never
+   * keeps field names only, and every read of it is recorded in the audit
+   * log (who read, through which function, how many reads and records,
+   * never the values). Left out otherwise, so a table that never
    * declares it hashes as it always did.
    */
   readonly sensitive?: true;

@@ -334,10 +334,11 @@ export interface Invocation {
    * Keeps the record of what the call read of the store's sensitive
    * tables (`SensitiveRead`), once for the whole call, nested functions
    * included, after it answered or failed and before its caller hears
-   * either. Never throws. None where nothing is kept: a store only a
-   * test or a draft's preview reaches holds no one's data.
+   * either. Never throws. Required, so every way of calling a function
+   * decides: `null` only where nothing is kept, a store only a test or a
+   * draft's preview reaches, which holds no one's data.
    */
-  readonly sensitiveReads?: (reads: readonly SensitiveRead[]) => Promise<void>;
+  readonly sensitiveReads: SensitiveReadsSink | null;
   /**
    * Told what the function the caller named threw that its caller hears
    * only as `internal.unexpected`, at most once a call: its name and
@@ -362,7 +363,8 @@ export interface Invocation {
  * What one function of a call read of one sensitive table
  * (`defineTable(...).sensitive()`, as the store holds it): how many reads
  * reached the table, and how many of its records they answered, related
- * records included. A read that answered none still counts: a filter on
+ * records and those a count, aggregate or group was computed over
+ * included. A read that answered none still counts: a filter on
  * the table's fields that matched nothing tells something of them too.
  */
 export interface SensitiveRead {
@@ -372,6 +374,11 @@ export interface SensitiveRead {
   readonly reads: number;
   readonly rows: number;
 }
+
+/** Keeps a call's sensitive reads (`Invocation.sensitiveReads`). */
+export type SensitiveReadsSink = (
+  reads: readonly SensitiveRead[]
+) => Promise<void>;
 
 /**
  * A call's sensitive reads so far, by function and table: kept by the

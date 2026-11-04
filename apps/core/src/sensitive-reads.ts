@@ -2,7 +2,7 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import type { Invocation, SensitiveRead } from "./operations.ts";
+import type { SensitiveRead, SensitiveReadsSink } from "./operations.ts";
 
 // Reads of a table its schema declares sensitive (`defineTable(...)
 // .sensitive()`, sticky in the store's `sdk_tables.sensitive`), recorded
@@ -110,10 +110,7 @@ export const keepSensitiveReads = async (
  * table, through the audit outbox, and never failing the call.
  */
 export const keptSensitiveReads =
-  (
-    env: Env,
-    context: SensitiveReadContext
-  ): NonNullable<Invocation["sensitiveReads"]> =>
+  (env: Env, context: SensitiveReadContext): SensitiveReadsSink =>
   async (reads) => {
     await keepSensitiveReads(
       env,

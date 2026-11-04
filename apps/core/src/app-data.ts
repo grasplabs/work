@@ -29,7 +29,7 @@ import { mintRecordId } from "@grasp-os/shared/record-ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { queryMaxResults } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
-import type { QueryRequest } from "@grasp-os/shared/store-reads";
+import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import { dataErrors, storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { CsvError, parse } from "csv-parse/sync";
@@ -48,6 +48,8 @@ import type { SensitiveReadContext } from "./sensitive-reads.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
+import type { QueryAnswer } from "./store-queries.ts";
+import { StoreReader } from "./store-reader.ts";
 
 // An App's data, from its page (`apps.data`): its builders and the
 // organization's admins browse its tables, read each record's change
@@ -312,31 +314,45 @@ const keepPageReads = async (
   );
 };
 
-/** One read's `ReadResult.sensitive`, as `keepPageReads` takes it. */
-const reachedBy = (
-  sensitive: Readonly<Record<string, number>>
-): Map<string, { reads: number; rows: number }> =>
-  new Map(
-    Object.entries(sensitive).map(([table, rows]) => [
-      table,
-      { reads: 1, rows },
-    ])
-  );
+/** What reads reached of sensitive tables, by table, for `keepPageReads`. */
+type Reached = Map<string, { reads: number; rows: number }>;
 
 /**
- * One page of `table` as `open` reads it, and what it answered of
- * sensitive tables (`ReadResult.sensitive`).
+ * One read of `open`'s store for the page, through a `StoreReader` as App
+ * code's reads go: what it answered of sensitive tables counted into
+ * `reached`, a read that failed after it looked at records included.
+ */
+const readCounted = async (
+  open: Opened,
+  request: ReadRequest,
+  reached: Reached
+): Promise<QueryAnswer> =>
+  await new StoreReader(open.store, open.scope).read(request, (sensitive) => {
+    for (const [table, rows] of Object.entries(sensitive)) {
+      const sofar = reached.get(table);
+      reached.set(table, {
+        reads: (sofar?.reads ?? 0) + 1,
+        rows: (sofar?.rows ?? 0) + rows,
+      });
+    }
+  });
+
+/**
+ * One page of `table` as `open` reads it, what it answered of sensitive
+ * tables counted into `reached`.
  */
 const readPage = async (
   open: Opened,
   table: string,
   size: number,
-  cursor: string | null
-): Promise<AppDataPage & { sensitive: Record<string, number> }> => {
-  const { value, sensitive } = await open.store.read(open.scope, {
-    kind: "query",
-    query: pageQuery(table, size, cursor),
-  });
+  cursor: string | null,
+  reached: Reached
+): Promise<AppDataPage> => {
+  const value = await readCounted(
+    open,
+    { kind: "query", query: pageQuery(table, size, cursor) },
+    reached
+  );
   const page =
     typeof value === "object" && value !== null && !Array.isArray(value)
       ? value
@@ -349,7 +365,6 @@ const readPage = async (
   return {
     records: items.map(recordOf),
     cursor: typeof next === "string" ? next : null,
-    sensitive,
   };
 };
 
@@ -825,9 +840,7 @@ const exportStream = (
   open: Opened,
   table: string,
   recheck: () => Promise<Opened>,
-  keep: (
-    reached: ReadonlyMap<string, { reads: number; rows: number }>
-  ) => Promise<void>
+  keep: (reached: Reached) => Promise<void>
 ): ReadableStream<Uint8Array> => {
   const declared = tableOf(open, table);
   const fields = Object.keys(declared.fields);
@@ -837,7 +850,7 @@ const exportStream = (
   // What its pages read of a sensitive table, kept once as it ends: read
   // through, failed or let go of by the client. (`app.data.exported`,
   // kept before anything was read, names the export whatever comes of it.)
-  const reached = new Map<string, { reads: number; rows: number }>();
+  const reached: Reached = new Map();
   let kept = false;
   const end = async (): Promise<void> => {
     if (!kept) {
@@ -867,14 +880,13 @@ const exportStream = (
             );
             return;
           }
-          const page = await readPage(now, table, queryMaxResults, cursor);
-          for (const [name, rows] of Object.entries(page.sensitive)) {
-            const sofar = reached.get(name);
-            reached.set(name, {
-              reads: (sofar?.reads ?? 0) + 1,
-              rows: (sofar?.rows ?? 0) + rows,
-            });
-          }
+          const page = await readPage(
+            now,
+            table,
+            queryMaxResults,
+            cursor,
+            reached
+          );
           count += page.records.length;
           if (count > appDataExportMaxRecords) {
             throw appDataErrors.create("app_data.export_too_large");
@@ -952,14 +964,12 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
       if (cursor !== null && typeof cursor !== "string") {
         throw appDataErrors.create("app_data.invalid");
       }
-      const { sensitive, ...page } = await readPage(
-        open,
-        table,
-        appDataPageSize,
-        cursor
-      );
-      await keepPageReads(this.#env, by, open, "browser", reachedBy(sensitive));
-      return page;
+      const reached: Reached = new Map();
+      try {
+        return await readPage(open, table, appDataPageSize, cursor, reached);
+      } finally {
+        await keepPageReads(this.#env, by, open, "browser", reached);
+      }
     });
   }
 
@@ -972,13 +982,17 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
     return await withPerson(this.#check, async (by) => {
       const open = await versionedStore(this.#env, by, app, version);
       tableOf(open, table);
-      const { value, sensitive } = await open.store.read(open.scope, {
-        kind: "get",
-        table,
-        id,
-        expectedRevision: null,
-      });
-      await keepPageReads(this.#env, by, open, "browser", reachedBy(sensitive));
+      const reached: Reached = new Map();
+      let value: QueryAnswer;
+      try {
+        value = await readCounted(
+          open,
+          { kind: "get", table, id, expectedRevision: null },
+          reached
+        );
+      } finally {
+        await keepPageReads(this.#env, by, open, "browser", reached);
+      }
       return value === null ? null : recordOf(value);
     });
   }

@@ -7,8 +7,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { identify } from "../src/auth/identity.ts";
 import { release } from "./apps.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -37,7 +39,9 @@ const files: Record<string, string> = {
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  salaries: defineTable({ person: v.string(), amount: v.number() }).sensitive(),
+  salaries: defineTable({ person: v.string(), amount: v.number() })
+    .index("by_person", ["person"])
+    .sensitive(),
   notes: defineTable({ text: v.string(), salary: v.id("salaries").optional() }),
 });
 `,
@@ -102,9 +106,28 @@ export const probe = query({
     }
   },
 });
+
+/** One person's exact salary, as the greatest of theirs. */
+export const highest = query({
+  args: { person: v.string() },
+  returns: v.number().nullable(),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("salaries")
+      .withIndex("by_person", (range) => range.eq("person", args.person))
+      .aggregate({ operation: "max", field: "amount" }),
+});
+
+/** Who is paid: the salaries' people, by group. */
+export const byPerson = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) =>
+    (await ctx.db.query("salaries").group({ by: ["person"] })).length,
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { leak, note, notes, pay, probe, salaries } from "./operations/pay.ts";
+import { byPerson, highest, leak, note, notes, pay, probe, salaries } from "./operations/pay.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -116,7 +139,7 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { pay: { leak, note, notes, pay, probe, salaries } },
+  operations: { pay: { byPerson, highest, leak, note, notes, pay, probe, salaries } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -392,6 +415,87 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       lines: 3,
       recorded: [{ via: "export", table: "salaries", rows: 2 }],
+    });
+  });
+
+  it("records an export the client lets go of after its first page", async () => {
+    const fixture = await payrollApp();
+    // More than one export page: one page read, and more to come.
+    const people = Array.from(
+      { length: 150 },
+      (_person, at) => `Person ${at},${1000 + at}`
+    );
+    const imported = await fixture.builder.api.apps.data.import(
+      fixture.app,
+      "salaries",
+      {
+        version: fixture.version,
+        csv: ["person,amount", ...people].join("\n"),
+        mapping: { person: "person", amount: "amount" },
+      }
+    );
+    expect(imported).toStrictEqual({ ok: true, inserted: 150 });
+    const after = await logHead();
+
+    // Read here a pull at a time, as a client takes a page in: over a
+    // connection the transport may read ahead of the client.
+    const headers = new Headers({ cookie: fixture.builder.session });
+    const rpc = new AppDataRpc(env, async () => {
+      const identity = await identify(env, headers);
+      if (!identity) {
+        throw new Error("Session ended");
+      }
+      return identity;
+    });
+    const stream = await rpc.export(fixture.app, "salaries");
+    const reader = stream.getReader();
+    // The header, then the first page.
+    await reader.read();
+    const page = await reader.read();
+    await reader.cancel();
+
+    expect({
+      page: new TextDecoder().decode(page.value).trim().split("\n").length,
+      recorded: await readsOf(fixture.app, after, [
+        "via",
+        "table",
+        "reads",
+        "rows",
+      ]),
+    }).toStrictEqual({
+      page: 100,
+      recorded: [{ via: "export", table: "salaries", reads: 1, rows: 100 }],
+    });
+  });
+
+  it("records the records an aggregate or a group is computed over", async () => {
+    // Neither answers a record, yet the greatest salary of one person is
+    // their salary, and a group tells each distinct value of its field.
+    const fixture = await payrollApp();
+    await payroll(fixture, 3);
+    const after = await logHead();
+
+    const highest = await call(fixture, "pay.highest", { person: "Person 1" });
+    const grouped = await call(fixture, "pay.byPerson");
+    const recorded = await readsOf(fixture.app, after, [
+      "function",
+      "reads",
+      "rows",
+    ]);
+
+    expect({
+      highest: valueOf(highest),
+      grouped: valueOf(grouped),
+      recorded: recorded.toSorted((one, other) =>
+        String(one.function).localeCompare(String(other.function))
+      ),
+    }).toStrictEqual({
+      highest: 1001,
+      grouped: 3,
+      recorded: [
+        { function: "pay.byPerson", reads: 1, rows: 3 },
+        { function: "pay.highest", reads: 1, rows: 1 },
+      ],
     });
   });
 });

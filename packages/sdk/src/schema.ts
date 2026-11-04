@@ -276,7 +276,9 @@ export interface TableDefinition<
       ) => TableDefinition<Fields, Indexes, true>;
   /**
    * The same table, its data declared sensitive: the store's change
-   * history of its records keeps which fields changed, never their values.
+   * history of its records keeps which fields changed, never their values,
+   * and every read of it is recorded in the audit log (who read, through
+   * which function, how many reads and records, never the values).
    * Once any schema handed to a store declares a table so, it stays so.
    */
   readonly sensitive: () => TableDefinition<Fields, Indexes, Searchable>;

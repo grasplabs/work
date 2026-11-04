@@ -316,8 +316,9 @@ export type RecordSql = Pick<SqlStorage, "exec">;
 /**
  * What a read reads records through, and tells how many records of each
  * table it answers (`answered`): every record that leaves the store as a
- * document, a related one included, whatever the terminal. The host
- * audits those of a sensitive table (store-host.ts, `#readIn`).
+ * document, a related one included, and every record a count, an
+ * aggregate or a group is computed over (`disclosed`). The host audits
+ * those of a sensitive table (store-host.ts, `#readIn`).
  */
 export interface ReadSql extends RecordSql {
   readonly answered: (table: string, records: number) => void;
@@ -794,6 +795,31 @@ const aggregateOf = (
     throw dataErrors.create("data.aggregate_overflow");
   }
   return result;
+};
+
+/**
+ * `matches`, each told to `sql` as a record of `table` the read answered
+ * as it is read: a count, an aggregate or a group reads through its
+ * matches and tells what they hold (an exact value under a narrow filter,
+ * a field's distinct values) as much as the records themselves would.
+ */
+const disclosed = (
+  sql: ReadSql,
+  table: ReadTable,
+  matches: Iterator<Match>
+): IterableIterator<Match, undefined> => {
+  const iterator: IterableIterator<Match, undefined> = {
+    next: () => {
+      const next = matches.next();
+      if (next.done === true) {
+        return { done: true, value: undefined };
+      }
+      sql.answered(table.name, 1);
+      return next;
+    },
+    [Symbol.iterator]: () => iterator,
+  };
+  return iterator;
 };
 
 /** How many matches there are. */
@@ -1690,7 +1716,7 @@ const runSearch = (
     }
     case "count": {
       let count = 0;
-      const iterator = matches();
+      const iterator = disclosed(sql, table, matches());
       for (
         let next = iterator.next();
         next.done !== true;
@@ -1776,11 +1802,11 @@ export const runQuery = (
       return found;
     }
     case "count": {
-      return countOf(matchesOf(sql, plan(), scan));
+      return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
     }
     case "aggregate": {
       if (terminal.operation === "count") {
-        return countOf(matchesOf(sql, plan(), scan));
+        return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
       }
       // Declared numeric fields only (spec 9.2), never a managed one.
       if (
@@ -1793,13 +1819,17 @@ export const runQuery = (
       }
       return aggregateOf(
         terminal.operation,
-        matchesOf(
+        disclosed(
           sql,
-          planQuery(pinned, scope, table, query, {
-            documents: false,
-            aggregate: terminal.field,
-          }),
-          scan
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              aggregate: terminal.field,
+            }),
+            scan
+          )
         )
       );
     }
@@ -1808,14 +1838,18 @@ export const runQuery = (
       return groupsOf(
         terminal,
         numbers,
-        matchesOf(
+        disclosed(
           sql,
-          planQuery(pinned, scope, table, query, {
-            documents: false,
-            groups: terminal.by,
-            numbers,
-          }),
-          scan
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              groups: terminal.by,
+              numbers,
+            }),
+            scan
+          )
         )
       );
     }

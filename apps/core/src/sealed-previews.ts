@@ -1017,6 +1017,8 @@ export class SealedPreviews {
       principal: personId,
       // The person whose chat previews the draft, on its fixture store.
       actor: { type: "person", userId: personId },
+      // The fixture store holds no one's data: nothing to record.
+      sensitiveReads: null,
       consumer: { resourceId: app, resourceVersion: running.version },
       store,
       requestId,

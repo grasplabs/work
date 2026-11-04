@@ -901,6 +901,8 @@ class FixtureSession extends TestTarget {
           ),
           // A test's fixture person, on a store only the test reaches.
           actor: { type: "person", userId: `fixture-${name}` },
+          // The test's store holds no one's data: nothing to record.
+          sensitiveReads: null,
           consumer: {
             resourceId: this.#release.manifest.resourceId,
             resourceVersion: this.#release.manifest.resourceVersion,
