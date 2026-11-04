@@ -1397,6 +1397,13 @@ export const runTurn = async ({
     { messages: [...history], tools },
     {
       model: model.model,
+      // Every request of the chat shares one prompt cache: the chat is its
+      // key (OpenAI's `prompt_cache_key`). Short retention, never long:
+      // Anthropic's long cache is a one-hour write, which the catalog
+      // doesn't price, so the model ledger refuses the request
+      // (model-requests.ts).
+      sessionId: scope.chatId,
+      cacheRetention: "short",
       // The transcript holds only pi's own messages. What the chat can no
       // longer read is withheld first, so the request fits without it.
       convertToLlm: (messages) =>

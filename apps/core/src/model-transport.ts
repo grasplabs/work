@@ -1,6 +1,7 @@
 import type {
   Api,
   AssistantMessageEventStream,
+  CacheRetention,
   FetchFunction,
   Model,
   ProviderHeaders,
@@ -113,6 +114,12 @@ export const failureOfResponse = (
     : { kind: "provider_down", status };
 };
 
+/** A request's prompt cache: pi's own options for it. */
+export interface RequestCache {
+  sessionId?: string;
+  retention?: CacheRetention;
+}
+
 /** What one streamed request takes beyond its route and conversation. */
 export interface StreamOptions {
   /** The gateway's fetch around the route's: admission, accounting. */
@@ -120,6 +127,13 @@ export interface StreamOptions {
   maxTokens: number;
   reasoning: SimpleStreamOptions["reasoning"];
   signal: AbortSignal;
+  /**
+   * The provider's prompt cache for this request, as pi sets it in the
+   * body: the conversation it belongs to (OpenAI's `prompt_cache_key`),
+   * and how long a cached prefix is kept (Anthropic's `cache_control`
+   * markers). Unset, pi's default: a short cache, and no key.
+   */
+  cache?: RequestCache;
   onResponse: (response: {
     status: number;
     headers: Record<string, string>;
@@ -146,6 +160,8 @@ export const streamRoute = async (
     maxRetries: 0,
     reasoning: options.reasoning,
     signal: options.signal,
+    sessionId: options.cache?.sessionId,
+    cacheRetention: options.cache?.retention,
     onPayload: route.onPayload,
     onResponse: options.onResponse,
   });

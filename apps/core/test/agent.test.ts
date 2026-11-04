@@ -199,6 +199,20 @@ const modelCallsBy = async (
   return await mine();
 };
 
+/** Every `cache_control` marker anywhere in `value`: Anthropic's cache. */
+const cacheMarkersIn = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap(cacheMarkersIn);
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const entries: [string, unknown][] = Object.entries(value);
+  return entries.flatMap(([key, inner]) =>
+    key === "cache_control" ? [inner] : cacheMarkersIn(inner)
+  );
+};
+
 const codeOf = async (call: Promise<unknown>) => {
   try {
     await call;
@@ -1217,6 +1231,50 @@ describe("chat agent turns", () => {
       codeOf(stub.ask(chat.id, { text: "Hi.", model: "openai/gpt-5.4" }))
     ).resolves.toBe("model.not_allowed");
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
+  });
+
+  it("keeps a chat's requests on one short-lived prompt cache, and records what each read from it", async () => {
+    const openai = "openai/gpt-5.4";
+    const { stub, chat, personId, provider } = await newChatOn(
+      [model, openai],
+      { ...says("Hi."), cache: { read: 900, write: 100 } },
+      says("Hi again.")
+    );
+    await stub.ask(chat.id, { text: "Hi.", model });
+    await stub.ask(chat.id, { text: "Hi again.", model: openai });
+
+    const [anthropic, responses] = provider.requests;
+    const markers = cacheMarkersIn(anthropic?.body);
+    expect({
+      anthropic:
+        anthropic && new URL(anthropic.url).pathname.endsWith("/messages"),
+      marked: markers.length > 0,
+      // Never Anthropic's one-hour cache, which the ledger refuses.
+      markers: [...new Set(markers.map((marker) => JSON.stringify(marker)))],
+      responses:
+        responses && new URL(responses.url).pathname.endsWith("/responses"),
+      key: z
+        .looseObject({ prompt_cache_key: z.string() })
+        .parse(responses?.body).prompt_cache_key,
+    }).toStrictEqual({
+      anthropic: true,
+      marked: true,
+      markers: [JSON.stringify({ type: "ephemeral" })],
+      responses: true,
+      key: chat.id,
+    });
+    const calls = await modelCallsBy(personId, 2);
+    expect(
+      calls.map(({ model: used, detail }) => ({
+        inputTokens: used?.inputTokens,
+        cacheReadTokens: detail.cacheReadTokens,
+        cacheWriteTokens: detail.cacheWriteTokens,
+      }))
+    ).toStrictEqual([
+      // The cache's tokens are among the prompt's.
+      { inputTokens: 1200, cacheReadTokens: 900, cacheWriteTokens: 100 },
+      { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
   });
 
   it("stops acting for a person who has left", async () => {

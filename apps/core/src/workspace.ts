@@ -1911,6 +1911,12 @@ export class Workspace extends DurableObject<Env> {
       calls,
     };
     this.#turns.set(chat.id, live);
+    // What the turn's model requests read from the provider's prompt cache,
+    // of all the prompt tokens they sent (each request's own is on its
+    // `model.call` audit event), recorded once the turn ends. A log line,
+    // as the compiler's cache logs its own (`build.cache`): a measure of
+    // how the cache does, not something done, so not an audit event.
+    const cache = { requests: 0, inputTokens: 0, cacheReadTokens: 0 };
     // Marked in storage as long as it is in `#turns`, however it ends.
     this.ctx.storage.kv.put(
       `${turnKeyPrefix}${chat.id}`,
@@ -2009,6 +2015,12 @@ export class Workspace extends DurableObject<Env> {
           }
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
+            cache.requests += 1;
+            cache.inputTokens +=
+              message.usage.input +
+              message.usage.cacheRead +
+              message.usage.cacheWrite;
+            cache.cacheReadTokens += message.usage.cacheRead;
           }
           // The turn's one question carries its files.
           const id = this.#keep(chat.id, message, {
@@ -2050,6 +2062,17 @@ export class Workspace extends DurableObject<Env> {
         channelText: context.channel?.mark ?? null,
       };
     } finally {
+      if (cache.requests > 0) {
+        log.info("chat.turn_cache", {
+          chatId: chat.id,
+          turnId: live.id,
+          ...cache,
+          share:
+            cache.inputTokens === 0
+              ? 0
+              : cache.cacheReadTokens / cache.inputTokens,
+        });
+      }
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
       this.#turns.delete(chat.id);
       this.#partials.delete(chat.id);
