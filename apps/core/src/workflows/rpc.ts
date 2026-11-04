@@ -7,8 +7,6 @@ import type {
   RunHistoryPageQuery,
   RunsPage,
   RunFilter,
-  WorkflowDetail,
-  WorkflowDryRun,
   WorkflowRun,
   WorkflowsApi,
   WorkflowSummary,
@@ -23,14 +21,11 @@ import { connectionWorkflows } from "./connection-workflows.ts";
 import { cancelRun } from "./controls.ts";
 import { runHistory } from "./history.ts";
 import {
-  dryRunWorkflow,
   listAllRuns,
   setOwner,
   setTeam,
-  workflowDetail,
   workflowOverview,
 } from "./overview.ts";
-import { WorkflowParamsRpc } from "./params-rpc.ts";
 import { listRuns, runStatus, startWorkflow } from "./runs.ts";
 import { teamChoices } from "./teams.ts";
 import { workflowsToday } from "./today.ts";
@@ -44,17 +39,11 @@ import { workflowsToday } from "./today.ts";
 export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #params: WorkflowParamsRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
-    this.#params = new WorkflowParamsRpc(env, check);
-  }
-
-  get params(): WorkflowParamsRpc {
-    return this.#params;
   }
 
   async start(
@@ -134,13 +123,6 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     );
   }
 
-  async get(app: string, workflow: string): Promise<WorkflowDetail> {
-    return await withPerson(
-      this.#check,
-      async (by) => await workflowDetail(this.#env, by, app, workflow)
-    );
-  }
-
   async setOwner(
     app: string,
     workflow: string,
@@ -167,13 +149,6 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await teamChoices(this.#env, by)
-    );
-  }
-
-  async test(app: string, workflow: string): Promise<WorkflowDryRun> {
-    return await withPerson(
-      this.#check,
-      async (by) => await dryRunWorkflow(this.#env, by, app, workflow)
     );
   }
 }

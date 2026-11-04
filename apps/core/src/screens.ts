@@ -5,8 +5,6 @@ import {
   appModuleName,
   buildFiles,
   compilerVersion,
-  isAppLayout,
-  isGeneratedPath,
   kitModuleName,
   kitModules,
   kitPreviewModules,
@@ -20,8 +18,6 @@ import {
   screenIncrementKeys,
   screenRefusals,
   screenSources,
-  workflowBindingsPath,
-  workflowBuildFiles,
   withTypeCheck,
 } from "@grasp-os/compiler";
 import type {
@@ -36,9 +32,7 @@ import type {
   OpenWorkflowBuild,
   ScreenBuild,
   Unchecked,
-  WorkflowBuild,
 } from "@grasp-os/compiler";
-import { symbolicModules } from "@grasp-os/sdk/host";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -198,7 +192,6 @@ export interface BuildOptions {
  */
 const compilerCalls = {
   screen: ["build", "screens"],
-  workflow: ["build", "workflows"],
   app: ["inspect", "app"],
   "app-check": ["build", "app"],
   "app-tests": ["build", "app-tests"],
@@ -1018,66 +1011,6 @@ export const buildAppTests = async (
     appFiles,
     appTestFiles,
     whose
-  );
-
-/**
- * What a workflow build reads (`workflowBuildFiles`): the App's
- * workflows, and the server code their types may name, with the host's
- * generated modules as inspection has them: the constructors, the same
- * for every App, and stand-ins for the references. Everything under
- * `.grasp/` is the host's: a save refuses an App's own file there (no
- * path segment starts with a dot, `appPathSchema`), and whatever a
- * version holds there anyway is dropped here, so only the host's
- * modules, and the binding names it gives, reach the type check.
- */
-const workflowInputs = (files: AppFiles): AppFiles => {
-  const selected = Object.fromEntries(
-    Object.entries(workflowBuildFiles(files)).filter(
-      ([path]) => !isGeneratedPath(path)
-    )
-  );
-  return isAppLayout(selected)
-    ? {
-        ...selected,
-        ...symbolicModules(),
-        ...hostModules,
-      }
-    : selected;
-};
-
-/**
- * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
- * compiler's isolate, type-checked with the server code their types may
- * name, and their `env` typed by `bindings`: each binding name the App's
- * permissions hold, as the kind of binding it is (`workflowBindingKinds`,
- * permissions.ts); any other name answers `unknown`. A
- * build is cached in R2, like the server's, by its inputs, the bindings
- * among them.
- */
-export const buildWorkflows = async (
-  env: BuildEnv,
-  appFiles: AppFiles,
-  /** Whose build it is: the App's ID. */
-  whose: string,
-  bindings: Readonly<Record<string, string>>,
-  options?: BuildOptions
-): Promise<WorkflowBuild> =>
-  await cachedBuild<WorkflowBuild>(
-    env,
-    "workflow",
-    appFiles,
-    (files) => ({
-      ...workflowInputs(files),
-      [workflowBindingsPath]: JSON.stringify(
-        Object.fromEntries(
-          Object.entries(bindings).toSorted(([one], [other]) =>
-            one.localeCompare(other)
-          )
-        )
-      ),
-    }),
-    whose,
-    options
   );
 
 /**

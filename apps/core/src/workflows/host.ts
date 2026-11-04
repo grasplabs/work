@@ -47,10 +47,10 @@ import { askAgainMs } from "./admission.ts";
 import { aiWaitEnded, aiWaitStarted, aiWakeType } from "./ai-waits.ts";
 import type { AiWait, AiWaitRun } from "./ai-waits.ts";
 import type { AttemptHost } from "./attempt-host.ts";
-import type { Settled, StepError } from "./code.ts";
 import { storedEventSchema } from "./event-envelopes.ts";
 import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
 import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's

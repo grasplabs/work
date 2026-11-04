@@ -15,7 +15,6 @@ import type {
   EventFilter,
   ParamValue,
   RunFailure,
-  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
@@ -1038,34 +1037,11 @@ export const appVersions = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     /**
-     * The App's bindings each of the version's workflows calls, by
-     * workflow ID (JSON, `WorkflowCalls`), written when it is committed
-     * from the same reading its review shows: a run's calls are held to
-     * it (workflows/host.ts). A workflow it keeps no entry for doesn't run
-     * (`workflow.calls_not_kept`), and its review shows no calls.
-     */
-    workflowCalls: text("workflow_calls", { mode: "json" })
-      .$type<Record<string, WorkflowCalls>>()
-      .notNull()
-      .default(sql`'{}'`),
-    /**
      * The chat's agent that wrote and proposed it, for `author_id` (JSON,
      * `AgentProposer`); null for a version a person committed. A row the
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
-    /**
-     * The binding names the App's permissions held when the version was
-     * committed, whatever their status, each with the kind of binding it
-     * is (JSON, `WorkflowBindingKinds`, permissions.ts): what its
-     * workflows' `env` is typed by at every build, so a version is typed
-     * the same however its App's permissions change after. A row the
-     * previous release writes gets none (the default).
-     */
-    workflowBindings: text("workflow_bindings", { mode: "json" })
-      .$type<Record<string, "connection" | "collection" | "brain">>()
-      .notNull()
-      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );

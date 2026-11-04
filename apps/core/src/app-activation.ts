@@ -4,15 +4,13 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { activateThroughCandidate } from "./app-candidates.ts";
-import { loadRelease, sealRelease } from "./app-releases.ts";
+import { sealRelease } from "./app-releases.ts";
 import { createStore } from "./data-stores.ts";
 import { appDefaultStores, businessStores } from "./db/core/schema.ts";
-import { aiStepProblem, workflowAiSteps } from "./resource-bindings.ts";
 
 // Making a version of an App current (spec 8, 16): a version of spec 8's
 // layout runs only from its sealed release, so it is sealed first, on the
@@ -33,13 +31,6 @@ import { aiStepProblem, workflowAiSteps } from "./resource-bindings.ts";
 //   isn't sealed, is revoked, or is bound to a deleted store, whoever calls
 //   it, in the statement that makes it current. A deleted default store is
 //   replaced by a new one for the versions sealed after it.
-//
-// It also refuses a version whose workflow AI steps go through an `ai`
-// permission its sealed release doesn't declare
-// (`requireDeclaredModels`), so its builder hears it now rather than from
-// failed runs. Only a report: every attempt is still checked against the
-// release and the binding as they are then (`stepModelBinding`), which
-// decides. Threat note on GRA-527.
 
 /** The App's default store, if it has one yet, and whether it still lives. */
 const defaultStoreOf = async (
@@ -144,44 +135,9 @@ const sealForActivation = async (
 };
 
 /**
- * Refuses `version` of `app`, with its `files`, when one of its workflows'
- * AI steps goes through anything but a text model resource the release
- * sealed for it declares (`aiStepProblem`): an App without a release
- * declares none. Each such step is named, at its line.
- */
-export const requireDeclaredModels = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  files: Readonly<Record<string, string>>
-): Promise<void> => {
-  const steps = workflowAiSteps(files);
-  if (steps.length === 0) {
-    return;
-  }
-  const release = isAppLayout(files)
-    ? await loadRelease(env, app, version)
-    : undefined;
-  const resources = release?.app.resources ?? {};
-  const diagnostics = steps.flatMap((step) => {
-    const message = aiStepProblem(resources, step);
-    return message === undefined
-      ? []
-      : [{ file: step.file, line: step.line, message }];
-  });
-  if (diagnostics.length > 0) {
-    throw workflowErrors.create("workflow.model_undeclared", {
-      version,
-      diagnostics,
-    });
-  }
-};
-
-/**
  * Makes `version` of `app` the one that runs, for one of its builders,
  * through a candidate (app-candidates.ts): sealed when it is of spec 8's
- * layout, and refused when its workflows' AI steps go through models it
- * doesn't declare (see the header), then verified and made current over
+ * layout, then verified and made current over
  * the version current now, or over `expected` when the caller gives it.
  */
 export const activateVersion = async (

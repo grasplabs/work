@@ -39,7 +39,6 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { StepError } from "../src/workflows/code.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
@@ -47,6 +46,7 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
+import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import {
   requirePackagesAdmitted,
   sealPackages,

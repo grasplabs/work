@@ -830,32 +830,6 @@ export type RunHistoryPage =
   | { items: RunHistoryEntry[]; nextCursor: string; hasMore: true };
 
 /**
- * A trigger of a workflow, as its App's current version registered it:
- * read from that registration, which was checked as the version was made
- * current, never from the workflow's code again. `position` is its place
- * among the triggers the workflow's code declares, its own alone: two
- * triggers alike in all else (one event, two filters) still differ in it.
- */
-export type WorkflowTrigger = { position: number } & (
-  | {
-      type: "schedule";
-      /** The schedule parameter it runs on. */
-      param: string;
-      timeZone: string;
-      /** ISO 8601; null while it has no next run. */
-      nextRunAt: string | null;
-      /** Its runs failed to start {@link maxFailedStarts} times in a row. */
-      stopped: boolean;
-    }
-  | {
-      type: "email";
-      /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
-      localPart: string;
-    }
-  | { type: "event"; event: string }
-);
-
-/**
  * The receipt of a pause, resume or cancel of a run the host admitted:
  * `admitted` until the engine confirms it, then `applied`; `superseded`
  * when a cancel overtook it first.
@@ -1416,52 +1390,6 @@ export interface ResourceWorkflowSummary extends WorkflowRunCounts {
 /** A workflow as the Workflows page lists it. */
 export type WorkflowSummary = AppWorkflowSummary | ResourceWorkflowSummary;
 
-/**
- * One workflow, as its view shows it: its summary, its steps as its code
- * reads (or why they can't be read), and, for the App's builders, its
- * parameters.
- */
-export interface WorkflowDetail {
-  summary: AppWorkflowSummary;
-  /**
-   * For anyone who doesn't build the App, the outline without its code:
-   * no conditions, loop heads, per-item keys, parameters read or literal
-   * options, only each step's description, name and kind.
-   */
-  steps:
-    | { ok: true; outline: WorkflowOutline }
-    | { ok: false; message: string };
-  /**
-   * What starts it by itself, in the order its code declares them, as the
-   * current version registered them; none for one started only by people.
-   */
-  triggers: WorkflowTrigger[];
-  /**
-   * Its parameters, for those who build the App; null for anyone else,
-   * who neither sees nor sets them.
-   */
-  params: WorkflowParam[] | null;
-  /** Whether the person sets its parameters: a builder, not Grasp staff. */
-  setsParams: boolean;
-}
-
-/**
- * A dry run of each of a workflow's tests, with the parameter values
- * people set now over the test's own: what each run did and would have
- * changed, as the test harness reports it (`dryRun`). It makes no state
- * changes: side effects are recorded, never made.
- */
-export interface WorkflowDryRun {
-  /** The App version whose code ran. */
-  version: number;
-  runs: {
-    /** The test the run is of. */
-    name: string;
-    status: "completed" | "failed";
-    report: string;
-  }[];
-}
-
 /** Most UTC days one `activity` read looks back over, today included. */
 export const runActivityMaxDays = 90;
 
@@ -1568,17 +1496,15 @@ export interface RunActivity {
  * an App's (its App and its name in the App's code), or an independent
  * workflow (its ID and name).
  */
-export type ConnectionWorkflow =
-  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { kind: "independent"; id: string; name: string };
+export interface ConnectionWorkflow {
+  id: string;
+  name: string;
+}
 
 /**
- * The workflows a person can open that use one connection: an App's whose
- * App holds an active permission on it and whose code calls that
- * permission's binding, and an independent workflow whose current version
- * declares a connector binding an active approval serves through the
- * workflow's own active permission on it. App workflows first, by App name
- * and workflow, then independent ones by name.
+ * The workflows a person can open that use one connection: each whose
+ * current version declares a connector binding an active approval serves
+ * through the workflow's own active permission on it, by name.
  */
 export interface ConnectionWorkflows {
   connectionId: string;
@@ -1719,8 +1645,6 @@ export interface WorkflowsApi {
    * they may not see only counted.
    */
   today: () => Promise<WorkflowsToday>;
-  /** One workflow of an App's current version. */
-  get: (app: string, workflow: string) => Promise<WorkflowDetail>;
   /**
    * Makes `owner`, a member of the organization who can open the App,
    * the owner of an App's workflow; for admins and the App's builders,
@@ -1746,48 +1670,4 @@ export interface WorkflowsApi {
    * to (`setTeam`); for admins and builders, never Grasp staff.
    */
   teams: () => Promise<{ id: string; name: string }[]>;
-  /**
-   * Dry-runs a workflow's tests at the App's current version, with the
-   * parameter values set now; for the App's builders.
-   */
-  test: (app: string, workflow: string) => Promise<WorkflowDryRun>;
-  /** The values people set for a workflow's parameters. */
-  readonly params: WorkflowParamsApi;
-}
-
-/**
- * A parameter of a workflow in its App's current version, as its code
- * declares it, with the value people set.
- */
-export interface WorkflowParam {
-  name: string;
-  /** `money`, `number`, `text`, `person`, `schedule` or `template`. */
-  kind: string;
-  label: string;
-  /**
-   * Its value needs care where it's shown. It's set like any other, and,
-   * like any other, never goes in an audit event.
-   */
-  sensitive: boolean;
-  default: ParamValue;
-  /** For money: its ISO 4217 currency; amounts are in its minor units. */
-  currency?: string;
-  /** The value people set; null while the code's default applies. */
-  value: ParamValue | null;
-}
-
-/**
- * The values of workflows' parameters. The App's builders set them
- * directly, sensitive or not, audited without the value.
- */
-export interface WorkflowParamsApi {
-  /** A workflow's parameters, in the order its code declares them. */
-  list: (app: string, workflow: string) => Promise<WorkflowParam[]>;
-  /** Sets a parameter's value, audited without the value. */
-  set: (
-    app: string,
-    workflow: string,
-    param: string,
-    value: ParamValue
-  ) => Promise<WorkflowParam>;
 }

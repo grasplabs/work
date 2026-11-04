@@ -1,6 +1,6 @@
 import type { WaitingFeed, WaitingKind } from "@grasp-os/shared/waiting";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
@@ -13,9 +13,8 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { endLiveRuns } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // What waits on a person, in one feed (waiting-rpc.ts). Its threat model
 // comes first: an item reaches someone it doesn't wait on (another
@@ -98,15 +97,6 @@ const heldMail = async (person: Person, admin: Person) => {
   });
   return { mail, chat, permission: id };
 };
-
-/** A workflow that fails in its one step. */
-const failing = workflowFiles(
-  "nightly",
-  `  await step.do("check", { description: "Check" }, async () => {
-    throw new Error("Customer c-1 is blocked");
-  });`,
-  { check: null }
-);
 
 describe("what waits", slow, () => {
   afterEach(async () => {
@@ -228,38 +218,6 @@ describe("what waits", slow, () => {
       status: "active",
       waiting: [],
       by: [{ type: "person", userId: admin.userId }],
-    });
-  });
-
-  it("lists a failed run for the person it acted for, without marking it read", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const other = await signedInApi(idp, "builder");
-    const app = await appWith(builder, failing);
-    const run = await builder.api.workflows.start(app, "nightly");
-    await finished(run.id);
-
-    // Core records the failure once the engine tells it (runs.ts).
-    const failed = await vi.waitFor(
-      async () => {
-        const items = await itemsOf(builder, "failedRun");
-        expect(items).toHaveLength(1);
-        return items;
-      },
-      { timeout: 20_000, interval: 100 }
-    );
-    const { notifications, unread } = await builder.api.notifications.list();
-    expect({
-      run: failed[0]?.notification.run,
-      waitsOn: failed[0]?.waitsOn,
-      other: await itemsOf(other, "failedRun"),
-      read: notifications.map(({ read }) => read),
-      unread,
-    }).toStrictEqual({
-      run: run.id,
-      waitsOn: { type: "person", userId: builder.userId },
-      other: [],
-      read: [false],
-      unread: 1,
     });
   });
 

@@ -27,14 +27,6 @@ import {
 } from "./expression-runtime.ts";
 import { currencySchema, paramValueSchemas } from "./params.ts";
 import type { ParamDefault, ParamKind, ParamValue } from "./params.ts";
-import type {
-  AppErrorPayload,
-  ArgsOf,
-  Callable,
-  ReferenceKind,
-  ReturnOf,
-  IsStreaming,
-} from "./references.ts";
 import {
   generatedStepOptionSchemas,
   namePattern,
@@ -717,32 +709,10 @@ export type WorkflowBrainBinding = Required<
 >;
 
 /**
- * Which of the App's functions `callFunction` calls: its generated
- * reference, or its name and kind. A query's reference holds no kind, so
- * a reference without one calls a query. The host resolves it in the
- * release the run is pinned to.
- */
-export interface FunctionReferenceName {
-  readonly name: string;
-  readonly kind?: ReferenceKind;
-}
-
-/**
- * The run's own App (`env.APP`): its public functions (`callFunction`,
- * typed with `appFunctions<Tree>(env)`).
- */
-export interface OwnAppBinding {
-  readonly callFunction: (
-    reference: FunctionReferenceName,
-    input: Json
-  ) => Promise<FunctionResult<Json>>;
-}
-
-/**
  * The run's bindings, by name, as its App's permissions make them. Empty
  * here: where an App's workflows are type-checked, the host declares
  * each binding the App holds a permission for in it, as what it is (a
- * `ConnectionBinding` or a `CollectionBinding`), with `APP` (`OwnAppBinding`), so reading one binding's answer as
+ * `ConnectionBinding` or a `CollectionBinding`), so reading one binding's answer as
  * another's is a type error.
  */
 // oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- declared per App by the host, by declaration merging
@@ -758,11 +728,6 @@ export interface WorkflowBindings {}
  * version current.
  */
 export type RunEnv = Readonly<WorkflowBindings> & WorkflowEnv;
-
-/** What `appFunctions` reads of a run's `env`: its `APP`. */
-export interface AppEnv {
-  readonly APP?: Partial<OwnAppBinding>;
-}
 
 /** Everything a workflow reads besides its steps. */
 export interface WorkflowContext<P extends Params, Input> {
@@ -786,10 +751,8 @@ export interface WorkflowContext<P extends Params, Input> {
    */
   inbox: Readonly<Record<string, string>>;
   /**
-   * The App's connections and other permissions, and its own functions,
-   * by binding name; call them in a step's own function, each written out
-   * as `env.NAME.method(…)` or `appFunctions(env).query(…)` (or
-   * `mutation`, `action`) (see `WorkflowEnv`). Where the
+   * The run's bindings, by name; call them in a step's own function, each
+   * written out as `env.NAME.method(…)` (see `WorkflowEnv`). Where the
    * App's workflows are type-checked, each name the App holds a permission
    * for is typed as the binding it is (`WorkflowBindings`); any other
    * answers `unknown` (`RunEnv`).
@@ -822,148 +785,6 @@ export interface WorkflowContext<P extends Params, Input> {
     index: number
   ) => Promise<Uint8Array>;
 }
-
-export type { AppErrorPayload } from "./references.ts";
-
-/**
- * What a call of one of the App's functions answers, as the host answers
- * it (spec 32.6): its value, or why it failed.
- */
-export type FunctionResult<Value> =
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly error: AppErrorPayload };
-
-/** How deep `FunctionPaths` reads groups of functions. */
-type GroupDepth = [never, 0, 1, 2, 3];
-
-/**
- * The paths (`drafts.propose`) of the public functions of kind `Kind` in
- * `Tree`, the App's functions grouped by their server modules, as their
- * paths are: a definition by its path, a group by the paths in it.
- * Never a streaming action's: it runs only for a screen following it
- * (spec 10.7.6), and a workflow's call answers once, so the host refuses
- * it (`operation.mode_mismatch`).
- */
-export type FunctionPaths<
-  Tree,
-  Kind extends ReferenceKind,
-  Prefix extends string = "",
-  Depth extends number = 4,
-> = [Depth] extends [never]
-  ? never
-  : {
-      [Key in keyof Tree & string]: Tree[Key] extends Callable
-        ? Tree[Key] extends Callable<Kind, "public">
-          ? true extends IsStreaming<Tree[Key]>
-            ? never
-            : `${Prefix}${Key}`
-          : never
-        : Tree[Key] extends object
-          ? FunctionPaths<
-              Tree[Key],
-              Kind,
-              `${Prefix}${Key}.`,
-              GroupDepth[Depth]
-            >
-          : never;
-    }[keyof Tree & string];
-
-/** The function of `Tree` at registered path `Path`. */
-export type FunctionAt<
-  Tree,
-  Path extends string,
-> = Path extends `${infer Group}.${infer Rest}`
-  ? Group extends keyof Tree
-    ? FunctionAt<Tree[Group], Rest>
-    : never
-  : Path extends keyof Tree
-    ? Tree[Path]
-    : never;
-
-/** A call of one of `Tree`'s public functions of kind `Kind`, by its path. */
-type FunctionCall<Tree, Kind extends ReferenceKind> = <
-  Path extends FunctionPaths<Tree, Kind>,
->(
-  name: Path,
-  input: ArgsOf<FunctionAt<Tree, Path>>
-) => Promise<FunctionResult<ReturnOf<FunctionAt<Tree, Path>>>>;
-
-/** A call of any of the App's functions, untyped: by path, with JSON. */
-type UntypedFunctionCall = (
-  name: string,
-  input: Json
-) => Promise<FunctionResult<Json>>;
-
-/**
- * The run's own App's public functions as a workflow calls them, one
- * method per kind; typed by `Tree` when given, untyped otherwise.
- */
-export type AppFunctionsStub<Tree> = unknown extends Tree
-  ? {
-      readonly query: UntypedFunctionCall;
-      readonly mutation: UntypedFunctionCall;
-      readonly action: UntypedFunctionCall;
-    }
-  : {
-      readonly query: FunctionCall<Tree, "query">;
-      readonly mutation: FunctionCall<Tree, "mutation">;
-      readonly action: FunctionCall<Tree, "action">;
-    };
-
-/**
- * A typed stub of the run's own App's public functions (spec 8, GRA-711):
- * `appFunctions<Intake>(env).mutation("drafts.propose", input)` is
- * `env.APP.callFunction({ name: "drafts.propose", kind: "mutation" },
- * input)`, typed by the App's own definitions, which a workflow imports
- * as types only, grouped by their server modules, as their paths are:
- *
- * ```ts
- * import type * as drafts from "../server/drafts.ts";
- *
- * type Intake = { drafts: typeof drafts };
- *
- * await step.do("propose", { description: "Keep the draft", sideEffect: true }, async () => {
- *   const answered = await appFunctions<Intake>(env).mutation("drafts.propose", input);
- *   if (!answered.ok) throw new Error(answered.error.message);
- *   return answered.value;
- * });
- * ```
- *
- * Each call answers what the host answers: `{ ok: true, value }`, the
- * function's answer checked against its contract, or `{ ok: false,
- * error }`. Like `env.APP`, it works only inside a step and acts for the
- * person the run acts for; the host calls only a public function of the
- * release the run is pinned to, of the kind the method names
- * (`operation.kind_mismatch` otherwise), so the types offer only those.
- * The review of the workflow's steps reads each call as one of `APP`'s.
- */
-export const appFunctions = <Tree = unknown>(
-  env: AppEnv
-): AppFunctionsStub<Tree> => {
-  const call =
-    (kind: ReferenceKind) =>
-    async (name: string, input: Json): Promise<unknown> => {
-      const app = env.APP;
-      if (app?.callFunction === undefined) {
-        throw invalidCall("The run has no App to call (env.APP)");
-      }
-      return await app.callFunction({ name, kind }, input ?? null);
-    };
-  // Exactly the three methods, with nothing inherited to reach: any other
-  // name is undefined, and calling it fails.
-  const stub = Object.freeze({
-    __proto__: null,
-    query: call("query"),
-    mutation: call("mutation"),
-    action: call("action"),
-  });
-  // SAFETY: each method calls the App's function of that kind by path,
-  // answering what the host answers, which is `FunctionResult` (spec
-  // 32.6); the paths and inputs the types allow are the App's own public
-  // functions', and the host checks both again.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return stub as AppFunctionsStub<Tree>;
-};
 
 // Definition
 

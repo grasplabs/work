@@ -43,7 +43,7 @@ import { z } from "zod";
 
 import { requireStillOpen } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
-import { appFor, usableApp, versionFiles } from "../apps.ts";
+import { appFor, findVersion, usableApp } from "../apps.ts";
 import {
   auditedBatch,
   outboxed,
@@ -55,6 +55,7 @@ import {
 import { currentMembership } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
 import { deliverRunCapturesSoon, runCaptured } from "../brain-capture.ts";
+import type { workflowTriggers } from "../db/core/schema.ts";
 import {
   apps,
   members,
@@ -64,7 +65,6 @@ import {
 import { failureNoticed } from "../notifications.ts";
 import { queuedRuns } from "./admission.ts";
 import type { RunWait } from "./admission.ts";
-import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { ownerOf } from "./owners.ts";
@@ -72,7 +72,6 @@ import { accountClaimed, admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
-import type { TriggerType } from "./trigger-registry.ts";
 
 // Runs of Apps' workflows, as core keeps them: one row each (the App
 // version it is pinned to, who started it, where the engine last said it
@@ -328,7 +327,11 @@ export interface RunRequest {
    * starts. `version` is the App version that registered it: it starts a
    * run only of that version, while it is current.
    */
-  trigger?: { type: TriggerType; key: string; version: number };
+  trigger?: {
+    type: (typeof workflowTriggers.$inferSelect)["type"];
+    key: string;
+    version: number;
+  };
   /**
    * The run that started it, for a run another run starts: core's own,
    * from the engine's record of that run, never from anything an App or a
@@ -782,7 +785,10 @@ export const startRun = async (
   if (trigger && trigger.version !== version) {
     throw workflowErrors.create("workflow.trigger_gone");
   }
-  if (!hasWorkflow(await versionFiles(env, app, version), workflow)) {
+  // As the version's row keeps its workflows: none since Apps hold no
+  // workflows of their own (app-no-workflows.ts).
+  const { workflows } = await findVersion(env, app, version);
+  if (!workflows.includes(workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
   }
   const again = await deliveredUnder(env, trigger, parent);

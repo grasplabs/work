@@ -23,13 +23,6 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import {
-  attemptMethods,
-  loadRunIsolate,
-  runModule,
-  runModules,
-} from "../src/workflows/code.ts";
-import type { StepError } from "../src/workflows/code.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import { RunHost, waitStepPrefix } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
@@ -37,6 +30,13 @@ import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import { loadedActivation, runOf } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import type { RunEventDelivery } from "../src/workflows/run-events.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+  sealedMainModules,
+} from "../src/workflows/sealed-isolate.ts";
+import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import {
   sealedRun,
   sealedRunFrom,
@@ -494,16 +494,19 @@ const ranAs = async (
       >,
     }
   );
-  const code = loadRunIsolate(env, {
+  const code = loadSealedIsolate(env, {
     owner: `test:${runId}`,
-    mainModule: runModule,
+    mainModule: sealedMainModule,
     modules: async () =>
       await Promise.resolve({
         ...run.build.sdk,
         [generatedModule]: source,
-        ...runModules({ module: generatedModule, refusal: "No workflow." }),
+        ...sealedMainModules({
+          module: generatedModule,
+          refusal: "No workflow.",
+        }),
       }),
-    attemptMethods,
+    attemptHostMethods,
   });
   const settled = settledSchema.parse(
     await code.run(host, await sealedRunStart(env, run))

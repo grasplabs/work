@@ -10,7 +10,6 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { projectCandidateRun } from "./candidate-runs.ts";
-import type { StepError } from "./code.ts";
 import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
@@ -25,6 +24,7 @@ import type {
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import type { StepError } from "./sealed-isolate.ts";
 import type { SentCalls } from "./sealed-run.ts";
 
 /**

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
-import { racingDb as racingAppsDb, release } from "./apps.ts";
+import { racingDb as racingAppsDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   addedSince,
@@ -81,17 +81,6 @@ describe("email triggers", () => {
     }).toStrictEqual({ rejected: undefined, subject: "Invoice INV-7" });
   });
 
-  it("show with their workflow, by the part of the address they receive at before the @", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("shown"));
-
-    const { triggers } = await builder.api.workflows.get(app, "intake");
-
-    expect(triggers).toStrictEqual([
-      { type: "email", position: 0, localPart: "shown" },
-    ]);
-  });
-
   it("start nothing for mail sent automatically or from the deployment's own domain, and audit each refusal, so a run's mail can't loop back into runs", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("loops"));
@@ -151,25 +140,6 @@ describe("email triggers", () => {
         ["loops", "own_domain"],
       ],
     });
-  });
-
-  it("start the same message once across a new version of the workflow", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("again"));
-    const to = "again@grasp.test";
-    const mail = invoiceMail({
-      to,
-      messageId: `${crypto.randomUUID()}@acme.test`,
-    });
-
-    await deliver(to, mail);
-    // A new version: its triggers are registered anew.
-    await release(builder, app, {
-      "workflows/lib/note.ts": "export const note = 2;\n",
-    });
-    await deliver(to, mail);
-
-    await expect(runsOf(builder, app)).resolves.toHaveLength(1);
   });
 
   it("start a message's run when delivered again after its start failed, once", async () => {
@@ -381,26 +351,6 @@ describe("email triggers", () => {
     ).toMatchObject([
       { detail: { schedules: 0, emails: "audited", events: "" } },
     ]);
-  });
-
-  it("go to one App: another can't take an address that's taken", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("taken"));
-    const { id: other } = await builder.api.apps.create({ name: "Other" });
-
-    await expect(
-      outcome(release(builder, other, intake("taken")))
-    ).resolves.toBe("workflow.email_taken");
-    // The App that has it keeps it in its next version.
-    await expect(
-      outcome(
-        release(builder, app, {
-          "workflows/lib/note.ts": "export const note = 1;\n",
-        })
-      )
-    ).resolves.toBe("ok");
-    await deliver("taken@grasp.test", invoiceMail());
-    await expect(runsOf(builder, app)).resolves.toHaveLength(1);
   });
 
   it("go to one App even when two take an address at once", async () => {

@@ -1,12 +1,9 @@
 import { collections } from "@grasp-os/brain/schema";
-import { workflowIdOf } from "@grasp-os/compiler";
 import type { AnyPermission } from "@grasp-os/sdk";
-import { aiStepCalls } from "@grasp-os/sdk/describe";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -37,7 +34,7 @@ import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appFor, findApp, versionFiles } from "./apps.ts";
+import { appFor, findApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf } from "./connections.ts";
@@ -838,119 +835,21 @@ const choicesFor = async (
   };
 };
 
-/** A workflow's AI step, and the `ai` permission it goes through. */
-export interface WorkflowAiStep {
-  /** The workflow's file, `workflows/<id>.ts`. */
-  readonly file: string;
-  readonly workflow: string;
-  /** Its name, null when not written as a literal. */
-  readonly step: string | null;
-  /** Its `binding`, null when it can't be read as a literal. */
-  readonly binding: string | null;
-  readonly line: number;
-}
-
-/**
- * The AI steps the workflows in `files` may take, by the model resource
- * each goes through (`step.llm`'s `binding`), read from their code
- * whether or not their outlines can be (`aiStepCalls`): a step in a `try`
- * runs all the same, and a workflow whose context can't be read counts
- * each `llm` call in it as a step whose model can't be read. Code that
- * doesn't parse gives none: it doesn't build.
- */
-export const workflowAiSteps = (
-  files: Readonly<Record<string, string>>
-): WorkflowAiStep[] =>
-  Object.entries(files).flatMap(([file, source]) => {
-    const workflow = workflowIdOf(file);
-    if (workflow === undefined) {
-      return [];
-    }
-    return (aiStepCalls(source) ?? []).map(({ name, binding, line }) => ({
-      file,
-      workflow,
-      step: name,
-      binding,
-      line,
-    }));
-  });
-
-/**
- * Why `step` can't go through `resources`: the release's declarations,
- * none for an App without one. Only the App's `ai` permission serves an AI
- * step (`stepModelBinding`), as the step brings its own schema, and only a
- * `binding` written as a literal can be checked. Undefined when it can.
- */
-export const aiStepProblem = (
-  resources: Readonly<Record<string, AnyPermission>>,
-  { workflow, step, binding }: WorkflowAiStep
-): string | undefined => {
-  const which =
-    step === null
-      ? `An AI step of workflow "${workflow}"`
-      : `AI step "${step}" of workflow "${workflow}"`;
-  if (binding === null) {
-    return `${which} goes through a model that can't be read: call it as \`step.llm("name", { binding: "ALIAS", … })\`, with \`step\` used only as \`step.method(…)\`.`;
-  }
-  const declared = Object.hasOwn(resources, binding)
-    ? resources[binding]
-    : undefined;
-  const named = `${which} goes through "${binding}"`;
-  if (declared === undefined) {
-    return `${named}, which this version declares no permission as: declare \`permissions: { ai: permission.ai({ … }) }\` in app.ts and name it \`"ai"\`.`;
-  }
-  if (declared["~permission"] !== "ai") {
-    return `${named}, a ${declared["~permission"]} permission: an AI step goes through the App's \`ai\` permission, \`"ai"\`.`;
-  }
-  return undefined;
-};
-
-/**
- * The AI steps of `app`'s workflows at `version`, as `workflow:<id>/<step>`,
- * by the model resource each goes through (`workflowAiSteps`): what a
- * review shows using a resource besides actions. A step whose binding or
- * name can't be read names none.
- */
-const workflowUsers = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<Map<string, string[]>> => {
-  const users = new Map<string, string[]>();
-  for (const { workflow, step, binding } of workflowAiSteps(
-    await versionFiles(env, app, version)
-  )) {
-    if (binding !== null && step !== null) {
-      users.set(binding, [
-        ...(users.get(binding) ?? []),
-        `workflow:${workflow}/${step}`,
-      ]);
-    }
-  }
-  return users;
-};
-
 /**
  * What uses `alias` in `release`: the paths of its actions that use it,
- * and the AI steps of its workflows that go through it (`workflowUsers`).
+ * as its manifest declares them.
  */
-const usersOf = (
-  release: Release,
-  alias: string,
-  steps: ReadonlyMap<string, readonly string[]>
-): string[] =>
-  [
-    ...Object.entries(release.app.operations)
-      .filter(
-        ([, operation]) =>
-          operation.kind === "action" &&
-          operation.uses.some(
-            (use) => use.type === "resource" && use.alias === alias
-          )
-      )
-      .map(([path]) => path),
-    ...(steps.get(alias) ?? []),
-  ].toSorted();
+const usersOf = (release: Release, alias: string): string[] =>
+  Object.entries(release.app.operations)
+    .filter(
+      ([, operation]) =>
+        operation.kind === "action" &&
+        operation.uses.some(
+          (use) => use.type === "resource" && use.alias === alias
+        )
+    )
+    .map(([path]) => path)
+    .toSorted();
 
 /**
  * How a review names each of `rows`' own bound target, for anyone who may
@@ -1125,10 +1024,6 @@ export const reviewResourceBindings = async (
     : undefined;
   const declaredRows = declared.flatMap(([alias]) => byAlias.get(alias) ?? []);
   const labelOf = await targetLabels(env, by, declaredRows);
-  const steps =
-    version === null
-      ? new Map<string, string[]>()
-      : await workflowUsers(env, found.id, version);
   const resources = await Promise.all(
     declared.map(async ([alias, declaration]): Promise<DeclaredResource> => {
       const row = byAlias.get(alias);
@@ -1138,7 +1033,7 @@ export const reviewResourceBindings = async (
           : await resolved(env, found.id, declaration, row, contracts.asks);
       return {
         ...declaredOf(declaration),
-        usedBy: release === undefined ? [] : usersOf(release, alias, steps),
+        usedBy: release === undefined ? [] : usersOf(release, alias),
         state: resolution?.state ?? "unbound",
         binding:
           row === undefined ? null : { ...toBinding(row), label: labelOf(row) },
@@ -1227,75 +1122,6 @@ export const resourceBindingsFor = (
 
 /** A held call its binding no longer serves. */
 const notServed = () => operationErrors.create("resource.unavailable");
-
-/** What a workflow's AI step asks the model gateway through (`stepModelBinding`). */
-export interface StepModel {
-  /** The model the binding's admin approved. */
-  readonly model: string;
-  /** The binding, as the gateway counts its spend. */
-  readonly binding: { readonly app: AppId; readonly alias: string };
-  /** The declaration's bound on the answer, for the step's request as a whole. */
-  readonly maxOutputTokens: number;
-}
-
-/**
- * The model binding a workflow's AI step of App `app`, at the version
- * `version` its run is pinned to, goes through (`step.llm`'s `binding`):
- * `alias` must name the `ai` permission that release declares (the step
- * brings its own schema), whose active
- * binding serves it now, as a request of the App's own would resolve it
- * (`resolved`): approved for exactly that declaration, its model still
- * allowed, its caps readable. Anything else, an App with no release
- * among it, is `resource.unavailable`. Read again for every attempt.
- * Accepted, as for an App's own requests: a revocation that lands while
- * one attempt's request is being admitted (after this read, before the
- * gateway sends it) doesn't stop that request; the next attempt finds it.
- */
-export const stepModelBinding = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  alias: string
-): Promise<StepModel> => {
-  let release: Release;
-  try {
-    release = await loadRelease(env, app, version);
-  } catch (error) {
-    // No sealed release (an App of the earlier layout) declares nothing;
-    // a revoked one runs no more.
-    if (
-      isExpectedError(error) &&
-      (error.code === "version.not_sealed" || error.code === "version.revoked")
-    ) {
-      throw notServed();
-    }
-    throw error;
-  }
-  const declaration = Object.hasOwn(release.app.resources, alias)
-    ? release.app.resources[alias]
-    : undefined;
-  if (declaration?.["~permission"] !== "ai") {
-    throw notServed();
-  }
-  const row = await activeRow(env, app, alias);
-  if (row === undefined) {
-    throw notServed();
-  }
-  const resolution = await resolved(env, app, declaration, row);
-  if (resolution.state !== "served" || resolution.target.kind !== "model") {
-    log.warn("resource_binding.not_served", {
-      binding: row.id,
-      contractId: row.contractId,
-      state: resolution.state,
-    });
-    throw notServed();
-  }
-  return {
-    model: resolution.target.model,
-    binding: { app, alias },
-    maxOutputTokens: declaration.maxOutputTokens,
-  };
-};
 
 /**
  * Refuses a held call of App `app` through binding `pin` unless the

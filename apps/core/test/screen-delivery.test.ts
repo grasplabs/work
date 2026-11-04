@@ -31,7 +31,6 @@ import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
-  firstVersion,
   openRpc,
   outcome,
   routed,
@@ -1017,69 +1016,6 @@ describe("screen delivery", { timeout: 60_000 }, () => {
       failed: { code: "notes.never_released", carriesData: false },
       read: true,
     });
-  });
-
-  it("holds every way from an App to code core didn't serve, and leaves the screen its own reports", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const { screens } = builder.api;
-    const live = await requestFor(app, "notes.live", {});
-
-    const events = await auditedDuring(async () => {
-      expect({
-        gated: await Promise.all([
-          outcome(called(builder, app)),
-          outcome(screens.frame(app, "").watchQuery(live, noop)),
-          outcome(screens.frame(app, "").startRun("invoices")),
-          outcome(screens.frame(app, "").runs("invoices")),
-          outcome(screens.frame(app, "").run("run-1")),
-          outcome(
-            screens
-              .frame(app, "")
-              .reviewDecision("run-1", "approve", { approved: true })
-          ),
-          outcome(
-            screens
-              .frame(app, "")
-              .confirmDecision("run-1", "approve", "revision", {
-                approved: true,
-              })
-          ),
-          outcome(
-            screens
-              .frame(app, "")
-              .decide("run-1", "approve", { approved: true })
-          ),
-          outcome(screens.frame(app, "").watchRuns("invoices", noop)),
-        ]),
-        version: await firstVersion(
-          async (onVersion) => await screens.watchVersion(app, onVersion)
-        ),
-        report: await outcome(
-          screens.report(
-            app,
-            { version: 1, screen: "notes" },
-            { kind: "error", message: "It didn't load" }
-          )
-        ),
-      }).toStrictEqual({
-        gated: Array.from({ length: 9 }, () => "screen.unreviewed"),
-        version: { type: "current", version: 1, recheck: false },
-        report: "ok",
-      });
-    });
-
-    expect(refusals(events).toSorted()).toStrictEqual([
-      "call/admission: unreviewed",
-      "confirmDecision/admission: unreviewed",
-      "decide/admission: unreviewed",
-      "reviewDecision/admission: unreviewed",
-      "run/admission: unreviewed",
-      "runs/admission: unreviewed",
-      "startRun/admission: unreviewed",
-      "watchQuery/admission: unreviewed",
-      "watchRuns/admission: unreviewed",
-    ]);
   });
 
   it("runs no action sent under a key without a lease of core's", async () => {

@@ -1,16 +1,9 @@
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { admitAttempt, admitChild } from "../src/workflows/quotas.ts";
-import { runActor, startRun } from "../src/workflows/runs.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
@@ -22,9 +15,8 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { withQuotas } from "./quota-limits.ts";
-import { finished, runObject, woken } from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { runObject } from "./runs.ts";
+import { outcome } from "./sign-in.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how often a step is tried, how long its steps run in all and how many
@@ -446,77 +438,5 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
   });
 });
 
-/** Starts a run of `workflow` under `parent`, as core starts a child run. */
-const startChild = async (
-  app: string,
-  workflow: string,
-  parent: string,
-  person: string
-): Promise<string> => {
-  const parentRun = runIdSchema.parse(parent);
-  const run = await startRun(env, {
-    app: appIdSchema.parse(app),
-    workflow: workflowIdSchema.parse(workflow),
-    input: null,
-    startedBy: person,
-    actor: runActor({ id: parentRun, appId: app, workflowId: workflow }),
-    parent: parentRun,
-  });
-  return run.id;
-};
-
-/** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
-const failedWith = async (run: string): Promise<unknown> => {
-  const events = await allEvents();
-  return events.find(
-    ({ action, target }) =>
-      action === "workflow.run.failed" && target?.id === run
-  )?.detail.error;
-};
-
-/** A step that takes about `ms`, then returns 1. */
-const working = (name: string, ms: number) =>
-  `  await step.do("${name}", { description: "Work" }, async () => {
-    await new Promise((resolve) => setTimeout(resolve, ${ms}));
-    return 1;
-  });`;
-
 // Kept until a JSON run shows it: an App run's lineage, as before.
-describe("an App run's lineage quotas", { timeout: 90_000 }, () => {
-  it("stop a lineage's steps once they have run its active time, across a restart, a long wait and a child, which starts no count of its own", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      // Two seconds of active time: a and b take 1.6, c takes the lineage
-      // past it, and d finds none left. The day's wait between a and b
-      // takes none, and the run is loaded anew after it.
-      ...workflowFiles(
-        "busy",
-        `${working("a", 800)}
-  await step.sleep("pause", { description: "Wait", duration: "1 day" });
-${working("b", 800)}
-${working("c", 800)}
-${working("d", 800)}
-  return 1;`,
-        { a: 1, b: 1, c: 1, d: 1 }
-      ),
-      ...workflowFiles("child", `${working("e", 10)}\n  return 1;`, { e: 1 }),
-    });
-
-    const result = await withQuotas({ workflowActiveMs: 2000 }, async () => {
-      const root = await builder.api.workflows.start(app, "busy");
-      await woken(root.id, "pause");
-      await finished(root.id);
-      const child = await startChild(app, "child", root.id, builder.userId);
-      await finished(child);
-      return {
-        root: await failedWith(root.id),
-        child: await failedWith(child),
-      };
-    });
-
-    expect(result).toStrictEqual({
-      root: "workflow.lineage_limit",
-      child: "workflow.lineage_limit",
-    });
-  });
-});
+describe("an App run's lineage quotas", { timeout: 90_000 }, () => {});

@@ -70,7 +70,6 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     expect(builds).toStrictEqual({
       screens: { status: "ok", diagnostics: [] },
-      workflows: { status: "none", diagnostics: [] },
     });
     // Opening it loads what the save built.
     await expect(
@@ -114,19 +113,17 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       "Broken"
     );
 
-    const { screens, workflows } = committed.builds;
+    const { screens } = committed.builds;
 
     const [typeError] = screens.diagnostics;
 
     expect({
       screens: [screens.status, ...where(screens)],
-      workflows: workflows.status,
       column: typeError?.column,
       message:
         typeError?.message.includes("not assignable to type 'number'") ?? false,
     }).toStrictEqual({
       screens: ["failed", "screens/desk.tsx:2 TS2322 error"],
-      workflows: "none",
       column: 9,
       message: true,
     });
@@ -192,7 +189,6 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
           error:
             "The build couldn't run now. It runs again when this is first used.",
         },
-        workflows: { status: "none" },
       },
     });
     // The warning says why, not only what kind of error.
@@ -236,7 +232,6 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
         app: appIdSchema.parse(crypto.randomUUID()),
         version: 1,
         files,
-        bindings: {},
       },
       { profile: "production" }
     );
@@ -258,7 +253,6 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
             error:
               "The build didn't finish in time. It runs again when this is first used.",
           },
-          workflows: { status: "none", diagnostics: [] },
         },
         firstUse: true,
         rebuilt: true,
@@ -399,7 +393,6 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
           app: appIdSchema.parse(crypto.randomUUID()),
           version: 1,
           files,
-          bindings: {},
         },
         { profile: "production" }
       );

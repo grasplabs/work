@@ -3,13 +3,11 @@ import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Member } from "../auth/identity.ts";
 import {
-  apps,
-  appVersions,
   permissions,
   sdkResourceBindings,
   workflowBindingApprovals,
@@ -17,63 +15,12 @@ import {
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { appWorkflowOverview } from "./overview.ts";
 
-// Which workflows use each connection, for Integrations: of the current
-// version of an App that holds an active permission on it, those whose
-// code calls the permission's binding, as the version's review read it
-// (`app_versions.workflow_calls`, what a run's calls are held to); and
-// each independent workflow whose current version declares a connector
-// binding that an active approval serves through the workflow's own
-// active permission on it, as Grasp's admin reads what workflows need
-// (admin-integrations.ts). Only the workflows the person can open, as the
-// Workflows page lists them: an App's through `workflowOverview`, an
-// independent one through `listWorkflowResources`.
-
-/** A workflow, as one key: its App and its ID. */
-const keyOf = (app: string, workflow: string): string =>
-  JSON.stringify([app, workflow]);
-
-/** The App workflows that use each connection, as `keyOf` keys. */
-const appWorkflowUses = async (env: Env): Promise<Map<string, Set<string>>> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      connectionId: permissions.objectId,
-      app: permissions.subjectId,
-      binding: permissions.binding,
-      calls: appVersions.workflowCalls,
-    })
-    .from(permissions)
-    .innerJoin(apps, eq(apps.id, permissions.subjectId))
-    .innerJoin(
-      appVersions,
-      and(
-        eq(appVersions.appId, apps.id),
-        eq(appVersions.version, apps.currentVersion)
-      )
-    )
-    .where(
-      and(
-        eq(permissions.objectType, "connection"),
-        eq(permissions.subjectType, "app"),
-        eq(permissions.status, "active"),
-        // A chat's request for its person's own connection is theirs alone.
-        eq(permissions.personal, false),
-        isNotNull(permissions.binding)
-      )
-    );
-  const uses = new Map<string, Set<string>>();
-  for (const { connectionId, app, binding, calls } of rows) {
-    for (const [workflow, { all }] of Object.entries(calls)) {
-      if (binding !== null && all.includes(binding)) {
-        const using = uses.get(connectionId) ?? new Set();
-        using.add(keyOf(app, workflow));
-        uses.set(connectionId, using);
-      }
-    }
-  }
-  return uses;
-};
+// Which independent workflows use each connection, for Integrations: each
+// whose current version declares a connector binding that an active
+// approval serves through the workflow's own active permission on it, as
+// Grasp's admin reads what workflows need (admin-integrations.ts). Only the
+// workflows the person can open (`listWorkflowResources`).
 
 /** A binding the current version of a live workflow declares, with its approval's target, if any. */
 export interface DeclaredBinding {
@@ -227,45 +174,19 @@ const independentWorkflowUses = async (
 };
 
 /**
- * Every connection a workflow `by` can open uses, with those workflows:
- * App workflows by App name, then workflow, then independent ones by name.
+ * Every connection a workflow `by` can open uses, with those workflows by
+ * name.
  */
 export const connectionWorkflows = async (
   env: Env,
   by: Member
 ): Promise<ConnectionWorkflows[]> => {
-  const [appUses, independentUses] = await Promise.all([
-    appWorkflowUses(env),
-    independentWorkflowUses(env),
-  ]);
-  const appKeys = new Set([...appUses.values()].flatMap((keys) => [...keys]));
-  const [summaries, resources] = await Promise.all([
-    appKeys.size === 0
-      ? []
-      : appWorkflowOverview(env, by, (app, workflow) =>
-          appKeys.has(keyOf(app, workflow))
-        ),
-    independentUses.size === 0 ? [] : listWorkflowResources(env, by),
-  ]);
-  const connectionIds = new Set([...appUses.keys(), ...independentUses.keys()]);
-  return [...connectionIds].flatMap((connectionId) => {
-    const usingApps = appUses.get(connectionId);
-    const usingIndependent = independentUses.get(connectionId);
-    const workflows: ConnectionWorkflow[] = [
-      ...summaries
-        .filter(
-          ({ app, workflow }) => usingApps?.has(keyOf(app, workflow)) === true
-        )
-        .map(({ app, appName, workflow }) => ({
-          kind: "app" as const,
-          app,
-          appName,
-          workflow,
-        })),
-      ...resources
-        .filter(({ id }) => usingIndependent?.has(id) === true)
-        .map(({ id, name }) => ({ kind: "independent" as const, id, name })),
-    ];
+  const uses = await independentWorkflowUses(env);
+  const resources = uses.size === 0 ? [] : await listWorkflowResources(env, by);
+  return [...uses].flatMap(([connectionId, using]) => {
+    const workflows: ConnectionWorkflow[] = resources
+      .filter(({ id }) => using.has(id))
+      .map(({ id, name }) => ({ id, name }));
     return workflows.length === 0 ? [] : [{ connectionId, workflows }];
   });
 };

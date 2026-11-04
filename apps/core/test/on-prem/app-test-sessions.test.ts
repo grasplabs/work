@@ -23,7 +23,6 @@ import {
 } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
-import { runOwnerOf } from "../../src/workflows/code.ts";
 import { person } from "../sealed-apps.ts";
 import {
   activation,
@@ -304,26 +303,6 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
       lastStartedInTime: true,
       gaveUpInTime: true,
     });
-  });
-
-  it("aren't held up by the App's own runs", async () => {
-    const built = await appWith(passing);
-    const giveUp = new AbortController();
-    const { ended: held } = await heldPlace(
-      runOwnerOf(built.app),
-      giveUp.signal
-    );
-    try {
-      await expect(activation(built)).resolves.toBe(1);
-      // Made current while the run's session still held its place, not
-      // once it ended on its CPU time.
-      await expect(
-        Promise.race([held, Promise.resolve("holding")])
-      ).resolves.toBe("holding");
-    } finally {
-      giveUp.abort();
-      await held;
-    }
   });
 
   it("refuse a session a suite wasn't answered: forged, or no number", async () => {

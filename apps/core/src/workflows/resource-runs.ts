@@ -64,8 +64,6 @@ import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
-import { attemptMethods, loadRunIsolate, runModule } from "./code.ts";
-import type { Settled, StepError } from "./code.ts";
 import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { childEndType } from "./event-envelopes.ts";
@@ -98,6 +96,12 @@ import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+} from "./sealed-isolate.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
 import {
   generatedForRunHost,
   sealedRun,
@@ -1031,7 +1035,7 @@ const resourceHostActivation = async (
             await admitAttempt(env, { ...admission, resource: owner }, attempt),
         }),
   });
-  const code = loadRunIsolate<ResourceAttemptHost>(
+  const code = loadSealedIsolate<ResourceAttemptHost>(
     env,
     {
       owner,
@@ -1042,7 +1046,7 @@ const resourceHostActivation = async (
           ...run.build.modules,
           [openRunModule]: openRunMain,
         }),
-      attemptMethods: resourceAttemptMethods,
+      attemptHostMethods: resourceAttemptMethods,
     },
     {
       onSession: (id) => {
@@ -1171,13 +1175,13 @@ export const sealedActivation = async (
           : await admitAttempt(env, { ...admission, resource: owner }, attempt),
     }
   );
-  const code = loadRunIsolate(
+  const code = loadSealedIsolate(
     env,
     {
       owner,
-      mainModule: runModule,
+      mainModule: sealedMainModule,
       modules: async () => await Promise.resolve(modules()),
-      attemptMethods,
+      attemptHostMethods,
     },
     {
       onSession: (id) => {

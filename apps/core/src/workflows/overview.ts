@@ -1,19 +1,13 @@
-import { workflowPaths } from "@grasp-os/compiler";
-import { describeWorkflow } from "@grasp-os/sdk/describe";
-import type { AppFiles } from "@grasp-os/shared/apps";
-import { messageOf } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   runIdSchema,
   workflowIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
-import { roleErrors } from "@grasp-os/shared/roles";
+import type { WorkflowId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
-  defaultTimeZone,
   failedRunDays,
   handledRunDays,
   maxFailedStarts,
@@ -26,20 +20,15 @@ import type {
   AppWorkflowSummary,
   LatestRun,
   ListedRun,
-  OutlineNode,
   ResourceListedRun,
   ResourceWorkflowSummary,
   RunFilterStatus,
   RunsPage,
   RunStatus,
-  WorkflowDetail,
-  WorkflowDryRun,
   WorkflowSummary,
-  WorkflowTrigger,
 } from "@grasp-os/shared/workflows";
 import {
   and,
-  asc,
   desc,
   eq,
   gt,
@@ -56,7 +45,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { appsBuiltBy } from "../app-access.ts";
-import { appFor, versionFiles } from "../apps.ts";
+import { appFor } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import {
   users,
@@ -68,10 +57,7 @@ import {
 import { inList } from "../db/d1.ts";
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
-import { declaredParams, dryRunTests, hasWorkflow } from "./code.ts";
 import { ownerKey, ownersSet, setWorkflowOwner } from "./owners.ts";
-import { paramValues } from "./param-values.ts";
-import { listParams } from "./params.ts";
 import type { RunRow as ResourceRunRow } from "./resource-runs.ts";
 import {
   hasOpenDecision,
@@ -934,254 +920,6 @@ export const listAllRuns = async (
         : { ...listed, status: "waiting", decision: answered };
     }),
     more: matched.length > runsPageSize,
-  };
-};
-
-/**
- * The outline without its code, for someone who doesn't build the App:
- * each step's description, name and kind, and the branches and loops
- * around them, without their conditions, heads, keys, parameters read or
- * literal options.
- */
-const withoutCode = (nodes: readonly OutlineNode[]): OutlineNode[] =>
-  nodes.map((node): OutlineNode => {
-    if (node.type === "step") {
-      const { key: _key, ...step } = node;
-      return { ...step, params: [], options: {}, code: "" };
-    }
-    if (node.type === "loop") {
-      return {
-        ...node,
-        header: "",
-        params: [],
-        steps: withoutCode(node.steps),
-      };
-    }
-    return {
-      ...node,
-      condition: "",
-      params: [],
-      steps: withoutCode(node.steps),
-      otherwise: withoutCode(node.otherwise),
-    };
-  });
-
-/** Whether `by` builds App `app`: the check a builder's call makes. */
-const buildsApp = async (
-  env: Env,
-  by: Identity,
-  app: AppId
-): Promise<boolean> => {
-  try {
-    await appFor(env, by, app, "builder");
-    return true;
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return false;
-    }
-    throw error;
-  }
-};
-
-/** A workflow's steps as its code reads, or why they can't be read. */
-const stepsOf = (
-  files: AppFiles,
-  workflow: WorkflowId
-): WorkflowDetail["steps"] => {
-  try {
-    return {
-      ok: true,
-      outline: describeWorkflow(files[workflowPaths(workflow).workflow] ?? ""),
-    };
-  } catch (error) {
-    return { ok: false, message: messageOf(error) };
-  }
-};
-
-/**
- * The triggers workflow `workflow` of App `app` has at `version`, in the
- * order its code declares them: the rows the version registered as it
- * was made current (trigger-registry.ts), from declarations checked then,
- * so its code isn't read or run again to show them.
- */
-const registeredTriggers = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  workflow: WorkflowId
-): Promise<WorkflowTrigger[]> => {
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.appId, app),
-        eq(workflowTriggers.version, version),
-        eq(workflowTriggers.workflowId, workflow)
-      )
-    )
-    .orderBy(asc(workflowTriggers.position));
-  return rows.flatMap((row): WorkflowTrigger[] => {
-    switch (row.type) {
-      case "schedule": {
-        return row.param === null
-          ? []
-          : [
-              {
-                type: "schedule",
-                position: row.position,
-                param: row.param,
-                timeZone: row.timeZone ?? defaultTimeZone,
-                nextRunAt: row.nextRunAt?.toISOString() ?? null,
-                stopped: row.failedStarts >= maxFailedStarts,
-              },
-            ];
-      }
-      case "email": {
-        return row.address === null
-          ? []
-          : [
-              {
-                type: "email",
-                position: row.position,
-                localPart: row.address,
-              },
-            ];
-      }
-      case "event": {
-        return row.event === null
-          ? []
-          : [{ type: "event", position: row.position, event: row.event }];
-      }
-      default: {
-        return row.type satisfies never;
-      }
-    }
-  });
-};
-
-/** A workflow of an App's current version, with the version's files. */
-interface CurrentWorkflow {
-  app: ListedApp;
-  workflow: WorkflowId;
-  version: number;
-  files: AppFiles;
-}
-
-/**
- * Workflow `workflow` of App `app`'s current version, for `by` with at
- * least `needed` in the App.
- */
-const currentWorkflow = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown,
-  needed: "user" | "builder"
-): Promise<CurrentWorkflow> => {
-  const found = await appFor(env, by, app, needed);
-  const id = workflowInputSchema.safeParse(workflow);
-  if (!id.success) {
-    throw invalid();
-  }
-  const version = found.currentVersion;
-  if (version === null) {
-    throw workflowErrors.create("workflow.not_found");
-  }
-  const files = await versionFiles(env, found.id, version);
-  if (!hasWorkflow(files, id.data)) {
-    throw workflowErrors.create("workflow.not_found");
-  }
-  const owner = await drizzle(env.DB)
-    .select({ name: users.name })
-    .from(users)
-    .where(eq(users.id, found.owner))
-    .get();
-  return {
-    app: {
-      id: found.id,
-      name: found.name,
-      ownerId: found.owner,
-      ownerName: owner?.name ?? null,
-      currentVersion: version,
-      workflows: [],
-    },
-    workflow: id.data,
-    version,
-    files,
-  };
-};
-
-/**
- * One workflow of an App's current version, for anyone with a role in the
- * App; its code (the outline's conditions, options and the like) and its
- * parameters only for its builders.
- */
-export const workflowDetail = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown
-): Promise<WorkflowDetail> => {
-  const current = await currentWorkflow(env, by, app, workflow, "user");
-  const [
-    {
-      apps: [summary],
-    },
-    builds,
-    triggers,
-  ] = await Promise.all([
-    summariesOf(env, by, [current], []),
-    buildsApp(env, by, current.app.id),
-    registeredTriggers(env, current.app.id, current.version, current.workflow),
-  ]);
-  if (summary === undefined) {
-    throw workflowErrors.create("workflow.not_found");
-  }
-  const steps = stepsOf(current.files, current.workflow);
-  return {
-    summary,
-    steps:
-      builds || !steps.ok
-        ? steps
-        : { ok: true, outline: { steps: withoutCode(steps.outline.steps) } },
-    triggers,
-    params: builds
-      ? await listParams(env, by, current.app.id, current.workflow)
-      : null,
-    setsParams: builds && !by.staff,
-  };
-};
-
-/**
- * Dry-runs a workflow's tests at its App's current version, with the
- * parameter values set now, as that version declares them; for the App's
- * builders. It makes no state changes, and records nothing.
- */
-export const dryRunWorkflow = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown
-): Promise<WorkflowDryRun> => {
-  const current = await currentWorkflow(env, by, app, workflow, "builder");
-  const { app: found, version, files } = current;
-  const values = await paramValues(
-    env,
-    found.id,
-    current.workflow,
-    await declaredParams(env, found.id, version, current.workflow, files)
-  );
-  return {
-    version,
-    runs: await dryRunTests(
-      env,
-      found.id,
-      version,
-      current.workflow,
-      files,
-      Object.fromEntries(values)
-    ),
   };
 };
 

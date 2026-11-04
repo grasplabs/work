@@ -47,8 +47,6 @@ import type {
 import { aiWaitEnded, aiWaitStarted } from "./ai-waits.ts";
 import type { AiWait } from "./ai-waits.ts";
 import { betweenStepsBudgetOf } from "./between-steps.ts";
-import { settling } from "./code.ts";
-import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
 import { engineAsks } from "./engine-asks.ts";
 import type { EngineAsk } from "./engine-asks.ts";
@@ -124,6 +122,8 @@ import {
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
+import { settling } from "./sealed-isolate.ts";
+import type { IsolateHostCalls, Settled, StepError } from "./sealed-isolate.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -1770,7 +1770,7 @@ const randomFraction = (): number => {
  */
 export class ResourceRunHost
   extends RpcTarget
-  implements RunHostCalls<ResourceAttemptHost>
+  implements IsolateHostCalls<ResourceAttemptHost>
 {
   readonly #env: Env;
   readonly #step: RunStep;

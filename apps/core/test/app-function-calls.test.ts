@@ -7,7 +7,6 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -23,7 +22,6 @@ import type { RunCaller } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -33,15 +31,11 @@ import {
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
 import { isRestricted, restrict } from "../src/restricted.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
 import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { endLiveRuns, finished, leave } from "./runs.ts";
+import { endLiveRuns, leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -430,93 +424,7 @@ export default app({
 `,
 });
 
-/** A workflow `id` whose one step calls its App's `asker.go`. */
-const askingWorkflow = (id: string): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("ask", { description: "Ask", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${JSON.stringify({ name: "asker.go", kind: "action" })}, {})) as Json
-  )
-);
-`,
-  [`workflows/${id}.workflow-tests.ts`]: `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./${id}.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { ask: null }, expect: {} }]);
-`,
-});
-
 type Sealed = Fixture & { release: Release };
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A greeting workflow's definition, named `name`. */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ greet: { set: { status: "done" } } }],
-  });
-
-/**
- * A workflow the CRM's owner publishes and binds to its `followUp`, which
- * an admin lets it start: so the CRM's own starts go through.
- */
-const bindFollowUp = async (admin: Person, crm: Sealed): Promise<void> => {
-  const workflow = await createWorkflowResource(
-    env,
-    crm.owner,
-    `follow-up-${crypto.randomUUID().slice(0, 8)}`
-  );
-  await publishWorkflowVersion(env, crm.owner, workflow.id, {
-    definition: definitionOf(workflow.name),
-    basedOn: null,
-  });
-  await bindWorkflowToApp(env, crm.owner, workflow.id, {
-    app: crm.app,
-    alias: "followUp",
-    version: 1,
-  });
-  const asked = await requestPermission(
-    env,
-    crm.owner,
-    {
-      subject: { type: "app", appId: crm.app },
-      object: { type: "workflow", workflowId: workflow.id },
-      actions: ["start"],
-      binding: "FOLLOW_UP",
-    },
-    {
-      app: async (named, role) => await appFor(env, crm.owner, named, role),
-      resource: async (ref, needed) => {
-        await requireResourceRole(env, crm.owner, ref, needed);
-      },
-    }
-  );
-  await grantPermission(env, admin, asked.id, {
-    version: crm.release.manifest.resourceVersion,
-  });
-};
 
 /** An App with `files`, sealed and current. */
 const sealedApp = async (
@@ -1153,158 +1061,11 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
   });
 });
 
-/** The value of a function's answer, as a step got it, if it answered. */
-const valueOf = (answer: unknown): unknown =>
-  z.object({ ok: z.literal(true), value: z.string() }).safeParse(answer).data
-    ?.value;
-
 // Kept until JSON runs reach parity: an App's own workflow's run, as
 // before.
 describe("a run calling another App's functions", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
-  });
-
-  it("starts no workflow of the App a run calls, in an action or after a commit", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await person("admin");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    await addMember(env, crm.owner, crm.app, {
-      type: "person",
-      id: builder.userId,
-      role: "user",
-    });
-    const kick = JSON.stringify({ name: "desk.kick", kind: "action" });
-    const later = JSON.stringify({
-      name: "desk.kickLater",
-      kind: "action",
-    });
-    const { id } = await builder.api.apps.create({ name: "Kicking desk" });
-    await published(id);
-    await release(builder, id, {
-      ...deskFiles(),
-      "workflows/kicker.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("kicker", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("kick", { description: "Kick", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    now: (await env.APP.callFunction(${kick}, {})) as Json,
-    later: (await env.APP.callFunction(${later}, {})) as Json,
-  }))
-);
-`,
-      "workflows/kicker.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./kicker.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { kick: null }, expect: {} }]);
-`,
-    });
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    await bindFollowUp(admin, crm);
-    const run = await builder.api.workflows.start(id, "kicker");
-    await finished(run.id);
-    const ended = await builder.api.workflows.status(run.id);
-    const output = z
-      .object({ now: z.unknown(), later: z.unknown() })
-      .parse(ended.output);
-    const intents = await env.DB.prepare(
-      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
-    )
-      .bind(crm.app)
-      .first<{ count: number }>();
-    // The same call from a screen starts the CRM's follow-up.
-    const deskApp = appIdSchema.parse(id);
-    const deskRelease = await loadRelease(env, deskApp, 1);
-    const fromScreen = await call(
-      { ...admin, userId: builder.userId, role: "builder", teams: [] },
-      { ...crm, app: deskApp, release: deskRelease },
-      "desk.kick"
-    );
-    const afterScreen = await env.DB.prepare(
-      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
-    )
-      .bind(crm.app)
-      .first<{ count: number }>();
-    expect({
-      status: ended.status,
-      now: valueOf(output.now),
-      later: valueOf(output.later),
-      started: intents?.count,
-      fromScreen,
-      afterScreen: afterScreen?.count,
-    }).toStrictEqual({
-      status: "completed",
-      now: '"error:resource.unavailable"',
-      later: "error:resource.unavailable",
-      started: 0,
-      fromScreen: "started",
-      afterScreen: 1,
-    });
-  });
-
-  it("starts no workflow two Apps down a run's chain either", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await person("admin");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    const desk = await sealedApp(deskFiles(), "Desk");
-    for (const sealed of [crm, desk]) {
-      // oxlint-disable-next-line no-await-in-loop -- one App after the other
-      await addMember(env, sealed.owner, sealed.app, {
-        type: "person",
-        id: builder.userId,
-        role: "user",
-      });
-    }
-    await bind(admin, desk, crm.app);
-    await bindFollowUp(admin, crm);
-    // A run of the Asker calls Desk's `desk.kick`, which calls the CRM's.
-    const { id } = await builder.api.apps.create({ name: "Asker" });
-    await published(id);
-    await release(builder, id, {
-      ...askerFiles("desk.kick"),
-      ...askingWorkflow("asking"),
-    });
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "next",
-      target: { kind: "app", appId: desk.app },
-      reviewed: { version: 1 },
-    });
-    const run = await builder.api.workflows.start(id, "asking");
-    await finished(run.id);
-    const ended = await builder.api.workflows.status(run.id);
-    const receipts = async () => {
-      const row = await env.DB.prepare(
-        "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
-      )
-        .bind(crm.app)
-        .first<{ count: number }>();
-      return row?.count;
-    };
-    const fromRun = await receipts();
-    // From a screen, the same chain starts the CRM's follow-up.
-    const asker = appIdSchema.parse(id);
-    const fromScreen = await call(
-      { ...admin, userId: builder.userId, role: "builder", teams: [] },
-      { ...crm, app: asker, release: await loadRelease(env, asker, 1) },
-      "asker.go"
-    );
-    expect({
-      ran: valueOf(ended.output),
-      fromRun,
-      fromScreen,
-      afterScreen: await receipts(),
-    }).toStrictEqual({
-      ran: '"error:resource.unavailable"',
-      fromRun: 0,
-      fromScreen: "started",
-      afterScreen: 1,
-    });
   });
 
   it("commits nothing in the App a run calls once the run's step lets go of its lease", async () => {

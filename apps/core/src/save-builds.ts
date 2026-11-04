@@ -3,8 +3,6 @@ import {
   buildFiles,
   isGeneratedPath,
   isLintedCode,
-  workflowFiles,
-  workflowsFolder,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import { generateModules, symbolicModules } from "@grasp-os/sdk/host";
@@ -24,12 +22,10 @@ import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { hostModules } from "./host-modules.ts";
 import { keepLints, readLints } from "./module-cache.ts";
-import type { WorkflowBindingKind } from "./permissions.ts";
 import { platformRunner } from "./platform-sandbox.ts";
 import {
   buildRefreshMs,
   buildScreens,
-  buildWorkflows,
   checkAppCode,
   leaseSlackMs,
   withinBuildWait,
@@ -72,12 +68,6 @@ interface SavedSource {
   app: AppId;
   version: number;
   files: Record<string, string>;
-  /**
-   * The binding names its workflows are typed by: a committed version's
-   * own (`workflowBindingKinds`), or for a draft the App's now
-   * (`appBindingKinds`), as a version committed from it would keep.
-   */
-  bindings: Readonly<Record<string, WorkflowBindingKind>>;
 }
 
 const toDiagnostic = ({
@@ -162,9 +152,8 @@ const savedBuild = async (
 };
 
 /**
- * Builds a saved version's screens and workflows, both at once, into the
- * build cache (screens.ts), so the version opens and runs without
- * building. Answers once both are done with how each
+ * Builds a saved version's screens into the build cache (screens.ts), so
+ * the version opens without building. Answers once done with how it
  * went, for whoever saved (an agent repairs what failed); none takes
  * longer than the build wait (`buildWaitMs` in screens.ts). Never throws, unless `signal` gave up on it: a build is never a reason
  * for a save to fail.
@@ -196,44 +185,33 @@ export const buildOnSave = async (
 ): Promise<SavedBuilds> => {
   const { files } = source;
   const options = { profile, signal };
-  const [screens, workflows] = await Promise.all([
-    savedBuild(
-      "screens",
-      source,
-      buildFiles,
-      // With the references its screens import, generated from these
-      // files themselves: neither a save nor a draft is sealed yet.
-      async () => {
-        const { files: withReferences, standIn } = await withDraftReferences(
-          env,
-          source.app,
-          source.version,
-          files,
-          options,
-          inspection
-        );
-        const built = await buildScreens(
-          env,
-          withReferences,
-          source.app,
-          options
-        );
-        return standIn ? { ...built, standIn: true as const } : built;
-      },
-      env,
-      signal
-    ),
-    savedBuild(
-      "workflows",
-      source,
-      workflowFiles,
-      async () =>
-        await buildWorkflows(env, files, source.app, source.bindings, options),
-      env,
-      signal
-    ),
-  ]);
-  return { screens, workflows };
+  const screens = await savedBuild(
+    "screens",
+    source,
+    buildFiles,
+    // With the references its screens import, generated from these
+    // files themselves: neither a save nor a draft is sealed yet.
+    async () => {
+      const { files: withReferences, standIn } = await withDraftReferences(
+        env,
+        source.app,
+        source.version,
+        files,
+        options,
+        inspection
+      );
+      const built = await buildScreens(
+        env,
+        withReferences,
+        source.app,
+        options
+      );
+      return standIn ? { ...built, standIn: true as const } : built;
+    },
+    env,
+    signal
+  );
+  return { screens };
 };
 
 /** A diagnostic of the App's layout (`server`) about `file`, in core's words. */
@@ -380,16 +358,13 @@ export const draftServerBuild = async (
 
 /**
  * The files Ultracite's rules read (`lint`): the App's TypeScript, but its
- * declarations, what core generates, and what is under `workflows/`, which
- * the agent never changes (app-no-workflows.ts).
+ * declarations and what core generates.
  */
 const lintedFiles = (files: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
-        isLintedCode(path) &&
-        !isGeneratedPath(path) &&
-        !path.startsWith(workflowsFolder.folder)
+        isLintedCode(path) && !isGeneratedPath(path)
     )
   );
 

@@ -28,18 +28,18 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import {
-  attemptMethods,
-  loadRunIsolate,
-  runModule,
-  runModules,
-} from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks } from "../src/workflows/host.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import { loadedActivation, runOf } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { inboxAt } from "../src/workflows/run-inboxes.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+  sealedMainModules,
+} from "../src/workflows/sealed-isolate.ts";
 import {
   sealedRun,
   sealedRunFrom,
@@ -306,16 +306,19 @@ const inboxRead = async (
       >,
     }
   );
-  const code = loadRunIsolate(env, {
+  const code = loadSealedIsolate(env, {
     owner: `test:${runId}`,
-    mainModule: runModule,
+    mainModule: sealedMainModule,
     modules: async () =>
       await Promise.resolve({
         ...run.build.sdk,
         [generatedModule]: readsInbox,
-        ...runModules({ module: generatedModule, refusal: "No workflow." }),
+        ...sealedMainModules({
+          module: generatedModule,
+          refusal: "No workflow.",
+        }),
       }),
-    attemptMethods,
+    attemptHostMethods,
   });
   const settled = z
     .object({ ok: z.literal(true), value: z.unknown() })
