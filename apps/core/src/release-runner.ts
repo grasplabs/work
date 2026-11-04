@@ -623,6 +623,7 @@ export const noStore = (): OpenStore => ({
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   id: "none" as OpenStore["id"],
   defineTables: unbound,
+  activate: unbound,
   get: unbound,
   claim: unbound,
   commit: unbound,

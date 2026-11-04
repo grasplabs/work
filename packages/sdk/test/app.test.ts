@@ -904,6 +904,41 @@ describe("uses", () => {
   });
 });
 
+describe("answers for a schema change", () => {
+  test("are recorded in the manifest, read back as declared, and checked against the schema", () => {
+    const { manifest } = inspectApp(
+      notes({
+        answers: [
+          { table: "notes", field: "rank", kind: "convert", to: "number" },
+          { table: "notes", field: "body", kind: "value", value: "" },
+        ],
+      })
+    );
+    expect({
+      answers: manifest.answers,
+      none: "answers" in inspectApp(notes()).manifest,
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
+      unknownField: refusal(() =>
+        looseNotes({
+          answers: [
+            { table: "notes", field: "colour", kind: "value", value: 1 },
+          ],
+        })
+      ),
+    }).toStrictEqual({
+      answers: [
+        { table: "notes", field: "rank", kind: "convert", to: "number" },
+        { table: "notes", field: "body", kind: "value", value: "" },
+      ],
+      none: false,
+      readBack: true,
+      unknownField: "`notes` has no field `colour` to answer for.",
+    });
+  });
+});
+
 describe("declarations", () => {
   test.each([
     ["`input`", { input: {}, returns: v.null() }, "not `input`"],

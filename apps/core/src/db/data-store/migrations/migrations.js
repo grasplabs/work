@@ -20,6 +20,7 @@ import m0017 from './0017_preferences_contract.sql';
 import m0018 from './0018_cascade_jobs.sql';
 import m0019 from './0019_search_docs.sql';
 import m0020 from './0020_record_changes.sql';
+import m0021 from './0021_schema_changes.sql';
 
   export default {
     journal,
@@ -44,7 +45,8 @@ m0016,
 m0017,
 m0018,
 m0019,
-m0020
+m0020,
+m0021
     }
   }
   

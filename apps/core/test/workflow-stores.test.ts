@@ -1,10 +1,11 @@
+import { declaredStoresOf } from "@grasp-os/open-workflow/stores";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { deleteStore, shareStore } from "../src/data-stores.ts";
+import { deleteStore, openStore, shareStore } from "../src/data-stores.ts";
 import {
   candidateBuildOf,
   createWorkflowResource,
@@ -14,7 +15,9 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
+import { commit } from "./pending-stores.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { newRecordId } from "./store-schemas.ts";
 
 // The stores a standalone workflow declares (GRA-682 slice 3,
 // workflow-stores.ts), from its threat model: a store is created only by
@@ -123,6 +126,29 @@ const storesOf = async (id: string) => {
       deletedAt: number | null;
     }>();
   return results;
+};
+
+/**
+ * Puts an order whose total is a number into workflow `id`'s `intake`
+ * store, under the schema `definition` declares for it: a record a
+ * version making the total text doesn't fit.
+ */
+const putOrder = async (id: string, definition: string): Promise<void> => {
+  const stores = await storesOf(id);
+  const named = stores.find(({ name }) => name === "intake");
+  const declaredStores = await declaredStoresOf(definition);
+  const declared = declaredStores.get("intake");
+  if (named === undefined || declared === undefined) {
+    throw new Error("No intake store");
+  }
+  await commit(await openStore(env, named.storeId), declared.schemaHash, [
+    {
+      op: "insert",
+      table: "orders",
+      id: newRecordId(),
+      fields: { customer: "acme", total: 1 },
+    },
+  ]);
 };
 
 /** The store bindings of version `version` of workflow `id`. */
@@ -280,10 +306,12 @@ describe("stores a workflow declares", () => {
       })
     );
     const other = await newWorkflow(ada);
+    const firstDefinition = definitionOf(other.name, "1.0.0", intake(orders()));
     const first = await publishWorkflowVersion(env, ada, other.id, {
-      definition: definitionOf(other.name, "1.0.0", intake(orders())),
+      definition: firstDefinition,
       basedOn: null,
     });
+    await putOrder(other.id, firstDefinition);
     // Nor dropped by them: a version declaring none would unbind them.
     const dropped = await outcome(
       publishWorkflowVersion(env, staff, other.id, {
@@ -325,10 +353,12 @@ describe("stores a workflow declares", () => {
     const ada = await person("builder");
     const admin = await person("admin");
     const { id, name } = await newWorkflow(ada);
+    const firstDefinition = definitionOf(name, "1.0.0", intake(orders()));
     const first = await publishWorkflowVersion(env, ada, id, {
-      definition: definitionOf(name, "1.0.0", intake(orders())),
+      definition: firstDefinition,
       basedOn: null,
     });
+    await putOrder(id, firstDefinition);
     const { intake: kept } = intake(orders());
     const extra = { extra: kept };
     // `extra` is created first, then `intake`'s narrowed schema stops the

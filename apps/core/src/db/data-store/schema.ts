@@ -278,6 +278,12 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
   planHash: text("plan_hash").notNull(),
   /** The plan, as canonical JSON: what it added and retained. */
   plan: text().notNull(),
+  /**
+   * The consumer's answers for fields a narrowing may not fit
+   * (store-schema-changes.ts), as canonical JSON `[answer, ...]`: what
+   * its activation rewrites the records that don't fit with.
+   */
+  answers: text().notNull().default("[]"),
   createdAt: integer("created_at").notNull(),
   /**
    * When the pending target this receipt waited on was abandoned
@@ -461,6 +467,71 @@ export const backfills = sqliteTable(
     uniqueIndex("sdk_schema_backfills_one_pending")
       .on(sql`(${table.state} <> 'complete')`)
       .where(sql`state <> 'complete'`),
+  ]
+);
+
+/**
+ * The schema changes the store applied as a release was made current,
+ * after checking every record (store-schema-changes.ts): a narrowing, a
+ * conversion, a rename, a changed access mode or row rule. Each with the
+ * contract before and after it, the schemas it left behind, and when it
+ * was undone. Never removed: the store's record of how its contract
+ * moved.
+ */
+export const schemaChanges = sqliteTable(
+  "sdk_schema_changes",
+  {
+    changeId: integer("change_id").primaryKey({ autoIncrement: true }),
+    /** The contract before, its hash and its canonical manifest. */
+    baseHash: text("base_hash").notNull(),
+    baseManifest: text("base_manifest").notNull(),
+    /** The contract after. */
+    contractHash: text("contract_hash").notNull(),
+    /** The schema whose activation applied it. */
+    schemaHash: text("schema_hash").notNull(),
+    /** The plan, as canonical JSON. */
+    plan: text().notNull(),
+    /** The schemas it left behind, as canonical JSON: `[hash, ...]`. */
+    superseded: text().notNull(),
+    /** How many records it rewrote. */
+    rewritten: integer().notNull(),
+    appliedAt: integer("applied_at").notNull(),
+    /** When it was undone: its records hold what they held before again. */
+    undoneAt: integer("undone_at"),
+  },
+  (table) => [index("sdk_schema_changes_contract").on(table.contractHash)]
+);
+
+/**
+ * What a schema change (`sdk_schema_changes`) rewrote: each record's
+ * document as it was before, and the revision the change wrote it at.
+ * Undoing the change puts the document back where the record is still at
+ * that revision; one edited since is checked against the contract before
+ * instead, never overwritten. Kept until the store's contract moves past
+ * the change, when no undo can reach it any more; a person's erasure
+ * clears the documents of records they own.
+ */
+export const schemaChangeValues = sqliteTable(
+  "sdk_schema_change_values",
+  {
+    changeId: integer("change_id").notNull(),
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** The revision the change wrote the record at. */
+    revision: integer().notNull(),
+    /** The document before the change; null once erased. */
+    valueJson: text("value_json"),
+    /** The schema the record was last written under before the change. */
+    schemaHash: text("schema_hash").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.changeId, table.tableId, table.recordId],
+    }),
+    // What a record's deletion removes with it (this migration's trigger).
+    index("sdk_schema_change_values_record").on(table.tableId, table.recordId),
+    index("sdk_schema_change_values_owner").on(table.ownerId),
   ]
 );
 

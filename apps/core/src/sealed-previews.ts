@@ -1634,10 +1634,19 @@ export class SealedPreviews {
     }
     const store = openFixtureStore(this.#env, id);
     try {
-      await store.defineTables(manifestText(release.app.schema), {
-        resourceId: app,
-        resourceVersion: running.version,
-      });
+      const consumer = { resourceId: app, resourceVersion: running.version };
+      const defined = await store.defineTables(
+        manifestText(release.app.schema),
+        consumer,
+        [],
+        (release.app.answers ?? []).map((answer) => ({ ...answer }))
+      );
+      // The preview's own store: its version is current there at once, so
+      // a change that checks records is applied now (a dry run already
+      // passed, or the define refused with its questions).
+      if (defined.contract.awaits) {
+        await store.activate(defined.schemaHash, consumer);
+      }
     } catch (error) {
       // Discarded since it was checked: forgotten, so the next call starts
       // a new one rather than find it again.

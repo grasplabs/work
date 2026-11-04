@@ -29,12 +29,14 @@ import type {
   WorkflowPermission,
 } from "./permissions.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
+import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type {
   AccessMode,
   SchemaAccess,
   SchemaManifest,
 } from "./schema-manifest.ts";
+import type { SchemaAnswer } from "./schema-plan.ts";
 import type { AnyTable, SchemaDefinition } from "./schema.ts";
 import { functionState, isServerFunction } from "./server.ts";
 import type { AnyFunction, FunctionKind, Visibility } from "./server.ts";
@@ -180,6 +182,14 @@ export interface AppDefinition<
    * schema, which only the host runs.
    */
   readonly migrations?: readonly Migration[];
+  /**
+   * Its answers for the records a change of its schema doesn't fit
+   * (schema-plan.ts, `SchemaAnswer`): for one field each, a value, another
+   * field's value, a map of the values they hold, or a standard
+   * conversion. The store checks every record as the version is made
+   * current, and rewrites only those that don't fit.
+   */
+  readonly answers?: readonly SchemaAnswer[];
 }
 
 /**
@@ -310,6 +320,8 @@ export interface AppManifest {
   readonly people?: true;
   /** Its migrations, by name, in the order declared. */
   readonly migrations: Readonly<Record<string, MigrationManifest>>;
+  /** Its answers for a schema change, when it declares any. */
+  readonly answers?: readonly SchemaAnswer[];
 }
 
 /** What the host runs an App from: its manifest and its handlers by path. */
@@ -361,6 +373,7 @@ const appKeys: ReadonlySet<string> = new Set([
   "preferences",
   "permissions",
   "migrations",
+  "answers",
 ]);
 
 /**
@@ -1354,6 +1367,8 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
     manifest
   );
 
+  const answers = readSchemaAnswers(definition.answers, manifest, refuse);
+
   const made: App<Tables> = Object.freeze({ name, schema });
   inspections.set(made, {
     manifest: deepFreeze({
@@ -1368,6 +1383,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       preferences,
       ...(people ? { people: true } : {}),
       migrations,
+      ...(answers.length > 0 ? { answers } : {}),
     }),
     functions,
     migrations: migrationsByName,

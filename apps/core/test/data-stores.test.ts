@@ -407,15 +407,14 @@ describe("schemas", () => {
     });
   });
 
-  it("a changed access mode needs a migration, either way", async () => {
+  it("a changed access mode waits for its version to be made current", async () => {
     const store = await openStore(env, await createStore(env, builder));
-    await store.defineTables(manifestText(notesManifest()));
-    await expect(
-      store.defineTables(manifestText(notesManifest({ read: "appMembers" })))
-    ).rejects.toMatchObject({
-      code: "migration.required",
-      details: { changes: [{ table: "notes", reason: "access_changed" }] },
-    });
+    const first = await store.defineTables(manifestText(notesManifest()));
+    const looser = await store.defineTables(
+      manifestText(notesManifest({ read: "appMembers" }))
+    );
+    expect(looser.contract).toMatchObject({ pending: true, awaits: true });
+    expect(looser.contract.hash).not.toBe(first.contract.hash);
   });
 
   it("indexes declared in another order alone are the same schema", async () => {

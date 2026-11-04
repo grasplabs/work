@@ -148,6 +148,13 @@
       "when": 1793716856293,
       "tag": "0020_record_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1793807465220,
+      "tag": "0021_schema_changes",
+      "breakpoints": true
     }
   ]
 }

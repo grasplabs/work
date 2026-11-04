@@ -188,13 +188,21 @@ export const provideWorkflowStores = async (
     const storeId = await storeFor(env, by, workflowId, name);
     // oxlint-disable-next-line no-await-in-loop -- see above
     const opened = await openStore(env, storeId);
+    const consumer = { resourceId: workflowId, resourceVersion: version };
     // oxlint-disable-next-line no-await-in-loop -- see above
     const defined = await defineSchemaOnStore(
       env,
       opened,
       manifestText(store.manifest),
-      { resourceId: workflowId, resourceVersion: version }
+      consumer
     );
+    // A published version runs at once: a change that checks records
+    // (sdk schema-plan.ts, `activates`) is applied now, every record
+    // checked, or the publication fails with its questions.
+    if (defined.contract.awaits) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await opened.activate(defined.schemaHash, consumer);
+    }
     if (defined.schemaHash !== store.schemaHash) {
       throw new Error("The store defined another schema than the workflow's");
     }

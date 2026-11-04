@@ -1,3 +1,4 @@
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { UploadState } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -110,13 +111,15 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     manifest: string,
     consumer?: SchemaConsumer,
-    declared?: StoreMigration[]
+    declared?: StoreMigration[],
+    answers?: SchemaAnswer[]
   ): Promise<DefinedTables> {
     return await this.#live().defineTables(
       storeId,
       manifest,
       consumer,
-      declared
+      declared,
+      answers
     );
   }
 
@@ -162,12 +165,12 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.activateReady`. */
-  activateReady(
+  async activateReady(
     storeId: StoreId,
     schemaHash: string,
     consumer: SchemaConsumer
-  ): SchemaStatus {
-    return this.#live().activateReady(storeId, schemaHash, consumer);
+  ): Promise<SchemaStatus> {
+    return await this.#live().activateReady(storeId, schemaHash, consumer);
   }
 
   /** `StoreHost.schemaStatus`. */

@@ -1,3 +1,4 @@
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
@@ -39,9 +40,14 @@ import { runEngine } from "./workflows/engine.ts";
 // A release sealed on that schema runs on the store only once the
 // store's contract holds its schema: core asks the store, the authority
 // on its own contract, before it makes such a release current
-// (`requireStoreSchemaActive`). A contract only ever widens, so a release
-// found in force stays so, and nothing between the question and the
-// change can undo the answer. Threat model, and how each is closed:
+// (`requireStoreSchemaActive`). A change that checks the store's records
+// (a narrowing, a conversion, a changed access mode or row rule;
+// store-schema-changes.ts) is applied by the store as its release is
+// made current (`activateReady`), all or nothing; the schemas it no
+// longer covers are left behind there, so a release another one's
+// activation left behind meanwhile writes nothing on the store
+// (`migration.incompatible_write`) rather than records that don't fit.
+// Threat model, and how each is closed:
 //
 // - The backfill stops for good (its run ran out of retries, its start
 //   was lost, the engine's retention removed it) and every schema change
@@ -333,11 +339,12 @@ export const defineSchemaOnStore = async (
   store: OpenStore,
   manifest: string,
   consumer: SchemaConsumer,
-  migrations: StoreMigration[] = []
+  migrations: StoreMigration[] = [],
+  answers: SchemaAnswer[] = []
 ): Promise<DefinedTables> => {
   let defined: DefinedTables;
   try {
-    defined = await store.defineTables(manifest, consumer, migrations);
+    defined = await store.defineTables(manifest, consumer, migrations, answers);
   } catch (error) {
     if (
       isExpectedError(error) &&

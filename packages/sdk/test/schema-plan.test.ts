@@ -4,6 +4,7 @@ import {
   manifestText,
   planSchemaChange,
   readSchemaManifest,
+  schemaCovered,
   schemaManifest,
 } from "../src/host.ts";
 import type { SchemaAccess, SchemaManifest, SchemaPlan } from "../src/host.ts";
@@ -11,7 +12,8 @@ import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type { ValueShape } from "../src/values.ts";
 
 // How a store's data contract changes when it is handed a schema: which
-// changes apply on their own and which need a migration (spec 17.1,
+// changes apply on their own, which the store checks every record for as
+// their release is made current, and which need a migration (spec 17.1,
 // 17.4). Pure, so unit tests; the store applying a plan is tested through
 // the store (apps/core/test/schema-contract.test.ts).
 
@@ -60,6 +62,16 @@ const contractOf = (plan: SchemaPlan): SchemaManifest => {
     throw new Error(`Refused: ${JSON.stringify(plan.refused)}`);
   }
   return plan.contract;
+};
+
+/** The plan's checks, each with its answer, or a failed test. */
+const checksOf = (plan: SchemaPlan) => {
+  contractOf(plan);
+  return plan.checks.map(({ table, field, answer }) => ({
+    table,
+    field,
+    answer,
+  }));
 };
 
 /** The plan's refusals, or a failed test. */
@@ -268,7 +280,7 @@ describe("safe changes", () => {
     expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
   });
 
-  test("an enum's members in another order are no change; a union's are", () => {
+  test("an enum's members in another order are no change; a new one widens it", () => {
     const status = (values: [string, ...string[]]) =>
       notes({ ...noteFields, status: v.enum(values).optional() });
     const contract = contractOf(
@@ -278,28 +290,14 @@ describe("safe changes", () => {
     expect(plan).toMatchObject({ accepted: true, changed: false });
     expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
     expect(
-      refusedOf(planSchemaChange(contract, status(["done", "open", "late"])))
-    ).toStrictEqual([
-      { table: "notes", field: "status", reason: "field_changed" },
-    ]);
-    const either = (first: "string" | "number") =>
-      notes({
-        ...noteFields,
-        size:
-          first === "string"
-            ? v.union(v.string(), v.number()).optional()
-            : v.union(v.number(), v.string()).optional(),
-      });
-    expect(
-      refusedOf(
-        planSchemaChange(
-          contractOf(planSchemaChange(null, either("string"))),
-          either("number")
-        )
-      )
-    ).toStrictEqual([
-      { table: "notes", field: "size", reason: "field_changed" },
-    ]);
+      planSchemaChange(contract, status(["done", "open", "late"]))
+    ).toMatchObject({
+      accepted: true,
+      changed: true,
+      activates: false,
+      widenedFields: [{ table: "notes", field: "status" }],
+      checks: [],
+    });
   });
 
   test("an enum in a record's values, or in a field named `value`, may reorder too", () => {
@@ -316,21 +314,10 @@ describe("safe changes", () => {
       changed: false,
     });
     expect(
-      refusedOf(planSchemaChange(contract, nested(["a", "c"]))).map(
+      checksOf(planSchemaChange(contract, nested(["a", "c"]))).map(
         ({ field }) => field
       )
     ).toStrictEqual(["detail", "tags", "value"]);
-  });
-
-  test("a default isn't normalized: another default is a change", () => {
-    const status = (fallback: string) =>
-      notes({
-        ...noteFields,
-        status: v.array(v.string()).default([fallback, "z"]),
-      });
-    expect(refusedOf(planSchemaChange(status("a"), status("b")))).toStrictEqual(
-      [{ table: "notes", field: "status", reason: "field_changed" }]
-    );
   });
 
   test("an older version is compatible with the contract it grew into", () => {
@@ -340,6 +327,7 @@ describe("safe changes", () => {
       accepted: true,
       changed: false,
     });
+    expect(schemaCovered(contract, v1)).toBeTruthy();
   });
 
   test("a version that leaves out one addition and adds another keeps both", () => {
@@ -360,6 +348,217 @@ describe("safe changes", () => {
       "colour",
       "title",
     ]);
+  });
+});
+
+describe("a widening", () => {
+  test("applies at once, every record fitting it, and the version before stays covered", () => {
+    for (const title of [
+      v.string().min(1).max(500),
+      v.string().max(200),
+      v.string().min(1).max(200).optional(),
+      v.string().min(1).max(200).nullable(),
+    ]) {
+      const plan = planSchemaChange(v1, notes({ ...noteFields, title }));
+      expect(plan).toMatchObject({
+        accepted: true,
+        changed: true,
+        activates: false,
+        widenedFields: [{ table: "notes", field: "title" }],
+        checks: [],
+      });
+      // Every value version 1 writes, the widened contract takes.
+      expect(schemaCovered(contractOf(plan), v1)).toBeTruthy();
+    }
+  });
+
+  test("a required field left out stays in the contract as optional", () => {
+    const plan = planSchemaChange(
+      v1,
+      notes({ archivedAt: noteFields.archivedAt }, {})
+    );
+    expect(plan).toMatchObject({
+      accepted: true,
+      activates: false,
+      retainedFields: [{ table: "notes", field: "title" }],
+    });
+    expect(contractOf(plan).tables.notes?.fields.title).toMatchObject({
+      kind: "string",
+      presence: "optional",
+    });
+  });
+
+  test("another default changes no record", () => {
+    const status = (fallback: string) =>
+      notes({
+        ...noteFields,
+        status: v.array(v.string()).default([fallback, "z"]),
+      });
+    expect(planSchemaChange(status("a"), status("b"))).toMatchObject({
+      accepted: true,
+      activates: false,
+      widenedFields: [{ table: "notes", field: "status" }],
+    });
+  });
+});
+
+describe("a change the store checks every record for", () => {
+  test("a narrowing, a type change or a field made required waits for activation", () => {
+    for (const title of [
+      v.number(),
+      v.string().min(1).max(100),
+      v.string().email(),
+    ]) {
+      const plan = planSchemaChange(v1, notes({ ...noteFields, title }));
+      expect(plan).toMatchObject({ accepted: true, activates: true });
+      expect(checksOf(plan)).toStrictEqual([
+        { table: "notes", field: "title", answer: null },
+      ]);
+      // Version 1's writes may not fit the narrowed contract.
+      expect(schemaCovered(contractOf(plan), v1)).toBeFalsy();
+    }
+    const required = planSchemaChange(
+      v1,
+      notes({ ...noteFields, archivedAt: v.timestamp() })
+    );
+    expect(checksOf(required)).toStrictEqual([
+      { table: "notes", field: "archivedAt", answer: null },
+    ]);
+  });
+
+  test("a required or nullable-only field added is checked: records must hold it", () => {
+    const v2 = notes({
+      ...noteFields,
+      category: v.string().default("general"),
+      priority: v.number(),
+      summary: v.string().nullable(),
+    });
+    const plan = planSchemaChange(v1, v2);
+    expect(plan).toMatchObject({
+      accepted: true,
+      activates: true,
+      filledFields: [{ table: "notes", field: "category" }],
+    });
+    expect(checksOf(plan)).toStrictEqual([
+      { table: "notes", field: "priority", answer: null },
+      { table: "notes", field: "summary", answer: null },
+    ]);
+  });
+
+  test("offers the answers that suit the change", () => {
+    const status = (values: [string, ...string[]]) =>
+      notes({ ...noteFields, status: v.enum(values) });
+    const renamed = planSchemaChange(
+      status(["todo", "done"]),
+      status(["open", "done"])
+    );
+    const typed = planSchemaChange(
+      notes({ ...noteFields, size: v.string() }),
+      notes({ ...noteFields, size: v.number() })
+    );
+    const added = planSchemaChange(
+      v1,
+      notes({ ...noteFields, size: v.number() })
+    );
+    expect({
+      renamed: renamed.checks.map(({ answers }) => answers),
+      typed: typed.checks.map(({ answers }) => answers),
+      added: added.checks.map(({ answers }) => answers),
+    }).toStrictEqual({
+      renamed: [["value", "field", "map"]],
+      typed: [["value", "field", "convert"]],
+      added: [["value", "field"]],
+    });
+  });
+
+  test("carries the App's answer for the field, and ignores answers for other fields", () => {
+    const status = (values: [string, ...string[]]) =>
+      notes({ ...noteFields, status: v.enum(values) });
+    const answer = {
+      table: "notes",
+      field: "status",
+      kind: "map",
+      values: { todo: "open" },
+    } as const;
+    const plan = planSchemaChange(
+      status(["todo", "done"]),
+      status(["open", "done"]),
+      {
+        answers: [
+          answer,
+          { table: "notes", field: "title", kind: "value", value: "x" },
+        ],
+      }
+    );
+    expect(checksOf(plan)).toStrictEqual([
+      { table: "notes", field: "status", answer },
+    ]);
+  });
+
+  test("a changed access mode or row rule changes no record, and applies at activation", () => {
+    const shared: SchemaAccess = {
+      tables: { notes: { read: "appMembers", write: "appMembers" } },
+    };
+    const fields = { title: v.string(), team: v.string() };
+    const plain = schemaManifest(
+      defineSchema({ notes: defineTable(fields) }),
+      shared
+    );
+    const byTeam = schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({ read: [rows.team("team")] }),
+      }),
+      shared
+    );
+    const owned = schemaManifest(
+      defineSchema({ notes: defineTable(fields) }),
+      ownerOnly
+    );
+    for (const [before, after] of [
+      [plain, byTeam],
+      [byTeam, plain],
+      [plain, owned],
+      [owned, plain],
+    ] as const) {
+      const plan = planSchemaChange(before, after);
+      expect(plan).toMatchObject({
+        accepted: true,
+        activates: true,
+        ruleChanges: ["notes"],
+        checks: [],
+      });
+      expect(contractOf(plan).tables.notes?.access).toStrictEqual(
+        after.tables.notes?.access
+      );
+      expect(contractOf(plan).tables.notes?.rules).toStrictEqual(
+        after.tables.notes?.rules
+      );
+      // The data is the same: either version's writes fit.
+      expect(schemaCovered(contractOf(plan), before)).toBeTruthy();
+    }
+  });
+
+  test("a rename takes the old field's value, and keeps the old field", () => {
+    const before = notes({ ...noteFields, body: v.string() });
+    const after = notes({ ...noteFields, text: v.string() });
+    const renames = [{ table: "notes", from: "body", to: "text" }];
+    const plan = planSchemaChange(before, after, { renames });
+    expect(plan).toMatchObject({
+      accepted: true,
+      activates: true,
+      renames,
+      retainedFields: [{ table: "notes", field: "body" }],
+    });
+    expect(checksOf(plan)).toStrictEqual([
+      {
+        table: "notes",
+        field: "text",
+        answer: { table: "notes", field: "text", kind: "field", from: "body" },
+      },
+    ]);
+    expect(contractOf(plan).tables.notes?.fields.body?.presence).toBe(
+      "optional"
+    );
   });
 });
 
@@ -385,32 +584,19 @@ describe("changes that need a migration", () => {
     ]);
   });
 
-  test("a required or nullable-only field added is refused: it has no value to fill in", () => {
-    const v2 = notes({
-      ...noteFields,
-      category: v.string().default("general"),
-      priority: v.number(),
-      summary: v.string().nullable(),
-    });
-    expect(refusedOf(planSchemaChange(v1, v2))).toStrictEqual([
-      { table: "notes", field: "priority", reason: "required_field_added" },
-      { table: "notes", field: "summary", reason: "required_field_added" },
+  test("a required reference or file added is refused: the store's indexes would have to follow", () => {
+    expect(
+      refusedOf(
+        planSchemaChange(linkedNotes({}), linkedNotes({ tag: v.id("tags") }))
+      )
+    ).toStrictEqual([
+      { table: "notes", field: "tag", reason: "required_field_added" },
     ]);
-  });
-
-  test("any change to a field's descriptor is refused", () => {
-    for (const title of [
-      v.number(),
-      v.string().min(1).max(100),
-      v.string().min(1).max(200).optional(),
-      v.string().min(1).max(200).default("Untitled"),
-    ]) {
-      expect(
-        refusedOf(planSchemaChange(v1, notes({ ...noteFields, title })))
-      ).toStrictEqual([
-        { table: "notes", field: "title", reason: "field_changed" },
-      ]);
-    }
+    expect(
+      refusedOf(planSchemaChange(v1, notes({ ...noteFields, scan: v.file() })))
+    ).toStrictEqual([
+      { table: "notes", field: "scan", reason: "required_field_added" },
+    ]);
   });
 
   test("a field turned into a reference, or pointed at another table, is refused", () => {
@@ -430,75 +616,52 @@ describe("changes that need a migration", () => {
     ).toStrictEqual(refusal);
   });
 
-  test("a changed access mode is refused, looser or tighter", () => {
-    const shared = notes(noteFields, undefined, {
-      tables: { notes: { read: "appMembers", write: "owner" } },
-    });
-    expect(refusedOf(planSchemaChange(v1, shared))).toStrictEqual([
-      { table: "notes", reason: "access_changed" },
-    ]);
-    expect(refusedOf(planSchemaChange(shared, v1))).toStrictEqual([
-      { table: "notes", reason: "access_changed" },
-    ]);
-  });
-
-  test("a changed row rule is refused, looser or tighter, as an access mode is", () => {
+  test("an answer or a rename that would rewrite a field a row rule reads is refused", () => {
     const shared: SchemaAccess = {
       tables: { notes: { read: "appMembers", write: "appMembers" } },
     };
-    const fields = { title: v.string(), team: v.string() };
-    const plain = schemaManifest(
-      defineSchema({ notes: defineTable(fields) }),
-      shared
-    );
-    const byTeam = schemaManifest(
-      defineSchema({
-        notes: defineTable(fields).access({ read: [rows.team("team")] }),
-      }),
-      shared
-    );
-    expect({
-      added: refusedOf(planSchemaChange(plain, byTeam)),
-      removed: refusedOf(planSchemaChange(byTeam, plain)),
-      kept: planSchemaChange(byTeam, byTeam).accepted,
-    }).toStrictEqual({
-      added: [{ table: "notes", reason: "access_changed" }],
-      removed: [{ table: "notes", reason: "access_changed" }],
-      kept: true,
-    });
-  });
-
-  test("a required field left out is refused: the schema's inserts would lack it", () => {
+    const ruled = (team: ReturnType<typeof v.string>, more: ValueShape = {}) =>
+      schemaManifest(
+        defineSchema({
+          notes: defineTable({ title: v.string(), team, ...more }).access({
+            read: [rows.team("team")],
+          }),
+        }),
+        shared
+      );
+    const before = ruled(v.string());
+    const after = ruled(v.string().max(10));
+    // Checked, it rewrites nothing: who sees a record stays as it was.
+    expect(planSchemaChange(before, after).accepted).toBeTruthy();
     expect(
       refusedOf(
-        planSchemaChange(v1, notes({ archivedAt: noteFields.archivedAt }, {}))
+        planSchemaChange(before, after, {
+          answers: [
+            { table: "notes", field: "team", kind: "value", value: "all" },
+          ],
+        })
       )
     ).toStrictEqual([
-      { table: "notes", field: "title", reason: "required_field_removed" },
+      { table: "notes", field: "team", reason: "rule_field_rewritten" },
     ]);
   });
 
-  test("a field kept from an older version can't come back as another type", () => {
+  test("a field kept from an older version, coming back as another type, is checked", () => {
     const v2 = notes({ ...noteFields, category: v.string().optional() });
     const contract = contractOf(planSchemaChange(v1, v2));
     const v3 = notes({ ...noteFields, category: v.number().optional() });
-    expect(refusedOf(planSchemaChange(contract, v3))).toStrictEqual([
-      { table: "notes", field: "category", reason: "field_changed" },
+    expect(checksOf(planSchemaChange(contract, v3))).toStrictEqual([
+      { table: "notes", field: "category", answer: null },
     ]);
   });
 
   test("every refusal is listed, and a refused plan has no contract", () => {
-    const v2 = notes(
-      { title: v.string(), priority: v.number() },
-      {},
-      { tables: { notes: { read: "appMembers", write: "appMembers" } } }
-    );
-    const plan = planSchemaChange(v1, v2);
+    const v2 = linkedNotes({ tag: v.id("tags"), size: v.id("tags") });
+    const plan = planSchemaChange(linkedNotes({ size: v.string() }), v2);
     expect(plan).not.toHaveProperty("contract");
     expect(refusedOf(plan).map(({ reason }) => reason)).toStrictEqual([
-      "required_field_added",
       "field_changed",
-      "access_changed",
+      "required_field_added",
     ]);
   });
 
@@ -527,7 +690,7 @@ describe("a field the store reserved", () => {
 
   test("is added again as it was, and refused with any other descriptor", () => {
     const reserved = reservedOf(category);
-    expect(planSchemaChange(v1, category, reserved)).toMatchObject({
+    expect(planSchemaChange(v1, category, { reserved })).toMatchObject({
       accepted: true,
       filledFields: [{ table: "notes", field: "category" }],
     });
@@ -540,11 +703,9 @@ describe("a field the store reserved", () => {
     ]) {
       expect(
         refusedOf(
-          planSchemaChange(
-            v1,
-            notes({ ...noteFields, category: other }),
-            reserved
-          )
+          planSchemaChange(v1, notes({ ...noteFields, category: other }), {
+            reserved,
+          })
         )
       ).toStrictEqual([
         { table: "notes", field: "category", reason: "reserved_field_changed" },
@@ -567,10 +728,14 @@ describe("a field the store reserved", () => {
         }
       );
     const reserved = reservedOf(tags(false));
-    expect(planSchemaChange(v1, tags(false), reserved).accepted).toBeTruthy();
-    expect(refusedOf(planSchemaChange(v1, tags(true), reserved))).toStrictEqual(
-      [{ table: "tags", field: "name", reason: "reserved_field_changed" }]
-    );
+    expect(
+      planSchemaChange(v1, tags(false), { reserved }).accepted
+    ).toBeTruthy();
+    expect(
+      refusedOf(planSchemaChange(v1, tags(true), { reserved }))
+    ).toStrictEqual([
+      { table: "tags", field: "name", reason: "reserved_field_changed" },
+    ]);
   });
 });
 
@@ -583,9 +748,10 @@ describe("a table an explicit migration transforms", () => {
   });
 
   test("takes a required field and a changed one, with the target's descriptors, filling nothing", () => {
-    expect(planSchemaChange(v1, target).accepted).toBeFalsy();
+    // Unmigrated, its required field and narrowed title are checked.
+    expect(planSchemaChange(v1, target)).toMatchObject({ activates: true });
 
-    const plan = planSchemaChange(v1, target, {}, migrated);
+    const plan = planSchemaChange(v1, target, { migrated });
     const contract = contractOf(plan);
 
     expect(plan).toMatchObject({
@@ -597,28 +763,23 @@ describe("a table an explicit migration transforms", () => {
     expect(manifestText(contract)).toBe(manifestText(target));
   });
 
-  test("still refuses a reference added, a changed access, values that can't overlap and a table on one side only", () => {
+  test("still refuses a reference added, values that can't overlap and a table on one side only", () => {
     const referring = notes({ ...noteFields, author: v.id("notes") });
-    const access = notes(noteFields, titleIndex, {
-      tables: { notes: { read: "appMembers", write: "owner" } },
-    });
 
-    expect(planSchemaChange(v1, referring, {}, migrated)).toMatchObject({
+    expect(planSchemaChange(v1, referring, { migrated })).toMatchObject({
       accepted: false,
       refused: [
         { table: "notes", field: "author", reason: "required_field_added" },
       ],
     });
-    expect(planSchemaChange(v1, access, {}, migrated)).toMatchObject({
-      accepted: false,
-      refused: [{ table: "notes", reason: "access_changed" }],
-    });
     const disjoint = notes({ ...noteFields, title: v.number() });
-    expect(planSchemaChange(v1, disjoint, {}, migrated)).toMatchObject({
+    expect(planSchemaChange(v1, disjoint, { migrated })).toMatchObject({
       accepted: false,
       refused: [{ table: "notes", field: "title", reason: "values_disjoint" }],
     });
-    const elsewhere = planSchemaChange(v1, target, {}, new Set(["people"]));
+    const elsewhere = planSchemaChange(v1, target, {
+      migrated: new Set(["people"]),
+    });
     expect(elsewhere.accepted).toBeFalsy();
     expect(elsewhere.accepted ? [] : elsewhere.refused).toContainEqual({
       table: "people",
