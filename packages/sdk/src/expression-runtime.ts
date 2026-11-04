@@ -1,25 +1,35 @@
 /**
- * What a workflow expression's generated code reads and calls through
- * (`compileExpression` in expression-check.ts): every member read is
- * `readMember`, every method call `callMethod`, every `?.` link
- * `optionalChain`. The syntactic check refuses what it can name; these
- * guard what it can't, at run time, wherever the expression's values
- * came from:
+ * What a workflow expression's generated code runs through (`code` of
+ * `checkExpression`, expression-lowering.ts). The syntactic check refuses
+ * what it can name; these guard what it can't, at run time:
  *
- * - `readMember` gives only a value's own data properties (an array's or
- *   string's `length` among them), never through the prototype chain,
- *   never a getter's result, and never a function. No expression can
- *   hold a function value, so none can file a built-in under an allowed
- *   name in an object literal (`{ at: [].forEach }`) or hand one to an
- *   implicit conversion (`toString`, `valueOf`, `toJSON`, `then`).
- * - `callMethod` calls an allowed built-in, captured when this module
- *   loads, only on a real array, string or number, so `{ indexOf, length:
- *   1e15 }` can't stand in for an array. A callback method takes exactly
- *   one function, the arrow the expression wrote there; others take none.
+ * - `checkJson` runs first, on every root the expression reads, on every
+ *   evaluation: each must be JSON data (null, booleans, finite numbers,
+ *   strings, and arrays and objects of `Array.prototype` and
+ *   `Object.prototype` or none, with only own data properties under
+ *   string keys), or the expression throws before it reads anything.
+ * - `readMember`, every member read, gives only a value's own data
+ *   property (an array's or string's `length` among them), never through
+ *   the prototype chain, never a getter's result, never a function.
+ * - `callMethod`, every method call, calls an allowed built-in, captured
+ *   when this module loads, only on a real array, string or number, so
+ *   `{ indexOf, length: 1e15 }` can't stand in for an array. A callback
+ *   method takes exactly one function, the arrow the expression wrote
+ *   there; others take none.
+ * - `spreadValue`, every `...`, spreads only a plain array or an object
+ *   of own data properties.
+ * - `optionalChain`, every `?.` link, runs the rest of the chain only for
+ *   a value that isn't nullish.
  *
- * Only plain data passes: arrays and objects of `Object.prototype` (or
- * none), strings, numbers, booleans and null, as a run's JSON values
- * are, and the arrays and objects an expression builds from them.
+ * What holds, then: every value an expression holds is JSON data, built
+ * from its roots, its literals, these guards' results, or the arrays and
+ * objects it writes from those; and the only functions are the arrows it
+ * writes as callbacks, which go straight to `callMethod`. So no
+ * expression can hold a built-in method to file under an allowed name
+ * (`{ at: [].forEach }.at(…)`), and the operators, templates and
+ * conversions it applies (`${value}`, `+`, `<`) find only the built-in
+ * `Object.prototype` and `Array.prototype` methods, never a function of
+ * the data's: a field named `toString` or `then` holds data.
  */
 
 // Captured as this module loads, and called only with `Reflect.apply` and
@@ -169,3 +179,77 @@ export const optionalChain = (
   value: unknown,
   rest: (value: unknown) => unknown
 ): unknown => (value === null || value === undefined ? undefined : rest(value));
+
+/**
+ * The values of an array's or object's own properties, when they are all
+ * data under string keys (an array's `length` left out); `undefined` when
+ * any is a getter or setter or has a symbol for its key.
+ */
+const ownData = (value: object): unknown[] | undefined => {
+  const values: unknown[] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor =
+      typeof key === "string"
+        ? Object.getOwnPropertyDescriptor(value, key)
+        : undefined;
+    if (descriptor === undefined || !("value" in descriptor)) {
+      return undefined;
+    }
+    if (!(key === "length" && Array.isArray(value))) {
+      values.push(descriptor.value);
+    }
+  }
+  return values;
+};
+
+/** Whether `value` is an array or object `ownData` holds to. */
+const isContainer = (value: unknown): value is object =>
+  typeof value === "object" &&
+  value !== null &&
+  (isArray(value) || isPlainObject(value));
+
+/**
+ * Throws unless every one of `roots` is JSON data, all the way down:
+ * null, undefined, booleans, numbers and strings, and arrays and objects
+ * (`isContainer`) of own data properties under string keys. Generated
+ * code calls it first, with the roots the expression reads.
+ */
+export const checkJson = (...roots: unknown[]): void => {
+  const pending = [...roots];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    const type = typeof value;
+    if (
+      value === null ||
+      type === "undefined" ||
+      type === "boolean" ||
+      type === "number" ||
+      type === "string"
+    ) {
+      continue;
+    }
+    if (!isContainer(value)) {
+      throw new TypeError("An expression's value is not JSON data.");
+    }
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    const values = ownData(value);
+    if (values === undefined) {
+      throw new TypeError("An expression's value is not JSON data.");
+    }
+    for (const item of values) {
+      pending.push(item);
+    }
+  }
+};
+
+/** `...value` of an expression: a plain array or object of own data only. */
+export const spreadValue = (value: unknown): unknown => {
+  if (!(isContainer(value) && ownData(value) !== undefined)) {
+    throw new TypeError("Only an array or an object of data can be spread.");
+  }
+  return value;
+};

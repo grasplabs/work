@@ -83,7 +83,7 @@ describe("what a workflow expression may be", () => {
     expect(checkExpression(" input.a ")).toStrictEqual({
       ok: true,
       source: " input.a ",
-      code: '($read(input, "a"))',
+      code: '($json(input), ($read(input, "a")))',
     });
   });
 });
@@ -283,6 +283,35 @@ describe("calling code", () => {
     ]);
   });
 
+  it("never reads an allowed method as a value, which would be `undefined`", () => {
+    expect({
+      refused: [
+        "input.list.map",
+        "input.list?.join",
+        "input.n.toFixed",
+        "{ indexOf: input.list.indexOf, length: 1e15 }",
+      ].map(verdict),
+      // A data field of a method's name, read in brackets.
+      field: verdict("input['split']"),
+      // Called, it's fine.
+      called: verdict("input.list.join(', ')"),
+    }).toStrictEqual({
+      refused: Array.from({ length: 4 }, () => "expression.method"),
+      field: "ok",
+      called: "ok",
+    });
+  });
+
+  it("checks the roots it reads are JSON first, and only those", () => {
+    expect({
+      none: generated("[1, 'a']"),
+      two: generated("params.a ?? run.id"),
+    }).toStrictEqual({
+      none: '([1, "a"])',
+      two: '($json(params, run), (($read(params, "a")) ?? ($read(run, "id"))))',
+    });
+  });
+
   it("spreads nothing into a call", () => {
     expect(verdict("input.lines.concat(...input.more)")).toBe(
       "expression.syntax"
@@ -372,7 +401,9 @@ describe("splicing into the generated code", () => {
 
   it("generates code with no comment to swallow the code after it", () => {
     const checked = checkExpression("input.a // the amount\n");
-    expect(checked.ok && checked.code).toBe('($read(input, "a"))');
+    expect(checked.ok && checked.code).toBe(
+      '($json(input), ($read(input, "a")))'
+    );
   });
 
   it("refuses a regular expression, whose work no limit of ours bounds", () => {
@@ -383,26 +414,26 @@ describe("splicing into the generated code", () => {
 describe("the code generated from an expression", () => {
   it("reads and calls only through the guards", () => {
     expect(generated("input.lines.map((line) => line.amount).at(-1)")).toBe(
-      '($call($call($read(input, "lines"), "map", [line => ($read(line, "amount"))]), "at", [-(1)]))'
+      '($json(input), ($call($call($read(input, "lines"), "map", [line => ($read(line, "amount"))]), "at", [-(1)])))'
     );
   });
 
   it("parenthesizes every operand, so TypeScript reads no type arguments", () => {
     // `input.a<input.b, input.c>(input.d)`, a generic call, in TypeScript.
     expect(generated("[input.a < input.b, input.c > (input.d)]")).toBe(
-      '([($read(input, "a")) < ($read(input, "b")), ($read(input, "c")) > ($read(input, "d"))])'
+      '($json(input), ([($read(input, "a")) < ($read(input, "b")), ($read(input, "c")) > ($read(input, "d"))]))'
     );
   });
 
   it("writes every object key as a computed string: `__proto__` stays a field", () => {
     expect(generated("{ a: input.a, 'b c': 1, 2: null, ...input.d }")).toBe(
-      '({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$read(input, "d")\n})'
+      '($json(input), ({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$spread($read(input, "d"))\n}))'
     );
   });
 
   it("short-circuits a `?.` chain as JavaScript does", () => {
     expect(generated("input.a?.b.c")).toBe(
-      '($opt($read(input, "a"), $0 => $read($read($0, "b"), "c")))'
+      '($json(input), ($opt($read(input, "a"), $0 => $read($read($0, "b"), "c"))))'
     );
   });
 

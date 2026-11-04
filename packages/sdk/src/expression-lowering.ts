@@ -1,4 +1,4 @@
-import generate from "@babel/generator";
+import { generate } from "@babel/generator";
 import * as t from "@babel/types";
 import type { Node } from "@babel/types";
 
@@ -35,10 +35,12 @@ export const runtimeNames = {
   read: "$read",
   call: "$call",
   optional: "$opt",
+  spread: "$spread",
+  json: "$json",
 } as const;
 
 /** How a generated workflow module imports the guards its expressions call. */
-export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional} } from "@grasp-os/sdk/workflow";`;
+export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional}, spreadValue as ${runtimeNames.spread}, checkJson as ${runtimeNames.json} } from "@grasp-os/sdk/workflow";`;
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
@@ -69,10 +71,31 @@ class Lowering {
   /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
   private next = 0;
 
+  /** The roots the expression reads, which it checks are JSON first. */
+  readonly readRoots = new Set<string>();
+
+  private readonly roots: ReadonlySet<string>;
+
+  constructor(roots: ReadonlySet<string>) {
+    this.roots = roots;
+  }
+
+  /** `...value`, of a plain array or object only (`$spread`). */
+  private spread(node: Node): t.SpreadElement {
+    return t.spreadElement(
+      t.callExpression(t.identifier(runtimeNames.spread), [
+        this.expression(node),
+      ])
+    );
+  }
+
   expression(node: Node): t.Expression {
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- the checker allows no other
     switch (node.type) {
       case "Identifier": {
+        if (this.roots.has(node.name)) {
+          this.readRoots.add(node.name);
+        }
         return t.identifier(node.name);
       }
       case "StringLiteral": {
@@ -102,7 +125,7 @@ class Lowering {
         return t.arrayExpression(
           node.elements.map((element) =>
             element?.type === "SpreadElement"
-              ? t.spreadElement(this.expression(element.argument))
+              ? this.spread(element.argument)
               : this.expression(nonNull(element))
           )
         );
@@ -111,7 +134,7 @@ class Lowering {
         return t.objectExpression(
           node.properties.map((property) => {
             if (property.type === "SpreadElement") {
-              return t.spreadElement(this.expression(property.argument));
+              return this.spread(property.argument);
             }
             if (property.type !== "ObjectProperty") {
               throw new Error("A checked object literal has only fields.");
@@ -265,7 +288,26 @@ class Lowering {
 
 /**
  * The code a checked expression runs as (`Lowering`): one parenthesized
- * expression, with no comment, printed from its syntax tree.
+ * expression, with no comment, printed from its syntax tree. It first
+ * checks that each root it reads is JSON (`$json`), on every evaluation,
+ * so what the guards rely on holds whatever the caller passed.
  */
-export const lowerExpression = (checked: Node): string =>
-  `(${generate(new Lowering().expression(checked), { comments: false }).code})`;
+export const lowerExpression = (
+  checked: Node,
+  roots: ReadonlySet<string>
+): string => {
+  const lowering = new Lowering(roots);
+  const value = lowering.expression(checked);
+  const read = [...lowering.readRoots];
+  const expression =
+    read.length === 0
+      ? value
+      : t.sequenceExpression([
+          t.callExpression(
+            t.identifier(runtimeNames.json),
+            read.map((root) => t.identifier(root))
+          ),
+          t.parenthesizedExpression(value),
+        ]);
+  return `(${generate(expression, { comments: false }).code})`;
+};

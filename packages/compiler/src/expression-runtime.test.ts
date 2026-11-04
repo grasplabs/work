@@ -13,7 +13,13 @@
  * them at run time, whatever the data's field names are.
  */
 import { checkExpression } from "@grasp-os/sdk/expression-check";
-import { callMethod, optionalChain, readMember } from "@grasp-os/sdk/workflow";
+import {
+  callMethod,
+  checkJson,
+  optionalChain,
+  readMember,
+  spreadValue,
+} from "@grasp-os/sdk/workflow";
 import { describe, expect, it } from "vite-plus/test";
 
 const roots = ["input", "steps", "params", "run"] as const;
@@ -34,6 +40,8 @@ const run = (
     "$read",
     "$call",
     "$opt",
+    "$spread",
+    "$json",
     ...roots,
     `return ${checked.code};`
   );
@@ -41,6 +49,8 @@ const run = (
     readMember,
     callMethod,
     optionalChain,
+    spreadValue,
+    checkJson,
     ...roots.map((root) => values[root]),
   ]);
 };
@@ -111,13 +121,11 @@ describe("a built-in method, read as a value", () => {
         "input.list.forEach",
         "input.list.push",
         "input.list.reverse",
-        "input.list.map",
-        "input.list.length.toFixed",
         "input.name.padStart",
         "[].forEach",
         "'x'.repeat",
       ].map((source) => run(source, { input: { ...input, name: "x" } }))
-    ).toStrictEqual(Array.from({ length: 8 }));
+    ).toStrictEqual(Array.from({ length: 6 }));
   });
 
   it("can't be filed under an allowed name and called with any `this`", () => {
@@ -137,7 +145,7 @@ describe("a built-in method, read as a value", () => {
   it("can't stand in for an array to do unbounded work", () => {
     const started = performance.now();
     expect(
-      outcome("({ indexOf: input.list.indexOf, length: 1e15 }).indexOf(1)", {
+      outcome("({ indexOf: input.list.forEach, length: 1e15 }).indexOf(1)", {
         input: { list: [1] },
       })
     ).toStrictEqual({ threw: "TypeError" });
@@ -231,5 +239,71 @@ describe("a member read", () => {
     expect(readMember(input, "__proto__")).toStrictEqual({ x: 1 });
     expect(readMember({}, "__proto__")).toBeUndefined();
     expect(readMember([], "constructor")).toBeUndefined();
+  });
+});
+
+describe("a root that isn't JSON data", () => {
+  it("fails the expression before it reads anything, however deep", () => {
+    let reads = 0;
+    const getter = Object.defineProperty({}, "a", {
+      get: () => {
+        reads += 1;
+        return 1;
+      },
+      enumerable: true,
+    });
+    const sources = [
+      // Spread, template and operators take a value whole, with no read.
+      "{ ...input }",
+      "[...input.list]",
+      "`${input}`",
+      "input + 1",
+      "input == 1",
+      "input.x",
+    ];
+    const inputs: unknown[] = [
+      getter,
+      { list: [getter] },
+      { deep: [{ f: () => 1 }] },
+      { list: [Symbol("s")] },
+      { at: new Date(0) },
+      { [Symbol("s")]: 1 },
+    ];
+    const outcomes = inputs.flatMap((input) =>
+      sources.map((source) => outcome(source, { input }))
+    );
+    expect({
+      threw: outcomes.every(
+        (result) => "threw" in result && result.threw === "TypeError"
+      ),
+      reads,
+    }).toStrictEqual({ threw: true, reads: 0 });
+  });
+
+  it("is only a root the expression reads", () => {
+    expect(
+      outcome("params.limit", { input: () => 1, params: { limit: 2 } })
+    ).toStrictEqual({ value: 2 });
+  });
+});
+
+describe("a spread", () => {
+  it("is of a plain array or an object of data only", () => {
+    const accessor = Object.defineProperty({}, "a", {
+      get: () => 1,
+      enumerable: true,
+    });
+    const refusals = [accessor, "abc", new Set([1]), null].map((value) => {
+      try {
+        spreadValue(value);
+        return "spread";
+      } catch (error) {
+        return error instanceof TypeError ? "refused" : "other";
+      }
+    });
+    expect(refusals).toStrictEqual(Array.from({ length: 4 }, () => "refused"));
+    expect(run("[...input.a, ...[3]]", { input: { a: [1, 2] } })).toStrictEqual(
+      [1, 2, 3]
+    );
   });
 });

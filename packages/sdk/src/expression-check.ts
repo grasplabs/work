@@ -324,6 +324,20 @@ class Checker {
       case "OptionalMemberExpression": {
         this.visit(node.object, scope);
         this.key(node.property, node.computed);
+        // A method read but not called: its type is a function, its value
+        // `undefined` (`readMember` gives no function). A data field of
+        // that name is read in brackets.
+        if (
+          !node.computed &&
+          node.property.type === "Identifier" &&
+          allowedMethods.has(node.property.name)
+        ) {
+          this.fail(
+            node.property,
+            "expression.method",
+            `\`${node.property.name}\` is a method: call it, or read a field of that name as ["${node.property.name}"].`
+          );
+        }
         break;
       }
       case "CallExpression":
@@ -562,5 +576,5 @@ export const checkExpression = (
   if (checker.errors.length > 0) {
     return { ok: false, errors: checker.errors };
   }
-  return { ok: true, source, code: lowerExpression(parsed) };
+  return { ok: true, source, code: lowerExpression(parsed, roots) };
 };
