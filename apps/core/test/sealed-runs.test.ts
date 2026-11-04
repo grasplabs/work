@@ -12,6 +12,7 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   afterAll,
@@ -42,6 +43,7 @@ import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  versionContract,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -51,14 +53,20 @@ import {
   runModules,
 } from "../src/workflows/code.ts";
 import type { StepError } from "../src/workflows/code.ts";
+import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import { admitAttempt as admittedAs } from "../src/workflows/quotas.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import {
-  sealedAdmission,
+  sealedActivation,
+  sealedRunOf,
+  workflowOwnerOf,
+} from "../src/workflows/resource-runs.ts";
+import { modelCallsIn, sentCallsIn } from "../src/workflows/run-object.ts";
+import {
   sealedRun,
   sealedRunModules,
-  sealedRunOf,
   sealedRunStart,
 } from "../src/workflows/sealed-run.ts";
 import type {
@@ -691,6 +699,21 @@ const newerEngine = (): Engine => {
 };
 
 /**
+ * The modules a sealed run's isolate loads, as `sealedRunModules` loads
+ * them, with the test's module `source` in place of the build's generated
+ * one, which today's generator writes for another SDK
+ * (`sealedRunModules` refuses it, as tested below).
+ */
+const modulesOfTest = (
+  run: HostedSealedRun,
+  source: string
+): Record<string, string> => ({
+  ...run.build.sdk,
+  [generatedModule]: source,
+  ...runModules({ module: generatedModule, refusal: "No workflow." }),
+});
+
+/**
  * Runs `source` (`moduleOf`) as run `runId` of its sealed build, on the run
  * host, its attempts admitted by `admitAttempt` (at once by default):
  * what it ended with (its value, or its error's code), and what the host
@@ -704,6 +727,7 @@ const ranAs = async (
     engine = newerEngine(),
     maxModelCalls,
     calling,
+    maxSleepMs,
   }: {
     /** How its attempts are admitted, from the run; at once if not given. */
     admitAttempt?: (
@@ -714,6 +738,8 @@ const ranAs = async (
     maxModelCalls?: number;
     /** What its calls go by, from what its start froze. */
     calling?: (frozen: CallingRun) => CallingRun;
+    /** Its waits' limit, as a test run's. */
+    maxSleepMs?: number;
   } = {}
 ) => {
   const loaded = await sealedRunOf(serving, runId);
@@ -721,6 +747,7 @@ const ranAs = async (
     ...loaded,
     ...(maxModelCalls === undefined ? {} : { maxModelCalls }),
     ...(calling === undefined ? {} : { calling: calling(loaded.calling) }),
+    ...(maxSleepMs === undefined ? {} : { maxSleepMs }),
   };
   const { step, leaseOf } = engine;
   const tampered: string[] = [];
@@ -749,16 +776,7 @@ const ranAs = async (
   const code = loadRunIsolate(serving, {
     owner: `test:${runId}`,
     mainModule: runModule,
-    // The run host's main module and the build's SDK, as
-    // `sealedRunModules` loads them, with the test's module in place of
-    // the build's generated one, which today's generator writes for
-    // another SDK (`sealedRunModules` refuses it, as tested below).
-    modules: async () =>
-      await Promise.resolve({
-        ...run.build.sdk,
-        [generatedModule]: source,
-        ...runModules({ module: generatedModule, refusal: "No workflow." }),
-      }),
+    modules: async () => await Promise.resolve(modulesOfTest(run, source)),
     attemptMethods,
   });
   const settled = settledSchema.parse(
@@ -769,7 +787,9 @@ const ranAs = async (
     ...(settled.ok ? {} : { why: settled.error.message }),
     tampered,
     // A failure no catch took, as the run's code ended well past it.
-    ...(settled.ok && kind?.failureUntaken === true ? { untaken: true } : {}),
+    ...(settled.ok && kind?.failureUntaken !== undefined
+      ? { untaken: kind.failureUntaken.code }
+      : {}),
   };
 };
 
@@ -867,7 +887,19 @@ describe("a sealed build's run on the run host", () => {
           'const answer = await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); return { sent: typeof answer.messageId };'
         )
       ),
-      { admitAttempt: (run) => sealedAdmission(serving, run) }
+      {
+        // As its workflow's, against its account's lineage.
+        admitAttempt: (run) => async (attempt) =>
+          await admittedAs(
+            serving,
+            {
+              run: run.runId,
+              root: run.calling.accountRunId,
+              resource: workflowOwnerOf(run.workflowId),
+            },
+            attempt
+          ),
+      }
     );
     const admitted = await env.DB.prepare(
       "SELECT resource FROM run_lineage_attempts WHERE run_id = ? AND step_key = 'key:send:task'"
@@ -1153,7 +1185,7 @@ ${greet(greeting, "again")}
           message: anyText,
         },
         tampered: [],
-        untaken: true,
+        untaken: "workflow.call_invalid",
       },
       seen: false,
     });
@@ -1177,7 +1209,7 @@ ${greet(greeting, "again")}
       ran: {
         ended: { code: anyText, message: anyText },
         tampered: [],
-        untaken: true,
+        untaken: "connect.outcome_unknown",
       },
       seen: false,
     });
@@ -1426,7 +1458,11 @@ try {
       skipped: { ended: { skipped: true }, tampered: [] },
       thrown: failedWith("workflow.raised"),
       cutOff: failedWith("workflow.raised"),
-      passedOver: { ended: { caught: null }, tampered: [], untaken: true },
+      passedOver: {
+        ended: { caught: null },
+        tampered: [],
+        untaken: "workflow.raised",
+      },
     });
   });
 
@@ -1456,7 +1492,7 @@ try {
       nextStep: refusedAs(
         "A run goes on past a failure only once a catch took it."
       ),
-      ended: { ended: "done", tampered: [], untaken: true },
+      ended: { ended: "done", tampered: [], untaken: "workflow.raised" },
       forged: refusedAs("A catch takes only the error it was offered."),
       asDo: refusedAs(`Step "outer:catch" isn't one the build seals.`),
     });
@@ -1551,17 +1587,17 @@ try {
       rejected: {
         ended: { code: "workflow.call_denied" },
         tampered: [],
-        untaken: true,
+        untaken: "workflow.call_denied",
       },
       afterEffect: {
         ended: { code: "workflow.failed_after_effect", caught: null },
         tampered: [],
-        untaken: true,
+        untaken: "workflow.failed_after_effect",
       },
       spentAfter: {
         ended: { code: "workflow.failed_after_effect", caught: null },
         tampered: [],
-        untaken: true,
+        untaken: "workflow.failed_after_effect",
       },
       relabelled: {
         ended: {
@@ -1781,7 +1817,11 @@ try {
       withheld: refusedAs(
         `Step "ping:task" gives no retry for its policy to ask.`
       ),
-      probeThenLayered: { ended: "none", tampered: [], untaken: true },
+      probeThenLayered: {
+        ended: "none",
+        tampered: [],
+        untaken: "internal.unexpected",
+      },
       declined: refusedAs(`Task "layered"'s catch retries the failure.`),
       roundsRun: 2,
       lastRound: { ended: "probe", tampered: [] },
@@ -1827,6 +1867,262 @@ try {
         tampered: ["workflow.invalid"],
       },
       tooFar: failedWith("workflow.call_invalid"),
+    });
+  });
+
+  it("holds a test run's sleeps, deadlines and retry backoffs to its wait limit, which no catch takes", async () => {
+    const limited = await sealedWorkflow();
+    const caughtOrNot = (steps: string): string => `
+try {
+  ${steps}
+} catch (thrown) {
+  const error = ${catchStep("guarded", "async () => true")};
+  if (error === undefined) throw thrown;
+  return { caught: error.status };
+}`;
+    const run = async (body: string, maxSleepMs: number, engine?: Engine) =>
+      await ranAs(await waitingRun(limited), moduleOf(body), {
+        maxSleepMs,
+        ...(engine === undefined ? {} : { engine }),
+      });
+    const minute = 60_000;
+    expect({
+      sleep: await run(
+        'await step.sleep("linger", { key: "task", description: "Its wait", duration: "1 hour" }); return "slept";',
+        minute
+      ),
+      farDeadline: await run(
+        `${enterPause("Date.now() + 2 * 60000")} ${sleepPause("until")} return "woke";`,
+        minute
+      ),
+      nearDeadline: await run(
+        `${enterPause("Date.now() + 1000")} ${sleepPause("until")} return "woke";`,
+        minute
+      ),
+      // Its policy backs off a second, past the half a second it may wait.
+      backoff: await run(
+        caughtOrNot(
+          `return ${taskStep("fetch", '(() => { throw new Error("not yet"); })()', retryingBy("guarded"))};`
+        ),
+        500,
+        retryingEngine()
+      ),
+      backoffWithin: await run(
+        caughtOrNot(
+          `let rounds = 0; return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 2) throw new Error("not yet"); return { output: rounds }; })()', retryingBy("guarded"))};`
+        ),
+        minute,
+        retryingEngine()
+      ),
+    }).toStrictEqual({
+      sleep: failedWith("workflow.candidate_wait_limit"),
+      farDeadline: failedWith("workflow.candidate_wait_limit"),
+      nearDeadline: { ended: "woke", tampered: [] },
+      backoff: failedWith("workflow.candidate_wait_limit"),
+      backoffWithin: { ended: { output: 2 }, tampered: [] },
+    });
+  });
+});
+
+/** How a test's engine ends an activation it evicts. */
+const eviction = (): Error => new Error("The activation was evicted");
+
+/**
+ * The engine of one activation of a run, `journal` what its activations
+ * journaled: a step journaled is replayed, never run again; any other
+ * runs once, as attempt `attempt`. The activation is evicted, journaling
+ * nothing more, as step `evictedAfter`'s attempt returned, or as step
+ * `evictedBefore` was to start.
+ */
+const activationEngine = (
+  journal: Map<string, unknown>,
+  {
+    attempt = 1,
+    evictedAfter,
+    evictedBefore,
+  }: { attempt?: number; evictedAfter?: string; evictedBefore?: string } = {}
+): Engine => {
+  const leases = new Set<string>();
+  return {
+    leaseOf: (key, number) =>
+      leases.has(`${number}:${key}`)
+        ? { generation: 1000, deadline: Date.now() + 60_000 }
+        : undefined,
+    step: {
+      ...engineOfTest().step,
+      do: async (name, _config, fn) => {
+        if (journal.has(name)) {
+          return journal.get(name);
+        }
+        if (name === evictedBefore) {
+          throw eviction();
+        }
+        const key = `key:${name}`;
+        leases.add(`${attempt}:${key}`);
+        try {
+          const value = await fn({ attempt, idempotencyKey: key });
+          if (name === evictedAfter) {
+            throw eviction();
+          }
+          journal.set(name, value);
+          return value;
+        } finally {
+          leases.delete(`${attempt}:${key}`);
+        }
+      },
+    },
+  };
+};
+
+/**
+ * Runs one activation of run `runId` of its sealed build as its object
+ * runs it (resource-runs.ts, `sealedActivation`): inside that object,
+ * keeping its sent calls and model calls in the object's own storage, on
+ * `engine`, with the test's module `source` in place of the build's
+ * generated one. What it answered, or the code it failed with.
+ */
+const activated = async (
+  runId: string,
+  source: string,
+  engine: Engine,
+  maxModelCalls?: number
+): Promise<unknown> =>
+  await runInDurableObject(runObjectOf(env, runId), async (_object, state) => {
+    const loaded = await sealedRunOf(serving, runId);
+    const run =
+      maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
+    const contract = await versionContract(env, run.workflowId, run.version);
+    try {
+      return await sealedActivation(
+        serving,
+        engine.step,
+        {
+          leaseOf: engine.leaseOf,
+          sentCalls: sentCallsIn(state.storage.sql),
+          modelCalls: modelCallsIn(state.storage.sql),
+        },
+        {
+          run,
+          output: JSON.stringify(contract?.output),
+          owner: workflowOwnerOf(run.workflowId),
+          admission: { run: runId, root: run.calling.accountRunId },
+        },
+        () => modulesOfTest(run, source)
+      );
+    } catch (error) {
+      const code: unknown =
+        error instanceof Error ? Reflect.get(error, "code") : undefined;
+      return { failed: typeof code === "string" ? code : String(error) };
+    }
+  });
+
+// A sealed run's activations as its object runs them (resource-runs.ts,
+// `sealedActivation`), from the threat model's "an effect repeated" and
+// "a run past what it may spend": what the run's object keeps of its
+// calls outlives the activation that made them, so an activation evicted
+// mid-step, or a later one replaying its steps, neither sends a call tried
+// once again nor spends past its ceiling. And a run whose code ends well
+// past a failure no catch took ends failed with that failure.
+describe("a sealed run's activations", () => {
+  let sealed: Sealed;
+
+  beforeAll(async () => {
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+    sealed = await sealedWorkflow();
+  });
+
+  afterEach(endLiveResourceRuns);
+
+  it("sends a call tried once only once, though the activation that sent it was evicted before its step was journaled", async () => {
+    const provider = await answeringProvider(() => hello, {
+      models: [allowedModel],
+    });
+    const runId = await waitingRun(sealed);
+    const source = moduleOf(
+      `const { line } = ${taskStep("greet", `await env.summary.call("grasp.model", ${greeting})`)}; return { status: line };`
+    );
+    const journal = new Map<string, unknown>();
+    const evicted = await activated(
+      runId,
+      source,
+      activationEngine(journal, { evictedAfter: "greet:task" })
+    );
+    const sentBefore = provider.requests.length;
+    // The next activation, a fresh host and isolate: the engine tries the
+    // step again, as attempt 2.
+    const resumed = await activated(
+      runId,
+      source,
+      activationEngine(journal, { attempt: 2 })
+    );
+    expect({
+      evicted,
+      sentBefore,
+      resumed,
+      sent: provider.requests.length,
+    }).toStrictEqual({
+      evicted: { failed: "internal.unexpected" },
+      sentBefore: 1,
+      resumed: { failed: "operation.deadline_exceeded" },
+      sent: 1,
+    });
+  });
+
+  it("holds a replayed run to its model-call ceiling with the calls its earlier activations made", async () => {
+    const provider = await answeringProvider(() => hello, {
+      models: [allowedModel],
+    });
+    const runId = await waitingRun(sealed);
+    const source = moduleOf(`
+${greet(greeting).replace("return await", "await")}
+const { line } = ${taskStep("again", `await env.summary.call("grasp.model", ${greeting})`)};
+return { status: line };`);
+    const journal = new Map<string, unknown>();
+    const evicted = await activated(
+      runId,
+      source,
+      activationEngine(journal, { evictedBefore: "again:task" }),
+      1
+    );
+    const replayed = await activated(
+      runId,
+      source,
+      activationEngine(journal),
+      1
+    );
+    expect({
+      evicted,
+      replayed,
+      sent: provider.requests.length,
+    }).toStrictEqual({
+      evicted: { failed: "internal.unexpected" },
+      replayed: { failed: "workflow.model_call_limit" },
+      sent: 1,
+    });
+  });
+
+  it("fails a run whose code ends well past a failure no catch took with that failure, as its code rethrowing it does", async () => {
+    const run = async (body: string) =>
+      await activated(
+        await waitingRun(sealed),
+        moduleOf(body),
+        activationEngine(new Map())
+      );
+    const raise = taskStep("stop", "{ output: null }");
+    expect({
+      swallowed: await run(
+        `try { ${raise}; } catch {} return { status: "done" };`
+      ),
+      rethrown: await run(
+        `try { ${raise}; } catch (thrown) { throw thrown; } return { status: "done" };`
+      ),
+      ended: await run('return { status: "done" };'),
+    }).toStrictEqual({
+      swallowed: { failed: "workflow.raised" },
+      rethrown: { failed: "workflow.raised" },
+      ended: { status: "done" },
     });
   });
 });

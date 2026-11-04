@@ -42,7 +42,10 @@ import { detailsRemoved } from "./retention.ts";
 // - a try's retry of a failed step runs it again under `<step>:retry:<n>`,
 //   after a backoff sleep (`<step>:retry:<n>:wait`) the host decided in a
 //   step of its own (`…:decide`): each round more attempts of the same
-//   step, waiting while it backs off, its state the latest round's;
+//   step, waiting while it backs off, its state the latest round's; on the
+//   run host, under core's prefix by the step's key
+//   (`$grasp:wait:<key>:retry:<n>:run|wait|decide`, `coreWait`), read
+//   alike;
 // - a decision task's call step first waits for its decision: the host
 //   asks and looks in steps of its own (`<step>:decision:<look>`) and
 //   waits for the decision's wake under core's prefix
@@ -98,14 +101,17 @@ const decisionPart =
 const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
 
 /**
- * One of core's waits of a round of a step (resource-host.ts, `#rounds`),
- * by the round's key: for its turn (`busy`) or its AI provider (`key`), a
- * record of waiting (`:waiting`), the round's run again (`:run`), and a
- * wait for its AI provider that ran out (`:timed_out`), failed with the
- * step's error.
+ * One of core's waits of a round of a step (resource-host.ts, `#rounds`;
+ * host.ts, `waitStep`), by the round's key: for its turn (`busy`) or its
+ * AI provider (`key`), a record of waiting (`:waiting`), the round's run
+ * again (`:run`), and a wait for its AI provider that ran out
+ * (`:timed_out`), failed with the step's error. On the run host, a
+ * catch's retry of the step (`retry`) too: its decision (`:decide`), its
+ * backoff (`:wait`) and its run again (`:run`), whose own waits go by its
+ * name's key.
  */
 const coreWait = new RegExp(
-  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?$`,
+  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?|retry:[1-9]\\d*:(?<retry>decide|wait|run))$`,
   "u"
 );
 
@@ -199,18 +205,40 @@ type Place =
       part: string;
       role: Role;
     }
-  | { kind: "wait"; key: string; role: Role };
+  | {
+      kind: "wait";
+      key: string;
+      role: Role;
+      /** A retry's run again, whose own waits go by its name's key. */
+      keyed: boolean;
+    };
 
 /** Where engine step `name` stands, if it is part of a task's step. */
 const placeOf = (name: string): Place | undefined => {
   const waited = coreWait.exec(name)?.groups;
   if (waited?.key !== undefined) {
+    const { key, retry } = waited;
+    if (retry !== undefined) {
+      // A retry's run again is a round of the step, its backoff its own;
+      // its decision tells nothing.
+      if (retry === "decide") {
+        return undefined;
+      }
+      const round = retry === "run";
+      return {
+        kind: "wait",
+        key,
+        role: round ? "round" : "backoff",
+        keyed: round,
+      };
+    }
     // Its waits and a timed-out wait's failure tell the step's state; its
     // runs again are its attempts.
     return {
       kind: "wait",
-      key: waited.key,
+      key,
       role: waited.rest === ":run" ? "round" : "held",
+      keyed: false,
     };
   }
   const named = stepName.exec(unprefixed(name))?.groups;
@@ -302,7 +330,11 @@ const placed = async (
   place: Place
 ): Promise<Folded | undefined> => {
   if (place.kind === "wait") {
-    return reading.byKey.get(place.key);
+    const into = reading.byKey.get(place.key);
+    if (into !== undefined && place.keyed) {
+      reading.byKey.set(await waitKeyOf(record.step.name), into);
+    }
+    return into;
   }
   const { ordinal } = record.step;
   // A round of its own, a retry, a held call or a decision's wait goes on
@@ -364,6 +396,33 @@ const foldRecord = async (
 };
 
 /**
+ * A read of a run's journal, record by record in the order it journaled
+ * them (`fold`), and the steps of tasks those records tell so far, in the
+ * order the run reached them (`steps`).
+ */
+export const traceReading = (): {
+  fold: (record: HistoryRecord) => Promise<void>;
+  steps: () => TraceStep[];
+} => {
+  const reading: Reading = {
+    folded: new Map(),
+    byOrdinal: new Map(),
+    current: new Map(),
+    byKey: new Map(),
+  };
+  return {
+    fold: async (record) => {
+      await foldRecord(reading, record);
+    },
+    // A step's ordinal is its place in the run.
+    steps: () =>
+      [...reading.folded.values()]
+        .map(({ step }) => step)
+        .toSorted((a, b) => a.ordinal - b.ordinal),
+  };
+};
+
+/**
  * The steps of tasks that run `id`'s journal holds, in the order it
  * reached them, as far as its first `maxRecords` records tell, and whether
  * it holds more. Read from the engine's own history, so a test run's as a
@@ -374,12 +433,7 @@ export const tracedSteps = async (
   id: string
 ): Promise<TracedSteps> => {
   const stub = runObjectOf(env, id);
-  const reading: Reading = {
-    folded: new Map(),
-    byOrdinal: new Map(),
-    current: new Map(),
-    byKey: new Map(),
-  };
+  const reading = traceReading();
   let after = 0;
   let read = 0;
   let more = true;
@@ -403,16 +457,10 @@ export const tracedSteps = async (
       read += 1;
       after = record.eventId;
       // oxlint-disable-next-line no-await-in-loop -- in the order the run journaled them
-      await foldRecord(reading, record);
+      await reading.fold(record);
     }
   }
-  return {
-    // A step's ordinal is its place in the run.
-    steps: [...reading.folded.values()]
-      .map(({ step }) => step)
-      .toSorted((a, b) => a.ordinal - b.ordinal),
-    truncated: more,
-  };
+  return { steps: reading.steps(), truncated: more };
 };
 
 /**

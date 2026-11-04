@@ -1448,7 +1448,16 @@ export interface RunKind {
     step: string,
     outcome: DecisionOutcome
   ) => Promise<DecisionOutcome>;
+  /**
+   * Refuses a durable wait the run may not wait, before it starts: a
+   * sleep, a sleep until a deadline, or a retry's backoff. A test run's
+   * are held to its limit (sealed-run.ts); an App's run waits any.
+   */
+  requireWait?: (wait: WaitLength) => void;
 }
+
+/** A durable wait as `RunKind.requireWait` hears of it: a length, or an end. */
+export type WaitLength = { readonly ms: number } | { readonly until: number };
 
 /** A step's engine retries, as a step's config has them. */
 export interface StepRetries {
@@ -2406,7 +2415,9 @@ export class RunHost extends RpcTarget {
    * it decided, each named after the round it leads to. Answers when the
    * first round failed, which every later decision reads; `undefined`
    * when it doesn't run again, and the step fails as its round did,
-   * whatever a decision itself failed with. Fresh or replayed alike.
+   * whatever a decision itself failed with; a backoff its kind refuses
+   * (`RunKind.requireWait`) fails it with that refusal. Fresh or replayed
+   * alike.
    */
   async #retried(
     step: string,
@@ -2467,6 +2478,9 @@ export class RunHost extends RpcTarget {
       return decided;
     }
     if (decided.delayMs > 0) {
+      // Past what the run may wait, the step fails with that refusal
+      // instead of its round's failure.
+      this.#kind.requireWait?.({ ms: decided.delayMs });
       await this.#step.sleep(`${prefix}:wait`, decided.delayMs);
     }
     await this.#kind.requirePerson();
@@ -2610,6 +2624,7 @@ export class RunHost extends RpcTarget {
       );
       started = true;
       const ms = checked(milliseconds, duration);
+      this.#kind.requireWait?.({ ms });
       await this.#step.sleep(step, ms);
       return null;
     });
@@ -2638,6 +2653,7 @@ export class RunHost extends RpcTarget {
       );
       started = true;
       const at = checked(timestampSchema, until);
+      this.#kind.requireWait?.({ until: at });
       await this.#kind.requirePerson();
       await this.#step.sleepUntil(step, at);
       return null;

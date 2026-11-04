@@ -64,7 +64,7 @@ import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
-import { loadRunIsolate } from "./code.ts";
+import { attemptMethods, loadRunIsolate, runModule } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
@@ -75,11 +75,12 @@ import {
   forIsolate,
   fromIsolate,
   modelCallLimitOf,
+  RunHost,
   settle,
   stepLimitOf,
   unadmitted,
 } from "./host.ts";
-import type { RunStep } from "./host.ts";
+import type { AiCalls, RunStep } from "./host.ts";
 import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
@@ -97,6 +98,18 @@ import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import {
+  generatedForRunHost,
+  sealedRun,
+  sealedRunFrom,
+  sealedRunModules,
+  sealedRunStart,
+} from "./sealed-run.ts";
+import type {
+  HostedSealedRun,
+  SealedRunKind,
+  SentCalls,
+} from "./sealed-run.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -763,8 +776,12 @@ export interface ResourceRunMemory {
   triedOnce?: ResourceHostHooks["triedOnce"];
   /** The run's settled scopes of items and branches (`ScopeFences`). */
   fences?: ResourceHostHooks["fences"];
-  /** The model calls its actions made (`ActionModelCalls`). */
+  /** The model calls it and its actions made (`ActionModelCalls`). */
   modelCalls?: ResourceHostHooks["modelCalls"];
+  /** A sealed build's calls tried once that went out (sealed-run.ts). */
+  sentCalls?: SentCalls;
+  /** Its AI calls in flight and answers no attempt took (host.ts). */
+  aiCalls?: AiCalls;
   /** Aborts once the activation running the run is over. */
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
@@ -972,14 +989,8 @@ export interface HostedActivation {
     | "fixture";
 }
 
-/**
- * Runs one activation of `activation.run` (an independent workflow's run,
- * a run an App's test started, fixture-runs.ts, or a test run of its draft's
- * checkpoint, candidate-runs.ts): the build's generated module in an
- * isolate of its own against a host of the run (resource-host.ts).
- * Answers the run's output, once it matches its version's output schema.
- */
-export const runActivation = async (
+/** `runActivation` of a build of today's generator, on resource-host.ts. */
+const resourceHostActivation = async (
   env: Env,
   engineStep: RunStep,
   memory: ResourceRunMemory,
@@ -1076,6 +1087,206 @@ export const runActivation = async (
     throw namedError(failed.name, failed.message, failed.code);
   }
   return acceptedOutput(output, result.ok ? result.value : undefined);
+};
+
+/** What one activation of a sealed build's run runs (`sealedActivation`). */
+export interface SealedActivation {
+  readonly run: HostedSealedRun;
+  /** Its version's output schema's descriptor (`acceptedOutput`). */
+  readonly output: string;
+  /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
+  readonly owner: string;
+  /** Its lineage, which admits each attempt (quotas.ts). */
+  readonly admission: { readonly run: string; readonly root: string };
+}
+
+/**
+ * Runs one activation of a sealed build's run, `activation.run`: its
+ * modules (`modules`, its verified build's: `sealedRunModules`) in an
+ * isolate of its own, on the run host as a sealed run (sealed-run.ts),
+ * whose sent calls and model calls its object keeps across activations
+ * (run-object.ts). It fails with the refusal that caught its isolate
+ * tampering; with the failure no catch took, should its code end well
+ * past one (`SealedRunKind.failureUntaken`), as the build's code, which
+ * rethrows it, ends; or as its code failed. Its end is the engine's,
+ * recorded and audited as any run's (`projectResourceRun`). Answers the
+ * run's output, once it matches its version's output schema.
+ */
+export const sealedActivation = async (
+  env: Env,
+  engineStep: RunStep,
+  memory: ResourceRunMemory,
+  { run, output, owner, admission }: SealedActivation,
+  modules: () => Record<string, string>
+): Promise<unknown> => {
+  const { runId } = run;
+  const { sentCalls, modelCalls } = memory;
+  if (sentCalls === undefined || modelCalls === undefined) {
+    throw new Error(`Run ${runId} has no object to keep its calls with`);
+  }
+  // The workflow's own step limit only ever lowers the host's.
+  const ceiling = stepLimitOf(env);
+  const step = countedStep(
+    engineStep,
+    Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)
+  );
+  const calls: AttemptCall[] = [];
+  let tampered: StepError | undefined;
+  // The run's own sandbox session on-prem, its actions' parent.
+  let sessionId: string | undefined;
+  let kind: SealedRunKind | undefined;
+  const host = new RunHost(
+    env,
+    step,
+    (controls) => {
+      kind = sealedRun(env, run, {
+        sentCalls,
+        modelCalls,
+        sessionId: () => sessionId,
+      })(controls);
+      return kind;
+    },
+    {
+      stepFailed: () => {
+        // A resource run keeps no failure report of its own: its end is
+        // the engine's, which the trace reads (resource-run-trace.ts).
+      },
+      attemptCall: trackAttemptCalls(calls),
+      ...(memory.aiCalls === undefined ? {} : { aiCalls: memory.aiCalls }),
+      leaseOf: memory.leaseOf,
+      tampered: (error) => {
+        tampered ??= error;
+      },
+      waiting: async () => {
+        // A resource run's waits are read from its journal (run-waits.ts).
+        await Promise.resolve();
+      },
+      admitAttempt: async (attempt) =>
+        await admitAttempt(env, { ...admission, resource: owner }, attempt),
+    }
+  );
+  const code = loadRunIsolate(
+    env,
+    {
+      owner,
+      mainModule: runModule,
+      modules: async () => await Promise.resolve(modules()),
+      attemptMethods,
+    },
+    {
+      onSession: (id) => {
+        sessionId = id;
+      },
+      ...(memory.over === undefined ? {} : { over: memory.over }),
+      ...(memory.current === undefined ? {} : { current: memory.current }),
+    }
+  );
+  const result = await settledRun(async () => {
+    try {
+      return await code.run(host, sealedRunStart(run));
+    } catch (error) {
+      return await afterCpuKill(error, calls);
+    }
+  });
+  if (!result.ok && memory.current?.() === false) {
+    throw new Error(`Run ${runId} is no longer this activation's`);
+  }
+  // Ended well past a failure no catch took: its code went on past it.
+  const untaken = result.ok ? kind?.failureUntaken : undefined;
+  // Its output and its failure leave the run, neither once it may no
+  // longer read what it recalled, a tampered run's checked first: the
+  // refusal can hold what the run said.
+  const evidenceRefused = await evidenceRefusal(env, run.calling);
+  const failed =
+    evidenceRefused ??
+    tampered ??
+    untaken ??
+    (result.ok ? undefined : result.error);
+  if (failed !== undefined) {
+    throw namedError(failed.name, failed.message, failed.code);
+  }
+  return acceptedOutput(output, result.ok ? result.value : undefined);
+};
+
+/**
+ * Run `runId` as its activation runs it, from its row and its start's
+ * receipt: its sealed build loaded against the manifest the receipt pins,
+ * every artifact and the build's identity checked against it, before any
+ * of its code can run (`workflow.version_corrupt`). A run that has ended
+ * runs nothing (`workflow.run_ended`).
+ */
+export const sealedRunOf = async (
+  env: Env,
+  runId: string
+): Promise<HostedSealedRun> => {
+  const row = await runOf(env, runId);
+  const receipt = row === undefined ? undefined : await receiptOf(env, runId);
+  if (
+    row === undefined ||
+    receipt?.manifestHash !== row.manifestHash ||
+    receipt.input === null ||
+    receipt.params === null
+  ) {
+    throw new Error(`Run ${runId}'s receipt doesn't admit it`);
+  }
+  // The receipt pins the manifest, and the row the build hash the start
+  // read from that same manifest, both immutable: so the build's identity,
+  // checked against the manifest's, is the row's too.
+  const build = await loadWorkflowBuild(
+    env,
+    row.workflowResourceId,
+    row.version,
+    row.manifestHash
+  );
+  const calling = await callingRunOf(env, row.workflowResourceId, runId);
+  if (calling === undefined) {
+    throw workflowResourceErrors.create("workflow.run_ended");
+  }
+  const ceiling = modelCallLimitOf(env);
+  return sealedRunFrom({
+    runId,
+    workflowId: row.workflowResourceId,
+    version: row.version,
+    build,
+    params: z.record(z.string(), z.json()).parse(JSON.parse(receipt.params)),
+    input: z.json().parse(JSON.parse(receipt.input)),
+    createdAt: row.createdAt.getTime(),
+    calling,
+    maxModelCalls: Math.min(ceiling, build.limits.maxModelCalls ?? ceiling),
+  });
+};
+
+/**
+ * Runs one activation of `activation.run` (an independent workflow's run,
+ * a run an App's test started, fixture-runs.ts, or a test run of its draft's
+ * checkpoint, candidate-runs.ts): the build's generated module in an
+ * isolate of its own against a host of the run: the run host, for a
+ * build generated for it (`sealedActivation`), else resource-host.ts until
+ * GRA-1366 removes it.
+ * Answers the run's output, once it matches its version's output schema.
+ */
+export const runActivation = async (
+  env: Env,
+  engineStep: RunStep,
+  memory: ResourceRunMemory,
+  activation: HostedActivation
+): Promise<unknown> => {
+  const { run, output, owner, admission } = activation;
+  if (!generatedForRunHost(run.build)) {
+    return await resourceHostActivation(env, engineStep, memory, activation);
+  }
+  if (admission === "fixture") {
+    // The run host serves none of a test's fixture calls and decisions yet.
+    throw new Error(`Run ${run.runId} is an App test's: not on the run host`);
+  }
+  const sealed = sealedRunFrom(run);
+  return await sealedActivation(
+    env,
+    engineStep,
+    memory,
+    { run: sealed, output, owner, admission },
+    () => sealedRunModules(sealed)
+  );
 };
 
 /**

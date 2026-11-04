@@ -27,7 +27,7 @@ import { z } from "zod";
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { memberRole } from "../auth/identity.ts";
 import type { DecisionOutcome } from "../decisions/decisions.ts";
-import { generatedModule, loadWorkflowBuild } from "../workflow-builds.ts";
+import { generatedModule } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
   SealedCall,
@@ -39,17 +39,10 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
-import {
-  forIsolate,
-  isCoreMarker,
-  modelCallLimitOf,
-  settle,
-  unbilledAiWaitOf,
-} from "./host.ts";
+import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
   DecisionWait,
   HostControls,
-  HostHooks,
   HostedRun,
   HostStepUse,
   RetryDecision,
@@ -57,11 +50,11 @@ import type {
   RunKind,
   StepAttempt,
   StepLimits,
+  WaitLength,
 } from "./host.ts";
-import { admitAttempt } from "./quotas.ts";
 import type { AttemptAdmission } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
-import { callingRunOf, runAuthority } from "./resource-authority.ts";
+import { runAuthority } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
@@ -85,9 +78,8 @@ import {
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
 import { boundedJson } from "./resource-host.ts";
-import type { ActionModelCalls } from "./resource-host.ts";
+import type { ActionModelCalls, HostedResourceRun } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
-import { receiptOf, runOf, workflowOwnerOf } from "./resource-runs.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // What a run of a sealed build of a generated JSON workflow may do on the
@@ -155,12 +147,17 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 // - An effect repeated. A store operation's, a model's and an action's
 //   call goes out at most once per step, whatever its attempts
 //   (`SentCalls`, marked sent just before it leaves, after every check of
-//   its own; a later attempt fails as the one that sent it did, and one
-//   that provably billed nothing may be sent again); a connector's is keyed in connect under its step's key,
+//   its own, in the run's object, whose output gate holds the call until
+//   the mark is durable (run-object.ts, `sentCallsIn`), so no later
+//   activation, an evicted one's successor included, sends it again; a
+//   later attempt fails as the one that sent it did, and one that
+//   provably billed nothing may be sent again); a connector's is keyed in connect under its step's key,
 //   and a call connect holds for the person ends its step as held, which
 //   runs again once they decided.
 // - A run past what it may spend. Its model calls, its actions' included,
-//   are held to its ceiling (`maxModelCalls`) as they go out; each call is
+//   are held to its ceiling (`maxModelCalls`) as they go out, counted in
+//   the run's object across activations (run-object.ts, `modelCallsIn`),
+//   so a replay spends nothing its earlier activations spent; each call is
 //   one of its lineage's host calls; its attempts are admitted as its
 //   workflow's (`sealedAdmission`, `workflow-resource:<id>`).
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
@@ -181,8 +178,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   what it wasn't offered, or that a catch with no conditions didn't
 //   take what it was, is tampering. The step journals the error it
 //   took, so a replay binds the same one. A run whose code goes on past a
-//   failure no catch took is refused at its next step, or as it ends
-//   (`failureUntaken`).
+//   failure no catch took is refused at its next step, or, ending well,
+//   fails with that failure (`failureUntaken`, resource-runs.ts), as the
+//   build's code, which rethrows it, would have.
 // - A retry past its limits. The host runs a step's rounds (host.ts,
 //   `#retried`), only after a failure that may be tried again
 //   (`retryable`) of a task in the list of a try whose catch has a retry
@@ -235,6 +233,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     response schema), in the step that records it, so a replay takes it
 //     alike. A decision nobody answered before its deadline closes as
 //     timed out, and the decision service refuses an answer after that.
+// - A test run sitting waiting. Its sleeps, its deadlines (from its start,
+//   as recorded) and its retries' backoffs are held to its `maxSleepMs`
+//   (`requireWait`): one past it fails the run, and no catch takes it.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.
@@ -254,14 +255,17 @@ const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
  * onto `@grasp-os/sdk/workflow`: so none is ever loaded here, where its
  * first step would be refused as one the build doesn't seal.
  */
-const generatedForRunHost = (build: LoadedBuild): boolean =>
+export const generatedForRunHost = (build: LoadedBuild): boolean =>
   build.generator === generatorVersion && isRunHostSdk(generatedImport);
 
 /** A run of a sealed build, as its activation loaded it (`sealedRunOf`). */
 export interface HostedSealedRun extends HostedRun {
   readonly workflowId: string;
   readonly version: number;
-  /** When it was admitted, in ms: a decision with no timeout waits out its age. */
+  /**
+   * When it was admitted, in ms: a decision with no timeout waits out its
+   * age, and a deadline's wait is measured from it.
+   */
   readonly createdAt: number;
   /** Its sealed build, checked against the hash its row pins. */
   readonly build: LoadedBuild;
@@ -276,6 +280,14 @@ export interface HostedSealedRun extends HostedRun {
   readonly calling: CallingRun;
   /** The most model calls it may make: its build's and the host's lower. */
   readonly maxModelCalls: number;
+  /**
+   * For a test run (candidate-runs.ts): the longest any one of its waits
+   * may last, a retry's backoff included, and the furthest past its start
+   * a sleep until a deadline may end, in ms. One past it fails the run
+   * (`workflow.candidate_wait_limit`, which no catch takes), so no test
+   * run sits waiting for long.
+   */
+  readonly maxSleepMs?: number;
 }
 
 /**
@@ -959,6 +971,8 @@ class SealedRun implements SealedRunKind {
    * step runs.
    */
   #pending: Failure | undefined;
+  /** The pending failure as the engine journaled it (`failureUntaken`). */
+  #pendingError: StepError | undefined;
   /**
    * The catch the pending failure's step's last retry decision said takes
    * it (null for none), if one decided: no other catch is offered it.
@@ -1020,11 +1034,29 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * Whether a failure no catch took is pending as the run's code ends: a
-   * run whose code ends well with one went on past it, and fails.
+   * The failure no catch took, as the engine journaled it, if one is
+   * pending as the run's code ends: a run whose code ends well with one
+   * went on past it, and fails with it (resource-runs.ts), as the build's
+   * code, which rethrows what no catch took, would have.
    */
-  get failureUntaken(): boolean {
-    return this.#pending !== undefined;
+  get failureUntaken(): StepError | undefined {
+    return this.#pending === undefined ? undefined : this.#pendingError;
+  }
+
+  /**
+   * Refuses a durable wait past a test run's `maxSleepMs`
+   * (`workflow.candidate_wait_limit`): one of `ms`, or one until `until`,
+   * measured from the run's start, as recorded, so a replay refuses
+   * alike. Any wait of any other run.
+   */
+  requireWait(wait: WaitLength): void {
+    const { maxSleepMs, createdAt } = this.run;
+    const ms = "ms" in wait ? wait.ms : wait.until - createdAt;
+    if (maxSleepMs !== undefined && ms > maxSleepMs) {
+      throw workflowResourceErrors.create("workflow.candidate_wait_limit", {
+        limit: maxSleepMs,
+      });
+    }
   }
 
   /**
@@ -1392,6 +1424,7 @@ class SealedRun implements SealedRunKind {
     const task = sealed?.task;
     if (!outcome.ok) {
       this.#pendingBy = takenBy;
+      this.#pendingError = outcome.error;
       this.#pending =
         task === undefined || sealed?.kind === "catch"
           ? notCaught()
@@ -2204,45 +2237,32 @@ export const sealedRun =
 
 /** A sealed run's kind, and what its run's end checks of it. */
 export interface SealedRunKind extends RunKind {
-  /** Whether a failure no catch took is pending (`SealedRun`). */
-  readonly failureUntaken: boolean;
+  /** The failure no catch took, if one is pending (`SealedRun`). */
+  readonly failureUntaken: StepError | undefined;
 }
 
 /**
- * Run `runId` as its activation runs it, from its row and its start's
- * receipt: its sealed build loaded against the manifest the receipt pins,
- * every artifact and the build's identity checked against it, before any
- * of its code can run (`workflow.version_corrupt`). A run that has ended
- * runs nothing (`workflow.run_ended`).
+ * Run `run`, as its activation loaded it (resource-runs.ts: an independent
+ * workflow's run, or a test run of its draft's checkpoint), as the run
+ * host serves a sealed build's: its lineage, its authority and its share
+ * from what its calls go by, which its row and its root's pin.
  */
-export const sealedRunOf = async (
-  env: Env,
-  runId: string
-): Promise<HostedSealedRun> => {
-  const row = await runOf(env, runId);
-  const receipt = row === undefined ? undefined : await receiptOf(env, runId);
-  if (
-    row === undefined ||
-    receipt?.manifestHash !== row.manifestHash ||
-    receipt.input === null ||
-    receipt.params === null
-  ) {
-    throw new Error(`Run ${runId}'s receipt doesn't admit it`);
-  }
-  // The receipt pins the manifest, and the row the build hash the start
-  // read from that same manifest, both immutable: so the build's identity,
-  // checked against the manifest's, is the row's too.
-  const build = await loadWorkflowBuild(
-    env,
-    row.workflowResourceId,
-    row.version,
-    row.manifestHash
-  );
-  const calling = await callingRunOf(env, row.workflowResourceId, runId);
-  if (calling === undefined) {
-    throw workflowResourceErrors.create("workflow.run_ended");
-  }
-  const ceiling = modelCallLimitOf(env);
+export const sealedRunFrom = (
+  run: Pick<
+    HostedResourceRun,
+    | "runId"
+    | "workflowId"
+    | "version"
+    | "build"
+    | "params"
+    | "input"
+    | "createdAt"
+    | "calling"
+    | "maxModelCalls"
+    | "maxSleepMs"
+  >
+): HostedSealedRun => {
+  const { runId, calling } = run;
   return {
     runId: runIdSchema.parse(runId),
     ...(calling.rootRunId === runId
@@ -2253,14 +2273,15 @@ export const sealedRunOf = async (
       : { accountRunId: runIdSchema.parse(calling.accountRunId) }),
     authority: runAuthority(calling),
     shareSubject: calling.principal,
-    workflowId: row.workflowResourceId,
-    version: row.version,
-    createdAt: row.createdAt.getTime(),
-    build,
-    params: z.record(z.string(), z.json()).parse(JSON.parse(receipt.params)),
-    input: z.json().parse(JSON.parse(receipt.input)),
+    workflowId: run.workflowId,
+    version: run.version,
+    build: run.build,
+    params: run.params,
+    input: run.input,
+    createdAt: run.createdAt,
     calling,
-    maxModelCalls: Math.min(ceiling, build.limits.maxModelCalls ?? ceiling),
+    maxModelCalls: run.maxModelCalls,
+    ...(run.maxSleepMs === undefined ? {} : { maxSleepMs: run.maxSleepMs }),
   };
 };
 
@@ -2307,20 +2328,3 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
   collections: [],
   brains: [],
 });
-
-/**
- * Admits each attempt of `run` as its workflow's (`workflow-resource:<id>`),
- * against its account's lineage (quotas.ts).
- */
-export const sealedAdmission =
-  (env: Env, run: HostedSealedRun): NonNullable<HostHooks["admitAttempt"]> =>
-  async (attempt) =>
-    await admitAttempt(
-      env,
-      {
-        run: run.runId,
-        root: run.calling.accountRunId,
-        resource: workflowOwnerOf(run.workflowId),
-      },
-      attempt
-    );
