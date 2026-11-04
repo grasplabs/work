@@ -15,7 +15,10 @@ import {
   limitErrors,
   computeModuleErrors,
   computePackagesFile,
+  moduleRecordOf,
   openWorkflowErrors,
+  screenIncrementKeys,
+  screenSources,
   workflowBindingsPath,
   workflowBuildFiles,
 } from "@grasp-os/compiler";
@@ -27,6 +30,7 @@ import type {
   InspectTarget,
   ComputeModulesBuild,
   IncrementalBuild,
+  Increments,
   OpenWorkflowBuild,
   ScreenBuild,
   WorkflowBuild,
@@ -41,6 +45,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   screenErrors,
   screenNameSchema,
@@ -152,7 +157,8 @@ interface FailedBuild {
 
 /** What building reads from core's env. */
 export type BuildEnv = PlatformEnv &
-  CacheEnv & {
+  CacheEnv &
+  Pick<Env, "COMPILER_TASK_CPU_MS"> & {
     /** Where builds are cached: core's R2 bucket, in the EU. */
     FILES: Pick<R2Bucket, "get" | "put">;
   };
@@ -327,12 +333,157 @@ const incrementalShaped = (
   value.metrics !== null;
 
 /**
+ * The CPU time, in ms, Babel with the React Compiler takes for one
+ * character of screen source on Cloudflare, at most: measured on a laptop
+ * (2026-11-04) at 5–9 µs (a 60-screen App's 820,000 characters in 4.2–6.9
+ * s), and Cloudflare runs 2–5× slower than a laptop.
+ */
+const transformCpuMsPerCharacter = 0.045;
+
+/**
+ * The share of one compiler call's CPU time a batch of transforms is sized
+ * to: the rest is left to a cold isolate's start (loading Babel, the React
+ * Compiler and the kit) and to a machine slower than measured.
+ */
+const batchCpuShare = 0.2;
+
+/**
+ * The most characters of source one batch of transforms takes
+ * (`transformInBatches`): about 89,000 at a call's 20 s of CPU
+ * (`compilerTaskCpuMs`), or fewer where tests set `COMPILER_TASK_CPU_MS`.
+ * One file larger than that (up to the 200,000 a file may have) is a batch
+ * of its own, still well within a call's CPU time.
+ */
+const batchCharacters = (env: BuildEnv): number => {
+  const set = Number(env.COMPILER_TASK_CPU_MS);
+  const cpuMs =
+    Number.isInteger(set) && set > 0 && set < platformLimits.compilerTaskCpuMs
+      ? set
+      : platformLimits.compilerTaskCpuMs;
+  return Math.floor((cpuMs * batchCpuShare) / transformCpuMsPerCharacter);
+};
+
+/**
+ * `sources` in batches of at most `characters` each, in order: a source
+ * larger than that is a batch of its own.
+ */
+const batchesOf = (
+  sources: readonly (readonly [string, string])[],
+  characters: number
+): Record<string, string>[] => {
+  const batches: Record<string, string>[] = [];
+  let batch: Record<string, string> = {};
+  let size = 0;
+  for (const [path, source] of sources) {
+    if (Object.keys(batch).length > 0 && size + source.length > characters) {
+      batches.push(batch);
+      batch = {};
+      size = 0;
+    }
+    batch[path] = source;
+    size += source.length;
+  }
+  if (Object.keys(batch).length > 0) {
+    batches.push(batch);
+  }
+  return batches;
+};
+
+/**
+ * Transforms what a screens build of `files` (`target`) would and `reuse`
+ * lacks, a batch at a time, before the build: the whole of a large App's
+ * first build (after a release, every App's) is many times one call's CPU
+ * time, and the runtime stops a call past it. Each batch is one compiler
+ * call, handed only its own sources, sized well within a call's CPU time
+ * (`batchCharacters`); what each made is kept at once (module-cache.ts),
+ * so a build stopped part way resumes where it stopped. A batch stopped at
+ * a bound is split and each half tried again; one file stopped alone is
+ * left to the build, which says why. Nothing when all that's missing fits
+ * in one batch: the build transforms it itself. What the batches made, by
+ * key, for the build to reuse, and how many calls they took.
+ */
+const transformInBatches = async (
+  env: BuildEnv,
+  runner: PlatformRunner,
+  {
+    files,
+    target,
+    preview,
+    reuse,
+    leaseMs,
+  }: {
+    files: AppFiles;
+    target: string;
+    preview: boolean;
+    reuse: Increments;
+    leaseMs: number;
+  }
+): Promise<{ made: Increments["modules"]; calls: number }> => {
+  const { sources, known, typeFiles } = screenSources(buildFiles(files));
+  const { modules: keys } = await screenIncrementKeys(files, preview);
+  const missing = sources.filter(
+    ([path]) => !Object.hasOwn(reuse.modules, keys[path] ?? "")
+  );
+  const characters = batchCharacters(env);
+  const made: Increments["modules"] = {};
+  let calls = 0;
+  if (
+    missing.reduce((sum, [, source]) => sum + source.length, 0) <= characters
+  ) {
+    return { made, calls };
+  }
+  const pathOf = new Map(
+    Object.entries(keys).map(([path, key]) => [key, path])
+  );
+  const transform = async (batch: Record<string, string>): Promise<void> => {
+    let answer: unknown;
+    calls += 1;
+    try {
+      answer = await runner.run("compiler", "transform", [
+        target,
+        batch,
+        { known, typeFiles },
+      ]);
+    } catch (error) {
+      if (!(error instanceof PlatformBoundError)) {
+        throw error;
+      }
+      const entries = Object.entries(batch);
+      if (entries.length < 2) {
+        return;
+      }
+      const half = Math.ceil(entries.length / 2);
+      await transform(Object.fromEntries(entries.slice(0, half)));
+      await transform(Object.fromEntries(entries.slice(half)));
+      return;
+    }
+    const fresh: Increments = { modules: {}, checks: {} };
+    for (const [key, value] of Object.entries(
+      typeof answer === "object" && answer !== null ? answer : {}
+    )) {
+      const record = moduleRecordOf(value, pathOf.get(key) ?? "");
+      if (record !== undefined) {
+        fresh.modules[key] = record;
+      }
+    }
+    await keepIncrements(env, files, preview, fresh, leaseMs);
+    Object.assign(made, fresh.modules);
+  };
+  for (const batch of batchesOf(missing, characters)) {
+    // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
+    await transform(batch);
+  }
+  return { made, calls };
+};
+
+/**
  * A screens build of `files` (spec 19.2, GRA-958), reusing what earlier
  * builds kept of each file (module-cache.ts): the compiler checks each
  * against the key it works out itself, and redoes the rest with every
- * gate; what it made now is kept for the next. Its metrics: putting it
- * together from what was kept, the compiler's run, and how much of each
- * part was done now or reused.
+ * gate; what it made now is kept for the next. A first build of a large
+ * App transforms its files in batches first (`transformInBatches`). Its
+ * metrics: putting it together from what was kept, the batches, the
+ * compiler's run, and how much of each part was done now or reused.
  */
 const compiledIncrementally = async (
   env: BuildEnv,
@@ -345,8 +496,20 @@ const compiledIncrementally = async (
   const preview = profile === "preview";
   const [, target] = compilerCallOf("screen", profile, checks);
   const started = Date.now();
-  const reuse = await readIncrements(env, files, preview, buildRefreshMs);
+  const earlier = await readIncrements(env, files, preview, buildRefreshMs);
   const read = Date.now();
+  const batched = await transformInBatches(env, runner, {
+    files,
+    target,
+    preview,
+    reuse: earlier,
+    leaseMs,
+  });
+  const reuse: Increments = {
+    modules: { ...earlier.modules, ...batched.made },
+    checks: earlier.checks,
+  };
+  const transformed = Date.now();
   let answer: unknown;
   const result = await compiled(runner, "screen", files, profile, async () => {
     answer = await runner.run("compiler", "buildIncrementally", [
@@ -370,8 +533,12 @@ const compiledIncrementally = async (
     profile,
     // Putting the build together: what was kept read, and kept now.
     assemblyMs: read - started + (Date.now() - ran),
+    // The batches' transforms, their calls, and the modules they made.
+    batchMs: transformed - read,
+    batchCalls: batched.calls,
+    batched: Object.keys(batched.made).length,
     // The compiler's run: transforms, checks and the CSS.
-    executionMs: ran - read,
+    executionMs: ran - transformed,
     ...(incrementalShaped(answer)
       ? (answer.metrics satisfies BuildMetrics)
       : {}),

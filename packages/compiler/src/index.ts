@@ -77,6 +77,7 @@ export {
   incrementSchema,
   moduleRecordOf,
   screenIncrementKeys,
+  screenSources,
 } from "./increments.ts";
 export type {
   BuildMetrics,
@@ -189,7 +190,7 @@ const reader = <T>(keep: boolean) => {
  * in every isolate that ever built, they left too little for the rest,
  * and core ran out of memory (staging, November 2026). Only the Loader
  * needs them, to start an isolate: the compiler's stays warm under its
- * release's name (`startAppCompiler`), and the Loader asks for its code
+ * App's and release's name (`startAppCompiler`), and the Loader asks for its code
  * only when it isn't, so a warm build reads none of it.
  */
 const workerCodeRead = reader<WorkerLoaderWorkerCode>(false);
@@ -339,24 +340,36 @@ const compilerWorker = async (
   });
 
 /**
- * The compiler, in one isolate per release that every build shares, with
- * its code read from core's static assets. Kept warm, a build doesn't load
- * the compiler and the kit again, so a change to an App shows at once. It
- * is safe to share: the compiler parses and transforms App code but never
- * runs it, and the isolate has no bindings, no network and no subrequests
- * (`isolateSettings`). App code itself never runs here. The name holds
- * only the release's compiler version: workerd keeps a named isolate for
- * as long as the process runs, so a name per build would keep one
- * compiler for every build ever made. Being shared, its limits are every
- * build's together: a stop at them may be another build's doing
+ * The name of `whose` warm compiler isolate: the App's (or independent
+ * workflow's) ID and the release's compiler version, never anything of its
+ * code. Each unique name is a Dynamic Worker billed per day, and workerd
+ * keeps a named isolate for as long as the process runs: a name per build,
+ * or per version of an App's code, would start and keep one compiler for
+ * every build ever made.
+ */
+export const appCompilerName = (whose: string): string =>
+  `compiler:${version}:${whose}`;
+
+/**
+ * The compiler, in one isolate per App and release that the App's builds
+ * share, with its code read from core's static assets. Kept warm, a build
+ * doesn't load the compiler and the kit again, so a change to an App shows
+ * at once. One per App keeps Apps apart: the isolate's limits, and a
+ * recycle or a kill at them, are that App's builds' alone, never another
+ * App's. The compiler parses and transforms App code but never runs it,
+ * and the isolate has no bindings, no network and no subrequests
+ * (`isolateSettings`). Shared by the App's builds, its limits are theirs
+ * together: a stop at them may be another of its builds' doing
  * (`loadAppCompiler`).
  */
 export const startAppCompiler = (
   loader: WorkerLoader,
-  assets: Fetcher
+  assets: Fetcher,
+  /** Whose builds it runs: the App's, or an independent workflow's, ID. */
+  whose: string
 ): Service<AppCompiler> =>
   loader
-    .get(`compiler:${version}`, async () => await compilerWorker(assets))
+    .get(appCompilerName(whose), async () => await compilerWorker(assets))
     .getEntrypoint<AppCompiler>();
 
 /**

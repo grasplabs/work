@@ -87,6 +87,7 @@ import type {
   Handed,
   IncrementalBuild,
   Increments,
+  ModuleRecord,
 } from "./increments.ts";
 import type { CodeFolder } from "./inputs.ts";
 import {
@@ -390,6 +391,38 @@ const declarationImportErrors = (
   });
 };
 
+/**
+ * The transform of the screen source `path`, as a build keeps it, or why
+ * it can't be (`compileFile`), in a build whose modules are `known` and
+ * whose types may name `typeFiles`.
+ */
+const transformSource = (
+  path: string,
+  source: string,
+  {
+    known,
+    typeFiles,
+  }: { known: ReadonlySet<string>; typeFiles: ReadonlySet<string> },
+  flags: { unparsed: Set<string>; untyped: Set<string> },
+  preview: boolean
+): { record: ModuleRecord } | { errors: Diagnostic[] } => {
+  const result = compileFile(path, source, known, typeFiles, flags, preview);
+  if (!("code" in result)) {
+    return result;
+  }
+  return {
+    record: {
+      path,
+      code: result.code,
+      app: [...result.imported.app],
+      kit: [...result.imported.kit],
+      // The references' classes are the host's, never a screen's.
+      candidates:
+        path === screenReferences.path ? [] : extractCandidates(source),
+    },
+  };
+};
+
 /** These modules and every module they import, through `importsOf`. */
 const closureOf = (
   roots: Iterable<string>,
@@ -664,40 +697,31 @@ export const buildScreensIncrementally = async (
         ] as const
     )
   );
+  const take = (record: ModuleRecord): void => {
+    const name = appModuleName(record.path);
+    modules[name] = record.code;
+    imports.set(name, { app: new Set(record.app), kit: new Set(record.kit) });
+    candidates.push(...record.candidates);
+  };
   for (const [path, source, key] of keyed) {
-    const name = appModuleName(path);
     // A transform is reused only under the key this build works out for
     // it: one handed over under another, or shaped otherwise, is not.
     const kept = moduleRecordOf(ownRecord(reuse.modules, key), path);
     if (kept !== undefined) {
-      modules[name] = kept.code;
-      imports.set(name, { app: new Set(kept.app), kit: new Set(kept.kit) });
-      candidates.push(...kept.candidates);
+      take(kept);
       metrics.reused += 1;
       continue;
     }
-    const result = compileFile(
+    const result = transformSource(
       path,
       source,
-      known,
-      typeFiles,
+      { known, typeFiles },
       { unparsed, untyped },
       preview
     );
-    if ("code" in result) {
-      // The references' classes are the host's, never a screen's.
-      const own =
-        path === screenReferences.path ? [] : extractCandidates(source);
-      modules[name] = result.code;
-      imports.set(name, result.imported);
-      candidates.push(...own);
-      fresh.modules[key] = {
-        path,
-        code: result.code,
-        app: [...result.imported.app],
-        kit: [...result.imported.kit],
-        candidates: own,
-      };
+    if ("record" in result) {
+      take(result.record);
+      fresh.modules[key] = result.record;
       metrics.compiled += 1;
     } else {
       errors.push(...result.errors);
@@ -764,6 +788,44 @@ export const buildScreensIncrementally = async (
         }
       : {}),
   });
+};
+
+/**
+ * Transforms part of a screens build's sources (`batch`), in a build whose
+ * modules are `known` and whose types may name `typeFiles`: each as
+ * `buildScreensIncrementally` would, under the key it would work out for
+ * it, so the build reuses it. What a first build of a large App does a
+ * part at a time, each part one call within a call's CPU time (core's
+ * screens.ts). Only `known` sources are transformed, whatever else is
+ * passed. A file that doesn't compile is left out: the build compiles it
+ * again and says why, with every gate.
+ */
+const transformScreens = async (
+  batch: Record<string, string>,
+  { known, typeFiles }: { known: string[]; typeFiles: string[] },
+  preview: boolean
+): Promise<Record<string, ModuleRecord>> => {
+  const sets = { known: new Set(known), typeFiles: new Set(typeFiles) };
+  const flags = { unparsed: new Set<string>(), untyped: new Set<string>() };
+  const records = await Promise.all(
+    Object.entries(batch)
+      .filter(([path]) => sets.known.has(path))
+      .map(async ([path, source]) => {
+        const result = transformSource(path, source, sets, flags, preview);
+        if (!("record" in result)) {
+          return [];
+        }
+        const key = await moduleKey({
+          path,
+          source,
+          known,
+          typeFiles,
+          preview,
+        });
+        return [[key, result.record] as const];
+      })
+  );
+  return Object.fromEntries(records.flat());
 };
 
 /** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
@@ -1546,6 +1608,25 @@ export default class AppCompiler extends WorkerEntrypoint {
       ...incrementalTargets[known],
       reuse: incrementsOf(reuse),
     });
+  }
+
+  /**
+   * Transforms part of a screens build's sources (`target`: `screens`, or
+   * a preview's) as `buildIncrementally` would (`transformScreens`): the
+   * records it makes, by key, for core to keep and the build to reuse.
+   */
+  async transform(
+    target: IncrementalTarget,
+    batch: Record<string, string>,
+    paths: { known: string[]; typeFiles: string[] }
+  ): Promise<Record<string, ModuleRecord>> {
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
+    const known = knownTarget(incrementalTargets, target, "transform");
+    return await transformScreens(
+      batch,
+      paths,
+      incrementalTargets[known].preview
+    );
   }
 
   /**

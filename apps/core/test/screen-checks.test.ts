@@ -623,7 +623,7 @@ export default function Lookalikes() {
   });
 
   it("checks a typical screen quickly once the isolate is warm", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     // The first check parses the kit's declarations; later ones reuse them.
     await expect(compiler.check("screens", typicalApp)).resolves.toStrictEqual(
       []
@@ -650,7 +650,7 @@ export default function Lookalikes() {
 
 describe("the App compiler's surface", { timeout: 60_000 }, () => {
   it("never checks clean a screen its build refuses for an import", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     const leaking = {
       ...typicalApp,
       "screens/leak.tsx":
@@ -672,7 +672,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
   });
 
   it("refuses a target it doesn't know, and an inspection of a target that has none", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     // By name, as an RPC caller could send anything.
     const refusals = await Promise.all(
       [
@@ -701,7 +701,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
   });
 
   it("answers only check, build and inspect", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     const answers = await Promise.all(
       ["buildWorkflows", "buildAppCode", "checkAppCode", "buildServer"].map(
         async (method) =>

@@ -51,10 +51,11 @@ import {
 //   a full cgroup sends to any process) is never kept as the input's
 //   verdict. A process that ended itself (V8 at its heap limit) is
 //   `memory`: the supervisor tells the two apart by how it died.
-// - On Cloudflare every App's screens compile in one warm, shared
-//   isolate, whose limits are theirs together: one App's heavy builds
-//   could get another's screen kept as failed. A stop there is tried once
-//   more in a fresh isolate of the build's own, and only that is kept.
+// - On Cloudflare an App's builds share one warm isolate (one per App and
+//   release, so another App's builds never share its limits), and one of
+//   its heavy builds could get another of its screens kept as failed. A
+//   stop there is tried once more in a fresh isolate of the build's own,
+//   and only that is kept.
 // - The input is made to stop the same way on Cloudflare and on-prem but
 //   is judged differently, so one path recompiles a screen on every view
 //   at 20 s of CPU, or refuses a package the other accepts. Both run
@@ -102,7 +103,7 @@ import {
 // pool (App code's too), and tie the supervisor to the release's build
 // output. Handing them over on a local socket costs milliseconds; loading
 // the compiler, about a second per build that isn't cached. Cloudflare
-// keeps the compiler warm in its Loader (`startAppCompiler`).
+// keeps each App's compiler warm in its Loader (`startAppCompiler`).
 
 /** What builds run as on the sandbox host: one owner of their own. */
 export const builderOwner = "platform:builder";
@@ -321,17 +322,17 @@ const loaderCall = async (
   await boundedInCore(async () => await callStub(entrypoint, method, args));
 
 /**
- * The runner in core's own Loader. The compiler runs warm in its named
- * isolate, which every App's builds share, so its limits are theirs
- * together: one heavy build beside another can stop both. A stop there is
- * tried once more in a fresh isolate of the build's own
- * (`loadAppCompiler`), whose stop is the build's alone, and only that
- * is answered: a build is never kept as failed for what another did. The
- * builder runs in a fresh isolate per runner, so nothing one App's
- * packages leave in memory is there for the next, and its stops are its
- * own already.
+ * The runner in core's own Loader. The compiler runs warm in an isolate
+ * named for `whose` builds (`startAppCompiler`), so no other App's builds
+ * share its limits; the App's own builds do, and one heavy build beside
+ * another can stop both. A stop there is tried once more in a fresh
+ * isolate of the build's own (`loadAppCompiler`), whose stop is the
+ * build's alone, and only that is answered: a build is never kept as
+ * failed for what another did. The builder runs in a fresh isolate per
+ * runner, so nothing one App's packages leave in memory is there for the
+ * next, and its stops are its own already.
  */
-const inCore = (env: PlatformEnv): PlatformRunner => {
+const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   let builder: ReturnType<typeof startPackageBuilder> | undefined;
   const compile = async (
     method: string,
@@ -339,7 +340,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startAppCompiler(quietLoader(env.LOADER), env.ASSETS),
+        startAppCompiler(quietLoader(env.LOADER), env.ASSETS, whose),
         method,
         args
       );
@@ -495,5 +496,5 @@ export const platformRunner = (
   whose: string
 ): PlatformRunner => {
   const host = sessionHost(env);
-  return host === undefined ? inCore(env) : onHost(env, host, whose);
+  return host === undefined ? inCore(env, whose) : onHost(env, host, whose);
 };
