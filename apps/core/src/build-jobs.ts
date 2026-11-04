@@ -37,7 +37,7 @@ import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
-import { keepTests, reviewVersion } from "./version-review.ts";
+import { reviewVersion } from "./version-review.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import type { RunStep } from "./workflows/host.ts";
 import type { BuildJob, Draft } from "./workspace.ts";
@@ -497,13 +497,6 @@ const commitStep = async (
       }
     );
     ({ version, tree } = proposed);
-  }
-  // The check ran the tests of exactly these files: kept with the version,
-  // before its receipt, so a commit cut off here takes the version again.
-  if (checked.check.tests.status !== "not_run") {
-    await keepTests(env, app, tree, checked.check.tests).catch(
-      afterProposal("keep_tests", app, version)
-    );
   }
   await chats.recordBuildReceipt(scope.chatId, job.id, version);
   await chats

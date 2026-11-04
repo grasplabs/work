@@ -1,21 +1,9 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
-import { appHost } from "../src/durable-objects.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
-import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection } from "./mail-connection.ts";
-import { finished, liveStatus, sleeping } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import {
-  appWith,
-  hitCall,
-  hitsOf,
-  invoiceMail,
-  workflowFiles,
-} from "./workflow-apps.ts";
 import {
   admitted,
   withShares,
@@ -25,13 +13,8 @@ import {
   attemptOf,
   admit,
   shown,
-  working,
   admitExactly,
   aged,
-  failedWith,
-  loadWaitsOf,
-  settled,
-  eventually,
 } from "./workflow-slots.ts";
 
 // The limit on workflow attempts running at once (admission.ts): in the
@@ -191,181 +174,6 @@ describe("workflow attempts running at once", { timeout: 120_000 }, () => {
       afterWallTime: "ok",
       firstTry: "ok",
       secondTry: "ok",
-    });
-  });
-
-  it("run another App's workflow while a busy App's runs wait for a slot, and run them all once slots come free", async () => {
-    const [first, second] = await Promise.all([
-      signedInApi(idp, "builder"),
-      signedInApi(idp, "builder"),
-    ]);
-    const hot = await appWith(
-      first,
-      workflowFiles("slow", `${working("work", 1500)}\n  return 1;`, {
-        work: 1,
-      })
-    );
-    const other = await appWith(
-      second,
-      workflowFiles("quick", `${working("work", 10)}\n  return 1;`, {
-        work: 1,
-      })
-    );
-
-    const result = await withShares(
-      { workflowClientAttempts: 3, workflowAppAttempts: 2 },
-      async () => {
-        const hotRuns = await Promise.all(
-          Array.from(
-            { length: 3 },
-            async () => await first.api.workflows.start(hot, "slow")
-          )
-        );
-        const quick = await second.api.workflows.start(other, "quick");
-        await finished(quick.id);
-        const hotWhenQuickDone = await Promise.all(
-          hotRuns.map(async ({ id }) => await liveStatus(id))
-        );
-        // The hot App's last run waits a round or two, five and ten
-        // seconds long (admission.ts, `askAgainMs`), before a slot is its.
-        await eventually(async () => {
-          const statuses = await Promise.all(
-            hotRuns.map(async ({ id }) => await liveStatus(id))
-          );
-          expect(statuses).toStrictEqual(["complete", "complete", "complete"]);
-        }, 60_000);
-        return {
-          quick: await liveStatus(quick.id),
-          hotStillRunning: hotWhenQuickDone.some(
-            (status) => status !== "complete"
-          ),
-        };
-      }
-    );
-
-    expect(result).toStrictEqual({ quick: "complete", hotStillRunning: true });
-  });
-
-  it("stop a step that waited for a slot as long as a step may, though one comes free before it asks again, and run none of its code", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      ...workflowFiles("noop", "  return 1;"),
-      ...workflowFiles(
-        "counted",
-        `  await step.do("work", { description: "Work" }, async () => {
-    await ${hitCall(`"work"`)};
-    return 1;
-  });
-  return 1;`,
-        { work: 1 }
-      ),
-    });
-    const holderRun = await builder.api.workflows.start(app, "noop");
-    await finished(holderRun.id);
-    const holder = { run: holderRun.id, root: holderRun.id, resource: app };
-
-    const result = await withShares(
-      {
-        workflowClientAttempts: 2,
-        workflowAppAttempts: 1,
-        workflowQueuedStepMs: 8000,
-      },
-      async () => {
-        const held = await admit(holder, "holder");
-        const run = await builder.api.workflows.start(app, "counted");
-        // Its slot comes free at twelve seconds, after its eight are up.
-        await scheduler.wait(12_000);
-        if ("admitted" in held) {
-          await held.admitted.settle();
-        }
-        await finished(run.id);
-        return {
-          failed: await failedWith(run.id),
-          hits: await hitsOf(builder, app, "work"),
-        };
-      }
-    );
-
-    expect(result).toStrictEqual({ failed: "workflow.queue_timeout", hits: 0 });
-  });
-
-  it("count a step's wait for a slot only while it waits for one, starting over once it was admitted and held for its person", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection([]);
-    // A pause first, so the send is the step that waits for a slot.
-    const app = await appWith(admin, {
-      ...workflowFiles("noop", "  return 1;"),
-      ...workflowFiles(
-        "mailer",
-        `  await step.sleep("pause", { description: "Wait", duration: "3 seconds" });
-  return await step.do("send", { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input: mail }) => JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output));`,
-        { send: { messageId: "mocked" } }
-      ),
-    });
-    await requestGranted(idp, admin, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
-      binding: "MAIL",
-    });
-    await appHost(env, appIdSchema.parse(app)).restrict();
-    const holderRun = await admin.api.workflows.start(app, "noop");
-    await finished(holderRun.id);
-    const holder = { run: holderRun.id, root: holderRun.id, resource: app };
-
-    const result = await withShares(
-      {
-        workflowClientAttempts: 2,
-        workflowAppAttempts: 1,
-        workflowQueuedStepMs: 10_000,
-      },
-      async () => {
-        const run = await admin.api.workflows.start(app, "mailer");
-        // The slot is taken as the run pauses: its send waits for it.
-        await sleeping(run.id, "pause");
-        const first = await admit(holder, "first holder");
-        await eventually(async () => {
-          await expect(loadWaitsOf(run.id)).resolves.not.toHaveLength(0);
-        });
-        // It comes free: the send runs, and waits for the person.
-        await settled(first);
-        const pending = await vi.waitFor(
-          async () => {
-            const listed = await admin.api.pendingActions.list();
-            const held = listed.find(({ action }) => action === "mail.send");
-            expect(held).toBeDefined();
-            return held;
-          },
-          { timeout: 20_000, interval: 200 }
-        );
-        // The person takes longer than a step may wait for a slot: none
-        // of it is a wait for one.
-        await scheduler.wait(12_000);
-        // The slot is taken again before they confirm: the send waits for
-        // it once more, its ten seconds starting over.
-        await admit(holder, "second holder");
-        const roundsBefore = await loadWaitsOf(run.id);
-        if (pending !== undefined) {
-          await admin.api.pendingActions.confirm(pending.id, pending.inputHash);
-        }
-        // Once its next check saw the confirmation, it waits again.
-        await eventually(async () => {
-          const rounds = await loadWaitsOf(run.id);
-          expect(rounds.length).toBeGreaterThan(roundsBefore.length);
-        });
-        const waitingAgainAt = Date.now();
-        await finished(run.id);
-        return {
-          failed: await failedWith(run.id),
-          // Its whole ten seconds, not the five its first wait left.
-          waitedAfresh: Date.now() - waitingAgainAt >= 8000,
-        };
-      }
-    );
-
-    expect(result).toStrictEqual({
-      failed: "workflow.queue_timeout",
-      waitedAfresh: true,
     });
   });
 });

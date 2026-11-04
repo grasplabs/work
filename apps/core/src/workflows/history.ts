@@ -1,12 +1,6 @@
-import { appErrors } from "@grasp-os/shared/apps";
 import { isExpectedCode } from "@grasp-os/shared/errors";
+import { runIdSchema } from "@grasp-os/shared/ids";
 import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
-import {
-  reviewedTaskOf,
   runHistoryPageSchema,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
@@ -14,7 +8,6 @@ import type {
   RunHistoryEntry,
   RunHistoryError,
   RunHistoryPage,
-  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 import type { WorkflowError } from "@grasp-os/workerflow/contracts";
 import type {
@@ -24,14 +17,13 @@ import type {
   StepIdentity,
 } from "@grasp-os/workerflow/run";
 
-import { callsFor, appFor } from "../apps.ts";
+import { appFor } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import { decisionOfEventType } from "../decisions/decisions.ts";
 import { runObjectOf } from "./engine.ts";
 import { waitKeyOf, waitStepPrefix } from "./host.ts";
 import { detailsRemoved } from "./retention.ts";
 import { findRun, seesDetails } from "./runs.ts";
-import type { RunRow } from "./runs.ts";
 
 // A run's history, as Grasp's run pages show it: projected, page by page,
 // from what the run's engine journaled (workerflow's `history`), never
@@ -650,31 +642,6 @@ export const historyTeller = async (
   return (record) => entryOf(record, context);
 };
 
-/**
- * What the run's version's review shows of its workflow; none when the
- * version keeps none (or is gone), and then no step is named.
- */
-const reviewedOf = async (
-  env: Env,
-  row: RunRow
-): Promise<WorkflowCalls | undefined> => {
-  try {
-    return await callsFor(env, {
-      app: appIdSchema.parse(row.appId),
-      version: row.version,
-      workflow: workflowIdSchema.parse(row.workflowId),
-    });
-  } catch (error) {
-    if (
-      workflowErrors.codeOf(error) === "workflow.calls_not_kept" ||
-      appErrors.codeOf(error) === "app.version_not_found"
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
-};
-
 /** How a page of a run's history tells its steps: `Context`'s own two. */
 export interface HistoryTelling {
   readonly sees: boolean;
@@ -765,7 +732,6 @@ export const runHistory = async (
   if (detailsRemoved(row)) {
     return { items: [], nextCursor: null, hasMore: false };
   }
-  const reviewed = await reviewedOf(env, row);
   const { pageSize, cursor } = query.data;
   const page = await historyEntries(
     env,
@@ -773,7 +739,8 @@ export const runHistory = async (
     { after: cursor === null ? 0 : Number(cursor), pageSize },
     {
       sees: seesDetails(by, row, owner),
-      taskOf: (engineStep) => reviewedTaskOf(reviewed, engineStep),
+      // An App's run keeps no review of its steps: none is named.
+      taskOf: () => null,
     }
   );
   return page.hasMore && page.nextCursor !== null

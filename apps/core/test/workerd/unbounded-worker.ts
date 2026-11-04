@@ -3,7 +3,7 @@ import { buildDependencies } from "../../src/packages/build.ts";
 import { resolveDependencies } from "../../src/packages/resolve.ts";
 import { buildScreens } from "../../src/screens.ts";
 import { runCompute } from "../../src/workflow-modules.ts";
-import { loadRunIsolate } from "../../src/workflows/code.ts";
+import { loadSealedIsolate } from "../../src/workflows/sealed-isolate.ts";
 
 // An independent JSON workflow's run and its calculations, the App
 // compiler and the package builder on plain workerd with no sandbox and no
@@ -37,13 +37,13 @@ export default {
         await refusal(() =>
           // A JSON run's build, in a sandbox session where one is bound:
           // here, none is.
-          loadRunIsolate(
+          loadSealedIsolate(
             { ...env, SANDBOX_HOST: undefined },
             {
               owner: `workflow-resource:${crypto.randomUUID()}`,
               mainModule: "run.js",
               modules: async () => await Promise.resolve({}),
-              attemptMethods: [],
+              attemptHostMethods: [],
             }
           )
         )

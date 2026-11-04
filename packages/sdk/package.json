@@ -27,7 +27,6 @@
     "./compute-runner": "./src/compute-runner.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
-    "./describe": "./src/describe.ts",
     "./testing": "./src/testing.ts",
     "./client": "./src/client.ts",
     "./form-binding": "./src/form-binding.ts",

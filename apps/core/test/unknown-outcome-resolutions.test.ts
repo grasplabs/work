@@ -7,23 +7,17 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { waitKeyOf } from "../src/workflows/host.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection } from "./mail-connection.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { outcome as codeOf } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 import {
   day,
-  connectShared,
-  mailboxOf,
   sentFrom,
   receiptsFrom,
   exportedObligations,
-  mailer,
-  withResolvedDone,
   resolutions,
   callReceipts,
   listedFor,
@@ -31,12 +25,7 @@ import {
   asleep,
   unknownOutcomesOf,
 } from "./unknown-outcome-runs.ts";
-import {
-  appWith,
-  invoiceMail,
-  runEvents,
-  workflowFiles,
-} from "./workflow-apps.ts";
+import { invoiceMail, runEvents } from "./workflow-apps.ts";
 
 // A run's side effect whose answer was lost, so nobody can tell whether it
 // took effect (spec 14.3), on a native connector (Microsoft 365, against
@@ -657,91 +646,5 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       // The lost send only.
       sent: 1,
     });
-  });
-
-  it("fails as before on a Composio tool's error, which stays listed for its person", async () => {
-    const admin = await personApi("admin");
-    const mail = await mailConnection(["lost"]);
-    const app = await appWith(
-      admin,
-      workflowFiles(
-        "composio",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output));`,
-        { send: null }
-      )
-    );
-    await requestGranted(idp, admin, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
-      binding: "MAIL",
-    });
-    const run = await admin.api.workflows.start(app, "composio");
-    await finished(run.id);
-    expect({
-      run: await admin.api.workflows.status(run.id),
-      listed: await admin.api.unknownOutcomes.list(),
-    }).toMatchObject({
-      run: {
-        status: "failed",
-        failure: { error: { code: "connect.outcome_unknown" } },
-      },
-      listed: [{ key: { connectionId: mail.id, action: "mail.send" } }],
-    });
-  });
-
-  it("can't be resolved once the resource binding its App's call came through no longer serves it", async () => {
-    const admin = await personApi("admin");
-    const connectionId = await connectShared(admin);
-    const app = await appWith(admin, withResolvedDone(mailer(mailboxOf())));
-    const permission = await requestGranted(idp, admin, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId },
-      actions: ["mail.send"],
-      binding: "MAIL",
-    });
-    // Sent through a binding since revoked, its answer lost.
-    const hash = "0".repeat(64);
-    const now = Date.now();
-    await connectDb()
-      .prepare(
-        "INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, created_at, claimed_at, resource, input, origin) VALUES ('app', ?, ?, ?, 'mail.send', ?, ?, 'unknown', ?, ?, NULL, '{}', ?)"
-      )
-      .bind(
-        app,
-        admin.userId,
-        connectionId,
-        `run-${crypto.randomUUID()}:send`,
-        hash,
-        now,
-        now,
-        JSON.stringify({
-          mode: "workflow",
-          appVersion: 1,
-          permissionId: permission,
-          context: { type: "app", appId: app },
-          restricted: false,
-          binding: {
-            id: `binding-${crypto.randomUUID()}`,
-            declarationHash: hash,
-            fingerprint: hash,
-          },
-        })
-      )
-      .run();
-    const [unknown] = await admin.api.unknownOutcomes.list();
-    if (unknown === undefined) {
-      throw new Error("Expected the call of unknown outcome");
-    }
-    expect({
-      resolved: await codeOf(
-        admin.api.unknownOutcomes.resolve(
-          unknown.key,
-          "happened",
-          unknown.claim
-        )
-      ),
-      stillListed: await listedFor(admin),
-    }).toStrictEqual({ resolved: "resource.unavailable", stillListed: 1 });
   });
 });

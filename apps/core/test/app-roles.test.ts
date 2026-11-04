@@ -111,7 +111,6 @@ const callsOn = async ({ api }: Person, app: string) => ({
   status: await outcome(api.workflows.status(runOf(app))),
   start: await outcome(api.workflows.start(app, "report")),
   allRuns: await outcome(api.workflows.runs({ app })),
-  workflow: await outcome(api.workflows.get(app, "report")),
   members: await outcome(api.apps.members.list(app)),
   // Its code and settings.
   read: await outcome(api.apps.files.read(app)),
@@ -124,8 +123,6 @@ const callsOn = async ({ api }: Person, app: string) => ({
   propose: await outcome(api.apps.versions.propose(app, 1)),
   setCurrent: await outcome(api.apps.versions.setCurrent(app, 1)),
   errors: await outcome(api.screens.errors(app)),
-  params: await outcome(api.workflows.params.list(app, "report")),
-  test: await outcome(api.workflows.test(app, "report")),
   cancel: await outcome(api.workflows.cancel(runOf(app))),
   permission: await outcome(
     api.permissions.request({
@@ -151,8 +148,6 @@ const asUser = {
   // Past the role check: the App has no such workflow.
   start: "workflow.not_found",
   allRuns: "ok",
-  // Past the role check: the App has no such workflow.
-  workflow: "workflow.not_found",
   members: "ok",
   read: "role.forbidden",
   commit: "role.forbidden",
@@ -162,8 +157,6 @@ const asUser = {
   propose: "role.forbidden",
   setCurrent: "role.forbidden",
   errors: "role.forbidden",
-  params: "role.forbidden",
-  test: "role.forbidden",
   cancel: "role.forbidden",
   permission: "role.forbidden",
   share: "role.forbidden",
@@ -262,9 +255,6 @@ describe("App roles", { timeout: 60_000 }, () => {
       setCurrent: "ok",
       errors: "ok",
       cancel: "ok",
-      // Refused for the workflow it doesn't have, past the role check.
-      params: "workflow.not_found",
-      test: "workflow.not_found",
       permission: "ok",
       // Refused for the team there isn't, past the role check.
       share: "app.member_invalid",

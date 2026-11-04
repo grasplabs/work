@@ -1,43 +1,23 @@
-import {
-  appCodeFiles,
-  compilerVersion,
-  workflowPaths,
-} from "@grasp-os/compiler";
-import { readOutline } from "@grasp-os/sdk/describe";
+import { appCodeFiles } from "@grasp-os/compiler";
 import { descriptorFromText } from "@grasp-os/sdk/host";
 import type { AppManifest, RowRule } from "@grasp-os/sdk/host";
 import type {
-  AppFiles,
   ReviewChange,
   TableRowRules,
   VersionReview,
 } from "@grasp-os/shared/apps";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import type { AppId } from "@grasp-os/shared/ids";
+import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { outlineSteps, workflowErrors } from "@grasp-os/shared/workflows";
-import type {
-  OutlineNode,
-  StepOutline,
-  TriggerDeclaration,
-  WorkflowCalls,
-} from "@grasp-os/shared/workflows";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { sealedEvidence, versionManifest } from "./app-releases.ts";
-import {
-  appFor,
-  keptCallsOf,
-  findVersion,
-  toVersion,
-  versionFiles,
-} from "./apps.ts";
+import { appFor, findVersion, toVersion, versionFiles } from "./apps.ts";
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
-import { putCached, readCached } from "./cache-macs.ts";
 import {
   appWorkflowBindings,
   workflowResourceVersions,
@@ -45,29 +25,17 @@ import {
 import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
-import {
-  declaredParams,
-  declaredTriggers,
-  workflowIdsIn,
-  workflowTestOutcome,
-} from "./workflows/code.ts";
 import { takesFile } from "./workflows/start-files.ts";
 
 // What a version changes, for the builder who reviews it before making
 // it current: worked out here from the version and the App as they are
 // now, never taken from whoever proposed it (the chat's agent, say), so a
 // proposal can't describe itself as less than it is. Against the current
-// version: who proposed it, its files and server code, its workflows with
-// the steps and parameters that differ (a workflow counts as changed when
-// code outside screens changed, which it may import; a step that calls
-// the App's bindings may change things whether it says so or not, a step
-// counts as changed when its code as written does, and every step when
-// shared code changed; which steps there are, what each calls and
-// whether they can be read at all as the version's row keeps them, the
-// reading its runs are held to, `stepsOf`), what
-// the App asks for that no admin granted yet, what it holds and which of
-// that making it current would ask an admin for again, and its workflows'
-// tests, kept per version's files so they run once.
+// version: who proposed it, its files and server code, its migrations,
+// what the App asks for that no admin granted yet, what it holds, and
+// which of that making it current would ask an admin for again. What it
+// may reach is what it declares (its manifest), each binding approved for
+// that declaration: no code is read to say what it calls.
 
 /** The input of a bound workflow version's contract. */
 const boundContractSchema = z.object({ input: z.json() });
@@ -297,9 +265,6 @@ const migrationsOf = async (
   return listed;
 };
 
-/** Most test failures a review lists. */
-const maxFailures = 50;
-
 /**
  * How an App's server code changed (`appCodeFiles`: what its seal
  * builds), from its files that did (`changes`)
@@ -353,278 +318,6 @@ const differences = <T>(
       : [{ name, change, now: now.get(name), before: before.get(name) }];
   });
 
-const sameJson = (one: unknown, other: unknown): boolean =>
-  JSON.stringify(one) === JSON.stringify(other);
-
-/** A workflow's steps by name, wherever they are in its branches and loops. */
-const stepsIn = (nodes: readonly OutlineNode[]): Map<string, StepOutline> =>
-  new Map(outlineSteps(nodes).map((step) => [step.name, step]));
-
-/** A version's number, its files, and what its row keeps its workflows call. */
-interface VersionAt {
-  version: number;
-  files: AppFiles;
-  calls: Record<string, WorkflowCalls>;
-}
-
-/**
- * A step its version's row keeps that its source's outline doesn't show:
- * named, and nothing more is known of it. Its code may be anywhere in
- * the workflow's file, so it is compared as the whole file (`source`):
- * any change to the file shows as a change to it.
- */
-const keptOnly = (name: string, source: string): StepOutline => ({
-  type: "step",
-  name,
-  kind: "exact",
-  description: "",
-  sideEffect: false,
-  locked: false,
-  params: [],
-  options: {},
-  code: source,
-  line: 0,
-});
-
-/**
- * A workflow's steps at a version, each with the bindings it calls: which
- * steps there are, what each calls, and whether they can be read at all
- * come from the version's row (`keptCallsOf`), the reading its runs are
- * held to, never from reading its source again, which a later describer
- * may read otherwise. The source's outline gives each step's layout and
- * options only, and how each changed: a step the outline doesn't show
- * changes with the file (`keptOnly`). None where the version has no such
- * workflow; null when its row keeps its steps as unread, or keeps nothing
- * for it (its runs then fail with `workflow.calls_not_kept`), and when
- * its source can't be read as steps at all, so their changes can't be
- * either: the review then lists the workflow's every call (`calls`).
- */
-const stepsOf = (
-  at: VersionAt | undefined,
-  id: WorkflowId
-): Map<string, StepOutline> | null => {
-  const source = at?.files[workflowPaths(id).workflow];
-  if (at === undefined || source === undefined) {
-    return new Map();
-  }
-  const kept = keptCallsOf(at.calls, id)?.steps ?? null;
-  if (kept === null) {
-    return null;
-  }
-  // Source the outline can't read says nothing of how its steps changed:
-  // said as unreadable, though the row keeps what each step may call.
-  const outline = readOutline(source);
-  if (outline === null) {
-    return null;
-  }
-  const read = stepsIn(outline.steps);
-  return new Map(
-    Object.entries(kept).map(([name, calls]) => [
-      name,
-      { ...(read.get(name) ?? keptOnly(name, source)), env: [...calls] },
-    ])
-  );
-};
-
-/**
- * Every binding a workflow calls at a version, as its row keeps it
- * (`keptCallsOf`): what each step is held to when its steps can't be read;
- * none once it's removed, or when its row keeps nothing for it.
- */
-const allCallsOf = (at: VersionAt, id: WorkflowId): string[] =>
-  workflowIdsIn(at.files).includes(id)
-    ? (keptCallsOf(at.calls, id)?.all ?? [])
-    : [];
-
-/** A step without where it is written, to compare. */
-const withoutLine = ({ line: _line, ...step }: StepOutline) => step;
-
-/** A workflow's parameters at a version; null when they can't be read. */
-const paramsOf = async (
-  env: Env,
-  app: AppId,
-  at: { version: number; files: AppFiles } | undefined,
-  id: WorkflowId
-) => {
-  if (at === undefined || !workflowIdsIn(at.files).includes(id)) {
-    return new Map<string, unknown>();
-  }
-  try {
-    const params = await declaredParams(env, app, at.version, id, at.files);
-    return new Map<string, unknown>(params.map((param) => [param.name, param]));
-  } catch (error) {
-    // Workflow code that doesn't build or declare: said as unreadable.
-    if (workflowErrors.codeOf(error) !== undefined) {
-      return null;
-    }
-    throw error;
-  }
-};
-
-/** A workflow's triggers, by canonical JSON: each, and how many of it. */
-type Triggers = Map<string, { trigger: TriggerDeclaration; count: number }>;
-
-/**
- * A workflow's triggers at a version, counted by canonical JSON (two
- * identical ones both register, so both count): none where it has no such
- * workflow; null when they can't be read (code that doesn't build or
- * declare).
- */
-const triggersOf = async (
-  env: Env,
-  app: AppId,
-  at: { version: number; files: AppFiles } | undefined,
-  id: WorkflowId
-): Promise<Triggers | null> => {
-  if (at === undefined || !workflowIdsIn(at.files).includes(id)) {
-    return new Map();
-  }
-  try {
-    const triggers = await declaredTriggers(env, app, at.version, id, at.files);
-    const counted: Triggers = new Map();
-    for (const trigger of triggers) {
-      const key = canonicalJson(trigger);
-      counted.set(key, {
-        trigger,
-        count: (counted.get(key)?.count ?? 0) + 1,
-      });
-    }
-    return counted;
-  } catch (error) {
-    if (workflowErrors.codeOf(error) !== undefined) {
-      return null;
-    }
-    throw error;
-  }
-};
-
-/**
- * A workflow's triggers added and removed, with how many of each: what
- * makes it run on its own, counted as a multiset, so a second identical
- * trigger shows as one added.
- */
-const triggerChanges = (
-  before: Triggers,
-  now: Triggers
-): NonNullable<VersionReview["workflows"][number]["triggers"]> => {
-  const keys = [...new Set([...now.keys(), ...before.keys()])];
-  return keys.flatMap((key) => {
-    const was = before.get(key);
-    const is = now.get(key);
-    const trigger = is?.trigger ?? was?.trigger;
-    const countBefore = was?.count ?? 0;
-    const countAfter = is?.count ?? 0;
-    const difference = countAfter - countBefore;
-    if (trigger === undefined || difference === 0) {
-      return [];
-    }
-    return [
-      {
-        trigger,
-        change: difference > 0 ? ("added" as const) : ("removed" as const),
-        count: Math.abs(difference),
-        countBefore,
-        countAfter,
-      },
-    ];
-  });
-};
-
-/**
- * The purpose kept test results are signed for (`putCached`). A review
- * shows them to whoever decides on the version, so only results core
- * kept are read back: one whose MAC doesn't check runs the tests again.
- */
-const testsCachePurpose = "grasp-os workflow tests cache";
-
-/** Where a version's tests are kept, by its files' hash and the compiler. */
-const testsKey = (app: AppId, tree: string): string =>
-  `apps/${app}/tests/${tree}-${compilerVersion}.json`;
-
-/** Test results as they are kept; anything else is run again. */
-const keptTestsSchema = z.object({
-  status: z.enum(["passed", "failed", "none"]),
-  failures: z.array(z.string()).max(maxFailures),
-});
-
-/**
- * Keeps the test results of files with hash `tree`: what a check that
- * ran them found (agent-builds.ts), so a review doesn't run them again.
- */
-export const keepTests = async (
-  env: Env,
-  app: AppId,
-  tree: string,
-  tests: { status: string; failures: string[] }
-): Promise<void> => {
-  const kept = keptTestsSchema.safeParse({
-    ...tests,
-    failures: tests.failures.slice(0, maxFailures),
-  });
-  if (kept.success) {
-    await putCached(
-      env,
-      env.FILES,
-      testsCachePurpose,
-      testsKey(app, tree),
-      JSON.stringify(kept.data)
-    );
-  }
-};
-
-/**
- * A version's workflows' tests: kept once per version's files (and
- * compiler), run the first time only. A failure kept is shown as it was,
- * never run again: making the version current runs its tests anyway
- * (`requireWorkflowTestsPass`), so a kept result can't let one through.
- */
-const testsOf = async (
-  env: Env,
-  app: AppId,
-  { version, tree }: { version: number; tree: string },
-  files: AppFiles
-): Promise<VersionReview["tests"]> => {
-  if (workflowIdsIn(files).length === 0) {
-    return { status: "none", failures: [] };
-  }
-  const stored = await readCached(
-    env,
-    env.FILES,
-    testsCachePurpose,
-    testsKey(app, tree)
-  );
-  if (stored !== undefined) {
-    const kept = keptTestsSchema.safeParse(JSON.parse(stored));
-    if (kept.success) {
-      return kept.data;
-    }
-  }
-  let tests: VersionReview["tests"];
-  let keep = true;
-  try {
-    const outcome = await workflowTestOutcome(env, app, version, files);
-    ({ keep } = outcome);
-    tests = {
-      status: outcome.failures.length === 0 ? "passed" : "failed",
-      failures: outcome.failures.slice(0, maxFailures),
-    };
-  } catch (error) {
-    if (workflowErrors.codeOf(error) !== "workflow.build_failed") {
-      throw error;
-    }
-    tests = { status: "failed", failures: ["The workflows don't build."] };
-  }
-  // A result that may be the sandbox's doing is shown, and run again next
-  // time, never kept.
-  if (keep) {
-    await keepTests(env, app, tree, tests);
-  }
-  return tests;
-};
-
-/** A path of code a workflow may import: anything outside `screens/`. */
-const sharedCode = /^(?!screens\/).+\.(?:ts|tsx|js|mjs|json)$/u;
-
 /** The chat's agent that proposed `row`, with its chat's title for them. */
 const proposerOf = async (
   env: Env,
@@ -646,220 +339,6 @@ const proposerOf = async (
   return { ...proposedBy, ownChat, chatTitle };
 };
 
-/**
- * How a workflow's steps differ, by name, each compared as its code is
- * written. When code outside screens it may import changed (`shared`),
- * any step may do something else through it, whether its own code
- * changed or not, and whether or not it reads the App's bindings itself
- * (a helper may): every step is then listed, `sharedCode`, and said to
- * possibly change things outside Grasp if the workflow calls bindings at
- * all.
- */
-const stepChanges = (
-  before: ReadonlyMap<string, StepOutline>,
-  now: ReadonlyMap<string, StepOutline>,
-  { shared, outside }: { shared: boolean; outside: boolean }
-): NonNullable<VersionReview["workflows"][number]["steps"]> => {
-  const usesBindings = [...now.values()].some(
-    ({ env }) => (env ?? []).length > 0
-  );
-  // A step with options chosen at run time reads them through code its
-  // call doesn't hold, which may sit anywhere in its file (a helper, say).
-  const readsOutside = (step: StepOutline): boolean =>
-    outside && (step.dynamic ?? []).length > 0;
-  return differences(
-    before,
-    now,
-    (one, other) =>
-      !shared &&
-      !readsOutside(other) &&
-      sameJson(withoutLine(one), withoutLine(other))
-  ).map(({ name, change, now: step, before: was }) => {
-    const found = step ?? was;
-    return {
-      name,
-      change,
-      // A step that calls the App's bindings may change things, whether it
-      // says so (`sideEffect`) or not.
-      sideEffect:
-        (found?.sideEffect ?? false) ||
-        (found?.env ?? []).length > 0 ||
-        (shared && usesBindings),
-      // What the version's runs are held to, by binding, not by method:
-      // a call of any other binding from this step is refused
-      // (`workflowCallsOf`, workflows/host.ts).
-      calls: found?.env ?? [],
-      sharedCode: shared || (found !== undefined && readsOutside(found)),
-      ...(found?.dynamic === undefined ? {} : { dynamic: [...found.dynamic] }),
-    };
-  });
-};
-
-/**
- * `source` without its steps' calls: each call as written (`code`), cut
- * out where it is, from the start of its line on (`line`), never the same
- * text elsewhere, such as inside a helper's string. A step the outline
- * doesn't place (`keptOnly`) cuts nothing.
- */
-const withoutCalls = (source: string, steps: Iterable<StepOutline>): string => {
-  const lineStarts = [0];
-  for (
-    let next = source.indexOf("\n");
-    next !== -1;
-    next = source.indexOf("\n", next + 1)
-  ) {
-    lineStarts.push(next + 1);
-  }
-  const spans = [...steps].flatMap(({ code, line }) => {
-    const from = lineStarts[line - 1];
-    if (code === "" || from === undefined) {
-      return [];
-    }
-    const at = source.indexOf(code, from);
-    return at === -1 ? [] : [{ at, end: at + code.length }];
-  });
-  let left = "";
-  let cursor = 0;
-  for (const { at, end } of spans.toSorted((x, y) => x.at - y.at)) {
-    if (at >= cursor) {
-      left += source.slice(cursor, at);
-      cursor = end;
-    }
-  }
-  return left + source.slice(cursor);
-};
-
-/**
- * Whether a workflow's own file changed outside its steps' calls: its
- * source before and now, each without its own calls (`withoutCalls`),
- * compared exactly, so a change inside a string (`"high risk"` to
- * `"highrisk"`) shows, and so, conservatively, does reformatting. A helper
- * in the file that an option reads at run time (`StepOutline.dynamic`), a
- * condition or a loop: a step may now behave differently, though no call
- * of one changed.
- */
-const changedOutsideSteps = (
-  before: { source: string | undefined; steps: Iterable<StepOutline> },
-  now: { source: string | undefined; steps: Iterable<StepOutline> }
-): boolean =>
-  before.source !== undefined &&
-  now.source !== undefined &&
-  withoutCalls(before.source, before.steps) !==
-    withoutCalls(now.source, now.steps);
-
-/**
- * A workflow's steps now, and how they differ from before (`stepChanges`):
- * every step listed as possibly changed when code it may use changed
- * (`shared`), and every step with options chosen at run time when its own
- * file changed outside its steps' calls; null when its steps can't be
- * read, before or now.
- */
-const stepsChangedIn = (
-  { before, proposed }: { before: VersionAt | undefined; proposed: VersionAt },
-  id: WorkflowId,
-  shared: boolean
-) => {
-  const stepsBefore = stepsOf(before, id);
-  const stepsNow = stepsOf(proposed, id);
-  if (stepsBefore === null || stepsNow === null) {
-    return { stepsNow, steps: null };
-  }
-  const file = workflowPaths(id).workflow;
-  const outside = changedOutsideSteps(
-    { source: before?.files[file], steps: stepsBefore.values() },
-    { source: proposed.files[file], steps: stepsNow.values() }
-  );
-  return {
-    stepsNow,
-    steps: stepChanges(stepsBefore, stepsNow, { shared, outside }),
-  };
-};
-
-/** A version's workflows that differ from the current version's. */
-const workflowsOf = async (
-  env: Env,
-  app: AppId,
-  {
-    before,
-    proposed,
-    changedPaths,
-  }: {
-    before: VersionAt | undefined;
-    proposed: VersionAt;
-    changedPaths: ReadonlySet<string>;
-  }
-): Promise<VersionReview["workflows"]> => {
-  const workflowIds = [
-    ...new Set([
-      ...workflowIdsIn(proposed.files),
-      ...workflowIdsIn(before?.files ?? {}),
-    ]),
-  ].toSorted();
-  // Code outside screens a workflow may import, another workflow's and the
-  // server's too: when it changes, the workflow may do something else.
-  const changedCode = [...changedPaths].filter((path) => sharedCode.test(path));
-  const workflows: VersionReview["workflows"] = [];
-  for (const id of workflowIds) {
-    const paths = workflowPaths(id);
-    const shared = changedCode.filter(
-      (path) => path !== paths.workflow && path !== paths.tests
-    );
-    const ownChanged =
-      changedPaths.has(paths.workflow) || changedPaths.has(paths.tests);
-    const change = changeOf(
-      before === undefined || !workflowIdsIn(before.files).includes(id)
-        ? undefined
-        : true,
-      workflowIdsIn(proposed.files).includes(id) ? true : undefined,
-      () => !ownChanged && shared.length === 0
-    );
-    if (change === undefined) {
-      continue;
-    }
-    const { stepsNow, steps } = stepsChangedIn(
-      { before, proposed },
-      id,
-      shared.length > 0
-    );
-    // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-    const paramsBefore = await paramsOf(env, app, before, id);
-    // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-    const paramsNow = await paramsOf(env, app, proposed, id);
-    // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-    const triggersBefore = await triggersOf(env, app, before, id);
-    // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-    const triggersNow = await triggersOf(env, app, proposed, id);
-    const heldTo = allCallsOf(proposed, id);
-    workflows.push({
-      id,
-      change,
-      shared,
-      // This workflow can change things: steps that can't be read may do
-      // anything, and any step, changed or not, that says so or calls
-      // the App's bindings may (a new trigger runs them all).
-      sideEffect:
-        steps === null ||
-        steps.some(({ sideEffect }) => sideEffect) ||
-        [...(stepsNow?.values() ?? [])].some(
-          ({ sideEffect, env: calls }) => sideEffect || (calls ?? []).length > 0
-        ),
-      steps,
-      calls: heldTo,
-      triggers:
-        triggersBefore === null || triggersNow === null
-          ? null
-          : triggerChanges(triggersBefore, triggersNow),
-      params:
-        paramsBefore === null || paramsNow === null
-          ? null
-          : differences(paramsBefore, paramsNow, sameJson).map(
-              ({ name, change: paramChange }) => ({ name, change: paramChange })
-            ),
-    });
-  }
-  return workflows;
-};
-
 /** What version `version` of App `app` changes, for its builders. */
 export const reviewVersion = async (
   env: Env,
@@ -871,8 +350,7 @@ export const reviewVersion = async (
   const row = await findVersion(env, found.id, version);
   const files = await versionFiles(env, found.id, row.version);
   const { currentVersion: current } = found;
-  // What the current version's row keeps, what its workflows call; the current version itself changes nothing against
-  // itself.
+  // The current version itself changes nothing against itself.
   const currentRow =
     current === null ? undefined : await findVersion(env, found.id, current);
   const before =
@@ -881,19 +359,12 @@ export const reviewVersion = async (
       : {
           version: currentRow.version,
           files: await versionFiles(env, found.id, currentRow.version),
-          calls: currentRow.workflowCalls,
         };
   const fileChanges = differences(
     new Map(Object.entries(before?.files ?? {})),
     new Map(Object.entries(files)),
     (one, other) => one === other
   );
-  const changedPaths = new Set(fileChanges.map(({ name }) => name));
-  const workflows = await workflowsOf(env, found.id, {
-    before,
-    proposed: { version: row.version, files, calls: row.workflowCalls },
-    changedPaths,
-  });
   const serverChanges = differences(
     new Map(Object.entries(appCodeFiles(before?.files ?? {}))),
     new Map(Object.entries(appCodeFiles(files))),
@@ -940,7 +411,6 @@ export const reviewVersion = async (
       change,
     })),
     migrations,
-    workflows,
     handsFilesToWorkflows: await handsFilesOf(env, found.id, {
       version: row.version,
       files,
@@ -964,6 +434,5 @@ export const reviewVersion = async (
       permission,
       askedAgain: askedAgainBy(by, permission, keep),
     })),
-    tests: await testsOf(env, found.id, row, files),
   };
 };

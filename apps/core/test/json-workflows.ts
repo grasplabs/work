@@ -12,7 +12,6 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { Settled } from "../src/workflows/code.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
@@ -22,6 +21,7 @@ import type {
   ScopeFences,
 } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import type { Settled } from "../src/workflows/sealed-isolate.ts";
 import { admittedFreely } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 

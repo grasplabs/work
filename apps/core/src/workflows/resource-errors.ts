@@ -2,7 +2,7 @@ import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { categoryOf, isRetryableCode } from "@grasp-os/shared/operations";
 
 import type { SealedTask } from "../workflow-builds.ts";
-import type { StepError } from "./code.ts";
+import type { StepError } from "./sealed-isolate.ts";
 
 // The failures of a JSON workflow's steps as its `try` tasks' catches see
 // them (spec 13.7): each an upstream error (its type, status, title,

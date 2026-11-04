@@ -10,14 +10,9 @@ import {
   permissions,
   workflowBindingApprovals,
   workflowResourceRuns,
-  workflowRunFiles,
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
-import {
-  workflowActivity,
-  workflowFiles,
-  workflowKnowledge,
-} from "../src/workflow-own.ts";
+import { workflowActivity, workflowKnowledge } from "../src/workflow-own.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -215,31 +210,6 @@ const ran = async (
   return id;
 };
 
-/** A file run `runId` wrote, named `name`, finished at `at`, as `state` says. */
-const wrote = async (
-  workflowId: string,
-  runId: string,
-  name: string,
-  at: number,
-  state: "writing" | "done" | "deleted" = "done"
-): Promise<void> => {
-  await drizzle(env.DB)
-    .insert(workflowRunFiles)
-    .values({
-      id: crypto.randomUUID(),
-      runId,
-      workflowResourceId: workflowId,
-      openedBy: "step",
-      openKey: unique(),
-      name,
-      type: "text/plain",
-      size: name.length,
-      state,
-      createdAt: new Date(at - 500),
-      finishedAt: state === "writing" ? null : new Date(at),
-    });
-};
-
 describe("a workflow's own knowledge, files and activity", () => {
   it("names the collections it may read itself, with the bindings that use them, to anyone with a role in it", async () => {
     const { ada, uma, workflow } = await greeting();
@@ -277,46 +247,6 @@ describe("a workflow's own knowledge, files and activity", () => {
       ],
       sameForUma: true,
       stranger: "workflow.resource_unavailable",
-    });
-  });
-
-  it("lists the files its runs wrote as their results are shown: to the person each run acted for, and admins", async () => {
-    const { ada, uma, workflow } = await greeting();
-    const admin = await person("admin");
-    const now = Date.now();
-    const umas = await ran(workflow.id, uma, now - 10_000);
-    const adas = await ran(workflow.id, ada, now - 5000);
-    await wrote(workflow.id, umas, "uma-report.txt", now - 9000);
-    await wrote(workflow.id, adas, "ada-report.txt", now - 4000);
-    // Still being written, or gone with its run's details: never listed.
-    await wrote(workflow.id, adas, "half.txt", now - 3000, "writing");
-    await wrote(workflow.id, adas, "gone.txt", now - 2000, "deleted");
-
-    const names = async (by: Acting) => {
-      const files = await workflowFiles(env, by, workflow.id);
-      return files.map(({ name }) => name);
-    };
-
-    const files = await workflowFiles(env, admin, workflow.id);
-
-    expect({
-      uma: await names(uma),
-      // A builder sees every run, but only their own runs' results.
-      ada: await names(ada),
-      // The organization's admins see every run's, as its results.
-      admin: files.map(({ name, runId, size, type }) => ({
-        name,
-        runId,
-        size,
-        type,
-      })),
-    }).toStrictEqual({
-      uma: ["uma-report.txt"],
-      ada: ["ada-report.txt"],
-      admin: [
-        { name: "ada-report.txt", runId: adas, size: 14, type: "text/plain" },
-        { name: "uma-report.txt", runId: umas, size: 14, type: "text/plain" },
-      ],
     });
   });
 

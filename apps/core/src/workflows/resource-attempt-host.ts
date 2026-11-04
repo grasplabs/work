@@ -1,7 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { RpcTarget } from "cloudflare:workers";
 
-import type { Settled } from "./code.ts";
+import type { Settled } from "./sealed-isolate.ts";
 
 /** What an attempt's calls reach in its run host (resource-host.ts). */
 export interface AttemptCalls {

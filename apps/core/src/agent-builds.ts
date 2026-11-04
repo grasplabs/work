@@ -44,15 +44,14 @@ import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
-import { appBindingKinds, requestPermission } from "./permissions.ts";
+import { requestPermission } from "./permissions.ts";
 import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave, draftServerBuild } from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
-import { keepTests, reviewVersion } from "./version-review.ts";
-import { workflowTestFailures } from "./workflows/code.ts";
+import { reviewVersion } from "./version-review.ts";
 import { runEngine } from "./workflows/engine.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -65,22 +64,20 @@ import type { Draft } from "./workspace.ts";
 // never over a version that changed the same files since it began, so
 // the agent's edits and a builder's can't overwrite each other.
 //
-// The agent writes no workflow into an App: `write` refuses a file under
-// `workflows/`, whether a workflow or code one may import. What runs on
-// its own is an independent JSON workflow, built with `env.workflowBuild`
-// (agent-workflow-build.ts) and bound to the App under an alias; each call
-// it makes outside itself is a binding of its validated definition, which
-// an admin approves for that exact version. So nothing the agent writes
-// reaches a binding that no review lists. A workflow a builder wrote stays
-// in the draft as it is: the agent may delete it, never change it.
+// An App holds no workflows (app-no-workflows.ts): `write` refuses a file
+// under `workflows/`. What runs on its own is an independent workflow,
+// built with `env.workflowBuild` (agent-workflow-build.ts) and bound to the
+// App under an alias; each call it makes outside itself is a binding of
+// its validated definition, which an admin approves for that exact
+// version. So nothing the agent writes reaches a binding that no review
+// lists.
 //
 // Every write answers with what the whole draft builds to (`draftBuilds`),
-// as a save builds it (screens and workflows: compile, type errors,
+// as a save builds it (screens: compile, type errors,
 // @shadcn/lint and the React Compiler) and its server code as its seal
 // type-checks it, every gate at once and none hiding another: sorted by
 // file, each named once (`writtenDiagnostics`). There is no check of its
-// own to call: proposing checks the draft again, runs its workflows'
-// tests and reads what the preview of the draft in the person's side
+// own to call: proposing checks the draft again and reads what the preview of the draft in the person's side
 // panel ran into so far (preview-reports.ts), and refuses it while
 // anything fails. The agent can also call
 // the draft's server code itself (`call`), in that same preview: the draft
@@ -347,8 +344,8 @@ export interface DraftWrite {
 /** How a check of a draft went: what proposing it checks. */
 export interface DraftCheck {
   /**
-   * It all builds and every workflow test passes: what proposing needs. A
-   * build that couldn't run (`error`) doesn't pass either.
+   * It all builds: what proposing needs. A build that couldn't run
+   * (`error`) doesn't pass either.
    */
   passed: boolean;
   screens: SavedBuild;
@@ -359,12 +356,6 @@ export interface DraftCheck {
    * runs, its preview reports.
    */
   server: SavedBuild;
-  workflows: SavedBuild;
-  tests: {
-    /** `not_run` while the workflows don't build. */
-    status: "passed" | "failed" | "none" | "not_run";
-    failures: string[];
-  };
   /**
    * What the preview of the draft in the person's side panel ran into so
    * far (preview-reports.ts): any problem but a `warning` fails the check. `seen` is
@@ -408,31 +399,6 @@ const reported = (build: SavedBuild): SavedBuild => ({
   ...build,
   diagnostics: build.diagnostics.slice(0, maxReported),
 });
-
-/** The tests of a draft's workflows, once they build. */
-const testsOf = async (
-  env: Env,
-  app: AppId,
-  base: number | null,
-  files: Record<string, string>,
-  workflows: SavedBuild,
-  signal?: AbortSignal
-): Promise<DraftCheck["tests"]> => {
-  if (workflows.status === "none") {
-    return { status: "none", failures: [] };
-  }
-  if (!buildPassed(workflows)) {
-    return { status: "not_run", failures: [] };
-  }
-  const failures = await workflowTestFailures(env, app, base ?? 0, files, {
-    draft: true,
-    ...(signal === undefined ? {} : { signal }),
-  });
-  return {
-    status: failures.length === 0 ? "passed" : "failed",
-    failures: failures.slice(0, maxReported),
-  };
-};
 
 /**
  * Logs what failed after a draft was proposed (committed, and up for
@@ -490,15 +456,13 @@ const previewOf = async (
   };
 };
 
-/** A draft's builds: its screens, its server code and its workflows. */
-export type DraftBuilds = Pick<DraftCheck, "screens" | "server" | "workflows">;
+/** A draft's builds: its screens and its server code. */
+export type DraftBuilds = Pick<DraftCheck, "screens" | "server">;
 
 /**
- * Builds a draft's `files` as a save does (`buildOnSave`: screens and
- * workflows) and its server code as its seal type-checks it
- * (`draftServerBuild`), all at once: every gate of each, none hiding
- * another. Typed by the App's permissions now, as a version committed
- * from it would be. Its server code is inspected once, at most, for both
+ * Builds a draft's `files` as a save does (`buildOnSave`: screens) and
+ * its server code as its seal type-checks it (`draftServerBuild`), both at
+ * once: every gate of each, none hiding the other. Its server code is inspected once, at most, for both
  * (`inspectDraft`): the screens' references and the server check read the
  * same registration, so a sandbox that ends one inspection can't check
  * the screens against stand-ins while the server passes.
@@ -524,12 +488,12 @@ const draftBuilds = async (
   const [saved, server] = await Promise.all([
     buildOnSave(
       env,
-      { app, version, files, bindings: await appBindingKinds(env, app) },
+      { app, version, files },
       { profile: "preview", signal, inspection }
     ),
     draftServerBuild(env, { app, version, files }, signal, inspection),
   ]);
-  return { screens: saved.screens, server, workflows: saved.workflows };
+  return { screens: saved.screens, server };
 };
 
 /** Where a diagnostic is, to sort by: its file (the App's own last), line and column. */
@@ -538,8 +502,8 @@ const placeOf = ({ file, line, column }: BuildDiagnostic): string =>
 
 /**
  * The diagnostics of `builds` as a write answers them: all together,
- * sorted by file, line and column, each said once (a screen's and a
- * workflow's check may both name a file they share), within
+ * sorted by file, line and column, each said once (the screens' and the
+ * server's check may both name a file they share), within
  * {@link maxReported}, errors first where that cuts some off.
  */
 const writtenDiagnostics = (
@@ -547,7 +511,7 @@ const writtenDiagnostics = (
 ): Pick<DraftWrite, "errors" | "warnings" | "diagnostics" | "leftOut"> => {
   const seen = new Set<string>();
   const all: BuildDiagnostic[] = [];
-  for (const build of [builds.screens, builds.server, builds.workflows]) {
+  for (const build of [builds.screens, builds.server]) {
     for (const diagnostic of build.diagnostics) {
       const key = JSON.stringify([
         diagnostic.file,
@@ -578,8 +542,7 @@ const writtenDiagnostics = (
 };
 
 /**
- * Builds a draft's `files` and runs their workflows' tests (`check`), and
- * reads what the preview of its revision ran into: a check fails while
+ * Builds a draft's `files` (`check`), and reads what the preview of its revision ran into: a check fails while
  * it has any problem.
  */
 export const checkFiles = async (
@@ -590,8 +553,8 @@ export const checkFiles = async (
   files: Record<string, string>,
   /**
    * Aborted once the check is no one's (a build job's step lost its
-   * lease): it starts nothing more, a phase, a compile or a workflow's
-   * tests, gives up the test it runs, and throws its reason. Checked
+   * lease): it starts nothing more, a phase or a compile, and throws its
+   * reason. Checked
    * before its first phase too: what ran before, a read of the draft, may
    * have outlived the lease.
    */
@@ -600,19 +563,13 @@ export const checkFiles = async (
   signal?.throwIfAborted();
   const builds = await draftBuilds(env, app, base, files, signal);
   signal?.throwIfAborted();
-  const tests = await testsOf(env, app, base, files, builds.workflows, signal);
-  signal?.throwIfAborted();
-  const built =
-    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
-    tests.status !== "failed";
+  const built = [builds.screens, builds.server].every(buildPassed);
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
     screens: reported(builds.screens),
     server: reported(builds.server),
-    workflows: reported(builds.workflows),
-    tests,
     preview,
   };
 };
@@ -761,14 +718,7 @@ export const proposeChatDraft = async (
   // Committed and up for review: from here on it is proposed, however the
   // rest goes, and says so, so nobody tries again (and meets nothing to
   // commit). What follows is logged when it fails.
-  const { version, tree } = proposed;
-  // The check ran the tests of exactly these files: the review takes its
-  // result rather than running them again.
-  if (check.tests.status !== "not_run") {
-    await keepTests(env, app, tree, check.tests).catch(
-      afterProposal("keep_tests", app, version)
-    );
-  }
+  const { version } = proposed;
   // Only the revision committed: a write since stays a draft.
   await workspace(env, scope.workspaceId)
     .dropDraft(scope.chatId, app, { revision: draft.revision })
@@ -911,8 +861,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
               by,
               blueprint,
               input,
-              this.#admit,
-              true
+              this.#admit
             )
         ),
       (created) => ({
@@ -1053,7 +1002,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           Object.fromEntries(files)
         );
         const notChecked: DraftWrite["notChecked"] = {};
-        for (const kind of ["screens", "server", "workflows"] as const) {
+        for (const kind of ["screens", "server"] as const) {
           const { status, error } = builds[kind];
           // Couldn't run, or checked on stand-ins (`standIn`): both say why.
           if (status === "error" || error !== undefined) {
@@ -1093,8 +1042,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Proposes the chat's draft of `app` for review: checks it over the
-   * App's latest version (its builds, its workflows' tests and what its
-   * preview ran into), and once it passes commits it as the App's next
+   * App's latest version (its builds and what its preview ran into), and once it passes commits it as the App's next
    * version, pending, with `message`, and drops the draft. A builder makes
    * it current, in Grasp. A draft that fails isn't proposed: what fails
    * comes back instead, so nothing that fails is ever proposed.
@@ -1426,8 +1374,7 @@ const buildDeclaration = `/**
  * \`env.workflowBuild\`, declare it in app.ts
  * (\`permissions: { workflows: [permission.workflow("alias", { input, output })] }\`,
  * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
- * under that alias. A workflow already in the App, which a builder wrote,
- * you may delete but not change.
+ * under that alias.
  *
  * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded:
  * \`take\`/\`collect\` return at most 100 records, so lists page with
@@ -1528,8 +1475,8 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
-   * Answers with what fails in the whole draft now, its screens, server code
-   * and workflows checked at once (compile, types, lint, React Compiler),
+   * Answers with what fails in the whole draft now, its screens and server
+   * code checked at once (compile, types, lint, React Compiler),
    * sorted by file, each once: fix the errors and write again; proposing
    * needs none. A build that couldn't run now, or screens checked without
    * the server code's references while it doesn't register, is in
@@ -1543,7 +1490,7 @@ build: {
     diagnostics: Build["diagnostics"];
     /** Diagnostics past the first 50. */
     leftOut: number;
-    notChecked: { screens?: string; server?: string; workflows?: string };
+    notChecked: { screens?: string; server?: string };
   }>;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
@@ -1569,7 +1516,7 @@ build: {
   >;
   /**
    * Proposes the draft for review: checks it over the App's latest version
-   * (its builds, its workflows' tests, and what its screens ran into so far
+   * (its builds, and what its screens ran into so far
    * in the person's preview (runtime errors)) and, once it passes, makes it the App's next
    * version, pending, with \`message\` (what changed and why, for the
    * reviewer). A builder of the App reviews what it changes and makes it
@@ -1592,8 +1539,6 @@ build: {
       passed: boolean;
       screens: Build;
       server: Build;
-      workflows: Build;
-      tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
       preview: {
         problems: { source: "screen" | "server"; at: string; kind: string; message: string; stack?: string }[];
         seen: boolean;
@@ -1612,25 +1557,11 @@ build: {
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */
       migrations: { name: string; table: string; change: "added" | "modified"; fixtures: number; fixturesPassed: boolean | null }[] | null;
-      workflows: {
-        id: string;
-        change: "added" | "modified" | "removed";
-        /** Changed code outside screens it may use. */
-        shared: string[];
-        /** \`sharedCode\`: listed because code it may use changed. */
-        steps: { name: string; change: string; sideEffect: boolean; calls: string[]; sharedCode: boolean }[] | null;
-        params: { name: string; change: string }[] | null;
-        /** What makes it run on its own, added or removed. */
-        triggers: { trigger: Record<string, unknown>; change: "added" | "removed"; count: number }[] | null;
-        /** It can change something outside Grasp (any step may, or its steps can't be read). */
-        sideEffect: boolean;
-      }[];
       permissions: { id: string; object: Record<string, unknown>; actions: string[]; binding: string }[];
       /** It reads the organization's people (\`permissions.people\`); null when that can't be read. */
       readsPeople: boolean | null;
       /** What the App holds, and which making it current asks an admin for again. */
       grants: { permission: { id: string; binding: string; actions: string[] }; askedAgain: boolean }[];
-      tests: { status: "passed" | "failed" | "none"; failures: string[] };
     } | null;
     reviewUnavailable: boolean;
   }>;

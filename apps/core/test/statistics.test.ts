@@ -18,7 +18,7 @@ import { readPlatformStatistics } from "../src/statistics.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, finished, seedResourceRun } from "./runs.ts";
+import { endLiveRuns, seedResourceRun } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
@@ -1216,91 +1216,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
   });
 });
 
-/** A function of the Stats App, as a step names it. */
-const statsFunction = (name: string, kind = "action") =>
-  JSON.stringify({ contractId: `stats.${name}`, kind });
-
-/** The input of `stats.platformRead`, as a step passes it. */
-const statsInput = (value: unknown) =>
-  JSON.stringify({ json: JSON.stringify(value) });
-
 describe("a run's statistics", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
-  });
-
-  it("read the platform's measures for a run as the run, for the person it acts for", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    const watched = await countedApp(admin);
-    await seedRun(watched, "pay");
-    const query = {
-      measure: "platform.workflow_runs",
-      days: 7,
-      where: { app: watched },
-    };
-    const reader = await statsApp(builder, {
-      ...statsFiles(),
-      "workflows/reads.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("reads", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("read", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${statsFunction("platformRead")}, ${statsInput(query)})) as Json
-  )
-);
-`,
-      "workflows/reads.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./reads.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { read: null }, expect: {} }]);
-`,
-    });
-    await grantPlatform(builder, reader);
-    /** A run of `reads` started by `starter`: its ID, and what it read. */
-    const runBy = async (starter: Person) => {
-      const run = await starter.api.workflows.start(reader, "reads");
-      await finished(run.id);
-      const ended = await starter.api.workflows.status(run.id);
-      const parsed = z
-        .object({ ok: z.literal(true), value: z.string() })
-        .safeParse(ended.output);
-      const answer: unknown = parsed.success
-        ? JSON.parse(parsed.data.value)
-        : ended.output;
-      return { id: run.id, read: answer };
-    };
-    const started: { id: string; read: unknown }[] = [];
-    const events = await auditedDuring(async () => {
-      started.push(await runBy(admin));
-    });
-    const [byAdmin = { id: "", read: null }] = started;
-    // A builder of the reading App, with no role in the one it counts.
-    const byBuilder = await runBy(builder);
-    expect({
-      byAdmin: answerSchema.parse(byAdmin.read).ok.groups,
-      audited: events
-        .filter(({ action }) => action === "statistics.read")
-        .map(({ actor, detail }) => ({
-          actor,
-          onBehalfOf: detail.onBehalfOf,
-        })),
-      byBuilder: byBuilder.read,
-    }).toStrictEqual({
-      byAdmin: [{ dimensions: {}, count: 1, sum: 1, min: 1, max: 1 }],
-      // As the run, for the person it acts for: whoever started it.
-      audited: [
-        {
-          actor: {
-            type: "workflow",
-            appId: reader,
-            workflowId: "reads",
-            runId: byAdmin.id,
-          },
-          onBehalfOf: admin.userId,
-        },
-      ],
-      byBuilder: { error: "resource.item_not_found" },
-    });
   });
 });

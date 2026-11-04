@@ -22,7 +22,6 @@ import type {
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  bindingNameSchema,
   declaredPermissionSchema,
   grantReviewSchema,
   permissionErrors,
@@ -1993,127 +1992,6 @@ export const activePermissions = async (
   where?: Where
 ): Promise<Permission[]> =>
   await permissionsIn(env, subject, ["active"], where);
-
-/** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
-export type WorkflowBindingKind = "connection" | "collection" | "brain";
-
-/** Whether a permission row's actions (JSON, as stored) include `brain`. */
-const holdsBrain = (actions: string | undefined): boolean => {
-  if (actions === undefined) {
-    return false;
-  }
-  let stored: unknown;
-  try {
-    stored = JSON.parse(actions);
-  } catch {
-    // Not a list of actions: none of them `brain`.
-    return false;
-  }
-  const parsed = z.array(z.string()).safeParse(stored);
-  return parsed.success && parsed.data.includes("brain");
-};
-
-/**
- * The kind of binding a permission row gives a run: a connection's, a
- * collection's, or the Brain's (a platform permission holding `brain`,
- * GRA-1067), or none.
- */
-const kindOf = (
-  objectType: string,
-  actions: string | undefined
-): WorkflowBindingKind | undefined => {
-  if (objectType === "connection" || objectType === "collection") {
-    return objectType;
-  }
-  return objectType === "platform" && holdsBrain(actions) ? "brain" : undefined;
-};
-
-/**
- * The binding names `held` gives, each with the kind of binding a run
- * gets from it: a connection's, a collection's or the Brain's. Another
- * App's permission gives a run none: a run reaches no App's code but its
- * own. A name is the kind of the permission that holds it unrevoked,
- * unique among those (`permissions_live_binding_idx`), as that is the one
- * a run gets; a name only revoked permissions held is the kind the run's
- * stub of it would be, a connection's over the Brain's over a
- * collection's (`bindings`, workflows/code.ts).
- */
-export const bindingKindsOf = (
-  held: readonly {
-    binding: string;
-    objectType: string;
-    actions?: string;
-    status?: string;
-  }[]
-): Record<string, WorkflowBindingKind> => {
-  const rank = { collection: 0, brain: 1, connection: 2 } as const;
-  const kinds: Record<string, { kind: WorkflowBindingKind; live: boolean }> =
-    {};
-  for (const { binding, objectType, actions, status } of held) {
-    const kind = kindOf(objectType, actions);
-    if (kind !== undefined && bindingNameSchema.safeParse(binding).success) {
-      const live = status !== "revoked";
-      const before = kinds[binding];
-      const wins =
-        before === undefined ||
-        (live && !before.live) ||
-        (live === before.live && rank[kind] > rank[before.kind]);
-      if (wins) {
-        kinds[binding] = { kind, live };
-      }
-    }
-  }
-  return Object.fromEntries(
-    Object.entries(kinds).map(([binding, { kind }]) => [binding, kind])
-  );
-};
-
-/**
- * Every binding name App `app`'s permissions hold now, whatever their
- * status, revoked included (`bindingKindsOf`): what a version committed
- * now keeps (`app_versions.workflow_bindings`), and what a draft, to be
- * committed, is type-checked against.
- */
-export const appBindingKinds = async (
-  env: Env,
-  app: AppId
-): Promise<Record<string, WorkflowBindingKind>> =>
-  bindingKindsOf(
-    await drizzle(env.DB)
-      .select({
-        binding: permissions.binding,
-        objectType: permissions.objectType,
-        actions: permissions.actions,
-        status: permissions.status,
-      })
-      .from(permissions)
-      .where(
-        and(eq(permissions.subjectType, "app"), eq(permissions.subjectId, app))
-      )
-      .all()
-  );
-
-/**
- * The binding names App `app`'s `version` keeps (`appBindingKinds` when it
- * was committed): what its workflows are type-checked against (GRA-720).
- * A version is typed the same at every build, as it is made current and
- * at each run's load: a permission asked for later types only later
- * versions, never breaking one already current, and nothing done to a
- * permission after changes it; a call is checked against the permissions
- * as they are when it is made. None for a version that doesn't exist.
- */
-export const workflowBindingKinds = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<Record<string, WorkflowBindingKind>> => {
-  const [committed] = await drizzle(env.DB)
-    .select({ bindings: appVersions.workflowBindings })
-    .from(appVersions)
-    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
-    .all();
-  return committed?.bindings ?? {};
-};
 
 /**
  * The active permissions of the App or agent `authority` names that hold

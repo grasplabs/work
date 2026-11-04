@@ -64,8 +64,17 @@ import type {
 } from "./query-subscriptions.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
-import { capability, noPlaceOf } from "./sandbox-session.ts";
-import type { SessionCapability } from "./sandbox-session.ts";
+import {
+  capability,
+  noPlaceOf,
+  runInSession,
+  sandboxVerdictOf,
+} from "./sandbox-session.ts";
+import type {
+  SessionCall,
+  SessionCapability,
+  SessionOptions,
+} from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
 import {
   SandboxUnavailableError,
@@ -73,7 +82,6 @@ import {
   sessionHost,
 } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
-import { codeSession, startFailure } from "./workflows/code.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import { holdFixtureRunSession } from "./workflows/fixture-run-sessions.ts";
 import {
@@ -156,6 +164,67 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 //   (`parentSession`), in its process's reserve, ending with it.
 
 /** An App's files at one version, by path. */
+/**
+ * The sandbox's verdicts that are the suite's own doing: anything else it
+ * says (its owner at its share, its call over) is the platform's, to try
+ * again (`codeSession`).
+ */
+const codesVerdicts: ReadonlySet<string> = new Set([
+  "deadline",
+  "cpu",
+  "memory",
+  "crashed",
+  "refused",
+]);
+
+/**
+ * What `call` answers in a sandbox session of App code: what the code
+ * threw, or why the sandbox ended it, as the code's failure only for
+ * {@link codesVerdicts}. Any other verdict (its owner at its share,
+ * `busy`; its call over) is thrown as a {@link SandboxUnavailableError},
+ * the platform's, to try again, its verdict on its `cause` (`noPlaceOf`).
+ */
+const codeSession = async (
+  host: Fetcher,
+  call: SessionCall,
+  options: SessionOptions = {}
+): Promise<unknown> => {
+  try {
+    return await runInSession(host, call, options);
+  } catch (error) {
+    const verdict = sandboxVerdictOf(error);
+    if (verdict !== undefined && !codesVerdicts.has(verdict)) {
+      throw new SandboxUnavailableError(
+        error instanceof Error ? error.message : "The sandbox is busy.",
+        { cause: error, started: verdict !== "busy" }
+      );
+    }
+    throw error;
+  }
+};
+
+/** The most of why an isolate didn't start that a failure keeps. */
+const maxLoadFailure = 500;
+
+/**
+ * workerd's "Failed to start Worker" message: first line, and what threw.
+ * Should workerd word it otherwise, a start failure no longer matches, and
+ * shows as the platform's error (`internal.unexpected`), never as passing.
+ */
+const failedStart = /^Failed to start Worker:\n(?:Uncaught )?(?<cause>.*)/u;
+
+/**
+ * What threw as an isolate's code loaded, without the stack, when `error`
+ * is workerd's "Failed to start Worker"; nothing for any other error.
+ */
+const startFailure = (error: unknown): string | undefined => {
+  const cause =
+    error instanceof Error
+      ? failedStart.exec(error.message)?.groups?.cause
+      : undefined;
+  return cause?.slice(0, maxLoadFailure);
+};
+
 type AppFiles = Readonly<Record<string, string>>;
 
 /** How an App's tests run: as App code, with more CPU than one call. */

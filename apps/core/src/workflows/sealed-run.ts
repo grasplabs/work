@@ -34,10 +34,8 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
-import { AttemptHost, attemptCallLabels } from "./attempt-host.ts";
+import { AttemptHost } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
-import { runModules } from "./code.ts";
-import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
 import { eventTypeKey } from "./event-envelopes.ts";
 import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
@@ -82,6 +80,8 @@ import type { CaughtError, Failure } from "./resource-errors.ts";
 import { boundedJson } from "./resource-host.ts";
 import type { ActionModelCalls, HostedResourceRun } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
+import { sealedMainModules } from "./sealed-isolate.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // What a run of a sealed build of a generated JSON workflow may do on the
@@ -143,7 +143,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   the host of the attempt whose code makes it (attempt-host.ts), only
 //   while that attempt holds its lease and is the step running now, and
 //   only from the step of a call task that makes its call (`<task>:task`).
-//   Code outside any step has no attempt to call through (code.ts,
+//   Code outside any step has no attempt to call through (sealed-isolate.ts,
 //   `workflow.outside_step`), and an attempt's host kept past its step is
 //   refused as stale. Each attempt makes one call: a second is refused.
 // - A call the build didn't seal. The binding, the operation, and every
@@ -288,7 +288,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 /**
  * Whether `sdk` is the one a sealed build's generated module must import:
- * the SDK the run's main module runs it on (code.ts, `runMain`).
+ * the SDK the run's main module runs it on (sealed-isolate.ts, `mainSource`).
  */
 const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
 
@@ -2016,27 +2016,12 @@ class SealedRun implements SealedRunKind {
   }
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
-    // Every call but a binding's is one the build's code never makes.
-    const refused = async (label: string): Promise<Settled<never>> =>
-      await settle(async () => {
-        this.#host.requireUntampered();
-        return await this.#host.refuseIn(
-          attempt,
-          tampering(`A run of a sealed build makes no ${label} call.`),
-          label
-        );
-      });
     const calls: AttemptCalls = {
       callConnection: async (binding, call) =>
         this.#answered(
           attempt,
           await this.#call(attempt, admission, binding, call)
         ),
-      callModel: async () => await refused(attemptCallLabels.callModel),
-      callCollection: async () =>
-        await refused(attemptCallLabels.callCollection),
-      callBrain: async () => await refused(attemptCallLabels.callBrain),
-      callFunction: async () => await refused(attemptCallLabels.callFunction),
       openDecision: async (request) =>
         this.#noted(attempt, await this.#openDecision(attempt, request)),
       decisionRecipients: async (decision, reminder) =>
@@ -2044,8 +2029,6 @@ class SealedRun implements SealedRunKind {
           attempt,
           await this.#askDecision(attempt, decision, reminder)
         ),
-      readAttachment: async () =>
-        await refused(attemptCallLabels.readAttachment),
     };
     return new AttemptHost(
       calls,
@@ -2682,7 +2665,7 @@ export const sealedRunFrom = (
 /**
  * The modules a sealed run's isolate loads: its verified build's SDK and
  * generated module (`sealedRunFrom`), and the main module that runs it
- * (code.ts, `runMain`). Only a build generated for the run host
+ * (sealed-isolate.ts, `mainSource`). Only a build generated for the run host
  * (`generatedForRunHost`): any other's module would be run on an engine
  * it wasn't written for.
  */
@@ -2698,7 +2681,7 @@ export const sealedRunModules = ({
   return {
     ...build.sdk,
     ...build.modules,
-    ...runModules({
+    ...sealedMainModules({
       module: generatedModule,
       refusal: "The sealed build doesn't export its workflow.",
     }),
@@ -2719,6 +2702,4 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
   ),
   input: run.input,
   connections: [...run.calling.bindings.keys()],
-  collections: [],
-  brains: [],
 });

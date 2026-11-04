@@ -46,13 +46,6 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import {
-  attemptMethods,
-  loadRunIsolate,
-  runModule,
-  runModules,
-} from "../src/workflows/code.ts";
-import type { StepError } from "../src/workflows/code.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
@@ -63,6 +56,13 @@ import {
   sealedActivation,
 } from "../src/workflows/resource-runs.ts";
 import { modelCallsIn, sentCallsIn } from "../src/workflows/run-object.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+  sealedMainModules,
+} from "../src/workflows/sealed-isolate.ts";
+import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import {
   sealedRun,
   sealedRunFrom,
@@ -867,7 +867,7 @@ const modulesOfTest = (
 ): Record<string, string> => ({
   ...run.build.sdk,
   [generatedModule]: source,
-  ...runModules({ module: generatedModule, refusal: "No workflow." }),
+  ...sealedMainModules({ module: generatedModule, refusal: "No workflow." }),
 });
 
 /**
@@ -930,11 +930,11 @@ const ranAs = async (
       admitAttempt: admitAttempt?.(run) ?? admittedFreely,
     }
   );
-  const code = loadRunIsolate(serving, {
+  const code = loadSealedIsolate(serving, {
     owner: `test:${runId}`,
-    mainModule: runModule,
+    mainModule: sealedMainModule,
     modules: async () => await Promise.resolve(modulesOfTest(run, source)),
-    attemptMethods,
+    attemptHostMethods,
   });
   const settled = settledSchema.parse(
     await code.run(host, sealedRunStart(run))

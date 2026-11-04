@@ -30,7 +30,6 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { Settled } from "../src/workflows/code.ts";
 import { runEngine, runRetentionDays } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
@@ -51,6 +50,7 @@ import {
   sweptPerBatch,
   sweepWorkflowStartDetails,
 } from "../src/workflows/retention.ts";
+import type { Settled } from "../src/workflows/sealed-isolate.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";

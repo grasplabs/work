@@ -1,6 +1,5 @@
 import { messageOf } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import {
   callReviewed,
@@ -22,7 +21,7 @@ import type {
   WorkflowEngine,
   WorkflowEnv,
 } from "./engine.ts";
-import { durationUnits, engineStepPattern } from "./steps.ts";
+import { engineStepPattern } from "./steps.ts";
 import type { WorkflowDefinition } from "./workflow.ts";
 
 // An App's tests (`appTest`), which core's test runner runs against the
@@ -64,21 +63,16 @@ export type {
 } from "./app-test.ts";
 
 /**
- * Test harness and dry runs for workflows. Runs a workflow in memory, with
+ * Test harness for workflows. Runs a workflow in memory, with
  * the time-skipping and step-mocking of Temporal's test environment:
  *
  * - steps can be mocked by name, or made to fail;
  * - side-effect steps don't run: they're recorded with their input, so a
- *   test asserts what the workflow would change and a dry run reports it;
+ *   test asserts what the workflow would change;
  * - decisions are answered up front, and a wait for one without an answer
  *   times out right away, as sleeps end right away.
  *
- * Every workflow ships with its tests next to it (`invoice.workflow-tests.ts`
- * beside `invoice.ts`), written with `workflowTests`, and `runWorkflowTests`
- * runs them, so a version whose tests fail is never activated. The suffix
- * isn't `.test.ts`: these aren't Vitest files. Only `workflows/<id>.ts`
- * (an id without dots) is a workflow: put shared code in a folder under
- * workflows/, such as workflows/lib/.
+ * The workflow SDK's own tests run on it.
  */
 
 /** A step's call, as a mock gets it. */
@@ -144,7 +138,7 @@ export interface TestEngineOptions {
   env?: WorkflowEnv;
   /**
    * The bindings each step calls, as the review of the workflow's version
-   * shows them (`reviewedCalls` in `@grasp-os/sdk/describe`): a call of a
+   * shows them: a call of a
    * binding in `env` that the running step's review doesn't show, or one
    * outside any step, fails as it does on the platform, and fails its
    * step even when the workflow catches it. Core passes it to the tests
@@ -624,8 +618,7 @@ export type TestRun<Output = unknown> = (
 
 /**
  * Runs a workflow once in memory. Side-effect steps are recorded, never run,
- * whatever the options say: a test's options come from the App's code, and
- * a dry run (`dryRun`) runs on them too. Every other step runs unless it's
+ * whatever the options say. Every other step runs unless it's
  * mocked. Never throws for the workflow: a run that fails comes back with
  * its error.
  */
@@ -672,210 +665,5 @@ export const testRun = async <Output>(
           ]
         : []
     ),
-  };
-};
-
-// Reports
-
-// Values as an engine stores them (through JSON), in canonical JSON, so
-// equal values compare equal whatever order their keys are in.
-const canonical = (value: unknown): string => {
-  const stored = JSON.stringify(value);
-  if (stored === undefined) {
-    return "undefined";
-  }
-  // SAFETY: parsing JSON text always gives a JSON value.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const parsed = JSON.parse(stored) as Json;
-  return canonicalJson(parsed);
-};
-
-const describeValue = (value: unknown): string =>
-  JSON.stringify(value) ?? "nothing";
-
-/** `3 days` for 259200000, in the largest unit that divides it. */
-const describeDuration = (milliseconds: number): string => {
-  const [unit, size] = durationUnits.find(
-    ([, unitSize]) => milliseconds % unitSize === 0
-  ) ?? ["millisecond", 1];
-  const amount = milliseconds / size;
-  return `${amount} ${unit}${amount === 1 ? "" : "s"}`;
-};
-
-const describeRecord = (record: StepRecord): string => {
-  if (record.type === "sleep") {
-    return `${record.name}: sleeps ${describeDuration(record.milliseconds)} (skipped)`;
-  }
-  if (record.type === "wait") {
-    const waited = `${record.name}: waited for ${record.eventType}`;
-    if (record.event.received) {
-      return `${waited}, received ${describeValue(record.event.payload)}`;
-    }
-    return `${waited}, none came within ${describeDuration(record.timeout)}`;
-  }
-  const input =
-    record.input === undefined ? "" : ` ${describeValue(record.input)}`;
-  if (record.status === "failed") {
-    return `${record.name}${input}: failed: ${record.error}`;
-  }
-  if (record.status === "recorded") {
-    return `${record.name}${input}: would change something, not run, so it has no result`;
-  }
-  return `${record.name}${input}: ${record.status}, returned ${describeValue(record.output)}`;
-};
-
-/** A dry run and its report. */
-export type DryRun<Output = unknown> = TestRun<Output> & {
-  /** What the run did and would have changed, for a person to read. */
-  report: string;
-};
-
-/**
- * Runs a workflow without changing anything: every step that only reads
- * runs, and every side-effect step is recorded with its input instead.
- * Reports the steps, their input and output, and what would have been
- * written. What the read steps call (connectors, stand-ins) is up to the
- * definition; the runtime gives it read-only connectors.
- */
-export const dryRun = async <Output>(
-  definition: WorkflowDefinition<Output>,
-  options: TestRunOptions = {}
-): Promise<DryRun<Output>> => {
-  const run = await testRun(definition, options);
-  const writes = run.sideEffects.map(
-    ({ name, input }) =>
-      `- ${name}${input === undefined ? "" : ` ${describeValue(input)}`}`
-  );
-  // Whatever the run did after a side effect without a result may differ
-  // from a real run, where that side effect returns something.
-  const withoutResult = run.steps.flatMap((record) =>
-    record.type === "step" && record.status === "recorded" ? [record.name] : []
-  );
-  const report = [
-    `Dry run of ${definition.metadata.id}`,
-    run.status === "completed"
-      ? `Completed with ${describeValue(run.output)}`
-      : `Failed: ${run.error.message}`,
-    ...(withoutResult.length === 0
-      ? []
-      : [
-          `Side effects that didn't run have no result, which a real run may use: ${withoutResult.join(", ")}`,
-        ]),
-    "",
-    "Steps:",
-    ...run.steps.map((record) => `- ${describeRecord(record)}`),
-    "",
-    "Would have changed:",
-    ...(writes.length === 0 ? ["- nothing"] : writes),
-  ].join("\n");
-  return { ...run, report };
-};
-
-// Tests
-
-/** One test of a workflow: a run, and what must come of it. */
-export interface WorkflowTest extends TestRunOptions {
-  name: string;
-  expect: {
-    /** The run completes with this output. */
-    output?: unknown;
-    /** The run fails with an error whose message contains this. */
-    error?: string;
-    /** Exactly these side effects, in this order, with this input. */
-    sideEffects?: SideEffect[];
-  };
-}
-
-/** A workflow and the tests that ship with it. */
-export interface WorkflowTests<Output = unknown> {
-  definition: WorkflowDefinition<Output>;
-  tests: WorkflowTest[];
-}
-
-/**
- * Declares a workflow's tests; the default export of the
- * `*.workflow-tests.ts` file next to the workflow. A test expects the run to
- * complete unless it names an `error`.
- */
-export const workflowTests = <Output>(
-  definition: WorkflowDefinition<Output>,
-  tests: WorkflowTest[]
-): WorkflowTests<Output> => ({ definition, tests });
-
-/** How one test went. */
-export interface TestResult {
-  name: string;
-  passed: boolean;
-  /** Why it failed, one line per expectation it missed. */
-  failures: string[];
-}
-
-/** How a workflow's tests went. */
-export interface TestReport {
-  /** Every test passed, and there is at least one. */
-  passed: boolean;
-  results: TestResult[];
-}
-
-const missedExpectations = (test: WorkflowTest, run: TestRun): string[] => {
-  const { expect } = test;
-  const missed: string[] = [];
-  if (expect.error === undefined && run.status === "failed") {
-    missed.push(
-      `Expected the run to complete; it failed: ${run.error.message}`
-    );
-  }
-  if (expect.error !== undefined) {
-    if (run.status === "completed") {
-      missed.push(
-        `Expected the run to fail with "${expect.error}"; it completed`
-      );
-    } else if (!run.error.message.includes(expect.error)) {
-      missed.push(
-        `Expected the run to fail with "${expect.error}"; it failed with "${run.error.message}"`
-      );
-    }
-  }
-  if (
-    Object.hasOwn(expect, "output") &&
-    run.status === "completed" &&
-    canonical(run.output) !== canonical(expect.output)
-  ) {
-    missed.push(
-      `Expected output ${canonical(expect.output)}; got ${canonical(run.output)}`
-    );
-  }
-  if (
-    expect.sideEffects !== undefined &&
-    canonical(run.sideEffects) !== canonical(expect.sideEffects)
-  ) {
-    missed.push(
-      `Expected side effects ${canonical(expect.sideEffects)}; got ${canonical(run.sideEffects)}`
-    );
-  }
-  return missed;
-};
-
-/**
- * Runs a workflow's tests, one after another, each held to `calls` (see
- * `TestEngineOptions`), whatever a test's own options say. Activation
- * refuses a version whose report hasn't `passed`; a workflow without
- * tests doesn't pass.
- */
-export const runWorkflowTests = async <Output>(
-  { definition, tests }: WorkflowTests<Output>,
-  calls?: WorkflowCalls | null
-): Promise<TestReport> => {
-  const results: TestResult[] = [];
-  for (const test of tests) {
-    const { name, expect: _expect, ...options } = test;
-    // oxlint-disable-next-line no-await-in-loop -- tests run one at a time
-    const run = await testRun(definition, { ...options, calls });
-    const failures = missedExpectations(test, run);
-    results.push({ name, passed: failures.length === 0, failures });
-  }
-  return {
-    passed: results.length > 0 && results.every(({ passed }) => passed),
-    results,
   };
 };

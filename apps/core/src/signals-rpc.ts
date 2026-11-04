@@ -17,7 +17,7 @@ import type {
 import { and, asc, desc, eq, ne, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appContents, appFor } from "./apps.ts";
+import { appFor } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   improvementSignalComputations as computations,
@@ -96,26 +96,6 @@ const waitsFor = (by: Identity) =>
     : notLike(improvementSignals.subject, "person:%");
 
 /**
- * Refuses a workflow the App's running version doesn't have: a filter that
- * could never match anything is a mistake, not an empty list.
- */
-const requireWorkflow = async (
-  env: Env,
-  by: Identity,
-  app: string,
-  workflow: string
-): Promise<void> => {
-  const { workflows } = await appContents(env, by, app);
-  if (!workflows.includes(workflow)) {
-    throw signalErrors.create("signal.invalid", {
-      issues: [
-        `workflow: the version of App ${app} that runs has no workflow ${workflow}`,
-      ],
-    });
-  }
-};
-
-/**
  * The signals `by` asked for, as of the latest finished computation: all
  * of them for an admin, whole; an App's (or one workflow of it) for its
  * builders, as `forBuilders` has them.
@@ -134,8 +114,12 @@ export const listSignals = async (
     requireAdmin(by);
   } else {
     await appFor(env, by, app, "builder");
+    // An App holds no workflows (app-no-workflows.ts): a filter by one
+    // could never match anything, a mistake rather than an empty list.
     if (workflow !== undefined) {
-      await requireWorkflow(env, by, app, workflow);
+      throw signalErrors.create("signal.invalid", {
+        issues: [`workflow: App ${app} has no workflow ${workflow}`],
+      });
     }
   }
   const db = drizzle(env.DB);
