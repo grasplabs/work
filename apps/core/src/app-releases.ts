@@ -1191,7 +1191,8 @@ const boundStore = async (
         fromSchema,
         toSchema,
       })
-    )
+    ),
+    (manifest.answers ?? []).map((answer) => ({ ...answer }))
   );
   if (defined.schemaHash !== schema) {
     throw new Error("The store defined another schema than the App's");

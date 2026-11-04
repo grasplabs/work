@@ -53,16 +53,26 @@ export type {
   SchemaReference,
   TableChange,
 } from "./schema-diff.ts";
-export { holdsId, planSchemaChange } from "./schema-plan.ts";
+export {
+  fieldWidens,
+  holdsId,
+  planSchemaChange,
+  schemaCovered,
+  withDefaultsFilled,
+} from "./schema-plan.ts";
 export type {
   AcceptedPlan,
+  PlanOptions,
   PlannedChanges,
+  PlannedCheck,
   PlannedField,
   PlannedIndex,
+  PlannedRename,
   PlanRefusal,
   PlanRefusalReason,
   RefusedPlan,
   ReservedFields,
+  SchemaAnswer,
   SchemaPlan,
 } from "./schema-plan.ts";
 export {

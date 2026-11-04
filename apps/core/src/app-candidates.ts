@@ -3,13 +3,12 @@ import {
   sdkProtocolVersion,
   versionErrors,
 } from "@grasp-os/shared/app-releases";
-import type { ReleaseManifest } from "@grasp-os/shared/app-releases";
 import { appErrors, openCandidateStates } from "@grasp-os/shared/apps";
 import type { App, CandidateState } from "@grasp-os/shared/apps";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -48,7 +47,6 @@ import {
   permissions,
   screenPolicies,
 } from "./db/core/schema.ts";
-import { survivesMigration } from "./store-backfill.ts";
 
 // Candidates (spec 22.1, 22.2): one frozen version of an App on its way to
 // being made current. A candidate pins the version, its source tree and
@@ -529,53 +527,18 @@ type RollbackEligibility =
   | { readonly eligible: false; readonly reason: string };
 
 /**
- * Whether `candidate` leaves behind the schema `replaced` binds a store
- * on: the candidate binds that store under another schema, reached by one
- * of its explicit migrations, and the store's contract once that
- * migration takes over no longer covers `replaced`'s schema
- * (`survivesMigration`, the check the store makes as it takes over). Made
- * current, it switches the store (`makeCurrent`), and the version it
- * replaces is refused there from then on (`migration.rollback_incompatible`,
- * store-backfill.ts). A migration that only adds to what the old schema
- * holds leaves it in force, and a rollback possible.
- */
-const migratesPast = async (
-  env: Env,
-  candidate: ReleaseManifest,
-  replaced: ReleaseManifest
-): Promise<boolean> => {
-  const moved = replaced.dataStoreBindings.filter((before) =>
-    candidate.dataStoreBindings.some(
-      (bound) =>
-        bound.storeId === before.storeId &&
-        bound.schemaHash !== before.schemaHash &&
-        candidate.migrationEvidence.some(
-          ({ toSchema }) => toSchema === bound.schemaHash
-        )
-    )
-  );
-  const survives = await Promise.all(
-    moved.map(
-      async ({ storeId, schemaHash }) =>
-        await survivesMigration(env, storeIdSchema.parse(storeId), schemaHash)
-    )
-  );
-  return survives.includes(false);
-};
-
-/**
- * Whether `version` could be made current again once `candidate` (its
- * sealed manifest, for one of spec 8's layout) is: its release not
- * revoked and its store live (`releaseRunnable`); for one of spec 8's
- * layout, its release read back from storage, every artifact present and
- * as sealed (`readBackRelease`), as the database flags alone can't tell;
- * and its store not migrated past it by the candidate (`migratesPast`).
+ * Whether `version` could be made current again: its release not revoked
+ * and its store live (`releaseRunnable`); for one of spec 8's layout, its
+ * release read back from storage, every artifact present and as sealed
+ * (`readBackRelease`), as the database flags alone can't tell. Whether
+ * its store's records still fit its schema is checked as it is made
+ * current (store-schema-changes.ts), against the records as they are
+ * then, never predicted here.
  */
 const rollbackEligible = async (
   env: Env,
   app: AppId,
-  version: number,
-  candidate: ReleaseManifest | undefined
+  version: number
 ): Promise<RollbackEligibility> => {
   if (!(await releaseRunnable(env, app, version))) {
     return { eligible: false, reason: "release_not_runnable" };
@@ -583,20 +546,13 @@ const rollbackEligible = async (
   if (!isAppLayout(await versionFiles(env, app, version))) {
     return { eligible: true };
   }
-  let replaced: ReleaseManifest;
   try {
-    ({ manifest: replaced } = await readBackRelease(env, app, version));
+    await readBackRelease(env, app, version);
   } catch (error) {
     if (isExpectedError(error)) {
       return { eligible: false, reason: error.code };
     }
     throw error;
-  }
-  if (
-    candidate !== undefined &&
-    (await migratesPast(env, candidate, replaced))
-  ) {
-    return { eligible: false, reason: "migration.rollback_incompatible" };
   }
   return { eligible: true };
 };
@@ -720,7 +676,7 @@ const reportOf = async (
         ? { to: null, eligible: false }
         : {
             to: replaces,
-            ...(await rollbackEligible(env, app, replaces, sealed?.manifest)),
+            ...(await rollbackEligible(env, app, replaces)),
           },
   });
 };

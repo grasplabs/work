@@ -278,6 +278,13 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
   planHash: text("plan_hash").notNull(),
   /** The plan, as canonical JSON: what it added and retained. */
   plan: text().notNull(),
+  /**
+   * The consumer's answers for fields records may lack
+   * (store-schema-changes.ts), as canonical JSON `[answer, ...]`: the
+   * value its activation gives the records that lack one, never over a
+   * value a record holds.
+   */
+  answers: text().notNull().default("[]"),
   createdAt: integer("created_at").notNull(),
   /**
    * When the pending target this receipt waited on was abandoned
@@ -287,6 +294,38 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
    */
   abandonedAt: integer("abandoned_at"),
 });
+
+/** What a version whose rules the store owes is a version of. */
+export const owedResourceKinds = ["app", "workflow"] as const;
+
+/**
+ * Access and row rules the store owes a resource (store-host.ts,
+ * `activateReady` with `owed`): its version's change was applied, rules
+ * kept, before core's database made the version current or published it,
+ * and the rules of whichever version core's database then has current
+ * follow once it committed (`applyRules`). Core settles it once they did;
+ * one core never settled (a crash after the commit) is the alarm's from
+ * `due_at` on, which applies them itself (store-backfill.ts,
+ * `applyCurrentRules`), or drops them when core's database has another
+ * version current. While it is held, it is also the activation in flight:
+ * another version's activation is refused (`migration.busy`).
+ */
+export const rulesOwed = sqliteTable(
+  "sdk_rules_owed",
+  {
+    /** The make-current or publication's own ID. */
+    owedId: text("owed_id").primaryKey(),
+    resourceKind: text("resource_kind", { enum: owedResourceKinds }).notNull(),
+    resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    /** The schema the version was activated on. */
+    schemaHash: text("schema_hash").notNull(),
+    owedAt: integer("owed_at").notNull(),
+    /** When the alarm takes it up, or tries it again. */
+    dueAt: integer("due_at").notNull(),
+  },
+  (table) => [index("sdk_rules_owed_due").on(table.dueAt)]
+);
 
 /**
  * The fields an abandoned pending target added (store-host.ts,

@@ -1,3 +1,4 @@
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
@@ -14,9 +15,16 @@ import type {
 } from "@grasp-os/shared/stores";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import type { OpenStore } from "./data-stores.ts";
-import { sdkReleaseManifests, sdkResourceBindings } from "./db/core/schema.ts";
+import {
+  apps,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+  workflowResources,
+} from "./db/core/schema.ts";
+import { owedResourceKinds } from "./db/data-store/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type {
   BackfillRestart,
@@ -39,9 +47,20 @@ import { runEngine } from "./workflows/engine.ts";
 // A release sealed on that schema runs on the store only once the
 // store's contract holds its schema: core asks the store, the authority
 // on its own contract, before it makes such a release current
-// (`requireStoreSchemaActive`). A contract only ever widens, so a release
-// found in force stays so, and nothing between the question and the
-// change can undo the answer. Threat model, and how each is closed:
+// (`requireStoreSchemaActive`). A change that checks the store's records
+// (a narrowing, a field required, a rename, a changed access mode or row rule;
+// store-schema-changes.ts) is applied by the store as its release is
+// made current (`activateReady`), all or nothing; the schemas it no
+// longer covers are left behind there, so a release another one's
+// activation left behind meanwhile writes nothing on the store
+// (`migration.incompatible_write`) rather than records that don't fit.
+// Access modes and row rules are the exception: a change of them checks
+// no record and can't be refused, so a store applies them only once
+// core's database made the version current or published it
+// (`applyCurrentRules`), never before, and no version reads under rules
+// that database never made current.
+//
+// Threat model, and how each is closed:
 //
 // - The backfill stops for good (its run ran out of retries, its start
 //   was lost, the engine's retention removed it) and every schema change
@@ -75,6 +94,18 @@ import { runEngine } from "./workflows/engine.ts";
 //   versions on the store that still fit (spec 17.4). The names come from
 //   the store's contract and core's own retained releases, for the App's
 //   builder making it current, who sees every version of it already.
+// - Rules applied for a version core's database doesn't make current
+//   after all (a lost compare-and-set, an archived App, a failed batch):
+//   none is applied before the commit; after it, the store takes the
+//   rules of whichever version that database has current then, read again
+//   after applying until it holds still, so a make-current racing another
+//   is never undone by a slower one. What checks records goes first and
+//   fails closed: a version it leaves behind is refused its writes
+//   (`migration.incompatible_write`), never let read more.
+// - Core stops between its commit and the rules (a crash, a lost isolate,
+//   its database failing): the store owes them from before the commit
+//   (`StoreHost.activateReady` with `owed`), and its alarm applies them
+//   once core is past due.
 
 /** The store `storeId`'s object, for core's own questions of it. */
 const storeObject = (
@@ -93,17 +124,6 @@ export const schemaStatus = async (
   consumer: SchemaConsumer
 ): Promise<SchemaStatus> =>
   await storeObject(env, storeId).schemaStatus(storeId, schemaHash, consumer);
-
-/**
- * Whether the store keeps `schemaHash` in force once its pending explicit
- * migration takes over (`StoreHost.survivesMigration`).
- */
-export const survivesMigration = async (
-  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
-  storeId: StoreId,
-  schemaHash: string
-): Promise<boolean> =>
-  await storeObject(env, storeId).survivesMigration(storeId, schemaHash);
 
 /**
  * The versions of `app` other than `version` that could be made current
@@ -333,11 +353,12 @@ export const defineSchemaOnStore = async (
   store: OpenStore,
   manifest: string,
   consumer: SchemaConsumer,
-  migrations: StoreMigration[] = []
+  migrations: StoreMigration[] = [],
+  answers: SchemaAnswer[] = []
 ): Promise<DefinedTables> => {
   let defined: DefinedTables;
   try {
-    defined = await store.defineTables(manifest, consumer, migrations);
+    defined = await store.defineTables(manifest, consumer, migrations, answers);
   } catch (error) {
     if (
       isExpectedError(error) &&
@@ -355,23 +376,78 @@ export const defineSchemaOnStore = async (
 };
 
 /**
- * Refuses release `version` of `app` while the store it binds doesn't
- * hold its schema in force, keeping its backfill going. A ready explicit
- * migration passes; with `activate` (the last step before the version is
- * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
- * refused as pending if work came back:
- * `migration.pending` (retryable, with the backfill's progress) while
- * its defaulted fields are being filled in, `migration.backfill_failed`
+ * Why a release can't run on a store that answered `status` for its
+ * schema: `migration.pending` (retryable, with the backfill's progress)
+ * while a target is pending or its change waits, `migration.backfill_failed`
  * (naming the record) while the backfill stays failed,
- * `migration.abandoned` once an admin abandoned it. A release without a
- * store passes.
+ * `migration.abandoned` once an admin abandoned it,
+ * `migration.rollback_incompatible` for a schema a migration left
+ * behind; a schema the store never took is its records and core's
+ * disagreeing, which no retry mends.
  */
-export const requireStoreSchemaActive = async (
+export const schemaRefusal = (
+  status: Exclude<SchemaStatus, { state: "active" }>
+): Error => {
+  if (status.state === "abandoned") {
+    return migrationErrors.create("migration.abandoned");
+  }
+  if (status.state === "incompatible") {
+    return migrationErrors.create("migration.rollback_incompatible", {
+      compatible: [],
+    });
+  }
+  if (status.state === "unknown") {
+    return new Error(
+      "The store doesn't hold the schema its release was sealed on"
+    );
+  }
+  if (status.state === "failed") {
+    return migrationErrors.create("migration.backfill_failed", {
+      target: status.target,
+      attempt: status.attempt,
+      failure: status.failure === null ? null : { ...status.failure },
+    });
+  }
+  return migrationErrors.create("migration.pending", {
+    retryable: true,
+    scanned: status.scanned,
+    filled: status.filled,
+  });
+};
+
+/**
+ * Applies the change schema `schemaHash` makes on `store` for `consumer`,
+ * a version that runs once it is written (a workflow's, as it is
+ * published), its rules owed under `owed` until it is
+ * (`applyRulesAfterCommit`), and refuses it (`schemaRefusal`) unless the
+ * store then holds it in force, keeping a pending backfill going.
+ */
+export const activateOnStore = async (
   env: Env,
-  app: AppId,
-  version: number,
-  { activate = false }: { activate?: boolean } = {}
+  store: OpenStore,
+  schemaHash: string,
+  consumer: SchemaConsumer,
+  owed: OwedRules
 ): Promise<void> => {
+  const status = await store.activate(schemaHash, consumer, owed);
+  if (status.state === "active") {
+    return;
+  }
+  if (status.state === "pending" || status.state === "failed") {
+    await keepGoingQuietly(env, store.id);
+  }
+  throw schemaRefusal(status);
+};
+
+/**
+ * The stores version `version` of resource `resourceId` (an App or a
+ * workflow) binds, each with the schema it was sealed or published on.
+ */
+export const storeBindings = async (
+  env: Env,
+  resourceId: string,
+  version: number
+): Promise<{ storeId: StoreId; schemaHash: string }[]> => {
   const bound = await drizzle(env.DB)
     .select({
       store: sdkResourceBindings.targetId,
@@ -380,36 +456,61 @@ export const requireStoreSchemaActive = async (
     .from(sdkResourceBindings)
     .where(
       and(
-        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.resourceId, resourceId),
         eq(sdkResourceBindings.resourceVersion, version),
         eq(sdkResourceBindings.kind, "store")
       )
-    )
-    .get();
+    );
+  return bound.map(({ store, schemaHash }) => ({
+    storeId: storeIdSchema.parse(store),
+    schemaHash,
+  }));
+};
+
+/**
+ * Refuses release `version` of `app` while the store it binds doesn't
+ * hold its schema in force, keeping its backfill going. A ready explicit
+ * migration passes; with `activate` (the last step before the version is
+ * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
+ * with the change its schema checks records for, its rules owed under
+ * `activate` until the version is current (`applyRulesAfterCommit`),
+ * refused as pending if work came back (`schemaRefusal`), or naming the
+ * versions that still fit for a rollback past a migration. A release
+ * without a store passes.
+ */
+export const requireStoreSchemaActive = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  { activate }: { activate?: OwedRules } = {}
+): Promise<void> => {
+  const [bound] = await storeBindings(env, app, version);
   if (bound === undefined) {
     return;
   }
-  const storeId = storeIdSchema.parse(bound.store);
+  const { storeId, schemaHash } = bound;
   const consumer = { resourceId: app, resourceVersion: version };
-  let status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
-  if (status.state === "ready" && !activate) {
+  let status = await schemaStatus(env, storeId, schemaHash, consumer);
+  if (status.state === "ready" && activate === undefined) {
     // Its explicit migration is done: it may be made current, and takes
     // over only as it is (`activate`), once every other gate passed.
     return;
   }
-  if (status.state === "ready") {
-    // It takes over now, unless a write queued work meanwhile.
+  if (
+    activate !== undefined &&
+    (status.state === "ready" || status.state === "active")
+  ) {
+    // It takes over now, unless a write queued work meanwhile; in force
+    // already, it may still owe its rules.
     status = await storeObject(env, storeId).activateReady(
       storeId,
-      bound.schemaHash,
-      consumer
+      schemaHash,
+      consumer,
+      activate
     );
   }
   if (status.state === "active") {
     return;
-  }
-  if (status.state === "abandoned") {
-    throw migrationErrors.create("migration.abandoned");
   }
   if (status.state === "incompatible") {
     // A rollback past an explicit migration: its records moved on, and
@@ -417,42 +518,152 @@ export const requireStoreSchemaActive = async (
     // of its own, never a rollback).
     throw await rollbackIncompatible(env, app, version, storeId);
   }
-  if (status.state === "unknown") {
-    // A sealed release's schema the store never took: its records and
-    // core's disagree, which no retry mends.
-    throw new Error(
-      "The store doesn't hold the schema its release was sealed on"
-    );
+  if (status.state === "abandoned" || status.state === "unknown") {
+    throw schemaRefusal(status);
   }
   await keepGoingQuietly(env, storeId);
   // Asked again: the store's pending target may have moved on meanwhile
   // (this schema's finished and a newer one began), and only this
   // schema's own state refuses its release.
-  const after = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  const after = await schemaStatus(env, storeId, schemaHash, consumer);
   if (after.state === "active") {
     return;
-  }
-  if (after.state === "abandoned") {
-    throw migrationErrors.create("migration.abandoned");
   }
   if (after.state === "incompatible") {
     throw await rollbackIncompatible(env, app, version, storeId);
   }
-  if (after.state === "failed") {
-    throw migrationErrors.create("migration.backfill_failed", {
-      target: after.target,
-      attempt: after.attempt,
-      failure: after.failure === null ? null : { ...after.failure },
-    });
+  throw schemaRefusal(after);
+};
+
+/** Rules a store owes a version until core's database committed it. */
+export const owedRulesSchema = z
+  .object({
+    /** The make-current's or publication's own. */
+    id: z.uuid(),
+    kind: z.enum(owedResourceKinds),
+  })
+  .strict();
+
+export type OwedRules = z.output<typeof owedRulesSchema>;
+
+/** What owes rules: an App or a workflow, by ID. */
+export interface OwedResource {
+  kind: OwedRules["kind"];
+  id: string;
+}
+
+/**
+ * What applying rules asks of a store: core reaches it over RPC, its own
+ * alarm calls its host directly.
+ */
+export interface RulesStore {
+  readonly id: StoreId;
+  applyRules: (schemaHash: string) => Promise<boolean>;
+}
+
+/** The version of `resource` core's database has current, if any. */
+export const currentVersionOf = async (
+  env: Env,
+  resource: OwedResource
+): Promise<number | null> => {
+  const db = drizzle(env.DB);
+  const row =
+    resource.kind === "app"
+      ? await db
+          .select({ version: apps.currentVersion })
+          .from(apps)
+          .where(eq(apps.id, resource.id))
+          .get()
+      : await db
+          .select({ version: workflowResources.currentVersion })
+          .from(workflowResources)
+          .where(eq(workflowResources.id, resource.id))
+          .get();
+  return row?.version ?? null;
+};
+
+/** How often applying rules reads the current version before it gives up. */
+const rulesReads = 3;
+
+/**
+ * Applies to `store` the access modes and row rules of the version of
+ * `resource` that core's database has current (`StoreHost.applyRules`),
+ * then reads it again: a version made current meanwhile is applied in
+ * turn, so a slower call never leaves the rules of the one before it.
+ * True once the rules are those of a version still current after (or
+ * none is current, or it binds no such store); false while the store
+ * waits on a pending target, or the version kept moving, for the store's
+ * alarm to try again.
+ */
+export const applyCurrentRules = async (
+  env: Env,
+  store: RulesStore,
+  resource: OwedResource
+): Promise<boolean> => {
+  for (let read = 0; read < rulesReads; read += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    const current = await currentVersionOf(env, resource);
+    if (current === null) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    const bound = await storeBindings(env, resource.id, current);
+    const binding = bound.find(({ storeId }) => storeId === store.id);
+    if (binding === undefined) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    if (!(await store.applyRules(binding.schemaHash))) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read, apply, read again
+    if ((await currentVersionOf(env, resource)) === current) {
+      return true;
+    }
   }
-  if (after.state === "unknown") {
-    throw new Error(
-      "The store doesn't hold the schema its release was sealed on"
-    );
+  return false;
+};
+
+/**
+ * After core's database made a version of `resourceId` current or
+ * published it, or failed to: applies on `stores` the rules of whichever
+ * version it has current (`applyCurrentRules`), and settles what each
+ * owed under `owed` (`StoreHost.activateReady`). A store that recorded
+ * nothing under `owed` (its activation refused as busy, or never asked)
+ * applies nothing (`StoreHost.applyRules`). Never throws, as the commit
+ * stands either way: a store it can't reach, or that waits on a pending
+ * target, keeps owing them, and its alarm applies them.
+ */
+export const applyRulesAfterCommit = async (
+  env: Env,
+  owed: OwedRules,
+  resourceId: string,
+  stores: readonly StoreId[]
+): Promise<void> => {
+  const resource = { kind: owed.kind, id: resourceId };
+  for (const storeId of stores) {
+    const stub = storeObject(env, storeId);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const applied = await applyCurrentRules(
+        env,
+        {
+          id: storeId,
+          applyRules: async (schemaHash) =>
+            await stub.applyRules(storeId, schemaHash, owed.id),
+        },
+        resource
+      );
+      if (applied) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await stub.settleRules(storeId, [owed.id]);
+      }
+    } catch (error) {
+      log.error("store.rules_apply_failed", {
+        storeId,
+        resourceId,
+        ...errorFields(error),
+      });
+    }
   }
-  throw migrationErrors.create("migration.pending", {
-    retryable: true,
-    scanned: after.scanned,
-    filled: after.filled,
-  });
 };

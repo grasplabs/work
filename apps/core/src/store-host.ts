@@ -6,6 +6,7 @@ import {
   planPreferenceChange,
   planSchemaChange,
   readSchemaManifest,
+  schemaCovered,
   schemaFromDescriptor,
   SchemaDefinitionError,
   schemaHash as hashOf,
@@ -17,8 +18,8 @@ import type {
   PreferencesContract,
   ReadManifest,
   ReservedFields,
+  SchemaAnswer,
   SchemaManifest,
-  SchemaPlan,
 } from "@grasp-os/sdk/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
@@ -56,6 +57,8 @@ import {
   storeIntentSchema,
   storeMigrationSchema,
   receiptScopeSchema,
+  schemaAnswerSchema,
+  schemaAnswersMax,
   storedFieldsSchema,
   tableNameSchema,
   writerRolesSchema,
@@ -92,6 +95,7 @@ import {
   lte,
   max,
   min,
+  ne,
   notInArray,
   or,
   sql,
@@ -117,6 +121,7 @@ import {
   recordRefs,
   records,
   reservedFields,
+  rulesOwed,
   schemaActivations,
   schemas,
   store,
@@ -136,7 +141,13 @@ import {
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { recordBackfillAbandoned } from "./store-abandon.ts";
-import { keepStoreBackfillGoing } from "./store-backfill.ts";
+import {
+  applyCurrentRules,
+  currentVersionOf,
+  keepStoreBackfillGoing,
+  owedRulesSchema,
+} from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import {
   historyDueAt,
   admittedHistoryOf,
@@ -197,6 +208,7 @@ import {
   ruleSql,
 } from "./store-rules.ts";
 import type { RuleCaller } from "./store-rules.ts";
+import { runChange, tableStepsOf } from "./store-schema-changes.ts";
 import {
   dropSearches,
   installSearches,
@@ -651,6 +663,7 @@ const purgedTables = [
   "sdk_mutation_receipts",
   "sdk_preferences",
   "sdk_record_changes",
+  "sdk_rules_owed",
   "sdk_import_rows",
   "sdk_tables",
 ] as const;
@@ -709,6 +722,15 @@ const alarmGapMs = 1000;
 
 /** The wait before the alarm tries again after its work failed. */
 const alarmRetryMs = 30_000;
+
+/**
+ * How long rules a store owes are left to core before its alarm applies
+ * them (`StoreHost.activateReady` with `owed`): longer than the make-current
+ * or publication that owes them can still be running, so the alarm never
+ * applies the rules of the version current before that one commits, and
+ * settles them, with no one left to apply the new ones.
+ */
+const rulesOwedGraceMs = 5 * 60_000;
 
 /** A stored intent, or undefined if it no longer reads as one. */
 const intentOf = (stored: string) => {
@@ -804,6 +826,17 @@ const contractOf = async (row: {
   return { hash, manifest };
 };
 
+/** How a plan's check is answered, as its record names it. */
+const answerOf = (
+  answer: SchemaAnswer | null,
+  from: string | null
+): string | null => {
+  if (answer !== null) {
+    return "value";
+  }
+  return from === null ? null : `from:${from}`;
+};
+
 /** What a plan added and kept, as its receipt records it. */
 const planRecord = (
   plan: AcceptedPlan,
@@ -825,6 +858,15 @@ const planRecord = (
       table,
       index,
     ]),
+    widenedFields: plan.widenedFields.map(({ table, field }) => [table, field]),
+    checks: plan.checks.map(({ table, field, answer, from }) => [
+      table,
+      field,
+      answerOf(answer, from),
+    ]),
+    renames: plan.renames.map(({ table, from, to }) => [table, from, to]),
+    ruleChanges: [...plan.ruleChanges],
+    activates: plan.activates,
   });
 
 /** A schema's change of a store's contract, worked out before it applies. */
@@ -842,6 +884,14 @@ interface ContractChange {
   readonly receiptId: string | null;
   /** Applied for its consumer already: answer the receipt, write nothing. */
   readonly replay: boolean;
+  /**
+   * Whether the change waits for its release to be made current, its
+   * records checked (`AcceptedPlan.activates`): recorded with its
+   * receipt, and the contract stays as it is.
+   */
+  readonly activates: boolean;
+  /** The consumer's answers, as canonical JSON, kept with its receipt. */
+  readonly answers: string;
   /**
    * The defaulted fields the change adds to tables the contract has: to
    * fill in first, wherever those tables hold records (`fillMissing`).
@@ -983,8 +1033,11 @@ export interface BackfillOutcome {
  * Whether a schema the store recorded is in force (`schemaStatus`):
  * `abandoned` when an admin abandoned the pending target that held it for
  * the consumer asked about (`abandonBackfill`), or that alone held it;
- * `incompatible` when an explicit migration left it behind
- * (`sdk_schemas.superseded_at`), for good: its records moved on.
+ * `incompatible` when an explicit migration, or a change that checked
+ * records, left it behind (`sdk_schemas.superseded_at`) and no plan
+ * brings the contract back to it; `ready` too for one whose change checks
+ * records, a rollback to one left behind included, applied as its release
+ * is made current (`activateReady`).
  */
 export type SchemaStatus =
   | { state: "active" }
@@ -1196,21 +1249,8 @@ const backfillRestartSchema = z.strictObject({
 export type BackfillRestart = z.input<typeof backfillRestartSchema>;
 
 /**
- * Whether a schema planned onto a contract (`plan`) is covered by it:
- * accepted, and adding no table and no field, so every table and field it
- * needs is there as it declares it. What it lists of indexes differs
- * freely (its own are installed whatever the contract lists), and fields
- * the contract keeps that it leaves out don't count. A release whose
- * schema its store's contract covers runs on the store.
- */
-const covered = (plan: SchemaPlan): boolean =>
-  plan.accepted &&
-  plan.addedTables.length === 0 &&
-  plan.addedFields.length === 0;
-
-/**
  * The plan of `target` onto the pending target, when the pending target
- * covers it (`covered`); otherwise refused: a
+ * covers it (`schemaCovered`); otherwise refused: a
  * change past the pending target waits until that is in force
  * (`migration.pending`, retryable), or needs a migration once its
  * backfill failed (`migration.backfill_failed`).
@@ -1231,7 +1271,7 @@ const ontoPending = (
     });
   }
   const onto = planSchemaChange(pending.manifest, target);
-  if (onto.accepted && covered(onto)) {
+  if (onto.accepted && schemaCovered(pending.manifest, target)) {
     return onto;
   }
   throw migrationErrors.create("migration.pending", {
@@ -1351,6 +1391,163 @@ export interface SweepOptions {
 }
 
 /**
+ * What making a release current does when its change checks records
+ * (`StoreHost.#checkedStep`): applies `plan` onto the contract whose hash
+ * is `baseHash`; a `rollback` when the release's schema was left behind.
+ */
+interface CheckedStep {
+  readonly baseHash: string;
+  readonly plan: AcceptedPlan;
+  readonly rollback: boolean;
+}
+
+/**
+ * `schema` as the store reads and writes under it: each table's access
+ * mode and row rules the contract's, whatever the version declared
+ * (sdk schema-plan.ts). A changed mode or rule takes effect for every
+ * record and every pinned version at once, as the release that changes
+ * it is made current, so no older version reads on under looser rules,
+ * nor writes under them. Its fields and indexes stay its own.
+ */
+const underContractRules = (
+  schema: SchemaManifest,
+  contract: SchemaManifest | undefined
+): SchemaManifest =>
+  contract === undefined
+    ? schema
+    : {
+        ...schema,
+        tables: Object.fromEntries(
+          Object.entries(schema.tables).map(([name, table]) => {
+            const held = Object.hasOwn(contract.tables, name)
+              ? contract.tables[name]
+              : undefined;
+            if (held === undefined) {
+              return [name, table];
+            }
+            const { rules: _own, ...rest } = table;
+            return [
+              name,
+              {
+                ...rest,
+                access: held.access,
+                ...(held.rules === undefined ? {} : { rules: held.rules }),
+              },
+            ];
+          })
+        ),
+      };
+
+/** Who owes rules a store holds: a version of a resource, as text. */
+const owedKey = (owed: {
+  kind: string;
+  resourceId: string;
+  version: number;
+}): string => canonicalText([owed.kind, owed.resourceId, owed.version]);
+
+/** A table's access mode and row rules, as canonical text. */
+const rulesOf = (table: ManifestTable | undefined): string =>
+  canonicalText({ access: table?.access, rules: table?.rules ?? null });
+
+/** A schema whose checked change waits to be made current (`schemaStatus`). */
+const readyStatus = (hash: string): SchemaStatus => ({
+  state: "ready",
+  target: hash,
+  attempt: 1,
+  scanned: 0,
+  filled: 0,
+  failure: null,
+});
+
+/** A schema the pending target holds, as `schemaStatus` answers it. */
+const statusOfPending = (
+  pending: PendingTarget,
+  consumer: SchemaConsumer | undefined
+): Extract<SchemaStatus, { state: "pending" | "failed" | "ready" }> => {
+  let state: "pending" | "failed" | "ready" = "pending";
+  if (pending.state === "failed") {
+    state = "failed";
+  } else if (pending.readyAt !== null) {
+    state = "ready";
+  }
+  return {
+    state,
+    target: pending.hash,
+    attempt: pending.attempt,
+    scanned: pending.scanned,
+    filled: pending.filled,
+    failure: shownFailure(pending.failure, pending.migrations, consumer),
+  };
+};
+
+/**
+ * `StoreHost.schemaStatus` of schema `schema` (hash `hash`), in force
+ * and not left behind, on a store whose contract is `contract`, with its
+ * `pending` target, if any; `checked` when making its release current
+ * still applies a change that checks records.
+ */
+const statusInForce = (
+  hash: string,
+  schema: SchemaManifest,
+  {
+    checked,
+    contract,
+    pending,
+    consumer,
+  }: {
+    checked: boolean;
+    contract: SchemaManifest | null;
+    pending: PendingTarget | null;
+    consumer: SchemaConsumer | undefined;
+  }
+): SchemaStatus => {
+  if (checked && pending === null) {
+    // Its change checks records: applied as it is made current.
+    return readyStatus(hash);
+  }
+  if (checked && pending !== null) {
+    // It waits for the pending target to be in force first, even when the
+    // contract covers it (coverage doesn't look at rules): ready with a
+    // target that holds it, an explicit migration found ready, which
+    // `activateReady` activates before applying the change.
+    const waiting = statusOfPending(pending, consumer);
+    return schemaCovered(pending.manifest, schema)
+      ? waiting
+      : { ...waiting, state: "pending" };
+  }
+  if (schemaCovered(contract, schema)) {
+    return { state: "active" };
+  }
+  if (pending !== null && schemaCovered(pending.manifest, schema)) {
+    return statusOfPending(pending, consumer);
+  }
+  return { state: "unknown" };
+};
+
+/**
+ * Whether `schema`, recorded on a store whose contract is `contract`,
+ * waits for its release to be made current: its change checks records
+ * (`AcceptedPlan.activates`), so the contract takes it only then
+ * (`StoreHost.activateReady`).
+ */
+const awaitsActivation = (
+  contract: SchemaManifest,
+  schema: SchemaManifest,
+  options: Parameters<typeof planSchemaChange>[2] = {}
+): boolean => {
+  const plan = planSchemaChange(contract, schema, options);
+  return plan.accepted && plan.activates;
+};
+
+/**
+ * Whether a schema recorded as `manifest` (its text) no longer fits the
+ * store's `contract`: what a migration, or a change that checks records,
+ * leaves behind as it takes over (`StoreHost.#supersede`).
+ */
+const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
+  !schemaCovered(contract, readSchemaManifest(manifest).manifest);
+
+/**
  * A store's object, as the host's code works on it: the store's
  * operations with what they depend on passed in (who takes outbox
  * entries, the clock, the live-run lookup). The Durable Object
@@ -1358,14 +1555,6 @@ export interface SweepOptions {
  * clock; tests choose them, inside the object. Not a Durable Object
  * itself, so none of this is reachable over RPC.
  */
-/**
- * Whether a schema recorded as `manifest` (its text) no longer fits the
- * store's `contract`: what a migration taking over leaves behind
- * (`StoreHost.#supersede`).
- */
-const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
-  !covered(planSchemaChange(contract, readSchemaManifest(manifest).manifest));
-
 export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
@@ -1391,6 +1580,8 @@ export class StoreHost {
   #schemasGeneration = 0;
   /** The store's contract as last read, by its hash (`#contractNow`). */
   #contract: StoreContract | undefined;
+  /** Whether each schema may write, by contract, pending target and schema (`#writable`). */
+  readonly #writableSchemas = new Map<string, boolean>();
   /** The defaulted fields of each contract read so far, by hash. */
   readonly #defaults = new Map<string, DefaultedFields>();
 
@@ -1442,13 +1633,18 @@ export class StoreHost {
    * the check's code).
    *
    * The contract (spec 17.4) is every table and field of every schema
-   * the store accepted: a schema is applied only when the change it makes
-   * to it is safe (`planSchemaChange`: new tables, new optional or
-   * defaulted fields, new or redefined indexes; tables and optional
-   * fields left out are kept), and refused otherwise
-   * (`migration.required`, listing each change and why), before anything
-   * is written. So every record the store holds fits the contract, and
-   * every version sealed on it stays compatible, a rollback included.
+   * the store accepted, and every record the store holds fits it
+   * (`planSchemaChange`): a change that keeps every record fitting
+   * (new tables, new optional or defaulted fields, widened fields, new or
+   * redefined indexes; tables and fields left out are kept) is applied
+   * now; one the records must be checked for (a narrowing, a required
+   * field, a rename, a changed access mode or row rule) is checked
+   * against every record now, a dry run that writes nothing, and waits,
+   * recorded with the consumer's `answers`, to be applied as its release
+   * is made current (`activateReady`, store-schema-changes.ts). Records a
+   * dry run finds that don't fit, and changes that need an explicit
+   * migration, are refused (`migration.required`, with each change and
+   * each question), before anything is written.
    *
    * A defaulted field added to a table that holds records doesn't fit
    * them until they have it: the contract the change plans is kept as the
@@ -1495,7 +1691,8 @@ export class StoreHost {
     storeId: StoreId,
     manifest: string,
     consumer?: SchemaConsumer,
-    migrations: readonly StoreMigration[] = []
+    migrations: readonly StoreMigration[] = [],
+    answers: readonly SchemaAnswer[] = []
   ): Promise<DefinedTables> {
     const read = readSchema(manifest);
     const named =
@@ -1506,6 +1703,11 @@ export class StoreHost {
       "data.invalid",
       z.array(storeMigrationSchema).max(16),
       migrations
+    );
+    const answered = dataErrors.parse(
+      "data.invalid",
+      z.array(schemaAnswerSchema).max(schemaAnswersMax),
+      answers
     );
     const schemaHash = await hashOf(read.manifest);
     const names = Object.keys(read.manifest.tables);
@@ -1524,7 +1726,8 @@ export class StoreHost {
         read.manifest,
         schemaHash,
         named,
-        declared
+        declared,
+        answered
       );
       const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
       const planned = Object.fromEntries(
@@ -1590,14 +1793,18 @@ export class StoreHost {
     target: SchemaManifest,
     schemaHash: string,
     consumer: SchemaConsumer | undefined,
-    migrations: readonly z.output<typeof storeMigrationSchema>[] = []
+    migrations: readonly z.output<typeof storeMigrationSchema>[] = [],
+    answers: readonly SchemaAnswer[] = []
   ): Promise<ContractChange> {
+    const answersText = canonicalText(answers);
     const row = this.#liveContractRow();
     this.#requireTablesFit(target);
     const pending = this.#pendingTarget();
     const { stored, base } = await this.#currentContract(row, pending);
     const pendingSeen = pending?.hash ?? null;
     const baseHash = base?.hash ?? null;
+    const baseManifest = base?.manifest ?? null;
+    const storedHash = stored ?? "";
     // Applied for this consumer already: its receipt is the answer, after
     // the checks above, and nothing is planned or written again, so a
     // retry never moves the contract (nor the indexes it lists) under a
@@ -1619,30 +1826,40 @@ export class StoreHost {
         pendingSeen,
         onto: false,
         migrations: null,
+        activates: false,
+        answers: answersText,
       };
     }
-    const { plan, migrated } = this.#acceptedPlan(
-      base?.manifest ?? null,
-      target,
-      { migrations, schemaHash, consumer }
-    );
+    const { plan, migrated } = this.#acceptedPlan(baseManifest, target, {
+      migrations,
+      schemaHash,
+      consumer,
+      answers,
+    });
     // While a target is pending, the contract moves to it and nowhere
     // else: a schema it holds already waits on its backfill; one that
     // would change it further waits until it is in force (or, failed,
     // needs a migration).
-    if (plan.changed && pending !== null && covered(plan)) {
+    if (
+      plan.changed &&
+      pending !== null &&
+      schemaCovered(baseManifest, target)
+    ) {
       // Covered by the contract in force, an older release's indexes
       // aside: applied without moving the contract, which waits on the
-      // pending target alone.
+      // pending target alone. A change it makes that checks records (a
+      // changed rule, which coverage doesn't look at) waits too, and is
+      // applied once the target is in force, as its release is made
+      // current: `activates` says so, as on the paths below.
       const record = planRecord(plan, {
         base: baseHash,
         schema: schemaHash,
-        contract: stored ?? "",
+        contract: storedHash,
       });
       return {
         stored,
         base: baseHash,
-        hash: stored ?? "",
+        hash: storedHash,
         text: "",
         changed: false,
         planHash: await sha256Hex(record),
@@ -1654,6 +1871,8 @@ export class StoreHost {
         pendingSeen,
         onto: false,
         migrations: null,
+        activates: plan.activates,
+        answers: answersText,
       };
     }
     if (plan.changed && pending !== null) {
@@ -1677,6 +1896,8 @@ export class StoreHost {
         pendingSeen,
         onto: true,
         migrations: null,
+        activates: plan.activates,
+        answers: answersText,
       };
     }
     const contractText = manifestText(plan.contract);
@@ -1701,14 +1922,22 @@ export class StoreHost {
       pendingSeen,
       onto: false,
       migrations: plan.changed ? migrated : null,
+      activates: plan.activates,
+      answers: answersText,
     };
   }
 
   /**
    * The plan of `target` onto `contract`, with the explicit migrations
-   * it is applied with (checked, `#requireMigrations`); refused
-   * (`migration.required`, listing each change and why) when a change
-   * needs a migration none covers.
+   * it is applied with (checked, `#requireMigrations`) and the consumer's
+   * answers; refused (`migration.required`, listing each change and why)
+   * when a change needs a migration none covers. A change that checks
+   * records (`activates`) is run over every record now, as a dry run that
+   * writes nothing (store-schema-changes.ts), and refused the same way,
+   * with a question for each field records don't fit; it can't share a
+   * release with explicit migrations (`migration.invalid`,
+   * `checks_elsewhere`), whose transforms rewrite records the check would
+   * have to follow.
    */
   #acceptedPlan(
     contract: SchemaManifest | null,
@@ -1717,10 +1946,12 @@ export class StoreHost {
       migrations,
       schemaHash,
       consumer,
+      answers,
     }: {
       migrations: readonly z.output<typeof storeMigrationSchema>[];
       schemaHash: string;
       consumer: SchemaConsumer | undefined;
+      answers: readonly SchemaAnswer[];
     }
   ): { plan: AcceptedPlan; migrated: PendingMigrations | null } {
     const migrated = this.#requireMigrations(migrations, {
@@ -1728,12 +1959,42 @@ export class StoreHost {
       consumer,
       contract,
     });
-    const plan = planSchemaChange(
-      contract,
-      target,
-      this.#reservedFields(),
-      new Set(migrated?.migrations.map(([table]) => table))
-    );
+    const plan = this.#plan(contract, target, {
+      migrated: new Set(migrated?.migrations.map(([table]) => table)),
+      answers,
+    });
+    if (migrated !== null && !plan.changed) {
+      // The contract holds the schema already: nothing is left to
+      // transform, and running the transform again would rewrite records
+      // the contract describes.
+      refuseMigration(migrated.migrations[0]?.[1] ?? "", "nothing_to_migrate");
+    }
+    if (migrated !== null && plan.activates) {
+      refuseMigration(migrated.migrations[0]?.[1] ?? "", "checks_elsewhere");
+    }
+    if (plan.activates) {
+      this.#requireRecordsFit(plan);
+    }
+    return { plan, migrated };
+  }
+
+  /**
+   * `planSchemaChange` of `target` onto `contract` with the store's
+   * reserved fields, refused (`migration.required`, listing each change
+   * and why) unless accepted.
+   */
+  #plan(
+    contract: SchemaManifest | null,
+    target: SchemaManifest,
+    options: {
+      migrated?: ReadonlySet<string>;
+      answers?: readonly SchemaAnswer[];
+    } = {}
+  ): AcceptedPlan {
+    const plan = planSchemaChange(contract, target, {
+      ...options,
+      reserved: this.#reservedFields(),
+    });
     if (!plan.accepted) {
       throw migrationErrors.create("migration.required", {
         changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
@@ -1741,13 +2002,25 @@ export class StoreHost {
         })),
       });
     }
-    if (migrated !== null && !plan.changed) {
-      // The contract holds the schema already: nothing is left to
-      // transform, and running the transform again would rewrite records
-      // the contract describes.
-      refuseMigration(migrated.migrations[0]?.[1] ?? "", "nothing_to_migrate");
+    return plan;
+  }
+
+  /**
+   * Runs `plan`'s checks over every record they reach, writing nothing,
+   * and refuses (`migration.required`, with a question for each field)
+   * when any record doesn't fit (store-schema-changes.ts).
+   */
+  #requireRecordsFit(plan: AcceptedPlan): void {
+    const tableIds = new Map(
+      this.#tableRows().map(({ name, tableId }) => [name, tableId])
+    );
+    const { questions } = runChange(this.#db, tableStepsOf(plan, tableIds));
+    if (!questions.empty) {
+      throw migrationErrors.create("migration.required", {
+        changes: [],
+        questions: questions.list(),
+      });
     }
-    return { plan, migrated };
   }
 
   /**
@@ -1840,7 +2113,7 @@ export class StoreHost {
       source.abandonedAt !== null ||
       source.supersededAt !== null ||
       !Object.hasOwn(manifest.tables, table) ||
-      !covered(planSchemaChange(contract, manifest))
+      !schemaCovered(contract, manifest)
     ) {
       refuseMigration(name, "unknown_source");
     }
@@ -1937,12 +2210,9 @@ export class StoreHost {
       ) {
         throw migrationErrors.create("migration.metadata_corrupt");
       }
-      const onto = planSchemaChange(
-        kept.manifest,
-        pending.manifest,
-        {},
-        migratedSet(pending)
-      );
+      const onto = planSchemaChange(kept.manifest, pending.manifest, {
+        migrated: migratedSet(pending),
+      });
       if (!onto.accepted || !onto.changed) {
         throw migrationErrors.create("migration.metadata_corrupt");
       }
@@ -1950,13 +2220,15 @@ export class StoreHost {
     if (kept !== null) {
       // The store's schemas fit the contract or the pending target, when
       // there is one: the schema that made it pending is recorded already.
+      // A schema whose change waits to be made current (`activates`) fits
+      // neither until then.
       for (const manifest of recorded) {
-        // Its tables, fields and access all in the contract already; its
-        // indexes are physical, installed whatever the contract lists.
+        // Its tables and fields all in the contract already; its indexes
+        // are physical, installed whatever the contract lists.
         if (
-          !covered(planSchemaChange(kept.manifest, manifest)) &&
-          (pending === null ||
-            !covered(planSchemaChange(pending.manifest, manifest)))
+          !schemaCovered(kept.manifest, manifest) &&
+          (pending === null || !schemaCovered(pending.manifest, manifest)) &&
+          !awaitsActivation(kept.manifest, manifest)
         ) {
           throw migrationErrors.create("migration.metadata_corrupt");
         }
@@ -1973,7 +2245,10 @@ export class StoreHost {
       if (!plan.accepted) {
         throw migrationErrors.create("migration.metadata_missing");
       }
-      folded = plan.contract;
+      // One that waits to be made current never moved the contract.
+      if (!plan.activates) {
+        folded = plan.contract;
+      }
     }
     if (folded === null) {
       throw new Error("A fold of recorded schemas left no contract");
@@ -2212,7 +2487,9 @@ export class StoreHost {
         set: { abandonedAt: null },
       })
       .run();
-    if (!change.onto && change.hash !== change.stored) {
+    // A change that checks records waits, recorded with its receipt, for
+    // its release to be made current (`activateReady`): the contract stays.
+    if (!change.onto && !change.activates && change.hash !== change.stored) {
       this.#moveContract(change, all, now);
     }
     return {
@@ -2298,11 +2575,12 @@ export class StoreHost {
    * behind by a migration (`sdk_schemas.superseded_at`): writes under it
    * are refused from now on (`#requireInForce`).
    */
-  #supersede(contract: SchemaManifest, now: number): void {
+  #supersede(contract: SchemaManifest, now: number): string[] {
     const behind = this.#db
       .select({ hash: schemas.schemaHash, manifest: schemas.manifest })
       .from(schemas)
       .where(and(isNull(schemas.abandonedAt), isNull(schemas.supersededAt)))
+      .orderBy(asc(schemas.schemaHash))
       .all()
       .filter(({ manifest }) => leftBehind(contract, manifest))
       .map(({ hash }) => hash);
@@ -2313,6 +2591,7 @@ export class StoreHost {
         .where(inArray(schemas.schemaHash, behind))
         .run();
     }
+    return behind;
   }
 
   /**
@@ -2320,6 +2599,14 @@ export class StoreHost {
    * running (`sdk_schema_backfills`). A target abandoned before under the
    * same hash goes on from the run after its last, so none of its runs is
    * taken for this one's (store-backfill.ts names runs by target and run).
+   *
+   * Refused (`migration.busy`, retryable) while the store owes rules
+   * (`sdk_rules_owed`): a target activates from the contract it was
+   * planned on, so owed rules would wait on its backfill (`applyRules`),
+   * a version already current running under the old rules and every other
+   * activation refused as busy, for as long as the backfill runs, or for
+   * good once it fails. Owed rules are settled within a make-current, or
+   * by the alarm, so a seal asked again soon goes through.
    */
   #makePending(
     change: ContractChange,
@@ -2328,6 +2615,13 @@ export class StoreHost {
     byName: ReadonlyMap<string, string>,
     now: number
   ): void {
+    const owing = this.#db
+      .select({ owedId: rulesOwed.owedId })
+      .from(rulesOwed)
+      .get();
+    if (owing !== undefined) {
+      throw migrationErrors.create("migration.busy", { retryable: true });
+    }
     const [abandoned] = this.#db
       .select({ attempt: max(abandonedTargets.attempt) })
       .from(abandonedTargets)
@@ -2409,7 +2703,8 @@ export class StoreHost {
       planHash: change.planHash,
       changed: change.changed,
       receiptId,
-      pending: this.#pendingTarget()?.hash === change.hash,
+      pending: this.#pendingTarget()?.hash === change.hash || change.activates,
+      awaits: change.activates,
     };
     if (consumer === undefined || receiptId === null) {
       return applied;
@@ -2431,7 +2726,10 @@ export class StoreHost {
         planHash: kept.planHash,
         changed: kept.contractHash !== kept.baseHash,
         receiptId,
-        pending: this.#pendingTarget()?.hash === kept.contractHash,
+        pending:
+          this.#pendingTarget()?.hash === kept.contractHash ||
+          this.#awaits(schemaHash),
+        awaits: this.#awaits(schemaHash),
       };
     }
     this.#db
@@ -2445,10 +2743,30 @@ export class StoreHost {
         contractHash: change.hash,
         planHash: change.planHash,
         plan: change.plan,
+        answers: change.answers,
         createdAt: now,
       })
       .run();
     return applied;
+  }
+
+  /**
+   * Whether schema `schemaHash` waits for its release to be made current
+   * (`awaitsActivation`) against the contract in force. Call it inside a
+   * transaction.
+   */
+  #awaits(schemaHash: string): boolean {
+    const recorded = this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, schemaHash))
+      .get();
+    const contract = this.#contractNow();
+    return (
+      recorded !== undefined &&
+      contract !== undefined &&
+      awaitsActivation(contract, readSchemaManifest(recorded.manifest).manifest)
+    );
   }
 
   /** The store's tables, by name and ID, in a stable order. */
@@ -3240,16 +3558,19 @@ export class StoreHost {
       return known;
     }
     const generation = this.#schemasGeneration;
-    const row = this.ctx.storage.transactionSync(() => {
+    const { row, contract } = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
-      return this.#db
-        .select({
-          manifest: schemas.manifest,
-          abandonedAt: schemas.abandonedAt,
-        })
-        .from(schemas)
-        .where(eq(schemas.schemaHash, schemaHash))
-        .get();
+      return {
+        row: this.#db
+          .select({
+            manifest: schemas.manifest,
+            abandonedAt: schemas.abandonedAt,
+          })
+          .from(schemas)
+          .where(eq(schemas.schemaHash, schemaHash))
+          .get(),
+        contract: this.#contractNow(),
+      };
     });
     if (row === undefined) {
       throw dataErrors.create("data.unknown_schema");
@@ -3259,7 +3580,7 @@ export class StoreHost {
     if (row.abandonedAt !== null) {
       throw migrationErrors.create("migration.abandoned");
     }
-    const { manifest } = readSchemaManifest(row.manifest);
+    const { manifest: own } = readSchemaManifest(row.manifest);
     const tableIds = Object.fromEntries(
       this.#db
         .select({ name: tables.name, tableId: tables.tableId })
@@ -3268,16 +3589,21 @@ export class StoreHost {
         .map(({ name, tableId }) => [name, tableId])
     );
     const pinned: PinnedSchema = {
-      manifest,
+      manifest: underContractRules(own, contract),
       tableIds,
-      indexes: await planIndexes(manifest, tableIds),
-      searches: await planSearches(manifest, tableIds),
+      // Its own indexes, as they were installed for it: what a read
+      // through them filters by is the contract's (`underContractRules`).
+      indexes: await planIndexes(own, tableIds),
+      searches: await planSearches(own, tableIds),
     };
-    // Kept only if no abandonment committed while its indexes were planned;
-    // a commit checks again in its transaction anyway (`#requireInForce`).
-    if (generation === this.#schemasGeneration) {
-      this.#schemas.set(schemaHash, pinned);
+    // Kept, and answered, only if no abandonment or schema change committed
+    // while its indexes were planned: one that did may have changed the
+    // contract's access and rules it carries (`underContractRules`), so it
+    // is read again rather than answered under the rules before.
+    if (generation !== this.#schemasGeneration) {
+      return await this.#pinned(storeId, schemaHash);
     }
+    this.#schemas.set(schemaHash, pinned);
     return pinned;
   }
 
@@ -3302,6 +3628,54 @@ export class StoreHost {
     if (row !== undefined && row.supersededAt !== null) {
       throw migrationErrors.create("migration.incompatible_write");
     }
+    if (!this.#writable(schemaHash)) {
+      throw migrationErrors.create("migration.not_current");
+    }
+  }
+
+  /**
+   * Whether a version pinned to schema `schemaHash` may write: the store's
+   * contract covers it, or its pending target does (store-fills.ts fills
+   * in what it lacks). One whose change checks records doesn't until its
+   * release is made current (`activateReady`): its writes may not fit the
+   * records the contract describes yet (a renamed field, a field newly
+   * required), and nothing checks them against it but this. Known per
+   * contract, pending target and schema; call it inside a transaction.
+   */
+  #writable(schemaHash: string): boolean {
+    const contract = this.#contractNow();
+    if (contract === undefined) {
+      return true;
+    }
+    const pending = this.#db
+      .select({ hash: backfills.targetHash, text: backfills.targetManifest })
+      .from(backfills)
+      .where(sql`${backfills.state} <> 'complete'`)
+      .get();
+    const key = canonicalJson([
+      this.#contract?.hash ?? "",
+      pending?.hash ?? "",
+      schemaHash,
+    ]);
+    const known = this.#writableSchemas.get(key);
+    if (known !== undefined) {
+      return known;
+    }
+    const recorded = this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, schemaHash))
+      .get();
+    if (recorded === undefined) {
+      return true;
+    }
+    const schema = readSchemaManifest(recorded.manifest).manifest;
+    const writable =
+      schemaCovered(contract, schema) ||
+      (pending !== undefined &&
+        schemaCovered(readSchemaManifest(pending.text).manifest, schema));
+    this.#writableSchemas.set(key, writable);
+    return writable;
   }
 
   /**
@@ -5469,19 +5843,90 @@ export class StoreHost {
    * migration found ready: checked again in this transaction, so work a
    * write queued since puts it back to running instead (its run goes on,
    * kept going as any). Activation is `#activate`'s: the contract moves to
-   * the target, and the schemas it no longer fits are left behind. Answers
-   * the schema's status after (`schemaStatus`).
+   * the target, and the schemas it no longer fits are left behind.
+   * Then, with no target pending, a change the schema makes that checks
+   * records is applied onto the contract in force, a rollback to a schema
+   * left behind among them, every record checked against it again
+   * (`#applyChecked`, store-schema-changes.ts). Answers the schema's
+   * status after (`schemaStatus`).
+   *
+   * With `owed`, as core makes an App's version current or publishes a
+   * workflow's (store-backfill.ts), the change is applied with the
+   * contract's access and rules kept, and the store owes the consumer's
+   * resource its rules (`sdk_rules_owed`): core's database hasn't made
+   * the version current yet, and may not (a lost compare-and-set, a
+   * failure), so no version reads under rules it never made current.
+   * What checks records goes first because it can still be refused (a
+   * write since the dry run), and the version it leaves behind then is
+   * refused its writes, never let read more; rules can't be refused, so
+   * they follow the commit (`applyRules`), or the alarm applies them
+   * (`#applyOwedRules`). Without `owed` (a preview, whose version is
+   * current at once), the rules are applied with the rest.
+   *
+   * The owed rules are also the activation in flight: while the store
+   * owes them for another version or schema (whatever the resource), this
+   * one is refused before anything moves (`migration.busy`, retryable).
+   * So of two versions made current at once, the one that loses in core's
+   * database never applied its change here, and never leaves the winner's
+   * schema behind; it is asked again once the winner's are settled, after
+   * its commit or by the alarm.
    */
-  activateReady(
+  async activateReady(
     storeId: StoreId,
     schemaHash: string,
-    consumer: SchemaConsumer
-  ): SchemaStatus {
+    consumer: SchemaConsumer,
+    owed?: OwedRules
+  ): Promise<SchemaStatus> {
     const hash = dataErrors.parse(
       "data.invalid",
       backfillTargetSchema,
       schemaHash
     );
+    const named = dataErrors.parse(
+      "data.invalid",
+      schemaConsumerSchema,
+      consumer
+    );
+    const owing =
+      owed === undefined
+        ? undefined
+        : dataErrors.parse("data.invalid", owedRulesSchema, owed);
+    if (owing !== undefined) {
+      // Owed before anything moves: a crash from here on leaves the
+      // alarm to apply whatever rules core's database ends up with.
+      this.ctx.storage.transactionSync(() => {
+        this.#bind(storeId, false);
+        const another = this.#db
+          .select({ owedId: rulesOwed.owedId })
+          .from(rulesOwed)
+          .where(
+            or(
+              ne(rulesOwed.resourceId, named.resourceId),
+              ne(rulesOwed.resourceVersion, named.resourceVersion),
+              ne(rulesOwed.schemaHash, hash)
+            )
+          )
+          .get();
+        if (another !== undefined) {
+          throw migrationErrors.create("migration.busy", { retryable: true });
+        }
+        const now = Date.now();
+        this.#db
+          .insert(rulesOwed)
+          .values({
+            owedId: owing.id,
+            resourceKind: owing.kind,
+            resourceId: named.resourceId,
+            resourceVersion: named.resourceVersion,
+            schemaHash: hash,
+            owedAt: now,
+            dueAt: now + rulesOwedGraceMs,
+          })
+          .onConflictDoNothing()
+          .run();
+      });
+      await this.schedule();
+    }
     const activated = this.ctx.storage.transactionSync((): boolean => {
       this.#bind(storeId, false);
       const pending = this.#pendingTarget();
@@ -5496,11 +5941,9 @@ export class StoreHost {
         pending.readyAt === null ||
         pending.state !== "running" ||
         recorded === undefined ||
-        !covered(
-          planSchemaChange(
-            pending.manifest,
-            readSchemaManifest(recorded.manifest).manifest
-          )
+        !schemaCovered(
+          pending.manifest,
+          readSchemaManifest(recorded.manifest).manifest
         )
       ) {
         return false;
@@ -5522,10 +5965,520 @@ export class StoreHost {
       return true;
     });
     if (activated) {
-      this.#schemasGeneration += 1;
-      this.#schemas.clear();
+      this.#forgetSchemas();
     }
-    return this.schemaStatus(storeId, hash, consumer);
+    // Then the change the schema checks records for, onto the contract in
+    // force now: one the target just activated may still leave some (a
+    // rule the schema changes beside the migration's tables, say).
+    await this.#applyChecked(storeId, hash, named, owing !== undefined);
+    return this.schemaStatus(storeId, hash, named);
+  }
+
+  /** Forgets every schema read, so none is read under a contract that moved. */
+  #forgetSchemas(): void {
+    this.#schemasGeneration += 1;
+    this.#schemas.clear();
+  }
+
+  /**
+   * The answers `consumer` applied schema `schemaHash` with, as its
+   * receipt keeps them; none without a receipt. Call it inside a
+   * transaction.
+   */
+  #answersOf(consumer: SchemaConsumer, schemaHash: string): SchemaAnswer[] {
+    const receipt = this.#db
+      .select({ answers: schemaActivations.answers })
+      .from(schemaActivations)
+      .where(
+        and(
+          eq(schemaActivations.resourceId, consumer.resourceId),
+          eq(schemaActivations.resourceVersion, consumer.resourceVersion),
+          eq(schemaActivations.schemaHash, schemaHash)
+        )
+      )
+      .get();
+    return receipt === undefined
+      ? []
+      : z
+          .array(schemaAnswerSchema)
+          .parse(JSON.parse(receipt.answers))
+          .map((answer) => ({ ...answer }));
+  }
+
+  /**
+   * What making a release of `schema` current does to the store's
+   * contract, when it checks records (store-schema-changes.ts): the plan
+   * of `schema` onto the contract, with `answers`, when it is accepted and
+   * checks records; or, for a schema a change left behind (`superseded`,
+   * a rollback), when it is accepted and changes the contract at all, so
+   * every record is checked against it again. Null for neither. With
+   * `keepRules`, the schema is planned with the contract's access and
+   * rules (`underContractRules`): only what checks records, the rules
+   * owed until core's database commits (`activateReady`). Reads only;
+   * call it inside a transaction.
+   */
+  #checkedStep(
+    declared: SchemaManifest,
+    superseded: boolean,
+    answers: readonly SchemaAnswer[],
+    keepRules: boolean
+  ): CheckedStep | null {
+    const row = this.#db
+      .select({
+        hash: store.contractHash,
+        manifest: store.contractManifest,
+      })
+      .from(store)
+      .get();
+    if (
+      row?.hash === null ||
+      row?.hash === undefined ||
+      row.manifest === null
+    ) {
+      return null;
+    }
+    // Not only a schema the contract doesn't cover: one it does, whose
+    // writes fit, may still narrow what records hold or change the rules,
+    // which the contract takes only as it is made current.
+    const contract = readSchemaManifest(row.manifest).manifest;
+    const schema = keepRules
+      ? underContractRules(declared, contract)
+      : declared;
+    const reserved = this.#reservedFields();
+    const plan = planSchemaChange(contract, schema, { reserved, answers });
+    if (!plan.accepted) {
+      return null;
+    }
+    // With its rules kept, what is left of a change that waited for its
+    // rules may check nothing (a field added beside them): it still moves
+    // the contract, which the seal left as it was for the rules' sake.
+    const waitedForRules =
+      keepRules &&
+      plan.changed &&
+      awaitsActivation(contract, declared, { reserved, answers });
+    return plan.activates || (superseded && plan.changed) || waitedForRules
+      ? { baseHash: row.hash, plan, rollback: superseded }
+      : null;
+  }
+
+  /**
+   * Applies the change that making a release of schema `hash` current for
+   * `consumer` makes (`#checkedStep`): in one transaction, which checks
+   * every record first and is thrown out whole when one doesn't fit
+   * (`migration.required`, with its questions), so the version in force
+   * serves on as it was (store-schema-changes.ts). Waits for a pending
+   * target first (changes nothing while one is). Hashing the new contract
+   * is asynchronous and the transaction isn't: the step is planned first
+   * and planned again in the transaction, which applies it only if the
+   * contract is still the one it was planned from.
+   */
+  async #applyChecked(
+    storeId: StoreId,
+    hash: string,
+    consumer: SchemaConsumer,
+    keepRules: boolean
+  ): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      const planned = this.ctx.storage.transactionSync(() => {
+        this.#bind(storeId, false);
+        return this.#stepFor(hash, consumer, keepRules);
+      });
+      if (planned === null) {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- once a try
+      const contractHash = await sha256Hex(manifestText(planned.plan.contract));
+      const done = this.ctx.storage.transactionSync((): boolean => {
+        this.#bind(storeId, false);
+        const step = this.#stepFor(hash, consumer, keepRules);
+        if (
+          step === null ||
+          step.baseHash !== planned.baseHash ||
+          manifestText(step.plan.contract) !==
+            manifestText(planned.plan.contract)
+        ) {
+          return false;
+        }
+        this.#applyIn(step, hash, contractHash);
+        return true;
+      });
+      if (done) {
+        this.#forgetSchemas();
+        return;
+      }
+      if (attempt >= 3) {
+        throw migrationErrors.create("migration.busy", { retryable: true });
+      }
+    }
+  }
+
+  /**
+   * `#checkedStep` for schema `hash` as `consumer` applied it, when the
+   * store records it, not abandoned, and holds no pending target. Call it
+   * inside a transaction.
+   */
+  #stepFor(
+    hash: string,
+    consumer: SchemaConsumer,
+    keepRules: boolean
+  ): CheckedStep | null {
+    const recorded = this.#db
+      .select({
+        manifest: schemas.manifest,
+        abandonedAt: schemas.abandonedAt,
+        supersededAt: schemas.supersededAt,
+      })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, hash))
+      .get();
+    if (
+      recorded === undefined ||
+      recorded.abandonedAt !== null ||
+      this.#pendingTarget() !== null
+    ) {
+      return null;
+    }
+    return this.#checkedStep(
+      readSchemaManifest(recorded.manifest).manifest,
+      recorded.supersededAt !== null,
+      this.#answersOf(consumer, hash),
+      keepRules
+    );
+  }
+
+  /**
+   * The store's next commit, counted: what a schema change's writes are
+   * recorded under in the change history, as a commit's writes are.
+   */
+  #nextCommit(): number {
+    const counted = this.#db
+      .update(store)
+      .set({ commits: sql`${store.commits} + 1` })
+      .returning({ commits: store.commits })
+      .get();
+    if (counted === undefined) {
+      throw new Error("A bound store has no row");
+    }
+    return counted.commits;
+  }
+
+  /**
+   * `#applyChecked`'s change, in its transaction: every record checked,
+   * and given what it lacks (a default, the App's value, a renamed
+   * field's value; never over a value it holds), each such write recorded
+   * in the change history under a commit of its own; then the contract
+   * moved (compared and set), and every recorded schema in force or left
+   * behind as the new contract covers it. Throws `migration.required`
+   * with the questions of every record that doesn't fit, which throws the
+   * transaction out.
+   */
+  #applyIn(step: CheckedStep, schemaHash: string, contractHash: string): void {
+    const now = Date.now();
+    const tableIds = new Map(
+      this.#tableRows().map(({ name, tableId }) => [name, tableId])
+    );
+    const run = runChange(this.#db, tableStepsOf(step.plan, tableIds), {
+      write: {
+        commit: this.#nextCommit(),
+        schemaHash,
+        now,
+        sensitive: this.#sensitivity(),
+      },
+      rollback: step.rollback,
+    });
+    if (!run.questions.empty) {
+      throw migrationErrors.create("migration.required", {
+        changes: [],
+        questions: run.questions.list(),
+      });
+    }
+    this.#moveContractTo(
+      step.baseHash,
+      contractHash,
+      manifestText(step.plan.contract)
+    );
+    // A rollback brings back what the contract covers again.
+    this.#reinstate(step.plan.contract);
+    this.#supersede(step.plan.contract, now);
+    // A table whose access mode or rules changed shows other rows now,
+    // though none was rewritten: its generation moves on too, so every
+    // live query that read it reads again under the new rules.
+    const ruled = step.plan.ruleChanges.flatMap((table) => {
+      const tableId = tableIds.get(table);
+      return tableId === undefined ? [] : [tableId];
+    });
+    this.#rewrote(new Set([...run.changedTables, ...ruled]));
+  }
+
+  /**
+   * Moves the contract's access modes and row rules to those schema
+   * `schemaHash` declares, for each table both hold: what a version owes
+   * once core's database made it current or published it (`activateReady`
+   * with `owed`; store-backfill.ts, `applyCurrentRules`). No record
+   * changes, so none is checked and nothing can refuse it; each table
+   * whose rules changed moves its generation, so every live query of it
+   * reads again under them. Applying them again changes nothing, as does
+   * a schema the store never recorded. False, changing nothing, while a
+   * target is pending: it activates from the contract it was planned on,
+   * so the rules follow once it is in force.
+   *
+   * Only for whoever holds the rules owed under `owedId`, still held in
+   * the transaction that moves the contract: one refused before it was
+   * recorded (`migration.busy`), or settled since, applies nothing. Only
+   * one version at a time holds them (`activateReady`), and its own
+   * make-current or the alarm applies them, so a caller that read the
+   * version current before another committed never puts back the rules
+   * that one replaced.
+   */
+  async applyRules(
+    storeId: StoreId,
+    schemaHash: string,
+    owedId: string
+  ): Promise<boolean> {
+    const hash = dataErrors.parse(
+      "data.invalid",
+      backfillTargetSchema,
+      schemaHash
+    );
+    const holder = dataErrors.parse("data.invalid", z.uuid(), owedId);
+    // Hashing is asynchronous and a transaction isn't: planned, then
+    // planned again in the transaction, which applies it only if the
+    // contract is still the one it was planned from.
+    for (let attempt = 1; ; attempt += 1) {
+      const planned = this.ctx.storage.transactionSync(() => {
+        this.#bind(storeId, false);
+        return this.#rulesStep(hash, holder);
+      });
+      if (planned === "pending") {
+        return false;
+      }
+      if (planned === null) {
+        return true;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- once a try
+      const contractHash = await sha256Hex(planned.text);
+      const done = this.ctx.storage.transactionSync((): boolean => {
+        this.#bind(storeId, false);
+        const step = this.#rulesStep(hash, holder);
+        if (
+          step === "pending" ||
+          step === null ||
+          step.baseHash !== planned.baseHash ||
+          step.text !== planned.text
+        ) {
+          return false;
+        }
+        this.#moveContractTo(step.baseHash, contractHash, step.text);
+        const tableIds = new Map(
+          this.#tableRows().map(({ name, tableId }) => [name, tableId])
+        );
+        this.#rewrote(
+          new Set(step.tables.flatMap((table) => tableIds.get(table) ?? []))
+        );
+        return true;
+      });
+      if (done) {
+        this.#forgetSchemas();
+        return true;
+      }
+      if (attempt >= 3) {
+        throw migrationErrors.create("migration.busy", { retryable: true });
+      }
+    }
+  }
+
+  /**
+   * `applyRules`' change for schema `hash`: the contract it moves from,
+   * the contract with the schema's rules (`underContractRules`, the other
+   * way round), and the tables whose rules change; null for none, or
+   * once the rules owed under `owedId` aren't held, `pending` while a
+   * target is. Call it inside a transaction.
+   */
+  #rulesStep(
+    hash: string,
+    owedId: string
+  ): { baseHash: string; text: string; tables: string[] } | "pending" | null {
+    const held = this.#db
+      .select({ owedId: rulesOwed.owedId })
+      .from(rulesOwed)
+      .where(eq(rulesOwed.owedId, owedId))
+      .get();
+    if (held === undefined) {
+      return null;
+    }
+    const recorded = this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, hash))
+      .get();
+    const row = this.#db
+      .select({ hash: store.contractHash, manifest: store.contractManifest })
+      .from(store)
+      .get();
+    if (
+      recorded === undefined ||
+      row?.hash === null ||
+      row?.hash === undefined ||
+      row.manifest === null
+    ) {
+      return null;
+    }
+    const contract = readSchemaManifest(row.manifest).manifest;
+    const ruled = underContractRules(
+      contract,
+      readSchemaManifest(recorded.manifest).manifest
+    );
+    const changed = Object.keys(contract.tables).filter(
+      (table) =>
+        rulesOf(contract.tables[table]) !== rulesOf(ruled.tables[table])
+    );
+    if (changed.length === 0) {
+      return null;
+    }
+    if (this.#pendingTarget() !== null) {
+      return "pending";
+    }
+    return { baseHash: row.hash, text: manifestText(ruled), tables: changed };
+  }
+
+  /**
+   * Settles the rules the store owed under `owedIds`: core applied those
+   * of the version its database has current, and found it still current
+   * after (store-backfill.ts, `applyCurrentRules`).
+   */
+  settleRules(storeId: StoreId, owedIds: readonly string[]): void {
+    const ids = dataErrors.parse(
+      "data.invalid",
+      z.array(z.uuid()).max(16),
+      owedIds
+    );
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      this.#db.delete(rulesOwed).where(inArray(rulesOwed.owedId, ids)).run();
+    });
+  }
+
+  /**
+   * The alarm's turn at the rules the store owes that core never settled
+   * (a crash after its commit, say), once due. Owed for the version core's
+   * database has current: its rules applied by core's own way
+   * (store-backfill.ts, `applyCurrentRules`) with this host for its store,
+   * and settled once they are; tried again a while later while a target
+   * is pending, or when it fails. Owed for any other version: settled at
+   * once, as that version never became current or is current no more (the
+   * version that is applies its own), so a make-current that stopped
+   * before or after its commit holds other activations back
+   * (`activateReady`) no longer than the alarm takes to come.
+   */
+  async #applyOwedRules(): Promise<void> {
+    const now = Date.now();
+    const due = this.#db
+      .select({
+        owedId: rulesOwed.owedId,
+        kind: rulesOwed.resourceKind,
+        resourceId: rulesOwed.resourceId,
+        version: rulesOwed.resourceVersion,
+      })
+      .from(rulesOwed)
+      .where(lte(rulesOwed.dueAt, now))
+      .all();
+    if (due.length === 0) {
+      return;
+    }
+    const storeId = this.#storeId();
+    const owners = new Map(due.map((owed) => [owedKey(owed), owed]));
+    for (const [key, { kind, resourceId, version, owedId }] of owners) {
+      const ids = due
+        .filter((owed) => owedKey(owed) === key)
+        .map((owed) => owed.owedId);
+      const resource = { kind, id: resourceId };
+      let settled = false;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one resource at a time
+        const current = await currentVersionOf(this.env, resource);
+        settled =
+          current !== version ||
+          // oxlint-disable-next-line no-await-in-loop -- one resource at a time
+          (await applyCurrentRules(
+            this.env,
+            {
+              id: storeId,
+              applyRules: async (schemaHash) =>
+                await this.applyRules(storeId, schemaHash, owedId),
+            },
+            resource
+          ));
+      } catch (error) {
+        log.error("store.rules_apply_failed", {
+          storeId,
+          resourceId,
+          ...errorFields(error),
+        });
+      }
+      if (settled) {
+        this.#db.delete(rulesOwed).where(inArray(rulesOwed.owedId, ids)).run();
+      } else {
+        this.#db
+          .update(rulesOwed)
+          .set({ dueAt: Date.now() + alarmRetryMs })
+          .where(inArray(rulesOwed.owedId, ids))
+          .run();
+      }
+    }
+  }
+
+  /**
+   * Puts every schema a change left behind that `contract` covers back in
+   * force (`sdk_schemas.superseded_at`): its writes fit the records again.
+   */
+  #reinstate(contract: SchemaManifest): void {
+    const back = this.#db
+      .select({ hash: schemas.schemaHash, manifest: schemas.manifest })
+      .from(schemas)
+      .where(and(isNull(schemas.abandonedAt), isNotNull(schemas.supersededAt)))
+      .all()
+      .filter(({ manifest }) => !leftBehind(contract, manifest))
+      .map(({ hash }) => hash);
+    if (back.length > 0) {
+      this.#db
+        .update(schemas)
+        .set({ supersededAt: null })
+        .where(inArray(schemas.schemaHash, back))
+        .run();
+    }
+  }
+
+  /**
+   * Moves the store's contract from `from` to `to` (`text`), compared and
+   * set: a contract that moved meanwhile is the store's records
+   * disagreeing (`migration.metadata_corrupt`).
+   */
+  #moveContractTo(from: string, to: string, text: string): void {
+    const moved = this.#db
+      .update(store)
+      .set({ contractHash: to, contractManifest: text })
+      .where(eq(store.contractHash, from))
+      .returning({ hash: store.contractHash })
+      .get();
+    if (moved === undefined) {
+      throw migrationErrors.create("migration.metadata_corrupt");
+    }
+  }
+
+  /**
+   * Moves on the generation of each table a schema change rewrote
+   * records of, so every read of it is known stale, and tells its watchers.
+   */
+  #rewrote(tableIds: ReadonlySet<string>): void {
+    if (tableIds.size === 0) {
+      return;
+    }
+    this.#db
+      .update(tables)
+      .set({ generation: sql`${tables.generation} + 1` })
+      .where(inArray(tables.tableId, [...tableIds]))
+      .run();
+    this.#moved(tableIds);
   }
 
   /**
@@ -5763,8 +6716,9 @@ export class StoreHost {
     }
     const targetFields = tableFieldsOf(pending.manifest, table.table);
     const contractFields = tableFieldsOf(contract, table.table);
-    // Rules never change on a table the contract holds (store-rules.ts);
-    // both are read all the same, so neither's fields move.
+    // An explicit migration shares no release with a changed rule
+    // (`checks_elsewhere`); both are read all the same, so neither's
+    // fields move.
     const ruleFields = [
       ...new Set([
         ...ruleFieldsOf(pending.manifest.tables[table.table]?.rules),
@@ -6117,10 +7071,12 @@ export class StoreHost {
       )
       .run();
     // No history row: a fill adds a defaulted field, never one a row rule
-    // reads (rules name fields their table had, and never change on it),
-    // so the states a history read by rules is rebuilt through admit the
-    // same people before and after it. A migration's rewrite keeps none
-    // for the same reason (store-migrations.ts, `rule_changed`).
+    // in force reads (rules name fields their table had, and a changed
+    // rule takes effect only as its release is made current, through
+    // `#applyIn` or `applyRules`), so the states a history read by rules is rebuilt
+    // through admit the same people before and after it. A migration's
+    // rewrite keeps none for the same reason (store-migrations.ts,
+    // `rule_changed`).
     return true;
   }
 
@@ -6489,12 +7445,9 @@ export class StoreHost {
     { abandonedBy, actor }: { abandonedBy: string; actor: AuditActor }
   ): BackfillAbandonment {
     const at = Date.now();
-    const plan = planSchemaChange(
-      contract,
-      pending.manifest,
-      {},
-      migratedSet(pending)
-    );
+    const plan = planSchemaChange(contract, pending.manifest, {
+      migrated: migratedSet(pending),
+    });
     this.#db
       .delete(migrationWork)
       .where(eq(migrationWork.targetHash, pending.hash))
@@ -6542,12 +7495,15 @@ export class StoreHost {
       .where(isNull(schemas.abandonedAt))
       .orderBy(asc(schemas.schemaHash))
       .all()
-      .filter(
-        ({ manifest }) =>
-          !covered(
-            planSchemaChange(contract, readSchemaManifest(manifest).manifest)
-          )
-      )
+      // Those the target alone held: not one that waits for its release
+      // to be made current, which the contract never took either.
+      .filter(({ manifest }) => {
+        const schema = readSchemaManifest(manifest).manifest;
+        return (
+          !schemaCovered(contract, schema) &&
+          schemaCovered(pending.manifest, schema)
+        );
+      })
       .map(({ hash }) => hash);
     if (outOfForce.length > 0) {
       this.#db
@@ -6740,12 +7696,24 @@ export class StoreHost {
       ) {
         return { state: "abandoned" };
       }
-      if (recorded.supersededAt !== null) {
-        // Writes under it are refused for good (`#requireInForce`), so it
-        // never runs on the store again, even should a contract cover it.
-        return { state: "incompatible" };
-      }
       const schema = readSchemaManifest(recorded.manifest).manifest;
+      const pending = this.#pendingTarget();
+      // Its rules don't hold it back: they follow core's commit
+      // (`applyRules`). Unless a target is pending, which the contract
+      // can't move past: a changed rule waits for it as a checked change
+      // does, never answered as in force under the old rules.
+      const step = this.#checkedStep(
+        schema,
+        recorded.supersededAt !== null,
+        named === undefined ? [] : this.#answersOf(named, hash),
+        pending === null
+      );
+      if (recorded.supersededAt !== null) {
+        // Writes under it are refused (`#requireInForce`): it runs on the
+        // store again only as it is made current, every record checked
+        // against it again (`activateReady`).
+        return step === null ? { state: "incompatible" } : readyStatus(hash);
+      }
       const row = this.#db
         .select({ text: store.contractManifest })
         .from(store)
@@ -6754,72 +7722,12 @@ export class StoreHost {
         row?.text === null || row?.text === undefined
           ? null
           : readSchemaManifest(row.text).manifest;
-      if (covered(planSchemaChange(contract, schema))) {
-        return { state: "active" };
-      }
-      const pending = this.#pendingTarget();
-      if (
-        pending === null ||
-        !covered(planSchemaChange(pending.manifest, schema))
-      ) {
-        return { state: "unknown" };
-      }
-      let state: "pending" | "failed" | "ready" = "pending";
-      if (pending.state === "failed") {
-        state = "failed";
-      } else if (pending.readyAt !== null) {
-        state = "ready";
-      }
-      return {
-        state,
-        target: pending.hash,
-        attempt: pending.attempt,
-        scanned: pending.scanned,
-        filled: pending.filled,
-        failure: shownFailure(pending.failure, pending.migrations, named),
-      };
-    });
-  }
-
-  /**
-   * Whether the schema `schemaHash` stays in force once the store's
-   * pending explicit migration takes over: false for a schema the store
-   * never took, one abandoned or already left behind, and one the pending
-   * target's contract doesn't cover, which taking over leaves behind
-   * (`#supersede`, the same check). With no explicit migration pending,
-   * whether it is still in force. Reads only, and tells core nothing of
-   * the store's records.
-   */
-  survivesMigration(storeId: StoreId, schemaHash: string): boolean {
-    const hash = dataErrors.parse(
-      "data.invalid",
-      backfillTargetSchema,
-      schemaHash
-    );
-    return this.ctx.storage.transactionSync((): boolean => {
-      this.#bind(storeId, false);
-      const recorded = this.#db
-        .select({
-          manifest: schemas.manifest,
-          abandonedAt: schemas.abandonedAt,
-          supersededAt: schemas.supersededAt,
-        })
-        .from(schemas)
-        .where(eq(schemas.schemaHash, hash))
-        .get();
-      if (
-        recorded === undefined ||
-        recorded.abandonedAt !== null ||
-        recorded.supersededAt !== null
-      ) {
-        return false;
-      }
-      const pending = this.#pendingTarget();
-      return (
-        pending === null ||
-        pending.migrations === null ||
-        !leftBehind(pending.manifest, recorded.manifest)
-      );
+      return statusInForce(hash, schema, {
+        checked: step !== null,
+        contract,
+        pending,
+        consumer: named,
+      });
     });
   }
 
@@ -6871,11 +7779,9 @@ export class StoreHost {
           recorded !== undefined &&
           recorded.abandonedAt === null &&
           recorded.supersededAt === null &&
-          covered(
-            planSchemaChange(
-              contract,
-              readSchemaManifest(recorded.manifest).manifest
-            )
+          schemaCovered(
+            contract,
+            readSchemaManifest(recorded.manifest).manifest
           );
         fits.set(hash, fit);
         return fit;
@@ -7318,6 +8224,12 @@ export class StoreHost {
       log.error("store.retention_failed", errorFields(error));
     }
     try {
+      await this.#applyOwedRules();
+    } catch (error) {
+      failed = true;
+      log.error("store.rules_owed_failed", errorFields(error));
+    }
+    try {
       await this.#keepBackfillGoing();
     } catch (error) {
       // Not the alarm's failure: its next look is a lease's time away
@@ -7432,6 +8344,11 @@ export class StoreHost {
       .from(backfills)
       .where(and(eq(backfills.state, "running"), isNull(backfills.readyAt)))
       .get();
+    // Rules owed that core never settled: the alarm's from when they're due.
+    const owed = this.#db
+      .select({ at: min(rulesOwed.dueAt) })
+      .from(rulesOwed)
+      .get();
     // A cascade job with members left: its next batch is due now.
     const cascading = this.#db
       .select({ jobId: cascadeJobs.jobId })
@@ -7467,6 +8384,7 @@ export class StoreHost {
       // A file expiring, or a deleted file's bytes due for purging.
       this.files.nextDue(),
       unaudited === undefined ? null : Date.now(),
+      owed?.at,
       backfill === undefined ? null : backfillDueAt(backfill),
       typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
     ].filter((time): time is number => typeof time === "number");

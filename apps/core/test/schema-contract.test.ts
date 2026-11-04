@@ -293,14 +293,63 @@ describe("safe changes", () => {
   });
 });
 
-describe("changes that need a migration", () => {
+describe("changes the store checks its records for", () => {
   it.each([
-    ["a changed type", notes({ title: v.number() }), "field_changed"],
+    ["a changed type", notes({ title: v.number() }), "title", "invalid"],
     [
       "a required field",
       notes({ ...noteFields, priority: v.number() }),
-      "required_field_added",
+      "priority",
+      "missing",
     ],
+  ])(
+    "refuse %s records don't fit, before anything is written",
+    async (_name, next, field, reason) => {
+      const store = await newStore();
+      await store.defineTables(v2);
+      const id = await insert(store, await manifestHash(v2), {
+        title: "Launch",
+        category: "news",
+      });
+      const before = await snapshot(store);
+
+      await expect(store.defineTables(next, consumer(3))).rejects.toMatchObject(
+        {
+          code: "migration.required",
+          details: {
+            changes: [],
+            questions: [
+              expect.objectContaining({ field, records: [{ id, reason }] }),
+            ],
+          },
+        }
+      );
+      await expect(snapshot(store)).resolves.toStrictEqual(before);
+    }
+  );
+
+  it("take a tighter access mode as waiting for its release, the contract as it was", async () => {
+    const store = await newStore();
+    const first = await store.defineTables(v2);
+    await insert(store, first.schemaHash, {
+      title: "Launch",
+      category: "news",
+    });
+    const tighter = await store.defineTables(
+      notes(noteFields, { read: "owner" }),
+      consumer(3)
+    );
+    expect(tighter.contract).toMatchObject({ pending: true });
+    await expect(
+      snapshot(store).then(({ contract }) => contract)
+    ).resolves.toStrictEqual([
+      expect.objectContaining({ contract_hash: first.contract.hash }),
+    ]);
+  });
+});
+
+describe("changes that need a migration", () => {
+  it.each([
     [
       "a field turned into a reference",
       manifestText(
@@ -343,11 +392,6 @@ describe("changes that need a migration", () => {
         )
       ),
       "defaulted_reference_added",
-    ],
-    [
-      "a tighter access mode",
-      notes(noteFields, { read: "owner" }),
-      "access_changed",
     ],
   ])("refuse %s, before anything is written", async (_name, next, reason) => {
     const store = await newStore();
@@ -449,7 +493,11 @@ describe("changes that need a migration", () => {
   it("refuse a missing contract its recorded schemas can't rebuild, or records with no schema", async () => {
     const conflicting = await newStore();
     await conflicting.defineTables(v2);
-    const retyped = notes({ ...noteFields, category: v.number().optional() });
+    // A reference where a string was: no plan takes it.
+    const retyped = notes({
+      ...noteFields,
+      category: v.id("notes").optional(),
+    });
     const retypedHash = await manifestHash(retyped);
     await inStore(conflicting, (sql) => {
       sql.exec(
@@ -642,7 +690,8 @@ describe("failures and races", () => {
     const store = await newStore();
     await store.defineTables(v1);
     const asText = notes({ ...noteFields, colour: v.string().optional() });
-    const asNumber = notes({ ...noteFields, colour: v.number().optional() });
+    // A reference where the other holds text: no plan takes both.
+    const asNumber = notes({ ...noteFields, colour: v.id("notes").optional() });
 
     const outcomes = await atOnce(store, [
       [asText, consumer(2)],

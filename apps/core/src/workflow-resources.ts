@@ -96,6 +96,8 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
+import { applyRulesAfterCommit } from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import {
   buildOf,
   buildSummary,
@@ -2371,13 +2373,17 @@ const publish = async (
     modules
   );
   // Its stores, created and handed its schema before the version is
-  // written: only on this path, never by a run (workflow-stores.ts).
+  // written: only on this path, never by a run (workflow-stores.ts). The
+  // rules they owe it follow once writing it is done, whatever came of
+  // it: those of the version D1 has current then.
+  const owed: OwedRules = { id: crypto.randomUUID(), kind: "workflow" };
   const stores = await provideWorkflowStores(
     env,
     by,
     workflow.id,
     (workflow.currentVersion ?? 0) + 1,
-    checked.stores
+    checked.stores,
+    owed
   );
   try {
     return await writeVersion(env, by, {
@@ -2428,6 +2434,13 @@ const publish = async (
       throw workflowResourceErrors.create("workflow.version_conflict");
     }
     return won;
+  } finally {
+    await applyRulesAfterCommit(
+      env,
+      owed,
+      workflow.id,
+      stores.map(({ storeId }) => storeId)
+    );
   }
 };
 

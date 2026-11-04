@@ -64,10 +64,15 @@ import type { Fragment } from "./store-expressions.ts";
 //   rows of one audience (`audienceKey`), the module state of its call
 //   ending with it, so whatever it carries between rows stays with the
 //   rows the same people already see.
-// - A rule changed for rows already written under the old one: refused
-//   for every table the store's contract holds, whether it holds records
-//   or not, as an access mode's change is (sdk schema-plan.ts), until
-//   versions pinned to the old rules can be retired (GRA-1480).
+// - A rule changed while versions pinned to the old one still run: the
+//   store reads and writes every version under the rules and access mode
+//   its contract holds, whatever the version declared (store-host.ts,
+//   `underContractRules`), and the contract takes a changed rule only
+//   once core's database made the release that changes it current
+//   (`StoreHost.applyRules`; sdk schema-plan.ts, `ruleChanges`). So an
+//   older version never reads on under looser rules, nor a newer one
+//   under its own before it is current. A schema
+//   change never rewrites a field a rule reads (`rule_field_rewritten`).
 
 /** Who a rule is evaluated for: what core resolved for the invocation. */
 export interface RuleCaller {

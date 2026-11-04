@@ -1040,12 +1040,26 @@ describe(
       ]);
 
       const winner = outcomes[0] === "ok" ? asText : asNumber;
+      const [refused, made] = outcomes.toSorted();
       expect({
-        outcomes: outcomes.toSorted(),
+        // Refused at its seal, once the other's change was in, or at its
+        // store while the other's activation was in flight: either way
+        // before its change was applied there.
+        refused: ["migration.required", "migration.busy"].includes(
+          refused ?? ""
+        ),
+        made,
         current: await currentOf(app),
+        // The version made current still writes to its store.
+        writes: await failure(
+          async () =>
+            await valueOf(owner, app, "notes.create", { title: "After" })
+        ),
       }).toStrictEqual({
-        outcomes: ["migration.required", "ok"],
+        refused: true,
+        made: "ok",
         current: winner,
+        writes: "ok",
       });
     });
 

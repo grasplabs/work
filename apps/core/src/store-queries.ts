@@ -1382,11 +1382,24 @@ const searchMatches = (
   if (terms.length === 0) {
     return [][Symbol.iterator]();
   }
-  const match = searchMatch(search, terms, scope.principal);
-  // Counted among the rows the caller may read, when rules choose them:
-  // a count of every match would tell how often a word stands in rows
-  // they can't see.
-  requireSearchable(sql.on(table.name), search, match, table.rows);
+  const match = searchMatch(search, terms, scope.principal, table.ownerScoped);
+  // Counted among the rows the caller may read, when rules or the owner
+  // choose them: a count of every match would tell how often a word
+  // stands in rows they can't see. The owner too, as the index may not
+  // narrow to them: a version pinned to a search index installed before
+  // its table became the owner's (store-host.ts, `underContractRules`).
+  const scoped = scopeTerms(table, scope);
+  requireSearchable(
+    sql.on(table.name),
+    search,
+    match,
+    scoped.length === 0
+      ? undefined
+      : {
+          sql: scoped.map((term) => `(${term.sql})`).join(" AND "),
+          params: scoped.flatMap(({ params }) => params),
+        }
+  );
   return matchesOf(
     sql,
     searchPlan(scope, table, query, search, match, seek),

@@ -376,6 +376,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "dataStore.sdk_file_refs": noPerson,
   "dataStore.sdk_record_refs": noPerson,
   "dataStore.sdk_reserved_fields": noPerson,
+  // The resource, version and schema whose rules the store owes.
+  "dataStore.sdk_rules_owed": noPerson,
   "dataStore.sdk_schema_activations": noPerson,
   "dataStore.sdk_schemas": noPerson,
   // Record IDs and the number each has in the search indexes. The indexes

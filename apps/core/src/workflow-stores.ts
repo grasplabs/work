@@ -14,6 +14,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
+import type { OpenStore } from "./data-stores.ts";
 import {
   businessStores,
   businessStoreVersions,
@@ -23,7 +24,12 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { defineSchemaOnStore } from "./store-backfill.ts";
+import {
+  activateOnStore,
+  applyRulesAfterCommit,
+  defineSchemaOnStore,
+} from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import { inventoriedDeleted, liveStoreSql } from "./store-deletion.ts";
 import { storeAlias } from "./workflow-store-host.ts";
 
@@ -164,16 +170,18 @@ const storeFor = async (
 /**
  * The stores `stores` declares for version `version` of workflow
  * `workflowId`, each created if the workflow has none of that name yet
- * and handed the version's schema, as `by` publishes it. `by` must build
- * in the organization and not be Grasp staff; none of this is checked or
- * done for a version that declares no store.
+ * and handed the version's schema, as `by` publishes it, its rules owed
+ * under `owed` until the version is written (`applyRulesAfterCommit`).
+ * `by` must build in the organization and not be Grasp staff; none of
+ * this is checked or done for a version that declares no store.
  */
 export const provideWorkflowStores = async (
   env: Env,
   by: Acting,
   workflowId: string,
   version: number,
-  stores: ReadonlyMap<string, SealedStore>
+  stores: ReadonlyMap<string, SealedStore>,
+  owed: OwedRules
 ): Promise<WorkflowStoreBinding[]> => {
   if (stores.size === 0) {
     return [];
@@ -181,8 +189,12 @@ export const provideWorkflowStores = async (
   requireBuilder(by);
   requireNotStaff(by);
   const bindings: WorkflowStoreBinding[] = [];
-  // One store after another: each is its own object, and a refusal stops
-  // the publication before the next is touched.
+  const consumer = { resourceId: workflowId, resourceVersion: version };
+  const prepared: { opened: OpenStore; schemaHash: string; awaits: boolean }[] =
+    [];
+  // Prepared first, one store after another: each is its own object, and
+  // a refusal (a dry run whose records don't fit) stops the publication
+  // before any store's contract moves for it.
   for (const [name, store] of stores) {
     // oxlint-disable-next-line no-await-in-loop -- see above
     const storeId = await storeFor(env, by, workflowId, name);
@@ -193,11 +205,16 @@ export const provideWorkflowStores = async (
       env,
       opened,
       manifestText(store.manifest),
-      { resourceId: workflowId, resourceVersion: version }
+      consumer
     );
     if (defined.schemaHash !== store.schemaHash) {
       throw new Error("The store defined another schema than the workflow's");
     }
+    prepared.push({
+      opened,
+      schemaHash: defined.schemaHash,
+      awaits: defined.contract.awaits,
+    });
     bindings.push({
       name,
       storeId,
@@ -207,6 +224,34 @@ export const provideWorkflowStores = async (
         canonicalJson({ ...store.fingerprints })
       ),
     });
+  }
+  // A published version runs once it is written: a change that checks
+  // records (sdk schema-plan.ts, `activates`) is applied now, before the
+  // version is written, since applying can still be refused, every
+  // store's dry run having passed. Each applies all or nothing, and must
+  // leave its store holding the schema in force: one still waiting on a
+  // pending backfill refuses the publication (`migration.pending`,
+  // retryable). A write landing on a later store between its dry run and
+  // here can refuse it too, after an earlier one applied: the version
+  // current is then refused its writes there, never let read more, until
+  // a retry publishes this one. Access modes and row rules wait for the
+  // version to be written (`applyRulesAfterCommit`, by the publication),
+  // or here, for one never written, for those of the version current.
+  try {
+    for (const { opened, schemaHash, awaits } of prepared) {
+      if (awaits) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await activateOnStore(env, opened, schemaHash, consumer, owed);
+      }
+    }
+  } catch (error) {
+    await applyRulesAfterCommit(
+      env,
+      owed,
+      workflowId,
+      prepared.map(({ opened }) => opened.id)
+    );
+    throw error;
   }
   return bindings;
 };

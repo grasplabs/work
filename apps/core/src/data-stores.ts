@@ -1,3 +1,4 @@
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
@@ -56,9 +57,15 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { PersonOrTeam } from "./sharing.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
-import type { ImportApply, ImportBatch, ReadResult } from "./store-host.ts";
+import type {
+  ImportApply,
+  ImportBatch,
+  ReadResult,
+  SchemaStatus,
+} from "./store-host.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -149,8 +156,20 @@ export interface OpenStore {
   defineTables: (
     manifest: string,
     consumer?: SchemaConsumer,
-    migrations?: StoreMigration[]
+    migrations?: StoreMigration[],
+    answers?: SchemaAnswer[]
   ) => Promise<DefinedTables>;
+  /**
+   * Applies the change schema `schemaHash` makes, for `consumer`, when it
+   * waits to be made current (`StoreHost.activateReady`), its rules owed
+   * under `owed` until core's database committed the version; answers its
+   * status after.
+   */
+  activate: (
+    schemaHash: string,
+    consumer: SchemaConsumer,
+    owed?: OwedRules
+  ) => Promise<SchemaStatus>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
@@ -917,8 +936,10 @@ const storeClient = (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (manifest, consumer, migrations) =>
-      await stub.defineTables(storeId, manifest, consumer, migrations),
+    defineTables: async (manifest, consumer, migrations, answers) =>
+      await stub.defineTables(storeId, manifest, consumer, migrations, answers),
+    activate: async (schemaHash, consumer, owed) =>
+      await stub.activateReady(storeId, schemaHash, consumer, owed),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
     commit: async (commit) =>

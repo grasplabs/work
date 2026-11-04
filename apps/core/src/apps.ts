@@ -29,7 +29,12 @@ import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  BlueprintId,
+  StoreId,
+  WorkflowId,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -78,7 +83,12 @@ import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { appBindingKinds, madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
-import { requireStoreSchemaActive } from "./store-backfill.ts";
+import {
+  applyRulesAfterCommit,
+  requireStoreSchemaActive,
+  storeBindings,
+} from "./store-backfill.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 import {
   requireWorkflowTestsPass,
@@ -1640,14 +1650,26 @@ export const makeCurrent = async (
     "core"
   );
   const db = drizzle(env.DB);
+  // The rules its store owes from its activation below until the batch
+  // is done, under this call's own ID.
+  const owed: OwedRules = { id: crypto.randomUUID(), kind: "app" };
+  let owing: StoreId[] = [];
   if (sealedLayout) {
-    // Last before the batch: a ready explicit migration's store switches
-    // to its contract now (store-backfill.ts), after every gate above, so
-    // no refused gate leaves the version still current locked out of its
-    // store. The store and D1 share no transaction: the batch is retried
-    // here if it fails, and a version found current after all is answered
-    // as such. Only a batch that keeps failing leaves the store switched
-    // ahead of D1, until making it current is asked again.
+    // Last before the batch (with it, below): a ready explicit
+    // migration's store switches to its contract, and a change that checks records (a narrowing,
+    // a field required) is applied (store-backfill.ts), after every gate
+    // above, so no refused gate leaves the version still current locked
+    // out of its store. That goes first because applying can still be
+    // refused (a write since the dry run), and the batch can't be taken
+    // back once it is in; a batch that isn't ours (a lost compare and
+    // set, one that keeps failing) leaves the version current refused its
+    // writes where the change left it behind, never reading more. A
+    // changed access mode or row rule waits for the batch: whatever its
+    // outcome, the store then takes the rules of the version D1 has
+    // current (`applyRulesAfterCommit`), so none is in force that D1
+    // never made current. The store and D1 share no transaction: the
+    // batch is retried here if it fails, and a version found current after
+    // all is answered as such.
     //
     // Its candidate still verified, superseded by no commit meanwhile:
     // asked here, before the store switches, so a candidate refused below
@@ -1658,121 +1680,144 @@ export const makeCurrent = async (
     // the candidate was verified, and a verified candidate never expires,
     // so an artifact changed in storage since must refuse it here.
     await requireReleaseAsReported(env, appId, number, candidate);
-    await requireStoreSchemaActive(env, appId, number, { activate: true });
+    const bound = await storeBindings(env, appId, number);
+    owing = bound.map(({ storeId }) => storeId);
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
   // worked out from still holds (trigger-registry.ts). The event is stored
   // only if this batch made it current, and what follows it only then.
-  const [[changed]] = await retriedBatch(
-    async () =>
-      await auditedBatch(env, db, [
-        db
-          .update(apps)
-          .set({
-            currentVersion: number,
-            pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
-          })
-          .where(
-            and(
-              eq(apps.id, appId),
-              sql`${apps.currentVersion} IS ${previous}`,
-              // Archived since `editableApp` let it in: read-only now.
-              ne(apps.status, "archived"),
-              registrationHolds(appId, triggers),
-              sealedLayout ? runnableReleaseSql(appId, number) : undefined,
-              sealedLayout
-                ? releaseAsReportedSql(appId, number, candidate)
-                : undefined,
-              verifiedCandidateSql(appId, number, candidate)
+  const batch = async () =>
+    await retriedBatch(
+      async () =>
+        await auditedBatch(env, db, [
+          db
+            .update(apps)
+            .set({
+              currentVersion: number,
+              pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
+            })
+            .where(
+              and(
+                eq(apps.id, appId),
+                sql`${apps.currentVersion} IS ${previous}`,
+                // Archived since `editableApp` let it in: read-only now.
+                ne(apps.status, "archived"),
+                registrationHolds(appId, triggers),
+                sealedLayout ? runnableReleaseSql(appId, number) : undefined,
+                sealedLayout
+                  ? releaseAsReportedSql(appId, number, candidate)
+                  : undefined,
+                verifiedCandidateSql(appId, number, candidate)
+              )
             )
-          )
-          .returning(),
-        outboxedEventWhere(db, event, sql`changes() > 0`),
-        // The candidate it was made current from is active from now on,
-        // and the activation's claim on it ends (app-candidates.ts).
-        db
-          .update(appCandidates)
-          .set({
-            state: "active",
-            lease: null,
-            leaseUntil: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(appCandidates.id, candidate.id),
-              eq(appCandidates.state, "verified"),
-              storedEvent(event.id)
-            )
-          ),
-        ...madeCurrent(env, by, {
-          app: appId,
-          version: number,
-          previous,
-          changed: storedEvent(event.id),
-          // A copy's first version, approved as it was created from the
-          // blueprint (app-blueprints.ts), made current for the first time.
-          keep: previous === null && approved === 1,
-        }),
-        ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
-        // Its webhooks told of the version, with the change or not at all.
-        ...queuedWebhookDeliveries(
-          db,
-          {
+            .returning(),
+          outboxedEventWhere(db, event, sql`changes() > 0`),
+          // The candidate it was made current from is active from now on,
+          // and the activation's claim on it ends (app-candidates.ts).
+          db
+            .update(appCandidates)
+            .set({
+              state: "active",
+              lease: null,
+              leaseUntil: null,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(appCandidates.id, candidate.id),
+                eq(appCandidates.state, "verified"),
+                storedEvent(event.id)
+              )
+            ),
+          ...madeCurrent(env, by, {
             app: appId,
-            event: "changed",
-            dedupe: `changed:${event.id}`,
             version: number,
-          },
-          storedEvent(event.id)
-        ),
-        // The store the arriving version's release binds now serves its
-        // definition, and one the leaving version's bound and the arriving
-        // one's doesn't serves none (each subquery finds no binding): core's
-        // inventory follows (data-stores.ts).
-        db
-          .update(businessStores)
-          .set({
-            activeSchemaVersion: sql`(SELECT bound.target_version FROM sdk_resource_bindings AS bound
+            previous,
+            changed: storedEvent(event.id),
+            // A copy's first version, approved as it was created from the
+            // blueprint (app-blueprints.ts), made current for the first time.
+            keep: previous === null && approved === 1,
+          }),
+          ...registerTriggers(
+            db,
+            appId,
+            number,
+            triggers,
+            storedEvent(event.id)
+          ),
+          // Its webhooks told of the version, with the change or not at all.
+          ...queuedWebhookDeliveries(
+            db,
+            {
+              app: appId,
+              event: "changed",
+              dedupe: `changed:${event.id}`,
+              version: number,
+            },
+            storedEvent(event.id)
+          ),
+          // The store the arriving version's release binds now serves its
+          // definition, and one the leaving version's bound and the arriving
+          // one's doesn't serves none (each subquery finds no binding): core's
+          // inventory follows (data-stores.ts).
+          db
+            .update(businessStores)
+            .set({
+              activeSchemaVersion: sql`(SELECT bound.target_version FROM sdk_resource_bindings AS bound
           WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
             AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-            activeSchemaHash: sql`(SELECT bound.schema_hash FROM sdk_resource_bindings AS bound
+              activeSchemaHash: sql`(SELECT bound.schema_hash FROM sdk_resource_bindings AS bound
           WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
             AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-            activeOperationManifestHash: sql`(SELECT definition.operation_manifest_hash
+              activeOperationManifestHash: sql`(SELECT definition.operation_manifest_hash
           FROM sdk_resource_bindings AS bound
           JOIN business_store_versions AS definition
             ON definition.store_id = bound.target_id AND definition.version = bound.target_version
           WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
             AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-          })
-          .where(
-            and(
-              sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
+            })
+            .where(
+              and(
+                sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
             WHERE resource_id = ${appId} AND resource_version IN (${number}, ${previous ?? number})
               AND kind = 'store')`,
-              storedEvent(event.id)
-            )
-          ),
-        // The sealed releases of the version leaving and the one arriving
-        // were current until now: their retention counts from here
-        // (release-retention.ts), not from the sweep's last look.
-        db
-          .update(sdkReleaseManifests)
-          .set({ lastCurrentAt: new Date() })
-          .where(
-            and(
-              eq(sdkReleaseManifests.appId, appId),
-              inArray(sdkReleaseManifests.version, [
-                number,
-                previous ?? number,
-              ]),
-              storedEvent(event.id)
-            )
-          ),
-      ])
-  );
+                storedEvent(event.id)
+              )
+            ),
+          // The sealed releases of the version leaving and the one arriving
+          // were current until now: their retention counts from here
+          // (release-retention.ts), not from the sweep's last look.
+          db
+            .update(sdkReleaseManifests)
+            .set({ lastCurrentAt: new Date() })
+            .where(
+              and(
+                eq(sdkReleaseManifests.appId, appId),
+                inArray(sdkReleaseManifests.version, [
+                  number,
+                  previous ?? number,
+                ]),
+                storedEvent(event.id)
+              )
+            ),
+        ])
+    );
+  let made: Awaited<ReturnType<typeof batch>>;
+  // The store's activation (`requireStoreSchemaActive`, the last step
+  // before the batch) and the batch share one ending: refused, failed or
+  // committed, the rules of the version D1 has current are applied and
+  // what the store owed is settled, so a refusal never leaves the store
+  // holding other activations back (`migration.busy`).
+  try {
+    if (sealedLayout) {
+      await requireStoreSchemaActive(env, appId, number, { activate: owed });
+    }
+    made = await batch();
+  } finally {
+    await applyRulesAfterCommit(env, owed, appId, owing);
+  }
+  const [[changed]] = made;
   if (!changed) {
     // Only this call's batch stores its event, and only if it made the
     // version current: found stored, an earlier try committed and its

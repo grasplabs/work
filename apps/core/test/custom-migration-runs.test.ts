@@ -1,4 +1,3 @@
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -10,15 +9,8 @@ import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import { threwOnRecord } from "../src/migration-transform.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
-import {
-  appFile,
-  deriving,
-  migrated,
-  notesOf,
-  refusalOf,
-} from "./migrated-apps.ts";
+import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
 import { codeOf, commit } from "./pending-stores.ts";
-import { seal } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
 /** Notes whose category is optional: version 1's notes fit it as they are. */
@@ -283,7 +275,7 @@ export default appTest({
     });
   });
 
-  it("refuses a rollback past the migration, naming the versions that still fit", async () => {
+  it("rolls back past the migration once every record fits the version before, keeping what it derived", async () => {
     const { fixture, store, release } = await migrated(5, deriving, {
       firstCurrent: true,
     });
@@ -300,71 +292,36 @@ export default appTest({
       { timeout: 120_000, interval: 500 }
     );
     await setCurrentVersion(env, fixture.owner, fixture.app, 3);
-    // Its candidate's report said so before it was made current.
-    const rollback = await reportedRollback(fixture.app, 3);
-    const toFirst = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
-    );
-    // A later version on the migrated schema, without the migration.
-    await commitFiles(
-      env,
-      fixture.owner,
-      fixture.app,
-      { "app.ts": appFile(false), "migrations/derive-category.ts": null },
-      "Drop the finished migration"
-    );
-    await seal(fixture, 4);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 4);
-
-    const toThird = await setCurrentVersion(env, fixture.owner, fixture.app, 3);
-    const again = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
-    );
-    // Version 4's receipt waited on a target an admin abandoned
-    // (store-abandon.ts): it never runs on the store, though version 3,
-    // on the same schema, does.
-    const abandoned = await runInDurableObject(
-      object,
-      (_instance, state) =>
-        state.storage.sql.exec(
-          "UPDATE sdk_schema_activations SET abandoned_at = ? WHERE resource_id = ? AND resource_version = 4",
-          Date.now(),
-          fixture.app
-        ).rowsWritten
-    );
-    const withoutAbandoned = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
-    );
+    // Version 3 requires the category; version 1 writes notes without it,
+    // so the migration left it behind.
+    const left = await object.schemaStatus(store.id, fixture.firstSchema);
+    // Made current again, its schema is planned onto the contract and
+    // every record checked against it (store-schema-changes.ts): they all
+    // fit, the category kept, as optional.
+    const back = await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    const records = await notesOf(store);
 
     expect({
-      rollback,
-      toFirst,
+      left,
+      back: back.currentVersion,
       status: await object.schemaStatus(store.id, fixture.firstSchema),
-      toThird: toThird.currentVersion,
-      again,
-      abandoned,
-      withoutAbandoned,
+      categorised: records.every(
+        ({ fields }) => typeof fields.category === "string"
+      ),
+      rollback: await reportedRollback(fixture.app, 3),
     }).toStrictEqual({
-      rollback: {
-        to: 1,
-        eligible: false,
-        reason: "migration.rollback_incompatible",
+      left: {
+        state: "ready",
+        target: fixture.firstSchema,
+        attempt: 1,
+        scanned: 0,
+        filled: 0,
+        failure: null,
       },
-      toFirst: {
-        code: "migration.rollback_incompatible",
-        details: { compatible: [3] },
-      },
-      status: { state: "incompatible" },
-      toThird: 3,
-      again: {
-        code: "migration.rollback_incompatible",
-        details: { compatible: [4, 3] },
-      },
-      abandoned: 1,
-      withoutAbandoned: {
-        code: "migration.rollback_incompatible",
-        details: { compatible: [3] },
-      },
+      back: 1,
+      status: { state: "active" },
+      categorised: true,
+      rollback: { to: 1, eligible: true },
     });
   });
 

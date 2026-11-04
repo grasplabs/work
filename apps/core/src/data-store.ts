@@ -1,3 +1,4 @@
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { UploadState } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -24,6 +25,7 @@ import type {
   FileReader,
   Publishable,
 } from "./file-host.ts";
+import type { OwedRules } from "./store-backfill.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
@@ -110,13 +112,15 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     manifest: string,
     consumer?: SchemaConsumer,
-    declared?: StoreMigration[]
+    declared?: StoreMigration[],
+    answers?: SchemaAnswer[]
   ): Promise<DefinedTables> {
     return await this.#live().defineTables(
       storeId,
       manifest,
       consumer,
-      declared
+      declared,
+      answers
     );
   }
 
@@ -162,12 +166,32 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.activateReady`. */
-  activateReady(
+  async activateReady(
     storeId: StoreId,
     schemaHash: string,
-    consumer: SchemaConsumer
-  ): SchemaStatus {
-    return this.#live().activateReady(storeId, schemaHash, consumer);
+    consumer: SchemaConsumer,
+    owed?: OwedRules
+  ): Promise<SchemaStatus> {
+    return await this.#live().activateReady(
+      storeId,
+      schemaHash,
+      consumer,
+      owed
+    );
+  }
+
+  /** `StoreHost.applyRules`. */
+  async applyRules(
+    storeId: StoreId,
+    schemaHash: string,
+    owedId: string
+  ): Promise<boolean> {
+    return await this.#live().applyRules(storeId, schemaHash, owedId);
+  }
+
+  /** `StoreHost.settleRules`. */
+  settleRules(storeId: StoreId, owedIds: readonly string[]): void {
+    this.#live().settleRules(storeId, owedIds);
   }
 
   /** `StoreHost.schemaStatus`. */
@@ -177,11 +201,6 @@ export class DataStore extends DurableObject<Env> {
     consumer?: SchemaConsumer
   ): SchemaStatus {
     return this.#live().schemaStatus(storeId, schemaHash, consumer);
-  }
-
-  /** `StoreHost.survivesMigration`. */
-  survivesMigration(storeId: StoreId, schemaHash: string): boolean {
-    return this.#live().survivesMigration(storeId, schemaHash);
   }
 
   /** `StoreHost.compatibleVersions`. */

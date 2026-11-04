@@ -474,11 +474,19 @@ export const readAppManifest = (text: string): AppManifest => {
     "preferences",
     "migrations",
   ];
-  // `people` only where the App reads the organization's people.
+  // `people` only where the App reads the organization's people, and
+  // `answers` only where it declares any.
   const readsPeople = isPlainObject(data) && data.people === true;
-  if (!hasExactly(data, readsPeople ? [...keys, "people"] : keys)) {
+  const answers = isPlainObject(data) && Object.hasOwn(data, "answers");
+  if (
+    !hasExactly(data, [
+      ...keys,
+      ...(readsPeople ? ["people"] : []),
+      ...(answers ? ["answers"] : []),
+    ])
+  ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, people?, migrations }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, people?, migrations, answers? }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
@@ -559,6 +567,7 @@ export const readAppManifest = (text: string): AppManifest => {
         : { preferences: schemaFrom(data.preferences) }),
       permissions: permissionsFrom(resources, browser, workflows, readsPeople),
       migrations: migrationsFrom(data.migrations),
+      ...(answers ? { answers: data.answers } : {}),
     } as Parameters<typeof app>[0];
     return inspectApp(app(definition)).manifest;
   };

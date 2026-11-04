@@ -3336,6 +3336,11 @@ msgid "By {by}"
 msgstr "Von {by}"
 
 #: src/engines/app-data.tsx
+msgctxt "a change's source: the platform filled in a value the record lacked as a new version of the App's data model took effect"
+msgid "by a change of the App's data model"
+msgstr "durch eine Änderung am Datenmodell der App"
+
+#: src/engines/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "durch einen Import"
