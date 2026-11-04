@@ -1,3 +1,4 @@
+import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 // grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
 // `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
@@ -358,8 +359,7 @@ export const forEachDescription = `Runs \`do\` for each of \`items\`, one item a
  * Who a decision asks: a person or a team by ID, or everyone with a role,
  * as the platform's deciders are (`@grasp-os/shared/decisions`).
  */
-export const recipientPattern =
-  "^(?:person:[A-Za-z0-9_-]{1,128}|role:(?:admin|builder|user)|team:[A-Za-z0-9_-]{1,128})$";
+export const recipientPattern = decidersPattern.source;
 
 /** How long a decision waits when its step names no timeout. */
 export const decisionTimeout = "365 days";

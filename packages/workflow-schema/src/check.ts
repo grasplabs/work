@@ -863,6 +863,7 @@ const checkStep = (
       for (const field of ["recipients", "prompt", "input"] as const) {
         checkValue(walk, step[field], join(pointer, field), place, false);
       }
+      checkDuration(walk, step.timeout, join(pointer, "timeout"));
       break;
     }
     case "wait": {

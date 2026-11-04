@@ -536,6 +536,10 @@ describe("generating a workflow", () => {
         /step\.do\("approve", \{ key: "enter"[^\n]*\? \{ \["recipients"\]: z\.array\(decider\)[^\n]* : \{ skipped: true \}\)\);/u.test(
           generated.source
         ),
+      // A blank prompt fails the enter step: the host asks none.
+      promptNotBlank: generated.source.includes(
+        '["prompt"]: z.string().regex(/\\S/u)'
+      ),
       asksFromRecord:
         /step\.decision\("approve", \{ key: "task", description: "approve", from: decided\d+\.recipients\[0\], timeout: "365 days"/u.test(
           generated.source
@@ -574,6 +578,7 @@ describe("generating a workflow", () => {
         timeoutMs: 2 * 86_400_000,
       },
       decidesInEnter: true,
+      promptNotBlank: true,
       asksFromRecord: true,
     });
   });

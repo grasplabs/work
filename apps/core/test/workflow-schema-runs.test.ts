@@ -413,6 +413,41 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     });
   });
 
+  it("records a list with a missing field as JSON, its item `null`, and runs its items", async () => {
+    const { source, sealed: withTable } = generated([
+      {
+        id: "rows",
+        type: "forEach",
+        // `input.missing` isn't there: the list's item is `null`.
+        items: { $expr: "[input.first, input.missing]" },
+        do: [
+          {
+            id: "notify",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: { to: { $expr: 'item ?? "nobody"' }, subject: "listed" },
+          },
+        ],
+      },
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: (run) => withTable({ ...run, input: { first: "a" } }),
+    });
+    const { sent } = await sealed.mail.did();
+    expect({
+      ran,
+      sent: sent
+        .filter(({ subject }) => subject === "listed")
+        .map(({ to }) => to),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      sent: ["a", "nobody"],
+    });
+  });
+
   it("ends a loop that reaches the run's step ceiling, saying to split the work", async () => {
     const { source, sealed: withTable } = generated([
       {

@@ -341,6 +341,7 @@ describe("checking a workflow", () => {
         )
       ),
       long: problemsAt(withDecisions(decision({ prompt: "x".repeat(501) }))),
+      blank: problemsAt(withDecisions(decision({ prompt: "   " }))),
       secret: problemsAt(
         withDecisions(decision({ prompt: { $expr: "params.token" } }))
       ),
@@ -360,6 +361,7 @@ describe("checking a workflow", () => {
       role: ["/steps/5/recipients/0"],
       many: ["/steps/5/recipients"],
       long: ["/steps/5/prompt"],
+      blank: ["/steps/5/prompt"],
       secret: ["/steps/5/prompt/$expr"],
       later: ["/steps/5/input/$expr"],
       ask: ["/steps/5/ask"],
@@ -653,12 +655,14 @@ describe("checking a workflow", () => {
       year: codesAt(
         changed("linger", (step) => ({ ...step, for: "365 days" }))
       ),
+      decision: codesAt(withDecisions(decision({ timeout: huge }))),
     }).toStrictEqual({
       wait: { "/steps/0/for": "workflow.duration_too_long" },
       timeout: { "/steps/1/timeout": "workflow.duration_too_long" },
       agent: { "/steps/2/timeout": "workflow.duration_too_long" },
       delay: { "/steps/4/catch/retry/delay": "workflow.duration_too_long" },
       year: "ok",
+      decision: { "/steps/5/timeout": "workflow.duration_too_long" },
     });
   });
 

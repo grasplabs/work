@@ -10,7 +10,8 @@ import type { Json } from "./json.ts";
 // run's starter, unless `from` is exactly `person:<them>`; a decision link
 // (`/decisions/<id>`) only leads them to it (threat model R8, decision Q5).
 
-const decidersPattern =
+/** Who answers a decision, as `decidersSchema` holds it: its pattern. */
+export const decidersPattern =
   /^(?:person:[\w-]{1,128}|role:(?:admin|builder|user)|team:[\w-]{1,128})$/u;
 
 /**

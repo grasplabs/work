@@ -93,7 +93,8 @@ const stepKinds = {
           ref("expression"),
           {
             type: "string",
-            minLength: 1,
+            // Not blank: the host asks no empty question.
+            pattern: "\\S",
             maxLength: formatLimits.promptLength,
           },
         ],

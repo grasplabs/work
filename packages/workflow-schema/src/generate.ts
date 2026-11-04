@@ -704,7 +704,9 @@ class Generator {
     this.#imports.add("decider");
     const record = [
       `["recipients"]: z.array(decider).nonempty().max(${formatLimits.recipients}).parse(${recipients.code})`,
-      `["prompt"]: z.string().min(1).max(${formatLimits.promptLength}).parse(${prompt.code})`,
+      // Not blank, as the host asks it: never trimmed here, the record
+      // is what the host matches.
+      `["prompt"]: z.string().regex(/\\S/u).max(${formatLimits.promptLength}).parse(${prompt.code})`,
       `["input"]: z.json().parse(${input.code})`,
     ];
     this.#decided(
@@ -770,7 +772,8 @@ class Generator {
       step,
       depth,
       "enter",
-      `{ items: ${items.code} }`,
+      // JSON as the record is: a missing field in the list is `null`.
+      `{ items: ${runtimeNames.json}(${items.code}) }`,
       (inner, entered) => {
         this.#loops = inside;
         // Over the recorded items, never a fresh evaluation: the host
