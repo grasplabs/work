@@ -14,6 +14,7 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { i18n as pageI18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -33,7 +34,11 @@ import { LeaveConfirmDialog } from "./leave-confirm-dialog.tsx";
 import { navigationPolicy, tabBudget } from "./navigation-policy.ts";
 import type { NavigationPolicy, PageState } from "./navigation-policy.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
-import type { FailureReason, ScreenState } from "./screen-host.ts";
+import type {
+  DraftRevisions,
+  FailureReason,
+  ScreenState,
+} from "./screen-host.ts";
 
 /**
  * What a frame's screen asks the person to confirm: a decision's answer,
@@ -89,6 +94,15 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
   const { t, i18n } = useLingui();
   if (state.status === "loading" || state.status === "running") {
     return null;
+  }
+  if (state.status === "fixing") {
+    // Calm, and never what went wrong: the agent hears that.
+    return (
+      <div className="flex items-center gap-2 border-b p-3 print:hidden">
+        <Spinner />
+        <output className="text-sm">{t`Fixing a problem…`}</output>
+      </div>
+    );
   }
   let message = i18n._(failureMessages.unknown);
   if (state.status === "updated") {
@@ -178,7 +192,8 @@ const start = (
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
   confirmLink: (link: PendingLink) => Promise<boolean>,
-  navigation: FrameNavigation
+  navigation: FrameNavigation,
+  revisions: DraftRevisions
 ): (() => void) =>
   chatId === undefined
     ? runScreen(
@@ -213,7 +228,8 @@ const start = (
           ...(appVersion === undefined ? {} : { appVersion }),
         },
         onState,
-        onOpened
+        onOpened,
+        revisions
       );
 
 /**
@@ -230,7 +246,8 @@ const startAsking = (
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   onAsk: (asked: Asked<FrameQuestion> | null) => void,
-  navigation: FrameNavigation
+  navigation: FrameNavigation,
+  revisions: DraftRevisions
 ): (() => void) => {
   const questions = frameQuestions<FrameQuestion>(onAsk, Date.now, pausedFor);
   const stop = start(
@@ -246,7 +263,8 @@ const startAsking = (
     onOpened,
     async (review) => await questions.confirm({ kind: "decision", review }),
     async (link) => await questions.confirm({ kind: "link", link }),
-    navigation
+    navigation,
+    revisions
   );
   return () => {
     questions.end();
@@ -319,6 +337,12 @@ const policedNavigation = (
 };
 
 interface FrameProps extends FrameSource {
+  /**
+   * With `chatId`: the newest revision of the chat's draft, which the
+   * preview open in the frame takes as it changes, without starting
+   * again (screen-host.ts `runPreview`).
+   */
+  revision?: number;
   title: string;
   onState: (state: ScreenState) => void;
   onOpened: (appName: string) => void;
@@ -346,6 +370,7 @@ const Frame = ({
   input,
   surface,
   beside,
+  revision,
   title,
   onState,
   onOpened,
@@ -357,6 +382,18 @@ const Frame = ({
   const core = useCore();
   const router = useRouter();
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
+  // Read by the start, not a reason to start again: one object for the
+  // frame's whole life, which each newer revision is passed on through.
+  const revisions = useRef<DraftRevisions>({
+    latest: revision,
+    listener: undefined,
+  });
+  useEffect(() => {
+    if (revision !== undefined) {
+      revisions.current.latest = revision;
+      revisions.current.listener?.(revision);
+    }
+  }, [revision]);
   useEffect(
     () =>
       frame
@@ -383,7 +420,8 @@ const Frame = ({
               policy,
               frame,
               beside === true
-            )
+            ),
+            revisions.current
           )
         : undefined,
     [
@@ -483,6 +521,7 @@ type Update = "none" | "asking" | "saving";
  */
 const FramedScreen = ({
   source,
+  revision,
   title,
   label,
   embedded,
@@ -492,6 +531,8 @@ const FramedScreen = ({
   onGuardChange,
 }: {
   source: FrameSource;
+  /** A chat's preview's: the draft's newest revision (`FrameProps`). */
+  revision?: number;
   title: string;
   label: string;
   embedded: boolean;
@@ -572,6 +613,28 @@ const FramedScreen = ({
     setAttempt((last) => last + 1);
     reloadTo.current?.();
   };
+  // A chat's preview that failed to start (its first build didn't build,
+  // its screen wasn't there, it didn't start in time) takes no updates:
+  // only a running frame follows the draft's revisions. So a newer
+  // revision than the one it failed at starts it afresh, as a draft that
+  // fixes it should show; one that runs takes it in place.
+  const failedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.status !== "failed" || revision === undefined) {
+      failedAt.current = null;
+      return;
+    }
+    if (failedAt.current === null) {
+      failedAt.current = revision;
+      return;
+    }
+    if (revision > failedAt.current) {
+      // As `reload`, from here: nothing was offered to a failed start.
+      setState({ status: "loading" });
+      setAttempt((last) => last + 1);
+      reloadTo.current?.();
+    }
+  }, [state, revision]);
   // Another version made current: a screen with nothing unsaved switches
   // at once; one holding edits asks once first (spec 11.5).
   const changeState = (next: ScreenState) => {
@@ -668,6 +731,7 @@ const FramedScreen = ({
         {...(source.input === undefined ? {} : { input: source.input })}
         {...(source.surface === undefined ? {} : { surface: source.surface })}
         {...(source.beside === true ? { beside: true } : {})}
+        {...(revision === undefined ? {} : { revision })}
       />
     </div>
   );
@@ -757,6 +821,8 @@ export const ScreenFrame = ({
  * agent. With `version`, of that earlier version of the draft, read-only;
  * with `appVersion` instead, of that version of the App (its first
  * screen), read-only the same way. `onEnded` is told once it failed.
+ * Without either, `revision`, the draft's newest, comes into the open
+ * frame as it changes: each write shows without starting it again.
  */
 export const PreviewFrame = ({
   chatId,
@@ -764,6 +830,7 @@ export const PreviewFrame = ({
   screen,
   version: draftVersion,
   appVersion,
+  revision,
   onEnded,
 }: {
   chatId: string;
@@ -771,6 +838,7 @@ export const PreviewFrame = ({
   screen?: string;
   version?: number;
   appVersion?: number;
+  revision?: number;
   onEnded?: ScreenEnded;
 }) => {
   const { t } = useLingui();
@@ -798,6 +866,7 @@ export const PreviewFrame = ({
         ...(appVersion === undefined ? {} : { appVersion }),
       }}
       title={title}
+      {...(version === undefined && revision !== undefined ? { revision } : {})}
       {...(onEnded === undefined ? {} : { onEnded })}
     />
   );

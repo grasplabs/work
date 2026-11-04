@@ -568,12 +568,12 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const id = chatIdSchema.parse(chatId);
     const { chats } = builder.api;
     const appId = appIdSchema.parse(app);
-    const writeDraft = async (revision: number) => {
+    const writeDraft = async (revision: number, fixed = false) => {
       await stub.saveDraft(
         id,
         app,
         1,
-        desk(false),
+        desk(fixed),
         [],
         revision,
         await openTestRun(stub, id)
@@ -628,9 +628,11 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     }
     const { length: looping } = await sources(third);
 
-    // What an earlier write's preview reports once the draft moved on is
-    // dropped, and the new write starts with none.
-    const fourth = await writeDraft(third);
+    // What an earlier write's preview reports once the draft's server code
+    // moved on is dropped, and the new write starts with none. (A frame
+    // still on an earlier write of the same server code reports to the
+    // newest: preview-hot-updates.test.ts.)
+    const fourth = await writeDraft(third, true);
     await reportOn(third, "From the earlier write");
     const moved = await sources(fourth);
 

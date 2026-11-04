@@ -270,6 +270,37 @@ export const categoryOf = (code: string): ErrorCategory => {
   return "operational";
 };
 
+/**
+ * The refusals of a draft of spec 8's layout that a change of its code
+ * fixes: code that doesn't seal. Never one of what was kept
+ * (`version.manifest_corrupt`, `version.artifact_corrupt`), which no
+ * change of the draft fixes.
+ */
+export const draftSealFailures: ReadonlySet<string> = new Set([
+  "version.unsealable",
+  "version.build_failed",
+  "version.inspection_failed",
+  "version.invalid_manifest",
+  "version.unstable_manifest",
+]);
+
+/**
+ * Whether a preview's call of a draft's function failed with `code`
+ * through the draft's own fault, for it to fix: its code (`source`), a
+ * contract it or its caller broke, or code that doesn't seal. Never an
+ * error the App meant (`domain`), nor a refusal that isn't the draft's
+ * (an out-of-date preview, a person who lost access), nor
+ * `internal.unexpected`, which says nothing of whose it was.
+ */
+export const isDraftFault = (code: string): boolean => {
+  const category = categoryOf(code);
+  return (
+    category === "source" ||
+    category === "contract" ||
+    draftSealFailures.has(code)
+  );
+};
+
 /** Whether platform error `code` is worth trying again unchanged. */
 export const isRetryableCode = (code: string): boolean =>
   retryableCodes.has(code);

@@ -1,6 +1,4 @@
-import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type {
@@ -24,9 +22,7 @@ import {
   callFunction,
   failureOf,
   fileRefusal,
-  openPreview,
   previewTarget,
-  supersededRetryMs,
 } from "./screen-host.ts";
 import type { ScreenOpening, ScreenState } from "./screen-host.ts";
 import type { FrameLink } from "./tab-link.ts";
@@ -1324,73 +1320,214 @@ describe("a screen's navigation, as the page takes it", () => {
   });
 });
 
-describe("opening a preview a newer load replaced", () => {
-  /** Opens with `answers` in turn, on a clock only pauses move. */
-  const opened = async (
-    answers: readonly ("loaded" | "app.preview_superseded" | "app.no_draft")[]
-  ) => {
-    let at = 0;
-    let asked = 0;
-    const result = await outcome(
-      openPreview(
-        async () => {
+/**
+ * A preview's target over a core that records what it was asked: each
+ * call's revision, each report, and each live query it follows, with the
+ * page's relay of it, which core pushes to.
+ */
+/** A query's answer of one title. */
+const value = (title: string) => ({ ok: true, value: [title] });
+
+const previewOver = (answer: unknown) => {
+  const calls: number[] = [];
+  const cancels: number[] = [];
+  const reports: string[] = [];
+  const watches: { revision: number; released: boolean }[] = [];
+  const asked = { calls, cancels, reports, watches };
+  const relays: ((push: unknown) => Promise<unknown>)[] = [];
+  const chats = {
+    previewFunction: async (_chat: string, _app: string, revision: number) => {
+      asked.calls.push(revision);
+      return await Promise.resolve(answer);
+    },
+    previewCancelStream: async (
+      _chat: string,
+      _app: string,
+      revision: number
+    ) => {
+      asked.cancels.push(revision);
+      return await Promise.resolve({ requested: false });
+    },
+    previewReport: async (
+      _chat: string,
+      _app: string,
+      revision: number,
+      _screen: string,
+      problem: { kind: string }
+    ) => {
+      asked.reports.push(`${problem.kind} at ${revision}`);
+      await Promise.resolve();
+    },
+    previewWatchQuery: async (
+      _chat: string,
+      _app: string,
+      revision: number,
+      _request: string,
+      relay: (push: unknown) => Promise<unknown>
+    ) => {
+      const watch = { revision, released: false };
+      asked.watches.push(watch);
+      relays.push(relay);
+      return await Promise.resolve({
+        release: async () => {
+          watch.released = true;
           await Promise.resolve();
-          const answer =
-            answers.at(Math.min(asked, answers.length - 1)) ?? "loaded";
-          asked += 1;
-          if (answer !== "loaded") {
-            throw appErrors.create(answer);
-          }
-          return answer;
         },
-        async (ms) => {
-          await Promise.resolve();
-          at += ms;
-        },
-        () => at
-      )
-    );
-    return { result, asked };
+      });
+    },
   };
+  const link = {
+    session: async () => await Promise.resolve({ chats }),
+    person: async () => await Promise.resolve("ada"),
+  };
+  let problems = 0;
+  // The revision the frame's reports are of, as its updates say.
+  const reporting = { at: 1 };
+  // SAFETY: a preview's calls, reports and live queries reach only these
+  // of `chats`, which the stand-in has.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+  const asLink = link as unknown as FrameLink;
+  const target = previewTarget(
+    asLink,
+    "chat",
+    { ...bundle, revision: 1, screens: ["home"] },
+    {
+      problem: () => {
+        problems += 1;
+      },
+      followUpdates: () => {
+        // The frame's receiver isn't handed over here.
+      },
+      runningAt: () => reporting.at,
+    }
+  );
+  return { target, asked, relays, reporting, problems: () => problems };
+};
 
-  it("asks again until it loads", async () => {
-    await expect(
-      opened(["app.preview_superseded", "app.preview_superseded", "loaded"])
-    ).resolves.toStrictEqual({ result: { answered: "loaded" }, asked: 3 });
+describe("a preview's frame as its draft changes", () => {
+  it("counts a problem the screen reported as one being fixed, but not a library's warning", async () => {
+    const { target, asked, problems } = previewOver({ result: { ok: true } });
+    await target.report({ kind: "warning", message: "React says" });
+    await target.report({ kind: "error", message: "boom" });
+    await target.report({ kind: "rejection", message: "nope" });
+    expect({ reports: asked.reports, problems: problems() }).toStrictEqual({
+      reports: ["warning at 1", "error at 1", "rejection at 1"],
+      problems: 2,
+    });
   });
 
-  it("waits behind the load ahead of it longer than a live screen waits for its build", async () => {
-    // On staging an update waited up to 18 s for the one ahead, then took
-    // about 10 s itself: past a live screen's whole wait.
-    const behind = Math.ceil(
-      (screenLimits.openMs + 10_000) / supersededRetryMs
+  it("names the revision the frame runs as each call and report arrives, the update it tries included", async () => {
+    const { target, asked, reporting } = previewOver({ result: { ok: true } });
+    // The frame is trying revision 2: its first render and mount effects
+    // call, and its failure comes before its answer.
+    reporting.at = 2;
+    const called = target.callFunction("{}");
+    const cancelled = target.cancelStream("{}");
+    const sent = target.report({ kind: "error", message: "The update broke" });
+    // Rolled back before core was reached: still the update's.
+    reporting.at = 1;
+    await Promise.all([called, cancelled, sent]);
+    await target.callFunction("{}");
+    await target.report({ kind: "error", message: "The screen shown broke" });
+    expect({
+      calls: asked.calls,
+      cancels: asked.cancels,
+      reports: asked.reports,
+    }).toStrictEqual({
+      calls: [2, 1],
+      cancels: [2],
+      reports: ["error at 2", "error at 1"],
+    });
+  });
+
+  it("counts a call the draft's own code failed as a problem, and not a refusal that isn't its fault", async () => {
+    const failed = previewOver(
+      JSON.stringify({
+        result: { ok: false, error: { code: "contract.invalid_output" } },
+      })
     );
-    await expect(
-      opened([
-        ...Array.from(
-          { length: behind },
-          () => "app.preview_superseded" as const
-        ),
-        "loaded",
-      ])
-    ).resolves.toStrictEqual({
-      result: { answered: "loaded" },
-      asked: behind + 1,
-    });
+    await failed.target.callFunction("{}");
+    const outdated = previewOver(
+      JSON.stringify({
+        result: { ok: false, error: { code: "app.preview_outdated" } },
+      })
+    );
+    await outdated.target.callFunction("{}");
+    expect([failed.problems(), outdated.problems()]).toStrictEqual([1, 0]);
   });
 
-  it("gives up once the page's wait for a preview is spent", async () => {
-    const tries = Math.ceil(screenLimits.previewOpenMs / supersededRetryMs);
-    await expect(opened(["app.preview_superseded"])).resolves.toStrictEqual({
-      result: { code: "app.preview_superseded" },
-      asked: tries,
+  it("hands the frame every data change of a live query across screen writes, each numbered past the last it was handed", async () => {
+    const { target, relays, reporting } = previewOver({ result: { ok: true } });
+    const handed: unknown[] = [];
+    await target.watchQuery(
+      "{}",
+      new RpcStub(async (push: unknown) => {
+        handed.push(push);
+        await Promise.resolve();
+      })
+    );
+    // Core numbers each subscription's pushes from its own start.
+    await relays[0]?.({ revision: 1, result: value("a") });
+    await relays[0]?.({ revision: 2, result: value("b") });
+    reporting.at = 2;
+    target.moved(2);
+    await vi.waitFor(() => {
+      expect(relays).toHaveLength(2);
     });
+    await relays[1]?.({ revision: 1, result: value("b") });
+    await relays[1]?.({ revision: 2, result: value("c") });
+    reporting.at = 3;
+    target.moved(3);
+    await vi.waitFor(() => {
+      expect(relays).toHaveLength(3);
+    });
+    await relays[2]?.({ revision: 1, result: value("c") });
+    await relays[2]?.({ revision: 2, result: value("d") });
+    // Each change reaches the frame numbered past the one before, so its
+    // client, which shows only a newer push, shows every one.
+    expect(handed).toStrictEqual([
+      { revision: 1, result: value("a") },
+      { revision: 2, result: value("b") },
+      { revision: 3, result: value("b") },
+      { revision: 4, result: value("c") },
+      { revision: 5, result: value("c") },
+      { revision: 6, result: value("d") },
+    ]);
   });
 
-  it("asks no more after any other refusal", async () => {
-    await expect(opened(["app.no_draft", "loaded"])).resolves.toStrictEqual({
-      result: { code: "app.no_draft" },
-      asked: 1,
+  it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {
+    const { target, asked, relays, reporting } = previewOver({
+      result: { ok: true },
+    });
+    const pushes: unknown[] = [];
+    const frameCallback = new RpcStub(async (push: unknown) => {
+      pushes.push(push);
+      await Promise.resolve();
+    });
+    await target.watchQuery("{}", frameCallback);
+    await target.callFunction("{}");
+    // Core refuses the revision the frame is moving past: the frame never
+    // hears it.
+    await relays[0]?.({
+      revision: 3,
+      result: { ok: false, error: { code: "app.preview_outdated" } },
+    });
+    // The frame took revision 2: it shows it, and runs it.
+    reporting.at = 2;
+    target.moved(2);
+    await target.callFunction("{}");
+    await vi.waitFor(() => {
+      expect(asked.watches).toStrictEqual([
+        { revision: 1, released: true },
+        { revision: 2, released: false },
+      ]);
+    });
+    await relays[1]?.({ revision: 4, result: { ok: true, value: [] } });
+    // A push of the one let go of reaches nothing.
+    await relays[0]?.({ revision: 5, result: { ok: true, value: ["old"] } });
+    expect({ calls: asked.calls, pushes }).toStrictEqual({
+      calls: [1, 2],
+      pushes: [{ revision: 4, result: { ok: true, value: [] } }],
     });
   });
 });

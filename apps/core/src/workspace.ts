@@ -205,9 +205,10 @@ import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
+import { PreviewBuilds } from "./preview-builds.ts";
+import type { PreviewBuilt } from "./preview-builds.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
-import { PreviewUpdates } from "./preview-updates.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -878,7 +879,8 @@ export class Workspace extends DurableObject<Env> {
 
   /** What those previews ran into (preview-reports.ts). */
   readonly #previewReports = new PreviewReports();
-  readonly #previewUpdates = new PreviewUpdates();
+  /** What bounds those previews' builds (preview-builds.ts). */
+  readonly #previewBuilds = new PreviewBuilds();
 
   /**
    * Bumped whenever a chat's agent writes or drops a draft, so its
@@ -4128,9 +4130,11 @@ export class Workspace extends DurableObject<Env> {
       return true;
     });
     if (saved) {
-      // The preview of the revision before is over: its database goes now;
-      // its problems are not the new revision's (preview-reports.ts).
-      this.#sealedPreviews.drop(chatId, appId);
+      // The preview of the revision before is over once its server code
+      // changed: its database goes now. A write of screens alone runs on
+      // as it was, store and all (sealed-previews.ts). Its problems are
+      // not the new revision's either way (preview-reports.ts).
+      this.#sealedPreviews.revised(chatId, appId, this.draft(chatId, appId));
       this.#draftsChanged(chatId);
     }
     return saved;
@@ -4346,43 +4350,72 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * A place for an update of `personId`'s own chat's preview of App
-   * `appId` (preview-updates.ts): its token once it may load, or null when
-   * a newer update replaced it while it waited.
+   * `previewDraft`, for a screen of it at `revision`: the draft's own, or
+   * one since which only its screens changed (`SealedPreviews.serves`);
+   * `app.preview_outdated` otherwise.
    */
-  async takePreviewUpdate(
+  #servedDraft(
     chatId: unknown,
     personId: string,
-    appId: string
-  ): Promise<string | null> {
-    const { id } = this.#ownChat(chatId, personId);
-    return await this.#previewUpdates.take(`${id}:${appId}`);
+    appId: string,
+    revision: unknown
+  ): Draft {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (
+      !this.#sealedPreviews.serves(
+        chatIdSchema.parse(chatId),
+        appId,
+        draft,
+        revision
+      )
+    ) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return draft;
   }
 
   /**
-   * Update `token` of `personId`'s own chat's preview of App `appId` is
-   * loading: one that waited keeps its place for the whole lease. False
-   * when its place is gone, as it was too late to confirm.
+   * What `build` answers, a build of `what` (the kind of ask and its
+   * screen) of `personId`'s own chat's preview of App `appId`, at
+   * `revision` (the draft's now when not named): one build per revision,
+   * shared by every ask for it while it runs (preview-builds.ts);
+   * `app.preview_outdated` for a revision the draft moved past. The
+   * caller builds; this only shares what it answers.
    */
-  confirmPreviewUpdate(
+  async previewBuild(
     chatId: unknown,
     personId: string,
     appId: string,
-    token: string
-  ): boolean {
-    const { id } = this.#ownChat(chatId, personId);
-    return this.#previewUpdates.confirm(`${id}:${appId}`, token);
+    what: string,
+    revision: number | undefined,
+    build: () => Promise<PreviewBuilt>
+  ): Promise<PreviewBuilt> {
+    // `app.no_draft` for an App the chat builds no draft of.
+    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    return await this.#previewBuilds.build(
+      `${id}:${appId}:${what}`,
+      revision ?? draft.revision,
+      draft.revision,
+      build
+    );
   }
 
-  /** Ends update `token` of `personId`'s own chat's preview of App `appId`. */
-  settlePreviewUpdate(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    token: string
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    this.#previewUpdates.settle(`${id}:${appId}`, token);
+  /**
+   * Whether a screen of the chat's draft of App `appId` at `revision`
+   * still reaches it (`SealedPreviews.serves`): for what follows it
+   * outside this object, a live query or a stream (chats-rpc.ts).
+   */
+  previewServes(chatId: unknown, appId: string, revision: unknown): boolean {
+    const chat = chatIdSchema.safeParse(chatId);
+    return (
+      chat.success &&
+      this.#sealedPreviews.serves(
+        chat.data,
+        appId,
+        this.draft(chat.data, appId),
+        revision
+      )
+    );
   }
 
   /** `personId`'s own chat's draft of App `appId`: `app.no_draft` while it changes nothing. */
@@ -4402,10 +4435,14 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Keeps `problem`, what the preview of `personId`'s own chat's draft of
    * App `appId` at `revision` reported on `screen`, for the agent's next
-   * check (preview-reports.ts). Dropped once the draft is at another
-   * revision, and never kept for a preview opened read-only (a version
-   * of the draft or of the App): a chat with no draft is at that
-   * revision too, yet nothing it reports is its draft's.
+   * check (preview-reports.ts): only of the draft's own revision, which a
+   * frame names for what that revision's screen ran into, an update of it
+   * the frame tried and rolled back too (@grasp-os/sdk's
+   * preview-updates.ts). Dropped for any other: an earlier screen's
+   * problems decide nothing of the draft now. Never kept for a preview
+   * opened read-only (a version of the draft or of the App): a chat with
+   * no draft is at that revision too, yet nothing it reports is its
+   * draft's.
    */
   previewReport(
     chatId: unknown,
@@ -4416,11 +4453,11 @@ export class Workspace extends DurableObject<Env> {
     problem: ScreenProblem
   ): void {
     const { id } = this.#ownChat(chatId, personId);
-    const { revision: now } = this.draft(id, appId);
-    if (revision === readOnlyRevision || revision !== now) {
+    const draft = this.draft(id, appId);
+    if (revision === readOnlyRevision || revision !== draft.revision) {
       return;
     }
-    this.#previewReports.report(id, appId, now, {
+    this.#previewReports.report(id, appId, draft.revision, {
       source: "screen",
       at: screen,
       ...problem,
@@ -4491,11 +4528,13 @@ export class Workspace extends DurableObject<Env> {
       chargeWindow?: (pages: number, whole: number) => Promise<void>;
     } = {}
   ): Promise<string> {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (draft.revision !== revision) {
-      throw appErrors.create("app.preview_outdated");
-    }
+    const draft = this.#servedDraft(chatId, personId, appId, revision);
     const id = chatIdSchema.parse(chatId);
+    // A screen of the draft's own revision: only what it ran into decides
+    // the draft's check. A frame still on an earlier screen of the same
+    // server code is answered, but what it saw is that earlier screen's,
+    // never the draft's: it marks nothing seen and fails nothing.
+    const ranDraft = revision === draft.revision;
     try {
       // What the draft's code threw, for the agent's check alone: the
       // screen's answer stays `internal.unexpected`, with no message.
@@ -4508,19 +4547,24 @@ export class Workspace extends DurableObject<Env> {
         request,
         {
           ...options,
+          // `serves` checked it is a revision: what its function logs is
+          // that screen's.
+          revision: Number(revision),
           draftFailure: (message) => {
             thrown = message;
           },
         }
       );
       const problem = functionProblem(request, answered.answer.result, thrown);
-      if (problem !== undefined) {
+      if (problem !== undefined && ranDraft) {
         this.#previewReports.report(id, appId, draft.revision, problem);
       }
       return JSON.stringify(answered);
     } finally {
       // Once the call ended, however: its failure is kept by then.
-      this.#previewReports.saw(id, appId, draft.revision);
+      if (ranDraft) {
+        this.#previewReports.saw(id, appId, draft.revision);
+      }
     }
   }
 
@@ -4539,18 +4583,17 @@ export class Workspace extends DurableObject<Env> {
     request: unknown,
     attach: boolean
   ): Promise<ReadableStream<Uint8Array>> {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (draft.revision !== revision) {
-      throw appErrors.create("app.preview_outdated");
-    }
+    const draft = this.#servedDraft(chatId, personId, appId, revision);
     return await this.#sealedPreviews.openStream(
       chatIdSchema.parse(chatId),
       personId,
       appIdSchema.parse(appId),
       draft,
       request,
-
-      attach
+      attach,
+      // `serves` checked it is a revision: what the stream logs is that
+      // screen's.
+      Number(revision)
     );
   }
 
@@ -4566,10 +4609,7 @@ export class Workspace extends DurableObject<Env> {
     revision: unknown,
     request: unknown
   ): Promise<boolean> {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (draft.revision !== revision) {
-      throw appErrors.create("app.preview_outdated");
-    }
+    const draft = this.#servedDraft(chatId, personId, appId, revision);
     return await this.#sealedPreviews.cancelStream(
       chatIdSchema.parse(chatId),
       personId,

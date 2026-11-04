@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
   QuerySnapshotPush,
@@ -242,6 +243,44 @@ export interface PreviewBundle extends Omit<
   revision: number;
   /** The draft's screens, sorted. */
   screens: string[];
+  /**
+   * The screen as one module for React Fast Refresh, as the frame opened
+   * it: what later updates are measured against (`PreviewUpdate`). Only
+   * for the draft as it is now; a version opened read-only never updates.
+   */
+  refresh?: PreviewRefresh;
+}
+
+/**
+ * One screen of a chat's draft at one revision, as a single ES module
+ * (the compiler's preview entry, all of the screen's App modules) for
+ * the preview's frame to evaluate and swap in with React Fast Refresh,
+ * with the CSS of that revision. The frame checks the module's size and
+ * SHA-256 before it evaluates it.
+ */
+export interface PreviewRefresh {
+  /** The draft's revision it was built from. */
+  revision: number;
+  screen: string;
+  /** The module's code. */
+  code: string;
+  /** Its UTF-8 bytes, counted. */
+  bytes: number;
+  /** The SHA-256 of those bytes, in hex. */
+  sha256: string;
+  css: string;
+  /**
+   * The kit's modules it imports, by flat name: an update that needs one
+   * the frame didn't load can't come in through Refresh, as the frame's
+   * import map is fixed once it loaded.
+   */
+  kit: string[];
+}
+
+/** What `ChatsApi.previewUpdate` answers: one screen of the draft now. */
+export interface PreviewUpdate {
+  app: AppId;
+  refresh: PreviewRefresh;
 }
 
 /**
@@ -938,6 +977,21 @@ export interface ChatsApi {
     version?: number,
     appVersion?: number
   ) => Promise<PreviewBundle>;
+  /**
+   * Screen `screen` of the chat's draft of `app` at `revision`, the
+   * newest the preview knows of, built as one module for the open preview
+   * to swap in with React Fast Refresh (`PreviewRefresh`): one build per
+   * revision, shared by every preview that asks for it, and
+   * `app.preview_outdated` once the draft moved past `revision`. Nothing
+   * is staged for a frame and nothing sealed, and the build's type check
+   * and lint don't hold it up. For the person while they build the App.
+   */
+  previewUpdate: (
+    chatId: string,
+    app: string,
+    screen: string,
+    revision: number
+  ) => Promise<PreviewUpdate>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a
    * screen's `callFunction` does, in the draft's preview: its draft

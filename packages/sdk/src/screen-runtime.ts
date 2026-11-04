@@ -17,8 +17,9 @@ import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenMounted, ScreenProblem } from "@grasp-os/shared/screens";
 import { RpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
-import { Component, createElement, useEffect } from "react";
+import { Component, createElement, useEffect, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
 import { clientInternals, GraspClient } from "./client-core.ts";
@@ -123,7 +124,103 @@ export interface ScreenBridge {
    * outcome isn't known: the page confirms once before leaving the screen.
    */
   leaveGuard: (guarded: boolean) => void;
+  /**
+   * A chat's preview's frame alone (preview-runtime.ts): hands the page
+   * the frame's receiver of its draft's updates, which the page calls
+   * with each part of each update in turn. Once per frame; a live
+   * screen's page never calls it.
+   */
+  refresh: (onPart: (part: PreviewPart) => Promise<PreviewApplied>) => void;
 }
+
+/**
+ * One part of an update of a chat's preview: a run of the screen's new
+ * module, in order, each part naming the whole it belongs to. The last
+ * one (`part === parts - 1`) also carries the CSS of that revision. A
+ * module comes in parts so no message on the frame's port is larger than
+ * a call's answer may be.
+ */
+export interface PreviewPart {
+  /** The draft's revision the module was built from. */
+  revision: number;
+  part: number;
+  parts: number;
+  code: string;
+  /** The whole module's UTF-8 bytes, counted, and their SHA-256 in hex. */
+  bytes: number;
+  sha256: string;
+  css: string;
+}
+
+/**
+ * What the frame says of a part: `more` until the last; then `applied`
+ * (its screen shows it), `failed` (it didn't evaluate or render, and the
+ * screen shows the last version that did), `reset` (React Fast Refresh
+ * can't go on in this frame: it needs a fresh start) or `refused` (not
+ * an update the frame takes: a revision it is past, a broken sequence, or
+ * bytes that aren't what the page said).
+ */
+export type PreviewApplied =
+  | "more"
+  | "applied"
+  | "failed"
+  | "reset"
+  | "refused";
+
+/**
+ * What a preview's runtime (preview-runtime.ts) hooks into: once the
+ * screen's modules evaluated, before it first renders; each error React
+ * met rendering it, caught by the screen's boundary or not; and once it
+ * first rendered, into `root`, with the page's bridge.
+ */
+export interface ScreenHooks {
+  loaded?: () => void;
+  renderFailed?: () => void;
+  mounted?: (page: RpcStub<ScreenBridge>, root: HTMLElement) => void;
+  /**
+   * Handed, once the screen is first rendered, what shows another
+   * component as the screen (`ShownScreen`): a preview's update whose
+   * screen is a component of another name.
+   */
+  shows?: (show: (screen: ScreenComponent) => void) => void;
+}
+
+/** A screen: its module's default export. */
+export type ScreenComponent = ComponentType<{ input: unknown }>;
+
+/**
+ * The screen a preview shows, which its updates may replace: React Fast
+ * Refresh swaps a component for the next of its family (its file and
+ * name), so a screen renamed in an update (`Desk` to `RenamedDesk`) is a
+ * family nothing renders. Its new default export is shown here instead.
+ * One of the same family is kept as it is, its state too: React keeps a
+ * component whose type changed within its family (Refresh's
+ * `resolveFamily`); one of another family mounts afresh, as a renamed
+ * component would. Shown synchronously (`flushSync`), as Refresh renders,
+ * so what fails in it fails the update that showed it.
+ */
+export const ShownScreen = ({
+  first,
+  input,
+  onShow,
+}: {
+  first: ScreenComponent;
+  input: unknown;
+  onShow: (show: (screen: ScreenComponent) => void) => void;
+}) => {
+  // A component is a function, which `useState` would call: held in one.
+  const [shown, setShown] = useState<{ screen: ScreenComponent }>(() => ({
+    screen: first,
+  }));
+  useEffect(() => {
+    onShow((screen) => {
+      flushSync(() => {
+        setShown({ screen });
+      });
+    });
+  }, [onShow]);
+  return createElement(shown.screen, { input });
+};
 
 let connected: RpcStub<ScreenBridge> | undefined;
 
@@ -447,10 +544,17 @@ export type ScreenStart = Omit<ScreenMounted, "type">;
  * screen's own code runs in this same frame and could post the same
  * message; the page gives a mounted screen nothing it wouldn't otherwise.
  */
-const Mounted = ({ start }: { start: ScreenStart }) => {
+const Mounted = ({
+  start,
+  onMounted,
+}: {
+  start: ScreenStart;
+  onMounted?: () => void;
+}) => {
   useEffect(() => {
     parent.postMessage({ type: screenFrameMounted, ...start }, "*");
-  }, [start]);
+    onMounted?.();
+  }, [start, onMounted]);
   return null;
 };
 
@@ -490,6 +594,18 @@ const send = async (problem: ScreenProblem): Promise<void> => {
 
 const report = (problem: ScreenProblem): void => {
   void send(problem);
+};
+
+/**
+ * Sends `value`, what went wrong, to the page as a problem of `kind`, as
+ * the runtime's own reports are: for a preview's runtime, whose updates
+ * fail outside what the runtime sees (preview-runtime.ts).
+ */
+export const reportProblem = (
+  kind: "error" | "rejection",
+  value: unknown
+): void => {
+  report({ kind, ...describe(value) });
 };
 
 /** Sends the screen's uncaught errors and `console.error` calls to the page. */
@@ -613,9 +729,10 @@ const isScreenModule = (
  * map), connected to the page through `port`, its files through
  * `filePort` (file-port.ts), its links through `linkPort` (link-port.ts),
  * and tells the page once it has rendered for the first time, as the
- * `start` the page named. `onLoaded` is called once the screen's modules
- * have evaluated, before it first renders: a preview registers their
- * components with Fast Refresh there (preview-runtime.ts).
+ * `start` the page named. A preview's runtime hooks into it (`hooks`):
+ * it registers the screen's components with Fast Refresh once its
+ * modules have evaluated, and takes the draft's updates once it has
+ * rendered (preview-runtime.ts).
  */
 export const runScreen = async (
   port: MessagePort,
@@ -623,7 +740,7 @@ export const runScreen = async (
   start: ScreenStart,
   filePort: MessagePort,
   linkPort: MessagePort,
-  onLoaded?: () => void
+  hooks: ScreenHooks = {}
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -640,7 +757,7 @@ export const runScreen = async (
     if (!isScreenModule(loaded)) {
       throw new Error(`${screen} has no default export to render.`);
     }
-    onLoaded?.();
+    hooks.loaded?.();
     // One client for the App session this frame runs, over the page's
     // bridge: every screen in it reads through the same queries and
     // submissions, and none makes its own (spec 10.7.1).
@@ -650,13 +767,16 @@ export const runScreen = async (
       files: portFileTransport(filePort),
       links: portLinkTransport(linkPort),
     });
+    const { mounted, shows } = hooks;
     createRoot(root, {
       onUncaughtError: (error) => {
+        hooks.renderFailed?.();
         report({ kind: "error", ...describe(error) });
       },
       // What the boundary caught: of a structured SDK error only its code
       // and request ID, never the domain message it may carry.
       onCaughtError: (error) => {
+        hooks.renderFailed?.();
         report({
           kind: "error",
           ...(error instanceof GraspError
@@ -680,8 +800,23 @@ export const runScreen = async (
               clientInternals(client).retryFailed();
             },
           },
-          createElement(loaded.default, { input }),
-          createElement(Mounted, { start })
+          shows === undefined
+            ? createElement(loaded.default, { input })
+            : createElement(ShownScreen, {
+                first: loaded.default,
+                input,
+                onShow: shows,
+              }),
+          createElement(Mounted, {
+            start,
+            ...(mounted === undefined
+              ? {}
+              : {
+                  onMounted: () => {
+                    mounted(page, root);
+                  },
+                }),
+          })
         )
       )
     );

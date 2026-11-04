@@ -16,6 +16,7 @@ import { versionFiles } from "../src/apps.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import {
   frameAccess,
+  frameKey,
   frameObjectMaxBytes,
   stageFrame,
 } from "../src/screen-frame.ts";
@@ -132,8 +133,7 @@ const published = async () => {
 };
 
 /** Where a build's frame manifest is staged in R2. */
-const manifestKey = (artifact: string): string =>
-  `screen-frames/${artifact}.json`;
+const manifestKey = frameKey;
 
 /** Where a module an import map names is staged in R2. */
 const moduleKeyOf = (address: string): string =>

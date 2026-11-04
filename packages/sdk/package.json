@@ -35,7 +35,8 @@
     "./screen": "./src/screen.ts",
     "./screen-runtime": "./src/screen-runtime.ts",
     "./preview-refresh": "./src/preview-refresh.ts",
-    "./preview-runtime": "./src/preview-runtime.ts"
+    "./preview-runtime": "./src/preview-runtime.ts",
+    "./preview-updates": "./src/preview-updates.ts"
   },
   "dependencies": {
     "@babel/generator": "catalog:",

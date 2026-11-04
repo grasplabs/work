@@ -116,17 +116,14 @@ export const screenLimits = {
    */
   openMs: 20_000,
   /**
-   * How long the page waits for core to hand over a preview of a chat's
-   * draft. Core loads one update of a chat's preview at a time, and the
-   * next waits for it: for the place of the one loading (held for at most
-   * one server invocation's wall time), then for its own load (which ends
-   * before another would be). Past both, by a moment, so core says why
-   * first (`screen.build_slow`). The live screen's `openMs` covered only
-   * one load, and on staging an update waited 6 to 18 s for the one ahead
-   * and then took about 10 s itself: the page gave up before core
-   * answered, and the preview never showed (November 2026).
+   * How long the page waits for core to open a preview of a chat's draft:
+   * its first open may seal the draft's server code as well as build its
+   * screen, which on staging took about 10 s (November 2026), so one
+   * server invocation's wall time and a moment more, for core to say why
+   * first (`screen.build_slow`). Each write after that comes into the
+   * open frame without opening it again.
    */
-  previewOpenMs: 2 * platformLimits.serverInvocationWallMs + 5000,
+  previewOpenMs: platformLimits.serverInvocationWallMs + 5000,
   /**
    * The limits on what a frame sends over its port. A message's size is
    * its text's, in UTF-16 code units, held by the accountant on the port

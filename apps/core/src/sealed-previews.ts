@@ -4,6 +4,7 @@ import {
   manifestText,
 } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
+import { readOnlyRevision } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, StoreId } from "@grasp-os/shared/ids";
@@ -73,6 +74,7 @@ import type { Invocation } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
+import { appCodeAndTestFiles } from "./screens.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -91,7 +93,8 @@ import type { Draft } from "./workspace.ts";
 //   does), and each invocation is handed the preview's own store, a
 //   fixture store that core's inventory never lists (`openFixtureStore`),
 //   so no release binds it and `openStore` never opens it. It starts
-//   empty, with the draft's schema, for the draft's revision alone.
+//   empty, with the draft's schema, for the draft's server code alone: a
+//   write of its screens alone keeps it, and what it holds (`serverOf`).
 // - The draft reads or writes its person's real preferences: the draft's
 //   `preferences.get` and `update` are answered by core as on a version
 //   (app-preferences.ts), but only from the preview's own store, named by
@@ -119,13 +122,15 @@ import type { Draft } from "./workspace.ts";
 //   build the App before every call (chats-rpc.ts), and each protected
 //   step of a call (its start, every commit) checks again that they are a
 //   member who builds the App (`authorize`).
-// - The preview outlives its draft: a new revision, a dropped or
-//   proposed draft, or a deleted chat drops it (`drop`). A call for
-//   another revision is `app.preview_outdated`, a call already running
-//   commits nothing more (each protected step checks its preview is still
-//   the one running), and its store is discarded.
+// - The preview outlives its draft: a revision with other server code, a
+//   dropped or proposed draft, or a deleted chat drops it (`drop`). A
+//   call for another revision is `app.preview_outdated` (chats-rpc.ts), a
+//   call already running commits nothing more (each protected step checks
+//   its preview is still the one running), and its store is discarded. A
+//   revision that changed only screens (`serverOf`) runs the same sealed
+//   code on the same store: what was sealed is still what runs.
 // - One preview's data reaches another's: a store per chat, App and
-//   revision, created empty, shared with nothing.
+//   server code, created empty, shared with nothing.
 // - A store is lost: each is recorded here before its object is first
 //   touched, and forgotten only once it is discarded; what a failure left
 //   is discarded at the next preview this object starts.
@@ -420,7 +425,10 @@ export const sweepPreviewStores = async (
 
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
+  /** The revision it started at, which its store is kept under. */
   readonly revision: number;
+  /** Its server code (`serverOf`): what it runs while that stays the same. */
+  readonly server: string;
   /** The version the draft would become: the identity it is sealed with. */
   readonly version: number;
   /** The draft release, sealed and stored, then loaded back and verified. */
@@ -511,10 +519,45 @@ export interface PreviewCallOptions {
    * check, never for the screen's answer.
    */
   readonly draftFailure?: (message: string) => void;
+  /**
+   * The revision of the screen that called, when it isn't the draft's
+   * (`serves`): what its function writes with `console` is filed under
+   * it, never under the draft's (server-logs.ts).
+   */
+  readonly revision?: number;
 }
 
 /** The version a draft's release is sealed as: the one it would become. */
 const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
+
+/**
+ * Whether a draft's seal reads the file at `path`: one its builds select
+ * (`appCodeAndTestFiles`, the very selection its compile and type check
+ * make), never decided by a list of its own. Of every other file (screens,
+ * components, anything else) the seal keeps only the whole tree's hash,
+ * as provenance; nothing it runs or checks comes from them.
+ */
+const sealReads = (path: string): boolean =>
+  Object.hasOwn(appCodeAndTestFiles({ [path]: "" }), path);
+
+/**
+ * What of `draft` its draft release is sealed from, as text to compare:
+ * the version it changes and every change of a file its seal reads
+ * (`sealReads`). Two revisions with the same server code run on one
+ * release and one store, so a write of a screen reaches its preview
+ * without a seal, and keeps what the preview's store holds.
+ */
+const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
+  canonicalJson({
+    base,
+    changes: Object.fromEntries(
+      Object.entries(changes).filter(([path]) => sealReads(path))
+    ),
+  });
+
+/** Whether `running` runs the server code of `draft`. */
+const runsServerOf = (running: Running, draft: Draft): boolean =>
+  running.revision === draft.revision || running.server === serverOf(draft);
 
 /**
  * The `#grasp` references the screens of `files`, an App as `version` of
@@ -606,6 +649,12 @@ export class SealedPreviews {
   readonly #discarding = new Set<string>();
   /** What each preview runs, by `nameOf`. In memory: a restart loads it again. */
   readonly #running = new Map<string, Running>();
+  /**
+   * The server code of each chat's draft of an App, by `nameOf`, and the
+   * first revision it has been that since (`serves`). In memory: a
+   * restart knows only the draft's revision now.
+   */
+  readonly #serverSince = new Map<string, { server: string; since: number }>();
   /** The receipts kept of settled invocations, oldest first (`#kept`). */
   readonly #receipts: { running: Running; name: string; live: Live }[] = [];
 
@@ -732,7 +781,7 @@ export class SealedPreviews {
         observe === undefined
           ? invocation
           : { ...invocation, observeReads: observe };
-      const hosted = this.#hostedOf(chatId, app, running, release);
+      const hosted = this.#hostedOf(chatId, app, options.revision, release);
       const answered = await (call.window === undefined
         ? callOperation(
             hosted,
@@ -1070,13 +1119,18 @@ export class SealedPreviews {
   #hostedOf(
     chatId: ChatId,
     app: AppId,
-    running: Running,
+    /**
+     * The revision of the screen it runs for, which its lines are filed
+     * under (the draft's now, unless said): one preview runs on across
+     * writes of its screens, so never the revision it started at.
+     */
+    revision: number | undefined,
     release: Release
   ): ReturnType<typeof hostedRelease> {
     const preview = {
       workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
       chatId,
-      revision: running.revision,
+      revision: revision ?? this.#revisionOf(chatId, app) ?? readOnlyRevision,
     };
     return hostedRelease(this.#env, release, (fn) =>
       exports.AppTail({
@@ -1101,7 +1155,9 @@ export class SealedPreviews {
     app: AppId,
     draft: Draft,
     request: unknown,
-    attach: boolean
+    attach: boolean,
+    /** The revision of the screen that started it (`PreviewCallOptions.revision`). */
+    revision = draft.revision
   ): Promise<ReadableStream<Uint8Array>> {
     const { call, key } = streamRequestOf(request);
     // Input past what reads as a value is refused, never hashed as none:
@@ -1168,7 +1224,7 @@ export class SealedPreviews {
         chatId,
         personId,
         app,
-        running,
+        { running, revision },
         call,
         live
       );
@@ -1230,7 +1286,7 @@ export class SealedPreviews {
     chatId: ChatId,
     personId: string,
     app: AppId,
-    running: Running,
+    { running, revision }: { running: Running; revision: number },
     call: FunctionRequest,
     live: Live
   ): Promise<{ result: OperationResult; reached: boolean; effects: number }> {
@@ -1260,7 +1316,7 @@ export class SealedPreviews {
       });
       reached = true;
       const answered = await callOperation(
-        this.#hostedOf(chatId, app, running, release),
+        this.#hostedOf(chatId, app, revision, release),
         invocation,
         { path, kind: call.reference.kind },
         call.input,
@@ -1320,30 +1376,35 @@ export class SealedPreviews {
     }
   }
 
-  /** The preview of `draft` running now, if one runs its revision. */
+  /** The preview of `draft` running now, if one runs its server code. */
   #runningAt(chatId: ChatId, app: AppId, draft: Draft): Running | undefined {
     const known = this.#running.get(nameOf(chatId, app));
-    return known?.revision === draft.revision ? known : undefined;
+    return known !== undefined && runsServerOf(known, draft)
+      ? known
+      : undefined;
   }
 
   /**
    * The preview of `draft`: the one running, while it runs the draft's
-   * revision; otherwise a new one, the one before dropped first.
+   * server code (a write of its screens alone changes none of it);
+   * otherwise a new one, the one before dropped first.
    */
   #runningFor(chatId: ChatId, app: AppId, draft: Draft): Running {
     const name = nameOf(chatId, app);
     const known = this.#running.get(name);
-    if (known?.revision === draft.revision) {
+    if (known !== undefined && runsServerOf(known, draft)) {
       return known;
     }
     if (known !== undefined) {
       this.drop(chatId, app);
     }
     const version = sealedAs(draft);
+    const server = serverOf(draft);
     const running: Running = {
       revision: draft.revision,
+      server,
       version,
-      release: this.#sealed(chatId, app, draft, version),
+      release: this.#sealed(chatId, app, draft, version, server),
       streams: new Map(),
     };
     // Not left unhandled while nothing awaits it: each call that does
@@ -1363,14 +1424,15 @@ export class SealedPreviews {
     chatId: ChatId,
     app: AppId,
     draft: Draft,
-    version: number
+    version: number,
+    server: string
   ): Promise<Release> {
     const kept = this.#keptRelease(chatId, app);
     if (kept?.revision !== draft.revision || kept.version !== version) {
       const files = await draftFiles(this.#env, app, draft);
       const sealed = await sealDraftRelease(this.#env, { app, version }, files);
       // Replaced while it was sealed: nothing of it is kept.
-      if (this.#running.get(nameOf(chatId, app))?.revision !== draft.revision) {
+      if (this.#running.get(nameOf(chatId, app))?.server !== server) {
         throw appErrors.create("app.preview_outdated");
       }
       this.#ctx.storage.transactionSync(() => {
@@ -1665,6 +1727,56 @@ export class SealedPreviews {
   }
 
   /**
+   * The chat's draft of `app` is at `draft` now: its preview stops
+   * (`drop`) unless it runs the draft's server code still, which a write
+   * of its screens alone leaves as it was (`serverOf`).
+   */
+  revised(chatId: ChatId, app: string, draft: Draft): void {
+    const name = nameOf(chatId, app);
+    const server = serverOf(draft);
+    const kept = this.#serverSince.get(name);
+    const known = this.#running.get(name);
+    if (known === undefined || !runsServerOf(known, draft)) {
+      this.drop(chatId, app);
+    }
+    this.#serverSince.set(
+      name,
+      kept?.server === server ? kept : { server, since: draft.revision }
+    );
+  }
+
+  /**
+   * Whether a screen of the draft at `revision` may call `draft`, the
+   * chat's draft of `app` now: at its revision, or at one since which
+   * only its screens changed (`serverOf`), so what it calls is the very
+   * code and store the draft runs now. A frame keeps the last version of
+   * its screen that worked while a write of it fails, and calls from
+   * there; one past the draft's server code is `app.preview_outdated`.
+   * After this object starts again, only the draft's own revision, as it
+   * knows of no earlier one.
+   */
+  serves(
+    chatId: ChatId,
+    app: string,
+    draft: Draft,
+    revision: unknown
+  ): boolean {
+    if (
+      typeof revision !== "number" ||
+      !Number.isSafeInteger(revision) ||
+      revision === readOnlyRevision ||
+      revision > draft.revision
+    ) {
+      return false;
+    }
+    if (revision === draft.revision) {
+      return true;
+    }
+    const kept = this.#serverSince.get(nameOf(chatId, app));
+    return kept?.server === serverOf(draft) && revision >= kept.since;
+  }
+
+  /**
    * Stops the chat's preview of `app`, if one runs: a call it stops
    * midway is `app.preview_outdated`, its draft release is forgotten, and
    * its stores are discarded.
@@ -1672,6 +1784,8 @@ export class SealedPreviews {
   drop(chatId: ChatId, app: string): void {
     const running = this.#running.get(nameOf(chatId, app));
     this.#running.delete(nameOf(chatId, app));
+    // No earlier revision serves once the draft was dropped or proposed.
+    this.#serverSince.delete(nameOf(chatId, app));
     // Its streaming actions stop, and commit nothing more: each protected
     // step checks the preview is still the one running.
     for (const { live } of running?.streams.values() ?? []) {

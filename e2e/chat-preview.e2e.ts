@@ -300,10 +300,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
   }
 });
 
-/** Longer than a live screen's wait for its build (`screenLimits.openMs`). */
-const behindAnotherLoadMs = 25_000;
-
-test("an App's own chat writes its screen, and its workspace previews it", async ({
+test("an App's own chat writes its screen, and its workspace previews it, taking each write in place", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -312,42 +309,6 @@ test("an App's own chat writes its screen, and its workspace previews it", async
   try {
     const app = await api.apps.create({ name });
     const page = await pageOf(builder);
-    // Core loads a chat's preview one update at a time, the next waiting
-    // for the one ahead; on staging that wait and the load took longer
-    // than a live screen's whole wait for its build. Here the preview's
-    // first load reaches core that late: the page still waits for it.
-    let heldAsks = 0;
-    await page.routeWebSocket("**/rpc", (socket) => {
-      const toCore = socket.connectToServer();
-      // Each preview's connection is held from its own first ask, in
-      // order: a connection's messages name what came before.
-      let heldFrom: number | undefined;
-      let holding: string[] | undefined;
-      socket.onMessage((message) => {
-        const text = String(message);
-        if (holding !== undefined) {
-          holding.push(text);
-          return;
-        }
-        if (!text.includes('["chats","preview"]')) {
-          toCore.send(text);
-          return;
-        }
-        const queued = [text];
-        holding = queued;
-        heldFrom ??= Date.now();
-        heldAsks += 1;
-        setTimeout(
-          () => {
-            holding = undefined;
-            for (const each of queued) {
-              toCore.send(each);
-            }
-          },
-          Math.max(0, heldFrom + behindAnotherLoadMs - Date.now())
-        );
-      });
-    });
     await page.goto(`/apps/${app.id}/edit`);
     await expect(page.getByText("Nothing built yet")).toBeVisible();
 
@@ -367,11 +328,84 @@ test("an App's own chat writes its screen, and its workspace previews it", async
     ).toBeVisible();
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
-      timeout: behindAnotherLoadMs + 30_000,
+      timeout: 30_000,
     });
-    expect(heldAsks).toBeGreaterThan(0);
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
+
+    // The agent writes the screen again: the frame it has open takes the
+    // write in place, its document never loaded again, and its store
+    // keeps what was added.
+    const screenFrame = page
+      .frames()
+      .find((each) => each.url().includes("/screen-frame"));
+    expect(screenFrame).toBeDefined();
+    await screenFrame?.evaluate(() => {
+      Reflect.set(globalThis, "stillThisDocument", true);
+    });
+    await ask.fill("Rename the button.");
+    const asked = Date.now();
+    await ask.press("Enter");
+    await expect(chat.getByText("Renaming the button.")).toBeVisible({
+      timeout: 30_000,
+    });
+    const written = Date.now();
+    await expect(
+      frame.getByRole("button", { name: "Add another" })
+    ).toBeVisible({ timeout: 10_000 });
+    const shown = Date.now();
+    console.info(
+      `preview took the write ${shown - written} ms after the chat showed it (${shown - asked} ms after asking)`
+    );
+    const sameDocument: unknown = await screenFrame?.evaluate((): unknown =>
+      Reflect.get(globalThis, "stillThisDocument")
+    );
+    expect({
+      count: await frame.getByRole("status").textContent(),
+      sameDocument,
+    }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
+  } finally {
+    core[Symbol.dispose]();
+  }
+});
+
+test("a preview whose first screen doesn't build shows it once the agent's next write fixes it", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    const app = await api.apps.create({ name });
+    const page = await pageOf(builder);
+    await page.goto(`/apps/${app.id}/edit`);
+    await expect(page.getByText("Nothing built yet")).toBeVisible();
+
+    const { opener } = modelScripts.fixesBrokenTally;
+    const chat = page.getByRole("region", { name: "Chat" });
+    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+    await ask.fill(opener);
+    await ask.press("Enter");
+    await expect(
+      chat.getByText("The tally's screen doesn't build yet.")
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Its first build fails: the preview says so, and takes no updates.
+    const preview = page.getByRole("region", { name: `Preview of ${name}` });
+    await expect(
+      preview.getByText("This page doesn't build. Ask a builder to fix it.")
+    ).toBeVisible({ timeout: 30_000 });
+
+    // The next write fixes it: the preview starts afresh and shows it.
+    await ask.fill("Fix the screen.");
+    await ask.press("Enter");
+    await expect(chat.getByText("The tally works now.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(preview.frameLocator("iframe").getByRole("status")).toHaveText(
+      "0 in the preview",
+      { timeout: 30_000 }
+    );
   } finally {
     core[Symbol.dispose]();
   }
