@@ -20,6 +20,7 @@
     "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
     "./open-workflow": "./src/open-workflow.ts",
+    "./expression-check": "./src/expression-check.ts",
     "./compute": "./src/compute.ts",
     "./action": "./src/action.ts",
     "./brain": "./src/brain.ts",
@@ -37,7 +38,9 @@
     "./preview-runtime": "./src/preview-runtime.ts"
   },
   "dependencies": {
+    "@babel/generator": "catalog:",
     "@babel/parser": "catalog:",
+    "@babel/types": "catalog:",
     "@grasp-os/brain": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workflow-expressions": "workspace:*",
@@ -48,8 +51,8 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@babel/types": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
+    "@types/babel__generator": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "react": "catalog:",
