@@ -90,7 +90,7 @@ export type {
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
- * module (core's workflows/code.ts) loads it before any of the App's code,
+ * module (core's workflows/sealed-isolate.ts) loads it before any of the App's code,
  * which could otherwise put its own in its place.
  */
 const { freeze } = Object;

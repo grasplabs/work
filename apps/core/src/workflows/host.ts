@@ -56,7 +56,7 @@ import { heldWakeType } from "./wakes.ts";
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
 // `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
 // (Workerflow, engine.ts). The
-// run's main module (code.ts) sends each engine call here over RPC. The
+// run's main module (sealed-isolate.ts) sends each engine call here over RPC. The
 // isolate is untrusted, so everything it sends is checked, and what it can
 // do is only this run's: steps, waits and model calls, all as this
 // run and this workflow, for the person it acts for while they are there.
@@ -1153,7 +1153,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
  * called into it. Known by its message, which is all that survives RPC.
  * The run's own code can't make a call into its isolate reject so: every
  * entrypoint and step function settles what its code threw into a report
- * (code.ts, `settled`).
+ * (sealed-isolate.ts, `settled`).
  */
 const cpuLimit = /\bCPU time limit\b/u;
 export const isCpuLimitKill = (error: unknown): boolean =>
@@ -1162,7 +1162,7 @@ export const isCpuLimitKill = (error: unknown): boolean =>
 /**
  * A CPU-limit kill as the Loader throws it (`isCpuLimitKill`): for a call
  * into an isolate already so stopped, and for the on-prem sandbox's `cpu`
- * verdict (code.ts), so both go the way the Loader's own kill does.
+ * verdict (sealed-isolate.ts), so both go the way the Loader's own kill does.
  */
 export const cpuLimitKill = (cause?: unknown): Error =>
   new Error("Worker exceeded CPU time limit.", { cause });
@@ -2049,7 +2049,7 @@ export class RunHost extends RpcTarget {
       typeof retry === "function"
         ? async (error: Json): Promise<unknown> =>
             // SAFETY: the isolate's function, over RPC, answering
-            // `Settled` as every one of its functions does (code.ts).
+            // `Settled` as every one of its functions does (sealed-isolate.ts).
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
             await (retry as (error: Json) => Promise<unknown>)(error)
         : undefined
@@ -2590,7 +2590,7 @@ export class RunHost extends RpcTarget {
    * every call `admission` admits as one of its lineage's host calls,
    * `stepDone` settling
    * once its step ends in this activation: what it settled with, or, once
-   * the Loader (on-prem, the sandbox: code.ts, `stepCodeFailure`) stopped
+   * the Loader (on-prem, the sandbox: sealed-isolate.ts, `stepCodeFailure`) stopped
    * the isolate past its CPU time while it ran, a timeout, which its step's retries retry in a fresh activation with a
    * fresh isolate (dispatcher.ts, `afterCpuKill`). An isolate so stopped
    * runs nothing more: an attempt that comes after it in this activation
