@@ -81,6 +81,20 @@ export class Inspect extends WorkerEntrypoint {
 /** The most of why App code failed that a refusal keeps. */
 const maxFailure = 500;
 
+/** A line of a stack trace, as workerd writes one. */
+const stackLine = /^\s+at\s/u;
+
+/**
+ * What App code threw, without its stack: the lines in the SDK's bundled
+ * modules (`sdk~app-error-….js:1:5746`) name nothing of the App's to fix,
+ * and would crowd out why it failed.
+ */
+const withoutStack = (message: string): string =>
+  message
+    .split("\n")
+    .filter((line) => !stackLine.test(line))
+    .join("\n");
+
 /** The details of a refused build: where and why, as diagnostics say. */
 const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
   diagnostics: diagnostics
@@ -169,7 +183,7 @@ export const inspected = async (
       throw error;
     }
     throw versionErrors.create("version.inspection_failed", {
-      message: (error instanceof Error ? error.message : "").slice(
+      message: withoutStack(error instanceof Error ? error.message : "").slice(
         0,
         maxFailure
       ),

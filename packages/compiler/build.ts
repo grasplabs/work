@@ -44,6 +44,7 @@ import {
   kitStylesheet,
   previewRefresh,
   previewRuntime,
+  referenceOf,
   screenHooks,
   screenRuntime,
   screenSdk,
@@ -1074,6 +1075,7 @@ const buildAppCompiler = async (
     [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
+    [compilerAssets.reference]: JSON.stringify(referenceOf(kit.types)),
   });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The

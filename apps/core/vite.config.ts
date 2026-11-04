@@ -89,6 +89,7 @@ export const screenTests = [
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/agent-builds.test.ts",
+  "test/app-chat-build.test.ts",
   "test/build-job-runs.test.ts",
   "test/build-job-commits.test.ts",
   "test/build-job-queue.test.ts",
