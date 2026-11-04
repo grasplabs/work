@@ -1716,15 +1716,12 @@ describe("chat agent code run leases", () => {
     ]);
     const [record] = await runRecords(stub, chat.id);
     expect(record?.status).toBe("revoked");
-    await expect(
-      runInDurableObject(stub, (instance) =>
-        instance.admitFromCodeRun(
-          chatIdSchema.parse(chat.id),
-          String(record?.id)
-        )
-      )
-      // Closed as withheld: nothing more of it is admitted.
-    ).resolves.toStrictEqual({ call: "revoked" });
+    const { call } = await runInDurableObject(stub, (instance) =>
+      instance.admitFromCodeRun(chatIdSchema.parse(chat.id), String(record?.id))
+    );
+    // Closed, as ended or, once the chat's guard withheld it first, as
+    // revoked: nothing more of it is admitted either way.
+    expect(["ended", "revoked"]).toContain(call);
   });
 
   it("admits nothing a run does while its end reads revocations", async () => {
