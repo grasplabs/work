@@ -64,6 +64,7 @@ import type { ComponentType } from "react";
 import { z } from "zod";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
+import { copyText } from "../copy.ts";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
@@ -100,7 +101,6 @@ import type { SendChoice } from "./send-plan.ts";
 import {
   Asides,
   Callout,
-  copyText,
   Cramped,
   evenVoice,
   Explained,

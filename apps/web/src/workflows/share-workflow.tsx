@@ -56,6 +56,9 @@ const nameOf = (
     ({ id }) => id === member.id
   )?.name ?? member.id;
 
+/** The kinds of member the dialog shares with, by their value's prefix. */
+const memberTypes = ["person", "team", "project"] as const;
+
 /** A role to choose, labelled in the page's language. */
 const RoleSelect = ({
   id,
@@ -111,6 +114,7 @@ export const ShareWorkflow = ({
   const [read, setRead] = useState<Read>();
   const [chosen, setChosen] = useState("");
   const [role, setRole] = useState<WorkflowRole>("user");
+  const everyone = (project: string): string => t`Everyone in ${project}`;
   const workflow = resource.id;
   const { name } = resource;
 
@@ -160,7 +164,13 @@ export const ShareWorkflow = ({
   const teams = (read?.candidates.teams ?? []).filter(
     ({ id }) => !shared.has(`team:${id}`)
   );
-  const [chosenType, chosenId] = chosen.split(":", 2);
+  // Only the projects the person builds: sharing with one reaches everyone
+  // in it, which its builders decide.
+  const projects = (read?.candidates.projects ?? []).filter(
+    ({ id }) => !shared.has(`project:${id}`)
+  );
+  const [chosenPrefix, chosenId] = chosen.split(":", 2);
+  const chosenType = memberTypes.find((type) => type === chosenPrefix);
 
   return (
     <Dialog
@@ -193,10 +203,7 @@ export const ShareWorkflow = ({
             className="flex flex-col gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (
-                (chosenType === "person" || chosenType === "team") &&
-                chosenId !== undefined
-              ) {
+              if (chosenType !== undefined && chosenId !== undefined) {
                 void change({ type: chosenType, id: chosenId }, role);
               }
             }}
@@ -237,6 +244,18 @@ export const ShareWorkflow = ({
                     ))}
                   </NativeSelectOptGroup>
                 )}
+                {projects.length === 0 ? null : (
+                  <NativeSelectOptGroup label={t`Projects`}>
+                    {projects.map((project) => (
+                      <NativeSelectOption
+                        key={project.id}
+                        value={`project:${project.id}`}
+                      >
+                        {everyone(project.name)}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelectOptGroup>
+                )}
               </NativeSelect>
               <RoleSelect
                 label={t`Role to share with`}
@@ -265,10 +284,16 @@ export const ShareWorkflow = ({
               <ul className="flex flex-col divide-y rounded-md border">
                 {read.members.map((member) => {
                   const memberName = nameOf(member, read.candidates);
-                  const shown =
-                    member.type === "team"
-                      ? t`${memberName} (team)`
-                      : memberName;
+                  const projectName = member.projectName ?? null;
+                  let shown = memberName;
+                  if (member.type === "team") {
+                    shown = t`${memberName} (team)`;
+                  } else if (member.type === "project") {
+                    shown =
+                      projectName === null
+                        ? t`Everyone in a project you aren’t in`
+                        : everyone(projectName);
+                  }
                   return (
                     <li
                       className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"

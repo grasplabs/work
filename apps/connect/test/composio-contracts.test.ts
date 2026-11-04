@@ -228,6 +228,10 @@ const contractOf = async (
   contract = "composio.hubspot@1"
 ) => await exports.default.connectorContract({ contract, connectionId });
 
+/** The contracts connection `connectionId` is listed as serving. */
+const listed = async (connectionId: string) =>
+  await exports.default.connectorContracts({ connectionId });
+
 /** A served schema, as the JSON it holds. */
 const parsed = (text: string | undefined): unknown =>
   text === undefined ? undefined : JSON.parse(text);
@@ -473,6 +477,43 @@ describe("a Composio connection's generated contract", () => {
       composioNamedNative: "connect.contract_not_found",
       toolkitAsNative: "connect.contract_not_found",
       nativeStill: "ok",
+    });
+  });
+
+  it("is listed for a connection by its kind alone, each listed one served", async () => {
+    const connectionId = await hubspot();
+    const native = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "microsoft-365",
+    });
+    const lookalike = await hubspot(rules, { provider: "microsoft-365" });
+    const composioNamed = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "composio",
+    });
+    const nativeListed = await listed(native);
+    const served = await Promise.all(
+      nativeListed.map(
+        async (contract) => await outcome(contractOf(native, contract))
+      )
+    );
+
+    expect({
+      toolkit: await listed(connectionId),
+      lookalike: await listed(lookalike),
+      composioNamed: await listed(composioNamed),
+      gone: await listed(crypto.randomUUID()),
+      nativeMail: nativeListed.includes("microsoft-365.mail@1"),
+      nativeServed: served.every((each) => each === "ok"),
+    }).toStrictEqual({
+      toolkit: ["composio.hubspot@1"],
+      lookalike: ["composio.microsoft-365@1"],
+      composioNamed: [],
+      gone: [],
+      nativeMail: true,
+      nativeServed: true,
     });
   });
 

@@ -253,8 +253,8 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
   it("checks a subscription against the following frame's own lease", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
-    // The builder's own lease names an approved build; this frame's is
-    // one core never signed.
+    // The builder's own lease names the build core served; this frame's
+    // is one core never signed.
     await expect(
       outcome(
         opened.screens

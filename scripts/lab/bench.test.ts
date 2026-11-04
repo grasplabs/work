@@ -8,6 +8,8 @@
  */
 import type { StephenTurn } from "@grasp-os/shared/interview-turn";
 import type { LabWho } from "@grasp-os/shared/lab";
+import { compare, noiseOf } from "@grasp-os/shared/lab-compare";
+import type { CaseScore } from "@grasp-os/shared/lab-compare";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -19,13 +21,11 @@ import {
 } from "./bench.ts";
 import type { Stand, TurnAsked } from "./bench.ts";
 import type { Transcript } from "./cases.ts";
-import { compare, noiseOf } from "./compare.ts";
 import type { Ask } from "./core.ts";
 import { keyOf } from "./keys/index.ts";
 import { handMoments, signalRules, waitsFor } from "./moments.ts";
 import type { Moment } from "./moments.ts";
 import type { Asker } from "./person.ts";
-import type { CaseScore } from "./results.ts";
 
 const who: LabWho = {
   company: "Noordzee Vis B.V.",

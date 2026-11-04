@@ -8,6 +8,7 @@ import { ChannelAccountsRpc } from "./channels/accounts.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
+import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
@@ -25,9 +26,9 @@ import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ProjectsRpc } from "./projects.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -66,11 +67,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
+  readonly #projects: ProjectsRpc;
   readonly #decisions: DecisionsRpc;
   readonly #heldStarts: HeldStartsRpc;
   readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
-  readonly #screenTrust: ScreenTrustRpc;
+  readonly #dataPolicy: DataPolicyRpc;
   readonly #members: MembersRpc;
   readonly #organization: OrganizationRpc;
   readonly #orgSettings: OrgSettingsRpc;
@@ -112,11 +114,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
+    this.#projects = new ProjectsRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
     this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
-    this.#screenTrust = new ScreenTrustRpc(env, full);
+    this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
     this.#orgSettings = new OrgSettingsRpc(env, full);
@@ -138,7 +141,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       unknownOutcomes: this.#unknownOutcomes,
       permissions: this.#permissions,
       dependencies: this.#dependencies,
-      screenTrust: this.#screenTrust,
       apps: this.#apps,
       notifications: this.#notifications,
       connections: this.#connections,
@@ -244,6 +246,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#workflowResources;
   }
 
+  get projects(): ProjectsRpc {
+    return this.#projects;
+  }
+
   get decisions(): DecisionsRpc {
     return this.#decisions;
   }
@@ -256,8 +262,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#screens;
   }
 
-  get screenTrust(): ScreenTrustRpc {
-    return this.#screenTrust;
+  get dataPolicy(): DataPolicyRpc {
+    return this.#dataPolicy;
   }
 
   get members(): MembersRpc {

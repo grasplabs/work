@@ -27,6 +27,7 @@ import type {
   LatestRun,
   ListedRun,
   OutlineNode,
+  ResourceListedRun,
   ResourceWorkflowSummary,
   RunFilterStatus,
   RunsPage,
@@ -115,8 +116,9 @@ import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 // deadline. It goes on once someone answers it, on the decision's own
 // page. A run that waits otherwise (a sleep, a feature switched
 // off, a decision past its deadline that it hasn't timed out yet) goes on
-// by itself, and counts as running. Only an App's runs ask for decisions
-// yet (run-view.ts).
+// by itself, and counts as running. Only an App's runs show as waiting
+// yet (run-view.ts); an independent workflow's run leads to an open
+// decision of its that the person may answer.
 //
 // A run that goes on without a decision to wait for, while a step of it
 // waits for a share of the model requests in flight (model-waits.ts),
@@ -685,9 +687,11 @@ const viewRuns = async (
 };
 
 /**
- * For each of the waiting runs `runIds`, the latest of its open decisions
- * `by` may answer now (`answerableBy`), if any: one read of their open
- * decisions (`workflow_decisions_run_status_idx`).
+ * For each of the runs `runIds`, an App's or an independent workflow's,
+ * the latest of its open decisions `by` may answer now (`answerableBy`),
+ * if any: one read of their decisions by run
+ * (`workflow_decisions_run_status_idx`, `..._resource_run_step_idx`), its
+ * status unary-plussed off the organization-wide status index.
  */
 const answerableDecisions = async (
   env: Env,
@@ -703,22 +707,28 @@ const answerableDecisions = async (
     .select({
       id: workflowDecisions.id,
       runId: workflowDecisions.runId,
+      resourceRunId: workflowDecisions.resourceRunId,
       deciders: workflowDecisions.deciders,
     })
     .from(workflowDecisions)
     .where(
       and(
-        sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
-        stillOpen(workflowDecisions, now)
+        or(
+          sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
+          sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`
+        ),
+        sql`+${workflowDecisions.status} = 'open'`,
+        gt(workflowDecisions.expiresAt, now)
       )
     )
     .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id));
   const answerable = await answerableBy(env, by, open);
   const byRun = new Map<string, string>();
-  for (const { id, runId } of open) {
-    // Each an App's run's, read by its ID.
-    if (runId !== null && answerable.has(id) && !byRun.has(runId)) {
-      byRun.set(runId, id);
+  for (const { id, runId, resourceRunId } of open) {
+    // An App's run's, or an independent workflow's.
+    const run = runId ?? resourceRunId;
+    if (run !== null && answerable.has(id) && !byRun.has(run)) {
+      byRun.set(run, id);
     }
   }
   return byRun;
@@ -865,8 +875,13 @@ export const listAllRuns = async (
       env,
       db,
       by,
+      // An independent workflow's run waits on its decisions without
+      // being read from them: one that hasn't ended may have one open.
       found.flatMap((run) =>
-        run.kind === "app" && run.decision !== null ? [run.row.id] : []
+        (run.kind === "app" && run.decision !== null) ||
+        (run.kind === "resource" && goesOn(run.row.status))
+          ? [run.row.id]
+          : []
       ),
       now
     ),
@@ -887,18 +902,20 @@ export const listAllRuns = async (
     runs: found.map((run): ListedRun => {
       if (run.kind === "resource") {
         const { row } = run;
+        const listed: ResourceListedRun = {
+          type: "resource",
+          id: runIdSchema.parse(row.id),
+          workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
+          name: workflowNames.get(row.workflowResourceId) ?? "",
+          version: row.version,
+          startedBy: { type: "person", userId: row.principalId },
+          status: shownStatus(row.status),
+          createdAt: row.createdAt.toISOString(),
+          endedAt: row.endedAt?.toISOString() ?? null,
+        };
+        const answered = answering.get(row.id);
         return queuedRun(
-          {
-            type: "resource",
-            id: runIdSchema.parse(row.id),
-            workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
-            name: workflowNames.get(row.workflowResourceId) ?? "",
-            version: row.version,
-            startedBy: { type: "person", userId: row.principalId },
-            status: shownStatus(row.status),
-            createdAt: row.createdAt.toISOString(),
-            endedAt: row.endedAt?.toISOString() ?? null,
-          },
+          answered === undefined ? listed : { ...listed, decision: answered },
           queues.get(row.id)
         );
       }

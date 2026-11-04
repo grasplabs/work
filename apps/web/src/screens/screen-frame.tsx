@@ -68,13 +68,14 @@ const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   "timed-out": msg`This page didn't start in time.`,
   left: msg`This page left its frame and was stopped.`,
   disconnected: msg`This page lost its connection to Grasp and was stopped.`,
-  unreviewed: msg`Nobody has approved this page's code for the App's data yet. An admin can approve it in the App's details.`,
-  revoked: msg`The approval of this page's code was taken back, and the page was stopped. An admin can approve it again in the App's details.`,
+  unreviewed: msg`Grasp couldn't confirm this page's code for you. Reload to try again.`,
+  revoked: msg`This version of the App was revoked, and the page was stopped. An admin can make another version current.`,
   "principal-changed": msg`Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now.`,
   "bad-input": msg`This link opens the page with something it doesn't take. Open the page from its App instead.`,
-  corrupt: msg`This page's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin.`,
+  corrupt: msg`This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin.`,
   "not-sealed": msg`This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again.`,
   "version-revoked": msg`This version of the App was revoked and no longer runs. An admin can make another version current.`,
+  unsupported: msg`This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari.`,
   unknown: msg`The page couldn't be loaded.`,
 };
 
@@ -566,7 +567,7 @@ const FramedScreen = ({
     if (next.status === "updated") {
       showUpdate("asking");
     }
-    // Stopped (its person lost the App, its build its approval, or the
+    // Stopped (its person lost the App, its release was revoked, or the
     // session ended): nothing is offered any more, and nothing reloads.
     if (next.status === "failed" || next.status === "signed-out") {
       showUpdate("none");

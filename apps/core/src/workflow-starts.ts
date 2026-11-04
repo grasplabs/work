@@ -47,6 +47,7 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { allowingPermissionSql } from "./permissions.ts";
+import { viaProjectSql } from "./project-sql.ts";
 import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { buildOf } from "./workflow-builds.ts";
@@ -365,7 +366,10 @@ const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
           JOIN team_members ON team_members.team_id = shared.member_id
             AND team_members.user_id = ${person}
           WHERE shared.app_id = ${app} AND shared.role = 'builder'
-            AND shared.member_type = 'team')))))`;
+            AND shared.member_type = 'team')
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND ${viaProjectSql(sql.raw("shared.member_type"), sql.raw("shared.member_id"), person)})))))`;
 
 /**
  * That `person` has a role in App `app` now, as SQL: an admin of the
@@ -388,7 +392,10 @@ const appRoleSql = (
         AND teams.organization_id = ${organizationId}
       JOIN team_members ON team_members.team_id = shared.member_id
         AND team_members.user_id = ${person}
-      WHERE shared.app_id = ${app} AND shared.member_type = 'team'))
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team')
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      WHERE shared.app_id = ${app}
+        AND ${viaProjectSql(sql.raw("shared.member_type"), sql.raw("shared.member_id"), person)}))
   AND ${appStatusAdmitsSql(person, app)})`;
 
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */

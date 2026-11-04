@@ -706,7 +706,7 @@ export const publicOperationOf = (
  * version of the App than the one current now keeps calling with that
  * version's references until it switches, a dirty editor among them
  * saving before it does. Which version it was opened on is core's own
- * word, signed into the frame's lease (`pinnedVersion`, screen-trust.ts's
+ * word, signed into the frame's lease (`pinnedVersion`, screen-delivery.ts's
  * `LeasedBuild`), never what the frame's reference says. Threat model:
  *
  * - A screen of a revoked release calls on: while its pinned version

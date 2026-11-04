@@ -3,7 +3,7 @@ import type {
   AiProvidersListing,
   ProviderTrouble,
 } from "@grasp-os/shared/ai-providers";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
@@ -11,7 +11,7 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatch } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -61,16 +61,6 @@ export const failingProviders = (
           },
         ]
   );
-
-/** Whether `identity` is one of the organization's own admins. */
-const ownAdmin = (identity: Identity | undefined): boolean =>
-  identity !== undefined && isAdmin(identity.role) && !identity.staff;
-
-/** Whether the signed-in person can replace a key: the organization's own admins. */
-export const useCanReplaceKey = (): boolean => {
-  const shell = useMatch({ from: "/_shell", shouldThrow: false });
-  return ownAdmin(shell?.context.identity);
-};
 
 /** What to do about a provider that isn't answering. */
 const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
@@ -141,7 +131,7 @@ export const AiKeyBanner = ({
   providers: () => Promise<AiProvidersListing>;
 }) => {
   const [failing, setFailing] = useState<FailingProvider[]>([]);
-  const shown = ownAdmin(identity);
+  const shown = isMemberAdmin(identity);
   useEffect(() => {
     let live = true;
     const read = async () => {

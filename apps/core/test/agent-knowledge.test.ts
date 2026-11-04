@@ -1183,7 +1183,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     );
     await grantRead(admin, agent, handbook);
     await grantRead(admin, agent, teamOnly);
-    // Without the Brain permission: refused.
+    // Without the Brain permission: no `env.brain` to call at all.
     const before = await ask("What is the plan?");
     const brainGrant = await requestGranted(idp, admin, {
       subject: agent,
@@ -1192,7 +1192,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       binding: "BRAIN",
     });
     const after = await ask("What is the plan, now?");
-    // Revoked: refused again, from the next call.
+    // Revoked: gone again, from the next turn.
     await admin.api.permissions.revoke(brainGrant);
     await ask("And now?");
     const results = await codeResults(stub, chat.id);
@@ -1202,14 +1202,14 @@ describe("a chat's Knowledge", setUpTime, () => {
       after: after.provenance,
     }).toStrictEqual({
       results: [
-        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
+        expect.stringContaining("This chat has no API named env.brain"),
         // Once granted, the turn recalls for the question first: never
         // from the plan its person can't read.
         expect.not.stringContaining(word),
         // Never wider than its grants, nor than what its person may read:
         // naming either is refused as not found.
         'Returned:\n[0,0,"brain.not_found","brain.not_found"]',
-        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
+        expect.stringContaining("This chat has no API named env.brain"),
       ],
       before: { sources: [], restricted: false },
       // The word is only in a collection the person can't read; the

@@ -10,6 +10,7 @@ import type {
   UnknownOutcomesApi,
 } from "./connect.ts";
 import type { DashboardApi } from "./dashboard.ts";
+import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
@@ -24,9 +25,9 @@ import type { OnboardingApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
+import type { ProjectsApi } from "./projects.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
-import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
@@ -135,6 +136,11 @@ export interface SessionApi {
    */
   readonly workflowResources: WorkflowResourcesApi;
   /**
+   * Projects: groupings of Apps and workflows the person is in, and what
+   * is filed in them that they may open. Filing never shares.
+   */
+  readonly projects: ProjectsApi;
+  /**
    * What core tells the person: the workflows that failed while acting for
    * them.
    */
@@ -161,11 +167,8 @@ export interface SessionApi {
   readonly dependencies: DependenciesApi;
   /** Apps' screens: their builds, their servers and their error logs. */
   readonly screens: ScreensApi;
-  /**
-   * Which of Apps' screens get their data: an admin's approval of exactly
-   * the code a screen runs, and what an App's data is to its screens.
-   */
-  readonly screenTrust: ScreenTrustApi;
+  /** What an App's data is to code Grasp didn't serve: a portable host. */
+  readonly dataPolicy: DataPolicyApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
   /**

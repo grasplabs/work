@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import type { ViewedApp } from "@grasp-os/shared/apps";
-import type { ChatSummary } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -15,23 +14,29 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
-import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { AppPage } from "./app-page.tsx";
 
-// An App's page against core's chats as the page reaches them over RPC,
-// faked: it has no Edit button, as the App's own chat is in the dock;
-// "Design it in the chat" on an App with no screen yet opens the person's
-// own chat for the App (`chats.forApp`) there, in the App's slot, leaving
-// their other open chat alone; what core refuses is said there, and no
-// chat opens.
+// The live App, as its people use it: its pages as tabs, the open one
+// marked, and nothing that builds it but Edit, which opens its workspace,
+// for its builders alone (by their role in this App, never Grasp staff,
+// whom core counts a builder of every App). Core refuses anyone else all
+// the same; this is what the page offers.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-const app: ViewedApp = {
-  id: appIdSchema.parse(crypto.randomUUID()),
+/** Takes the page down. */
+const takenDown = (): void => {
+  act(() => {
+    root?.unmount();
+  });
+  root = undefined;
+  document.body.replaceChildren();
+};
+
+const appAs = (role: ViewedApp["role"]): ViewedApp => ({
+  id: appIdSchema.parse("invoice-desk"),
   name: "Invoices",
   description: "",
   owner: "user-1",
@@ -41,58 +46,34 @@ const app: ViewedApp = {
   blueprint: null,
   currentVersion: 1,
   pendingVersion: null,
-  status: "draft",
+  status: "published",
   link: null,
   createdAt: "2026-10-20T08:00:00.000Z",
-  role: "builder",
-};
+  role,
+});
 
-const appChat: ChatSummary = {
-  id: "chat-for-invoices",
-  title: "Invoices",
-  createdAt: "2026-10-20T08:00:00.000Z",
-  lastAt: "2026-10-20T08:00:00.000Z",
-  running: false,
-  projectId: null,
-  appId: app.id,
-  via: "web",
-};
-
-/** How the dock sits, as the page shows it. */
-const Dock = () => <output data-dock>{useDockMode()}</output>;
-
-/** The App's page, with `screens`, whose core answers `forApp` with `answer`. */
-const shown = async (screens: string[], answer: () => Promise<ChatSummary>) => {
-  const asked: string[] = [];
-  const chats = {
-    forApp: async (id: string) => {
-      asked.push(id);
-      return await answer();
-    },
-  };
-  const core = {
-    withSession: async <T,>(
-      action: (session: { chats: typeof chats }) => Promise<T>
-    ): Promise<T> => await action({ chats }),
-  };
+/** The live App with `screens`, as `viewer` sees it. */
+const shown = async (
+  screens: string[],
+  { role, staff }: { role: ViewedApp["role"]; staff: boolean }
+): Promise<void> => {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <>
-          <AppPage
-            app={app}
-            contents={{ version: 1, screens, workflows: [] }}
-            identity={{ staff: false }}
-            open={screens[0]}
-          >
-            <p>The screen</p>
-          </AppPage>
-          <Dock />
-        </>
+        <AppPage
+          app={appAs(role)}
+          contents={{ version: 1, screens, workflows: [] }}
+          fullPage={null}
+          identity={{ staff }}
+          open={screens[0]}
+        >
+          <p>The screen</p>
+        </AppPage>
       ),
     }),
     history: createMemoryHistory(),
-    context: { core },
+    // Nothing here calls core: the page only shows.
+    context: { core: {} },
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -105,28 +86,17 @@ const shown = async (screens: string[], answer: () => Promise<ChatSummary>) => {
     );
     await router.load();
   });
-  return { asked };
 };
 
-/** Presses the button named `name`, and lets core answer. */
-const press = async (name: string): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === name
-  );
-  await act(async () => {
-    button?.click();
-    await Promise.resolve();
-  });
-  await act(async () => {
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    setTimeout(() => {
-      resolve(true);
-    }, 0);
-    await promise;
-  });
-};
+/** Where the page's link called `name` goes, if it has one. */
+const linkTo = (name: string): string | null | undefined =>
+  [...document.querySelectorAll("a")]
+    .find((link) => link.textContent === name)
+    ?.getAttribute("href");
 
-const dock = () => document.querySelector("[data-dock]")?.textContent;
+const builder = { role: "builder", staff: false } as const;
+const user = { role: "user", staff: false } as const;
+const staff = { role: "builder", staff: true } as const;
 
 describe(AppPage, () => {
   afterEach(() => {
@@ -135,33 +105,28 @@ describe(AppPage, () => {
     });
     root = undefined;
     document.body.replaceChildren();
-    setActiveChat(undefined);
-    setActiveChat(undefined, appSlot(app.id));
-    setDockMode("bar");
   });
 
-  it("has no Edit button: the App's own chat is in the dock", async () => {
-    const { asked } = await shown(["home"], async () => {
-      await Promise.resolve();
-      return appChat;
-    });
+  it("offers Edit, to the App's workspace, to its builders alone, never to a user of it or to staff", async () => {
+    const edit: Record<string, string | null | undefined> = {};
+    for (const [who, viewer] of Object.entries({ builder, user, staff })) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await shown(["home"], viewer);
+      edit[who] = linkTo("Edit");
+      takenDown();
+    }
 
-    expect({
-      edit: [...document.querySelectorAll("button")].some(
-        (button) => button.textContent === "Edit"
-      ),
-      asked,
-    }).toStrictEqual({ edit: false, asked: [] });
+    expect(edit).toStrictEqual({
+      builder: "/apps/invoice-desk/edit",
+      user: undefined,
+      staff: undefined,
+    });
   });
 
-  it("shows an App with two screens as one App with two pages, the open one marked, and its Details", async () => {
-    await shown(["home", "invoices"], async () => {
-      await Promise.resolve();
-      return appChat;
-    });
+  it("shows an App with two screens as one App with two pages, the open one marked, and the open one under the bar", async () => {
+    await shown(["home", "invoices"], user);
 
     const pages = document.querySelector('nav[aria-label="Pages"]');
-    const views = document.querySelector('nav[aria-label="App views"]');
     expect({
       heading: [...document.querySelectorAll("h1")].map(
         (each) => each.textContent
@@ -170,55 +135,38 @@ describe(AppPage, () => {
         name: link.textContent,
         open: link.getAttribute("aria-current") === "page",
       })),
-      details: [...(views?.querySelectorAll("a") ?? [])]
-        .find((link) => link.textContent === "Details")
-        ?.getAttribute("href"),
+      screen: document.body.textContent.includes("The screen"),
     }).toStrictEqual({
       heading: ["Invoices"],
       pages: [
         { name: "home", open: true },
         { name: "invoices", open: false },
       ],
-      details: `/apps/${app.id}/details`,
+      screen: true,
     });
   });
 
-  it("designs an App with no screen yet in its own chat, leaving the person's other chat open", async () => {
-    setActiveChat("chat-about-holidays");
-    const { asked } = await shown([], async () => {
-      await Promise.resolve();
-      return appChat;
+  it("says an App with no page has nothing to open, with the way to build it for its builder alone", async () => {
+    await shown([], builder);
+    const forBuilder = {
+      said: document.body.textContent.includes("No page yet"),
+      build: linkTo("Build it"),
+    };
+    act(() => {
+      root?.unmount();
     });
-
-    await press("Design it in the chat");
+    document.body.replaceChildren();
+    await shown([], user);
 
     expect({
-      asked,
-      appChat: activeChat(appSlot(app.id)),
-      chat: activeChat(),
-      dock: dock(),
+      forBuilder,
+      forUser: {
+        said: document.body.textContent.includes("No page yet"),
+        build: linkTo("Build it"),
+      },
     }).toStrictEqual({
-      asked: [app.id],
-      appChat: appChat.id,
-      chat: "chat-about-holidays",
-      dock: "frame",
+      forBuilder: { said: true, build: "/apps/invoice-desk/edit" },
+      forUser: { said: true, build: undefined },
     });
-  });
-
-  it("says why when core gives no chat, and opens none", async () => {
-    await shown([], async () => {
-      await Promise.resolve();
-      throw Object.assign(new Error("There's no such App."), {
-        code: "app.not_found",
-      });
-    });
-
-    await press("Design it in the chat");
-
-    expect({
-      chat: activeChat(appSlot(app.id)),
-      dock: dock(),
-      said: document.body.textContent.includes("There's no such App."),
-    }).toStrictEqual({ chat: undefined, dock: "bar", said: true });
   });
 });

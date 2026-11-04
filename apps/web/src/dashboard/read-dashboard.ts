@@ -157,11 +157,6 @@ export const readWaiting = async (
         requests: items.map(({ request }) => request),
       };
     }),
-    screens: decidesRequests(identity)
-      ? partOf(feed, "screens", (read) =>
-          ofKind(read, "appApproval").map(({ waiting }) => waiting)
-        )
-      : undefined,
     heldStarts: partOf(feed, "heldStarts", (read) =>
       ofKind(read, "heldStart").map(({ start }) => start)
     ),

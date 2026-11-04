@@ -5,10 +5,13 @@ import type {
   DecisionsApi,
   DecisionView,
 } from "@grasp-os/shared/decisions";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import type { Identity } from "@grasp-os/shared/rpc";
 
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { requireWorkflowRole } from "../workflow-resources.ts";
 import {
   answerDecision,
   confirmDecision,
@@ -16,6 +19,23 @@ import {
   reviewDecision,
   waitingDecisions,
 } from "./decisions.ts";
+
+/** Whether `by` may open independent workflow `id`'s page. */
+const opensWorkflow = async (
+  env: Env,
+  by: Identity,
+  id: string
+): Promise<boolean> => {
+  try {
+    await requireWorkflowRole(env, by, id, "user");
+    return true;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
 
 /**
  * A signed-in person's `decisions`: for screens, the decision's page and
@@ -46,10 +66,19 @@ export class DecisionsRpc extends CoreRpcTarget implements DecisionsApi {
   }
 
   async get(decision: string): Promise<DecisionView> {
-    return await withPerson(
-      this.#check,
-      async (by) => await decisionFor(this.#env, by, decision)
-    );
+    return await withPerson(this.#check, async (by) => {
+      const view = await decisionFor(this.#env, by, decision);
+      const source = view.workflowResource;
+      // A decider needn't have a role in the independent workflow that
+      // asks: its page is offered only to one who may open it.
+      if (
+        source === undefined ||
+        !(await opensWorkflow(this.#env, by, source.id))
+      ) {
+        return view;
+      }
+      return { ...view, workflowResource: { ...source, opens: true } };
+    });
   }
 
   async review(

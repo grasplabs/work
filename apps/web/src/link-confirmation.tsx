@@ -16,17 +16,18 @@ import type { ConfirmGate } from "./confirm-gate.ts";
 
 // The page's confirmation of a link an App's screen asks to open (spec
 // 10.7.7, decision 2 on GRA-259), when the person didn't just click in
-// the screen, or its App read restricted data. Grasp's own dialog, outside
+// the screen, or core wants each link confirmed (its App's data isn't
+// `ordinary`, or it read restricted data). Grasp's own dialog, outside
 // the frame: it names only the origin core checked, in ASCII, never text
-// of the screen's, so a look-alike name shows as the punycode it is; for
-// an App that read restricted data, the whole URL too, as core parsed it,
-// so the person sees what it would carry out. Open counts only as the
+// of the screen's, so a look-alike name shows as the punycode it is; when
+// core wants it confirmed, the whole URL too, as core parsed it, so the
+// person sees what it would carry out. Open counts only as the
 // gate says (confirm-gate.ts): never for a click or key on its way.
 
 /** A link waiting for the person: the ASCII origin it opens. */
 export interface PendingLink {
   readonly origin: string;
-  /** The whole URL, for an App that read restricted data. */
+  /** The whole URL, when core wants the link confirmed. */
   readonly url?: string;
 }
 

@@ -4,7 +4,6 @@ import { clientInternals, GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -26,7 +25,7 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
 // What the session client's tests share (screen-client*.test.ts): a Notes
-// App opened as an approved screen, the page's transport to core's real
+// App's screen opened, the page's transport to core's real
 // function route and connection, and how a test reads what a live query
 // shows or what a raw subscription was pushed.
 
@@ -54,8 +53,8 @@ export const personApi = async (role: Role) => {
 };
 
 /**
- * A builder's Notes App, made current, its screen approved by an admin and
- * opened: the release, the screen's lease, and the builder's session.
+ * A builder's Notes App, made current, its screen opened by its builder
+ * and an admin: the release, the screen's lease, and the builder's session.
  */
 export const openedApp = async (appFiles: Record<string, string> = files) => {
   const builder = await personApi("builder");
@@ -68,12 +67,6 @@ export const openedApp = async (appFiles: Record<string, string> = files) => {
     "First"
   );
   await builder.api.apps.versions.setCurrent(id, version);
-  const review = await admin.api.screenTrust.review(id);
-  await admin.api.screenTrust.approve(id, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const { lease } = await builder.api.screens.open(id, "notes");
   const { lease: adminLease } = await admin.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);

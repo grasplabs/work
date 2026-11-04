@@ -590,6 +590,93 @@ export interface Proposal {
 }
 
 /**
+ * Proposes the chat's draft of `app` for review, by `by`: checks it over
+ * the App's latest version (`checkFiles`, through `counted` when its
+ * checks are counted), and once it passes commits it as the App's next
+ * version, pending, with `message`, and drops the draft. A draft that
+ * fails isn't proposed: what fails comes back instead. The chat's agent
+ * proposes this way (`env.build.propose`), and so does its person, as
+ * themselves, from the App's workspace (`ChatsApi.proposeDraft`).
+ */
+export const proposeChatDraft = async (
+  env: Env,
+  by: Acting,
+  scope: Pick<AgentScope, "workspaceId" | "chatId">,
+  app: AppId,
+  message: unknown,
+  {
+    counted = async (_app, run) => ({
+      result: await run(),
+      failedInARow: 0,
+    }),
+    admit,
+  }: {
+    /** Runs the check as one of the draft's counted checks. */
+    counted?: <T extends Pick<DraftCheck, "passed">>(
+      app: AppId,
+      run: () => Promise<T>
+    ) => Promise<{ result: T; failedInARow: number }>;
+    /** Admits the commit: before it starts, and right before it is written. */
+    admit?: () => Promise<void>;
+  } = {}
+): Promise<Proposal> => {
+  const draft = await draftOf(env, scope, app);
+  if (Object.keys(draft.changes).length === 0) {
+    throw appErrors.create("app.nothing_to_commit");
+  }
+  const over = await draftOverLatest(env, app, draft);
+  const checked = await counted(
+    app,
+    async () =>
+      await checkFiles(env, scope, app, draft, Object.fromEntries(over.files))
+  );
+  const check = {
+    ...checked.result,
+    failedInARow: checked.failedInARow,
+    maxFailedChecks,
+  };
+  if (!check.passed) {
+    return { version: null, check, review: null, reviewUnavailable: false };
+  }
+  await admit?.();
+  const proposed = await proposeDraft(
+    env,
+    by,
+    app,
+    over,
+    message,
+    admit,
+    // Proposed by the person, the version names no agent: its audit says
+    // which chat's draft it was, whose agent wrote it.
+    by.via === undefined ? scope.chatId : undefined
+  );
+  // Committed and up for review: from here on it is proposed, however the
+  // rest goes, and says so, so nobody tries again (and meets nothing to
+  // commit). What follows is logged when it fails.
+  const { version, tree } = proposed;
+  // The check ran the tests of exactly these files: the review takes its
+  // result rather than running them again.
+  if (check.tests.status !== "not_run") {
+    await keepTests(env, app, tree, check.tests).catch(
+      afterProposal("keep_tests", app, version)
+    );
+  }
+  // Only the revision committed: a write since stays a draft.
+  await workspace(env, scope.workspaceId)
+    .dropDraft(scope.chatId, app, { revision: draft.revision })
+    .catch(afterProposal("drop_draft", app, version));
+  const review = await reviewVersion(env, by, app, version).catch(
+    afterProposal("review", app, version)
+  );
+  return {
+    version,
+    check,
+    review: review ?? null,
+    reviewUnavailable: review === undefined,
+  };
+};
+
+/**
  * The chat's person as an App build acts for them: refused from a chat
  * that read restricted data, and with the chat's agent as the actor the
  * audit log records for what it changes, in this chat.
@@ -741,6 +828,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    */
   async #creating<T>(create: () => Promise<T>): Promise<T> {
     const { workspaceId, chatId, runId } = this.ctx.props;
+    // An App's own chat changes that App: a build asked there never makes
+    // a second one beside it (`ChatsApi.forApp`).
+    if ((await workspace(this.env, workspaceId).chatApp(chatId)) !== null) {
+      throw appErrors.create("app.chat_has_app");
+    }
     // Admitted as it takes the create, which a D1 write follows.
     await admitEffect(this.env, this.ctx.props);
     const taken = await workspace(this.env, workspaceId).takeCreate(
@@ -943,73 +1035,19 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async propose(app: unknown, message: unknown): Promise<Proposal> {
     return await this.#build(
       "build.propose",
-      async (by) => {
-        const id = await this.#buildable(by, app);
-        const { workspaceId, chatId } = this.ctx.props;
-        const draft = await draftOf(this.env, this.ctx.props, id);
-        if (Object.keys(draft.changes).length === 0) {
-          throw appErrors.create("app.nothing_to_commit");
-        }
-        const over = await draftOverLatest(this.env, id, draft);
-        const counted = await this.#counted(
-          id,
-          async () =>
-            await checkFiles(
-              this.env,
-              this.ctx.props,
-              id,
-              draft,
-              Object.fromEntries(over.files)
-            )
-        );
-        const check = {
-          ...counted.result,
-          failedInARow: counted.failedInARow,
-          maxFailedChecks,
-        };
-        if (!check.passed) {
-          return {
-            version: null,
-            check,
-            review: null,
-            reviewUnavailable: false,
-          };
-        }
-        // The commit is admitted only while the run is still open.
-        await admitEffect(this.env, this.ctx.props);
-        const proposed = await proposeDraft(
+      async (by) =>
+        await proposeChatDraft(
           this.env,
           by,
-          id,
-          over,
+          this.ctx.props,
+          await this.#buildable(by, app),
           message,
-          this.#admit
-        );
-        // Committed and up for review: from here on it is proposed, however
-        // the rest goes, and says so, so the agent doesn't try again (and
-        // meet nothing to commit). What follows is logged when it fails.
-        const { version, tree } = proposed;
-        // The check ran the tests of exactly these files: the review takes
-        // its result rather than running them again.
-        if (check.tests.status !== "not_run") {
-          await keepTests(this.env, id, tree, check.tests).catch(
-            afterProposal("keep_tests", id, version)
-          );
-        }
-        // Only the revision committed: a write since stays a draft.
-        await workspace(this.env, workspaceId)
-          .dropDraft(chatId, id, { revision: draft.revision })
-          .catch(afterProposal("drop_draft", id, version));
-        const review = await reviewVersion(this.env, by, id, version).catch(
-          afterProposal("review", id, version)
-        );
-        return {
-          version,
-          check,
-          review: review ?? null,
-          reviewUnavailable: review === undefined,
-        };
-      },
+          {
+            counted: async (id, run) => await this.#counted(id, run),
+            // The commit is admitted only while the run is still open.
+            admit: this.#admit,
+          }
+        ),
       (proposal) => ({
         app: typeof app === "string" ? app : null,
         version: proposal.version,
@@ -1379,8 +1417,8 @@ const buildDeclaration = `/**
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
- * this. A visitor's call can't tell anyone. Read the SDK's types for the
- * rest.
+ * this. A visitor's call can't tell anyone. For the rest, \`check\`
+ * type-checks against the SDK and names what doesn't fit.
  *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
@@ -1397,7 +1435,7 @@ const buildDeclaration = `/**
  * actions \`["get"]\` and/or \`["send"]\`); an admin grants it and binds the resource.
  */
 build: {
-  /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */
+  /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. Refused in an App's own chat (\`app.chat_has_app\`), which changes its App. */
   create(app: { name: string; description?: string }): Promise<{ id: string; name: string }>;
   /** The blueprints the person may create an App from, newest first: \`id\` names each. */
   blueprints(): Promise<{ id: string; name: string; description: string }[]>;
@@ -1406,7 +1444,7 @@ build: {
    * (its \`id\`): the blueprint's code as its first version, and a request
    * for each permission the blueprint declares, which an admin grants or
    * not; ask for any other it needs as for any App. Counts with \`create\`:
-   * at most ${maxCreatesPerTurn} a question. Change it afterwards in a draft, as any App.
+   * at most ${maxCreatesPerTurn} a question, and is refused with it in an App's own chat. Change it afterwards in a draft, as any App.
    */
   createFromBlueprint(blueprint: string, created: { name: string; description?: string }): Promise<{
     app: { id: string; name: string };

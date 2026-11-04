@@ -1,12 +1,18 @@
 /**
  * The compiler's own lint rules for screens, beside @shadcn/lint's (which
  * hold classes, colours and the `style` prop to the kit): every other way
- * a screen could style itself outside the design system, or load what
- * the frame would refuse anyway, refused where it is written, each with
- * what to do instead. The frame's sandbox and CSP still hold at run time
- * (core's security-headers.ts); these say so at build, where it can be
- * fixed.
+ * a screen could style itself outside the design system, load what the
+ * frame would refuse anyway, or reach WebRTC, refused where it is
+ * written, each with what to do instead. The frame's sandbox, CSP and
+ * bootstrap hold at run time (core's security-headers.ts and
+ * screen-frame.ts); these say so at build, where it can be fixed. They
+ * read source, which code can always spell another way, so nothing
+ * relies on them.
  */
+import {
+  screenNestedDocuments,
+  screenPeerInterfaces,
+} from "@grasp-os/shared/screens";
 import type { Rule } from "eslint";
 
 /** Added to every message: a screen styles itself with the kit. */
@@ -502,6 +508,93 @@ const noRemoteResources: Rule.RuleModule = {
   }),
 };
 
+/** The WebRTC interfaces that open a peer connection (@grasp-os/shared/screens). */
+const peerInterfaces = new Set(screenPeerInterfaces);
+
+/** Elements that hold a document of their own, and with it a realm of its own. */
+const frameElements = new Set(screenNestedDocuments);
+
+/** Members that hand over a nested document's window or document. */
+const childRealmMembers = new Set([
+  "contentWindow",
+  "contentDocument",
+  "getSVGDocument",
+]);
+
+/** What to do instead of reaching outside the frame. */
+const insteadOfOut =
+  "A screen reaches outside its frame only through its App's functions.";
+
+const noPeerConnections: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Refuse WebRTC and nested documents in a screen, where it is written",
+    },
+    schema: false,
+    messages: {
+      peer: `{{name}} opens a peer connection out of the screen's frame, past what its App may reach. ${insteadOfOut}`,
+      frame: `A nested document (<{{element}}>) gives the screen a second realm, with its own WebRTC. ${insteadOfOut}`,
+      childRealm: `{{member}} reaches a nested document's realm, with its own WebRTC. ${insteadOfOut}`,
+    },
+  },
+  create: (context) => {
+    const peer = (node: Rule.Node, name: string | undefined): void => {
+      if (name !== undefined && peerInterfaces.has(name)) {
+        context.report({ node, messageId: "peer", data: { name } });
+      }
+    };
+    return {
+      Identifier: (node: Rule.Node) => {
+        const name = get(node, "name");
+        peer(node, typeof name === "string" ? name : undefined);
+      },
+      Literal: (node: Rule.Node) => {
+        peer(node, stringOf(node));
+      },
+      TemplateLiteral: (node: Rule.Node) => {
+        peer(node, stringOf(node));
+      },
+      MemberExpression: (node: Rule.Node) => {
+        const member = memberName(node);
+        if (member !== undefined && childRealmMembers.has(member)) {
+          context.report({ node, messageId: "childRealm", data: { member } });
+        }
+      },
+      CallExpression: (node: Rule.Node) => {
+        const method = memberName(get(node, "callee"));
+        const args: unknown = get(node, "arguments");
+        if (!Array.isArray(args) || method === undefined) {
+          return;
+        }
+        const first: unknown = args[0];
+        const second: unknown = args[1];
+        const created = (
+          method === "createElementNS" ? stringOf(second) : stringOf(first)
+        )?.toLowerCase();
+        if (
+          (method === "createElement" || method === "createElementNS") &&
+          created !== undefined &&
+          frameElements.has(created)
+        ) {
+          context.report({
+            node,
+            messageId: "frame",
+            data: { element: created },
+          });
+        }
+      },
+      JSXOpeningElement: (node: Rule.Node) => {
+        const name = jsxName(get(node, "name"));
+        if (name !== undefined && frameElements.has(name)) {
+          context.report({ node, messageId: "frame", data: { element: name } });
+        }
+      },
+    };
+  },
+};
+
 /** Helpers whose string arguments are class lists. */
 const classHelpers = new Set([
   "cn",
@@ -695,6 +788,7 @@ export const designRules = {
   rules: {
     "no-style-escapes": noStyleEscapes,
     "no-remote-resources": noRemoteResources,
+    "no-peer-connections": noPeerConnections,
     "no-important": noImportant,
   },
 };
@@ -703,5 +797,6 @@ export const designRules = {
 export const designRuleLevels = {
   "grasp/no-style-escapes": "error",
   "grasp/no-remote-resources": "error",
+  "grasp/no-peer-connections": "error",
   "grasp/no-important": "error",
 } as const;

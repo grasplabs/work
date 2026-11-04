@@ -22,8 +22,9 @@ import { inboxItems } from "./items.ts";
 // A workflow's bindings that wait on an admin, in the inbox, against core's
 // workflowResources as the page reaches them over RPC, faked: each binding
 // core offers targets for is approved with exactly the chosen target, for
-// the version shown; one it offers none for says where it is approved
-// instead, and offers nothing to press.
+// the version shown; a connector it offers none for leads to the
+// workflow's page, where such kinds are offered targets, and a binding
+// nothing serves says it needs a grant; neither offers anything to press.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -64,6 +65,12 @@ const item: BindingApprovalItem = {
         contractId: "crm/contacts",
         offered: [],
       },
+      {
+        alias: "docs",
+        kind: "knowledge",
+        contractId: "docs-v1",
+        offered: [],
+      },
     ],
   },
 };
@@ -102,7 +109,6 @@ const shown = async () => {
       state: "ready",
       data: { policyGeneration: 1, requests: [] },
     },
-    screens: undefined,
     decisions: { state: "ready", data: [] },
     workflowGoLives: { state: "ready", data: [] },
     heldStarts: { state: "ready", data: [] },
@@ -196,14 +202,24 @@ describe("a workflow's bindings in the inbox", () => {
     });
   });
 
-  it("offers nothing to press for a binding core offers no target for, and says where it is approved", async () => {
+  it("leads to the workflow's page for a connector it offers no target for, and says a binding nothing serves needs a grant, with nothing to press", async () => {
     await shown();
 
     expect({
-      approve: button("Approve crm"),
-      says: document.body.textContent.includes(
-        "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
+      approve: [button("Approve crm"), button("Approve docs")],
+      grant: document.body.textContent.includes(
+        "Nothing the workflow may use serves it now: grant the workflow what it needs, or try again later."
       ),
-    }).toStrictEqual({ approve: undefined, says: true });
+      leads: [...document.querySelectorAll("a")]
+        .filter(
+          (link) =>
+            link.textContent.trim() === "Approve it on the workflow's page"
+        )
+        .map((link) => link.getAttribute("href")),
+    }).toStrictEqual({
+      approve: [undefined, undefined],
+      grant: true,
+      leads: ["/workflows/workflow-quotes?tab=files"],
+    });
   });
 });

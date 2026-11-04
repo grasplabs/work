@@ -8,8 +8,8 @@ import type { ScreenNavigate } from "./screen-frame.tsx";
 
 // Where a screen's navigation takes the page (spec 10.7.7, 34.1): an App's
 // screen, in the same layout the navigating screen runs in; or, for a
-// surface, where the host places it: the shell's panel, or the Settings
-// tab of the App's details.
+// surface, where the host places it: the shell's panel, or the Options
+// section of the App's settings.
 //
 // The route, input and surface core resolved go in the history entry's
 // state, never in the address: anyone can write an address, and a link
@@ -137,9 +137,9 @@ export const useScreenNavigate = (
     });
     const { href } = settings
       ? router.buildLocation({
-          to: "/apps/$app/details",
+          to: "/apps/$app/settings",
           params: { app },
-          search: { tab: "settings" },
+          search: { section: "options" },
         })
       : router.buildLocation(layoutLocation(layout, app, target.screen));
     // Already there, as it opens: the router commits nothing new, and that

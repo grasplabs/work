@@ -207,15 +207,16 @@ test("the panel closes once its App is no longer shared with the person", async 
   await expect(main).not.toHaveAttribute("src");
 });
 
-test("an App's sidebar entry opens its screen, and its settings screen is a tab on its page", async ({
+test("an App's sidebar entry opens its screen, and its settings screen is its settings' Options", async ({
   pageOf,
 }) => {
   const { builder, name, app } = await surfacedApp();
   const page = await pageOf(builder);
-  await page.goto(`/apps/${app}/details`);
+  await page.goto(`/apps/${app}/settings`);
   const shortcuts = page.getByRole("list", { name: "App shortcuts" });
   await expect(shortcuts.getByRole("link", { name })).toBeVisible();
-  await page.getByRole("tab", { name: "Settings" }).click();
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await sections.getByRole("link", { name: "Options" }).click();
   // Opened by its address, with nothing: its defaults.
   const settings = page.frameLocator('iframe[title="prefs app"]');
   await expect(
@@ -232,21 +233,22 @@ test("an App's sidebar entry opens its screen, and its settings screen is a tab 
   await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=notes$`, "u"));
   await expect(page.locator('iframe[title="notes app"]')).toHaveCount(1);
 
-  // A screen's navigation to the App's settings opens its page's tab.
+  // A screen's navigation to the App's settings opens their Options.
   await page.goto(`/apps/${app}?screen=home`);
   await page
     .frameLocator('iframe[title="home app"]')
     .getByRole("button", { name: "Open preferences" })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}/details\\?tab=settings$`, "u")
+    new RegExp(`/apps/${app}/settings\\?section=options$`, "u")
   );
-  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute(
-    "aria-selected",
-    "true"
+  await expect(sections.getByRole("link", { name: "Options" })).toHaveAttribute(
+    "aria-current",
+    "page"
   );
 
-  // An App without settings, its settings asked for by address.
+  // An App without settings, its Options asked for by address: none to
+  // list, and it says so.
   const { core, api } = apiOf(builder);
   let plain: string;
   try {
@@ -255,22 +257,17 @@ test("an App's sidebar entry opens its screen, and its settings screen is a tab 
   } finally {
     core[Symbol.dispose]();
   }
-  await page.goto(`/apps/${plain}/details?tab=settings`);
-  // No Settings tab: the page opens on its first, Workflows.
-  await expect(page.getByRole("tab", { name: /^Workflows/u })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-  await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(0);
+  await page.goto(`/apps/${plain}/settings?section=options`);
+  await expect(page.getByText("This App offers no options.")).toBeVisible();
+  await expect(sections.getByRole("link", { name: "Options" })).toHaveCount(0);
 
-  // A tab the page doesn't know, by address, as text or as what reads as
-  // a number: the page, where it opens without one (Pages, for an App
-  // that serves no business process).
-  const firstTab = page.getByRole("tab", { name: /^Pages/u });
-  await page.goto(`/apps/${app}/details?tab=workflows`);
-  await expect(firstTab).toHaveAttribute("aria-selected", "true");
-  await page.goto(`/apps/${app}/details?tab=1`);
-  await expect(firstTab).toHaveAttribute("aria-selected", "true");
+  // A section the page doesn't know, by address, as text or as what reads
+  // as a number: General.
+  const general = sections.getByRole("link", { name: "General" });
+  await page.goto(`/apps/${app}/settings?section=pages`);
+  await expect(general).toHaveAttribute("aria-current", "page");
+  await page.goto(`/apps/${app}/settings?section=1`);
+  await expect(general).toHaveAttribute("aria-current", "page");
 });
 
 test("a deep link opened signed out leads through sign-in, then to its screen with its input once core checked it", async ({
@@ -329,7 +326,7 @@ test("a deep link opened signed out leads through sign-in, then to its screen wi
   await expect(signedIn.locator("iframe")).toHaveCount(0);
 });
 
-test("a navigation to an App's settings opens them with its input, again after the person chose another tab", async ({
+test("a navigation to an App's settings opens them with its input, again after the person chose another section", async ({
   pageOf,
 }) => {
   const { builder, name, app, chat } = await surfacedApp();
@@ -349,20 +346,21 @@ test("a navigation to an App's settings opens them with its input, again after t
   });
   await billing.click({ timeout: 20_000 });
   await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}/details\\?tab=settings$`, "u")
+    new RegExp(`/apps/${app}/settings\\?section=options$`, "u")
   );
   const settings = page.frameLocator('main iframe[title="prefs app"]');
   await expect(
     settings.getByRole("heading", { name: "Preferences billing" })
   ).toBeVisible({ timeout: 20_000 });
 
-  // The person picks another tab; the panel's screen asks for the
+  // The person picks another section; the panel's screen asks for the
   // settings again: they show again.
-  await page.getByRole("tab", { name: /^Pages/u }).click();
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await sections.getByRole("link", { name: "Sharing" }).click();
   await billing.click();
-  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute(
-    "aria-selected",
-    "true"
+  await expect(sections.getByRole("link", { name: "Options" })).toHaveAttribute(
+    "aria-current",
+    "page"
   );
   await expect(
     settings.getByRole("heading", { name: "Preferences billing" })

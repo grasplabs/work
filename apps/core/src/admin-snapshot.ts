@@ -124,6 +124,7 @@ const interviewOf = (facts: AdminInterviewFacts): AdminInterview => {
     typed: facts.typed,
     interviewer: facts.interviewer,
     version: facts.version,
+    locale: facts.locale,
   };
 };
 

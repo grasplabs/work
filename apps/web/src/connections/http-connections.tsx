@@ -8,7 +8,7 @@ import type {
   HttpConnectionInput,
   HttpMethod,
 } from "@grasp-os/shared/http-connections";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   AlertDialog,
@@ -89,10 +89,6 @@ export const httpConnectionsMatching = (
       http.origin.toLocaleLowerCase().includes(needle)
   );
 };
-
-/** Whether `identity` may approve and revoke HTTP connections: admins, never staff. */
-export const managesHttpConnections = (identity: Identity): boolean =>
-  isAdmin(identity.role) && !identity.staff;
 
 /** The credential's kinds, as the form offers them. */
 type CredentialKind = "header" | "bearer";
@@ -464,12 +460,15 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
 );
 
 /** One HTTP connection: where it reaches, what it allows, and, for admins, revoking it. */
-const HttpConnectionItem = ({
+export const HttpConnectionItem = ({
   listed: { connection, http },
   manages,
+  heading: Heading = "h3",
 }: {
   listed: HttpListed;
   manages: boolean;
+  /** Its name's heading, under the list's own. */
+  heading?: "h3" | "h4";
 }) => {
   const { t } = useLingui();
   const ranOut = connection.status === "needs_reauth";
@@ -477,7 +476,7 @@ const HttpConnectionItem = ({
   return (
     <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-medium">{http.name}</h3>
+        <Heading className="font-medium">{http.name}</Heading>
         {manages ? (
           <Revoke
             createdAt={connection.createdAt}
@@ -532,7 +531,8 @@ export const HttpConnections = ({
   search: string | undefined;
 }) => {
   const { t } = useLingui();
-  const manages = managesHttpConnections(identity);
+  // Admins approve and revoke HTTP connections, never Grasp staff.
+  const manages = isMemberAdmin(identity);
   const shown =
     connections === undefined
       ? []

@@ -302,7 +302,7 @@ export const find = (
 };
 
 /** How many integrations each kind of app holds. */
-export const countByGroup = (
+const countByGroup = (
   integrations: readonly Integration[]
 ): ReadonlyMap<CatalogGroup, number> => {
   const counts = new Map<CatalogGroup, number>();

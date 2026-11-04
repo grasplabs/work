@@ -224,7 +224,7 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   await expect(page.getByRole("heading", { name: "At work" })).toBeVisible();
   await expect(
     row.getByRole("link", { name: `Open the App ${name}` })
-  ).toHaveAttribute("href", `/apps/${app}/details`);
+  ).toHaveAttribute("href", `/apps/${app}/settings?section=workflows`);
   // A run waits for a decision: it needs someone, and the tab counts it.
   await page.getByRole("tab", { name: /^Needs you/u }).click();
   await expect(page).toHaveURL(/tab=needs/u);

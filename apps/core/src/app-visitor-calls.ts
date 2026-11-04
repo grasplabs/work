@@ -42,9 +42,9 @@ import { requireNotStaff } from "./sharing.ts";
 //   version grants nothing until granted again. Unpublishing also ends
 //   every visitor's session, in the same batch as the status, and a
 //   sign-in's session goes in only while the App is still published.
-// - Code nobody approved, or whose approval was taken back. A call runs
-//   only for a screen build that gets the App's data, read before it runs
-//   and again before its answer or error is handed over
+// - Code core didn't lease, or of a revoked release. A call runs only for
+//   a screen build that gets the App's data, read before it runs and
+//   again before its answer or error is handed over
 //   (`deliveredToVisitor`), so a revocation while it ran keeps both.
 // - A call too large. Its request is bounded as a member's screen's is
 //   (`functionRequestMaxBytes`), and the endpoint's body has room for

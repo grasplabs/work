@@ -9,7 +9,6 @@ import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileLimits } from "@grasp-os/shared/run-files";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -170,7 +169,7 @@ const signedIn = async (role: Role) => {
 type Person = Awaited<ReturnType<typeof signedIn>>;
 
 /**
- * The Reviews App sealed and current, its screen approved, `review` bound
+ * The Reviews App sealed and current, `review` bound
  * to a workflow taking a file, with the App's `start` grant.
  */
 const reviewsApp = async () => {
@@ -211,12 +210,6 @@ const reviewsApp = async () => {
     }
   );
   await grantPermission(env, admin.acting, asked.id, { version: 1 });
-  const review = await admin.api.screenTrust.review(fixture.app);
-  await admin.api.screenTrust.approve(fixture.app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const release = await loadRelease(env, fixture.app, 1);
   const declared = declaredWorkflows(release.app, release.workflows).find(
     ({ alias }) => alias === "review"

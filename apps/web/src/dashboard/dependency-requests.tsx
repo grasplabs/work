@@ -446,7 +446,8 @@ export const PackagesCard = ({
           <Link
             className="hover:underline focus-visible:underline"
             params={{ app: request.subject.id }}
-            to="/apps/$app/details"
+            search={{ section: "packages" }}
+            to="/apps/$app/settings"
           >
             {who}
           </Link>

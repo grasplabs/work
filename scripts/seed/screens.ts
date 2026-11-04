@@ -167,12 +167,3 @@ export const engineScreens: Record<
         ];
   })
 );
-
-/**
- * The domains whose screens an admin approves as the seed runs; the
- * others' wait for an admin, so the dashboard shows one to approve.
- */
-export const approvedScreens: ReadonlySet<string> = new Set([
-  "Purchase-to-Pay",
-  "Opportunity-to-Cash",
-]);

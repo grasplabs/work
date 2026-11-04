@@ -6,7 +6,6 @@ import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -889,20 +888,13 @@ const signedIn = async (role: Role) => {
 };
 
 /**
- * The Desk App sealed and current with its screen approved, opened by its
- * builder, and that screen following the builder's preferences, once the
+ * The Desk App sealed and current, opened by its builder, and that screen following the builder's preferences, once the
  * first push came.
  */
 const followingDesk = async () => {
   const admin = await signedIn("admin");
   const builder = await signedIn("builder");
   const desk = await sealedDesk(filesWith(declared), builder.acting);
-  const review = await admin.api.screenTrust.review(desk.app);
-  await admin.api.screenTrust.approve(desk.app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const bundle = await builder.api.screens.open(desk.app, "desk");
   const follower = pageFollower();
   const subscription = await builder.api.screens
@@ -1004,17 +996,10 @@ describe(
     });
 
     it("follows a refused read to its repair: once the person replaces a value that no longer fits, the screen gets the document", async () => {
-      const admin = await signedIn("admin");
       const builder = await signedIn("builder");
       const desk = await sealedDesk(filesWith(declared), builder.acting);
       // What they stored no longer fits.
       await planted(desk, builder.userId, { theme: "blue" });
-      const review = await admin.api.screenTrust.review(desk.app);
-      await admin.api.screenTrust.approve(desk.app, {
-        version: review.version,
-        generation: review.generation,
-        artifacts: builtArtifacts(review.screens),
-      });
       const bundle = await builder.api.screens.open(desk.app, "desk");
       const follower = pageFollower();
       const subscription = await builder.api.screens
@@ -1046,11 +1031,16 @@ describe(
       await subscription.release();
     });
 
-    it("stops at the screen's revocation: its calls, and its subscription's next push", async () => {
+    it("stops at its release's revocation: its calls, and its subscription's next push", async () => {
       const { admin, builder, desk, bundle, follower, subscription } =
         await followingDesk();
       await expect(routedGet(builder, desk, bundle.lease)).resolves.toBe("ok");
-      await admin.api.screenTrust.revoke(desk.app, bundle.artifact);
+      await revokeRelease(
+        env,
+        admin.acting,
+        { app: desk.app, version: bundle.version },
+        "Leaks"
+      );
       await expect(routedGet(builder, desk, bundle.lease)).resolves.toBe(
         "screen.revoked"
       );

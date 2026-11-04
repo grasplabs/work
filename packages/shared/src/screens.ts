@@ -14,7 +14,6 @@ import {
   screenFrameReady,
   screenLimits,
 } from "./screen-limits.ts";
-import type { ScreenDelivery } from "./screen-trust.ts";
 import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web): a
@@ -22,6 +21,59 @@ import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 // that build's modules and nothing else, connected to its App's server
 // through the page and core. Core checks the person's session and role on
 // every call; the frame only ever talks to the page.
+
+/**
+ * The WebRTC interfaces that open a peer connection: the one way out of a
+ * screen's frame its policy doesn't close (core's security-headers.ts).
+ * The compiler refuses them in a screen (no-peer-connections), and the
+ * frame's bootstrap takes them away before the screen's code runs (core's
+ * screen-frame.ts).
+ */
+export const screenPeerInterfaces: readonly string[] = [
+  "RTCPeerConnection",
+  "webkitRTCPeerConnection",
+  "mozRTCPeerConnection",
+  "RTCDataChannel",
+  "RTCIceTransport",
+  "RTCDtlsTransport",
+  "RTCSctpTransport",
+];
+
+/**
+ * Elements that hold a document of their own, and with it a realm with
+ * its own WebRTC and network: refused in a screen, as
+ * `screenPeerInterfaces` are, by their local names.
+ */
+export const screenNestedDocuments: readonly string[] = [
+  "iframe",
+  "frame",
+  "object",
+  "embed",
+  "fencedframe",
+  "portal",
+];
+
+/** The interfaces of `screenNestedDocuments`, as a browser names them. */
+export const screenNestedInterfaces: readonly string[] = [
+  "HTMLIFrameElement",
+  "HTMLFrameElement",
+  "HTMLObjectElement",
+  "HTMLEmbedElement",
+  "HTMLFencedFrameElement",
+  "HTMLPortalElement",
+];
+
+/** A screen's code as core built it: the SHA-256, in hex, of what a frame is handed. */
+export const artifactSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * Whether code gets an App's data now: `open`; `revoked` once the release
+ * it runs was revoked; `unreviewed` for code Grasp didn't serve (no lease
+ * core signed: a portable host) while the App's data isn't `ordinary`
+ * (@grasp-os/shared/data-policy). Core decides it again on every call and
+ * every push.
+ */
+export type ScreenDelivery = "open" | "unreviewed" | "revoked";
 
 export {
   appFunctionPath,
@@ -44,11 +96,17 @@ export type { ScreenLanguage, StreamCallAction } from "./screen-limits.ts";
 /** A value the page or core made up: never longer than a hash in hex. */
 const stageValue = z.string().min(1).max(128);
 
-/** The frame's `ready`, as the page reads it. */
+/**
+ * The frame's `ready`, as the page reads it: `supported` is false when the
+ * browser doesn't enforce what keeps a screen from making a document of
+ * its own (core's screen-frame.ts), and the frame then starts nothing.
+ */
 export const screenReadySchema = z.strictObject({
   type: z.literal(screenFrameReady),
   load: stageValue,
+  supported: z.boolean(),
 });
+export type ScreenReady = z.output<typeof screenReadySchema>;
 
 /** The runtime's `mounted`, as the page reads it. */
 export const screenMountedSchema = z.strictObject({
@@ -179,8 +237,8 @@ export interface ScreenBundle {
   screen: string;
   /**
    * The SHA-256, in hex, of the code a frame runs (the screen's modules,
-   * the kit's modules they load and their CSS), as core built it: what an
-   * admin approves, and what the frame's document runs and nothing else.
+   * the kit's modules they load and their CSS), as core built it: what
+   * core leases the frame, and what its document runs and nothing else.
    * The frame says it back once the screen has mounted
    * (`screenFrameMounted`).
    */
@@ -373,7 +431,7 @@ export interface QuerySnapshotPush {
  * What core pushes to a page following an App's current version
  * (`ScreensApi.watchVersion`): the version current now (null while it
  * has none), read for the person; `recheck` when their access to the App,
- * or a build's approval, may have dropped, so the page asks each frame's
+ * or a build's delivery (its release revoked), may have dropped, so the page asks each frame's
  * build again (`ScreenFrameApi.delivery`). A refusal, the person having
  * lost the App or their session, is the last push.
  */
@@ -396,8 +454,10 @@ export interface RunSubscriptionApi {
  * frame and the person it was opened for. Each call is decided on that
  * build alone, never on what another frame of the App on the connection
  * runs: every call that reaches the App's data or runs is refused with
- * `screen.unreviewed` or `screen.revoked` unless that build gets the data
- * now, read before the call, before its answer and before each push.
+ * `screen.revoked` once the release that build runs was revoked, or with
+ * `screen.unreviewed` when core leased the frame no build and the App's
+ * data isn't `ordinary`, read before the call, before its answer and
+ * before each push.
  * `close` (or letting go of the stub) releases everything the frame
  * follows through it, its live queries and its runs' updates, at once;
  * a closed frame is refused every call (`screen.invalid`).
@@ -508,11 +568,8 @@ export interface ScreenFrameApi {
 export interface ScreensApi {
   /**
    * A screen of the App, built from its current version: refused with
-   * `screen.unreviewed` or `screen.revoked` while the App's data is
-   * sensitive and nobody approved exactly this build
-   * (@grasp-os/shared/screen-trust), or with `screen.revoked` once its
-   * approval was taken back, however the data is classified. Refusals are
-   * audited, the same one once in a while. Counted against what one
+   * `screen.revoked` once the release of that version was revoked.
+   * Refusals are audited, the same one once in a while. Counted against what one
    * person's screens of the App may ask (`screen.rate_limited`).
    */
   open: (
@@ -546,7 +603,7 @@ export interface ScreensApi {
    * lease `open` gave it: how frames that share a connection each get
    * their App's data on their own build, and let go of all they follow
    * when they close. A lease core didn't sign for this person and App
-   * names no build, and the frame runs one nobody approved.
+   * names no build: the frame is decided as code core didn't serve.
    */
   frame: (app: string, lease: string) => Promise<ScreenFrameApi>;
   /**
@@ -602,11 +659,10 @@ export const screenErrors = defineErrorFamily({
   "screen.answer_too_large":
     "The App answered with more data than a page takes in one call.",
   "screen.unreviewed":
-    "Nobody has approved this page's code for the App's data yet.",
-  "screen.revoked": "The approval of this page's code was taken back.",
+    "An admin hasn't opened this App's data to code outside Grasp.",
+  "screen.revoked": "This version of the App was revoked.",
   "screen.review_outdated":
-    "The page or its approvals changed since they were reviewed. Review them again.",
-  "screen.not_approved": "That build of the page isn't approved.",
+    "What the App's data is changed since it was read. Read it again.",
   "screen.reload_required": "This page is out of date. Reload it to go on.",
   "screen.access_changed":
     "Your access to this App changed. What it shows is being read again.",

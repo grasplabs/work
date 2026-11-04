@@ -19,7 +19,7 @@ export const linkErrors = defineErrorFamily({
     "Another link is waiting for an answer, or one was just turned down. Try again in a moment.",
   "link.unavailable": "Links can't be opened here.",
   "link.confirmation_required":
-    "This page read restricted data, so each link it opens needs your confirmation.",
+    "Each link this page opens needs your confirmation.",
 });
 
 /** An alias of a links resource, as an App declares it. */

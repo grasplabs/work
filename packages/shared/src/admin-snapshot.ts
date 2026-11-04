@@ -123,6 +123,11 @@ export const adminInterviewSchema = z.object({
    * kept it; missing from a core older than this field (expand, then contract).
    */
   version: z.string().max(64).nullable().optional(),
+  /**
+   * The language its last turn was held in. Null before a turn ran; missing
+   * from a core older than this field (expand, then contract).
+   */
+  locale: z.string().max(16).nullable().optional(),
 });
 export type AdminInterview = z.output<typeof adminInterviewSchema>;
 

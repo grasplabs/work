@@ -9,15 +9,21 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
-import { teams } from "./db/core/schema.ts";
+import { projects, teams } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { requireProjectRole } from "./project-access.ts";
+import type { Person } from "./project-access.ts";
+import { viaProjectSql } from "./project-sql.ts";
 
 // Sharing a resource with people and teams of the organization, the same
 // for every kind that is shared (Apps, app-members.ts; business stores,
 // data-stores.ts): who a member row is, who is still a member, whom a
 // resource can be shared with, that Grasp staff never share, and what the
 // audit log records. Each kind keeps its own table of members, with a
-// `member_type` and a `member_id` column.
+// `member_type` and a `member_id` column. Apps and workflows may also be
+// shared with everyone in a project (`project`, projects.ts): such a row
+// is `by`'s while they are in the project, read in the statement
+// (project-access.ts).
 
 /** A member table's columns that say whom a row shares with. */
 export interface MemberColumns {
@@ -25,19 +31,28 @@ export interface MemberColumns {
   memberId: SQLiteColumn;
 }
 
-/** Whom a resource is shared with: a person or a team. */
+/** Whom a resource is shared with: a person, a team or a project. */
 export interface MemberRef {
-  type: "person" | "team";
+  type: "person" | "team" | "project";
   id: string;
 }
 
-/** The member rows that are `by`'s: their own, or one of their teams'. */
+/** Whom a resource that is never shared with a project is shared with. */
+export interface PersonOrTeam extends MemberRef {
+  type: "person" | "team";
+}
+
+/**
+ * The member rows that are `by`'s: their own, one of their teams', or one
+ * of a project they are in.
+ */
 export const rowsOf = (
   columns: MemberColumns,
   by: Pick<Identity, "userId" | "teams">
 ): SQL =>
   or(
     and(eq(columns.memberType, "person"), eq(columns.memberId, by.userId)),
+    viaProjectSql(columns.memberType, columns.memberId, by.userId),
     by.teams.length === 0
       ? undefined
       : and(
@@ -51,11 +66,15 @@ export const rowsOf = (
 
 /**
  * The member rows that still reach someone: a person in the organization
- * now, or a team that still exists. The rest reach nothing.
+ * now, a team or a project that still exists. The rest reach nothing.
  */
 export const stillMembers = (columns: MemberColumns): SQL =>
   or(
     and(eq(columns.memberType, "person"), activeMember(columns.memberId)),
+    and(
+      eq(columns.memberType, "project"),
+      sql`EXISTS (SELECT 1 FROM ${projects} WHERE ${projects.id} = ${columns.memberId})`
+    ),
     and(
       eq(columns.memberType, "team"),
       sql`EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${columns.memberId} AND ${teams.organizationId} = ${organizationId})`
@@ -107,7 +126,7 @@ export interface SharingRules {
 
 /**
  * Refuses sharing with `member`: only with someone in the organization
- * now, or one of its teams; never with the owner; and, where the share
+ * now, one of its teams, or a project `by` builds; never with the owner; and, where the share
  * needs it, only with someone whose role in the organization builds. A
  * team can be shared with whatever its people's roles: each acts only as
  * their own role allows.
@@ -115,8 +134,22 @@ export interface SharingRules {
 export const requireSharable = async (
   env: Pick<Env, "DB">,
   member: MemberRef,
-  rules: SharingRules
+  rules: SharingRules,
+  /**
+   * Who shares: needed to share with a project, which only its builders
+   * share with, so whoever decides whom it reaches also decides who is in
+   * it. Kinds that are never shared with a project leave it out.
+   */
+  by?: Person
 ): Promise<void> => {
+  if (member.type === "project") {
+    if (by === undefined) {
+      throw rules.invalid("type: It can't be shared with a project.");
+    }
+    // Checked again in the share's own write (`projectStillBuiltSql`).
+    await requireProjectRole(env, by, member.id, "builder");
+    return;
+  }
   if (member.type === "team") {
     const team = await drizzle(env.DB)
       .select({ id: teams.id })

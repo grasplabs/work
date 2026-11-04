@@ -20,6 +20,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { revokePermission } from "../src/permissions.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import {
   answerWorkflowCommand,
   failureOf,
@@ -61,6 +62,7 @@ import type { Person } from "./json-workflow-apps.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { runInstance, sleeping, whileEngineRefuses, woken } from "./runs.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
 
@@ -2207,8 +2209,8 @@ describe(
       const { builder, admin, app, reference } = await boundApp({
         hold: "PT1H",
       });
-      const { generation } = await admin.api.screenTrust.review(app);
-      await admin.api.screenTrust.classify(app, "ordinary", generation);
+      const { generation } = await admin.api.dataPolicy.read(app);
+      await admin.api.dataPolicy.classify(app, "ordinary", generation);
       const start = JSON.stringify({
         workflow: wireOf(reference),
         command: "start",
@@ -2275,10 +2277,10 @@ describe(
       });
     });
 
-    it("fences a screen whose build lost its approval at its run's next change", async () => {
+    it("fences a screen whose release was revoked at its run's next change", async () => {
       const fixture = await boundApp({ hold: "PT1H" });
-      const { builder, admin, app, reference } = fixture;
-      const { lease, artifact } = await builder.api.screens.open(app, "desk");
+      const { builder, app, reference } = fixture;
+      const { lease, version } = await builder.api.screens.open(app, "desk");
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
       const handle = await channel.start(read, { who: "Ada" });
@@ -2290,7 +2292,12 @@ describe(
           "running"
         );
       }, settles);
-      await admin.api.screenTrust.revoke(app, artifact);
+      await revokeRelease(
+        env,
+        await actingPerson("admin"),
+        { app: appIdSchema.parse(app), version },
+        "Leaks data"
+      );
       await terminateResourceRun(
         env,
         builder.acting,

@@ -78,9 +78,15 @@ const loaded = async (element: HTMLScriptElement | HTMLImageElement): Promise<st
 const probe = async (): Promise<Record<string, string>> => {
   const script = document.createElement("script");
   script.type = "module";
-  script.src = \`\${artifact}${hostileName}.js\`;
-  const scriptOutcome = loaded(script);
-  headOf().append(script);
+  let scriptOutcome: Promise<string>;
+  try {
+    script.src = \`\${artifact}${hostileName}.js\`;
+    scriptOutcome = loaded(script);
+    headOf().append(script);
+  } catch {
+    // Refused outright: a script's address takes no string (Trusted Types).
+    scriptOutcome = Promise.resolve("refused");
+  }
 
   let worker = "started";
   try {
@@ -292,16 +298,23 @@ test("a screen can't load a package's code, or bring in what the code would fetc
 
   expect(JSON.parse((await probes.textContent()) ?? "")).toStrictEqual({
     script: "refused",
-    worker: "refused: SecurityError",
+    // A script's address takes no string (Trusted Types), a worker's
+    // neither: refused before the policy's worker-src is asked.
+    worker: "refused: TypeError",
     svg: "refused",
     fetch: "refused",
     varImage: "applied",
   });
-  // The frame's policy refused each (the worker by throwing, above); the
-  // receiver heard nothing.
+  // The frame's policy refused each (the script and the worker as Trusted
+  // Types, by throwing, above); the receiver heard nothing.
   await expect
     .poll(() =>
-      ["script-src-elem", "img-src", "style-src-elem", "connect-src"].filter(
+      [
+        "require-trusted-types-for",
+        "img-src",
+        "style-src-elem",
+        "connect-src",
+      ].filter(
         (directive) => !violations.some((line) => line.startsWith(directive))
       )
     )

@@ -1,4 +1,4 @@
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { DropdownMenuItem } from "@grasp-os/ui/components/dropdown-menu";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon, Maximize2Icon } from "lucide-react";
@@ -13,11 +13,12 @@ import {
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
 
-// An App's own page (engines/app-page.tsx). Its pages (core's screens)
-// open in the frame under its bar, the one in the address's `screen` or
-// else its first; an archived App opens none, as nobody uses one until it
-// is restored. "Open full page" opens the open page outside the frame
-// (apps.$app.full.tsx).
+// The live App (engines/app-page.tsx), as its people use it: its current
+// version. Its pages (core's screens) open in the frame under its bar, the
+// one in the address's `screen` or else its first; an archived App opens
+// none, as nobody uses one until it is restored. "Open full page" opens
+// the open page outside the frame (apps.$app.full.tsx). Its builders build
+// it in its workspace (_shell.apps.$app_.edit.tsx), never here.
 
 /** The screen to open: the one asked for, if the App has it, else its first. */
 const openScreen = (
@@ -28,7 +29,7 @@ const openScreen = (
 
 const AppPageView = () => {
   const { app: id } = Route.useParams();
-  const { screen: asked, view } = Route.useSearch();
+  const { screen: asked } = Route.useSearch();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const router = useRouter();
@@ -55,20 +56,6 @@ const AppPageView = () => {
   return (
     <>
       <SiteHeader
-        actions={
-          open === undefined || view === "code" ? undefined : (
-            <Link
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-              params={{ app: id }}
-              search={{ screen: open }}
-              state={(previous) => ({ ...previous, screenOpening: opening })}
-              to="/apps/$app/full"
-            >
-              <Maximize2Icon data-icon="inline-start" />
-              <Trans>Open full page</Trans>
-            </Link>
-          )
-        }
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: app.name }]}
       />
       <AppPage
@@ -77,8 +64,27 @@ const AppPageView = () => {
         // Another App starts afresh: nothing the last one said stays.
         key={app.id}
         contents={contents}
+        fullPage={
+          open === undefined ? null : (
+            <DropdownMenuItem
+              render={
+                <Link
+                  params={{ app: id }}
+                  search={{ screen: open }}
+                  state={(previous) => ({
+                    ...previous,
+                    screenOpening: opening,
+                  })}
+                  to="/apps/$app/full"
+                />
+              }
+            >
+              <Maximize2Icon />
+              <Trans>Open full page</Trans>
+            </DropdownMenuItem>
+          )
+        }
         open={open}
-        view={view ?? "app"}
       >
         {open === undefined ? null : (
           <ScreenFrame
@@ -116,13 +122,8 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   component: AppPageView,
   // The page to open; any other value (an old or hand-typed address)
   // opens the App's first.
-  // `view=code` shows the App's code instead, to its builders.
-  validateSearch: (
-    search: Record<string, unknown>
-  ): { screen?: string; view?: "code" } => ({
-    ...(typeof search.screen === "string" ? { screen: search.screen } : {}),
-    ...(search.view === "code" ? { view: "code" } : {}),
-  }),
+  validateSearch: (search: Record<string, unknown>): { screen?: string } =>
+    typeof search.screen === "string" ? { screen: search.screen } : {},
   loader: async ({ context: { core }, params }) =>
     await loadFromCore(core, async (session) => {
       const [app, contents] = await Promise.all([

@@ -638,7 +638,11 @@ const WorkflowView = ({
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
                 render={
-                  <Link params={{ app: summary.app }} to="/apps/$app/details" />
+                  <Link
+                    params={{ app: summary.app }}
+                    search={{ section: "workflows" }}
+                    to="/apps/$app/settings"
+                  />
                 }
                 variant="outline"
               >

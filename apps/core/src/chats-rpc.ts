@@ -1,14 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
-import {
-  chatTitleSchema,
-  projectDocumentMaxBytes,
-  projectDocumentNameSchema,
-  projectGoalSchema,
-  projectNameSchema,
-  readOnlyRevision,
-} from "@grasp-os/shared/chat";
+import { chatTitleSchema, readOnlyRevision } from "@grasp-os/shared/chat";
 import type {
   ChatConnectionRequest,
   ChatCitedDocument,
@@ -16,7 +9,6 @@ import type {
   ChatDraftVersion,
   ChatFile,
   ChatFileInput,
-  ChatProject,
   ChatQuestion,
   ChatSearchHit,
   ChatsApi,
@@ -24,7 +16,6 @@ import type {
   ChatUpdate,
   FixRunResult,
   PreviewBundle,
-  ProjectDocument,
 } from "@grasp-os/shared/chat";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import {
@@ -38,6 +29,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -49,10 +41,18 @@ import type {
   QuerySnapshotPush,
   ScreenProblem,
 } from "@grasp-os/shared/screens";
-import { z } from "zod";
 
+import { proposeChatDraft } from "./agent-builds.ts";
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
+import { reapProvisionalApp } from "./app-removal.ts";
+import {
+  appFor,
+  createApp,
+  draftFiles,
+  editableApp,
+  screensIn,
+} from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
@@ -68,11 +68,12 @@ import { relayPreviewStream } from "./preview-stream-relay.ts";
 import { previewLoadMsOf } from "./preview-updates.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
+import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
-import type { LeasedBuild } from "./screen-trust.ts";
 import {
   admitPreviewCall,
   admitWindow,
@@ -94,8 +95,7 @@ import { questionSchema } from "./workspace.ts";
 // chat of someone else's is refused as if there were none. Making,
 // renaming and deleting one is audited, and so is starting one to fix a
 // failed run (`fixRun`), and deciding a connection its agent asked for
-// (chat-connections.ts). A person's projects are theirs alike, and every
-// change to one is audited, as is moving a chat into or out of one.
+// (chat-connections.ts).
 
 /**
  * The agent every chat's agent is: the organization workspace's, so
@@ -122,16 +122,12 @@ const chatIdOf = (chatId: unknown): ChatId => {
   return parsed.data;
 };
 
-/**
- * A document to add to a project, as the page sends it: a name with one
- * of the types a project takes, and text. Its size and how many the
- * project has are the object's to check (`addProjectDocument`).
- */
-const projectDocumentSchema = z.strictObject({
-  name: projectDocumentNameSchema,
-  // A character is at least a byte: longer can't fit.
-  content: z.string().max(projectDocumentMaxBytes),
-});
+/** Logs a new App whose chat failed and that couldn't be reaped: the reaper takes it in time. */
+const unreapedApp =
+  (appId: string) =>
+  (error: unknown): void => {
+    log.warn("chat.new_app_unreaped", { appId, ...errorFields(error) });
+  };
 
 /**
  * Why a question wasn't taken, as its person reads it: an unplanned error
@@ -338,26 +334,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
-  async search(
-    query: string,
-    projectId?: string | null
-  ): Promise<ChatSearchHit[]> {
+  async search(query: string): Promise<ChatSearchHit[]> {
     return await withPerson(this.#check, async ({ userId }) => {
-      if (
-        typeof query !== "string" ||
-        (projectId !== undefined &&
-          projectId !== null &&
-          typeof projectId !== "string")
-      ) {
+      if (typeof query !== "string") {
         throw agentErrors.create("agent.invalid_request");
       }
       // Only the signed-in person's own object, and only their chats in it:
       // nobody searches another person's, an admin no more than anyone.
-      return await this.#chatsOf(userId).searchChats(
-        userId,
-        query,
-        projectId ?? null
-      );
+      return await this.#chatsOf(userId).searchChats(userId, query);
     });
   }
 
@@ -369,7 +353,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
-  async create(title: string, projectId?: string | null): Promise<ChatSummary> {
+  async create(title: string): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
@@ -380,9 +364,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         parsed.data,
         userId,
         chatAgentId,
-        actorOf(person),
-        undefined,
-        projectId ?? undefined
+        actorOf(person)
       );
       return {
         id: chat.id,
@@ -390,7 +372,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
         running: false,
-        projectId: chat.projectId,
         appId: chat.appId,
         via: chat.via,
       };
@@ -401,35 +382,81 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(this.#check, async (person) => {
       // A builder's, of an App that isn't archived: the chat changes it.
       const { id, name } = await editableApp(this.#env, person, app);
-      const chats = this.#chatsOf(person.userId);
-      const kept = await chats.appChat(person.userId, id);
-      if (kept !== null) {
-        return kept;
-      }
-      // An App's name always fits a chat's title.
-      const title = chatTitleSchema.parse(name);
-      const chat = await chats.createChat(
-        title,
+      const kept = await this.#chatsOf(person.userId).appChat(
         person.userId,
-        chatAgentId,
-        actorOf(person),
-        undefined,
-        undefined,
-        "web",
-        undefined,
         id
       );
-      return {
-        id: chat.id,
-        title: chat.title,
-        createdAt: chat.createdAt.toISOString(),
-        lastAt: chat.lastAt.toISOString(),
-        running: false,
-        projectId: chat.projectId,
-        appId: chat.appId,
-        via: chat.via,
-      };
+      return kept ?? (await this.#appChat(person, id, name));
     });
+  }
+
+  async newApp(input: {
+    name: string;
+    description: string;
+  }): Promise<ChatSummary & { appId: string }> {
+    return await withPerson(this.#check, async (person) => {
+      // Its chat's ID picked first, so the App is made provisional in it,
+      // as a chat's agent makes one (`createApp`), and reaped as one is
+      // (app-removal.ts, `reapAbandonedApps`).
+      const origin = {
+        workspaceId: personalWorkspaceId(person.userId),
+        chatId: chatIdSchema.parse(crypto.randomUUID()),
+      };
+      const made = await createApp(this.#env, person, input, undefined, origin);
+      try {
+        const chat = await this.#appChat(
+          person,
+          made.id,
+          made.name,
+          origin.chatId
+        );
+        return { ...chat, appId: made.id };
+      } catch (error) {
+        // Refused (too many chats, say): its chat never came to be, so the
+        // App goes now, rather than one more each time the person asks
+        // again. Why the chat was refused is what they read. Anything else
+        // may have made the chat after all: the App is left to the reaper.
+        if (isExpectedError(error)) {
+          await reapProvisionalApp(this.#env, {
+            id: made.id,
+            name: made.name,
+            ...origin,
+          }).catch(unreapedApp(made.id));
+        }
+        throw error;
+      }
+    });
+  }
+
+  /** A new chat of `person`'s for App `id`, named after it (`forApp`). */
+  async #appChat(
+    person: Identity,
+    id: AppId,
+    name: string,
+    chatId?: ChatId
+  ): Promise<ChatSummary> {
+    // An App's name always fits a chat's title.
+    const title = chatTitleSchema.parse(name);
+    const chat = await this.#chatsOf(person.userId).createChat(
+      title,
+      person.userId,
+      chatAgentId,
+      actorOf(person),
+      undefined,
+      "web",
+      undefined,
+      id,
+      chatId
+    );
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: false,
+      appId: chat.appId,
+      via: chat.via,
+    };
   }
 
   async rename(chatId: string, title: string): Promise<void> {
@@ -443,111 +470,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data,
-        actorOf(person)
-      );
-    });
-  }
-
-  async moveChat(chatId: string, projectId: string | null): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await this.#chatsOf(person.userId).moveChat(
-        chatIdOf(chatId),
-        person.userId,
-        projectId,
-        actorOf(person)
-      );
-    });
-  }
-
-  async projects(): Promise<ChatProject[]> {
-    return await withPerson(
-      this.#check,
-      async ({ userId }) => await this.#chatsOf(userId).projects(userId)
-    );
-  }
-
-  async createProject(name: string): Promise<ChatProject> {
-    return await withPerson(this.#check, async (person) => {
-      const parsed = projectNameSchema.safeParse(name);
-      if (!parsed.success) {
-        throw agentErrors.create("agent.invalid_project");
-      }
-      return await this.#chatsOf(person.userId).createProject(
-        person.userId,
-        parsed.data,
-        actorOf(person)
-      );
-    });
-  }
-
-  async renameProject(projectId: string, name: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      const parsed = projectNameSchema.safeParse(name);
-      if (!parsed.success) {
-        throw agentErrors.create("agent.invalid_project");
-      }
-      await this.#chatsOf(person.userId).renameProject(
-        projectId,
-        person.userId,
-        parsed.data,
-        actorOf(person)
-      );
-    });
-  }
-
-  async setProjectGoal(projectId: string, goal: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      const parsed = projectGoalSchema.safeParse(goal);
-      if (!parsed.success) {
-        throw agentErrors.create("agent.invalid_project");
-      }
-      await this.#chatsOf(person.userId).setProjectGoal(
-        projectId,
-        person.userId,
-        parsed.data,
-        actorOf(person)
-      );
-    });
-  }
-
-  async addProjectDocument(
-    projectId: string,
-    document: unknown
-  ): Promise<ProjectDocument> {
-    return await withPerson(this.#check, async (person) => {
-      // A name and text only: whatever else the page passed goes no further.
-      const parsed = projectDocumentSchema.safeParse(document);
-      if (!parsed.success) {
-        throw agentErrors.create("agent.invalid_project_document");
-      }
-      return await this.#chatsOf(person.userId).addProjectDocument(
-        projectId,
-        person.userId,
-        parsed.data,
-        actorOf(person)
-      );
-    });
-  }
-
-  async removeProjectDocument(
-    projectId: string,
-    documentId: string
-  ): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await this.#chatsOf(person.userId).removeProjectDocument(
-        projectId,
-        person.userId,
-        documentId,
-        actorOf(person)
-      );
-    });
-  }
-
-  async removeProject(projectId: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await this.#chatsOf(person.userId).deleteProject(
-        projectId,
-        person.userId,
         actorOf(person)
       );
     });
@@ -640,7 +562,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         title: chat.title,
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
-        projectId: chat.projectId,
         appId: chat.appId,
         via: chat.via,
       };
@@ -729,6 +650,52 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         actorOf(by)
       );
+    });
+  }
+
+  /**
+   * Proposes the chat's draft of `app` as the App's next version, by the
+   * person themselves (`proposeChatDraft`, as the chat's agent proposes
+   * it): only while they build the App and it isn't archived, and never
+   * from a chat that read restricted data, which its agent couldn't
+   * propose from either: what it wrote there may carry that data.
+   */
+  async proposeDraft(
+    chatId: string,
+    app: string,
+    message: string
+  ): Promise<number> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await editableApp(this.#env, by, app);
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const authority = chatAuthority({
+        agentId: chatAgentId,
+        personId: by.userId,
+      });
+      const unrestricted = async (): Promise<void> => {
+        if (await isRestricted(this.#env, authority, chatContext(scope))) {
+          throw permissionErrors.create("permission.restricted");
+        }
+      };
+      // Refused early, and again right before the commit: a chat stays
+      // restricted once it is, so a draft its agent wrote after reading
+      // restricted data, while this checked it, is never committed.
+      await unrestricted();
+      const { version } = await proposeChatDraft(
+        this.#env,
+        by,
+        scope,
+        id,
+        message,
+        { admit: unrestricted }
+      );
+      if (version === null) {
+        throw appErrors.create("app.draft_failed");
+      }
+      return version;
     });
   }
 
@@ -877,8 +844,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       id,
       "preview"
     );
-    // A preview reads no real data, so no approval decides it; its
-    // frame still runs exactly this build and nothing else.
+    // A preview reads no real data; its frame still runs exactly this
+    // build and nothing else.
     signal.throwIfAborted();
     await stageFrame(this.#env, built.artifact, built.code);
     signal.throwIfAborted();
