@@ -282,6 +282,19 @@ export const AskedLine = ({ asked }: { asked: ChatAsked }) => {
 };
 
 /**
+ * Where the person is with the questions waiting for them: the call they
+ * chose to type instead of answering, and how far they got with its
+ * questions. Held by the box's place (`AskOrCompose`), or above it by a
+ * place whose box can unmount while the chat goes on (the App workspace's
+ * panel, hidden or moved into a sheet), so neither is lost.
+ */
+export const useAskProgress = () => {
+  const [typing, setTyping] = useState<string>();
+  const [progress, setProgress] = useState<AskProgress>();
+  return { typing, setTyping, progress, setProgress };
+};
+
+/**
  * The box to ask in, or, while the chat's agent waits on questions it
  * asked with choices, those questions in its place, until the person
  * answers or chooses to type instead; then a way back to them above it.
@@ -289,17 +302,18 @@ export const AskedLine = ({ asked }: { asked: ChatAsked }) => {
 export const AskOrCompose = ({
   messages,
   onAnswer,
+  held,
   ...composer
 }: ComponentProps<typeof Composer> & {
   messages: readonly ChatMessage[];
   /** Sends the person's answers, as their own message. */
   onAnswer: (answers: string) => void;
+  /** Where the person is with the questions, when kept above the box. */
+  held?: ReturnType<typeof useAskProgress>;
 }) => {
   const asking = pendingAsk(messages, composer.running);
-  // The questions the person chose to type instead of answering, by call.
-  const [typing, setTyping] = useState<string>();
-  // How far they got with them, kept while they type instead.
-  const [progress, setProgress] = useState<AskProgress>();
+  const own = useAskProgress();
+  const { typing, setTyping, progress, setProgress } = held ?? own;
   if (asking !== undefined && typing !== asking.callId) {
     return (
       <AskedQuestions

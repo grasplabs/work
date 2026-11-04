@@ -24,7 +24,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ArchiveIcon, LinkIcon } from "lucide-react";
+import { ArchiveIcon, LinkIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
@@ -83,6 +83,7 @@ import type { ResourcesPage } from "./resource-bindings.tsx";
 import type { readStoreChanges } from "./store-changes.tsx";
 import { StoreChanges } from "./store-changes.tsx";
 import { useAppRead } from "./use-app-read.ts";
+import type { AppRead } from "./use-app-read.ts";
 
 // Everything about an App besides the App itself, in one place, grouped
 // plainly, a section at a time: what it is called and where it stands
@@ -138,21 +139,56 @@ const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
   }),
 };
 
-/** What a section shows of a read: a skeleton while it comes, why it didn't, or `children` once it did. */
+/**
+ * That a section shows what was read before, its latest re-read having
+ * failed: why, and a way to read it again.
+ */
+const RefreshFailed = ({
+  refresh: { failure, retry },
+}: {
+  refresh: NonNullable<AppRead<unknown>["refresh"]>;
+}) => (
+  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-3 text-sm">
+    <TriangleAlertIcon
+      aria-hidden="true"
+      className="text-status-attention size-4 flex-none"
+    />
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <p className="font-medium">
+        <Trans>Couldn&apos;t refresh. This may be out of date.</Trans>
+      </p>
+      <NotLoaded page={failure} />
+    </div>
+    <Button onClick={retry} size="sm" variant="outline">
+      <Trans>Try again</Trans>
+    </Button>
+  </div>
+);
+
+/**
+ * What a section shows of a read: a skeleton while it comes, why it
+ * didn't, or `children` once it did, over a note while a re-read failed.
+ */
 export const Read = <T,>({
   read,
   children,
 }: {
-  read: Loaded<T> | undefined;
+  read: AppRead<T> | undefined;
   children: (data: T) => ReactElement;
 }) => {
   if (read === undefined) {
     return <LoadingLines />;
   }
-  return read.state === "ready" ? (
-    children(read.data)
-  ) : (
-    <NotLoaded page={read} />
+  if (read.state !== "ready") {
+    return <NotLoaded page={read} />;
+  }
+  return (
+    <>
+      {read.refresh === undefined ? null : (
+        <RefreshFailed refresh={read.refresh} />
+      )}
+      {children(read.data)}
+    </>
   );
 };
 

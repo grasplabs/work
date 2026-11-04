@@ -3,24 +3,25 @@ import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { Crumb } from "./frame/site-header.tsx";
 
 /**
- * The crumb of the workflow whose run asks: its App's workflow, or an
- * independent workflow's own page when core says the reader may open it;
- * otherwise only its name.
+ * The crumb of the workflow whose run asks, linking its App's workflow or
+ * an independent workflow's own page when core says the reader may open
+ * it; otherwise only its name.
  */
 export const decisionSource = (decision: DecisionView): Crumb => {
-  if (decision.app !== undefined) {
+  const { app, workflowResource, workflow } = decision;
+  if (decision.opens === true && app !== undefined) {
     return {
-      label: decision.workflow,
+      label: workflow,
       to: "/workflows/$app/$workflow",
-      params: { app: decision.app.id, workflow: decision.workflow },
+      params: { app: app.id, workflow },
     };
   }
-  if (decision.workflowResource?.opens === true) {
+  if (decision.opens === true && workflowResource !== undefined) {
     return {
-      label: decision.workflowResource.name,
+      label: workflowResource.name,
       to: "/workflows/$workflow",
-      params: { workflow: decision.workflowResource.id },
+      params: { workflow: workflowResource.id },
     };
   }
-  return { label: decision.workflowResource?.name ?? decision.workflow };
+  return { label: workflowResource?.name ?? workflow };
 };

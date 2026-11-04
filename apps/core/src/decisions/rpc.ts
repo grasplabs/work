@@ -8,6 +8,7 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 
+import { appFor } from "../apps.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -20,14 +21,10 @@ import {
   waitingDecisions,
 } from "./decisions.ts";
 
-/** Whether `by` may open independent workflow `id`'s page. */
-const opensWorkflow = async (
-  env: Env,
-  by: Identity,
-  id: string
-): Promise<boolean> => {
+/** Whether `allows` lets `by` in, an expected refusal saying no. */
+const allowed = async (allows: () => Promise<unknown>): Promise<boolean> => {
   try {
-    await requireWorkflowRole(env, by, id, "user");
+    await allows();
     return true;
   } catch (error) {
     if (isExpectedError(error)) {
@@ -35,6 +32,30 @@ const opensWorkflow = async (
     }
     throw error;
   }
+};
+
+/**
+ * Whether `by` may open the page of the workflow whose run asks `view`:
+ * its App's workflow, for someone with a role in the App, or an
+ * independent workflow's own page, for someone with a role in it. A
+ * decider needs neither to answer.
+ */
+const opensSource = async (
+  env: Env,
+  by: Identity,
+  view: DecisionView
+): Promise<boolean> => {
+  const { app, workflowResource } = view;
+  if (app !== undefined) {
+    return await allowed(async () => await appFor(env, by, app.id, "user"));
+  }
+  if (workflowResource !== undefined) {
+    return await allowed(
+      async () =>
+        await requireWorkflowRole(env, by, workflowResource.id, "user")
+    );
+  }
+  return false;
 };
 
 /**
@@ -68,16 +89,10 @@ export class DecisionsRpc extends CoreRpcTarget implements DecisionsApi {
   async get(decision: string): Promise<DecisionView> {
     return await withPerson(this.#check, async (by) => {
       const view = await decisionFor(this.#env, by, decision);
-      const source = view.workflowResource;
-      // A decider needn't have a role in the independent workflow that
-      // asks: its page is offered only to one who may open it.
-      if (
-        source === undefined ||
-        !(await opensWorkflow(this.#env, by, source.id))
-      ) {
-        return view;
-      }
-      return { ...view, workflowResource: { ...source, opens: true } };
+      // Its source's page is offered only to one who may open it.
+      return (await opensSource(this.#env, by, view))
+        ? { ...view, opens: true }
+        : view;
     });
   }
 

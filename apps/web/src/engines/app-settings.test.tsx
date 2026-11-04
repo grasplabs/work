@@ -272,6 +272,10 @@ const sections = () =>
     })
   );
 
+/** Whether a section says its latest re-read failed. */
+const note = (): boolean =>
+  document.body.textContent.includes("Couldn't refresh");
+
 describe(AppSettings, () => {
   afterEach(() => {
     act(() => {
@@ -460,5 +464,33 @@ describe(AppSettings, () => {
     await settled();
 
     expect(nameField()?.value).toBe("Invoice desk");
+  });
+
+  it("says a re-read failed over what it still shows, and reads again on Try again", async () => {
+    const fake = fakeCore("builder");
+    const router = await opened(fake);
+    const before = note();
+
+    fake.state.unreachable = true;
+    await act(async () => {
+      await router.invalidate();
+    });
+    await settled();
+    const failed = {
+      note: note(),
+      why: document.body.textContent.includes(
+        "Grasp can't be reached right now."
+      ),
+      name: nameField()?.value,
+    };
+    fake.state.unreachable = false;
+    await press("Try again");
+    await settled();
+
+    expect({ before, failed, after: note() }).toStrictEqual({
+      before: false,
+      failed: { note: true, why: true, name: "Invoices" },
+      after: false,
+    });
   });
 });

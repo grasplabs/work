@@ -4473,6 +4473,10 @@ msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 msgid "Couldn't make {chosen} the owner of {named}"
 msgstr "{chosen} kon geen eigenaar van {named} worden"
 
+#: src/engines/app-settings.tsx
+msgid "Couldn't refresh. This may be out of date."
+msgstr "Kon niet vernieuwen. Dit is misschien niet meer actueel."
+
 #: src/workflows/figures.tsx
 msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
 msgstr "Geteld over de workflows van de apps die je kunt openen; zelfstandige workflows tellen hier niet mee."
@@ -14502,6 +14506,7 @@ msgstr "Proberen"
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
 #: src/engines/app-owner.tsx
+#: src/engines/app-settings.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx
