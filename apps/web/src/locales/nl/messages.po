@@ -5834,6 +5834,10 @@ msgstr "Doorgestuurd naar ons team"
 msgid "Found"
 msgstr "Gevonden"
 
+#: src/activity/audit-words.ts
+msgid "Found a new advisory for approved packages"
+msgstr "Vond een nieuwe beveiligingsmelding voor goedgekeurde pakketten"
+
 #: src/brain/brain.ts
 msgid "Found in {source}"
 msgstr "Gevonden in {source}"
@@ -9818,16 +9822,13 @@ msgstr "Eigenaren zien mensen één voor één."
 msgid "Package"
 msgstr "Pakket"
 
-#: src/inbox/items.ts
-msgid "package approvers"
-msgstr "pakketgoedkeurders"
-
 #: src/chat/package-requests.tsx
 msgid "Package requests"
 msgstr "Pakketverzoeken"
 
 #: src/engines/package-approvals.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Pakketten"
@@ -9847,7 +9848,7 @@ msgstr "Pakketten"
 msgid "Packages for {app}"
 msgstr "Pakketten voor {app}"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Packages for {workflow}"
 msgstr "Pakketten voor {workflow}"
 
@@ -13665,7 +13666,7 @@ msgstr "De organisatie heeft nog geen teams."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "De origin is https:// en een openbare hostnaam, zonder iets erachter: https://api.example.com."
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
 msgstr "De pakketten die zijn goedgekeurd voor de berekeningen van deze workflow. Faseer ze hier uit of trek ze in."
 
@@ -15251,6 +15252,10 @@ msgid "Was called by another App"
 msgstr "Is door een andere app aangeroepen"
 
 #: src/activity/audit-words.ts
+msgid "Was refused a decision on packages"
+msgstr "Een beslissing over pakketten werd geweigerd"
+
+#: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "Mocht geen lid aan een app toevoegen"
 
@@ -16074,11 +16079,12 @@ msgid "Workflow {workflow}"
 msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Workflow niet gevonden"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Workflow packages"
 msgstr "Workflowpakketten"
 
@@ -16109,6 +16115,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.requests.tsx

@@ -272,6 +272,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "dependency.malware_refused",
     text: msg`Was refused packages known as malware`,
   },
+  {
+    action: "dependency.decision_refused",
+    text: msg`Was refused a decision on packages`,
+  },
+  {
+    action: "dependency.advisory_found",
+    text: msg`Found a new advisory for approved packages`,
+  },
   { action: "dependency", text: msg`Changed a request for packages` },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
   {

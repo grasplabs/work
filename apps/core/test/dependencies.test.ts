@@ -904,6 +904,13 @@ describe("dependency approval", () => {
           )
         ),
         staff: await outcome(staff.dependencies.decide(request.id, decision)),
+        // IDs nobody has, however many: refused, and never audited.
+        madeUp: await outcome(
+          stranger.api.dependencies.decide(crypto.randomUUID(), decision)
+        ),
+        notAnId: await outcome(
+          stranger.api.dependencies.decide("not an id", decision)
+        ),
       };
     });
     const unseen = {
@@ -933,6 +940,8 @@ describe("dependency approval", () => {
       otherBuilder: "dependency.not_found",
       builderForOtherApp: "dependency.not_found",
       staff: "role.forbidden",
+      madeUp: "dependency.not_found",
+      notAnId: "dependency.not_found",
     });
     expect(unseen).toStrictEqual({
       strangerWaiting: [],
@@ -1061,7 +1070,7 @@ describe("dependency approval", () => {
     });
   });
 
-  it("decides in one write: leaving the organization, a replacement or a policy change just before it lands refuses it", async () => {
+  it("decides in one write: leaving the organization, being unshared, a replacement or a policy change just before it lands refuses it", async () => {
     const admin = await personApi("admin");
     const racedBy = async (
       first: (raced: {
@@ -1120,6 +1129,13 @@ describe("dependency approval", () => {
     const removedFromOrganization = await racedBy(async ({ approver }) => {
       await admin.api.members.remove(approver.userId);
     });
+    // Unshared while the registry and OSV.dev were read: no longer a builder.
+    const unshared = await racedBy(async ({ approver, builder, app }) => {
+      await builder.api.apps.members.remove(app, {
+        type: "person",
+        id: approver.userId,
+      });
+    });
     const replaced = await racedBy(async ({ builder, app }) => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
     });
@@ -1137,6 +1153,11 @@ describe("dependency approval", () => {
 
     const nothing = { admitted: "dependency.approval_required", decisions: [] };
     expect(removedFromOrganization).toStrictEqual({
+      result: "dependency.forbidden",
+      status: "pending",
+      ...nothing,
+    });
+    expect(unshared).toStrictEqual({
       result: "dependency.forbidden",
       status: "pending",
       ...nothing,

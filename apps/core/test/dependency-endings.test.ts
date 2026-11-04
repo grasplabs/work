@@ -855,27 +855,34 @@ describe("who ends an approval, and on what", () => {
       },
     };
 
-    const refused = {
-      otherBuilder: await outcome(
-        otherBuilder.api.dependencies.retire(approved.request.id, ending)
-      ),
-      staff: await outcome(
-        staff.dependencies.revoke(approved.request.id, ending)
-      ),
-      agent: await outcome(
-        endDependency(env, acting, approved.request.id, "retired", ending)
-      ),
-      // Nor does anyone who doesn't build it read what ending one touches.
-      otherImpact: await outcome(
-        otherBuilder.api.dependencies.impact(approved.request.id)
-      ),
-      noReason: await outcome(
-        approved.builder.api.dependencies.retire(approved.request.id, {
-          ...ending,
-          reason: " ",
-        })
-      ),
-    };
+    let refused: Record<string, string> = {};
+    const events = await auditedDuring(async () => {
+      refused = {
+        otherBuilder: await outcome(
+          otherBuilder.api.dependencies.retire(approved.request.id, ending)
+        ),
+        staff: await outcome(
+          staff.dependencies.revoke(approved.request.id, ending)
+        ),
+        agent: await outcome(
+          endDependency(env, acting, approved.request.id, "retired", ending)
+        ),
+        // Nor does anyone who doesn't build it read what ending one touches.
+        otherImpact: await outcome(
+          otherBuilder.api.dependencies.impact(approved.request.id)
+        ),
+        noReason: await outcome(
+          approved.builder.api.dependencies.retire(approved.request.id, {
+            ...ending,
+            reason: " ",
+          })
+        ),
+        // An approval nobody has: refused, and never audited.
+        madeUp: await outcome(
+          otherBuilder.api.dependencies.revoke(crypto.randomUUID(), ending)
+        ),
+      };
+    });
     const before = await approved.builder.api.dependencies.status({
       app: approved.app,
     });
@@ -891,7 +898,22 @@ describe("who ends an approval, and on what", () => {
       agent: "dependency.forbidden",
       otherImpact: "dependency.not_found",
       noReason: "dependency.invalid",
+      madeUp: "dependency.not_found",
     });
+    // Each refusal of who ends it is on the record, with why.
+    expect(
+      events
+        .filter(({ action }) => action === "dependency.decision_refused")
+        .map(({ actor, target, detail }) => [
+          actor.type,
+          target?.id,
+          detail.reason,
+          detail.ending,
+        ])
+    ).toStrictEqual([
+      ["person", approved.request.id, "dependency.not_found", "retired"],
+      ["agent", approved.request.id, "dependency.forbidden", "retired"],
+    ]);
     expect(before.approved?.status).toBe("approved");
     expect(retired).toMatchObject({
       status: "retired",
@@ -899,7 +921,7 @@ describe("who ends an approval, and on what", () => {
     });
   });
 
-  it("decides in one write: leaving the organization, a policy change or another approval of the graph just before it lands refuses it", async () => {
+  it("decides in one write: leaving the organization, being unshared, a policy change or another approval of the graph just before it lands refuses it", async () => {
     const admin = await approvingAdmin();
     const racedBy = async (
       first: (raced: { ender: Person; approved: Approved }) => Promise<unknown>
@@ -947,6 +969,12 @@ describe("who ends an approval, and on what", () => {
     const removed = await racedBy(async ({ ender }) => {
       await admin.api.members.remove(ender.userId);
     });
+    const unshared = await racedBy(async ({ ender, approved }) => {
+      await approved.builder.api.apps.members.remove(approved.app, {
+        type: "person",
+        id: ender.userId,
+      });
+    });
     const policyChanged = await racedBy(async () => {
       // Another App's approval retired: the generation moves on.
       const other = await approvedApp(admin, ["browser"]);
@@ -971,8 +999,9 @@ describe("who ends an approval, and on what", () => {
       });
     });
 
-    expect({ removed, policyChanged, approvedAgain }).toStrictEqual({
+    expect({ removed, unshared, policyChanged, approvedAgain }).toStrictEqual({
       removed: { result: "dependency.forbidden", status: "approved" },
+      unshared: { result: "dependency.forbidden", status: "approved" },
       policyChanged: { result: "dependency.stale", status: "approved" },
       approvedAgain: { result: "dependency.stale", status: "approved" },
     });

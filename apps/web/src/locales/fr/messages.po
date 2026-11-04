@@ -5834,6 +5834,10 @@ msgstr "Transmise à notre équipe"
 msgid "Found"
 msgstr "Trouvé"
 
+#: src/activity/audit-words.ts
+msgid "Found a new advisory for approved packages"
+msgstr "A trouvé un nouvel avis de sécurité pour des paquets approuvés"
+
 #: src/brain/brain.ts
 msgid "Found in {source}"
 msgstr "Trouvé dans {source}"
@@ -9818,16 +9822,13 @@ msgstr "Les propriétaires voient les personnes une à une."
 msgid "Package"
 msgstr "Paquet"
 
-#: src/inbox/items.ts
-msgid "package approvers"
-msgstr "approbateurs de paquets"
-
 #: src/chat/package-requests.tsx
 msgid "Package requests"
 msgstr "Demandes de paquets"
 
 #: src/engines/package-approvals.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Paquets"
@@ -9847,7 +9848,7 @@ msgstr "Paquets"
 msgid "Packages for {app}"
 msgstr "Paquets pour {app}"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Packages for {workflow}"
 msgstr "Paquets pour {workflow}"
 
@@ -13665,7 +13666,7 @@ msgstr "L’organisation n’a pas encore d’équipes."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "L'origine est https:// et un nom d'hôte public, sans rien après : https://api.example.com."
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
 msgstr "Les paquets approuvés pour les calculs de ce workflow. Mettez-les hors service ou révoquez-les ici."
 
@@ -15251,6 +15252,10 @@ msgid "Was called by another App"
 msgstr "A été appelée par une autre application"
 
 #: src/activity/audit-words.ts
+msgid "Was refused a decision on packages"
+msgstr "S'est vu refuser une décision sur des paquets"
+
+#: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "N’a pas pu ajouter un membre à une application"
 
@@ -16074,11 +16079,12 @@ msgid "Workflow {workflow}"
 msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Workflow introuvable"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Workflow packages"
 msgstr "Paquets du workflow"
 
@@ -16109,6 +16115,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.requests.tsx

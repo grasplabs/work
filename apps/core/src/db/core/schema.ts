@@ -2690,11 +2690,12 @@ export const dependencyRequests = sqliteTable(
      * the registry's advisories, by the regular re-scan
      * (`rescanPackages`, requests.ts): null until it was.
      */
-    malwareCheckedAt: timestamp("malware_checked_at"),
+    scannedAt: timestamp("scanned_at"),
     /**
-     * The advisories the re-scan found of an approval in force since it was
-     * approved and told its builders of (`rescanPackages`), by ID: each is
-     * told once. Null until one was.
+     * The advisories that affected an approval's graph as it was approved,
+     * and those the re-scan told its builders of since (`rescanPackages`),
+     * by ID, at most 2,000: the re-scan tells none of them again. Null
+     * while it waits, or was denied.
      */
     advisoriesNoticed: text("advisories_noticed", { mode: "json" }).$type<
       string[]
@@ -2726,14 +2727,10 @@ export const dependencyRequests = sqliteTable(
       table.graphHash,
       table.status
     ),
-    // The approvals the re-scan is due to read: by when each was
-    // last found clean, never checked first. Led by that time, not the
-    // status, so the approvers' list of what is in force keeps reading the
-    // subject index in its order.
-    index("dependency_requests_malware_idx").on(
-      table.malwareCheckedAt,
-      table.status
-    ),
+    // The approvals the re-scan is due to read: by when each was last
+    // scanned, never scanned first. Led by that time, not the status, so
+    // the subject index keeps its order for what reads by subject.
+    index("dependency_requests_scan_idx").on(table.scannedAt, table.status),
   ]
 );
 

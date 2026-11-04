@@ -18,6 +18,7 @@ import {
   publish,
   reportToOsv,
 } from "./npm.ts";
+import { racingDb } from "./racing-db.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Malware or an advisory reported after a graph was approved (GRA-924,
@@ -36,9 +37,10 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
 
 /**
  * An App whose graph (`pkg`, which depends on `dep`) an admin approved, as
- * a builder of every App, neither reported as malware when it was.
+ * a builder of every App, neither reported as malware when it was. With
+ * `beforeApproval`, what happens between the resolve and the approval.
  */
-const approvedApp = async () => {
+const approvedApp = async (beforeApproval?: (dep: string) => Promise<void>) => {
   const admin = await personApi("admin");
   const builder = await personApi("builder");
   const { id: app } = await builder.api.apps.create({
@@ -51,6 +53,7 @@ const approvedApp = async () => {
   const { request } = await builder.api.dependencies.resolve(
     intentFor(app, { [pkg]: "1.0.0" })
   );
+  await beforeApproval?.(dep);
   const { policyGeneration } = await admin.api.dependencies.waiting();
   await admin.api.dependencies.decide(request.id, {
     approved: true,
@@ -112,6 +115,27 @@ const toldOf = async (person: Person) => {
 const recheckLater = async (): Promise<void> => {
   await rescanPackages(env, new Date(Date.now() + 2 * malwareRecheckMs));
 };
+
+/** A registry advisory of `dep` 1.0.0, not malware, with GitHub's ID `ghsa`. */
+const advisoryOf = (ghsa: string) => ({
+  id: 2_000_001,
+  url: `https://github.com/advisories/${ghsa}`,
+  title: "Prototype pollution",
+  severity: "high",
+  vulnerable_versions: "<1.0.1",
+});
+
+/** The `dependency.advisory_found` events of `graphHash`, by advisory. */
+const advisoriesFound = (
+  logged: Awaited<ReturnType<typeof auditedDuring>>,
+  graphHash: string
+): unknown[] =>
+  logged
+    .filter(
+      ({ action, detail }) =>
+        action === "dependency.advisory_found" && detail.graphHash === graphHash
+    )
+    .map(({ detail }) => detail.advisory);
 
 /**
  * The new advisories `person` is told of, as their notifications list
@@ -430,6 +454,86 @@ describe("an advisory published after an approval", () => {
       waiting: 1,
       // An advisory warns; the builders decide. Only malware revokes.
       built: "built",
+    });
+  });
+
+  it("tells nothing of an advisory known when the graph was approved, though its review never showed it", async () => {
+    // Published after the resolve, before the approval: not among the
+    // review's findings, but among what the approval was made with.
+    const app = await approvedApp(async (dep) => {
+      await advise(dep, advisoryOf("GHSA-kkkk-nnnn-wwww"));
+    });
+
+    const events = await auditedDuring(recheckLater);
+
+    await expect(advisedOf(app.builder)).resolves.toStrictEqual([]);
+    expect(advisoriesFound(events, app.request.graphHash)).toStrictEqual([]);
+  });
+
+  it("tells an advisory once when two runs race, and nothing once the graph ended meanwhile", async () => {
+    const at = new Date(Date.now() + 2 * malwareRecheckMs);
+    // Another run tells it just before this one's batch lands.
+    const raced = await approvedApp();
+    await advise(raced.dep, advisoryOf("GHSA-rrrr-cccc-eeee"));
+    let ran = false;
+    const twice = await auditedDuring(async () => {
+      await rescanPackages(
+        {
+          ...env,
+          DB: racingDb(async () => {
+            if (!ran) {
+              ran = true;
+              await rescanPackages(env, at);
+            }
+          }),
+        },
+        at
+      );
+    });
+    // Its approval revoked just before the batch lands.
+    const ended = await approvedApp();
+    await advise(ended.dep, advisoryOf("GHSA-gggg-hhhh-jjjj"));
+    let revoked = false;
+    const afterEnding = await auditedDuring(async () => {
+      await rescanPackages(
+        {
+          ...env,
+          DB: racingDb(async () => {
+            if (!revoked) {
+              revoked = true;
+              const { policyGeneration, endings } =
+                await ended.admin.api.dependencies.impact(ended.request.id);
+              await ended.admin.api.dependencies.revoke(ended.request.id, {
+                reviewed: {
+                  graphHash: ended.request.graphHash,
+                  policyGeneration,
+                  approvalsDigest: endings.revoke.digest,
+                },
+                reason: "Not needed.",
+              });
+            }
+          }),
+        },
+        new Date(Date.now() + 4 * malwareRecheckMs)
+      );
+    });
+
+    expect({
+      twice: advisoriesFound(twice, raced.request.graphHash),
+      toldTwice: await advisedOf(raced.builder),
+      afterEnding: advisoriesFound(afterEnding, ended.request.graphHash),
+      toldAfterEnding: await advisedOf(ended.builder),
+    }).toStrictEqual({
+      twice: ["GHSA-rrrr-cccc-eeee"],
+      toldTwice: [
+        {
+          about: raced.app,
+          package: { name: raced.dep, version: "1.0.0" },
+          advisory: "GHSA-rrrr-cccc-eeee",
+        },
+      ],
+      afterEnding: [],
+      toldAfterEnding: [],
     });
   });
 });

@@ -5834,6 +5834,10 @@ msgstr "Forwarded to our team"
 msgid "Found"
 msgstr "Found"
 
+#: src/activity/audit-words.ts
+msgid "Found a new advisory for approved packages"
+msgstr "Found a new advisory for approved packages"
+
 #: src/brain/brain.ts
 msgid "Found in {source}"
 msgstr "Found in {source}"
@@ -9818,16 +9822,13 @@ msgstr "Owners see people one by one."
 msgid "Package"
 msgstr "Package"
 
-#: src/inbox/items.ts
-msgid "package approvers"
-msgstr "package approvers"
-
 #: src/chat/package-requests.tsx
 msgid "Package requests"
 msgstr "Package requests"
 
 #: src/engines/package-approvals.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Packages"
@@ -9847,7 +9848,7 @@ msgstr "Packages"
 msgid "Packages for {app}"
 msgstr "Packages for {app}"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Packages for {workflow}"
 msgstr "Packages for {workflow}"
 
@@ -13665,7 +13666,7 @@ msgstr "The organization has no teams yet."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
 msgstr "The packages approved for this workflow's calculations. Retire or revoke them here."
 
@@ -15251,6 +15252,10 @@ msgid "Was called by another App"
 msgstr "Was called by another App"
 
 #: src/activity/audit-words.ts
+msgid "Was refused a decision on packages"
+msgstr "Was refused a decision on packages"
+
+#: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "Was refused adding a member to an App"
 
@@ -16074,11 +16079,12 @@ msgid "Workflow {workflow}"
 msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Workflow not found"
 
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 msgid "Workflow packages"
 msgstr "Workflow packages"
 
@@ -16109,6 +16115,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.packages.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.requests.tsx

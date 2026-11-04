@@ -298,7 +298,7 @@ const WorkflowSettings = ({
               render={
                 <Link
                   params={{ workflow: resource.id }}
-                  to="/settings/packages/workflows/$workflow"
+                  to="/workflows/$workflow/packages"
                 />
               }
               size="sm"

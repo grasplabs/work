@@ -334,10 +334,11 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
     };
   });
 
-/** Packages proposed for an engine, which someone given the permission approves. */
+/** Packages the person, or their chat's agent, asked for an engine they build: theirs to approve. */
 const packageItems = (
   requests: readonly DependencyRequest[],
-  policyGeneration: number
+  policyGeneration: number,
+  me: string
 ): InboxItem[] =>
   requests.map((request) => {
     // An App or a workflow, in one queue: only an App has a page to go to.
@@ -369,7 +370,7 @@ const packageItems = (
         request.subject.type === "app"
           ? { kind: "engine", engine: request.subject.id, place: "packages" }
           : undefined,
-      forWhom: { role: t`package approvers` },
+      forWhom: { person: me },
       date: request.requestedAt,
       urgent: false,
       source: { type: "packages", request, policyGeneration },
@@ -856,7 +857,7 @@ export const inboxItems = (
     ...(requests === undefined ? [] : requestItems(requests)),
     ...(dependencies === undefined
       ? []
-      : packageItems(dependencies.requests, dependencies.policyGeneration)),
+      : packageItems(dependencies.requests, dependencies.policyGeneration, me)),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),

@@ -673,7 +673,7 @@ describe(TargetLink, () => {
     const about = (id: string) => items.find((item) => item.id === id)?.about;
 
     expect({
-      // An approver with no role in the App still reads its packages there.
+      // Its builders read and decide its packages there.
       packages: await hrefOf(about("packages:packages-1")),
       revoked: await hrefOf(about("revoked:revoked-1")),
       goLive: await hrefOf(about("goLive:app-invoices:4")),
