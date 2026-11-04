@@ -856,6 +856,32 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     ]);
   });
 
+  it("leave an occurrence untried and unlogged when another clock run skipped it first, while its start waits", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    await dueAt(waiting.id, lastMinute());
+    // Another clock run, overlapping, skips it after this one read it.
+    await startDueScheduleTriggers(
+      changedBefore(/^update "trigger_schedules"/iu, async () => {
+        await startDueScheduleTriggers(env);
+      })
+    );
+    const logged = await allEvents();
+    const runs = await runsOf(waiting.id);
+
+    expect({
+      runs: runs.length,
+      refusals: logged.filter(
+        ({ action, target }) =>
+          (action === "workflow.start.refused" && target?.id === workflow.id) ||
+          (action === "trigger.schedule.refused" && target?.id === waiting.id)
+      ).length,
+    }).toStrictEqual({ runs: 0, refusals: 0 });
+  });
+
   it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);

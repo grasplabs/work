@@ -324,7 +324,9 @@ const movedOn = async (
  * trigger's page says it waits, so no refusal is tried, counted toward
  * stopping, or logged for each occurrence. Only over the schedule read,
  * and only while the trigger still holds no active `start`: whether it
- * moved on.
+ * moved on. One that didn't is tried as any other: granted since, it
+ * starts; moved on by another clock run, its start is refused without a
+ * record (`stillNext`, `asRead`).
  */
 const skipped = async (
   env: Env,
