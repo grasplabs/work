@@ -48,9 +48,10 @@ import type { WorkflowApps } from "./workflow-apps.ts";
 // says; each catalog binding of the version a start runs now, with what an
 // admin approved it to reach, who and when, which the organization's
 // admins revoke here (the binding then waits again, its starts are refused
-// and runs already started fail at their next call through it); the apps it works in, each with whether it is connected; the
-// Knowledge it reads, with the names its bindings give it; and the files
-// its runs wrote, what they are and never what they hold.
+// and runs already started fail at their next call through it); the apps
+// it works in, each with whether it is connected; the Knowledge it reads,
+// with the names its bindings give it; and the files its runs wrote, what
+// they are and never what they hold.
 // Each part is read on its own, each time the tab opens, and says on its
 // own why it failed: the apps read the catalog and connections from
 // connect (a cold catalog can take seconds), which no other tab needs, so
@@ -279,7 +280,8 @@ const Waiting = ({
 /**
  * Each catalog binding of version `version`, `declared`, with the approval
  * of `approvals` that serves it, if any: what it reaches (a decision's
- * deciders by `names` and `teams`), who approved it and when, and, when `revokes`, Revoke; `onChanged` once one is revoked.
+ * deciders by `names` and `teams`), who approved it and when, and, when
+ * `revokes`, Revoke; `onChanged` once one is revoked.
  */
 const Approved = ({
   workflow,
