@@ -31,9 +31,7 @@ import { outcome } from "./sign-in.ts";
 // changes once it ended, so where a test needs runs that ended long ago,
 // the ledger sweeps with the clock moved on, as time passing would.
 //
-// That a lineage's children are pruned with it is workflow-children's
-// "have the model ledger forget a lineage's requests once every run of it
-// ended long ago…". An App's account in a lineage another App's mail
+// An App's account in a lineage another App's mail
 // started a run in went with App workflows: an independent workflow's
 // lineage holds only its own runs (run-children.ts).
 

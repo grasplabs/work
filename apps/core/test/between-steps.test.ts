@@ -12,9 +12,7 @@ import { betweenSteps } from "../src/workflows/between-steps.ts";
 // The clock of a run's time between steps (between-steps.ts), as pure
 // logic: the clock and its timer are faked, so a step call can land after
 // the budget is spent but before the budget's timer has fired, as on an
-// isolate busy enough to run a timer late. A JSON run held busy for no
-// longer than its time between steps, over the real engine, is in
-// workflow-concurrency.test.ts.
+// isolate busy enough to run a timer late.
 
 const budgetMs = 1000;
 

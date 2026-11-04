@@ -313,7 +313,6 @@
   "@grasp-os/core test/workflow-builds.test.ts": 3.9,
   "@grasp-os/core test/workflow-calls.test.ts": 91.2,
   "@grasp-os/core test/workflow-candidate-runs.test.ts": 18.2,
-  "@grasp-os/core test/workflow-children.test.ts": 63.2,
   "@grasp-os/core test/workflow-compute.test.ts": 33.8,
   "@grasp-os/core test/workflow-decisions.test.ts": 36.9,
   "@grasp-os/core test/workflow-dependencies.test.ts": 15.2,

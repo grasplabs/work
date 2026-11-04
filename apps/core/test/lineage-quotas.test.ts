@@ -44,8 +44,6 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // - An attempt the Loader cut off retried in a fresh activation:
 //   workflow-resource-runs' "admits nothing of an attempt it cuts off…"
 //   and "cuts off an attempt the activation's expression fuel can't fund…".
-// - Levels and descendant runs as a parent's tasks start children:
-//   workflow-children's "stop at the lineage's levels and descendant runs…".
 // - A run's own step limit: workflow-calls' "lowers the host's step limit,
 //   never raises it".
 // - A task's own timeout: workflow-calls' "ends an attempt that runs past

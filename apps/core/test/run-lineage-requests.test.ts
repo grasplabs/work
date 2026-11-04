@@ -17,9 +17,6 @@ import { outcome } from "./sign-in.ts";
 // (test/model-provider.ts); the gateway and the model ledger are real.
 //
 // Covered elsewhere for JSON runs, and so not tried here:
-// - A child's requests counted with its parent's, so children never start
-//   the lineage's count afresh: workflow-children's "count every run of
-//   the lineage against its model requests…".
 // - A run's lineage taken from core's own row, never from its input: a
 //   JSON start's input is held to its workflow's schema, and
 //   workflow-resource-runs' "admits each attempt against the run's own
