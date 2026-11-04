@@ -50,6 +50,6 @@ test("signing in speaks the browser's language", async ({ newContext }) => {
   const page = await context.newPage();
   await page.goto("/sign-in");
   await expect(
-    page.getByText("Utilisez le compte de votre organisation pour continuer.")
+    page.getByText("Connectez-vous avec votre compte professionnel.")
   ).toBeVisible();
 });

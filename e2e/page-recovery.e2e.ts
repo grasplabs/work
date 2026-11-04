@@ -101,8 +101,6 @@ test("a start without its words says so in English, and tries again", async ({
   await page.unroute(words);
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(
-    page.getByText(
-      "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
-    )
+    page.getByText("Melden Sie sich mit Ihrem Arbeitskonto an.")
   ).toBeVisible();
 });
