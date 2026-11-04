@@ -10,8 +10,9 @@ UPDATE `sdk_resource_bindings` SET `target_id` = `contract_id`, `target_version`
 DELETE FROM `permissions` WHERE `object_type` = 'store' AND `object_id` IN (SELECT `store_id` FROM `sdk_store_owners` WHERE `workflow_id` IS NOT NULL);--> statement-breakpoint
 DELETE FROM `sdk_resource_bindings` WHERE `kind` = 'store' AND `resource_id` IN (SELECT `id` FROM `workflow_resources`);--> statement-breakpoint
 -- The stores themselves are deleted, never left to whoever published the
--- workflow to manage, read or share: nothing reaches a deleted store.
-UPDATE `business_stores` SET `deleted_at` = CAST(unixepoch('subsec') * 1000 AS INTEGER), `closing_at` = NULL, `closing_owner` = NULL WHERE `deleted_at` IS NULL AND `id` IN (SELECT `store_id` FROM `sdk_store_owners` WHERE `workflow_id` IS NOT NULL);--> statement-breakpoint
+-- workflow to manage, read or share: nothing reaches a deleted store. Their
+-- objects' records are deleted once, by hand, after this deploys (GRA-1552).
+UPDATE `business_stores` SET `deleted_at` = CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE `deleted_at` IS NULL AND `id` IN (SELECT `store_id` FROM `sdk_store_owners` WHERE `workflow_id` IS NOT NULL);--> statement-breakpoint
 DROP TABLE `workflow_stores`;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_sdk_store_owners` (
