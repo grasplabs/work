@@ -7,15 +7,11 @@ import {
   lowerExpression,
   typeForm,
 } from "./expression-lowering.ts";
-import type { TypeForm } from "./expression-lowering.ts";
+import type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
-export {
-  runtimeImport,
-  runtimeNames,
-  sourcePosition,
-} from "./expression-lowering.ts";
-export type { TypeForm } from "./expression-lowering.ts";
+export { runtimeNames, sourcePosition } from "./expression-lowering.ts";
+export type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -119,11 +115,18 @@ export interface ExpressionError {
  * A checked expression: its source, as written, and the code generated
  * from its syntax tree (`Lowering`), one parenthesized expression the
  * generator writes where the value is computed, in a module that
- * imports `runtimeImport`. Never write it right after an identifier on
+ * imports the guards under `runtimeNames`. Never write it right after an identifier on
  * the line before: `name\n(…)` is a call.
  */
 export type CheckedExpression =
-  | { ok: true; source: string; code: string; forTypes: TypeForm }
+  | {
+      ok: true;
+      source: string;
+      code: string;
+      /** The reads of its roots, for the caller to hold to where it stands. */
+      reads: ExpressionRead[];
+      forTypes: TypeForm;
+    }
   | { ok: false; errors: ExpressionError[] };
 
 const fixes: Record<ExpressionErrorCode, string> = {
@@ -553,7 +556,7 @@ export const checkExpression = (
   return {
     ok: true,
     source,
-    code: lowerExpression(parsed),
+    ...lowerExpression(parsed, roots),
     forTypes: typeForm(parsed, source, parsed.comments ?? []),
   };
 };

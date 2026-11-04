@@ -84,6 +84,7 @@ describe("what a workflow expression may be", () => {
       ok: true,
       source: " input.a ",
       code: '($read(input, "a"))',
+      reads: [{ root: "input", path: ["a"] }],
       forTypes: { code: " input.a ", added: [] },
     });
   });
@@ -473,6 +474,26 @@ describe("what TypeScript type-checks", () => {
     expect(typed("input.a /*😀*/ < input.b")).toBe(
       `(input.a ${" ".repeat(6)} < input.b)`
     );
+  });
+});
+
+describe("what an expression reads", () => {
+  it("is each read of a root, by its path up to a call or computed step", () => {
+    const checked = checkExpression(
+      "steps.extract.output.lines.map((line) => line.total)[0] + params.limit + input"
+    );
+    expect(checked.ok ? checked.reads : []).toStrictEqual([
+      { root: "steps", path: ["extract", "output", "lines"] },
+      { root: "params", path: ["limit"] },
+      { root: "input", path: [] },
+    ]);
+  });
+
+  it("isn't a callback parameter that shadows a root", () => {
+    const checked = checkExpression("input.items.map((steps) => steps.total)");
+    expect(checked.ok ? checked.reads : []).toStrictEqual([
+      { root: "input", path: ["items"] },
+    ]);
   });
 });
 

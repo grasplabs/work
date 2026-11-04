@@ -120,6 +120,7 @@ export const screenTests = [
   "test/guests.test.ts",
   "test/app-function-calls.test.ts",
   "test/workflow-type-check.test.ts",
+  "test/workflow-schema-builds.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */
