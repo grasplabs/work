@@ -1,5 +1,9 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  Message,
+  ToolResultMessage,
+} from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
 import {
@@ -223,6 +227,36 @@ const liveSchema = z.object({
     .optional(),
 });
 
+/** What pi keeps of a tool result's diagnostics, beside the rendered block. */
+const diagnosticsDataSchema = z.object({
+  diagnostics: z.array(z.object({ message: z.string() })),
+});
+
+/**
+ * A tool result as the person reads it: pi ends the model's copy with its
+ * diagnostics rendered as a `<harness>` block, which the chat shows as
+ * their plain words instead.
+ */
+const withPlainDiagnostics = (
+  message: ToolResultMessage,
+  data: unknown
+): ToolResultMessage => {
+  const parsed = diagnosticsDataSchema.safeParse(data);
+  if (!parsed.success || parsed.data.diagnostics.length === 0) {
+    return message;
+  }
+  return {
+    ...message,
+    content: [
+      ...message.content.slice(0, -1),
+      {
+        type: "text",
+        text: parsed.data.diagnostics.map((each) => each.message).join("\n"),
+      },
+    ],
+  };
+};
+
 /**
  * The messages a committed entry shows the person: a question, then its
  * recall's step if it recalled; a response or a tool's result; or none.
@@ -246,9 +280,10 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
         : recallStepOf(recall, recalled, message.timestamp)),
     ];
   }
-  return entry.kind === "pi.assistant" || entry.kind === "pi.tool-result"
-    ? [{ message }]
-    : [];
+  if (entry.kind === "pi.tool-result" && message.role === "toolResult") {
+    return [{ message: withPlainDiagnostics(message, entry.data) }];
+  }
+  return entry.kind === "pi.assistant" ? [{ message }] : [];
 };
 
 /**

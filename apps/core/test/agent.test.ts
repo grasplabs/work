@@ -916,7 +916,7 @@ describe("chat agent turns", () => {
       async () => {
         expect(provider.requests).toHaveLength(1);
         // The step has started once its call is kept.
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(3);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
       },
       { timeout: 10_000 }
     );

@@ -703,6 +703,14 @@ export const durableTool = <P extends TSchema>(
   ...(agentTool.executionMode === undefined
     ? {}
     : { executionMode: agentTool.executionMode }),
+  // Every tool here bounds its own result to a run's output budget
+  // (`codeLimits.outputBytes`), saying where it cut: pi's own bound, 50 KB
+  // and 2,000 lines unless set, is that same budget, so a result is never
+  // cut twice, nor shorter than its tool kept it.
+  outputLimits: {
+    maxBytes: codeLimits.outputBytes,
+    maxLines: codeLimits.outputBytes,
+  },
   execute: async (args, api, context) => {
     // What a tool streams isn't mirrored into the call's running output: a
     // call cut short by a restart becomes a result of that output alone,
