@@ -314,13 +314,20 @@ const accessOf = (
 export type RecordSql = Pick<SqlStorage, "exec">;
 
 /**
- * What a read reads records through, and tells how many records of each
- * table it answers (`answered`): every record that leaves the store as a
- * document, a related one included, and every record a count, an
- * aggregate or a group is computed over (`disclosed`). The host audits
- * those of a sensitive table (store-host.ts, `#readIn`).
+ * What a read reads records through. Every statement it runs names the
+ * table it reads (`on`), so the host knows each table the read looked at
+ * before the statement runs, whatever it then answers or however it
+ * fails; a table a read only names (one its `with` would load from, when
+ * no record named one) is never read, and never told. How many records
+ * of a table it answers is told besides (`answered`): every record that
+ * leaves the store as a document, a related one included, and every
+ * record a count, an aggregate or a group is computed over
+ * (`disclosed`). The host audits those of a sensitive table
+ * (store-host.ts, `#readIn`).
  */
-export interface ReadSql extends RecordSql {
+export interface ReadSql {
+  /** The statements of the read that read `table`. */
+  readonly on: (table: string) => RecordSql;
   readonly answered: (table: string, records: number) => void;
 }
 
@@ -550,6 +557,7 @@ export const readRecord = (
   const table = readableTable(pinned, scope, request.table);
   const scoped = scopeClause(table, scope);
   const [row] = sql
+    .on(table.name)
     .exec<ReadRow & { value_json: string }>(
       `SELECT record_id, owner_id, revision, created_at, updated_at, value_json FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
       table.tableId,
@@ -557,12 +565,12 @@ export const readRecord = (
       ...scoped.params
     )
     .toArray();
-  // Read, found or not; and answered even when its revision conflicts:
-  // the failure says the record is there.
-  sql.answered(table.name, row === undefined ? 0 : 1);
   if (row === undefined) {
     return null;
   }
+  // Answered even when its revision conflicts: the failure says the
+  // record is there.
+  sql.answered(table.name, 1);
   if (
     request.expectedRevision !== null &&
     row.revision !== request.expectedRevision
@@ -719,15 +727,18 @@ export interface Match {
  * no further, and whoever reads past a bound gets `data.scan_limit`.
  */
 export const matchesOf = (
-  sql: RecordSql,
+  sql: ReadSql,
   plan: Plan,
   shared?: Scan
 ): IterableIterator<Match, undefined> => {
   // A scan of its own unless the caller's spans several statements.
   const scan: Scan = shared ?? { entries: 0, bytes: 0 };
-  const cursor = sql.exec<
-    ReadRow & { value_json?: string; bytes?: number; matched?: number }
-  >(plan.statement, ...plan.params);
+  const cursor = sql
+    .on(plan.table.name)
+    .exec<ReadRow & { value_json?: string; bytes?: number; matched?: number }>(
+      plan.statement,
+      ...plan.params
+    );
   const rows = cursor[Symbol.iterator]();
   const iterator: IterableIterator<Match, undefined> = {
     next: () => {
@@ -802,15 +813,12 @@ const aggregateOf = (
  * as it is read: a count, an aggregate or a group reads through its
  * matches and tells what they hold (an exact value under a narrow filter,
  * a field's distinct values) as much as the records themselves would.
- * `matches` ran its statement already: the table was read, matching
- * nothing or not.
  */
 const disclosed = (
   sql: ReadSql,
   table: ReadTable,
   matches: Iterator<Match>
 ): IterableIterator<Match, undefined> => {
-  sql.answered(table.name, 0);
   const iterator: IterableIterator<Match, undefined> = {
     next: () => {
       const next = matches.next();
@@ -1176,15 +1184,14 @@ const recordsById = (
     scanned(scan, 0);
   }
   const scoped = scopeClause(target, scope);
-  const rows = sql.exec<ReadRow & { value_json: string; bytes: number }>(
-    `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
-    target.tableId,
-    JSON.stringify([...ids]),
-    ...scoped.params
-  );
-  // Read once its statement ran, whatever it answers or however it fails
-  // (`data.scan_limit` past the bytes bound, below).
-  sql.answered(target.name, 0);
+  const rows = sql
+    .on(target.name)
+    .exec<ReadRow & { value_json: string; bytes: number }>(
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
+      target.tableId,
+      JSON.stringify([...ids]),
+      ...scoped.params
+    );
   for (const row of rows) {
     scannedBytes(scan, row.bytes);
     found.set(row.record_id, documentOf(target, row, row.value_json));
@@ -1361,7 +1368,7 @@ const searchPlan = (
  * read, when its text holds no word to look for.
  */
 const searchMatches = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1379,7 +1386,7 @@ const searchMatches = (
   // Counted among the rows the caller may read, when rules choose them:
   // a count of every match would tell how often a word stands in rows
   // they can't see.
-  requireSearchable(sql, search, match, table.rows);
+  requireSearchable(sql.on(table.name), search, match, table.rows);
   return matchesOf(
     sql,
     searchPlan(scope, table, query, search, match, seek),
@@ -1607,9 +1614,6 @@ const withDocuments = (
   limit: number,
   scan: Scan
 ): ReadDocument[] => {
-  // `matches` ran its statement already: read, whatever it answers or
-  // however it fails.
-  sql.answered(table.name, 0);
   const documents = documentsOf(table, matches, limit);
   sql.answered(table.name, documents.length);
   withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
@@ -1638,15 +1642,18 @@ export const readPage = (
     throw new Error("Not a page");
   }
   const table = readableTable(pinned, scope, query.table);
-  // Read by every page, whatever it answers or however it fails (a page
-  // refused before any statement ran is told apart by the host).
-  sql.answered(table.name, 0);
   const scan: Scan = { entries: 0, bytes: 0 };
   const found: Match[] = [];
   let anchorFields: number;
   if (query.search === undefined) {
     anchorFields = accessOf(pinned, table, query).orderFields.length - 1;
-    for (const plan of pagePlans(sql, pinned, scope, query, anchor)) {
+    for (const plan of pagePlans(
+      sql.on(table.name),
+      pinned,
+      scope,
+      query,
+      anchor
+    )) {
       if (found.length > terminal.pageSize) {
         break;
       }

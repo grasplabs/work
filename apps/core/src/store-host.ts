@@ -2528,12 +2528,16 @@ export class StoreHost {
    * Handed back the same way (`sensitive`, and `details.sensitive` on a
    * failure): how many records the read answered of each table it ran a
    * statement on that the store holds sensitive (`#sensitivity`), for
-   * core to audit (store-reader.ts). A sensitive table the read looked at
-   * is named
-   * even when it answered none of its records, or failed: a filter on its
-   * fields that matched nothing, or a `unique` that found two, still
-   * tells something of what they hold. A read that ran no statement
-   * (`take(0)`, a refusal) looked at nothing and names none.
+   * core to audit (store-reader.ts). A table is named by the statement
+   * that reads it (`ReadSql.on`), before that statement runs: the one
+   * place every read's statements pass, its counts, cursor anchors and
+   * search bounds included, so no way a read looks at a table and then
+   * fails leaves it out. Named even when it answered none of its records,
+   * or failed: a filter on its fields that matched nothing, or a `unique`
+   * that found two, still tells something of what they hold. A read that
+   * ran no statement (`take(0)`, a refusal) looked at nothing and names
+   * none, and neither does a table only a `with` named whose records
+   * were never looked up.
    *
    * With `preview` (a mutation's writes, staged and not yet committed),
    * the writes are applied first, as its commit would apply them (the
@@ -2558,13 +2562,13 @@ export class StoreHost {
       const generations = this.#generationsOf(pinned, names);
       let readRecords = false;
       const isSensitive = this.#sensitivity();
-      // The sensitive tables a statement actually read, as the read tells
-      // them (`ReadSql.answered`): never every table of `names`, which
-      // holds those its `with` names whether or not their records were
-      // ever looked up (an empty root reads none of them).
+      // The sensitive tables a statement read (`ReadSql.on`) and the
+      // records it answered of each (`ReadSql.answered`): never every
+      // table of `names`, which holds those its `with` names whether or
+      // not their records were ever looked up.
       const answered = new Map<string, number>();
       const sensitiveRead = (): Record<string, number> =>
-        readRecords ? Object.fromEntries(answered) : {};
+        Object.fromEntries(answered);
       try {
         if (preview !== undefined) {
           const { staged } = this.#apply(
@@ -2591,14 +2595,22 @@ export class StoreHost {
         // generations, so its reader isn't rerun for every commit).
         const storage = this.ctx.storage.sql;
         const counted: ReadSql = {
-          exec: <Row extends Record<string, SqlStorageValue>>(
-            query: string,
-            ...bindings: unknown[]
-          ): SqlStorageCursor<Row> => {
-            const cursor = storage.exec<Row>(query, ...bindings);
-            readRecords = true;
-            return cursor;
-          },
+          on: (table) => ({
+            exec: <Row extends Record<string, SqlStorageValue>>(
+              query: string,
+              ...bindings: unknown[]
+            ): SqlStorageCursor<Row> => {
+              // Named before it runs: a statement that then fails, or
+              // whose answer the read fails on, read the table all the
+              // same.
+              if (isSensitive(table)) {
+                answered.set(table, answered.get(table) ?? 0);
+              }
+              const cursor = storage.exec<Row>(query, ...bindings);
+              readRecords = true;
+              return cursor;
+            },
+          }),
           answered: (table, answeredNow) => {
             if (isSensitive(table)) {
               answered.set(table, (answered.get(table) ?? 0) + answeredNow);

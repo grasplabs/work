@@ -1,10 +1,14 @@
 import { GraspClient } from "@grasp-os/sdk/host";
+import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
-import { queryMaxScannedBytes } from "@grasp-os/shared/store-limits";
+import {
+  queryMaxScannedBytes,
+  queryMaxScannedEntries,
+} from "@grasp-os/shared/store-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -43,6 +47,7 @@ const files: Record<string, string> = {
 export default defineSchema({
   salaries: defineTable({ person: v.string(), amount: v.number() })
     .index("by_person", ["person"])
+    .searchIndex(["person"])
     .sensitive(),
   notes: defineTable({
     text: v.string(),
@@ -122,6 +127,19 @@ export const bundles = query({
   },
 });
 
+/** How many salaries a search finds, or the code it failed with, caught. */
+export const find = query({
+  args: { text: v.string() },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    try {
+      return String(await ctx.db.search("salaries", args.text).count());
+    } catch (error) {
+      return String(Reflect.get(Object(error), "code"));
+    }
+  },
+});
+
 /** Reads the salaries, then fails. */
 export const leak = query({
   args: {},
@@ -166,7 +184,7 @@ export const byPerson = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { bundle, bundles, byPerson, highest, leak, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
+import { bundle, bundles, byPerson, find, highest, leak, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -178,7 +196,7 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { pay: { bundle, bundles, byPerson, highest, leak, note, notes, pay, probe, salaries, stuff } },
+  operations: { pay: { bundle, bundles, byPerson, find, highest, leak, note, notes, pay, probe, salaries, stuff } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -543,6 +561,39 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
         { function: "pay.leak", reads: 1, rows: 2 },
         // `unique` read two records to know there were more than one.
         { function: "pay.probe", reads: 1, rows: 2 },
+      ],
+    });
+  });
+
+  it("records a search that fails past the scan bound before it reads a record", async () => {
+    // The search is refused on its count of matches, before any record is
+    // read: the salaries were still looked at, and a refusal tells there
+    // are more than the bound.
+    const fixture = await payrollApp();
+    const batches = Math.ceil(
+      (queryMaxScannedEntries + 1) / appDataImportLimits.maxRows
+    );
+    for (let batch = 0; batch < batches; batch += 1) {
+      // One import after the other, as a person would.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await importSalaries(fixture, appDataImportLimits.maxRows);
+    }
+    const after = await logHead();
+
+    const found = await call(fixture, "pay.find", { text: "Person" });
+
+    expect({
+      found: valueOf(found),
+      recorded: await readsOf(fixture.app, after, [
+        "function",
+        "table",
+        "reads",
+        "rows",
+      ]),
+    }).toStrictEqual({
+      found: "data.scan_limit",
+      recorded: [
+        { function: "pay.find", table: "salaries", reads: 1, rows: 0 },
       ],
     });
   });
