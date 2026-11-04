@@ -27,7 +27,9 @@ import {
   callReviewed,
   executionErrors,
   inboundEmailIndexSchema,
+  holdsPlaceholder,
   modelReviewed,
+  placeholderPrefix,
   reviewerChosenAtRun,
   stepIdempotencyKey,
   stepReviewed,
@@ -259,6 +261,20 @@ const requireUnrefused = (attempt: StepAttempt): void => {
 };
 
 /**
+ * Refuses what an App's run sends that holds a placeholder's key
+ * (`placeholderPrefix`): its code may call the SDK's `sensitiveParam`, but
+ * only a sealed build's run host gives a placeholder a value, so here it
+ * would reach a binding as it is.
+ */
+const requireNoPlaceholder = (value: unknown): void => {
+  if (holdsPlaceholder(value)) {
+    const error = workflowErrors.create("workflow.invalid");
+    error.message = `An App's run sends no "${placeholderPrefix}" keys: they are placeholders only a sealed build's run fills in.`;
+    throw error;
+  }
+};
+
+/**
  * Whether connect said an unknown outcome waits for its person's word
  * (`awaitsResolution`): a native connector's lost answer. A Composio
  * tool's error, which its person can't yet see, fails the step instead.
@@ -457,6 +473,7 @@ class AppRun implements RunKind {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#host.requireUntampered();
+      requireNoPlaceholder(request);
       await this.#host.requireCurrent(attempt, "model");
       requireUnrefused(attempt);
       await this.#requireEvidenceReadable();
@@ -650,6 +667,7 @@ class AppRun implements RunKind {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#host.requireUntampered();
+      requireNoPlaceholder(args);
       await this.#host.requireCurrent(attempt, "collection");
       const { collections } = this.run;
       const name = checked(z.string(), binding);
@@ -716,6 +734,7 @@ class AppRun implements RunKind {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#host.requireUntampered();
+      requireNoPlaceholder(request);
       const call = checked(brainCallSchema, operation);
       await this.#host.requireCurrent(attempt, "brain");
       const { brains, authority } = this.run;
@@ -797,6 +816,7 @@ class AppRun implements RunKind {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#host.requireUntampered();
+      requireNoPlaceholder(call);
       await this.#host.requireCurrent(attempt, "connection");
       await this.#requireEvidenceReadable();
       const stepKey = this.#stepKeyOf(attempt);
@@ -869,6 +889,7 @@ class AppRun implements RunKind {
     const place = attempt.functionCalls;
     return await settle(async () => {
       this.#host.requireUntampered();
+      requireNoPlaceholder(input);
       await this.#host.requireCurrent(attempt, "APP");
       await this.#requireEvidenceReadable();
       await this.#requireReviewed(attempt, "APP");

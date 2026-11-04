@@ -680,6 +680,39 @@ queueMicrotask(() => {
     });
   });
 
+  it("refuse a placeholder's key in what a call sends, which only a sealed build's run fills in", async () => {
+    const { host, appCalls, tampered } = await hostHeldTo({
+      steps: { send: ["APP", "CRM"] },
+      kinds: { send: "exact" },
+      models: {},
+      keyed: [],
+      all: ["APP", "CRM"],
+    });
+    const placeholder = { "$grasp:param": "token" };
+    let connection: Settled<unknown> = { ok: true, value: null };
+    let called: Settled<unknown> = { ok: true, value: null };
+    await host.do("send", {}, async (attempt) => {
+      connection = await attempt.callConnection("CRM", [
+        "mail.send",
+        { to: "Ada", subject: placeholder },
+      ]);
+      called = await attempt.callFunction(hit, { name: [placeholder] });
+      return { ok: true, value: null };
+    });
+
+    expect({
+      connection: codeOf(connection),
+      called: codeOf(called),
+      appCalls,
+      tampered,
+    }).toStrictEqual({
+      connection: "workflow.invalid",
+      called: "workflow.invalid",
+      appCalls: [],
+      tampered: [],
+    });
+  });
+
   it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },

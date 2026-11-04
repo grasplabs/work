@@ -454,6 +454,42 @@ export const triggerDeclarationsSchema = z
 export const coreStepPrefix = "$grasp:";
 
 /**
+ * What the keys of the platform's placeholders in a call's arguments start
+ * with: a run of a sealed build puts one where its run host fills in a
+ * value the isolate never sees (core's workflows/sealed-run.ts), and an
+ * App's run may send none (core's workflows/app-run.ts).
+ */
+export const placeholderPrefix = "$grasp:";
+
+/**
+ * The key of a sensitive parameter's placeholder, `{"$grasp:param": name}`
+ * (the SDK's `sensitiveParam`): a connector call's run host puts in the
+ * value the run's start froze for `name`.
+ */
+export const sensitiveParamKey = `${placeholderPrefix}param`;
+
+/**
+ * Whether `value` holds a key that starts with `placeholderPrefix`
+ * anywhere, at any depth.
+ */
+export const holdsPlaceholder = (value: unknown): boolean => {
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [value];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (typeof node === "object" && node !== null && !seen.has(node)) {
+      seen.add(node);
+      for (const [key, item] of Object.entries(node)) {
+        if (key.startsWith(placeholderPrefix)) {
+          return true;
+        }
+        pending.push(item);
+      }
+    }
+  }
+  return false;
+};
+
+/**
  * What a decision task's waits for its answer, and its looks after them,
  * start with (core's workflows/resource-host.ts): core's steps, so they
  * count against none of the run's steps however long it waits, each named
