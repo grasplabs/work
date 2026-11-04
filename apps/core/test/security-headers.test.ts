@@ -107,6 +107,14 @@ describe("security headers on the frontend", () => {
     }
   });
 
+  it("keeps no handle on a site that opened it, while popups it opens keep theirs", async () => {
+    for (const response of await eachPage()) {
+      expect(response.headers.get("cross-origin-opener-policy")).toBe(
+        "same-origin-allow-popups"
+      );
+    }
+  });
+
   it("tells browsers to use https only, for at least a year", async () => {
     const response = await routed("/");
     const hsts = response.headers.get("strict-transport-security") ?? "";

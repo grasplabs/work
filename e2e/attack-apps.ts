@@ -364,6 +364,16 @@ const routes = (): Record<string, string> => {
   results.linkMarkup = attempt(() => {
     holder.insertAdjacentHTML("beforeend", '<li' + 'nk rel="preconnect" href="${attacker}/markup">');
   });
+  // A message from a window that isn't the page, as another App's frame
+  // beside this one would send.
+  let heard = "dropped";
+  const hear = (): void => {
+    heard = "heard";
+  };
+  window.addEventListener("message", hear);
+  window.dispatchEvent(new MessageEvent("message", { data: "from a sibling", source: window }));
+  window.removeEventListener("message", hear);
+  results.foreignMessage = heard;
   results.windows = String(window.length);
   return results;
 };

@@ -679,9 +679,11 @@ const enforced = (() => {
     return true;
   }
 })();
+// Descriptors with no prototype: \`Object.defineProperty\` reads \`get\`,
+// \`set\` and \`writable\` through one, which the screen's code can fill.
 const lock = (target, name, descriptor) => {
   if (Object.getOwnPropertyDescriptor(target, name)?.configurable !== false) {
-    Object.defineProperty(target, name, { ...descriptor, enumerable: false, configurable: false });
+    Object.defineProperty(target, name, { __proto__: null, ...descriptor, enumerable: false, configurable: false });
   }
 };
 for (const name of ${JSON.stringify(screenPeerInterfaces)}) {
@@ -836,9 +838,10 @@ const shield = (event) => {
     apply(weakAdd, cancelledByScreen, [event]);
   };
   const cancelled = () => apply(weakHas, cancelledByScreen, [event]);
-  define(event, "preventDefault", { value: cancel });
-  define(event, "defaultPrevented", { get: cancelled });
+  define(event, "preventDefault", { __proto__: null, value: cancel });
+  define(event, "defaultPrevented", { __proto__: null, get: cancelled });
   define(event, "returnValue", {
+    __proto__: null,
     get: () => !cancelled(),
     set: (value) => {
       if (!value) {
@@ -904,6 +907,17 @@ const start = (event) => {
     )
   );
 };
+// A message from any window but the page never reaches the screen's
+// code: another App's frame on the same page (a side panel) could
+// otherwise hand it what it read, for its own App to send on.
+const sourceOf = Object.getOwnPropertyDescriptor(MessageEvent.prototype, "source").get;
+const stopNow = Event.prototype.stopImmediatePropagation;
+const page = parent;
+apply(listen, window, ["message", (event) => {
+  if (apply(sourceOf, event, []) !== page) {
+    apply(stopNow, event, []);
+  }
+}, true]);
 if (enforced) {
   apply(listen, window, ["message", start]);
 }

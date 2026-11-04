@@ -436,6 +436,32 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
   await expect(frameOf(page)).not.toHaveAttribute("src");
 });
 
+test("a page another site opened keeps no handle on that site, so its screens can post it nothing", async ({
+  pageOf,
+}) => {
+  const page = await pageOf(builder);
+  await page.goto(screenPath(attacking, "turn"));
+  const address = page.url();
+  // The attacker's site opens Grasp, as a link with a target would.
+  await page.goto(attacker.url);
+  const [opened] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.evaluate((url) => {
+      window.open(url);
+    }, address),
+  ]);
+  await opened.waitForLoadState();
+  const screen = opened.frameLocator('iframe[title="turn app"]');
+  await expect(
+    screen.getByRole("status", { name: "Nested documents" })
+  ).not.toBeEmpty({ timeout: 30_000 });
+  const frame = opened.frame({ url: /\/screen-frame\?load=/u });
+  expect({
+    pageOpener: await opened.evaluate(() => window.opener === null),
+    screenOpener: await frame?.evaluate(() => window.top?.opener === null),
+  }).toStrictEqual({ pageOpener: true, screenOpener: true });
+});
+
 test("a screen makes no document of its own and reaches no network, WebRTC or a name looked up ahead of time", async ({
   pageOf,
 }) => {
@@ -508,6 +534,9 @@ test("a screen makes no document of its own and reaches no network, WebRTC or a 
     linkAttribute: "refused: NotSupportedError",
     linkAttributeNode: "refused: NotSupportedError",
     linkArrayPrototype: "no address",
+    // A message from any window but the page is dropped before the
+    // screen's own listeners.
+    foreignMessage: "dropped",
     windows: "0",
   });
   const frame = page.frame({ url: /\/screen-frame\?load=/u });

@@ -34,8 +34,11 @@ import { appHost } from "./durable-objects.ts";
 // anywhere else: WebRTC, the one way out no directive closes, is taken
 // from the frame before the screen runs, and the screen can make no
 // nested document to find it, or a network, in (screen-frame.ts,
-// security-headers.ts). Every call it makes is the person's and recorded
-// as such.
+// security-headers.ts). Nor can it post it to another window: the page
+// keeps no handle on a site that opened it (its opener policy), and a
+// message from any window but the page never reaches a screen, so
+// another App's frame beside it hears nothing. Every call it makes is
+// the person's and recorded as such.
 //
 // What the gate still refuses, read on every call and every push:
 //

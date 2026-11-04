@@ -256,6 +256,11 @@ export const setSecurityHeaders = (
     headers.set("cross-origin-resource-policy", "same-origin");
   } else if (url.pathname !== screenFramePath) {
     headers.set("content-security-policy", contentSecurityPolicy(origin));
+    // A page opened from another site keeps no handle on its opener, and
+    // that site none on it: a screen's frame could otherwise post what it
+    // read to `top.opener`, which no policy of its own stops. Popups the
+    // page opens itself (a provider's sign-in) keep theirs.
+    headers.set("cross-origin-opener-policy", "same-origin-allow-popups");
   } else if (!headers.has("content-security-policy")) {
     headers.set("content-security-policy", screenFramePolicy([]));
   }
