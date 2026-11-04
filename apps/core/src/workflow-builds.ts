@@ -333,8 +333,10 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
   strategy: z.enum(["one", "any", "all"]),
-  // How resource-host.ts answers its events, until GRA-1366 removes it;
-  // the run host never reads it (sealed-run.ts, `isEventWait`).
+  // How resource-host.ts answers its events, until GRA-1366 removes it:
+  // every build it runs (the generator before the run host's) has it. The
+  // run host never reads it (sealed-run.ts, `isEventWait`), so a build
+  // generated for it leaves it out.
   read: z.enum(["data", "envelope"]).optional(),
   filters: z
     .array(

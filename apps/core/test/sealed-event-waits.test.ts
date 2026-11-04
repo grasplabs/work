@@ -317,10 +317,16 @@ type Engine = Pick<ReturnType<typeof engineOfTest>, "step" | "leaseOf">;
  */
 interface Kept {
   readonly journal: Map<string, { ok: true; value: unknown } | { ok: false }>;
+  /** What each wait asked for, which a replay must ask again exactly. */
+  readonly waits: Map<string, string>;
   readonly taken: Set<number>;
 }
 
-const keptOfTest = (): Kept => ({ journal: new Map(), taken: new Set() });
+const keptOfTest = (): Kept => ({
+  journal: new Map(),
+  waits: new Map(),
+  taken: new Set(),
+});
 
 /**
  * An engine whose waits for an event take from run `runId`'s real inbox
@@ -355,8 +361,7 @@ const inboxEngine = (
       throw error;
     }
   };
-  const taking: RunStep["waitForMatch"] = async (name, { match, until }) => {
-    asked.push({ name, match, until });
+  const taking: RunStep["waitForMatch"] = async (_name, { match }) => {
     const journal = await runObject(runId).journal();
     const event = journal?.events.find(
       (each) =>
@@ -393,10 +398,20 @@ const inboxEngine = (
       ...step,
       do: async (name, config, fn) =>
         await replayed(name, async () => await step.do(name, config, fn)),
-      waitForMatch: async (name, options) =>
-        z
+      waitForMatch: async (name, options) => {
+        asked.push({ name, ...options });
+        // As the engine halts a replay that waits for anything else.
+        const waited = JSON.stringify(options);
+        if ((kept.waits.get(name) ?? waited) !== waited) {
+          throw new Error(
+            `Wait "${name}" asks otherwise than it was journaled`
+          );
+        }
+        kept.waits.set(name, waited);
+        return z
           .object({ payload: z.unknown(), timestamp: z.date() })
-          .parse(await replayed(name, async () => await taking(name, options))),
+          .parse(await replayed(name, async () => await taking(name, options)));
+      },
     },
   };
 };
@@ -626,8 +641,9 @@ describe(
         replay: { ended: { timedOut: true }, tampered: [] },
         reached: reachedStep,
         inRange: true,
-        // The replay answered what the engine journaled: it asked nothing.
-        until: [at + timeoutMs],
+        // The replay asked for the same deadline, and answered what the
+        // engine journaled.
+        until: [at + timeoutMs, at + timeoutMs],
       });
     });
 

@@ -115,10 +115,11 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   after either, `workflow:input` and `workflow:output` where the workflow has them,
 //   and the SDK's `$params`. Any other name, one in another encoding of
 //   the same key included, or a step run otherwise than it runs (a task's
-//   step as a `do`, a sleeping task's own as its sleep, a try's catch as a
-//   catch), beside another step, or again, is refused, and fails the run.
-//   A `fork`, a loop of items at once, and every task in one have no steps
-//   in the table yet.
+//   step as a `do`, a sleeping task's own as its sleep, an event wait's
+//   own as its wait, a try's catch as a catch), beside another step, or
+//   again, is refused, and fails the run. A `fork`, a loop of items at
+//   once, every task in one, and a listen that isn't an event wait
+//   (`isEventWait`) have no steps in the table.
 // - A loop's item it never had, or out of its order. A task inside loops
 //   whose items run one after another names its item's index in each loop
 //   its build seals around it, and nothing else: its loops are its task's.
