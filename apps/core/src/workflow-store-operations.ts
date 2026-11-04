@@ -11,6 +11,7 @@ import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation } from "./operations.ts";
+import { keptSensitiveReads } from "./sensitive-reads.ts";
 import {
   auditStoreRefusal,
   consumerDetail,
@@ -129,6 +130,15 @@ export const callWorkflowStoreOperation = async (
   const invocation: Invocation = {
     principal: caller.principal,
     actor: caller.actor,
+    // What it read of the store's sensitive tables, as the store's.
+    sensitiveReads: keptSensitiveReads(env, {
+      actor: caller.actor,
+      target: { type: "store", id: storeId },
+      version: server.version,
+      principal: caller.principal,
+      requestId: caller.requestId,
+      runId: caller.runId,
+    }),
     consumer: {
       resourceId: consumer.subject.id,
       resourceVersion: consumer.version,

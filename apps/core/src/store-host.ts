@@ -187,7 +187,7 @@ import type {
   PageAnswer,
   PinnedSchema,
   QueryAnswer,
-  RecordSql,
+  ReadSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
 import {
@@ -310,12 +310,15 @@ const indexRequired = <Answer>(read: () => Answer): Answer => {
 };
 
 /**
- * What a read answers: its value, and the generation of the table it
- * read, at the moment it read it (`sdk_tables.generation`).
+ * What a read answers: its value, the generation of the table it read,
+ * at the moment it read it (`sdk_tables.generation`), and how many
+ * records it answered of each sensitive table it read
+ * (`StoreHost.#readIn`).
  */
 export interface ReadResult {
   value: QueryAnswer;
   generations: Record<string, number>;
+  sensitive: Record<string, number>;
 }
 
 /** A store's record, as staged in a commit. */
@@ -2526,6 +2529,20 @@ export class StoreHost {
    * `data.result_limit`, ...) depended on them as much as one that
    * answered.
    *
+   * Handed back the same way (`sensitive`, and `details.sensitive` on a
+   * failure): how many records the read answered of each table it ran a
+   * statement on that the store holds sensitive (`#sensitivity`), for
+   * core to audit (store-reader.ts). A table is named by the statement
+   * that reads it (`ReadSql.on`), before that statement runs: the one
+   * place every read's statements pass, its counts, cursor anchors and
+   * search bounds included, so no way a read looks at a table and then
+   * fails leaves it out. Named even when it answered none of its records,
+   * or failed: a filter on its fields that matched nothing, or a `unique`
+   * that found two, still tells something of what they hold. A read that
+   * ran no statement (`take(0)`, a refusal) looked at nothing and names
+   * none, and neither does a table only a `with` named whose records
+   * were never looked up.
+   *
    * With `preview` (a mutation's writes, staged and not yet committed),
    * the writes are applied first, as its commit would apply them (the
    * same checks, owner, metadata and staging time), the read sees them,
@@ -2538,12 +2555,24 @@ export class StoreHost {
     reader: ReadScope,
     names: readonly string[],
     preview: Preview | undefined,
-    read: (statements: RecordSql) => Answer
-  ): { value: Answer; generations: Record<string, number> } {
+    read: (statements: ReadSql) => Answer
+  ): {
+    value: Answer;
+    generations: Record<string, number>;
+    sensitive: Record<string, number>;
+  } {
     const run = () => {
       this.#bind(storeId, false);
       const generations = this.#generationsOf(pinned, names);
       let readRecords = false;
+      const isSensitive = this.#sensitivity();
+      // The sensitive tables a statement read (`ReadSql.on`) and the
+      // records it answered of each (`ReadSql.answered`): never every
+      // table of `names`, which holds those its `with` names whether or
+      // not their records were ever looked up.
+      const answered = new Map<string, number>();
+      const sensitiveRead = (): Record<string, number> =>
+        Object.fromEntries(answered);
       try {
         if (preview !== undefined) {
           const { staged } = this.#apply(
@@ -2569,17 +2598,35 @@ export class StoreHost {
         // `data.access_denied`, depended on none, and carries no
         // generations, so its reader isn't rerun for every commit).
         const storage = this.ctx.storage.sql;
-        const counted: RecordSql = {
-          exec: <Row extends Record<string, SqlStorageValue>>(
-            query: string,
-            ...bindings: unknown[]
-          ): SqlStorageCursor<Row> => {
-            const cursor = storage.exec<Row>(query, ...bindings);
-            readRecords = true;
-            return cursor;
+        const counted: ReadSql = {
+          on: (table) => ({
+            exec: <Row extends Record<string, SqlStorageValue>>(
+              query: string,
+              ...bindings: unknown[]
+            ): SqlStorageCursor<Row> => {
+              // Named before it runs: a statement that then fails, or
+              // whose answer the read fails on, read the table all the
+              // same.
+              if (isSensitive(table)) {
+                answered.set(table, answered.get(table) ?? 0);
+              }
+              const cursor = storage.exec<Row>(query, ...bindings);
+              readRecords = true;
+              return cursor;
+            },
+          }),
+          // Rows only of a table a statement named already (`on`): never
+          // a table of its own, so a read that ran no statement on it (a
+          // search with no terms answers none without one) names none.
+          answered: (table, answeredNow) => {
+            const sofar = answered.get(table);
+            if (sofar !== undefined) {
+              answered.set(table, sofar + answeredNow);
+            }
           },
         };
-        return { value: read(counted), generations };
+        const value = read(counted);
+        return { value, generations, sensitive: sensitiveRead() };
       } catch (error) {
         if (
           readRecords &&
@@ -2590,6 +2637,7 @@ export class StoreHost {
           Reflect.set(error, "details", {
             ...(typeof details === "object" && details !== null ? details : {}),
             generations,
+            sensitive: sensitiveRead(),
           });
         }
         throw error;
@@ -2598,9 +2646,7 @@ export class StoreHost {
     if (preview === undefined) {
       return this.ctx.storage.transactionSync(run);
     }
-    let answer:
-      | { value: Answer; generations: Record<string, number> }
-      | undefined;
+    let answer: ReturnType<typeof run> | undefined;
     // Thrown to end the transaction, so SQLite rolls back everything it
     // did; told apart from any other failure by identity.
     const rollback = new Error("Rolled back after a preview");
@@ -3074,7 +3120,11 @@ export class StoreHost {
       terminal.cursor === null
         ? null
         : await openCursor(keys, binding, terminal.cursor);
-    const { value: read, generations } = this.#readIn(
+    const {
+      value: read,
+      generations,
+      sensitive,
+    } = this.#readIn(
       storeId,
       pinned,
       reader,
@@ -3101,7 +3151,7 @@ export class StoreHost {
             hasMore: true,
           }
         : { items: read.items, nextCursor: null, hasMore: false };
-    return { value, generations };
+    return { value, generations, sensitive };
   }
 
   /**

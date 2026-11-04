@@ -42,30 +42,47 @@ export interface ReadGuard {
   readonly expectedRevision: number;
 }
 
+/** `counts`, if an object, as its members that are counts. */
+const countsOf = (counts: unknown): Record<string, number> =>
+  typeof counts === "object" && counts !== null
+    ? Object.fromEntries(
+        Object.entries(counts).filter((entry): entry is [string, number] =>
+          Number.isSafeInteger(entry[1])
+        )
+      )
+    : {};
+
 /**
- * The generations a failed read's error carries (`details.generations`,
- * StoreHost's `#readIn`), taken off it, so App code never sees them; none
- * for an error raised before the read looked at a record.
+ * What a failed read's error carries of the read (`details.generations`
+ * and `details.sensitive`, StoreHost's `#readIn`), taken off it, so App
+ * code never sees them; none for an error raised before the read looked
+ * at a record.
  */
-const takeGenerations = (error: unknown): Record<string, number> => {
+const takeReadDetails = (
+  error: unknown
+): {
+  generations: Record<string, number>;
+  sensitive: Record<string, number>;
+} => {
   if (typeof error !== "object" || error === null) {
-    return {};
+    return { generations: {}, sensitive: {} };
   }
   const details: unknown = Reflect.get(error, "details");
   if (typeof details !== "object" || details === null) {
-    return {};
+    return { generations: {}, sensitive: {} };
   }
-  const { generations, ...rest }: Record<string, unknown> = { ...details };
+  const { generations, sensitive, ...rest }: Record<string, unknown> = {
+    ...details,
+  };
   Reflect.set(error, "details", rest);
-  if (typeof generations !== "object" || generations === null) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(generations).filter((entry): entry is [string, number] =>
-      Number.isSafeInteger(entry[1])
-    )
-  );
+  return { generations: countsOf(generations), sensitive: countsOf(sensitive) };
 };
+
+/**
+ * Told how many records a read answered of each sensitive table it read
+ * (`ReadResult.sensitive`), answered or failed alike.
+ */
+export type SensitiveSink = (sensitive: Record<string, number>) => void;
 
 /** The host's record of one invocation's reads of one store. */
 export class StoreReader {
@@ -94,22 +111,30 @@ export class StoreReader {
 
   /**
    * One read for the invocation, its scope the one core resolved; what it
-   * depended on is recorded, never anything App code says it read.
+   * depended on is recorded, never anything App code says it read, and
+   * what it answered of sensitive tables told to `sensitive`.
    */
-  async read(request: ReadRequest): Promise<QueryAnswer> {
+  async read(
+    request: ReadRequest,
+    sensitive?: SensitiveSink
+  ): Promise<QueryAnswer> {
     let result: Awaited<ReturnType<OpenStore["read"]>>;
     const staged = this.#staged?.();
     try {
       result = await this.#store.read(this.#scope, request, staged);
     } catch (error) {
       // A read that failed after it looked at records still depended on
-      // them: count what the store says it read, then fail as it did,
-      // without the generations, which are the host's own.
-      this.#record(takeGenerations(error));
+      // them, and told something of them: count what the store says it
+      // read, then fail as it did, without what it said of the read,
+      // which is the host's own.
+      const read = takeReadDetails(error);
+      this.#record(read.generations);
+      sensitive?.(read.sensitive);
       throw error;
     }
     const { value, generations } = result;
     this.#record(generations);
+    sensitive?.(result.sensitive);
     // A record this mutation already changed is checked by its write's
     // own expected revision (or is new): a guard on it would compare the
     // commit's base with the revision the staged read showed, and fail.

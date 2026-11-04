@@ -194,11 +194,13 @@ export interface OpenStore {
 /**
  * A read's result as the store's object answered it, as JSON text over
  * RPC (data-store.ts): its value as the store shaped it, and the
- * generations, which must be counts.
+ * generations and the records it answered of each sensitive table, which
+ * must be counts.
  */
 const readResultSchema = z.strictObject({
   value: z.unknown(),
   generations: z.record(z.string(), z.number().int().min(0)),
+  sensitive: z.record(z.string(), z.number().int().min(0)),
 });
 
 /** A claim's answer, as JSON text over RPC (data-store.ts). */
@@ -223,11 +225,13 @@ const historyOf = (answered: string): RecordChangePage => {
 };
 
 const readResultOf = (answered: string): ReadResult => {
-  const { value, generations } = readResultSchema.parse(JSON.parse(answered));
+  const { value, generations, sensitive } = readResultSchema.parse(
+    JSON.parse(answered)
+  );
   // SAFETY: the store's host shaped the value (`StoreHost.read`), a
   // `QueryAnswer` of JSON documents, which JSON carries unchanged.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return { value: value as ReadResult["value"], generations };
+  return { value: value as ReadResult["value"], generations, sensitive };
 };
 
 /** The audit entry of a change to `store` by `by`: identifiers only. */

@@ -175,6 +175,11 @@ const typeRules: readonly {
   // An App's data read and changed from its page (core's src/app-data.ts):
   // a builder or admin exporting a table, and importing rows into one.
   { action: "app.data.exported", type: "read" },
+  // A table its schema declares sensitive read (core's
+  // src/sensitive-reads.ts): by an App's function, once a call for each
+  // function and table, or by the data browser or an export; who read,
+  // which table and how many of its records, never what they hold.
+  { action: "app.data.read", type: "read" },
   { action: "app.data.imported", type: "action" },
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },

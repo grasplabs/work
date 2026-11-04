@@ -238,6 +238,8 @@ const fixtureOperation = async (
         principal: run.principal,
         // A test's fixture person, on a store only the test reaches.
         actor: { type: "person", userId: run.principal },
+        // The test's store holds no one's data: nothing to record.
+        sensitiveReads: null,
         consumer,
         // The workflow's version, as a real workflow's store call names it.
         writer: { resourceId: run.workflowId, resourceVersion: run.version },

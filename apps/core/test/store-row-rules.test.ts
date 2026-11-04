@@ -541,6 +541,8 @@ const call = async (
     {
       principal: by.userId,
       actor: { type: "person", userId: by.userId },
+      // A test of the host, on a store only it reaches.
+      sensitiveReads: null,
       consumer: { resourceId: appId, resourceVersion: 1 },
       store,
       requestId: crypto.randomUUID(),

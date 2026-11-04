@@ -313,6 +313,24 @@ const accessOf = (
  */
 export type RecordSql = Pick<SqlStorage, "exec">;
 
+/**
+ * What a read reads records through. Every statement it runs names the
+ * table it reads (`on`), so the host knows each table the read looked at
+ * before the statement runs, whatever it then answers or however it
+ * fails; a table a read only names (one its `with` would load from, when
+ * no record named one) is never read, and never told. How many records
+ * of a table it answers is told besides (`answered`): every record that
+ * leaves the store as a document, a related one included, and every
+ * record a count, an aggregate or a group is computed over
+ * (`disclosed`). The host audits those of a sensitive table
+ * (store-host.ts, `#readIn`).
+ */
+export interface ReadSql {
+  /** The statements of the read that read `table`. */
+  readonly on: (table: string) => RecordSql;
+  readonly answered: (table: string, records: number) => void;
+}
+
 /** A record's row, as a read selects it. */
 export interface ReadRow extends Record<string, SqlStorageValue> {
   record_id: string;
@@ -531,7 +549,7 @@ const scanned = (scan: Scan, bytes: number): void => {
  * see. A different `expectedRevision` on one it may see is a conflict.
  */
 export const readRecord = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   request: GetRequest
@@ -539,6 +557,7 @@ export const readRecord = (
   const table = readableTable(pinned, scope, request.table);
   const scoped = scopeClause(table, scope);
   const [row] = sql
+    .on(table.name)
     .exec<ReadRow & { value_json: string }>(
       `SELECT record_id, owner_id, revision, created_at, updated_at, value_json FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
       table.tableId,
@@ -549,6 +568,9 @@ export const readRecord = (
   if (row === undefined) {
     return null;
   }
+  // Answered even when its revision conflicts: the failure says the
+  // record is there.
+  sql.answered(table.name, 1);
   if (
     request.expectedRevision !== null &&
     row.revision !== request.expectedRevision
@@ -705,15 +727,18 @@ export interface Match {
  * no further, and whoever reads past a bound gets `data.scan_limit`.
  */
 export const matchesOf = (
-  sql: RecordSql,
+  sql: ReadSql,
   plan: Plan,
   shared?: Scan
 ): IterableIterator<Match, undefined> => {
   // A scan of its own unless the caller's spans several statements.
   const scan: Scan = shared ?? { entries: 0, bytes: 0 };
-  const cursor = sql.exec<
-    ReadRow & { value_json?: string; bytes?: number; matched?: number }
-  >(plan.statement, ...plan.params);
+  const cursor = sql
+    .on(plan.table.name)
+    .exec<ReadRow & { value_json?: string; bytes?: number; matched?: number }>(
+      plan.statement,
+      ...plan.params
+    );
   const rows = cursor[Symbol.iterator]();
   const iterator: IterableIterator<Match, undefined> = {
     next: () => {
@@ -781,6 +806,31 @@ const aggregateOf = (
     throw dataErrors.create("data.aggregate_overflow");
   }
   return result;
+};
+
+/**
+ * `matches`, each told to `sql` as a record of `table` the read answered
+ * as it is read: a count, an aggregate or a group reads through its
+ * matches and tells what they hold (an exact value under a narrow filter,
+ * a field's distinct values) as much as the records themselves would.
+ */
+const disclosed = (
+  sql: ReadSql,
+  table: ReadTable,
+  matches: Iterator<Match>
+): IterableIterator<Match, undefined> => {
+  const iterator: IterableIterator<Match, undefined> = {
+    next: () => {
+      const next = matches.next();
+      if (next.done === true) {
+        return { done: true, value: undefined };
+      }
+      sql.answered(table.name, 1);
+      return next;
+    },
+    [Symbol.iterator]: () => iterator,
+  };
+  return iterator;
 };
 
 /** How many matches there are. */
@@ -1120,7 +1170,7 @@ const idsIn = (value: unknown): string[] => {
  * table.
  */
 const recordsById = (
-  sql: RecordSql,
+  sql: ReadSql,
   scope: ReadScope,
   target: ReadTable,
   ids: ReadonlySet<string>,
@@ -1134,16 +1184,19 @@ const recordsById = (
     scanned(scan, 0);
   }
   const scoped = scopeClause(target, scope);
-  const rows = sql.exec<ReadRow & { value_json: string; bytes: number }>(
-    `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
-    target.tableId,
-    JSON.stringify([...ids]),
-    ...scoped.params
-  );
+  const rows = sql
+    .on(target.name)
+    .exec<ReadRow & { value_json: string; bytes: number }>(
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
+      target.tableId,
+      JSON.stringify([...ids]),
+      ...scoped.params
+    );
   for (const row of rows) {
     scannedBytes(scan, row.bytes);
     found.set(row.record_id, documentOf(target, row, row.value_json));
   }
+  sql.answered(target.name, found.size);
   return found;
 };
 
@@ -1152,7 +1205,7 @@ const recordsById = (
  * `fields` under `_with`, as the header above says.
  */
 const withRelated = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1315,7 +1368,7 @@ const searchPlan = (
  * read, when its text holds no word to look for.
  */
 const searchMatches = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1333,7 +1386,7 @@ const searchMatches = (
   // Counted among the rows the caller may read, when rules choose them:
   // a count of every match would tell how often a word stands in rows
   // they can't see.
-  requireSearchable(sql, search, match, table.rows);
+  requireSearchable(sql.on(table.name), search, match, table.rows);
   return matchesOf(
     sql,
     searchPlan(scope, table, query, search, match, seek),
@@ -1552,7 +1605,7 @@ const groupsOf = (
 
 /** At most `limit` matches, as documents of `table`, with their relations. */
 const withDocuments = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1562,6 +1615,7 @@ const withDocuments = (
   scan: Scan
 ): ReadDocument[] => {
   const documents = documentsOf(table, matches, limit);
+  sql.answered(table.name, documents.length);
   withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
   return documents;
 };
@@ -1577,7 +1631,7 @@ const withDocuments = (
  * A search's page is ordered by relevance (`searchMatches`).
  */
 export const readPage = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest,
@@ -1593,7 +1647,13 @@ export const readPage = (
   let anchorFields: number;
   if (query.search === undefined) {
     anchorFields = accessOf(pinned, table, query).orderFields.length - 1;
-    for (const plan of pagePlans(sql, pinned, scope, query, anchor)) {
+    for (const plan of pagePlans(
+      sql.on(table.name),
+      pinned,
+      scope,
+      query,
+      anchor
+    )) {
       if (found.length > terminal.pageSize) {
         break;
       }
@@ -1628,6 +1688,7 @@ export const readPage = (
   const items = page.map(({ row, valueJson }) =>
     documentOf(table, row, valueJson ?? "{}")
   );
+  sql.answered(table.name, items.length);
   withRelated(sql, pinned, scope, table, items, query.with ?? [], scan);
   return {
     items,
@@ -1646,7 +1707,7 @@ export const readPage = (
 
 /** Answers a search's terminal other than a page (`runQuery`). */
 const runSearch = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1674,7 +1735,7 @@ const runSearch = (
     }
     case "count": {
       let count = 0;
-      const iterator = matches();
+      const iterator = disclosed(sql, table, matches());
       for (
         let next = iterator.next();
         next.done !== true;
@@ -1708,7 +1769,7 @@ const runSearch = (
  * records of its `with`. A page is read with `readPage`.
  */
 export const runQuery = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest
@@ -1760,11 +1821,11 @@ export const runQuery = (
       return found;
     }
     case "count": {
-      return countOf(matchesOf(sql, plan(), scan));
+      return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
     }
     case "aggregate": {
       if (terminal.operation === "count") {
-        return countOf(matchesOf(sql, plan(), scan));
+        return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
       }
       // Declared numeric fields only (spec 9.2), never a managed one.
       if (
@@ -1777,13 +1838,17 @@ export const runQuery = (
       }
       return aggregateOf(
         terminal.operation,
-        matchesOf(
+        disclosed(
           sql,
-          planQuery(pinned, scope, table, query, {
-            documents: false,
-            aggregate: terminal.field,
-          }),
-          scan
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              aggregate: terminal.field,
+            }),
+            scan
+          )
         )
       );
     }
@@ -1792,14 +1857,18 @@ export const runQuery = (
       return groupsOf(
         terminal,
         numbers,
-        matchesOf(
+        disclosed(
           sql,
-          planQuery(pinned, scope, table, query, {
-            documents: false,
-            groups: terminal.by,
-            numbers,
-          }),
-          scan
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              groups: terminal.by,
+              numbers,
+            }),
+            scan
+          )
         )
       );
     }
