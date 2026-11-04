@@ -1,3 +1,5 @@
+import { schemaProblemMessages } from "@grasp-os/workflow-schema/data-schema";
+
 import { profileLimits } from "./limits.ts";
 
 /**
@@ -38,19 +40,7 @@ export const diagnosticMessages = {
   "profile.limit_above_ceiling": "A limit is above the host's ceiling.",
 
   // Inline data schemas.
-  "schema.unsupported_keyword":
-    "The data schema uses a keyword outside the profile's value algebra.",
-  "schema.external": "Data schemas are inline; external schemas aren't loaded.",
-  "schema.invalid": "The data schema isn't valid.",
-  "schema.keyword_not_applicable":
-    "The keyword doesn't apply to the schema's type.",
-  "schema.open_object":
-    "An object schema must set additionalProperties to false.",
-  "schema.default_not_allowed": "A default isn't allowed here.",
-  "schema.invalid_default": "The default isn't a value its schema accepts.",
-  "schema.ambiguous_any_of":
-    "Two members of anyOf can accept the same value and normalize it differently.",
-  "schema.too_large": "The data schema nests too deep or declares too much.",
+  ...schemaProblemMessages,
 
   // Tasks, scopes and control flow.
   "task.invalid_id": "A task ID is 1 to 64 characters of kebab-case.",

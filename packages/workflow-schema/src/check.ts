@@ -1,11 +1,5 @@
 import { Validator } from "@cfworker/json-schema";
 import type { OutputUnit } from "@cfworker/json-schema";
-import { compileDataSchema } from "@grasp-os/open-workflow/data-schema";
-import type { SchemaProblem } from "@grasp-os/open-workflow/data-schema";
-import {
-  diagnosticMessages,
-  pointerJoin,
-} from "@grasp-os/open-workflow/diagnostics";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { checkExpression } from "@grasp-os/sdk/expression-check";
 import type {
@@ -16,6 +10,12 @@ import { currencySchema, paramValueSchemas } from "@grasp-os/sdk/params";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
 
+import {
+  compileDataSchema,
+  pointerJoin,
+  schemaProblemMessages,
+} from "./data-schema.ts";
+import type { SchemaProblem } from "./data-schema.ts";
 import {
   durationMs,
   formatLimits,
@@ -659,7 +659,7 @@ const checkSchema = (
         walk,
         each.pointer,
         each.code,
-        diagnosticMessages[each.code],
+        schemaProblemMessages[each.code],
         each.remedy
       );
     }

@@ -1003,6 +1003,9 @@ importers:
       '@grasp-os/workflow-expressions':
         specifier: workspace:*
         version: link:../workflow-expressions
+      '@grasp-os/workflow-schema':
+        specifier: workspace:*
+        version: link:../workflow-schema
     devDependencies:
       '@cfworker/json-schema':
         specifier: 'catalog:'
@@ -1208,9 +1211,6 @@ importers:
       '@cfworker/json-schema':
         specifier: 'catalog:'
         version: 4.1.1
-      '@grasp-os/open-workflow':
-        specifier: workspace:*
-        version: link:../open-workflow
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../sdk

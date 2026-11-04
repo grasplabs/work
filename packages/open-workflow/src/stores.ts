@@ -24,11 +24,11 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "@grasp-os/shared/operation-limits";
+import { compileDataSchema } from "@grasp-os/workflow-schema/data-schema";
 
 import { readOptions } from "./catalog.ts";
 import { createChecker } from "./checker.ts";
 import type { Checker } from "./checker.ts";
-import { compileDataSchema } from "./data-schema.ts";
 import { pointerJoin } from "./diagnostics.ts";
 import { isObject, parseDefinitionText } from "./json-text.ts";
 import type { JsonValue } from "./json-text.ts";
