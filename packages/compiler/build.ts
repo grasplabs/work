@@ -40,6 +40,7 @@ import {
 import {
   compilerAssets,
   kitModule,
+  jqWasmModule,
   kitModuleName,
   kitStylesheet,
   previewRefresh,
@@ -70,6 +71,13 @@ const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
  * and Knowledge's types come from: kept for the same reason.
  */
 const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
+/**
+ * The workflow SDK's jq (its `evaluate`): its types are the SDK's, and its
+ * WebAssembly a module of every workflow isolate (`jqWasmModule`).
+ */
+const expressions = realpathSync(
+  path.join(sdk, "node_modules/@grasp-os/workflow-expressions")
+);
 const require = createRequire(path.join(root, "package.json"));
 
 /** React as the kit's modules, App modules and packages import it. */
@@ -495,6 +503,34 @@ const buildKitModules = async (
   return built;
 };
 
+/** jq's WebAssembly, as workflow-expressions pins it. */
+const jqWasmSource = path.join(expressions, "src/jq.wasm");
+
+/**
+ * jq's WebAssembly, which the workflow SDK's `evaluate` imports: not
+ * bundled, but a module of the workflow isolate by its flat name
+ * (`jqWasmModule`), as core loads it from the release (`jq.wasm`). It is
+ * the only WebAssembly the SDK may import.
+ */
+const jqWasmExternal: Plugin = {
+  name: "grasp-jq-wasm",
+  // Before Vite's own WebAssembly plugin, which would inline it.
+  enforce: "pre",
+  resolveId: (source, importer) => {
+    if (!source.endsWith(".wasm")) {
+      return null;
+    }
+    const resolved =
+      importer === undefined
+        ? source
+        : path.resolve(path.dirname(importer), source);
+    if (realpathSync(resolved) !== jqWasmSource) {
+      throw new Error(`The SDK may import no WebAssembly but jq's: ${source}`);
+    }
+    return { id: jqWasmModule, external: true };
+  },
+};
+
 /**
  * The SDK's modules for `specifiers`, which App code runs with outside
  * screens: the workflow SDK, which App workflows import (`sdkImports`),
@@ -515,6 +551,7 @@ const buildSdkModules = async (
     mode: "production",
     define: production,
     resolve: { conditions: ["workerd", "worker"] },
+    plugins: [jqWasmExternal],
     build: {
       write: false,
       minify: true,
@@ -654,6 +691,8 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
       name = `/node_modules/@grasp-os/shared${real.slice(shared.length)}`;
     } else if (real.startsWith(`${brain}/`)) {
       name = `/node_modules/@grasp-os/brain${real.slice(brain.length)}`;
+    } else if (real.startsWith(`${expressions}/`)) {
+      name = `/node_modules/@grasp-os/workflow-expressions${real.slice(expressions.length)}`;
     } else if (inPackage === real) {
       // The compiler's own package.json, read for the entry.
       continue;
@@ -1040,6 +1079,8 @@ const buildAppCompiler = async (
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
+  // jq's, which every workflow isolate loads beside the SDK's modules.
+  const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
   const kitPreviewModules = modulesOf(previewKitCode);
   // App workflows and the code generated from JSON workflows share one set:
@@ -1064,6 +1105,7 @@ const buildAppCompiler = async (
     .update(serverSdkModules.version)
     .update(packageBuilder)
     .update(esbuildWasm)
+    .update(jqWasm)
     .digest("hex")
     .slice(0, 16);
   writeRelease(assets, version, {
@@ -1076,6 +1118,7 @@ const buildAppCompiler = async (
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
     [compilerAssets.reference]: JSON.stringify(referenceOf(kit.types)),
+    [compilerAssets.jqWasm]: jqWasm,
   });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The

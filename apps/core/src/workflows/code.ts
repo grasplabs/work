@@ -1,6 +1,8 @@
 import {
   appModuleName,
   compilerVersion,
+  jqWasm,
+  jqWasmModule,
   kitModuleName,
   workflowSdkModules,
   workflowIdOf,
@@ -38,7 +40,11 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../sandbox-session.ts";
-import type { SessionCall, SessionOptions } from "../sandbox-session.ts";
+import type {
+  PlatformModule,
+  SessionCall,
+  SessionOptions,
+} from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
@@ -250,6 +256,25 @@ export const codeSession = async (
     }
     throw error;
   }
+};
+
+/**
+ * jq's WebAssembly, as a run's isolate has it besides its modules: the
+ * workflow SDK's `evaluate` imports it by `jqWasmModule`. In core's
+ * Loader a module of its own; on-prem one of the release's platform
+ * modules, which the sandbox host reads apart (sandbox-session.ts).
+ */
+const jqModules = async (
+  env: Pick<Env, "ASSETS">
+): Promise<{
+  loader: Record<string, { wasm: ArrayBuffer }>;
+  platform: Record<string, PlatformModule>;
+}> => {
+  const wasm = await jqWasm(env.ASSETS);
+  return {
+    loader: { [jqWasmModule]: { wasm } },
+    platform: { [jqWasmModule]: { type: "wasm", bytes: new Uint8Array(wasm) } },
+  };
 };
 
 /**
@@ -1058,7 +1083,8 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
     return {
       run: async (host, start) => {
         // Read before the clock starts: none of the run's code runs yet.
-        const loaded = await modules();
+        const [own, jq] = await Promise.all([modules(), jqModules(env)]);
+        const loaded = { ...own, ...jq.loader };
         const entrypoint = quietLoader(env.LOADER)
           .get(null, () => ({
             ...workflowSandbox,
@@ -1091,9 +1117,11 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         ended: ended.promise,
       };
       const clock = betweenSteps(budgetMs);
+      const [own, jq] = await Promise.all([modules(), jqModules(env)]);
       const call = {
         mainModule,
-        modules: await modules(),
+        modules: own,
+        platformModules: jq.platform,
         entrypoint: "Run",
         method: "run",
         args: [

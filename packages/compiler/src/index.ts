@@ -65,6 +65,7 @@ export {
 export {
   appModuleName,
   computePackagesFile,
+  jqWasmModule,
   kitModuleName,
   packageModuleName,
   packageModulePrefix,
@@ -197,6 +198,18 @@ const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
     compilerAssets.esbuildWasm,
     async () =>
       await readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm")
+  );
+
+/**
+ * jq's WebAssembly (the workflow SDK's `evaluate`), as every workflow
+ * isolate loads it beside the SDK's modules, by `jqWasmModule`: read once
+ * per isolate.
+ */
+export const jqWasm = async (assets: Fetcher): Promise<ArrayBuffer> =>
+  await memoisedWasm(
+    assets,
+    compilerAssets.jqWasm,
+    async () => await readCompilerBytes(assets, compilerAssets.jqWasm, "wasm")
   );
 
 /** The module sets every App imports, read once per isolate (`memoiser`). */

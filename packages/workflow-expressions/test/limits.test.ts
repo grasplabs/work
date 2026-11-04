@@ -1,7 +1,7 @@
-import { v } from "@grasp-os/sdk";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { expressionErrors } from "../src/errors.ts";
 import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
@@ -379,12 +379,12 @@ describe("result contracts, with no truthiness or coercion", () => {
   it("needs a selector to be exactly what its schema accepts, untransformed", async () => {
     const status = {
       kind: "schema",
-      schema: v.object({ status: v.enum(["approved", "rejected"]) }),
+      schema: z.strictObject({ status: z.enum(["approved", "rejected"]) }),
       expected: "{ status }",
     } as const;
     const trimmed = {
       kind: "schema",
-      schema: v.string().trim(),
+      schema: z.string().trim(),
       expected: "trimmed string",
     } as const;
     expect({

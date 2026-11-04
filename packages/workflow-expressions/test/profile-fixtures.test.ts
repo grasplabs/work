@@ -1,7 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { v } from "@grasp-os/sdk";
 import type { Json } from "@grasp-os/shared/json";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { runtimeDescriptor } from "../src/evaluate.ts";
 import type { ResultContract, Stage } from "../src/evaluate.ts";
@@ -57,7 +57,7 @@ const summary: Fixture[] = [
     slot: "${ $workflow.input.noteId }",
     stage: "taskDefinition",
     values: { variables: { workflow: workflowFor({ noteId: noteOne }) } },
-    contract: { kind: "schema", schema: v.id("notes"), expected: "notes ID" },
+    contract: { kind: "schema", schema: z.string(), expected: "string" },
     expected: noteOne,
   },
   {
@@ -88,7 +88,7 @@ const summary: Fixture[] = [
     slot: "${ $params.instructions }",
     stage: "taskDefinition",
     values: { variables: { params } },
-    contract: { kind: "schema", schema: v.string(), expected: "string" },
+    contract: { kind: "schema", schema: z.string(), expected: "string" },
     expected: params.instructions,
   },
   {
@@ -112,7 +112,7 @@ const summary: Fixture[] = [
     values: { variables: { params } },
     contract: {
       kind: "schema",
-      schema: v.number().integer(),
+      schema: z.number().int(),
       expected: "integer",
     },
     expected: 120,
