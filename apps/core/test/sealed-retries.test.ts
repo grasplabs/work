@@ -23,7 +23,7 @@ const tryOf = (id: string, catcher: Try["catch"]): Try => ({
 });
 
 const caught = {
-  type: "https://open-workflow-specification.org/spec/1.0.0/errors/runtime",
+  type: "https://grasp.work/schemas/grasp-workflow/1/errors/runtime",
   status: 500,
   instance: "/do/0/outer/try/0/inner/try/0/fetch",
   title: "Something went wrong.",

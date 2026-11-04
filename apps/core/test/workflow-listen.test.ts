@@ -530,7 +530,7 @@ describe("listen tasks", { timeout: 120_000 }, () => {
           catch: {
             errors: {
               with: {
-                type: "https://open-workflow-specification.org/spec/1.0.0/errors/timeout",
+                type: "https://grasp.work/schemas/grasp-workflow/1/errors/timeout",
               },
             },
             as: "failure",

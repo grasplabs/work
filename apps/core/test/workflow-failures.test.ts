@@ -74,8 +74,7 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 
 /** A domain error a raise raises: of the workflow's own type. */
 /** Where the standard error types are. */
-const standardTypes =
-  "https://open-workflow-specification.org/spec/1.0.0/errors/";
+const standardTypes = "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 const conflict = {
   type: "urn:grasp:error:invoice.conflict",
@@ -386,7 +385,7 @@ describe("raise and catch in JSON workflows", () => {
           {
             errors: {
               with: {
-                type: "https://open-workflow-specification.org/spec/1.0.0/errors/validation",
+                type: "https://grasp.work/schemas/grasp-workflow/1/errors/validation",
                 status: 400,
               },
             },

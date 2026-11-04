@@ -20,6 +20,14 @@ import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 export const workflowSchemaUrl =
   "https://grasp.work/schemas/grasp-workflow/1.json";
 
+/**
+ * Where the host's own error kinds are (`<errorTypeBase>timeout`, say), as
+ * a catch's `errors.type` names them. A raise never names one: an error of
+ * these kinds is always the host's.
+ */
+export const errorTypeBase =
+  "https://grasp.work/schemas/grasp-workflow/1/errors/";
+
 /** JSON, as the format's values hold it. */
 export type Json =
   | null
