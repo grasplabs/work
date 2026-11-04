@@ -67,6 +67,7 @@ export const momentSchema = z.object({
   minutes: z.number(),
   spoken: z.boolean().optional(),
   also: z.array(z.literal(signals)).optional(),
+  event: z.literal("resume").optional(),
 }) satisfies z.ZodType<Moment>;
 
 /** Where fixtures of a kind are kept: in git for the open set, in the hidden set's own folder for the hidden one. */

@@ -20,6 +20,9 @@ export const moves = [
   "do not know",
   "wrap up",
   "detour",
+  "called away",
+  "wrong paste",
+  "misread",
 ] as const;
 export type Move = (typeof moves)[number];
 

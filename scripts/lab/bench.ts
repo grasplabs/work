@@ -37,7 +37,7 @@ import type { CaseSet } from "./kept.ts";
 import { keyOf } from "./keys/index.ts";
 import { sliceOf } from "./keys/types.ts";
 import type { AnswerKey } from "./keys/types.ts";
-import { signalPlain, signalRules, signals } from "./moments.ts";
+import { signalPlain, signalRules, signals, waitsFor } from "./moments.ts";
 import type { Moment, Signal } from "./moments.ts";
 import type { Asker, Said } from "./person.ts";
 import { notesAfter } from "./play.ts";
@@ -251,7 +251,7 @@ export const rightLine = async (
   moment: Moment,
   turn: Pick<StephenTurn, "say" | "wants">
 ): Promise<Verdict> => {
-  if (moment.signal === "mid sentence") {
+  if (waitsFor.has(moment.signal)) {
     return turn.say === ""
       ? { right: true, single: true, why: "He waits." }
       : {
@@ -272,6 +272,12 @@ export const rightLine = async (
         ? {
             "their last line":
               "said out loud, written as speech recognition heard it",
+          }
+        : {}),
+      ...(moment.event === "resume"
+        ? {
+            "what happened":
+              "They left after his last line, and came back to the interview later through the same link. His line is the first thing he says to them now.",
           }
         : {}),
       notes: moment.facts.map((fact) => fact.text),
@@ -372,7 +378,7 @@ export const momentTurn = (
   const opening = openingOf(moment.locale);
   const last = moment.lines.length - 1;
   return {
-    event: "answer",
+    event: moment.event ?? "answer",
     locale: moment.locale,
     interviewer,
     lines: [
@@ -403,7 +409,7 @@ const askCase = async (
 ): Promise<CaseScore> => {
   // Only his line is judged: what he would write down is never waited for, but where they stopped mid-sentence, since he then says nothing and the whole turn tells.
   const turn = await stand.turn(moment.who, momentTurn(moment, interviewer), {
-    lineOnly: moment.signal !== "mid sentence",
+    lineOnly: !waitsFor.has(moment.signal),
   });
   const { right, single, why } = await rightLine(stand.asker, moment, turn);
   const mistakes = mistakesIn(turn.say).length > 0 ? 1 : 0;
