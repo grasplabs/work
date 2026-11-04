@@ -2,12 +2,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { decisionEventType } from "../src/decisions/decisions.ts";
-import { shownWaits } from "../src/workflows/run-waits.ts";
+import { waitKeyOf, waitStep } from "../src/workflows/host.ts";
+import { shownWaits, tasksByKey } from "../src/workflows/run-waits.ts";
 import type { Pending, WaitContext } from "../src/workflows/run-waits.ts";
 
 // Which of a run's open waits a screen is shown, by the steps an
 // independent run's host names (resource-host.ts): names the run's code
 // chose are never shown, so nothing it read reaches a screen through one.
+// A run on the run host names its steps by its build's table of tasks
+// (sealed-steps.ts), read by that table alike.
 
 const key = "0123456789abcdef";
 const openedAt = 1000;
@@ -27,14 +30,17 @@ const child = {
   manifestHash: "m",
 };
 
+/** A task's own step, in no loop. */
+const ownStep = { steps: ["task"], scope: [] };
+
 /** A build of a sleep, a connector call, a decision, a listen and a run. */
 const context: WaitContext = {
   tasks: new Map([
-    ["hold", { kind: "wait" }],
-    ["send", { kind: "call" }],
-    ["ask", { kind: "call", decision: "approval" }],
-    ["await-job", { kind: "listen" }],
-    ["sub", { kind: "run" }],
+    ["hold", { kind: "wait", ...ownStep }],
+    ["send", { kind: "call", ...ownStep }],
+    ["ask", { kind: "call", decision: "approval", ...ownStep }],
+    ["await-job", { kind: "listen", ...ownStep }],
+    ["sub", { kind: "run", ...ownStep }],
   ]),
   decisionKeys: new Set(["approval"]),
   listens: { "await-job": ["jobEvents"] },
@@ -283,6 +289,215 @@ describe("the waits a screen is shown of a run", () => {
           pendingOf(17, "task:sub", "waitForEvent"),
         ],
         { ...context, listens: {}, child: undefined }
+      )
+    ).toStrictEqual([]);
+  });
+});
+
+/**
+ * A build generated for the run host: a fixed wait, a deadline's wait, a
+ * call its catch retries, a decision, and in loop `rows` a wait and, in
+ * loop `cells` inside it, a call.
+ */
+const sealedContext: WaitContext = {
+  ...context,
+  sealed: true,
+  tasks: new Map([
+    ["linger", { kind: "wait", steps: ["task"], scope: [] }],
+    ["pause", { kind: "wait", steps: ["enter", "task"], scope: [] }],
+    ["fetch", { kind: "call", steps: ["task"], scope: [] }],
+    [
+      "approve",
+      {
+        kind: "call",
+        decision: "approval",
+        steps: ["enter", "task", "leave"],
+        scope: [],
+      },
+    ],
+    ["rows", { kind: "for", steps: ["enter", "item"], scope: [] }],
+    ["nap", { kind: "wait", steps: ["task"], scope: ["rows"] }],
+    ["cells", { kind: "for", steps: ["enter"], scope: ["rows"] }],
+    ["send", { kind: "call", steps: ["task"], scope: ["rows", "cells"] }],
+  ]),
+};
+
+describe("the waits a screen is shown of a run on the run host", () => {
+  it("shows a fixed wait's, a deadline's and a loop item's sleep, and a retry of a step in nested items", () => {
+    expect(
+      shownWaits(
+        [
+          pendingOf(1, "linger:task"),
+          // A deadline's `until` is recorded in its enter step, then slept.
+          pendingOf(2, "pause:task"),
+          pendingOf(3, "nap:task%403"),
+          pendingOf(4, "send:task%402%2F5", "retry"),
+          pendingOf(5, "pause:enter", "retry"),
+        ],
+        sealedContext
+      )
+    ).toStrictEqual([
+      {
+        id: "wait-1",
+        taskId: "linger",
+        key: "linger",
+        title: "linger",
+        ...times,
+        kind: "timer",
+        purpose: "sleep",
+      },
+      {
+        id: "wait-2",
+        taskId: "pause",
+        key: "pause",
+        title: "pause",
+        ...times,
+        kind: "timer",
+        purpose: "sleep",
+      },
+      {
+        id: "wait-3",
+        taskId: "nap",
+        key: "nap",
+        title: "nap",
+        ...times,
+        kind: "timer",
+        purpose: "sleep",
+      },
+      {
+        id: "wait-4",
+        taskId: "send",
+        key: "send",
+        title: "send",
+        ...times,
+        kind: "timer",
+        purpose: "retry",
+      },
+      {
+        id: "wait-5",
+        taskId: "pause",
+        key: "pause",
+        title: "pause",
+        ...times,
+        kind: "timer",
+        purpose: "retry",
+      },
+    ]);
+  });
+
+  it("shows a catch's retry backing off, and its round's run again, as retries of the task whose step has the key", async () => {
+    const journal = ["linger:task", "fetch:task", "nap:task%403"];
+    const keyed = await tasksByKey(journal, sealedContext.tasks);
+    const fetch = waitStep(await waitKeyOf("fetch:task"), "retry", 2);
+    const nap = waitStep(await waitKeyOf("nap:task%403"), "retry", 1);
+    const unknown = waitStep("f".repeat(16), "retry", 2);
+    expect(
+      shownWaits(
+        [
+          pendingOf(6, `${fetch}:wait`),
+          pendingOf(7, `${nap}:run`, "retry"),
+          // Its decision is no wait.
+          pendingOf(8, `${fetch}:decide`),
+          // A step the journal holds none of: a retry of the run's.
+          pendingOf(9, `${unknown}:wait`),
+        ],
+        { ...sealedContext, keyed }
+      )
+    ).toStrictEqual([
+      {
+        id: "wait-6",
+        taskId: "fetch",
+        key: "fetch",
+        title: "fetch",
+        ...times,
+        kind: "timer",
+        purpose: "retry",
+      },
+      {
+        id: "wait-7",
+        taskId: "nap",
+        key: "nap",
+        title: "nap",
+        ...times,
+        kind: "timer",
+        purpose: "retry",
+      },
+      {
+        id: "wait-9",
+        taskId: "$run",
+        key: "$run",
+        title: "Retrying a step",
+        ...times,
+        kind: "timer",
+        purpose: "retry",
+      },
+    ]);
+  });
+
+  it("shows a decision's wait, after a reminder and again, by the ID its event names, as the key the release sealed", async () => {
+    const decision = crypto.randomUUID();
+    const answer = "approve:task#answer";
+    const keyed = await tasksByKey(
+      ["approve:enter", "approve:task", "approve:task#ask", answer],
+      sealedContext.tasks
+    );
+    const again = `$grasp:wait:${await waitKeyOf(answer)}:again:1`;
+    const event = decisionEventType(decision);
+    const shown = {
+      id: decision,
+      taskId: "approve",
+      key: "approval",
+      title: "approve",
+      ...times,
+      kind: "decision",
+      canRespond: false,
+    };
+    expect({
+      sealed: shownWaits(
+        [
+          pendingOf(10, answer, "waitForEvent", event),
+          pendingOf(
+            11,
+            "approve:task#answer-after-reminder",
+            "waitForEvent",
+            event
+          ),
+          pendingOf(12, again, "waitForEvent", event),
+        ],
+        { ...sealedContext, keyed }
+      ),
+      unsealed: shownWaits([pendingOf(10, answer, "waitForEvent", event)], {
+        ...sealedContext,
+        decisionKeys: new Set(),
+      }),
+    }).toStrictEqual({
+      sealed: [shown, shown, shown],
+      unsealed: [],
+    });
+  });
+
+  it("shows no step its build's table doesn't have, nor a name of another generator's or another encoding", () => {
+    expect(
+      shownWaits(
+        [
+          // Another generator's names, read only for its builds.
+          pendingOf(20, "task:linger"),
+          pendingOf(21, "task:linger:retry:2:wait"),
+          // No such task, or no such step of it.
+          pendingOf(22, "ghost:task"),
+          pendingOf(23, "linger:enter"),
+          // Items of a task in no loop, none of one in a loop, too many.
+          pendingOf(24, "linger:task%400"),
+          pendingOf(25, "nap:task"),
+          pendingOf(26, "nap:task%400%2F1"),
+          // An index another way than the SDK encodes it.
+          pendingOf(27, "nap:task@3"),
+          pendingOf(28, "nap:task%4003"),
+          // A sleep of a decision's own step, of a deadline's enter step.
+          pendingOf(29, "approve:task#ask"),
+          pendingOf(30, "pause:enter"),
+        ],
+        sealedContext
       )
     ).toStrictEqual([]);
   });

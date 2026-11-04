@@ -343,14 +343,14 @@ describe("a step its catch's retry policy runs again", () => {
   });
 
   it("is traced as rounds of its task's step, waiting while it backs off", async () => {
-    // The trace reads today's generator's step names (`task:<id>`); a
-    // retry's rounds under core's prefix go by the step's key alike.
-    const base = "task:fetch";
+    const base = "fetch:task";
     const prefix = waitStep(await waitKeyOf(base), "retry", 2);
     const own = stepOf(1, base);
     const run = stepOf(4, `${prefix}:run`);
     const backoff = stepOf(3, `${prefix}:wait`, "sleep");
-    const reading = traceReading();
+    const reading = traceReading(
+      new Map([["fetch", { steps: ["task"], scope: [] }]])
+    );
     const states: string[] = [];
     for (const record of [
       recordOf("step_started", own, { attempt: 1 }),

@@ -18,6 +18,9 @@ import {
 } from "../decisions/decisions.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { runObjectOf } from "./engine.ts";
+import { waitKeyOf } from "./host.ts";
+import { sealedStepOf, sealedStepsOf } from "./sealed-steps.ts";
+import type { SealedSteps } from "./sealed-steps.ts";
 
 // What an independent run waits on now, as its screens are shown it (spec
 // 10.7.2), read from the engine's journal (workerflow's `pendingWaits`),
@@ -42,6 +45,21 @@ import { runObjectOf } from "./engine.ts";
 //   one wait for each event of the release's reference it listens for;
 // - a child run a run task waits for (`task:<task>` of a run task): the
 //   run's one child still under way, by its handle.
+//
+// A run of a build generated for the run host (sealed-run.ts) names its
+// steps otherwise, `<task>:<kind>` with each loop's index after `@`
+// (sealed-steps.ts), each placed by its build's table of tasks:
+//
+// - a timer: a wait task's sleep (`<task>:task`, a deadline's too), a
+//   retry of any of a task's steps, or a catch's retry's backoff and its
+//   rounds, under core's prefix by the retried step's key
+//   (`$grasp:wait:<key>:retry:<round>:wait`, host.ts, `#retried`), of the
+//   task whose step has that key in the run's journal;
+// - a person's decision: its wait (`<task>:task#answer`, or
+//   `#answer-after-reminder`, the SDK's), and its waits again under
+//   core's prefix by that wait's key (`$grasp:wait:<key>:again:<round>`,
+//   host.ts, `waitForDecision`), by the decision's ID its event names;
+// - holds of the platform's, as above.
 //
 // What a wait shows is metadata only: a task's ID as its version's sealed
 // build names it (a step of any other name is left out: it could be made
@@ -131,6 +149,9 @@ export interface WaitTask {
   readonly kind: string;
   /** A decision task's decision binding: its decisions' key. */
   readonly decision?: string;
+  /** Its engine steps, and the loops around it (`SealedTask`). */
+  readonly steps: readonly string[];
+  readonly scope: readonly string[];
 }
 
 /** A pending wait as the engine lists it (workerflow's `PendingWait`). */
@@ -158,6 +179,17 @@ export interface WaitContext {
   readonly child: Json | undefined;
   /** Whether the person may send the run its events now. */
   readonly canSend: boolean;
+  /**
+   * Whether its build was generated for the run host, which names its
+   * steps by its table of tasks (sealed-steps.ts).
+   */
+  readonly sealed?: boolean;
+  /**
+   * For a run on the run host, the task of each of its journal's steps by
+   * the key core names its own steps of it by (`waitKeyOf`): read only
+   * while it waits in one of those a task's (`keyedWait`).
+   */
+  readonly keyed?: ReadonlyMap<string, string>;
 }
 
 /** A wait's fields: its ID, task, key and times. */
@@ -197,6 +229,13 @@ const retryWait = (wait: Pending, task: string, title: string): Json => ({
   ...fieldsOf(`wait-${wait.ordinal}`, task, task, title, wait),
   kind: "timer",
   purpose: "retry",
+});
+
+/** A task's sleep, of task `id`. */
+const sleepWait = (wait: Pending, id: string): Json => ({
+  ...fieldsOf(`wait-${wait.ordinal}`, id, id, id, wait),
+  kind: "timer",
+  purpose: "sleep",
 });
 
 /**
@@ -239,15 +278,7 @@ const timerOf = (wait: Pending, id: string, rest: string): Json[] => {
   if (retryBackoff.test(rest)) {
     return wait.deadline === null ? [] : [retryWait(wait, id, id)];
   }
-  return rest === "" && wait.deadline !== null
-    ? [
-        {
-          ...fieldsOf(`wait-${wait.ordinal}`, id, id, id, wait),
-          kind: "timer",
-          purpose: "sleep",
-        },
-      ]
-    : [];
+  return rest === "" && wait.deadline !== null ? [sleepWait(wait, id)] : [];
 };
 
 /** The decision a decision task's wait is, by the ID its event names. */
@@ -376,6 +407,89 @@ const coreWaitsOf = (wait: Pending, holding: Set<string>): Json[] => {
     : [];
 };
 
+/**
+ * One of core's own steps of a task's step on the run host, by that
+ * step's key (`waitKeyOf`): a catch's retry's decision, backoff or run
+ * again (`retry:<round>:…`, host.ts, `#retried`), or a decision's wait
+ * again (`again:<round>`, `waitForDecision`).
+ */
+const keyedWait = new RegExp(
+  `^${waitPrefix}(?<key>[0-9a-f]{16}):(?:retry:[1-9]\\d*:(?<retry>decide|wait|run)|again:[1-9]\\d*)$`,
+  "u"
+);
+
+/** A decision's wait for its answer, past its task step (the SDK's). */
+const answerPart = /^#answer(?:-after-reminder)?$/u;
+
+/**
+ * The waits one pending wait of core's own steps of a task's step on the
+ * run host is (`keyedWait`), of the task `context.keyed` names by its
+ * key: a retry, its backoff's included, of the run if no task has that
+ * key; a decision's wait again.
+ */
+const keyedWaitsOf = (
+  wait: Pending,
+  key: string,
+  retry: string | undefined,
+  context: WaitContext
+): Json[] => {
+  const id = context.keyed?.get(key);
+  const task = id === undefined ? undefined : context.tasks.get(id);
+  if (retry === undefined) {
+    return id === undefined ||
+      task === undefined ||
+      wait.type !== "waitForEvent"
+      ? []
+      : decisionOf(wait, id, task, context);
+  }
+  const retrying =
+    wait.type === "retry" || (wait.type === "sleep" && retry === "wait");
+  if (!retrying || wait.deadline === null) {
+    return [];
+  }
+  return id === undefined
+    ? [retryWait(wait, "$run", "Retrying a step")]
+    : [retryWait(wait, id, id)];
+};
+
+/**
+ * The waits one pending wait of a run on the run host is, its steps
+ * placed by its build's table of tasks (`steps`): a task's sleep, a retry
+ * of any of its steps, a decision's wait, a listen's or a run's own; core's
+ * own steps of a task's step (`keyedWaitsOf`) or of a wait for load
+ * (`coreWaitsOf`), each hold once (`holding`); none otherwise.
+ */
+const sealedWaitsOf = (
+  wait: Pending,
+  steps: SealedSteps,
+  context: WaitContext,
+  holding: Set<string>
+): Json[] => {
+  if (wait.openedAt === null) {
+    return [];
+  }
+  const keyed = keyedWait.exec(wait.name)?.groups;
+  if (keyed?.key !== undefined) {
+    return keyedWaitsOf(wait, keyed.key, keyed.retry, context);
+  }
+  const step = sealedStepOf(wait.name, steps);
+  const task = step === undefined ? undefined : context.tasks.get(step.task);
+  if (step === undefined || task === undefined) {
+    return coreWaitsOf(wait, holding);
+  }
+  if (wait.type === "retry") {
+    return [retryWait(wait, step.task, step.task)];
+  }
+  const own = step.kind === "task" && step.part === "";
+  if (wait.type === "sleep") {
+    return own && wait.deadline !== null ? [sleepWait(wait, step.task)] : [];
+  }
+  if (step.kind === "task" && answerPart.test(step.part)) {
+    return decisionOf(wait, step.task, task, context);
+  }
+  return own ? awaitedOf(wait, step.task, task, context) : [];
+};
+
 /** A decision task's wait or look, past `decisionPollStepPrefix`. */
 const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
 
@@ -407,7 +521,13 @@ export const shownWaits = (
 ): Json[] => {
   const waits: Json[] = [];
   const holding = new Set<string>();
+  const steps: SealedSteps | undefined =
+    context.sealed === true ? context.tasks : undefined;
   for (const wait of pending) {
+    if (steps !== undefined) {
+      waits.push(...sealedWaitsOf(wait, steps, context, holding));
+      continue;
+    }
     const step = taskStep.exec(taskStepName(wait.name))?.groups;
     const shown =
       step?.id === undefined
@@ -418,31 +538,86 @@ export const shownWaits = (
   return waits.slice(0, maxWaits);
 };
 
-/** The tasks run `run`'s version's sealed build declares; none if unreadable. */
+/**
+ * The tasks run `run`'s version's sealed build declares, and whether it
+ * was generated for the run host (`sealedStepsOf`); none if unreadable.
+ */
 const sealedTasks = async (
   env: Env,
   run: { workflowId: string; version: number; manifestHash: string }
-): Promise<ReadonlyMap<string, WaitTask>> => {
+): Promise<{ tasks: ReadonlyMap<string, WaitTask>; sealed: boolean }> => {
   try {
-    const { tasks } = await loadWorkflowBuild(
+    const build = await loadWorkflowBuild(
       env,
       run.workflowId,
       run.version,
       run.manifestHash
     );
-    return new Map(
-      tasks.map((task) => [
-        task.id,
-        task.kind === "call" && task.call.name === "grasp.decision"
-          ? { kind: task.kind, decision: task.call.binding }
-          : { kind: task.kind },
-      ])
-    );
+    return {
+      tasks: new Map(
+        build.tasks.map((task) => {
+          const { kind, steps, scope } = task;
+          return [
+            task.id,
+            task.kind === "call" && task.call.name === "grasp.decision"
+              ? { kind, steps, scope, decision: task.call.binding }
+              : { kind, steps, scope },
+          ];
+        })
+      ),
+      sealed: sealedStepsOf(build) !== undefined,
+    };
   } catch (error) {
     // Logged where it loads (workflow-builds.ts): its waits name no task.
     log.error("workflow.waits_build_unreadable", {
       workflowId: run.workflowId,
       version: run.version,
+      ...errorFields(error),
+    });
+    return { tasks: new Map(), sealed: false };
+  }
+};
+
+/**
+ * The task of each of `names`, engine steps of a run on the run host, as
+ * its build's table places it (`steps`), by the key core names its own
+ * steps of it by (`waitKeyOf`): `WaitContext.keyed`.
+ */
+export const tasksByKey = async (
+  names: readonly string[],
+  steps: SealedSteps
+): Promise<ReadonlyMap<string, string>> => {
+  const keyed = new Map<string, string>();
+  for (const name of names) {
+    const step = sealedStepOf(name, steps);
+    if (step !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
+      keyed.set(await waitKeyOf(name), step.task);
+    }
+  }
+  return keyed;
+};
+
+/**
+ * Of run `runId` on the run host, the task of each step its journal holds,
+ * by its key (`tasksByKey`); none while the engine can't say (logged).
+ */
+const keyedTasks = async (
+  env: Env,
+  runId: string,
+  steps: SealedSteps
+): Promise<ReadonlyMap<string, string>> => {
+  try {
+    const page = await runObjectOf(env, runId).history({
+      after: 0,
+      limit: 1,
+      steps: [{ kind: null, prefix: null }],
+    });
+    const names = (page?.steps[0] ?? []).map(({ name }) => name);
+    return await tasksByKey(names, steps);
+  } catch (error) {
+    log.warn("workflow.waits_steps_unreadable", {
+      runId,
       ...errorFields(error),
     });
     return new Map();
@@ -511,8 +686,15 @@ export const runWaits = async (
   const waitsChild = pending.some(
     (wait) => wait.type === "waitForEvent" && wait.eventType === null
   );
+  const { tasks, sealed } = await sealedTasks(env, run);
+  const keyed =
+    sealed && pending.some((wait) => keyedWait.test(wait.name))
+      ? await keyedTasks(env, run.id, tasks)
+      : undefined;
   return shownWaits(pending, {
-    tasks: await sealedTasks(env, run),
+    tasks,
+    sealed,
+    ...(keyed === undefined ? {} : { keyed }),
     decisionKeys: new Set(Object.keys(declared.decisions)),
     listens: declared.listens,
     events: new Map(fingerprints),
