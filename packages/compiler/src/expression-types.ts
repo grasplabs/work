@@ -5,8 +5,12 @@
  * there is an error at its line and column in the expression, as an
  * author wrote it.
  */
-import { checkExpression, checkRoots } from "@grasp-os/sdk/expression-check";
-import type { ExpressionError } from "@grasp-os/sdk/expression-check";
+import {
+  checkExpression,
+  checkRoots,
+  sourcePosition,
+} from "@grasp-os/sdk/expression-check";
+import type { ExpressionError, TypeForm } from "@grasp-os/sdk/expression-check";
 
 import { serverTarget, typeProgram } from "./type-check.ts";
 
@@ -119,7 +123,13 @@ export const checkExpressionTypes = (
     "",
   ].join("\n");
   // The first line of each expression in the module, 1-based, and its last.
-  const placed: { name: string; first: number; last: number }[] = [];
+  const placed: {
+    name: string;
+    first: number;
+    last: number;
+    form: TypeForm;
+    source: string;
+  }[] = [];
   for (const [index, [name, { source, result }]] of Object.entries(
     expressions
   ).entries()) {
@@ -137,11 +147,20 @@ export const checkExpressionTypes = (
     }
     const head = `export const e${index} = (input: Input, steps: Steps, params: Params, run: Run${extraParameters})${returns} =>\n`;
     const first = lineCount(code + head) + 1;
-    // The source as written, so an error's position is the author's.
-    // It is only type-checked, never run: what runs is the code generated
-    // from its checked tree (`checked.code`), through the SDK's guards.
-    code += `${head}(\n${source}\n);\n`;
-    placed.push({ name, first, last: first + lineCount(source) - 1 });
+    // Built from its checked tree (`forTypes`), every operand and comparison in
+    // parentheses and no comment: TypeScript reads what JavaScript does.
+    // It is only type-checked, never run: what runs is `checked.code`,
+    // through the SDK's guards. Errors map back to the source
+    // (`sourcePosition`).
+    const form = checked.forTypes;
+    code += `${head}(\n${form.code}\n);\n`;
+    placed.push({
+      name,
+      first,
+      last: first + lineCount(form.code) - 1,
+      form,
+      source,
+    });
   }
   const scopeErrors: ExpressionTypeError[] = [];
   if (placed.length === 0) {
@@ -177,8 +196,12 @@ export const checkExpressionTypes = (
     } else {
       errors[at.name]?.push({
         ...error,
-        line: line - at.first + 1,
-        column: diagnostic.column ?? 1,
+        ...sourcePosition(
+          at.form,
+          at.source,
+          line - at.first + 1,
+          diagnostic.column ?? 1
+        ),
       });
     }
   }

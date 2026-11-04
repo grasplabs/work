@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
+import { checkExpression } from "@grasp-os/sdk/expression-check";
+import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkExpressionTypes } from "./expression-types.ts";
@@ -38,6 +40,30 @@ const scope: ExpressionScopeTypes = {
   },
   params: "{ limit: number }",
   run: "{ id: string }",
+};
+
+/** How many type arguments TypeScript reads in an expression's code and type form. */
+const withTypeArguments = (source: string): number => {
+  const checked = checkExpression(source);
+  if (!checked.ok) {
+    throw new Error(`${source} is refused`);
+  }
+  let found = 0;
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isCallExpression(node) || ts.isExpressionWithTypeArguments(node)) &&
+      node.typeArguments !== undefined
+    ) {
+      found += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const code of [checked.code, checked.forTypes.code]) {
+    visit(
+      ts.createSourceFile("e.ts", `const e = ${code};`, ts.ScriptTarget.ES2022)
+    );
+  }
+  return found;
 };
 
 const check = (expressions: Record<string, TypedExpression>) =>
@@ -91,6 +117,52 @@ describe("type-checking a workflow's expressions", () => {
       callback: [{ code: "TS2551", line: 1, column: 33 }],
       method: [{ code: "TS2551", line: 1, column: 16 }],
     });
+  });
+
+  it("reads what JavaScript reads: comparisons, never a generic call", () => {
+    const { expressions } = checkExpressionTypes(
+      { ...scope, input: "{ a: number; b: number; c: number; d: number }" },
+      { pair: { source: "[input.a < input.b, input.c > (input.d)]" } },
+      kitTypes
+    );
+    expect(expressions.pair).toStrictEqual([]);
+  });
+
+  it("runs code TypeScript reads as JavaScript does, with no type arguments", () => {
+    expect(
+      [
+        "[input.a < input.b, input.c > (input.d)]",
+        "[1 < 2, 3 > (4)]",
+        "input.lines.map((x) => [x < 1, 2 > (x)])",
+      ].map(withTypeArguments)
+    ).toStrictEqual([0, 0, 0]);
+  });
+
+  it("maps an error back past the parentheses it adds, to the source", () => {
+    const { expressions } = check({
+      sum: { source: "1 + -input.lines.length * input.custmer" },
+      lines: { source: "input.customer\n  // a note\n  + !input.lnes" },
+    });
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, line, column }) => ({ code, line, column })),
+        ])
+      )
+    ).toStrictEqual({
+      sum: [{ code: "TS2551", line: 1, column: 33 }],
+      lines: [{ code: "TS2551", line: 3, column: 12 }],
+    });
+  });
+
+  it("can't be silenced from inside an expression", () => {
+    const { expressions } = check({
+      ignored: { source: "input.custmer // @ts-ignore" },
+    });
+    expect(expressions.ignored?.map(({ code }) => code)).toStrictEqual([
+      "expression.syntax",
+    ]);
   });
 
   it("holds a result to the type the workflow needs", () => {

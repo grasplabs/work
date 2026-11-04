@@ -84,6 +84,7 @@ describe("what a workflow expression may be", () => {
       ok: true,
       source: " input.a ",
       code: '($json(input), ($read(input, "a")))',
+      forTypes: { code: " input.a ", added: [] },
     });
   });
 });
@@ -421,7 +422,7 @@ describe("the code generated from an expression", () => {
   it("parenthesizes every operand, so TypeScript reads no type arguments", () => {
     // `input.a<input.b, input.c>(input.d)`, a generic call, in TypeScript.
     expect(generated("[input.a < input.b, input.c > (input.d)]")).toBe(
-      '($json(input), ([($read(input, "a")) < ($read(input, "b")), ($read(input, "c")) > ($read(input, "d"))]))'
+      '($json(input), ([(($read(input, "a")) < ($read(input, "b"))), (($read(input, "c")) > ($read(input, "d")))]))'
     );
   });
 
@@ -450,6 +451,70 @@ describe("the code generated from an expression", () => {
     expect(verdict("input.lines.map?.((line) => line)")).toBe(
       "expression.syntax"
     );
+  });
+});
+
+describe("a chain in parentheses", () => {
+  it("is a chain of its own: `(a?.b).c` reads `.c` of whatever `a?.b` gives", () => {
+    expect(generated("(input.a?.b).c")).toBe(
+      '($json(input), ($read($opt($read(input, "a"), $0 => $read($0, "b")), "c")))'
+    );
+  });
+
+  it("is never a method's callee: `(a?.map)(f)` would call `undefined`", () => {
+    expect([
+      verdict("(input.list?.map)((x) => x)"),
+      verdict("(input.list.join)(', ')"),
+    ]).toStrictEqual(["expression.syntax", "expression.syntax"]);
+  });
+});
+
+/** The form an expression is type-checked in. */
+const typed = (source: string): string => {
+  const checked = checkExpression(source);
+  if (!checked.ok) {
+    throw new Error(`${source} is refused: ${checked.errors[0]?.code}`);
+  }
+  return checked.forTypes.code;
+};
+
+describe("what TypeScript type-checks", () => {
+  it("is the source with every operand and comparison in parentheses, read as JavaScript reads it", () => {
+    expect(typed("[input.a < input.b, input.c > (input.d)]")).toBe(
+      "[((input.a) < (input.b)), ((input.c) > ((input.d)))]"
+    );
+    expect(typed("!input.a ? -input.b : input.c ?? 1")).toBe(
+      "(!(input.a)) ? (-(input.b)) : ((input.c) ?? (1))"
+    );
+  });
+
+  it("holds no comment, and an expression holds no `@ts-` directive", () => {
+    expect(typed("input.a // the amount\n+ 1")).toBe(
+      `((input.a)${" ".repeat(14)}\n+ (1))`
+    );
+    expect([
+      verdict("input.a // @ts-ignore"),
+      verdict("/* @ts-expect-error */ input.a"),
+      verdict("input.a\n// @ts-nocheck\n+ 1"),
+    ]).toStrictEqual(Array.from({ length: 3 }, () => "expression.syntax"));
+  });
+});
+
+describe("a callback's parameters", () => {
+  it("never take a root's name: one name, one value", () => {
+    expect(
+      [
+        "[1, 2].map((input) => input + 1)",
+        "input.lines.map((steps) => steps)",
+        "input.lines.filter((line, run) => run > 0)",
+      ].map(verdict)
+    ).toStrictEqual(Array.from({ length: 3 }, () => "expression.callback"));
+    expect(
+      checkExpression("input.a.map((item) => item)", { roots: ["item"] })
+    ).toMatchObject({
+      ok: false,
+      errors: [{ code: "expression.callback" }],
+    });
   });
 });
 

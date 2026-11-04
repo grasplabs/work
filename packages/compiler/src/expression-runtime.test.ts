@@ -242,6 +242,21 @@ describe("a member read", () => {
   });
 });
 
+describe("an optional chain", () => {
+  it("short-circuits within its parentheses only, as JavaScript does", () => {
+    const input = { a: null };
+    expect({
+      grouped: outcome("(input.a?.b).c", { input }),
+      chained: outcome("input.a?.b.c", { input }),
+      called: outcome("input.a?.b.join(',')", { input }),
+    }).toStrictEqual({
+      grouped: { threw: "TypeError" },
+      chained: { value: undefined },
+      called: { value: undefined },
+    });
+  });
+});
+
 describe("a root that isn't JSON data", () => {
   it("fails the expression before it reads anything, however deep", () => {
     let reads = 0;

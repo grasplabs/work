@@ -1,12 +1,22 @@
 import { parseExpression } from "@babel/parser";
-import type { Expression, Node } from "@babel/types";
+import type { Comment, Node } from "@babel/types";
 import { messageOf } from "@grasp-os/shared/errors";
 import globals from "globals";
 
-import { literalKey, lowerExpression } from "./expression-lowering.ts";
+import {
+  literalKey,
+  lowerExpression,
+  typeForm,
+} from "./expression-lowering.ts";
+import type { TypeForm } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
-export { runtimeImport, runtimeNames } from "./expression-lowering.ts";
+export {
+  runtimeImport,
+  runtimeNames,
+  sourcePosition,
+} from "./expression-lowering.ts";
+export type { TypeForm } from "./expression-lowering.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -119,7 +129,7 @@ export interface ExpressionError {
  * the line before: `name\n(…)` is a call.
  */
 export type CheckedExpression =
-  | { ok: true; source: string; code: string }
+  | { ok: true; source: string; code: string; forTypes: TypeForm }
   | { ok: false; errors: ExpressionError[] };
 
 const fixes: Record<ExpressionErrorCode, string> = {
@@ -171,14 +181,21 @@ const isCallbackArrow = (node: Node): boolean =>
 class Checker {
   readonly errors: ExpressionError[] = [];
 
+  private readonly roots: ReadonlySet<string>;
+
   /** The roots, as a global's error names them. */
   private readonly rootList: string;
 
   constructor(roots: ReadonlySet<string>) {
+    this.roots = roots;
     this.rootList = [...roots].join(", ");
   }
 
-  private fail(node: Node, code: ExpressionErrorCode, message: string): void {
+  private fail(
+    node: Pick<Node, "start" | "loc">,
+    code: ExpressionErrorCode,
+    message: string
+  ): void {
     const start = node.loc?.start;
     this.errors.push(
       located(
@@ -189,6 +206,23 @@ class Checker {
         (start?.column ?? 0) + 1
       )
     );
+  }
+
+  /**
+   * Comments are notes, never directives: a `@ts-` one would steer the
+   * type check if it reached TypeScript. None does (`typeForm` prints no
+   * comment), and the expression says so here.
+   */
+  comments(comments: readonly Comment[]): void {
+    for (const comment of comments) {
+      if (comment.value.includes("@ts-")) {
+        this.fail(
+          comment,
+          "expression.syntax",
+          "A comment can't hold a TypeScript directive (`@ts-…`)."
+        );
+      }
+    }
   }
 
   private property(node: Node, name: string): void {
@@ -236,6 +270,16 @@ class Checker {
     }
     const method = callee.property.name;
     this.visit(callee.object, scope);
+    // `(a?.map)(f)` calls what the parentheses give, `undefined` included:
+    // a method is called directly.
+    if (callee.extra?.parenthesized === true) {
+      this.fail(
+        callee,
+        "expression.syntax",
+        `Call \`${method}\` directly, without parentheses around it.`
+      );
+      return;
+    }
     if (node.type === "OptionalCallExpression" && node.optional) {
       this.fail(
         node,
@@ -261,9 +305,20 @@ class Checker {
       if (callback.type === "ArrowFunctionExpression") {
         const inner = new Set(scope);
         for (const param of callback.params) {
-          if (param.type === "Identifier") {
-            inner.add(param.name);
+          if (param.type !== "Identifier") {
+            continue;
           }
+          // One namespace: a root's name always means the root, inside a
+          // callback too, so the generated code checks the roots it
+          // reads by name alone, and no reader mistakes one for the other.
+          if (this.roots.has(param.name)) {
+            this.fail(
+              param,
+              "expression.callback",
+              `\`${param.name}\` is one of the workflow's values; name the parameter something else.`
+            );
+          }
+          inner.add(param.name);
         }
         this.visit(callback.body, inner);
       }
@@ -563,7 +618,7 @@ export const checkExpression = (
   options: CheckOptions = {}
 ): CheckedExpression => {
   const roots = checkRoots(options.roots);
-  let parsed: Expression;
+  let parsed: ReturnType<typeof parseExpression>;
   try {
     // As a module, as the generated code is one: strict, no HTML comments.
     // No plugins: TypeScript's syntax and JSX are refused.
@@ -572,9 +627,15 @@ export const checkExpression = (
     return { ok: false, errors: [syntaxError(source, error)] };
   }
   const checker = new Checker(roots);
+  checker.comments(parsed.comments ?? []);
   checker.visit(parsed, roots);
   if (checker.errors.length > 0) {
     return { ok: false, errors: checker.errors };
   }
-  return { ok: true, source, code: lowerExpression(parsed, roots) };
+  return {
+    ok: true,
+    source,
+    code: lowerExpression(parsed, roots),
+    forTypes: typeForm(parsed, source, parsed.comments ?? []),
+  };
 };
