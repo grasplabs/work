@@ -1,7 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
-import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
@@ -23,7 +23,11 @@ import type {
   TriggerSummary,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
+import {
+  maxFailedStarts,
+  nextScheduledRun,
+  workflowErrors,
+} from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -43,11 +47,16 @@ import {
   triggerSchedules,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
-import { inList, notNullFailed } from "./db/d1.ts";
+import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { revokedWith, triggerRequests } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
+import {
+  addressTaken,
+  randomEmailAddress,
+  requireFreeAddresses,
+} from "./workflows/email-addresses.ts";
 import { quotaLimits } from "./workflows/quotas.ts";
 import {
   webhookTokenOf,
@@ -107,14 +116,19 @@ import {
 //   event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
 // - An email trigger taking mail meant for another, or mailed by anyone
-//   who learned its ID: its address is `trigger-` and 128 random bits of
-//   its own (`emailAddressOf`), never derived from its ID (which builders,
+//   who learned its ID: its address is the name its builder chose, as an
+//   App's is, or else `trigger-` and 128 random bits of its own
+//   (`randomEmailAddress`), never derived from its ID (which builders,
 //   admins, staff and the audit log see), shown only to whoever may see
-//   the trigger, never audited or logged. Mail to it reaches the trigger
-//   first (inbound-email.ts); no App's address is that token unless
-//   copied. It is never changed: deleting the trigger and making another is
-//   how it changes. Its input is a fixed mapping as a connector trigger's
-//   is. Its mail starts runs as workflows/inbound-email.ts says.
+//   the trigger; a random one is never audited or logged. Either way it
+//   is one workflow's: Apps and triggers take addresses from one
+//   namespace, first come, checked in the statement that takes one
+//   (workflows/email-addresses.ts).
+//   A chosen name can be guessed, as an App's can: anyone may mail it,
+//   and its mail is held to the same ingress as any other. It is never
+//   changed: deleting the trigger gives it up, and making another is how
+//   it changes. Its input is a fixed mapping as a connector trigger's is.
+//   Its mail starts runs as workflows/inbound-email.ts says.
 // - A webhook trigger started by anyone who learns its URL: its URL ends
 //   in a token of 128 random bits of its own, kept as an email trigger's
 //   address is, and every delivery must be signed with its secret, which
@@ -287,12 +301,17 @@ const kindFieldsOf = async (
   };
 };
 
-/** Random bytes in an email trigger's address: 128 bits. */
-const addressBytes = 16;
-
-/** A new email trigger's address, before the `@`: random, its own. */
-const emailAddressOf = (): string =>
-  `trigger-${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
+/**
+ * The name an email trigger's builder chose for its address in `config`
+ * (checked by `kindFieldsOf` already), if they chose one.
+ */
+const chosenAddressOf = (
+  kind: TriggerKind,
+  config: unknown
+): string | undefined =>
+  kind === "email"
+    ? emailTriggerConfigSchema.safeParse(config).data?.address
+    : undefined;
 
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
@@ -345,6 +364,33 @@ const requirePublished = async (
 };
 
 /**
+ * Why creating a trigger (at the address `chosen`, if one was) failed with
+ * `error`, as its creator is told: its address taken, over the cap, its
+ * workflow gone, or `error` itself.
+ */
+const creationRefusal = async (
+  env: Env,
+  error: unknown,
+  chosen: string | undefined
+): Promise<unknown> => {
+  // A new row's only unique column that can collide is its address.
+  if (chosen !== undefined && isUniqueViolation(error)) {
+    return workflowErrors.create("workflow.email_taken", { address: chosen });
+  }
+  if (notNullFailed(error, "trigger_resources.id")) {
+    if (chosen !== undefined) {
+      // Taken meanwhile answers as taken; over the cap otherwise.
+      await requireFreeAddresses(env, [chosen]);
+    }
+    return workflowResourceErrors.create("workflow.trigger_limit");
+  }
+  if (notNullFailed(error, "trigger_resource_versions.workflow_resource_id")) {
+    return workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  return error;
+};
+
+/**
  * Creates a trigger of `input.kind` that starts exactly version
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
  * build the workflow. It may start nothing until an admin grants it
@@ -377,6 +423,10 @@ export const createTriggerResource = async (
     version,
     by.userId
   );
+  const chosen = chosenAddressOf(kind, config);
+  if (chosen !== undefined) {
+    await requireFreeAddresses(env, [chosen]);
+  }
   const id = triggerIdSchema.parse(crypto.randomUUID());
   const configHash = await sha256Hex(canonicalJson(config));
   const cap = quotaLimits(env).triggerResourcesPerPerson;
@@ -400,16 +450,19 @@ export const createTriggerResource = async (
   );
   const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
-      // Only while `by` is under the cap, counted in this statement:
-      // otherwise NULL, which fails the batch.
+      // Only while `by` is under the cap, counted in this statement, and
+      // a chosen address is still free, an App's or a trigger's
+      // (email-addresses.ts): otherwise NULL, which fails the batch. The
+      // address's unique index is a backstop.
       id: sql`(SELECT ${id} WHERE (SELECT COUNT(*) FROM trigger_resources
-        WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap})`,
+        WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap}
+        ${chosen === undefined ? sql`` : sql`AND NOT ${addressTaken([chosen])}`})`,
       ownerId: by.userId,
       kind,
       currentVersion: 1,
       enabled: true,
       createdAt: now,
-      emailAddress: kind === "email" ? emailAddressOf() : null,
+      emailAddress: kind === "email" ? (chosen ?? randomEmailAddress()) : null,
       webhookToken: kind === "webhook" ? webhookTokenOf() : null,
       webhookSecretGeneration: kind === "webhook" ? 1 : null,
     }),
@@ -449,6 +502,9 @@ export const createTriggerResource = async (
         workflowId: workflow.id,
         workflowVersion: version,
         configHash,
+        // A name chosen is no secret, as an App's address isn't; a random
+        // address is never audited.
+        ...(chosen === undefined ? {} : { address: chosen }),
       })
     ),
     // Asked for as it lands, so the trigger never waits on a request
@@ -459,15 +515,7 @@ export const createTriggerResource = async (
   try {
     await batch;
   } catch (error) {
-    if (notNullFailed(error, "trigger_resources.id")) {
-      throw workflowResourceErrors.create("workflow.trigger_limit");
-    }
-    if (
-      notNullFailed(error, "trigger_resource_versions.workflow_resource_id")
-    ) {
-      throw workflowResourceErrors.create("workflow.resource_unavailable");
-    }
-    throw error;
+    throw await creationRefusal(env, error, chosen);
   }
   return {
     id,
@@ -871,9 +919,11 @@ export const deleteTriggerResource = async (
   const trigger = await requireTriggerManager(env, by, id);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
+    // Its address goes with it, for another workflow to take
+    // (email-addresses.ts): mail to it bounces from now on.
     db
       .update(triggerResources)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: new Date(), emailAddress: null })
       .where(
         and(
           eq(triggerResources.id, trigger.id),
@@ -958,7 +1008,8 @@ const connectorConfigOf = (row: TriggerRow): Json | null => {
 
 /**
  * A trigger's configuration as it was created, in its kind's schema, from
- * the fields its version keeps; null when it keeps none (a webhook).
+ * the fields its version keeps; null when it keeps none (a webhook). An
+ * email trigger's address is served as its `address`, not in here.
  */
 const configOf = (row: TriggerRow): Json | null => {
   if (row.kind === "email") {

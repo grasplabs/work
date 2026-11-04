@@ -467,6 +467,27 @@ describe("a workflow's Triggers tab", () => {
     });
   });
 
+  it("adds an email trigger at the name typed, trimmed", async () => {
+    const asked = await shown(true);
+    await fill("What starts it", "email");
+    await fill("Address, the part before the @", " invoices ");
+    await submit();
+
+    expect(asked).toStrictEqual([
+      {
+        create: {
+          kind: "email",
+          workflowId: "workflow-1",
+          version: 2,
+          config: {
+            input: { fields: {}, defaults: {} },
+            address: "invoices",
+          },
+        },
+      },
+    ]);
+  });
+
   it("offers someone who doesn't build the workflow nothing to add, nor to change on another's trigger", async () => {
     await shown(false);
 

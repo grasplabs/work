@@ -3818,9 +3818,12 @@ export const triggerResources = sqliteTable("trigger_resources", {
   deletedAt: timestamp("deleted_at"),
   /**
    * For an email trigger: the part before the `@` of the address it
-   * receives mail at (`trigger-<token>`, 128 random bits), set as it is
-   * created and never changed; null for any other kind. Unlike its ID,
-   * shown only to whoever may see the trigger, never logged or audited.
+   * receives mail at, the name its builder chose or `trigger-<token>`
+   * (128 random bits), set as it is created and never changed, and set to
+   * null as it is deleted, which frees it (workflows/email-addresses.ts);
+   * null for any other kind. Unlike its ID, shown only to whoever may see
+   * the trigger; a chosen name is audited as it is created, a random one
+   * never logged or audited.
    */
   emailAddress: text("email_address").unique(),
   /**

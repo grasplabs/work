@@ -84,7 +84,7 @@ export const workflowErrors = defineErrorFamily({
     "Someone changed the workflow's owner meanwhile. Try again.",
   "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
-    "Another App's workflow already receives mail at this address.",
+    "Another workflow already receives mail at this address.",
   "workflow.attachment_not_found":
     "This App has no such attachment: the message isn't kept for it, or its 30 days have passed.",
   "workflow.attachment_unreadable":
@@ -240,8 +240,10 @@ export const isCronExpression = (cron: string): boolean =>
 
 /**
  * The part of an address before the `@` that an email trigger receives
- * mail at, e.g. `invoices`: lower case letters, digits, `.`, `_`, `+` and
- * `-`, with no dot first, last or twice in a row.
+ * mail at, an App's or an independent workflow's, e.g. `invoices`: lower
+ * case letters, digits, `.`, `_`, `+` and `-`, with no dot first, last or
+ * twice in a row. One address on the deployment's mail domain is one
+ * workflow's (core's workflows/email-addresses.ts).
  */
 export const emailLocalPartSchema = z
   .string()

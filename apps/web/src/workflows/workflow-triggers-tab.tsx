@@ -64,9 +64,10 @@ import {
 // to anyone else. Its builders add a schedule (a cron expression in a time
 // zone, with the input each run starts with) or a connection's event (an
 // account's new mail or file, with how the event becomes the run's input)
-// or an email to an address of its own (with how the message becomes the
-// run's input, shown by the part of its address before the @, as an App's
-// email trigger is), for an exact published version. A trigger acts for whoever made it:
+// or an email to an address of its own (a name they choose, as an App's
+// email trigger has, or a random one when they leave it empty, with how
+// the message becomes the run's input, shown by the part of its address
+// before the @), for an exact published version. A trigger acts for whoever made it:
 // they alone turn it on again or move it to another version; its builders
 // and admins turn it off and delete it (deleting asks first). A schedule
 // whose starts kept failing stopped, and says so, with Turn on again for
@@ -672,6 +673,7 @@ const AddTrigger = ({
   const [connection, setConnection] = useState("");
   const [resource, setResource] = useState("");
   const [mapping, setMapping] = useState("{}");
+  const [address, setAddress] = useState("");
   const reporting = connections.filter(
     (each) =>
       each.source === "native" &&
@@ -702,7 +704,12 @@ const AddTrigger = ({
       return undefined;
     }
     if (kind === "email") {
-      return { input: { fields: fields.value, defaults: {} } };
+      // Without a name, core gives it a random address of its own.
+      const name = address.trim();
+      return {
+        input: { fields: fields.value, defaults: {} },
+        ...(name === "" ? {} : { address: name }),
+      };
     }
     if (connection === "") {
       setProblem(t`Choose a connection.`);
@@ -737,6 +744,7 @@ const AddTrigger = ({
       setCron("");
       setInput("{}");
       setMapping("{}");
+      setAddress("");
     }
     if (created?.secret !== undefined) {
       onSecret(created.secret);
@@ -852,23 +860,51 @@ const AddTrigger = ({
         </div>
       ) : null}
       {kind === "email" ? (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor={`${ids}-mapping`}>
-            <Trans>
-              The run&apos;s input fields, each from the message as a JSON
-              Pointer, as JSON
-            </Trans>
-          </Label>
-          <Textarea
-            id={`${ids}-mapping`}
-            onChange={(changed) => {
-              setMapping(changed.target.value);
-            }}
-            placeholder='{ "subject": "/subject", "from": "/from/address", "attachments": "/attachments" }'
-            spellCheck={false}
-            value={mapping}
-            variant="code"
-          />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-address`}>
+              <Trans>Address, the part before the @</Trans>
+            </Label>
+            <Input
+              aria-describedby={`${ids}-address-hint`}
+              autoCapitalize="none"
+              id={`${ids}-address`}
+              onChange={(changed) => {
+                setAddress(changed.target.value);
+              }}
+              placeholder="invoices"
+              spellCheck={false}
+              value={address}
+            />
+            <p
+              className="text-muted-foreground text-sm"
+              id={`${ids}-address-hint`}
+            >
+              <Trans>
+                Lower case letters, digits, dots, dashes, underscores and plus
+                signs. Leave it empty for a random address of its own, which is
+                harder to guess.
+              </Trans>
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-mapping`}>
+              <Trans>
+                The run&apos;s input fields, each from the message as a JSON
+                Pointer, as JSON
+              </Trans>
+            </Label>
+            <Textarea
+              id={`${ids}-mapping`}
+              onChange={(changed) => {
+                setMapping(changed.target.value);
+              }}
+              placeholder='{ "subject": "/subject", "from": "/from/address", "attachments": "/attachments" }'
+              spellCheck={false}
+              value={mapping}
+              variant="code"
+            />
+          </div>
         </div>
       ) : null}
       {kind === "connector" ? (

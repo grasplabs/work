@@ -2154,6 +2154,10 @@ msgstr "Adding an app or workflow shares it with nobody. Only those it is shared
 msgid "Address"
 msgstr "Address"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Address, the part before the @"
+msgstr "Address, the part before the @"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -7674,6 +7678,10 @@ msgstr "Low"
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Low"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Lower case letters, digits, dots, dashes, underscores and plus signs. Leave it empty for a random address of its own, which is harder to guess."
+msgstr "Lower case letters, digits, dots, dashes, underscores and plus signs. Leave it empty for a random address of its own, which is harder to guess."
 
 #: src/engines/app-own-link.tsx
 msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
