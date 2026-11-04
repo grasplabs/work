@@ -76,8 +76,13 @@ export {
 } from "./expressions.ts";
 // The guards a workflow's JavaScript expressions run through, as the
 // code generated from them imports them (expression-check.ts,
-// `runtimeImport`).
-export { callMethod, optionalChain, readMember } from "./expression-runtime.ts";
+// `runtimeNames`).
+export {
+  callMethod,
+  jsonValue,
+  optionalChain,
+  readMember,
+} from "./expression-runtime.ts";
 export type { ParamKind, ParamValue } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.

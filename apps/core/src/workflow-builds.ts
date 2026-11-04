@@ -544,7 +544,7 @@ const sealedExpressionSchema = z.strictObject({
     .optional(),
 });
 
-const tasksFileSchema = z.strictObject({
+export const tasksFileSchema = z.strictObject({
   tasks: z.array(sealedTaskSchema).max(10_000),
   expressions: z.array(sealedExpressionSchema).max(10_000),
   /** Whether the workflow has its own input.from and output.as steps. */
