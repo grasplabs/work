@@ -220,7 +220,7 @@ export type StepMethod = keyof typeof stepOptionSchemas;
 
 /**
  * What the steps only generated workflows run take (`step.sleepUntil`,
- * `step.caught`, and `do`'s `retry`): never a step or option the
+ * `step.caught`, `step.listen`, and `do`'s `retry`): never a step or option the
  * describer reads, so an App's workflow that uses one is refused where it
  * is written.
  */
@@ -230,6 +230,7 @@ export const generatedStepOptionSchemas = {
     until: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
   }),
   caught: z.strictObject(common),
+  listen: z.strictObject(common),
   /** A `do` step's `retry` option, which only generated code passes. */
   retry: z
     .custom<(error: CaughtError) => Promise<RetryChoice | null>>(

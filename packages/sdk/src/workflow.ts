@@ -480,6 +480,44 @@ export interface RetryChoice {
   retry: boolean;
 }
 
+/**
+ * An event a generated workflow's wait took, as its run host admitted it
+ * to the run: its ID, its type, who sent it (`source`, which the host
+ * names, never the sender), what it is about, if the sender said, when the
+ * run accepted it (ISO 8601) and its data, as its contract takes it.
+ */
+export interface WorkflowEvent {
+  readonly id: string;
+  readonly type: string;
+  readonly source: string;
+  readonly subject?: string;
+  readonly time: string;
+  readonly data: Json;
+}
+
+/**
+ * How a generated workflow's event wait ended: the event it took, or
+ * nothing by its timeout. A timeout is an outcome, not a failure.
+ */
+export type EventWait =
+  | { readonly timedOut: false; readonly event: WorkflowEvent }
+  | { readonly timedOut: true };
+
+const eventWaitSchema = z.union([
+  z.strictObject({
+    timedOut: z.literal(false),
+    event: z.strictObject({
+      id: z.string(),
+      type: z.string(),
+      source: z.string(),
+      subject: z.string().optional(),
+      time: z.string(),
+      data: z.json(),
+    }),
+  }),
+  z.strictObject({ timedOut: z.literal(true) }),
+]);
+
 /** A sleep until a deadline an earlier step recorded, in ms since the epoch. */
 export interface SleepUntilOptions extends StepOptions {
   until: number;
@@ -555,6 +593,14 @@ export interface StepRunner {
     options: StepOptions,
     takes: (error: CaughtError) => Promise<boolean>
   ) => Promise<CaughtError | undefined>;
+  /**
+   * A generated workflow's only: durably waits for an event sent to this
+   * run. Its run host decides from the step alone what it takes (the
+   * event binding and types its build seals, from the run's own inbox)
+   * and until when (its sealed timeout), and answers the event, or that
+   * none came in time.
+   */
+  listen: (name: string, options: StepOptions) => Promise<EventWait>;
 }
 
 // What the runner implements: the same steps, with their options checked at
@@ -576,6 +622,7 @@ interface UntypedStepRunner {
     options: unknown,
     takes: (error: CaughtError) => Promise<boolean>
   ) => Promise<CaughtError | undefined>;
+  listen: (name: string, options: unknown) => Promise<EventWait>;
 }
 
 /**
@@ -1366,6 +1413,21 @@ const createRunner = (
           )
         );
         return journal.caught ? journal.error : undefined;
+      }),
+
+    listen: async (name, rawOptions) =>
+      await exclusive(`Step "${name}"`, async () => {
+        const { key } = optionsOf(
+          generatedStepOptionSchemas.listen,
+          name,
+          rawOptions
+        );
+        if (engine.listen === undefined) {
+          throw invalidCall(
+            `Step "${name}" waits for an event, which only a generated workflow does`
+          );
+        }
+        return eventWaitSchema.parse(await engine.listen(start(name, key)));
       }),
   };
 

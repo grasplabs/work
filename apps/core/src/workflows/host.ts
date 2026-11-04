@@ -48,6 +48,7 @@ import { aiWaitEnded, aiWaitStarted, aiWakeType } from "./ai-waits.ts";
 import type { AiWait, AiWaitRun } from "./ai-waits.ts";
 import type { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
+import { storedEventSchema } from "./event-envelopes.ts";
 import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { heldWakeType } from "./wakes.ts";
@@ -548,6 +549,9 @@ const doOptionsSchema = z.object({
 
 /** A time, in ms since the epoch, as a sleep until it takes it. */
 const timestampSchema = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+/** What an event wait recorded when it was first reached. */
+const reachedAtSchema = z.strictObject({ at: timestampSchema });
 
 /** What a decision wait recorded when it was first reached. */
 const reachedSchema = z.object({ at: z.number(), answered: z.boolean() });
@@ -1437,11 +1441,45 @@ export interface RunKind {
   ) => Promise<DecisionOutcome>;
   /**
    * Refuses a durable wait the run may not wait, before it starts: a
-   * sleep, a sleep until a deadline, or a retry's backoff. A test run's
+   * sleep, a sleep until a deadline, an event wait, or a retry's backoff. A test run's
    * are held to its limit (sealed-run.ts); an App's run waits any.
    */
   requireWait?: (wait: WaitLength) => void;
+  /**
+   * What event wait step `step` takes from the run's own inbox, and how
+   * long it waits from when it is first reached, decided by the kind
+   * alone, its authority to take them checked first: a sealed run's
+   * (sealed-run.ts). None of an App's run, which waits for no events.
+   */
+  eventWait?: (step: string) => Promise<EventWaitPlan>;
 }
+
+/** What an event wait takes, and for how long (`RunKind.eventWait`). */
+export interface EventWaitPlan {
+  /** Engine types and attributes, any of which an event must match. */
+  readonly match: readonly EventMatch[];
+  /** How long it waits from when it was first reached, in ms. */
+  readonly timeoutMs: number;
+}
+
+/**
+ * How an event wait ended (`RunHost.listen`), as `@grasp-os/sdk/workflow`'s
+ * `EventWait` has it: the event it took, its envelope as the host minted
+ * it, or that none came in time.
+ */
+export type EventWaitOutcome =
+  | {
+      timedOut: false;
+      event: {
+        id: string;
+        type: string;
+        source: string;
+        subject?: string;
+        time: string;
+        data: Json;
+      };
+    }
+  | { timedOut: true };
 
 /** A durable wait as `RunKind.requireWait` hears of it: a length, or an end. */
 export type WaitLength = { readonly ms: number } | { readonly until: number };
@@ -1464,9 +1502,10 @@ export interface StepLimits {
 /**
  * How the host is asked to run a step: as an App's run is
  * (`StepUse`), or, only by a sealed run, as a sleep until the deadline
- * its step recorded (`sleepUntil`) or a `try` task's catch (`caught`).
+ * its step recorded (`sleepUntil`), a `try` task's catch (`caught`) or
+ * an event wait (`listen`).
  */
-export type HostStepUse = StepUse | "sleepUntil" | "caught";
+export type HostStepUse = StepUse | "sleepUntil" | "caught" | "listen";
 
 /** What a retry's decision step records (`RunHost.#retried`). */
 export interface RetryDecision {
@@ -2645,6 +2684,67 @@ export class RunHost extends RpcTarget {
       this.#kind.stepEnded?.(step, slept);
     }
     return slept;
+  }
+
+  /**
+   * Waits durably for an event of the run's own inbox, holding no
+   * isolate: only a sealed run's event wait does (an App's run's kind
+   * refuses the step as tampering). What it takes, and until when, are its kind's
+   * (`RunKind.eventWait`), never its code's. When it was first reached is
+   * recorded, so its deadline is the same on every replay; the engine
+   * journals the event it took, so a replay answers that event, and no
+   * other wait takes it again. Past its deadline, `{ timedOut: true }`.
+   */
+  async listen(name: unknown): Promise<Settled<EventWaitOutcome>> {
+    let step = "";
+    let started = false;
+    const waited = await settle(async (): Promise<EventWaitOutcome> => {
+      this.#requireUntampered();
+      step = checked(stepNameSchema, name);
+      await this.#requireStep(step, "listen");
+      started = true;
+      await this.#kind.requirePerson();
+      const plan = await this.#kind.eventWait?.(step);
+      if (plan === undefined) {
+        throw new Error(`Step "${step}" waits for events its run has none of`);
+      }
+      const { match, timeoutMs } = plan;
+      const reached = reachedAtSchema.parse(
+        await this.#step.do(
+          `${waitStepPrefix}${await waitKeyOf(step)}:reached`,
+          {},
+          async () => await Promise.resolve({ at: Date.now() })
+        )
+      );
+      const until = reached.at + timeoutMs;
+      this.#kind.requireWait?.({ until });
+      let taken: { payload: unknown; timestamp: Date };
+      try {
+        taken = await this.#step.waitForMatch(step, { match, until });
+      } catch (error) {
+        if (isTimeout(error)) {
+          return { timedOut: true };
+        }
+        throw error;
+      }
+      // As the host minted it when the run accepted it (run-events.ts).
+      const stored = storedEventSchema.parse(taken.payload);
+      return {
+        timedOut: false,
+        event: {
+          id: stored.id,
+          type: stored.type,
+          source: stored.source,
+          ...(stored.subject === undefined ? {} : { subject: stored.subject }),
+          time: taken.timestamp.toISOString(),
+          data: stored.data,
+        },
+      };
+    });
+    if (started) {
+      this.#kind.stepEnded?.(step, waited);
+    }
+    return waited;
   }
 
   /**

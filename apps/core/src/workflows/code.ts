@@ -588,6 +588,7 @@ export class Run extends WorkerEntrypoint {
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
         sleepUntil: async (name, until) => unwrapped(await host.sleepUntil(name, until)),
         caught: async (name, options, takes) => unwrapped(await host.caught(name, options, async (attempt, error) => await inAttempt(attempt, async () => await settled(async () => await takes(error))))),
+        listen: async (name) => unwrapped(await host.listen(name)),
         callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),
         openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
         decisionRecipients: async (decision, reminder) => unwrapped(await currentAttempt().decisionRecipients(decision, reminder)),
@@ -814,7 +815,8 @@ export interface RunHostCalls<Attempt = AttemptHost> {
   sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
   /**
    * A listen task's events, as the host takes them: an independent
-   * workflow's (resource-host.ts); an App's run has none.
+   * workflow's (resource-host.ts), or a sealed run's event wait (host.ts);
+   * an App's run has none.
    */
   listen?: (name: unknown) => Promise<Settled<unknown>>;
   /**

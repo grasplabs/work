@@ -39,9 +39,11 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
+import { eventTypeKey } from "./event-envelopes.ts";
 import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
   DecisionWait,
+  EventWaitPlan,
   HostControls,
   HostedRun,
   HostStepUse,
@@ -54,7 +56,7 @@ import type {
 } from "./host.ts";
 import type { AttemptAdmission } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
-import { runAuthority } from "./resource-authority.ts";
+import { requireCallAuthority, runAuthority } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
@@ -113,10 +115,11 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   after either, `workflow:input` and `workflow:output` where the workflow has them,
 //   and the SDK's `$params`. Any other name, one in another encoding of
 //   the same key included, or a step run otherwise than it runs (a task's
-//   step as a `do`, a sleeping task's own as its sleep, a try's catch as a
-//   catch), beside another step, or again, is refused, and fails the run.
-//   A `fork`, a loop of items at once, and every task in one have no steps
-//   in the table yet.
+//   step as a `do`, a sleeping task's own as its sleep, an event wait's
+//   own as its wait, a try's catch as a catch), beside another step, or
+//   again, is refused, and fails the run. A `fork`, a loop of items at
+//   once, every task in one, and a listen that isn't an event wait
+//   (`isEventWait`) have no steps in the table.
 // - A loop's item it never had, or out of its order. A task inside loops
 //   whose items run one after another names its item's index in each loop
 //   its build seals around it, and nothing else: its loops are its task's.
@@ -259,8 +262,25 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     response schema), in the step that records it, so a replay takes it
 //     alike. A decision nobody answered before its deadline closes as
 //     timed out, and the decision service refuses an answer after that.
+// - An event wait taking an event the isolate made up, one sent to
+//   another run, or through a binding the run may not use. An event wait
+//   (`isEventWait`: the first event of any of its sealed types) runs only
+//   as the host's own step (`RunHost.listen`), never as a step its code
+//   records: its outcome is the event the engine took and journaled, or
+//   that none came by its deadline (`{ timedOut: true }`). What it takes
+//   is the build's alone (`eventWait`): the engine's types of its sealed
+//   binding and types (`eventTypeKey`, so no other binding's event
+//   matches), from the run's own inbox, which takes only events admitted
+//   to this run through a binding its start froze (run-events.ts). Before
+//   every wait, a replay's too, the binding must be one the start froze
+//   and its authority must hold (`workflow.event_denied`); no catch takes
+//   a wait's failure, so a replay refused after a revocation fails the
+//   run rather than taking a path the run never took. Its deadline is
+//   its sealed timeout from when it was first reached, as recorded, so a
+//   replay waits alike; the engine takes each event once.
 // - A test run sitting waiting. Its sleeps, its deadlines (from its start,
-//   as recorded) and its retries' backoffs are held to its `maxSleepMs`
+//   as recorded), its event waits' deadlines and its retries' backoffs are
+//   held to its `maxSleepMs`
 //   (`requireWait`): one past it fails the run, and no catch takes it.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
@@ -378,6 +398,29 @@ type ForTask = Extract<SealedTask, { kind: "for" }>;
 const isSequentialLoop = (task: SealedTask | undefined): task is ForTask =>
   task?.kind === "for" && task.loop.concurrency === 1;
 
+/** The furthest ahead a deadline may be, as the engine sleeps: a year. */
+const maxDeadlineMs = 365 * 86_400_000;
+
+/** A `listen` task. */
+type ListenTask = Extract<SealedTask, { kind: "listen" }>;
+
+/**
+ * Whether `task` is an event wait the run host runs: one that takes the
+ * first event of any of its sealed types (`any`), through its sealed
+ * binding, until its timeout of at most a year. The sealed listen's other
+ * fields (`one` and `all`, filters by an event's attributes, correlations)
+ * are resource-host.ts's until GRA-1366 removes it: such a listen has no
+ * steps here, so it never runs, and `read` is never read (the wait always
+ * answers the host's `EventWait`).
+ */
+const isEventWait = (task: SealedTask | undefined): task is ListenTask =>
+  task?.kind === "listen" &&
+  task.listen.strategy === "any" &&
+  task.timeoutMs <= maxDeadlineMs &&
+  task.listen.filters.every(
+    (filter) => filter.attributes.length === 0 && filter.correlate === undefined
+  );
+
 /**
  * The steps `build` seals, by `<task>:<kind>`, the item indices of their
  * engine names left out (`stepNameOf`): the workflow's own, every task's
@@ -398,6 +441,7 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
     const runs =
       task.kind !== "fork" &&
       (task.kind !== "for" || isSequentialLoop(task)) &&
+      (task.kind !== "listen" || isEventWait(task)) &&
       task.scope.every((id) => isSequentialLoop(tasks.get(id)));
     if (runs) {
       for (const kind of task.steps) {
@@ -667,9 +711,6 @@ const sleepsOf = (task: SealedTask): boolean =>
 const sleepsUntil = (task: SealedTask): boolean =>
   (task.kind === "wait" && task.duration !== undefined) ||
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
-
-/** The furthest ahead a deadline may be, as the engine sleeps: a year. */
-const maxDeadlineMs = 365 * 86_400_000;
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
 const maxRetryDelayMs = 365 * 86_400_000;
@@ -1218,8 +1259,8 @@ class SealedRun implements SealedRunKind {
   /**
    * Refuses a step the sealed table doesn't have, or not as it runs: a
    * task's step as a `do`, but a sleeping task's own as its sleep (of
-   * exactly its sealed length, or until exactly its recorded deadline)
-   * and a try's catch as a catch; in an item its loops don't have, or out
+   * exactly its sealed length, or until exactly its recorded deadline),
+   * an event wait's own as its wait, and a try's catch as a catch; in an item its loops don't have, or out
    * of their order (`#loopRefusal`). While a failure no catch took is
    * pending, any step but a catch; while another step runs, any step; a
    * step that started already, again. A step it lets start runs until it
@@ -1353,8 +1394,12 @@ class SealedRun implements SealedRunKind {
   ): boolean {
     const { task, kind, path } = sealed;
     const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
+    const listens = kind === "task" && isEventWait(task);
     if (use === "do") {
-      return kind !== "catch" && kind !== "answer" && !sleeps;
+      return kind !== "catch" && kind !== "answer" && !sleeps && !listens;
+    }
+    if (use === "listen") {
+      return listens;
     }
     if (use === "waitForDecision") {
       return kind === "answer";
@@ -1692,8 +1737,15 @@ class SealedRun implements SealedRunKind {
     if (!outcome.ok) {
       this.#pendingBy = takenBy;
       this.#pendingError = outcome.error;
+      // An event wait's failure is the host's refusal of the wait (its
+      // binding's authority, its person, a test run's limit), asked again
+      // on every replay and never journaled before it: a catch taking it
+      // would let a replay after a revocation take a path the run never
+      // took, so none does.
       this.#pending =
-        task === undefined || sealed?.kind === "catch"
+        task === undefined ||
+        sealed?.kind === "catch" ||
+        (sealed?.kind === "task" && isEventWait(task))
           ? notCaught()
           : failureOf(outcome.error, task, false);
       return;
@@ -1813,6 +1865,60 @@ class SealedRun implements SealedRunKind {
       throw isExpectedError(error)
         ? namedError("NonRetryableError", error.message, error.code)
         : error;
+    }
+  }
+
+  /**
+   * What event wait step `step` (an event wait's own) takes, from its
+   * build alone: the first event of the run's inbox of any of its sealed
+   * types through its sealed binding (each kept under the engine's type
+   * naming both, `eventTypeKey`, so no other binding's event matches),
+   * until its sealed timeout. Refused unless the run may still take
+   * events through that binding (`#requireEventAuthority`).
+   */
+  async eventWait(step: string): Promise<EventWaitPlan> {
+    const task = this.#stepOf(step)?.task;
+    if (!isEventWait(task)) {
+      throw new Error(`Step "${step}" is no event wait's`);
+    }
+    const { binding, filters } = task.listen;
+    await this.#requireEventAuthority(binding);
+    return {
+      match: await Promise.all(
+        filters.map(async ({ type }) => ({
+          type: await eventTypeKey(binding, type),
+        }))
+      ),
+      timeoutMs: task.timeoutMs,
+    };
+  }
+
+  /**
+   * Refuses a wait for events through `alias` unless the run may still
+   * take them: an event binding its start froze, its authority holding
+   * now (resource-authority.ts, `requireCallAuthority`), as a call's must
+   * (`workflow.event_denied`). A test run's binding is its checkpoint's,
+   * and nothing outside it is asked.
+   */
+  async #requireEventAuthority(alias: string): Promise<void> {
+    const { calling } = this.run;
+    if (calling.candidate !== undefined) {
+      if (calling.candidate.get(alias)?.kind !== "event") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      return;
+    }
+    const binding = calling.bindings.get(alias);
+    if (binding?.kind !== "event") {
+      throw workflowResourceErrors.create("workflow.event_denied");
+    }
+    try {
+      await requireCallAuthority(this.#env, calling, binding);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      throw error;
     }
   }
 
