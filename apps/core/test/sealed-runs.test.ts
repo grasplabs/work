@@ -207,8 +207,10 @@ const granted = async (
  * argument (`secret`), and task `greet` asks model binding `summary`.
  * Loop `rows` runs its items one after another, each mailing its row
  * (`notify`), raising what its own try's catch takes (`check` in
- * `guard`) and sleeping until a deadline (`nap`); loop `pages` runs loop
- * `lines` in each item, its items stopped by a `while`; fork `both` and
+ * `guard`), mailing again under a retry policy (`poke` in `steady`) and
+ * sleeping until a deadline (`nap`); loop `pages` runs loop
+ * `lines` in each item, its items stopped by a `while`; loop `cells`,
+ * in try `shielded`, raises in each item (`bad`); fork `both` and
  * loop `wide`, of items at once, don't run on the run host yet.
  */
 const sealedWorkflow = async () => {
@@ -447,6 +449,29 @@ const sealedWorkflow = async () => {
                 },
               },
               {
+                steady: {
+                  try: [
+                    {
+                      poke: {
+                        call: "grasp.connector",
+                        with: {
+                          binding: "mail",
+                          operation: "mail.send",
+                          arguments: { to: "${ $row }", subject: "again" },
+                        },
+                      },
+                    },
+                  ],
+                  catch: {
+                    errors: { with: { type: `${standardErrors}runtime` } },
+                    retry: {
+                      delay: { seconds: 1 },
+                      limit: { attempt: { count: 3 } },
+                    },
+                  },
+                },
+              },
+              {
                 nap: {
                   call: "grasp.sleepUntil",
                   with: {
@@ -474,6 +499,28 @@ const sealedWorkflow = async () => {
                 },
               },
             ],
+          },
+        },
+        {
+          shielded: {
+            try: [
+              {
+                cells: {
+                  for: { each: "cell", at: "cellAt", in: "${ [1, 2] }" },
+                  output: { as: "${ . }" },
+                  do: [
+                    {
+                      bad: {
+                        raise: {
+                          error: { type: "urn:grasp:error:cell", status: 451 },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            catch: { errors: { with: { status: 451 } } },
           },
         },
         {
@@ -2540,6 +2587,10 @@ const guardAt = (at: string, takes = "async () => true"): string =>
 const napAt = (at: number, until: string): string =>
   `await step.do("nap", { key: "enter@${at}", description: "Its start" }, async () => ({ output: null, until: ${until} }))`;
 
+/** Task `bad`'s raise in item `at` of `cells`, recording `record`. */
+const badAt = (at: number, record: string): string =>
+  `await step.do("bad", { key: "task@${at}", description: "Its raise" }, async () => (${record}))`;
+
 /** Item `at` of `rows`: its mail, and its raise its own catch takes. */
 const rowAt = (at: string): string => `
 sent.push(${notifyAt(at)});
@@ -2581,8 +2632,11 @@ ${enterRows('["a", "b"]')}
 const sent = [];
 const caught = [];
 const slept = [];
+const rounds = [];
 for (let index = 0; index < items.length; index += 1) {
   ${rowAt("index")}
+  rounds[index] = 0;
+  await step.do("poke", { key: "task@" + index, description: "Its task", retry: async () => ({ by: "steady", retry: true }) }, async () => { rounds[index] += 1; if (rounds[index] < 2) throw new Error("not yet"); return { output: rounds[index] }; });
   const { until } = await step.do("nap", { key: "enter@" + index, description: "Its start" }, async () => ({ output: null, until: Date.now() + 1000 + index }));
   await step.sleepUntil("nap", { key: "task@" + index, description: "Its sleep", until });
   slept.push(index);
@@ -2608,6 +2662,10 @@ return { sent, caught, slept };`);
       mail: mail.map(({ to }) => to),
       checked: checked.map(({ step }) => step),
       journaled: [...journal.keys()].filter((name) => name.includes("%40")),
+      // Each item's rounds under steps of its own.
+      retried: [...journal.keys()].filter(
+        (name) => name.includes(":retry:") && name.endsWith(":run")
+      ).length,
     }).toStrictEqual({
       first: { ended, tampered: [] },
       replayed: { ended, tampered: [] },
@@ -2618,14 +2676,17 @@ return { sent, caught, slept };`);
         engineStep("notify", "task@0"),
         engineStep("check", "task@0"),
         engineStep("guard", "catch@0"),
+        engineStep("poke", "task@0"),
         engineStep("nap", "enter@0"),
         engineStep("nap", "task@0"),
         engineStep("notify", "task@1"),
         engineStep("check", "task@1"),
         engineStep("guard", "catch@1"),
+        engineStep("poke", "task@1"),
         engineStep("nap", "enter@1"),
         engineStep("nap", "task@1"),
       ],
+      retried: 2,
     });
   });
 
@@ -2773,6 +2834,30 @@ return "woke";`);
       otherDeadline: refusedAs(
         `Step "${engineStep("nap", "task@1")}" isn't one the build seals.`
       ),
+    });
+  });
+
+  it("leaves a loop by its leave step, or by the catch of a try around it, its items run no more", async () => {
+    const looping = await sealedWorkflow();
+    const cellsOf = `await step.do("cells", { key: "enter", description: "Its items" }, async () => ({ items: [1, 2] }));`;
+    const run = async (body: string) =>
+      await ranAs(await waitingRun(looping), moduleOf(`${cellsOf} ${body}`));
+    const caughtAround = `try { ${badAt(0, "{ output: null }")}; } catch (thrown) {
+  const error = await step.caught("shielded", { key: "catch", description: "Its catch" }, async () => true);
+  if (error === undefined) throw thrown;
+}`;
+    expect({
+      caught: await run(`${caughtAround} return "caught";`),
+      afterCatch: await run(
+        `${caughtAround} return ${badAt(1, "{ skipped: true }")};`
+      ),
+      afterLeave: await run(
+        `${badAt(0, "{ skipped: true }")}; await step.do("cells", { key: "leave", description: "Its output" }, async () => ({ output: null })); return ${badAt(1, "{ skipped: true }")};`
+      ),
+    }).toStrictEqual({
+      caught: { ended: "caught", tampered: [] },
+      afterCatch: refusedAs(`Loop "cells" has no item 1 here.`),
+      afterLeave: refusedAs(`Loop "cells" has no item 1 here.`),
     });
   });
 
