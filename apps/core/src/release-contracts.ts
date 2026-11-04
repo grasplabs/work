@@ -70,6 +70,74 @@ const httpGet = {
   readOnly: true,
 };
 
+/**
+ * A reply to a run's mail (`grasp.email.reply`, run-inboxes.ts): sent to
+ * the run's reply address (`inbox.<alias>`), which the workflow gives its
+ * mail as Reply-To. Who replies is whoever the mail reached.
+ */
+export const emailReplyContract = "grasp/email-reply";
+
+/** The type of a reply to a run's mail. */
+export const emailReplyType = "grasp.email.reply";
+
+/** A name and address, as a message's headers give them. */
+const mailbox = v.object({ name: v.string(), address: v.string() });
+
+/**
+ * What an authentication method said of a message, as the receiving
+ * server's `Authentication-Results` header records it (RFC 8601 2.7);
+ * null when it records none.
+ */
+const methodResult = v
+  .enum([
+    "pass",
+    "fail",
+    "softfail",
+    "neutral",
+    "none",
+    "temperror",
+    "permerror",
+    "policy",
+  ])
+  .nullable();
+
+/**
+ * A reply as a run's inbox takes it: the message as an email trigger's run
+ * gets it (`InboundEmail` in @grasp-os/shared/workflows, fitted to an
+ * event's data), and what SPF, DKIM and DMARC said of it. `from` is what
+ * its header says, which only DMARC's `pass` ties to its domain: the
+ * workflow checks who replied, never core, which takes every reply. An
+ * event contract's `email` type takes exactly this
+ * (workflow-catalog.ts), so every reply fits whichever contract a binding
+ * pins.
+ */
+export const emailReplyData = JSON.stringify(
+  v.object({
+    id: v.string(),
+    stored: v.string().nullable(),
+    from: mailbox,
+    to: v.array(mailbox),
+    cc: v.array(mailbox),
+    subject: v.string(),
+    date: v.string().nullable(),
+    text: v.string(),
+    truncated: v.boolean(),
+    attachments: v.array(
+      v.object({
+        filename: v.string().nullable(),
+        mimeType: v.string(),
+        size: v.number().integer(),
+        file: v.object({ id: v.string() }).optional(),
+      })
+    ),
+    authentication: v.object({
+      spf: methodResult,
+      dkim: methodResult,
+      dmarc: methodResult,
+    }),
+  }).descriptor
+);
+
 /** The contracts this release ships, by key. */
 export const releaseContracts: readonly CatalogContractDefinition[] = [
   { key: modelStepContract, kind: "model" },
@@ -82,6 +150,17 @@ export const releaseContracts: readonly CatalogContractDefinition[] = [
     response: JSON.stringify(
       v.union(v.null(), v.object({ comment: v.string() })).descriptor
     ),
+  },
+  {
+    key: emailReplyContract,
+    kind: "event",
+    events: {
+      [emailReplyType]: {
+        data: emailReplyData,
+        browser: false,
+        ingress: "email",
+      },
+    },
   },
   { key: httpReadContract, kind: "connector", operations: { get: httpGet } },
   {

@@ -3,6 +3,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
 import type {
+  EventIngressKind,
   ListedWorkflowBindingApproval,
   PendingWorkflowBindings,
   WorkflowBindingTarget,
@@ -40,6 +41,7 @@ import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
 import { workflowStoreServer } from "./workflow-store-host.ts";
+import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
 // the waiting feed's `bindings`): every catalog binding of a workflow's
@@ -153,6 +155,14 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
     }
   }
 };
+
+/**
+ * What an event binding's offer says outsiders may send it, by where
+ * from: a run's inbox takes whatever reaches it (run-inboxes.ts).
+ */
+const ingressLabels = {
+  email: "Replies to the run's mail, from anyone it reaches",
+} as const satisfies Record<EventIngressKind, string>;
 
 /** The names of the Brain collections `ids`, by ID. */
 const collectionNames = async (
@@ -336,8 +346,16 @@ const candidatesOf = async (
         return { target, label: labelOf(target) };
       });
     }
+    // Who sends its events from outside, when its contract takes any
+    // (run-inboxes.ts): what approving it lets outsiders do.
     case "event": {
-      return [{ target: { kind: "event" }, label: "" }];
+      const ingress = await ingressOf(env, binding);
+      return [
+        {
+          target: { kind: "event" },
+          label: ingress === undefined ? "" : ingressLabels[ingress],
+        },
+      ];
     }
     case "files": {
       return [{ target: { kind: "files" }, label: "" }];

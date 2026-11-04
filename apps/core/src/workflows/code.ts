@@ -102,6 +102,11 @@ export type Settled<T> =
  */
 export interface RunStart {
   runId: RunId;
+  /**
+   * A sealed run's inboxes, by its event binding's alias: a reply address
+   * (run-inboxes.ts). None for any other run.
+   */
+  inbox?: Readonly<Record<string, string>>;
   params: Record<string, string | number>;
   input: unknown;
   collections: string[];
@@ -587,13 +592,14 @@ import definition from ${JSON.stringify(module)};
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, params, input, connections, collections, brains }) {
+  async run(host, { runId, inbox, params, input, connections, collections, brains }) {
     return await settled(async () => {
       if (${id === undefined ? "" : `definition?.metadata?.id !== ${JSON.stringify(id)} || `}typeof definition?.run !== "function") {
         throw new Error(${JSON.stringify(refusal)});
       }
       const engine = {
         runId,
+        inbox: Object.freeze({ ...inbox }),
         params,
         env: bindings({ connections, collections, brains }),
         do: async (name, options, fn, retry) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)), ...(typeof retry === "function" ? [async (error) => await settled(async () => await retry(error))] : []))),

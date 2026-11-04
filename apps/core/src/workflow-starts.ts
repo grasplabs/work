@@ -62,10 +62,12 @@ import {
 } from "./workflows/package-seal.ts";
 import { triggeredAccountClaimed } from "./workflows/quotas.ts";
 import type { ChildPlace } from "./workflows/quotas.ts";
+import { frozenBindingsOf } from "./workflows/resource-authority.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { runEvidenceMaxRows } from "./workflows/run-evidence.ts";
 import { startFilesDropped } from "./workflows/run-files.ts";
+import { inboxesAdmitted } from "./workflows/run-inboxes.ts";
 import { handFiles } from "./workflows/start-files.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
 
@@ -1171,6 +1173,21 @@ const pinsAdmitted = (
   ];
 };
 
+/**
+ * The inboxes (run-inboxes.ts) of run `runId` a start admits, if it
+ * `runs` one: for the event bindings it froze (`bindings`, as its receipt
+ * keeps them) whose contract takes events from outside.
+ */
+const startInboxes = async (
+  env: Env,
+  start: { runId: string; workflowId: string; bindings: string; runs: boolean }
+): Promise<(admitted: SQL) => BatchItem<"sqlite">[]> =>
+  await inboxesAdmitted(env, {
+    runId: start.runId,
+    workflowId: start.workflowId,
+    bindings: start.runs ? frozenBindingsOf(start.bindings).values() : [],
+  });
+
 /** Where a start of `invoker` sits in a lineage, if not at a root of its own. */
 const lineageOf = (
   invoker: StartInvoker
@@ -1401,13 +1418,22 @@ export const decideWorkflowStart = async (
     { runId, workflowId: id, runs: buildHash !== null },
     files
   );
+  // The ID its files were copied under, which its run is admitted under.
+  const admittedId = handed.runId ?? runId;
+  const inboxes = await startInboxes(env, {
+    runId: admittedId,
+    workflowId: id,
+    bindings: bindings.text,
+    runs: buildHash !== null,
+  });
   return {
     authorization: {
-      // The ID its files and pins were copied under.
-      id: handed.runId ?? runId,
+      // The ID its files, pins and inboxes were made under.
+      id: admittedId,
       alsoAdmitted: (admitted) => [
         ...(handed.admitted?.(admitted) ?? []),
-        ...pinsAdmitted(env, handed.runId ?? runId, pins, admitted),
+        ...pinsAdmitted(env, admittedId, pins, admitted),
+        ...inboxes(admitted),
       ],
       workflowId: id,
       version,

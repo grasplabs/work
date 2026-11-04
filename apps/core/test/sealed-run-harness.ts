@@ -897,7 +897,7 @@ export const ranAs = async (
     attemptMethods,
   });
   const settled = settledSchema.parse(
-    await code.run(host, sealedRunStart(run))
+    await code.run(host, await sealedRunStart(env, run))
   );
   return {
     ended: settled.ok ? settled.value : settled.error.code,

@@ -1189,7 +1189,7 @@ export const sealedActivation = async (
   );
   const result = await settledRun(async () => {
     try {
-      return await code.run(host, sealedRunStart(run));
+      return await code.run(host, await sealedRunStart(env, run));
     } catch (error) {
       return await afterCpuKill(error, calls);
     }

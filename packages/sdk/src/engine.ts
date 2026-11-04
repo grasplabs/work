@@ -176,6 +176,11 @@ export interface WorkflowEngine {
    * started with even when people change them before it resumes.
    */
   readonly params: Readonly<Record<string, unknown>>;
+  /**
+   * Where outsiders send the run's events, by its event binding's alias
+   * (see `WorkflowContext.inbox`). Only a sealed build's run host has it.
+   */
+  readonly inbox?: Readonly<Record<string, string>>;
   /** The run's bindings, built for this execution of it (see `WorkflowEnv`). */
   readonly env: WorkflowEnv;
   /**
