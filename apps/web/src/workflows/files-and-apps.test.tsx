@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
+import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
+  WorkflowBindingApproval,
   WorkflowBindingTarget,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
@@ -17,14 +19,17 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { formatDateTime } from "../format.ts";
 import { FilesAndApps } from "./files-and-apps.tsx";
 
 // A workflow's Files and apps tab against core's RPC as the page reaches
-// it, faked: core keeps what an admin approves, and lists as waiting only
-// the bindings no approval serves, so what the tab shows after an approval
-// is what core holds. An admin approves a decision with the people and
-// teams they pick, and a connector with the target core offers, each for
-// the version listed; anyone else is never shown what waits.
+// it, faked: core keeps what an admin approves and revokes, and lists as
+// waiting only the bindings no active approval serves, so what the tab
+// shows after a change is what core holds. An admin approves a decision
+// with the people and teams they pick, and a connector with the target
+// core offers, each for the version listed, and revokes an approval once
+// they confirm; anyone else sees what is approved, never what waits, and
+// revokes nothing.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -54,7 +59,7 @@ const waiting: PendingWorkflowBindings["bindings"] = [
   },
 ];
 
-/** Version 2, which declares `crm` as a connector binding. */
+/** Version 2, which declares `approval` and `crm` as catalog bindings. */
 const versionTwo: WorkflowResourceVersion = {
   resourceId: workflow,
   version: 2,
@@ -64,6 +69,14 @@ const versionTwo: WorkflowResourceVersion = {
   contractHash: "contract",
   manifestHash: "manifest",
   bindings: [
+    {
+      alias: "approval",
+      kind: "decision",
+      resourceId: null,
+      resourceVersion: null,
+      contractId: "invoice-approval",
+      fingerprint: "fingerprint-approval",
+    },
     {
       alias: "crm",
       kind: "connector",
@@ -80,41 +93,66 @@ const versionTwo: WorkflowResourceVersion = {
   createdAt: "2026-11-04T09:00:00.000Z",
 };
 
+/** Version 2 live, as core's lifecycle answers it. */
+const lifecycle: WorkflowLifecycle = {
+  workflowId: workflow,
+  revision: 2,
+  stage: "live",
+  stageSet: false,
+  draft: null,
+  publishedVersion: 2,
+  live: {
+    version: 2,
+    approvedBy: "user-admin",
+    approvedAt: "2026-11-03T09:00:00.000Z",
+    selfApproved: false,
+  },
+  paused: null,
+  goLive: null,
+  canChange: false,
+  canDecide: false,
+};
+
+/** An admin's active approval of `crm` for version 2, as core lists it. */
+const crmApproval = (id: string): WorkflowBindingApproval => ({
+  id,
+  alias: "crm",
+  kind: "connector",
+  contractId: "crm-contacts",
+  fingerprint: "fingerprint",
+  target: crmTarget,
+  reviewedVersion: 2,
+  status: "active",
+  approvedBy: "user-grace",
+  approvedAt: "2026-11-04T09:00:00.000Z",
+});
+
 /**
- * Core as the tab reaches it, keeping each approval asked of it; its first
- * read of the connections catalog answers only once `answerFirstCatalog`
- * lets it, as a cold catalog can take seconds.
+ * Core as the tab reaches it, keeping each approval and revocation asked
+ * of it, `crm` approved from the start when `crmApproved`; its first read
+ * of the connections catalog answers only once `answerFirstCatalog` lets
+ * it, as a cold catalog can take seconds.
  */
-const fakeCore = () => {
+const fakeCore = (crmApproved = false) => {
   const approved: { id: string; input: { alias: string } }[] = [];
+  const revoked: { id: string; approval: string }[] = [];
+  const active: WorkflowBindingApproval[] = crmApproved
+    ? [crmApproval("approval-crm-first")]
+    : [];
   const asked: string[] = [];
   const firstCatalog = Promise.withResolvers<boolean>();
   let catalogReads = 0;
   const workflowResources = {
     knowledge: async () => await Promise.resolve([]),
     files: async () => await Promise.resolve([]),
-    // As core answers them now: each approval asked so far, for version 2.
-    bindings: async () =>
-      await Promise.resolve(
-        approved.map(({ input }) => ({
-          id: `approval-${input.alias}`,
-          alias: input.alias,
-          kind: "connector",
-          contractId: "crm-contacts",
-          fingerprint: "fingerprint",
-          target: crmTarget,
-          reviewedVersion: 2,
-          status: "active",
-          approvedBy: "user-admin",
-          approvedAt: "2026-11-04T09:00:00.000Z",
-        }))
-      ),
+    // As core answers them now: its active approvals, for version 2.
+    bindings: async () => await Promise.resolve([...active]),
     pendingBindingsOf: async (
       id: string
     ): Promise<PendingWorkflowBindings[]> => {
       await Promise.resolve();
       asked.push("pendingBindingsOf");
-      const done = new Set(approved.map(({ input }) => input.alias));
+      const done = new Set(active.map(({ alias }) => alias));
       const left = waiting.filter(({ alias }) => !done.has(alias));
       return left.length === 0
         ? []
@@ -130,7 +168,20 @@ const fakeCore = () => {
     approveBinding: async (id: string, input: { alias: string }) => {
       await Promise.resolve();
       approved.push({ id, input });
-      return {};
+      const approval = {
+        ...crmApproval(`approval-${input.alias}-${approved.length}`),
+        alias: input.alias,
+      };
+      active.push(approval);
+      return approval;
+    },
+    revokeBinding: async (id: string, approval: string) => {
+      await Promise.resolve();
+      revoked.push({ id, approval });
+      const at = active.findIndex((each) => each.id === approval);
+      if (at !== -1) {
+        active.splice(at, 1);
+      }
     },
   };
   const session = {
@@ -160,6 +211,7 @@ const fakeCore = () => {
   return {
     session,
     approved,
+    revoked,
     asked,
     answerFirstCatalog: () => {
       firstCatalog.resolve(true);
@@ -193,6 +245,11 @@ const shown = async (
       <FilesAndApps
         approves={approves}
         currentVersion={2}
+        lifecycle={{ state: "ready", data: lifecycle }}
+        names={{
+          people: new Map([["user-grace", "Grace Hopper"]]),
+          me: "user-ada",
+        }}
         versions={{ state: "ready", data: [versionTwo] }}
         workflow={workflow}
       />
@@ -228,12 +285,30 @@ const press = async (element: Element | null | undefined) => {
   await settled();
 };
 
-const button = (name: string): HTMLButtonElement | undefined =>
-  [...document.querySelectorAll("button")].find(
+const buttons = (name: string): HTMLButtonElement[] =>
+  [...document.querySelectorAll("button")].filter(
     (each) =>
       each.getAttribute("aria-label") === name ||
       each.textContent.trim() === name
   );
+
+const button = (name: string): HTMLButtonElement | undefined =>
+  buttons(name)[0];
+
+/**
+ * What the binding listed as `alias` in the version that runs now says,
+ * each piece of text apart.
+ */
+const listed = (alias: string): string[] | undefined => {
+  const row = [
+    ...document.querySelectorAll('[aria-label="Bindings of version 2"] > li'),
+  ].find((each) => each.querySelector("code")?.textContent === alias);
+  return row === undefined
+    ? undefined
+    : [...row.querySelectorAll("*")]
+        .filter((each) => each.children.length === 0)
+        .map((each) => each.textContent.trim());
+};
 
 /** Opens the list of who answers and picks `name` from it. */
 const pick = async (name: string) => {
@@ -308,6 +383,65 @@ describe("a workflow's Files and apps tab", () => {
       afterApproval,
       afterFirstRead: document.body.textContent.includes("Not connected"),
     }).toStrictEqual({ afterApproval: false, afterFirstRead: false });
+  });
+
+  it("lists each binding of the version that runs now with what an admin approved and who, and lets an admin revoke one once they confirm, after which it waits again", async () => {
+    const { session, revoked, answerFirstCatalog } = fakeCore(true);
+    answerFirstCatalog();
+    await shown(session, true);
+    const before = { crm: listed("crm"), approval: listed("approval") };
+
+    await press(button("Revoke crm"));
+    // The dialog's own button, after the row's.
+    await press(buttons("Revoke").at(-1));
+
+    expect({
+      before,
+      revoked,
+      after: listed("crm"),
+      waitsAgain: button("Approve crm") !== undefined,
+    }).toStrictEqual({
+      before: {
+        crm: [
+          "crm",
+          "connector: crm-contacts",
+          "composio.hubspot@1",
+          `Approved by Grace Hopper on ${formatDateTime("2026-11-04T09:00:00.000Z")}`,
+          "Revoke",
+        ],
+        approval: [
+          "approval",
+          "decision: invoice-approval",
+          "Waiting for an admin's approval",
+        ],
+      },
+      revoked: [{ id: workflow, approval: "approval-crm-first" }],
+      after: [
+        "crm",
+        "connector: crm-contacts",
+        "Waiting for an admin's approval",
+      ],
+      waitsAgain: true,
+    });
+  });
+
+  it("shows anyone else what is approved, but never a way to revoke it", async () => {
+    const { session, answerFirstCatalog } = fakeCore(true);
+    answerFirstCatalog();
+    await shown(session, false);
+
+    expect({
+      crm: listed("crm"),
+      revoke: buttons("Revoke crm").length,
+    }).toStrictEqual({
+      crm: [
+        "crm",
+        "connector: crm-contacts",
+        "composio.hubspot@1",
+        `Approved by Grace Hopper on ${formatDateTime("2026-11-04T09:00:00.000Z")}`,
+      ],
+      revoke: 0,
+    });
   });
 
   it("never asks core what waits for someone who doesn't approve", async () => {

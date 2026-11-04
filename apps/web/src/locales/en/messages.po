@@ -1591,6 +1591,10 @@ msgstr "A guest wrote a message"
 msgid "A JSON value"
 msgstr "A JSON value"
 
+#: src/workflows/binding-approvals.tsx
+msgid "A Knowledge collection it may read"
+msgstr "A Knowledge collection it may read"
+
 #: src/dashboard/signals.tsx
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
@@ -2495,6 +2499,10 @@ msgstr "Answered"
 msgid "Answered by"
 msgstr "Answered by"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Answered by {deciders}"
+msgstr "Answered by {deciders}"
+
 #: src/brain/brain.ts
 msgid "Answered on {date}."
 msgstr "Answered on {date}."
@@ -2676,6 +2684,10 @@ msgstr "Approved"
 #: src/activity/audit-words.ts
 msgid "Approved a page's code"
 msgstr "Approved a page's code"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Approved by {approver} on {at}"
+msgstr "Approved by {approver} on {at}"
 
 #: src/engines/package-approvals.tsx
 msgid "Approved by {decidedBy}, {decidedAt}"
@@ -3196,6 +3208,10 @@ msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
 msgid "Bindings"
 msgstr "Bindings"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Bindings of version {version}"
+msgstr "Bindings of version {version}"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Blocker"
@@ -3383,6 +3399,7 @@ msgstr "Can't offer Start: {unread}"
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/draft-versions.tsx
+#: src/confirmed.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -7028,6 +7045,7 @@ msgid "Its apps and workflows aren’t deleted, but they stop being shared with 
 msgstr "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 
 #: src/workflows/binding-approvals.tsx
+#: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
 msgstr "Its bindings"
 
@@ -7087,6 +7105,10 @@ msgstr "Its model tasks"
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+
+#: src/workflows/files-and-apps.tsx
+msgid "Its next start is refused until an admin approves {alias} again. Runs already started keep what they started with."
+msgstr "Its next start is refused until an admin approves {alias} again. Runs already started keep what they started with."
 
 #: src/engines/store-change-errors.ts
 msgid "its output doesn't fit the table"
@@ -11124,6 +11146,7 @@ msgstr "Revision {revision} passes the profile and can be published."
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
+#: src/workflows/files-and-apps.tsx
 msgid "Revoke"
 msgstr "Revoke"
 
@@ -11131,6 +11154,14 @@ msgstr "Revoke"
 msgctxt "revoke an HTTP connection"
 msgid "Revoke"
 msgstr "Revoke"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoke {alias}"
+msgstr "Revoke {alias}"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoke {alias}?"
+msgstr "Revoke {alias}?"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
@@ -11196,6 +11227,10 @@ msgstr "Revoked a disconnected account's access at its provider"
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Revoked a permission"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoked: {alias}."
+msgstr "Revoked: {alias}."
 
 #: src/brain/goals-editor.tsx
 msgid "Reword"
@@ -13004,6 +13039,7 @@ msgid "Template"
 msgstr "Template"
 
 #: src/engines/resource-bindings.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Template {templateId}, version {version}"
 msgstr "Template {templateId}, version {version}"
 
@@ -14914,6 +14950,10 @@ msgstr "Version {pendingVersion} is ready to publish"
 msgid "Version {version}"
 msgstr "Version {version}"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version} declares no binding to approve."
+msgstr "Version {version} declares no binding to approve."
+
 #: src/workflows/traced-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
@@ -15083,6 +15123,10 @@ msgstr "Waiting for a share of this person's runs; tries again by {time}"
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Waiting for an admin"
 msgstr "Waiting for an admin"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Waiting for an admin's approval"
+msgstr "Waiting for an admin's approval"
 
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"

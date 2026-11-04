@@ -1591,6 +1591,10 @@ msgstr "Een gast heeft een bericht geschreven"
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
 
+#: src/workflows/binding-approvals.tsx
+msgid "A Knowledge collection it may read"
+msgstr "Een Knowledge-verzameling die hij mag lezen"
+
 #: src/dashboard/signals.tsx
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
@@ -2495,6 +2499,10 @@ msgstr "Beantwoord"
 msgid "Answered by"
 msgstr "Beantwoord door"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Answered by {deciders}"
+msgstr "Beantwoord door {deciders}"
+
 #: src/brain/brain.ts
 msgid "Answered on {date}."
 msgstr "Beantwoord op {date}."
@@ -2676,6 +2684,10 @@ msgstr "Goedgekeurd"
 #: src/activity/audit-words.ts
 msgid "Approved a page's code"
 msgstr "De code van een pagina goedgekeurd"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Approved by {approver} on {at}"
+msgstr "Goedgekeurd door {approver} op {at}"
 
 #: src/engines/package-approvals.tsx
 msgid "Approved by {decidedBy}, {decidedAt}"
@@ -3196,6 +3208,10 @@ msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
 msgid "Bindings"
 msgstr "Koppelingen"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Bindings of version {version}"
+msgstr "Koppelingen van versie {version}"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Blokkade"
@@ -3383,6 +3399,7 @@ msgstr "Starten kan niet worden aangeboden: {unread}"
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/draft-versions.tsx
+#: src/confirmed.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -7028,6 +7045,7 @@ msgid "Its apps and workflows aren’t deleted, but they stop being shared with 
 msgstr "De apps en workflows erin worden niet verwijderd, maar niet meer met iedereen erin gedeeld: {who} verliezen er toegang toe, tenzij ze op een andere manier met hen gedeeld zijn."
 
 #: src/workflows/binding-approvals.tsx
+#: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
 msgstr "Zijn koppelingen"
 
@@ -7087,6 +7105,10 @@ msgstr "Zijn modeltaken"
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "De standaardwaarden van de nieuwe velden worden ingevuld. Releases die dit nodig hebben, kunnen actueel worden gemaakt zodra het klaar is."
+
+#: src/workflows/files-and-apps.tsx
+msgid "Its next start is refused until an admin approves {alias} again. Runs already started keep what they started with."
+msgstr "De volgende start wordt geweigerd tot een beheerder {alias} opnieuw goedkeurt. Runs die al gestart zijn houden waarmee ze gestart zijn."
 
 #: src/engines/store-change-errors.ts
 msgid "its output doesn't fit the table"
@@ -11124,6 +11146,7 @@ msgstr "Revisie {revision} doorstaat de controle van het profiel en kan worden g
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
+#: src/workflows/files-and-apps.tsx
 msgid "Revoke"
 msgstr "Intrekken"
 
@@ -11131,6 +11154,14 @@ msgstr "Intrekken"
 msgctxt "revoke an HTTP connection"
 msgid "Revoke"
 msgstr "Intrekken"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoke {alias}"
+msgstr "{alias} intrekken"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoke {alias}?"
+msgstr "{alias} intrekken?"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
@@ -11196,6 +11227,10 @@ msgstr "De toegang van een ontkoppeld account bij de provider ingetrokken"
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Een toestemming ingetrokken"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Revoked: {alias}."
+msgstr "Ingetrokken: {alias}."
 
 #: src/brain/goals-editor.tsx
 msgid "Reword"
@@ -13004,6 +13039,7 @@ msgid "Template"
 msgstr "Sjabloon"
 
 #: src/engines/resource-bindings.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Template {templateId}, version {version}"
 msgstr "Sjabloon {templateId}, versie {version}"
 
@@ -14914,6 +14950,10 @@ msgstr "Versie {pendingVersion} is klaar om te publiceren"
 msgid "Version {version}"
 msgstr "Versie {version}"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version} declares no binding to approve."
+msgstr "Versie {version} declareert geen koppeling om goed te keuren."
+
 #: src/workflows/traced-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
@@ -15083,6 +15123,10 @@ msgstr "Wacht op een deel van de uitvoeringen van deze persoon; probeert het uit
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Waiting for an admin"
 msgstr "Wacht op een beheerder"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Waiting for an admin's approval"
+msgstr "Wacht op goedkeuring van een beheerder"
 
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"

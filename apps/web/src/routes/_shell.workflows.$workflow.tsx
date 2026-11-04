@@ -810,6 +810,14 @@ const WorkflowResourceView = ({
             <FilesAndApps
               approves={approves}
               currentVersion={currentVersion}
+              // As the header has it: a change made here before the page
+              // reads it again.
+              lifecycle={
+                status === undefined
+                  ? lifecycle
+                  : { state: "ready", data: status }
+              }
+              names={names}
               versions={versions}
               workflow={resource.id}
             />

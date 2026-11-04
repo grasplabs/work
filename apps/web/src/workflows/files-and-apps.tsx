@@ -1,5 +1,7 @@
+import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
+  WorkflowBindingApproval,
   WorkflowBindingTarget,
   WorkflowFile,
   WorkflowKnowledge,
@@ -19,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { Confirmed } from "../confirmed.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
@@ -30,14 +33,22 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { PendingBindingList } from "./binding-approvals.tsx";
+import type { Names } from "./activity-bar.tsx";
+import {
+  BindingFrame,
+  PendingBindingList,
+  targetWords,
+} from "./binding-approvals.tsx";
 import { workflowAppsOf } from "./workflow-apps.ts";
 import type { WorkflowApps } from "./workflow-apps.ts";
 
 // A workflow's Files and apps (prototype `inside-files.tsx`,
 // `inside-connectors.tsx`): for the organization's admins, what it reaches
 // that waits for their approval, approved here, as a start refused for it
-// says; the apps it works in, each with whether it is connected; the
+// says; each catalog binding of the version a start runs now, with what an
+// admin approved it to reach, who and when, which the organization's
+// admins revoke here (the binding then waits again, and its starts are
+// refused); the apps it works in, each with whether it is connected; the
 // Knowledge it reads, with the names its bindings give it; and the files
 // its runs wrote, what they are and never what they hold.
 // Each part is read on its own, each time the tab opens, and says on its
@@ -265,6 +276,131 @@ const Waiting = ({
   );
 };
 
+/**
+ * Each catalog binding of version `version`, `declared`, with the approval
+ * of `approvals` that serves it, if any: what it reaches, who approved it
+ * and when, and, when `revokes`, Revoke; `onChanged` once one is revoked.
+ */
+const Approved = ({
+  workflow,
+  version,
+  declared,
+  approvals,
+  names,
+  revokes,
+  onChanged,
+}: {
+  workflow: string;
+  version: number;
+  declared: WorkflowResourceVersion["bindings"];
+  approvals: readonly WorkflowBindingApproval[];
+  names: Names;
+  revokes: boolean;
+  onChanged: () => void;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [said, setSaid] = useState<string>();
+  // Its catalog bindings: whichever other workflow a binding names is
+  // hidden from all but its builders, so known by kind alone.
+  const catalog = declared.filter(({ kind }) => kind !== "workflow");
+  if (catalog.length === 0) {
+    return (
+      <Quiet>
+        <Trans>Version {version} declares no binding to approve.</Trans>
+      </Quiet>
+    );
+  }
+  const revoke = async (alias: string, approval: string): Promise<void> => {
+    setSaid(undefined);
+    const revoked = await run(async (session) => {
+      await session.workflowResources.revokeBinding(workflow, approval);
+      return true;
+    });
+    if (revoked === true) {
+      setSaid(t`Revoked: ${alias}.`);
+      onChanged();
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="font-medium">
+        <Trans>Version {version}, which runs now</Trans>
+      </h3>
+      <ul
+        aria-label={t`Bindings of version ${version}`}
+        className="flex flex-col gap-2"
+      >
+        {catalog.map(({ alias, kind, contractId, fingerprint }) => {
+          // Served as a start serves it: approved for this version's own
+          // declaration of the alias (its contract's fingerprint, as the
+          // key itself is shown to its builders alone).
+          const approval = approvals.find(
+            (each) =>
+              each.reviewedVersion === version &&
+              each.alias === alias &&
+              each.kind === kind &&
+              each.fingerprint === fingerprint
+          );
+          if (approval === undefined) {
+            return (
+              <BindingFrame
+                alias={alias}
+                contractId={contractId}
+                key={alias}
+                kind={kind}
+              >
+                <span>
+                  <Badge variant="outline">
+                    <Trans>Waiting for an admin&apos;s approval</Trans>
+                  </Badge>
+                </span>
+              </BindingFrame>
+            );
+          }
+          const approver =
+            names.people.get(approval.approvedBy) ?? approval.approvedBy;
+          const at = formatDateTime(approval.approvedAt);
+          return (
+            <BindingFrame
+              alias={alias}
+              contractId={approval.contractId}
+              key={alias}
+              kind={kind}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span>{targetWords(approval.target, "", names.people)}</span>
+                  <span className="text-muted-foreground">
+                    <Trans>
+                      Approved by {approver} on {at}
+                    </Trans>
+                  </span>
+                </span>
+                {revokes ? (
+                  <Confirmed
+                    busy={busy}
+                    button={t`Revoke`}
+                    confirm={t`Revoke`}
+                    description={t`Its next start is refused until an admin approves ${alias} again. Runs already started keep what they started with.`}
+                    label={t`Revoke ${alias}`}
+                    onConfirm={() => {
+                      void revoke(alias, approval.id);
+                    }}
+                    title={t`Revoke ${alias}?`}
+                  />
+                ) : null}
+              </div>
+            </BindingFrame>
+          );
+        })}
+      </ul>
+      <ErrorText>{failure}</ErrorText>
+      {said === undefined ? null : <output>{said}</output>}
+    </div>
+  );
+};
+
 /** A part of the tab: loading until read, then its content or why not. */
 const Part = <T,>({
   loaded,
@@ -310,24 +446,70 @@ const readApps = async (
   });
 };
 
+/** The catalog bindings of the version a start runs now, and its approvals. */
+interface RunningBindings {
+  version: number;
+  declared: WorkflowResourceVersion["bindings"];
+  approvals: WorkflowBindingApproval[];
+}
+
+/**
+ * What `RunningBindings` the reads give, once all are read: of the version
+ * a start runs now, as core picks it for what waits (`pendingBindingsOf`),
+ * the live one, or before any went live `currentVersion`, the one published
+ * last; null before any was published.
+ */
+const runningBindingsOf = (
+  versions: Loaded<WorkflowResourceVersion[]>,
+  lifecycle: Loaded<WorkflowLifecycle>,
+  currentVersion: number | null,
+  approvals: Loaded<WorkflowBindingApproval[]> | undefined
+): Loaded<RunningBindings | null> | undefined => {
+  if (versions.state !== "ready") {
+    return versions;
+  }
+  if (lifecycle.state !== "ready") {
+    return lifecycle;
+  }
+  if (approvals?.state !== "ready") {
+    return approvals;
+  }
+  const version = lifecycle.data.live?.version ?? currentVersion;
+  const running = versions.data.find((each) => each.version === version);
+  return {
+    state: "ready",
+    data:
+      version === null || running === undefined
+        ? null
+        : { version, declared: running.bindings, approvals: approvals.data },
+  };
+};
+
 /**
  * Files and apps of workflow `workflow`, read each time it is shown;
- * `versions` and `currentVersion` as the page read them. `approves` for
- * one of the organization's admins, who approve its bindings here.
+ * `versions`, `currentVersion` and `lifecycle` as the page read them, and
+ * `names` who approved its bindings. `approves` for one of the
+ * organization's admins, who approve and revoke its bindings here.
  */
 export const FilesAndApps = ({
   workflow,
   currentVersion,
   versions,
+  lifecycle,
+  names,
   approves,
 }: {
   workflow: string;
   currentVersion: number | null;
   versions: Loaded<WorkflowResourceVersion[]>;
+  lifecycle: Loaded<WorkflowLifecycle>;
+  names: Names;
   approves: boolean;
 }) => {
   const core = useCore();
   const [pending, setPending] = useState<Loaded<PendingWorkflowBindings[]>>();
+  const [approvals, setApprovals] =
+    useState<Loaded<WorkflowBindingApproval[]>>();
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
   const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
@@ -339,6 +521,12 @@ export const FilesAndApps = ({
   const appsOf: Loaded<WorkflowApps> | undefined = versionsRead
     ? apps
     : versions;
+  const runningBindings = runningBindingsOf(
+    versions,
+    lifecycle,
+    currentVersion,
+    approvals
+  );
 
   // The apps of the version as the page has it now, without reading again
   // for a page refresh that left the version where it was.
@@ -388,6 +576,10 @@ export const FilesAndApps = ({
         setApps
       );
     }
+    void latest(
+      async (session) => await session.workflowResources.bindings(workflow),
+      setApprovals
+    );
     if (approves) {
       void latest(
         async (session) =>
@@ -400,18 +592,25 @@ export const FilesAndApps = ({
     };
   }, [core, workflow, currentVersion, versionsRead, approves]);
 
-  // Once a binding is approved: what still waits, read again and shown as
-  // soon as it lands, and the apps its approvals connect, apart. Only the
-  // latest of each read is shown, the tab's first reads among them, as one
-  // started before a later approval would miss it.
-  const approved = async (): Promise<void> => {
+  // Once a binding is approved or revoked: what waits and what is
+  // approved, read again and shown as soon as they land, and the apps its
+  // approvals connect, apart. Only the latest of each read is shown, the
+  // tab's first reads among them, as one started before a later change
+  // would miss it.
+  const changed = async (): Promise<void> => {
     rereads.current += 1;
     const reread = rereads.current;
     const latest = (): boolean => reread === rereads.current;
-    const waiting = loadFromCore(
+    const waiting = approves
+      ? loadFromCore(
+          core,
+          async (session) =>
+            await session.workflowResources.pendingBindingsOf(workflow)
+        )
+      : undefined;
+    const approved = loadFromCore(
       core,
-      async (session) =>
-        await session.workflowResources.pendingBindingsOf(workflow)
+      async (session) => await session.workflowResources.bindings(workflow)
     );
     const connected = versionsRead
       ? loadFromCore(
@@ -421,8 +620,12 @@ export const FilesAndApps = ({
         )
       : undefined;
     const waited = await waiting;
-    if (latest()) {
+    if (waited !== undefined && latest()) {
       setPending(waited);
+    }
+    const approvedRead = await approved;
+    if (latest()) {
+      setApprovals(approvedRead);
     }
     const appsRead = await connected;
     if (appsRead !== undefined && latest()) {
@@ -442,12 +645,34 @@ export const FilesAndApps = ({
             {(data) => (
               <Waiting
                 onApproved={() => {
-                  void approved();
+                  void changed();
                 }}
                 pending={data}
                 workflow={workflow}
               />
             )}
+          </Part>
+        </Section>
+      )}
+      {runningBindings?.state === "ready" &&
+      runningBindings.data === null ? null : (
+        <Section id="workflow-bindings" title={<Trans>Its bindings</Trans>}>
+          <Part loaded={runningBindings}>
+            {(data) =>
+              data === null ? null : (
+                <Approved
+                  approvals={data.approvals}
+                  declared={data.declared}
+                  names={names}
+                  onChanged={() => {
+                    void changed();
+                  }}
+                  revokes={approves}
+                  version={data.version}
+                  workflow={workflow}
+                />
+              )
+            }
           </Part>
         </Section>
       )}
