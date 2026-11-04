@@ -56,32 +56,6 @@ const confirmations = `import { workflows } from "#grasp";
 export const confirmed = workflows.archiveNotes.events.confirmed;
 `;
 
-/**
- * A workflow of the App's own that calls its server's functions, typed by
- * its operations (`appFunctions<Tree>(env)`). It holds what the platform's
- * check accepts though a stricter one wouldn't: an index read as present
- * (no `noUncheckedIndexedAccess`) and a type imported without `type` (no
- * `verbatimModuleSyntax`).
- */
-const tally = `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
-import { FunctionResult } from "@grasp-os/sdk/workflow";
-
-import type * as notes from "../operations/notes.ts";
-
-interface Notes {
-  notes: typeof notes;
-}
-
-const firstWordLength = (text: string): number => text.split(" ")[0].length;
-
-export default workflow("tally", { input: z.object({}), params: {} }, async (step, { env }) =>
-  await step.do("tally", { description: "Count the notes" }, async () => {
-    const answered: FunctionResult<number> = await appFunctions<Notes>(env).action("notes.tally", {});
-    return answered.ok ? answered.value + firstWordLength("a note") : 0;
-  })
-);
-`;
-
 /** A screen, which has the DOM as its frame does. */
 const notesScreen = `export default function Notes() {
   return <p>{window.location.pathname}</p>;
@@ -97,7 +71,6 @@ const notesFiles = (): Record<string, string> => ({
     ])
   ),
   "operations/confirmations.ts": confirmations,
-  "workflows/tally.ts": tally,
   "screens/notes.tsx": notesScreen,
 });
 
@@ -499,8 +472,6 @@ describe(
           "app/screens/notes.tsx",
           "app/tsconfig.screens.json",
           "app/tsconfig.server.json",
-          "app/tsconfig.workflows.json",
-          "app/workflows/tally.ts",
         ],
         workflow: [
           "workflows/greet/1.0.0/.grasp/workflow.ts",
@@ -548,36 +519,30 @@ describe(
       const accepted = projectCheck(out);
 
       // What the platform's check refuses, each in a file of its own: a
-      // type error in a screen and in a compute module; a workflow and
-      // server code reaching the DOM, which their isolate lacks; and a
-      // workflow importing what its kind may not.
+      // type error in a screen and in a compute module; server code and a
+      // compute module reaching the DOM, which their isolate lacks; and a
+      // compute module importing what its kind may not.
       const mistyped: Record<string, string> = {
         "app/screens/typo.tsx": 'export const count: number = "none";\n',
-        // A declaration among the workflows, which their check leaves out,
-        // as the platform's does: a workflow can't import it.
-        "app/workflows/lib/types.d.ts": "export type Value = number;\n",
-        "app/workflows/lib/typed.ts":
-          'import type { Value } from "./types";\n\nexport const one: Value = 1;\n',
         "workflows/greet/1.0.0/code/typo.ts":
           "export const half = (value: number): string => value / 2;\n",
-        "app/workflows/lib/window.ts":
+        "workflows/greet/1.0.0/code/window.ts":
           "export const here = (): string => window.location.href;\n",
         "app/operations/document.ts":
           "export const title = (): string => document.title;\n",
-        "app/workflows/lib/kit.ts":
+        "workflows/greet/1.0.0/code/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
       };
       // And what its build refuses before any check: every way a file
-      // could steer the check, in a workflow, server code and a compute
-      // module alike.
+      // could steer the check, in server code and a compute module alike.
       const steering: Record<string, string> = {
         "app/operations/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
         "workflows/greet/1.0.0/code/dom.ts":
           '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
         ...Object.fromEntries(
-          steeringCases("@grasp-os/sdk/workflow").map(([, source], index) => [
-            `app/workflows/lib/steering-${index}.ts`,
+          steeringCases("@grasp-os/sdk/compute").map(([, source], index) => [
+            `workflows/greet/1.0.0/code/steering-${index}.ts`,
             source,
           ])
         ),
@@ -616,11 +581,10 @@ describe(
           status: 1,
           problems: {
             "app/operations/document.ts": ["TS2584"],
-            "app/workflows/lib/kit.ts": ["TS2307"],
-            "app/workflows/lib/window.ts": ["TS2304"],
             "app/screens/typo.tsx": ["TS2322"],
-            "app/workflows/lib/typed.ts": ["TS2307"],
+            "workflows/greet/1.0.0/code/kit.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
+            "workflows/greet/1.0.0/code/window.ts": ["TS2304"],
           },
         },
         failedBuild: {

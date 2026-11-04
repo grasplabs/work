@@ -90,7 +90,6 @@ import {
   compilerOptions,
   computeTarget,
   generatedTarget,
-  workflowTarget,
 } from "../packages/compiler/src/type-check.ts";
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 import {
@@ -764,9 +763,9 @@ const kindConfig = (
 /**
  * The project's tsconfigs, one a kind of code, each as the platform checks
  * it, and the root tsconfig.json that lists them (an editor's, and the
- * check's): the App's screens with the DOM and JSX; its server code and
- * workflows with a worker's lib and no DOM; and each workflow version's
- * compute modules likewise, and the module the host generated from it.
+ * check's): the App's screens with the DOM and JSX; its server code with
+ * a worker's lib and no DOM; and each workflow version's compute modules
+ * likewise, and the module the host generated from it.
  */
 const planTypeCheck = (project: Plan): void => {
   const configs: Record<string, ReturnType<typeof kindConfig>> = {
@@ -787,10 +786,6 @@ const planTypeCheck = (project: Plan): void => {
     ),
     "app/tsconfig.server.json": kindConfig("server", appCodeTarget, {
       include: [...serverCodeIncludes, "tests/**/*.ts"],
-      exclude: ["**/*.d.ts"],
-    }),
-    "app/tsconfig.workflows.json": kindConfig("workflows", workflowTarget, {
-      include: ["workflows/**/*.ts", ...serverCodeIncludes],
       exclude: ["**/*.d.ts"],
     }),
   };

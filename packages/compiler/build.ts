@@ -532,9 +532,10 @@ const jqWasmExternal: Plugin = {
 };
 
 /**
- * The SDK's modules for `specifiers`, which App code runs with outside
- * screens: the workflow SDK, which App workflows import (`sdkImports`),
- * or what an App's server isolate loads (`serverSdkImports`), each a set
+ * The SDK's modules for `specifiers`, which code runs with outside
+ * screens: what a workflow's or an App test's isolate loads (`sdkImports`
+ * and the JSON workflows' own), or what an App's server isolate loads
+ * (`serverSdkImports`), each a set
  * of its own, so each isolate carries only what it uses. One module per
  * specifier, named by it (`@grasp-os~sdk~workflow.js`), and chunks for
  * what they share (Zod), importing each other by flat name like the kit's
@@ -1065,8 +1066,6 @@ const buildAppCompiler = async (
       "@grasp-os/sdk/database",
       // And its tests, against the SDK's testing module (app-code.ts).
       "@grasp-os/sdk/testing",
-      // And its workflows, against the SDK's workflow modules.
-      ...sdkImports,
     ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
@@ -1083,7 +1082,7 @@ const buildAppCompiler = async (
   const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
   const kitPreviewModules = modulesOf(previewKitCode);
-  // App workflows and the code generated from JSON workflows share one set:
+  // The run hosts', App tests' and JSON workflows' isolates share one set:
   // each imports only its own entry of it (imports.ts).
   const workflowSdkModules = modulesOf(
     await buildSdkModules([

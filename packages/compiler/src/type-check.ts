@@ -8,7 +8,7 @@ import ts from "typescript";
 
 import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { computeSdkImports, sdkImports } from "./imports.ts";
+import { computeSdkImports } from "./imports.ts";
 import { ownEntry, screenReferences } from "./kit.ts";
 
 /**
@@ -110,19 +110,6 @@ export const appCodeTarget = serverTarget(
     // Its tests' (app-code.ts): what the source checks give tests alone.
     "@grasp-os/sdk/testing",
   ])
-);
-
-/**
- * How an App's workflows are type-checked: no DOM, which
- * their isolate doesn't have, no JSX, each file a module of its own; by
- * name only the SDK's workflow modules they may import, and those the
- * App's server code their types may name imports (`appCodeTarget`'s),
- * with its generated modules by their aliases. A workflow's values reach
- * none of the server's: its build holds them to `sdkImports`.
- */
-export const workflowTarget = serverTarget(
-  generatedModules,
-  new Set([...sdkImports, ...serverSdkImports, "@grasp-os/sdk/database"])
 );
 
 /**

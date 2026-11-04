@@ -11,7 +11,7 @@
  * platform, it reports only the App's own files, never the packages they
  * import, and holds them to what the platform does besides the options:
  *
- * - code whose types are checked (server code, workflows, compute
+ * - code whose types are checked (server code, compute
  *   modules) steers nothing: no triple-slash directive, no suppression
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
  *   global` or `declare module` (imports.ts, `typeChecked`);
@@ -51,14 +51,12 @@ interface Kind {
 const every = (): boolean => true;
 const none = (): boolean => false;
 const generated = (file: string): boolean => file.startsWith(".grasp/");
-const workflow = (file: string): boolean => file.startsWith("workflows/");
 
 /**
  * The kinds of code, as each tsconfig's `grasp.kind` names it. Server
  * code's migrations are checked for what they name, not yet for their
- * own type errors (compiler `checkAppCode`, GRA-690); a workflow's check
- * reads the App's server code for the types it names, reporting only the
- * workflows'; and the host's generated modules are its own.
+ * own type errors (compiler `checkAppCode`, GRA-690); and the host's
+ * generated modules are its own.
  */
 const kinds: Readonly<Record<string, Kind>> = {
   screens: { reports: every, steered: none, lenient: none },
@@ -67,7 +65,6 @@ const kinds: Readonly<Record<string, Kind>> = {
     steered: (file) => !generated(file),
     lenient: (file) => file.startsWith("migrations/"),
   },
-  workflows: { reports: workflow, steered: workflow, lenient: none },
   compute: { reports: every, steered: every, lenient: none },
   generated: { reports: every, steered: none, lenient: none },
 };
@@ -352,8 +349,8 @@ const checkKind = (config: string): Problem[] => {
         return { resolvedModule };
       }
       const resolved = path.resolve(resolvedModule.resolvedFileName);
-      // A file beside the App's that this check leaves out (a workflow's
-      // `.d.ts`, a server file a screen names) isn't one the platform
+      // A file beside the App's that this check leaves out (a server file
+      // a screen names) isn't one the platform
       // gives this kind of code: it doesn't exist there.
       if (isWithin(dir, resolved) && !app.has(resolved)) {
         return { resolvedModule: undefined };

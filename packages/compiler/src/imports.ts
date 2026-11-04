@@ -664,10 +664,10 @@ export const rewriteImports =
   };
 
 /**
- * App code built here that runs outside the screens: its workflows
- * (`workflows/`), a JSON workflow's generated module and its compute
- * modules. Each imports its own files and a few of the
- * platform's modules, by the flat name each is loaded under.
+ * Code built here that runs outside the screens: a JSON workflow's
+ * generated module and its compute modules. Each imports its own files
+ * and a few of the platform's modules, by the flat name each is loaded
+ * under.
  */
 export interface CodeKind {
   /** What the code is, for messages, such as "Workflow". */
@@ -676,35 +676,26 @@ export interface CodeKind {
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
   /**
-   * Whether its types are checked (`buildWorkflows`): then nothing in it
-   * may steer the check, no directive, suppression or ambient module.
+   * Whether its types are checked (`buildComputeModules`): then nothing in
+   * it may steer the check, no directive, suppression or ambient module.
    */
   typeChecked?: boolean;
 }
 
 /**
- * The SDK modules workflow code may import: the workflow SDK and its test
- * harness, never the engine and never the Workers runtime.
+ * The SDK modules core's own entry modules import in the isolates it
+ * runs: the workflow SDK a sealed run's host drives
+ * (`@grasp-os/sdk/workflow`, sealed-isolate.ts) and the test harness an
+ * App's tests run on (`@grasp-os/sdk/testing`, app-tests.ts).
  */
 export const sdkImports = [
   "@grasp-os/sdk/workflow",
   "@grasp-os/sdk/testing",
 ] as const;
 
-/** Workflow code imports its own files and the SDK (`sdkImports`). */
-export const workflowCode: CodeKind = {
-  name: "Workflow",
-  folder: "workflows/",
-  imports: new Map(
-    sdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
-  ),
-  typeChecked: true,
-};
-
 /**
  * The SDK module the code the host generates from a JSON workflow imports
- * (`@grasp-os/sdk/open-workflow`), and nothing else: App workflows can't
- * import it, nor it anything of theirs.
+ * (`@grasp-os/sdk/open-workflow`), and nothing else.
  */
 export const openWorkflowSdkImports = ["@grasp-os/sdk/open-workflow"] as const;
 
@@ -803,8 +794,8 @@ export const codeImportError = (
 ): string | undefined => {
   // An ambient module would declare, or shadow, a module by name in the
   // type check, or `declare global` give every file globals its isolate
-  // doesn't have: code of a `typeChecked` kind (App workflows, compute
-  // modules) declares none. Generated workflow code is the host's own, so there it reaches nothing.
+  // doesn't have: code of a `typeChecked` kind (compute modules) declares
+  // none. Generated workflow code is the host's own, so there it reaches nothing.
   if (ambient) {
     if (kind.typeChecked !== true) {
       return undefined;

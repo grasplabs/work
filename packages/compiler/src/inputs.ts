@@ -59,10 +59,6 @@ export const strayFileMessage = (
 
 const typeScriptFile = /\.tsx?$/u;
 
-/** A `.ts` file that declares nothing but types isn't code a build runs. */
-const isTypeScriptCode = (path: string): boolean =>
-  path.endsWith(".ts") && !path.endsWith(".d.ts");
-
 /**
  * The App's components, which its screens import: TypeScript (`.ts`,
  * `.tsx`, declarations included) anywhere under `components/`.
@@ -94,53 +90,6 @@ export const buildFiles = (
         path === screenReferences.path
     )
   );
-
-/**
- * The App's workflows, their tests and the code they share: TypeScript
- * anywhere under `workflows/`. Only `workflows/<id>.ts` is a workflow
- * (`workflowIdOf`); a file in a folder, dotted or not, is shared code.
- */
-export const workflowsFolder: CodeFolder = {
-  folder: "workflows/",
-  isFile: (path) =>
-    path.startsWith("workflows/") &&
-    isTypeScriptCode(path) &&
-    hasAppPathSegments(path),
-  holds:
-    "the App's workflows, their tests and the code they share: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot",
-};
-
-/**
- * The files a workflow build reads: everything under `workflows/`, so it
- * can refuse what isn't workflow code (`workflowsFolder`).
- */
-export const workflowFiles = (
-  files: Record<string, string>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) =>
-      path.startsWith(workflowsFolder.folder)
-    )
-  );
-
-/**
- * Where a workflow's code is, and its tests: `workflows/<id>.ts`, whose
- * default export is the workflow, and `workflows/<id>.workflow-tests.ts`
- * beside it, whose default export is its tests (`workflowTests`). Only
- * `workflows/<id>.ts` (an id without dots) is a workflow: put shared code
- * in a folder under workflows/, such as workflows/lib/.
- */
-export const workflowPaths = (
-  id: string
-): { workflow: string; tests: string } => ({
-  workflow: `workflows/${id}.ts`,
-  tests: `workflows/${id}.workflow-tests.ts`,
-});
-
-/** A workflow's ID, from its file's path; undefined for any other file. */
-const workflowPath = /^workflows\/(?<id>[A-Za-z][\w-]{0,63})\.ts$/u;
-export const workflowIdOf = (path: string): string | undefined =>
-  workflowPath.exec(path)?.groups?.id;
 
 /**
  * The module the host generates from a JSON workflow's definition: one

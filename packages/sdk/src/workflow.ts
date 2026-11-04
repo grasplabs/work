@@ -1,7 +1,6 @@
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { CollectionReader } from "@grasp-os/shared/knowledge";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -12,7 +11,6 @@ import {
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
-import type { BrainBinding } from "./brain.ts";
 import type {
   Backoff,
   DecisionRecipient,
@@ -617,79 +615,6 @@ interface UntypedStepRunner {
   listen: (name: string, options: unknown) => Promise<EventWait>;
 }
 
-/**
- * What a connection's action answered, as the run gets it: its output as
- * JSON text, and the IDs of what it read, as its connector names them. A
- * run's call is never held to answer later: a held call fails the step
- * (`connect.held`) and runs again once the person decided.
- */
-export interface ConnectionAnswer {
-  readonly output: string;
-  readonly provenance: string[];
-}
-
-/**
- * A connection the run's App has a permission for, by its binding name:
- * `await env.OUTLOOK.call("mail.send", mail, { idempotencyKey })`.
- */
-export interface ConnectionBinding {
-  readonly call: (
-    action: string,
-    input: Json,
-    options?: { readonly idempotencyKey?: string }
-  ) => Promise<ConnectionAnswer>;
-}
-
-/**
- * A Knowledge collection the run's App may read, by its binding name:
- * `await env.HANDBOOK.search("refunds")`. A run recalls through the Brain
- * binding (`WorkflowBrainBinding`), never a collection's.
- */
-export type CollectionBinding = Readonly<Omit<CollectionReader, "recall">>;
-
-/**
- * The Brain, when the run's App holds the `brain` permission, by its
- * binding name: `await brain(env.BRAIN).recall({ query })`, a skill's
- * selection and pinned read (`.skills.select`, `.skills.read`), and its
- * entities and relations (`.entities.list`, `.entities.sources`,
- * `.relations.get`, `.relations.explain`), the same contract every caller of the Brain uses
- * (`@grasp-os/sdk/brain`). Keep a selection's pin in the step's result: a
- * replay reads the same version.
- */
-export type WorkflowBrainBinding = Required<
-  Pick<
-    BrainBinding,
-    | "recall"
-    | "skillsRead"
-    | "skillsSelect"
-    | "entitiesList"
-    | "entitySources"
-    | "relationsGet"
-    | "relationsExplain"
-  >
->;
-
-/**
- * The run's bindings, by name, as its App's permissions make them. Empty
- * here: where an App's workflows are type-checked, the host declares
- * each binding the App holds a permission for in it, as what it is (a
- * `ConnectionBinding` or a `CollectionBinding`), so reading one binding's answer as
- * another's is a type error.
- */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- declared per App by the host, by declaration merging
-export interface WorkflowBindings {}
-
-/**
- * A run's `env`: each binding `WorkflowBindings` declares, typed as what
- * it is; any other name as `WorkflowEnv` has it, its methods answering
- * `unknown`, which the workflow narrows before it uses. Another name is no
- * type error: a binding the App has no permission for is refused when it
- * is called (`permission.denied`), whatever its code says, so the type
- * check adds no order between asking for a permission and making a
- * version current.
- */
-export type RunEnv = Readonly<WorkflowBindings> & WorkflowEnv;
-
 /** Everything a workflow reads besides its steps. */
 export interface WorkflowContext<P extends Params, Input> {
   runId: RunId;
@@ -697,12 +622,11 @@ export interface WorkflowContext<P extends Params, Input> {
   params: ParamValues<P>;
   /**
    * The run's bindings, by name; call them in a step's own function, each
-   * written out as `env.NAME.method(…)` (see `WorkflowEnv`). Where the
-   * App's workflows are type-checked, each name the App holds a permission
-   * for is typed as the binding it is (`WorkflowBindings`); any other
-   * answers `unknown` (`RunEnv`).
+   * written out as `env.NAME.method(…)` (see `WorkflowEnv`). A binding the
+   * run has no permission for is refused when it is called
+   * (`permission.denied`).
    */
-  env: RunEnv;
+  env: WorkflowEnv;
   /**
    * The content of attachment `index` (its place in `message.attachments`)
    * of a message an email trigger received, as it arrived. Call it inside
@@ -1339,11 +1263,9 @@ export const workflow = <
         // schema of its kind, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
-        // The host builds the run's bindings from its App's permissions
-        // (connections, collections) and its App
-        // (`APP`), which is what `WorkflowBindings` declares where the App's
-        // workflows are type-checked; a binding the run doesn't have when it
-        // calls fails then (`permission.denied`).
+        // The host builds the run's bindings from its permissions; a
+        // binding the run doesn't have when it calls fails then
+        // (`permission.denied`).
         env: engine.env,
         readAttachment: runner.readAttachment,
       }

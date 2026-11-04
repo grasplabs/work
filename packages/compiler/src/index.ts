@@ -34,7 +34,6 @@ export type {
   ScreenBuild,
   TargetBuilds,
   TargetInspections,
-  WorkflowBuild,
 } from "./worker.ts";
 export {
   appCodeFiles,
@@ -47,8 +46,6 @@ export {
   isUnderAppTests,
   strayTestFileMessage,
   strayTestFiles,
-  workflowBindingsPath,
-  workflowBuildFiles,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,
@@ -57,10 +54,6 @@ export {
   limitErrors,
   openWorkflowEntry,
   openWorkflowErrors,
-  workflowFiles,
-  workflowIdOf,
-  workflowPaths,
-  workflowsFolder,
 } from "./inputs.ts";
 export {
   appModuleName,
@@ -254,8 +247,9 @@ export const kitPreviewModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.kitPreviewModules);
 
 /**
- * The workflow SDK's modules, which every App's workflows import
- * (`sdkImports`): one set per release.
+ * The SDK's modules the isolates core runs outside the screens load (a
+ * sealed run's, a JSON workflow's generated and compute modules', an
+ * App's tests'): one set per release.
  */
 export const workflowSdkModules = async (
   assets: Fetcher

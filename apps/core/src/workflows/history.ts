@@ -41,8 +41,8 @@ import { findRun, seesDetails } from "./runs.ts";
 // What it holds: metadata only. The engine hands core no params, output,
 // step result or event payload for it, so none can reach a page: no
 // input, output, reviewer or review. A step is named (`taskId`) only by a
-// name its version's review shows (`reviewedTaskOf`), without the key an
-// engine name adds (`name:key`, from the App's data); any other name can
+// name its version's build names (`taskOf`), without the key an
+// engine name adds (`name:key`, from the run's data); any other name can
 // be made of what the run read, so its entries name no task, and the
 // opaque `stepId` alone tells the step. A failure's message is the
 // workflow's own text, which can hold what the run read, so only those
@@ -137,7 +137,7 @@ interface Context {
   sees: boolean;
   /**
    * The task an engine step name is, as its version names it; null for a
-   * name it doesn't (`reviewedTaskOf` for an App's run).
+   * name it doesn't.
    */
   taskOf: (engineStep: string) => string | null;
   /**
