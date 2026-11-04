@@ -101,7 +101,14 @@ export const everyStep = () => ({
       ],
       catch: {
         errors: { status: 500 },
-        retry: { attempts: 3, delay: "1 second", backoff: "constant" },
+        when: { $expr: 'error.type !== "urn:grasp:error:final"' },
+        retry: {
+          attempts: 3,
+          delay: "1 second",
+          backoff: "constant",
+          // Not a boolean on its own: the generated choice makes it one.
+          when: { $expr: "error.title" },
+        },
         do: [
           {
             id: "notice",
@@ -115,6 +122,40 @@ export const everyStep = () => ({
           },
         ],
       },
+    },
+  ],
+});
+
+/** A workflow calling a binding of every kind a `do` step calls. */
+export const everyBinding = () => ({
+  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+  bindings: {
+    mail: { kind: "connector", contract: "composio.mail@1" },
+    lookup: { kind: "operation", contract: "crm.lookup@1" },
+    total: { kind: "compute", contract: "local:code/total.ts#total" },
+    note: { kind: "action", contract: "local:code/note.ts#note" },
+  },
+  steps: [
+    {
+      id: "send",
+      type: "do",
+      binding: "mail",
+      operation: "mail.send",
+      arguments: { to: { $expr: "input.who" }, subject: "Hi" },
+    },
+    {
+      id: "find",
+      type: "do",
+      binding: "lookup",
+      arguments: { name: { $expr: "input.who" } },
+    },
+    { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
+    {
+      id: "tell",
+      type: "do",
+      binding: "note",
+      arguments: { to: { $expr: "input.who" } },
+      timeout: "30 seconds",
     },
   ],
 });

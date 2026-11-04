@@ -4,18 +4,21 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   checked,
+  everyBinding,
   everyStep,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildWorkflows } from "../src/screens.ts";
+import { tasksFileSchema } from "../src/workflow-builds.ts";
 
 // grasp-workflow/1's generated code, held to the compiler's own type
 // check against the SDK's real declarations (compiler `buildWorkflows`),
 // as an App workflow is: the generator's output is the host's own, so a
 // type error in it is the generator's, and nothing it generates may fail
-// the check a build holds it to.
+// the check a build holds it to. Its sealed table, likewise, is one the
+// host reads back (`tasksFileSchema`).
 
 /** Every fixture the generator is tested on, by name. */
-const fixtures = { everyStep };
+const fixtures = { everyStep, everyBinding };
 
 describe("grasp-workflow/1's generated code", () => {
   it("type-checks against the SDK, for every fixture", async () => {
@@ -48,5 +51,22 @@ describe("grasp-workflow/1's generated code", () => {
     expect(diagnostics).toStrictEqual(
       Object.fromEntries(Object.keys(fixtures).map((name) => [name, []]))
     );
+  });
+
+  it("seals a table the host reads back, for every fixture", () => {
+    const refused = Object.entries(fixtures).flatMap(([name, fixture]) => {
+      const generation = generateWorkflow(checked(fixture()), "generated");
+      const read = tasksFileSchema.safeParse(
+        structuredClone({
+          tasks: generation.tasks,
+          expressions: generation.expressions,
+          workflow: generation.workflow,
+          params: generation.params,
+          limits: generation.limits,
+        })
+      );
+      return read.success ? [] : [[name, read.error.issues]];
+    });
+    expect(refused).toStrictEqual([]);
   });
 });

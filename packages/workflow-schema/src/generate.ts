@@ -1,17 +1,16 @@
+import { pointerJoin } from "@grasp-os/open-workflow/diagnostics";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
 
 import type { CheckedWorkflow } from "./check.ts";
 import {
-  durationUnits,
+  durationMs,
   isPlain,
   isValueList,
   localContractPattern,
 } from "./format.ts";
 import type {
   Binding,
-  Duration,
-  DurationUnit,
   ErrorFilter,
   Json,
   PlainParam,
@@ -183,6 +182,8 @@ export interface Generation {
 
 const literal = (value: unknown): string => JSON.stringify(value);
 
+const localPattern = new RegExp(localContractPattern, "u");
+
 /** A try around a step, with where it is (its catch's expressions are by it). */
 type PlacedTry = TryStep & { readonly pointer: string };
 
@@ -194,29 +195,6 @@ type ExpressionEntry = Omit<
   SealedExpression,
   "slot" | "pointer" | "source" | "loopVariables"
 >;
-
-const unitMs: Readonly<Record<DurationUnit, number>> = {
-  second: 1000,
-  minute: 60_000,
-  hour: 3_600_000,
-  day: 86_400_000,
-  week: 604_800_000,
-};
-
-const isUnit = (unit: string): unit is DurationUnit =>
-  durationUnits.includes(unit);
-
-/** A duration in milliseconds: the schema checked its shape. */
-export const durationMs = (duration: Duration): number => {
-  const [count = "", unit = ""] = duration.split(" ");
-  const singular = unit.replace(/s$/u, "");
-  if (!isUnit(singular)) {
-    throw new Error(`Not a duration: ${duration}`);
-  }
-  return Number(count) * unitMs[singular];
-};
-
-const localPattern = new RegExp(localContractPattern, "u");
 
 /** The SDK's constructor for a parameter of `kind`. */
 const paramCall = (param: PlainParam): string => {
@@ -259,10 +237,6 @@ const literalsOf = (templates: readonly Template[]): Json[] | undefined => {
   }
   return literals;
 };
-
-/** A token of a JSON Pointer (RFC 6901). */
-const token = (part: string): string =>
-  part.replaceAll("~", "~0").replaceAll("/", "~1");
 
 /** What a call step names: its sealed call, and the operation its code calls. */
 const callOf = (
@@ -381,7 +355,7 @@ class Generator {
     }
     if (isValueList(value)) {
       const items = value.map((item: Value, index) =>
-        this.#value(item, `${pointer}/${index}`, entry)
+        this.#value(item, pointerJoin(pointer, index), entry)
       );
       const literals = literalsOf(items.map(({ template }) => template));
       return {
@@ -395,7 +369,7 @@ class Generator {
     const fields: Readonly<Record<string, Value>> = value;
     const entries = Object.entries(fields).map(
       ([key, item]) =>
-        [key, this.#value(item, `${pointer}/${token(key)}`, entry)] as const
+        [key, this.#value(item, pointerJoin(pointer, key), entry)] as const
     );
     const literals = literalsOf(entries.map(([, { template }]) => template));
     return {
@@ -432,9 +406,9 @@ class Generator {
     if (retry.when === undefined) {
       return "true";
     }
-    return (
-      this.#workflow.code.get(`${around.pointer}/catch/retry/when`) ?? "false"
-    );
+    // Whether it retries is a boolean, as the host reads the choice.
+    const code = this.#workflow.code.get(`${around.pointer}/catch/retry/when`);
+    return code === undefined ? "false" : `Boolean(${code})`;
   }
 
   /** The step options' `retry`, deciding by the tries around a step. */

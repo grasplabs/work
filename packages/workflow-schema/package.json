@@ -14,7 +14,8 @@
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
     "@grasp-os/open-workflow": "workspace:*",
-    "@grasp-os/sdk": "workspace:*"
+    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/shared": "workspace:*"
   },
   "devDependencies": {
     "@babel/parser": "catalog:",

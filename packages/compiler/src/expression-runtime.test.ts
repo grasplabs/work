@@ -258,6 +258,10 @@ describe("an expression's whole value", () => {
       text: "Ada",
       list: [undefined, 1, [undefined]],
       object: { from: undefined, to: "Ada", nested: { at: undefined } },
+      // Numbers JSON can't write, on their own and inside.
+      notNumber: Number.NaN,
+      infinite: [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      negativeZero: { at: -0 },
     };
     expect(
       Object.fromEntries(
@@ -268,6 +272,10 @@ describe("an expression's whole value", () => {
       text: "Ada",
       list: parsed(JSON.stringify(values.list)),
       object: parsed(JSON.stringify(values.object)),
+      notNumber: null,
+      infinite: [null, null],
+      // `toStrictEqual` tells `-0` from `0`.
+      negativeZero: { at: 0 },
     });
   });
 });
