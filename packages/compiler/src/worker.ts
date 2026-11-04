@@ -277,14 +277,16 @@ const refreshHeader = (path: string): string =>
 /**
  * Compiles one App file, with what it imports, or says why it can't be:
  * with `refresh`, for a preview, instrumented for React Fast Refresh. A
- * file the parser refuses is added to `unparsed` (`together`).
+ * file the parser refuses is added to `unparsed`, and one whose compiled
+ * code imports what its source doesn't (a refused JSX runtime) to
+ * `untyped` (`together`).
  */
 const compileFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
   typeFiles: ReadonlySet<string>,
-  unparsed: Set<string>,
+  { unparsed, untyped }: { unparsed: Set<string>; untyped: Set<string> },
   refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
@@ -344,6 +346,8 @@ const compileFile = (
     imported.kit.add(kitModuleName(previewRefresh));
     return { code: `${refreshHeader(path)}${code}`, imported };
   } catch (error) {
+    // An import only the compiled code makes, refused: its JSX runtime.
+    untyped.add(path);
     return {
       errors: [problem("imports", messageIn(path, error), { file: path })],
     };
@@ -634,6 +638,8 @@ export const buildScreensIncrementally = async (
   const errors: Diagnostic[] = [];
   // The files the parser refused, whose checks past the break are guesses.
   const unparsed = new Set<string>();
+  // The files whose JSX runtime was refused, whose types are its guesses.
+  const untyped = new Set<string>();
   const keyed = await Promise.all(
     sources.map(
       async ([path, source]) =>
@@ -667,7 +673,7 @@ export const buildScreensIncrementally = async (
       source,
       known,
       typeFiles,
-      unparsed,
+      { unparsed, untyped },
       preview
     );
     if ("code" in result) {
@@ -705,7 +711,8 @@ export const buildScreensIncrementally = async (
   const diagnostics = together(
     errors,
     await checkScreens(files, reuse, fresh, metrics),
-    unparsed
+    unparsed,
+    untyped
   );
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
     return done({ ok: false, diagnostics });
