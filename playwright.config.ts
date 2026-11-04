@@ -48,7 +48,8 @@ export const journeyTests = /journey\.e2e\.ts$/u;
  * uses, so a decision another worker's browser already shows is refused as
  * stale. They run in a project of their own, one test at a time.
  */
-const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
+const packageApprovalTests =
+  /(?:chat-packages|dashboard|engine-packages|inbox)\.e2e\.ts$/u;
 /**
  * The admin's journeys (e2e/admin): they run on a stack of their
  * own (playwright.admin.config.ts).

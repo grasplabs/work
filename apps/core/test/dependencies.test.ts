@@ -1404,6 +1404,76 @@ describe("dependency approval", () => {
     });
   });
 
+  it("answers with the decision once it landed, even when the chats and names can't be read after", async () => {
+    const { builder, app } = await builderWithApp();
+    const chats = await personalChatsOf(builder.userId);
+    const { chat } = await chats.newChat();
+    const identity = await builder.api.whoami();
+    const request = await proposeForTests(
+      env,
+      {
+        ...identity,
+        actor: { ...chats.agent, onBehalfOf: identity.userId },
+        via: {
+          ...chats.agent,
+          onBehalfOf: identity.userId,
+          workspaceId: chats.id,
+          chatId: chat.id,
+        },
+      },
+      proposalFor(app)
+    );
+    const { policyGeneration } = await builder.api.dependencies.waiting();
+    // Once the decision's batch has landed, D1 fails what reads after it.
+    let landed = false;
+    const db = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            const results = await target.batch(statements);
+            landed = true;
+            return results;
+          };
+        }
+        if (property === "prepare") {
+          return (query: string) => {
+            if (
+              landed &&
+              (query.includes('from "dependency_request_askers"') ||
+                query.includes('from "users"'))
+            ) {
+              throw new Error("D1 is unavailable");
+            }
+            return target.prepare(query);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const decided = await decideDependency(
+      { ...env, DB: db },
+      identity,
+      request.id,
+      {
+        approved: true,
+        reviewed: { graphHash: request.graphHash, policyGeneration },
+      }
+    );
+    const { approved } = await builder.api.dependencies.status({ app });
+
+    expect({
+      landed,
+      decided: [decided.id, decided.status],
+      approved: approved?.id,
+    }).toStrictEqual({
+      landed: true,
+      decided: [request.id, "approved"],
+      approved: request.id,
+    });
+  });
+
   it("takes one decision, on the graph and policy the person reviewed", async () => {
     const { builder, app } = await builderWithApp();
     const second = await personApi("builder");

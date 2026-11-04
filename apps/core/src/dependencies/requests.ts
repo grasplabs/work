@@ -1254,14 +1254,28 @@ const tellChats = async (
   request: Listed,
   decision: "approved" | "denied"
 ): Promise<void> => {
-  const askers = await drizzle(env.DB)
-    .select({
-      personId: dependencyRequestAskers.personId,
-      chatId: dependencyRequestAskers.chatId,
-      workspaceId: dependencyRequestAskers.workspaceId,
-    })
-    .from(dependencyRequestAskers)
-    .where(eq(dependencyRequestAskers.requestId, request.id));
+  let askers: {
+    personId: string;
+    chatId: string;
+    workspaceId: string | null;
+  }[];
+  try {
+    askers = await drizzle(env.DB)
+      .select({
+        personId: dependencyRequestAskers.personId,
+        chatId: dependencyRequestAskers.chatId,
+        workspaceId: dependencyRequestAskers.workspaceId,
+      })
+      .from(dependencyRequestAskers)
+      .where(eq(dependencyRequestAskers.requestId, request.id));
+  } catch (error) {
+    // The decision landed: telling the chats can't turn it into a failure.
+    log.warn("chat.packages_decided_failed", {
+      request: request.id,
+      ...errorFields(error),
+    });
+    return;
+  }
   // Each chat once, however many times it asked.
   const chats = new Map(
     askers.flatMap((asker) =>
@@ -1392,7 +1406,13 @@ const decide = async (
     throw whyNotWritten(standing, true);
   }
   await tellChats(env, decided, status);
-  return await toRequest(env, decided);
+  // Landed: the answer is what the batch returned, and reading names
+  // can't turn it into a failure.
+  const [answer] = await toRequests(env, [decided], "if they can be read");
+  if (answer === undefined) {
+    throw new Error(`Dependency request ${decided.id} is missing`);
+  }
+  return answer;
 };
 
 /**
