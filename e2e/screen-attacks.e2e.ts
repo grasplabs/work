@@ -507,6 +507,7 @@ test("a screen makes no document of its own and reaches no network, WebRTC or a 
     prefetch: "refused: NotSupportedError",
     linkAttribute: "refused: NotSupportedError",
     linkAttributeNode: "refused: NotSupportedError",
+    linkArrayPrototype: "no address",
     windows: "0",
   });
   const frame = page.frame({ url: /\/screen-frame\?load=/u });

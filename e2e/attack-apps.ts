@@ -338,6 +338,28 @@ const routes = (): Record<string, string> => {
     link.setAttribute("HREF", "${attacker}/attribute");
     (Reflect.get(document, unread("he", "ad")) as HTMLElement).append(link);
   });
+  // An address slipped in through Array.prototype, for a lock that reads
+  // its arguments from an array: a missing index reads, and a write to it
+  // calls, whatever the screen put there.
+  results.linkArrayPrototype = (() => {
+    const link = document.createElementNS(XHTML, unread("li", "nk"));
+    link.setAttribute("rel", "preconnect");
+    head.append(link);
+    Object.defineProperty(Array.prototype, 0, {
+      configurable: true,
+      get: () => "rel",
+      set(this: unknown[]) {
+        Object.defineProperty(this, 0, { value: "href", writable: true, enumerable: true, configurable: true });
+        this[1] = "${attacker}/array";
+      },
+    });
+    try {
+      Reflect.apply(Reflect.get(link, "setAttribute") as () => void, link, []);
+    } finally {
+      Reflect.deleteProperty(Array.prototype, 0);
+    }
+    return link.getAttribute(unread("hr", "ef")) ?? "no address";
+  })();
   // A link the parser would make from a string: refused as any markup.
   results.linkMarkup = attempt(() => {
     holder.insertAdjacentHTML("beforeend", '<li' + 'nk rel="preconnect" href="${attacker}/markup">');

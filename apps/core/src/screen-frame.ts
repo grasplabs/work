@@ -778,17 +778,35 @@ const isAddress = (name) => {
   const lower = apply(toLower, toText(name), []);
   return lower === "href" || apply(endsWith, lower, [":href"]);
 };
-for (const [name, nameAt] of [["setAttribute", 0], ["setAttributeNS", 1], ["toggleAttribute", 0]]) {
-  const set = Element.prototype[name];
-  lock(Element.prototype, name, {
-    writable: false,
-    value: function (...args) {
-      const named = toText(args[nameAt]);
-      args[nameAt] = named;
-      return isLink(this) && isAddress(named) ? refuse() : apply(set, this, args);
-    },
-  });
-}
+// Fixed parameters and literal arrays only: a rest array's missing
+// index would read, and its write would call, whatever the screen put on
+// Array.prototype at that index.
+const setAttribute = Element.prototype.setAttribute;
+const setAttributeNS = Element.prototype.setAttributeNS;
+const toggleAttribute = Element.prototype.toggleAttribute;
+lock(Element.prototype, "setAttribute", {
+  writable: false,
+  value: function (name, value) {
+    const named = toText(name);
+    return isLink(this) && isAddress(named) ? refuse() : apply(setAttribute, this, [named, value]);
+  },
+});
+lock(Element.prototype, "setAttributeNS", {
+  writable: false,
+  value: function (namespace, name, value) {
+    const named = toText(name);
+    return isLink(this) && isAddress(named) ? refuse() : apply(setAttributeNS, this, [namespace, named, value]);
+  },
+});
+lock(Element.prototype, "toggleAttribute", {
+  writable: false,
+  value: function (name, force) {
+    const named = toText(name);
+    // A force left out is not one given as undefined: the browser counts.
+    const passed = arguments.length > 1 ? [named, force] : [named];
+    return isLink(this) && isAddress(named) ? refuse() : apply(toggleAttribute, this, passed);
+  },
+});
 for (const [owner, name] of [[Element.prototype, "setAttributeNode"], [Element.prototype, "setAttributeNodeNS"], [NamedNodeMap.prototype, "setNamedItem"], [NamedNodeMap.prototype, "setNamedItemNS"]]) {
   const set = owner[name];
   lock(owner, name, {
