@@ -1,5 +1,5 @@
 import { readOnlyRevision } from "@grasp-os/shared/chat";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
@@ -14,9 +14,10 @@ import { signedInApi } from "./sign-in.ts";
 // Every write of a chat's draft of an App is kept as a version: listed,
 // previewed read-only and restored as a new version, the draft discarded,
 // only by the chat's person while they build the App, and gone with the
-// chat. These tests
-// start from the ways it can fail: a write lost or kept out of order when
-// writes land together, a restore that rewrites history, an earlier
+// chat. The version of the App a draft is proposed as is previewed
+// read-only the same way, until it is published. These tests start from
+// the ways it can fail: a write lost or kept out of order when writes
+// land together, a restore that rewrites history, an earlier or proposed
 // version's preview that runs or changes anything, someone else (or a
 // person who no longer builds the App) reading another's versions, and
 // versions that outlive their chat.
@@ -209,6 +210,109 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       calls: ["app.preview_outdated", "app.preview_outdated"],
       restoredIsFirst: true,
       missing: "app.version_not_found",
+    });
+  });
+
+  it("previews the version a draft was proposed as, read-only, before it is published", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "builder");
+    const { app, chatId, revision } = await twoVersions(builder);
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: other.userId,
+      role: "builder",
+    });
+    const { chats } = builder.api;
+    const request = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.titles"
+    );
+    const drafted = await chats.preview(chatId, app);
+
+    // Proposed, the draft is dropped: only the version is left to preview.
+    const version = await chats.proposeDraft(chatId, app, "Two");
+    const proposed = await chats.preview(
+      chatId,
+      app,
+      undefined,
+      undefined,
+      version
+    );
+    const live = await chats.preview(chatId, app, undefined, undefined, 1);
+    // Previewed from a chat of theirs that never drafted the App, which
+    // reads as at the read-only revision: what its frame reports never
+    // reaches that chat's agent as its draft's.
+    const look = await chats.create("Look");
+    const looking = chatIdSchema.parse(look.id);
+    const elsewhere = await chats.preview(
+      looking,
+      app,
+      undefined,
+      undefined,
+      version
+    );
+    await chats.previewReport(looking, app, elsewhere.revision, "desk", {
+      kind: "rejection",
+      message: "Not a draft's.",
+    });
+    const reports = await chatsOf(builder).previewReports(
+      looking,
+      app,
+      elsewhere.revision,
+      0
+    );
+
+    expect({
+      version,
+      drafts: await chats.drafts(chatId),
+      draft: await failure(async () => await chats.preview(chatId, app)),
+      proposed: { revision: proposed.revision, screens: proposed.screens },
+      // Built as its draft's preview was, from the same files.
+      asDrafted: proposed.artifact === drafted.artifact,
+      notLive: proposed.artifact !== live.artifact,
+      // Nothing of it runs: no call, the draft's own revision's neither.
+      calls: await Promise.all(
+        [proposed.revision, revision].map(
+          async (named) =>
+            await failure(
+              async () =>
+                await chats.previewFunction(chatId, app, named, request)
+            )
+        )
+      ),
+      elsewhere: elsewhere.artifact === proposed.artifact,
+      reports,
+      both: await failure(
+        async () => await chats.preview(chatId, app, undefined, 1, version)
+      ),
+      missing: await failure(
+        async () => await chats.preview(chatId, app, undefined, undefined, 9)
+      ),
+      // Another builder of the App, through a chat that isn't theirs.
+      othersChat: await failure(
+        async () =>
+          await other.api.chats.preview(
+            chatId,
+            app,
+            undefined,
+            undefined,
+            version
+          )
+      ),
+    }).toStrictEqual({
+      version: 2,
+      drafts: [],
+      draft: "app.no_draft",
+      proposed: { revision: readOnlyRevision, screens: ["desk"] },
+      asDrafted: true,
+      notLive: true,
+      calls: ["app.no_draft", "app.no_draft"],
+      elsewhere: true,
+      reports: { problems: [], logs: [], seen: false },
+      both: "screen.invalid",
+      missing: "app.version_not_found",
+      othersChat: "agent.chat_not_found",
     });
   });
 

@@ -10155,6 +10155,7 @@ msgid "Preview"
 msgstr "Preview"
 
 #: src/chat/studio.tsx
+#: src/engines/app-workspace.tsx
 msgid "Preview of {name}"
 msgstr "Preview of {name}"
 
@@ -10165,6 +10166,10 @@ msgstr "Preview of the {screen} page"
 #: src/screens/screen-frame.tsx
 msgid "Preview of the draft's first page"
 msgstr "Preview of the draft's first page"
+
+#: src/screens/screen-frame.tsx
+msgid "Preview of the version's first page"
+msgstr "Preview of the version's first page"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
@@ -14938,10 +14943,6 @@ msgstr "Version {number} of {latest}"
 msgid "Version {number}, current"
 msgstr "Version {number}, current"
 
-#: src/engines/app-workspace.tsx
-msgid "Version {pendingVersion} is ready to publish"
-msgstr "Version {pendingVersion} is ready to publish"
-
 #: src/brain/brain.ts
 #: src/engines/app-workflows.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -14958,6 +14959,14 @@ msgstr "Version {version} has no build that runs, so nothing ran: one of its tas
 #: src/workflows/start-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran."
 msgstr "Version {version} has no build that runs, so nothing ran."
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} is ready to publish"
+msgstr "Version {version} is ready to publish"
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."
+msgstr "Version {version} is ready to publish: this preview changes nothing and reads no real data."
 
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."

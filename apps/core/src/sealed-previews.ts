@@ -517,23 +517,20 @@ export interface PreviewCallOptions {
 const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
 
 /**
- * The `#grasp` references the screens of `draft`, a kept version of a
- * chat's draft of `app`, import: generated from its draft release, sealed
- * as the preview's is (`sealDraftRelease`) and loaded back through the
- * same checks, every hash, but kept nowhere: that version's preview is
- * read-only, so nothing runs on the release. Null when it generates none.
+ * The `#grasp` references the screens of `files`, an App as `version` of
+ * `app` (a kept version of a chat's draft, or a version of the App),
+ * import: generated from its draft release, sealed as the preview's is
+ * (`sealDraftRelease`) and loaded back through the same checks, every
+ * hash, but kept nowhere: that version's preview is read-only, so nothing
+ * runs on the release. Null when it generates none.
  */
-export const draftVersionReferences = async (
+export const readOnlyReferences = async (
   env: Env,
   app: AppId,
-  draft: Draft
+  version: number,
+  files: ReadonlyMap<string, string>
 ): Promise<string | null> => {
-  const version = sealedAs(draft);
-  const sealed = await sealDraftRelease(
-    env,
-    { app, version },
-    await draftFiles(env, app, draft)
-  );
+  const sealed = await sealDraftRelease(env, { app, version }, files);
   const release = await loadDraftRelease(
     { app, version },
     sealed,
@@ -548,6 +545,23 @@ export const draftVersionReferences = async (
   });
   return generated[generatedPaths.references] ?? null;
 };
+
+/**
+ * The `#grasp` references the screens of `draft`, a kept version of a
+ * chat's draft of `app`, import (`readOnlyReferences`), as the version it
+ * would become.
+ */
+export const draftVersionReferences = async (
+  env: Env,
+  app: AppId,
+  draft: Draft
+): Promise<string | null> =>
+  await readOnlyReferences(
+    env,
+    app,
+    sealedAs(draft),
+    await draftFiles(env, app, draft)
+  );
 
 /** The key of one chat's preview of one App. */
 const nameOf = (chatId: ChatId, app: string): string => `${chatId}:${app}`;

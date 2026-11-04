@@ -1501,8 +1501,9 @@ export interface SealedDraft extends StoredDraft {
  * version it would become (`key.version`), exactly as `sealRelease` seals
  * a version (see the header), but bound to no store and stored nowhere:
  * its keeper (sealed-previews.ts) keeps what this answers, and loads it
- * back through `loadDraftRelease`. It names a version no one committed,
- * so nothing that runs a version (`loadRelease`) ever finds it.
+ * back through `loadDraftRelease`. Stored nowhere a version's release is,
+ * so nothing that runs a version (`loadRelease`) ever finds it, even when
+ * it names a committed one (a read-only preview's, `readOnlyReferences`).
  * `version.unsealable` for files not of spec 8's layout.
  */
 export const sealDraftRelease = async (

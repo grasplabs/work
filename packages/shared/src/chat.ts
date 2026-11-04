@@ -191,10 +191,12 @@ export interface ChatDraft {
 }
 
 /**
- * The revision a preview of a version of the draft carries
- * (`ChatsApi.preview` with `version`): no draft is ever at it, so every
- * call of that preview (function, query, stream, report) is refused as
- * out of date, the latest version's too. Read-only by construction.
+ * The revision a preview of a version of the draft, or of the App,
+ * carries (`ChatsApi.preview` with `version` or `appVersion`): no draft
+ * with changes is ever at it (a chat with none reads as at it, and is
+ * refused for having none), so every call of that preview (function,
+ * query, stream) is refused, the latest version's too, and nothing it
+ * reports is kept. Read-only by construction.
  */
 export const readOnlyRevision = 0;
 
@@ -925,13 +927,16 @@ export interface ChatsApi {
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
    * the App. With `version`, of that version of the draft, read-only:
-   * at `readOnlyRevision`, so its calls are all refused.
+   * at `readOnlyRevision`, so its calls are all refused. With
+   * `appVersion` instead, of that version of the App (the one proposed,
+   * before it is published), read-only the same way.
    */
   preview: (
     chatId: string,
     app: string,
     screen?: string,
-    version?: number
+    version?: number,
+    appVersion?: number
   ) => Promise<PreviewBundle>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a

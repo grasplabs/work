@@ -20,18 +20,21 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import type { AnyRouter } from "@tanstack/react-router";
+import { RpcTarget } from "capnweb";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
+import { socketsTo } from "../screens/test-socket.ts";
 import { AppWorkspace } from "./app-workspace.tsx";
 
 // An App's workspace against core's `apps` as the page reaches it over
 // RPC (the boundary from the web app), faked: only its builders get it;
 // it never shows the live App, only where the App stands (a version ready
-// to publish, nothing unpublished, nothing built yet); Publish moves the
+// to publish, previewed read-only once the App's chat is known, nothing
+// unpublished, nothing built yet); Publish moves the
 // App only along what core allows, the page reads it again afterwards,
 // and what core refuses is said; a draft the agent didn't propose is
 // proposed by the person and reviewed; an archived App is restored from it. The
@@ -376,8 +379,50 @@ const draftOf = (app: string): ChatDraft => ({
   callId: null,
 });
 
+/**
+ * Core, over the page's own connection (a WebSocket) and a real Cap'n Web
+ * session, as far as a preview's load reaches it: who is signed in, and
+ * each preview asked for, kept and never answered, or refused with
+ * `refusal` when one is given. `reached` resolves at the first.
+ */
+class PreviewingCore extends RpcTarget {
+  readonly asked: unknown[][] = [];
+  readonly #reached = Promise.withResolvers<boolean>();
+  readonly reached = this.#reached.promise;
+  readonly #refusal: string | undefined;
+
+  constructor(refusal?: string) {
+    super();
+    this.#refusal = refusal;
+  }
+
+  authenticate(): this {
+    return this;
+  }
+
+  readonly userId = "user-1";
+
+  whoami(): { userId: string } {
+    return { userId: this.userId };
+  }
+
+  get chats(): this {
+    return this;
+  }
+
+  async preview(...args: unknown[]): Promise<never> {
+    this.asked.push(args);
+    this.#reached.resolve(true);
+    if (this.#refusal !== undefined) {
+      throw Object.assign(new Error("Refused."), { code: this.#refusal });
+    }
+    return await Promise.withResolvers<never>().promise;
+  }
+}
+
 describe(AppWorkspace, () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     act(() => {
       root?.unmount();
     });
@@ -654,6 +699,86 @@ describe(AppWorkspace, () => {
       ready: says("Version 2 is ready to publish"),
       publish: button("Publish version 2").disabled,
     }).toStrictEqual({ before: false, ready: true, publish: false });
+  });
+
+  it("previews the version proposed, read-only, with the way to publish it, once the App's chat is known", async () => {
+    const fake = fakeApps("published", { pendingVersion: 2 });
+    // No chat yet: where the App stands, as before.
+    await opened(fake.apps);
+    const withoutChat = {
+      ready: says("Grasp finished these changes"),
+      frame: document.querySelector("iframe"),
+    };
+    takenDown();
+
+    const core = new PreviewingCore();
+    socketsTo(core);
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-proposed",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    const frame = document.querySelector("iframe");
+
+    await press(button("Review and publish"));
+
+    expect({
+      withoutChat,
+      label: says("Version 2: read-only preview"),
+      said: says("Version 2 is ready to publish"),
+      frame: {
+        title: frame?.getAttribute("title"),
+        sandbox: frame?.getAttribute("sandbox"),
+      },
+      review: document.querySelector('[role="dialog"] h2')?.textContent,
+      // What the frame asked core to build: the App's version 2, not the
+      // chat's draft (proposing dropped it) nor a version of the draft.
+      asked: core.asked,
+    }).toStrictEqual({
+      withoutChat: { ready: true, frame: null },
+      label: true,
+      said: true,
+      // The same sandboxed frame a draft's preview runs in.
+      frame: {
+        title: "Preview of the version's first page",
+        sandbox: "allow-scripts",
+      },
+      review: "Publish version 2",
+      asked: [["chat-proposed", "invoice-desk", undefined, undefined, 2]],
+    });
+  });
+
+  it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {
+    // An App of workflows alone: core has no page of it to build.
+    const core = new PreviewingCore("screen.not_found");
+    socketsTo(core);
+    await opened(
+      fakeApps("published", { pendingVersion: 2 }).apps,
+      identityOf(false),
+      "chat-workflows",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    // Its refusal crosses the session back, then the area changes: each
+    // look lets what came render first.
+    await vi.waitFor(async () => {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(says("Grasp finished these changes")).toBeTruthy();
+    });
+
+    expect({
+      ready: says("Grasp finished these changes"),
+      frame: document.querySelector("iframe"),
+      review: button("Review and publish").disabled,
+    }).toStrictEqual({ ready: true, frame: null, review: false });
   });
 
   it("opens the App's own chat when the chat handed over can't be followed", async () => {
