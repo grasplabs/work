@@ -1398,16 +1398,17 @@ export const checkAppCode = (
   // shape it declares (`input`), or as the stored JSON it is handed when
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
+  const checked = { ...appCodeFiles(files), ...tests };
   return {
     built,
     typeCheck: {
-      request: typeCheckRequest(
-        { ...appCodeFiles(files), ...tests },
-        appCodeTarget
-      ),
+      request: typeCheckRequest(checked, appCodeTarget),
       found: built.ok ? [] : built.diagnostics,
       after: lintServerCode(appCodeFiles(files)),
       unparsed: [...unparsed],
+      // A draft whose server code doesn't register is checked against the
+      // stand-ins (core's save-builds.ts).
+      lenient: readsStandIns(checked) ? callbackParameters(checked) : [],
     },
   };
 };

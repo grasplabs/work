@@ -70,7 +70,7 @@ const answerTime = async (): Promise<number> => {
 };
 
 describe("a build task's CPU on-prem", () => {
-  it("gives the compiler and the package builder each one build task's CPU, spec 18.1's 60 s, on the sandbox host", async () => {
+  it("gives the compiler, the type checker and the package builder each one build task's CPU, spec 18.1's 60 s, on the sandbox host", async () => {
     const host = env.SANDBOX_HOST;
     if (host === undefined) {
       throw new Error("The on-prem project binds SANDBOX_HOST.");
@@ -107,7 +107,11 @@ describe("a build task's CPU on-prem", () => {
     }).toStrictEqual({
       built: true,
       inspected: [],
-      compiler: [String(platformLimits.compilerTaskCpuMs)],
+      // The compiler's call, then the type checker's.
+      compiler: [
+        String(platformLimits.compilerTaskCpuMs),
+        String(platformLimits.compilerTaskCpuMs),
+      ],
       builder: [String(platformLimits.compilerTaskCpuMs)],
     });
   });
@@ -202,14 +206,18 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
   });
 
   it("runs the compiler once for a screen it was stopped on for its own sake, however often it's viewed", async () => {
-    // Every build kept: one per time the compiler ran to an end it keeps.
+    // Every build kept: one per time a build ran to an end it keeps. The
+    // compiler's transforms are kept besides (module-cache.ts): it ends,
+    // and the type checker is what the types stop.
     let kept = 0;
     const counting = {
       ...onPrem,
       FILES: {
         get: env.FILES.get.bind(env.FILES),
         put: async (...args: Parameters<R2Bucket["put"]>) => {
-          kept += 1;
+          if (args[0].startsWith("screen-builds/")) {
+            kept += 1;
+          }
           return await env.FILES.put(...args);
         },
       },
@@ -423,6 +431,7 @@ const probing = (program: string) => ({
 describe("the platform's programs on the sandbox host", () => {
   it.each([
     ["App compiler", "compiler", "/compiler.js"],
+    ["type checker", "type-checker", "/checker.js"],
     ["package builder", "package-builder", "/package-builder.js"],
   ] as const)(
     "run the %s with no bindings and no network",

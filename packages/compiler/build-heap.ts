@@ -11,10 +11,11 @@
  *   It loads the SDK and the App's code, so it runs without the cap.
  * - `node --max-heap-size=<MB> build-heap.ts build <release> <files.json>`
  *   builds each blueprint's screens, its preview and its server code in
- *   one compiler, as a shared isolate builds them one after another, and
- *   prints each build's outcome and the heap after it, one JSON line
- *   each. It fails should a build fail, and V8 ends it should the heap
- *   pass the cap.
+ *   one compiler, as a shared isolate builds them one after another,
+ *   each then type-checked by the release's checker, as core has it
+ *   check them (src/checked-build.ts), and prints each build's outcome
+ *   and the heap after its compile, one JSON line each. It fails should
+ *   a build fail, and V8 ends it should the heap pass the cap.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -25,7 +26,11 @@ import { getHeapStatistics } from "node:v8";
 import { z } from "zod";
 
 import { isServerModule } from "./src/app-code.ts";
-import { compilerAssets, kitModule } from "./src/kit.ts";
+import { withTypeCheck } from "./src/checked-build.ts";
+import type { Unchecked } from "./src/checked-build.ts";
+import type { Diagnostic } from "./src/diagnostic.ts";
+import { compilerAssets, kitModule, typesModule } from "./src/kit.ts";
+import type { TypeCheckRequest } from "./src/type-check.ts";
 import type { CompileTarget } from "./src/worker.ts";
 
 /** The release identity the generated modules name: any will do. */
@@ -122,29 +127,65 @@ interface Compiler {
   build: (
     target: CompileTarget,
     files: Record<string, string>
-  ) => Promise<{ ok: boolean; diagnostics?: { severity: string }[] }>;
+  ) => Promise<Unchecked<{ ok: boolean; diagnostics?: Diagnostic[] }>>;
 }
 
+/** The type checker's entrypoint (src/checker.ts). */
+interface Checker {
+  check: (request: TypeCheckRequest) => Diagnostic[];
+}
+
+/** A module of the release's WebAssembly, compiled, as an isolate's module. */
+const wasmStub = (release: string, file: string): string =>
+  `import { readFileSync } from "node:fs";
+export default new WebAssembly.Module(readFileSync(${JSON.stringify(path.join(release, file))}));`;
+
+/** The release's JSON modules, by the name its isolates import each by. */
+const jsonModules: Readonly<Record<string, string>> = {
+  [kitModule]: compilerAssets.kit,
+  [typesModule]: compilerAssets.types,
+};
+
+/** The release module `file`'s default export, constructed as its isolate's entrypoint. */
+const entrypointOf = async (
+  release: string,
+  file: string
+): Promise<unknown> => {
+  const loaded: unknown = await import(
+    pathToFileURL(path.join(release, file)).href
+  );
+  const Entrypoint: unknown = defaultExport.parse(loaded).default;
+  if (typeof Entrypoint !== "function") {
+    throw new TypeError(`The release's ${file} exports no entrypoint`);
+  }
+  return Reflect.construct(Entrypoint, [{ props: {} }, {}]);
+};
+
 /**
- * Loads the release's compiler as its isolate does: its module, what it
- * knows of the kit as a JSON module, esbuild's WebAssembly compiled, and
- * `cloudflare:workers`, of which it uses the entrypoint class alone.
+ * Loads the release's compiler and type checker as their isolates do:
+ * their modules, the kit's JSON modules, the WebAssembly compiled, and
+ * `cloudflare:workers`, of which they use the entrypoint class alone.
  */
-const loadCompiler = async (release: string): Promise<Compiler> => {
+const loadRelease = async (
+  release: string
+): Promise<{ compiler: Compiler; checker: Checker }> => {
   const stubs: Record<string, string> = {
     "cloudflare:workers":
       "export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
-    "./esbuild.wasm": `import { readFileSync } from "node:fs";
-export default new WebAssembly.Module(readFileSync(${JSON.stringify(path.join(release, compilerAssets.esbuildWasm))}));`,
+    "./esbuild.wasm": wasmStub(release, compilerAssets.esbuildWasm),
+    "./tsrs.wasm": wasmStub(release, compilerAssets.tsrsWasm),
   };
   registerHooks({
     resolve: (specifier, context, next) => {
       if (Object.hasOwn(stubs, specifier)) {
         return { url: `heap-stub:${specifier}`, shortCircuit: true };
       }
-      if (specifier === kitModule) {
+      const json = Object.hasOwn(jsonModules, specifier)
+        ? jsonModules[specifier]
+        : undefined;
+      if (json !== undefined) {
         return {
-          url: pathToFileURL(path.join(release, compilerAssets.kit)).href,
+          url: pathToFileURL(path.join(release, json)).href,
           importAttributes: { type: "json" },
           shortCircuit: true,
         };
@@ -162,17 +203,20 @@ export default new WebAssembly.Module(readFileSync(${JSON.stringify(path.join(re
   });
   // A Worker's global scope, which esbuild's browser build reads.
   Reflect.set(globalThis, "self", globalThis);
-  const compiler: unknown = await import(
-    pathToFileURL(path.join(release, compilerAssets.source)).href
-  );
-  const AppCompiler: unknown = defaultExport.parse(compiler).default;
-  if (typeof AppCompiler !== "function") {
-    throw new TypeError("The release's compiler exports no entrypoint");
-  }
-  // SAFETY: the release's compiler module is src/worker.ts built, whose
-  // default export is the `AppCompiler` entrypoint, `Compiler`'s shape.
+  // SAFETY: the release's modules are src/worker.ts and src/checker.ts
+  // built, whose default exports are the entrypoints of these shapes.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return Reflect.construct(AppCompiler, [{ props: {} }, {}]) as Compiler;
+  const compiler = (await entrypointOf(
+    release,
+    compilerAssets.source
+  )) as Compiler;
+  // SAFETY: as above, the checker's.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const checker = (await entrypointOf(
+    release,
+    compilerAssets.checker
+  )) as Checker;
+  return { compiler, checker };
 };
 
 /** What each target builds of a blueprint's files: a screen build has only `#grasp` of what the host generates. */
@@ -190,23 +234,30 @@ const buildAll = async (release: string, filesJson: string): Promise<void> => {
   const all = blueprintsSchema.parse(
     JSON.parse(readFileSync(filesJson, "utf-8"))
   );
-  const compiler = await loadCompiler(release);
+  const { compiler, checker } = await loadRelease(release);
   for (const [blueprint, files] of Object.entries(all)) {
     for (const [target, sent] of Object.entries(targets)) {
       // oxlint-disable-next-line no-await-in-loop -- one build at a time, as a shared isolate takes them
-      const built = await compiler.build(
+      const answer = await compiler.build(
         // SAFETY: `targets` has compile targets only, as its keys.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         target as CompileTarget,
         Object.fromEntries(Object.entries(files).filter(([file]) => sent(file)))
       );
-      const errors = (built.diagnostics ?? []).filter(
-        ({ severity }) => severity === "error"
-      );
-      // What the build keeps, when run with --expose-gc.
+      // What the compile keeps, when run with --expose-gc. The check runs
+      // in an isolate of its own, in tsrs's WebAssembly memory.
       globalThis.gc?.();
       const { used_heap_size: used, total_heap_size: total } =
         getHeapStatistics();
+      const built = withTypeCheck(
+        answer,
+        answer.typeCheck === undefined
+          ? []
+          : checker.check(answer.typeCheck.request)
+      );
+      const errors = (built.diagnostics ?? []).filter(
+        ({ severity }) => severity === "error"
+      );
       console.info(
         JSON.stringify({
           blueprint,

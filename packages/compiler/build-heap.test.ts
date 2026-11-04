@@ -10,15 +10,16 @@ import { compilerAssets } from "./src/kit.ts";
 // Every built-in blueprint's screens, its preview and its server code,
 // built one after another in one release's compiler, as a shared isolate
 // builds them (build-heap.ts), under Node, whose V8 is workerd's, in a
-// heap of `heapMb`. The type chunks took what all of them need from
-// 289–320 MB to 193–208 MB; an isolate gets 128 MB, which the check and
-// the transforms reach in isolates of their own.
+// heap of `heapMb`, each then type-checked by the release's checker, as
+// core runs it, in an isolate of its own. The type chunks took what all of
+// them need from 289–320 MB to 193–208 MB; the check in tsrs's isolate
+// took the compiler's to 66–105 MB, inside the 128 MB an isolate gets.
 
 const harness = path.join(import.meta.dirname, "build-heap.ts");
 const blueprints = path.join(import.meta.dirname, "../../apps/core/blueprints");
 
-/** The heap the builds must fit in, in MB: above today's need, below the sources' 289. */
-const heapMb = 256;
+/** The heap the builds must fit in, in MB: a Cloudflare isolate's. */
+const heapMb = 128;
 
 const builtSchema = z.object({
   blueprint: z.string(),

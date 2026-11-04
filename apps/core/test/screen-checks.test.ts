@@ -159,7 +159,7 @@ describe("screen checks", { timeout: 60_000 }, () => {
           column: 44,
           rule: "TS2322",
           severity: "error",
-          message: `Type '"stuck"' is not assignable to type '"open" | "waiting" | "closed"'.`,
+          message: `Type '"stuck"' is not assignable to type '"closed" | "open" | "waiting"'.`,
         },
       ],
     });

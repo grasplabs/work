@@ -46,6 +46,9 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.esbuildWasm,
         compilerAssets.reference,
         compilerAssets.jqWasm,
+        compilerAssets.checker,
+        compilerAssets.types,
+        compilerAssets.tsrsWasm,
       ].toSorted()
     );
     // The same sources are the same release, under any NODE_ENV.
