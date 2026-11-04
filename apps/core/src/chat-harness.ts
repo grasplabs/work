@@ -1,0 +1,643 @@
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import { createModels, createProvider } from "@earendil-works/pi-ai/models";
+import type { MutableModels } from "@earendil-works/pi-ai/models";
+import {
+  ConversationBusy,
+  createRegistry,
+  DEFAULT_COMPACTION_POLICY,
+  defineDoc,
+  Harness,
+  LiveDoc,
+} from "@earendil-works/pi-durable";
+import type {
+  Conversation,
+  EntryId,
+  EntryRecord,
+  Registry,
+  SettledSubmissionRecord,
+  Wake,
+} from "@earendil-works/pi-durable";
+import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
+import { agentErrors } from "@grasp-os/shared/agent";
+import { delegateActorOf } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import type { ModelEffort } from "@grasp-os/shared/models";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
+import { z } from "zod";
+
+import { apisFor } from "./agent-apis.ts";
+import { isMessage } from "./agent-messages.ts";
+import { chatAuthority, chatContext } from "./agent-scope.ts";
+import type { AgentScope } from "./agent-scope.ts";
+import { showThinking } from "./agent-thinking.ts";
+import { recallFor, textOf } from "./agent.ts";
+import type { CodeTurn, TurnContext, TurnOutcome } from "./agent.ts";
+import { memberOf } from "./auth/identity.ts";
+import { readThinkingBrain } from "./brain-rpc.ts";
+import {
+  chatAgent,
+  needsRebase,
+  noticeKind,
+  questionContent,
+  questionKind,
+  questionText,
+  rebase,
+} from "./chat-agent.ts";
+import { codeTimeoutMs } from "./code-mode.ts";
+import { workspace } from "./durable-objects.ts";
+import { models } from "./models.ts";
+import { sessionHost } from "./sandboxed.ts";
+
+// A chat's turns on pi-durable (GRA-1529), in the chat's own object
+// (chat-session.ts): one Harness on the object's SQLite, its root
+// conversation the chat's. Each turn installs the chat agent's extension
+// (chat-agent.ts) with what that turn runs with, behind the model gateway:
+// one provider, the turn's admitted model, through which every request
+// goes, summaries included, metered and audited as the chat's. pi stores
+// the transcript, compacts it, and picks a turn cut short up again; the
+// turn's request is kept with it (`TurnDoc`), so a resumed turn is set up
+// and admitted again as it was. What it commits is copied to the chat's
+// Workspace (`keepTurnMessages`), which shows the chat; the code runs, their
+// leases and what the chat may no longer read stay the Workspace's. Once
+// the chat holds a result it may no longer read, its context is rebased
+// (`rebase` in chat-agent.ts) before its next turn, and after a turn the
+// guard stopped for it.
+
+/** One question of a chat, as its Workspace hands it over. */
+export interface TurnRequest {
+  /** The turn's ID: the request ID of its input, so a retry finds it. */
+  turnId: string;
+  scope: Omit<AgentScope, "runId">;
+  question: {
+    text: string;
+    /** `<provider>/<model>`, one the deployment allows. */
+    model: string;
+    effort?: ModelEffort;
+    /** The files it carries: their IDs and types. */
+    files: { id: string; type: string }[];
+  };
+  /** A chat others share, which reads only what they all may. */
+  shared: boolean;
+  /** Whether the chat's agent holds the brain permission. */
+  readsBrain: boolean;
+  context: TurnContext;
+}
+
+/** Why a turn stopped before it answered, when no model said so. */
+export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
+
+/** How a turn ended, as its Workspace reads it. */
+export interface TurnEnd {
+  outcome: TurnOutcome;
+  /** The model's last words: its answer, or where it stopped. */
+  answer: string;
+  /** Why it failed, in the gateway's words. */
+  error?: string;
+  stopped?: TurnStop;
+}
+
+/** A message for the Workspace to show, with the files a question carries. */
+export interface TurnMessage {
+  message: Message;
+  files?: string[];
+}
+
+const context = BACKGROUND_CONTEXT;
+
+/** The provider every request of the chat goes through: the model gateway. */
+const gateway = "grasp";
+
+/** The turn under way, or the last, as its Workspace asked it. */
+const TurnDoc = defineDoc<{ request: string }>({
+  kind: "grasp.turn",
+  version: 1,
+  scope: "session",
+  initial: () => ({ request: "" }),
+  checkpointWhen: () => true,
+});
+
+/** The last entry copied to the Workspace. */
+const CopiedDoc = defineDoc<{ after: EntryId | null }>({
+  kind: "grasp.copied",
+  version: 1,
+  scope: "session",
+  initial: () => ({ after: null }),
+  checkpointWhen: () => true,
+});
+
+const questionDataSchema = z.object({ files: z.array(z.string()) });
+
+/** A turn's request, as `TurnDoc` keeps it: our own JSON, checked as an object. */
+const turnRequestSchema = z.custom<TurnRequest>(
+  (value) => typeof value === "object" && value !== null
+);
+
+/** The partial answer `pi.live` shows, if there is one. */
+const liveSchema = z.object({
+  generation: z
+    .object({
+      message: z
+        .custom<AssistantMessage>(
+          (value) =>
+            typeof value === "object" &&
+            value !== null &&
+            isMessage(value) &&
+            value.role === "assistant"
+        )
+        .optional(),
+    })
+    .optional(),
+});
+
+/** The message a committed entry shows the person, if it shows one. */
+const shownOf = (entry: EntryRecord): TurnMessage | undefined => {
+  const [message] = entry.model ?? [];
+  if (message === undefined) {
+    return undefined;
+  }
+  if (entry.kind === questionKind && message.role === "user") {
+    const data = questionDataSchema.safeParse(entry.data);
+    return {
+      message: { ...message, content: questionText(message) },
+      files: data.success ? data.data.files : [],
+    };
+  }
+  return entry.kind === "pi.assistant" || entry.kind === "pi.tool-result"
+    ? { message }
+    : undefined;
+};
+
+/** The brain as `personId` may read it now: what a step of thinking may name. */
+const brainOf = async (env: Env, personId: string) => {
+  const person = await memberOf(env.DB, personId);
+  if (person === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  return await readThinkingBrain(env, person);
+};
+
+/** Why `error` stopped a turn, as the hook said it. */
+const stopOf = (error: Error): TurnStop =>
+  isExpectedError(error) && error.code === "agent.history_revoked"
+    ? "history_revoked"
+    : "unreadable";
+
+/** One chat's Harness, opened on its object's storage. */
+export class ChatHarness {
+  readonly #ctx: DurableObjectState;
+  readonly #env: Env;
+  readonly #harness: Harness;
+  readonly #conversation: Conversation;
+  readonly #registry: Registry;
+  readonly #models: MutableModels;
+  /** What the chat has read from, as of the last request's guard. */
+  #sources: string[] = [];
+  /** Why the turn under way was stopped, if it was. */
+  #stopped: TurnStop | undefined;
+  /** The copies to the Workspace under way, one after another. */
+  #copying: Promise<void> = Promise.resolve();
+  /** The partial answer the Workspace was shown last. */
+  #shown = "null";
+
+  constructor(
+    ctx: DurableObjectState,
+    env: Env,
+    harness: Harness,
+    conversation: Conversation,
+    registry: Registry,
+    pi: MutableModels
+  ) {
+    this.#ctx = ctx;
+    this.#env = env;
+    this.#harness = harness;
+    this.#conversation = conversation;
+    this.#registry = registry;
+    this.#models = pi;
+  }
+
+  /**
+   * Opens the chat's Harness on its object's SQLite (tables prefixed
+   * `pi_`), in the EU as the object is. `onWake` arms the object's alarm.
+   */
+  static async open(
+    ctx: DurableObjectState,
+    env: Env,
+    onWake: (wake: Wake) => void
+  ): Promise<ChatHarness> {
+    const storage = await openDurableObjectSqliteStorage(ctx.storage, {
+      prefix: "pi_",
+    });
+    const registry = createRegistry();
+    const pi = createModels();
+    const harness = await Harness.open(
+      storage,
+      {
+        models: pi,
+        registry,
+        // One code run at a time, as each is an isolate of its own.
+        settings: { toolExecution: "sequential" },
+        identity: { attribution: null },
+        onWake,
+      },
+      context
+    );
+    const conversation = await harness.root(context);
+    const opened = new ChatHarness(
+      ctx,
+      env,
+      harness,
+      conversation,
+      registry,
+      pi
+    );
+    const view = await conversation.viewState(context);
+    view.subscribe((value) => {
+      opened.#showPartial(value.docs["pi.live"]);
+      opened.#copySoon();
+    });
+    return opened;
+  }
+
+  /** When the Harness next needs the object (`Harness.wake`). */
+  wake(): Wake {
+    return this.#harness.wake();
+  }
+
+  /**
+   * Runs `request`'s turn to its end: its question once (a retry with the
+   * same turn finds it), then waits for its answer, every entry copied.
+   */
+  async run(request: TurnRequest): Promise<TurnEnd> {
+    this.#stopped = undefined;
+    await this.#conversation.commit(async (tx) => {
+      const kept = await tx.doc(TurnDoc);
+      kept.request = JSON.stringify(request);
+    }, context);
+    const { turn, room } = await this.#setUp(request);
+    await this.#rebaseIfNeeded(request, room);
+    const placed = await this.#conversation.commit(
+      async (tx) =>
+        await tx.submissionByRequest(this.#conversation.id, request.turnId),
+      context
+    );
+    const recall =
+      placed === undefined && request.readsBrain
+        ? await recallFor(turn, request.question.text)
+        : undefined;
+    let submitted;
+    try {
+      submitted = await this.#conversation.submit(
+        {
+          type: "input",
+          content: questionContent(
+            request.question.text,
+            request.question.files,
+            recall
+          ),
+          requestId: request.turnId,
+          whenBusy: "reject",
+          entry: {
+            kind: questionKind,
+            data: { files: request.question.files.map(({ id }) => id) },
+          },
+        },
+        context
+      );
+    } catch (error) {
+      if (error instanceof ConversationBusy) {
+        throw agentErrors.create("agent.busy");
+      }
+      throw error;
+    }
+    const settled = await submitted.wait(context);
+    this.#copySoon();
+    await this.#copying;
+    const end = await this.#endOf(settled);
+    if (end.stopped === "history_revoked") {
+      await this.#conversation.waitForIdle(context);
+      await this.#rebaseIfNeeded(request, room);
+    }
+    return end;
+  }
+
+  /**
+   * Rebases the chat's context (`rebase`) when it holds a result the chat
+   * may no longer read, or a rebase was cut short: only while idle.
+   */
+  async #rebaseIfNeeded(request: TurnRequest, room: number): Promise<void> {
+    const { withheld } = await this.#host(request.scope).turnGuard(
+      request.scope
+    );
+    const runs = new Set(withheld);
+    if (await needsRebase(this.#conversation, runs, context)) {
+      await rebase(this.#conversation, runs, room, context);
+    }
+  }
+
+  /**
+   * Goes on with the turn a restart cut short, as it was set up: its
+   * request admitted again first, so nothing runs for a person who left.
+   */
+  async resume(): Promise<void> {
+    const live = await this.#harness.snapshot(
+      LiveDoc,
+      this.#conversation.id,
+      context
+    );
+    const request = await this.#request();
+    if (live?.run !== undefined && request !== undefined) {
+      try {
+        const { room } = await this.#setUp(request);
+        const { withheld } = await this.#host(request.scope).turnGuard(
+          request.scope
+        );
+        if (await needsRebase(this.#conversation, new Set(withheld), context)) {
+          await this.#conversation.abort(context);
+          await this.#rebaseIfNeeded(request, room);
+        }
+      } catch {
+        await this.#conversation.abort(context);
+        return;
+      }
+    }
+    this.#harness.resume();
+  }
+
+  /**
+   * Tells the turn under way `text` before its next request, never shown
+   * as the person's: dropped once no turn runs.
+   */
+  async steer(text: string): Promise<void> {
+    const live = await this.#harness.snapshot(
+      LiveDoc,
+      this.#conversation.id,
+      context
+    );
+    if (live?.run === undefined) {
+      return;
+    }
+    await this.#conversation.submit(
+      {
+        type: "input",
+        content: text,
+        whenBusy: "steer",
+        entry: { kind: noticeKind },
+      },
+      context
+    );
+  }
+
+  /** Stops the turn under way, if any: its request or tool call in flight ends. */
+  async abort(): Promise<void> {
+    await this.#conversation.abort(context);
+  }
+
+  async close(): Promise<void> {
+    await this.#harness.close(context);
+  }
+
+  /** The turn under way, or the last, as `TurnDoc` keeps it. */
+  async #request(): Promise<TurnRequest | undefined> {
+    const kept = await this.#harness.snapshot(TurnDoc, context);
+    return kept === undefined || kept.request === ""
+      ? undefined
+      : turnRequestSchema.parse(JSON.parse(kept.request));
+  }
+
+  /** The chat's Workspace. */
+  #host(scope: TurnRequest["scope"]) {
+    return workspace(this.#env, scope.workspaceId);
+  }
+
+  /** Stops the turn under way for `reason`. */
+  #stop(reason: TurnStop): void {
+    this.#stopped ??= reason;
+    this.#ctx.waitUntil(this.#conversation.abort(context));
+  }
+
+  /**
+   * Admits the turn's model through the gateway, refused before anything
+   * runs, and installs the chat's extension with what the turn runs with.
+   */
+  async #setUp(
+    request: TurnRequest
+  ): Promise<{ turn: CodeTurn; room: number }> {
+    const env = this.#env;
+    const { scope } = request;
+    const host = this.#host(scope);
+    const authority = chatAuthority(scope);
+    const guard = await host.turnGuard(scope);
+    if (guard.stop !== undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    this.#sources = guard.sources;
+    // Every request carries everything the chat has read from, as of its
+    // guard: the rules judge it by all of it.
+    const admitted = await models(env).agent(
+      {
+        model: request.question.model,
+        effort: request.question.effort,
+        purpose: "chat.turn",
+        trigger: delegateActorOf(authority, scope.via),
+        provenance: this.#sources,
+        work: { authority, context: chatContext(scope) },
+      },
+      () => this.#sources
+    );
+    this.#models.setProvider(
+      createProvider({
+        id: gateway,
+        auth: {
+          apiKey: {
+            name: "Grasp's model gateway",
+            resolve: async () => await Promise.resolve({ auth: {} }),
+          },
+        },
+        models: [{ ...admitted.model, provider: gateway }],
+        api: { stream: admitted.stream, streamSimple: admitted.stream },
+      })
+    );
+    const turn: CodeTurn = {
+      apis: apisFor(request.shared, request.readsBrain),
+      scope,
+      runs: {
+        open: async (opening) => await host.openCodeRun(scope.chatId, opening),
+        close: async (runId, status) =>
+          await host.endTurnRun(scope, runId, status),
+        output: (runId, callId, line) => {
+          this.#ctx.waitUntil(
+            host.codeRunOutput(scope.chatId, runId, callId, line)
+          );
+        },
+      },
+      loader: quietLoader(env.LOADER),
+      sandbox: () => sessionHost(env),
+      codeTimeoutMs: codeTimeoutMs(env),
+    };
+    const transcript = await this.#conversation.context(context);
+    const extension = chatAgent({
+      ...turn,
+      context: request.context,
+      assets: env.ASSETS,
+      history: transcript.messages,
+      // Only in a person's own chat, by an agent that may read the brain.
+      ...(request.readsBrain && !request.shared
+        ? {
+            thinking: showThinking(
+              async () => await brainOf(env, scope.personId)
+            ),
+          }
+        : {}),
+      withheld: async () => {
+        const checked = await host.turnGuard(scope);
+        this.#sources = checked.sources;
+        if (checked.stop !== undefined) {
+          this.#stop(checked.stop);
+        }
+        return new Set(checked.withheld);
+      },
+      stop: (reason) => {
+        this.#stop(stopOf(reason));
+      },
+    });
+    this.#registry.install(extension);
+    await this.#conversation.configure(
+      {
+        model: { provider: gateway, modelId: admitted.model.id },
+        extensions: [extension],
+      },
+      context
+    );
+    // What a rebased context may hold before pi compacts it: the model's
+    // window less pi's reserve for the answer.
+    const room = Math.max(
+      admitted.model.contextWindow - DEFAULT_COMPACTION_POLICY.reserveTokens,
+      DEFAULT_COMPACTION_POLICY.keepRecentTokens
+    );
+    return { turn, room };
+  }
+
+  /** How the turn whose input settled as `settled` ended. */
+  async #endOf(settled: SettledSubmissionRecord): Promise<TurnEnd> {
+    const stopped = this.#stopped;
+    if (stopped !== undefined) {
+      return { outcome: "failed", answer: "", stopped };
+    }
+    if (settled.type !== "input") {
+      return { outcome: "failed", answer: "" };
+    }
+    if (settled.status === "done") {
+      const page = await this.#conversation.entries(
+        { minEntryId: settled.answer, maxEntryId: settled.answer },
+        1,
+        undefined,
+        context
+      );
+      const [message] = page.items[0]?.model ?? [];
+      return {
+        outcome: "answered",
+        answer: message?.role === "assistant" ? textOf(message) : "",
+      };
+    }
+    if (settled.reason === "aborted") {
+      return { outcome: "cancelled", answer: "" };
+    }
+    return {
+      outcome: "failed",
+      answer: "",
+      error:
+        typeof settled.detail === "string" ? settled.detail : settled.reason,
+    };
+  }
+
+  /** Copies what was committed since the last copy, after the copies under way. */
+  #copySoon(): void {
+    const before = this.#copying;
+    this.#copying = (async () => {
+      try {
+        await before;
+      } catch {
+        // A copy that failed is done again by this one.
+      }
+      await this.#copy();
+    })();
+    this.#ctx.waitUntil(this.#copying);
+  }
+
+  /**
+   * Copies the entries committed since the last copy that show the person
+   * something to the chat's Workspace, then marks them copied: at least
+   * once each, a failed copy tried again at the next commit.
+   */
+  async #copy(): Promise<void> {
+    const request = await this.#request();
+    if (request === undefined) {
+      return;
+    }
+    const { scope } = request;
+    const copied = await this.#harness.snapshot(CopiedDoc, context);
+    const after = copied?.after ?? null;
+    const shown: TurnMessage[] = [];
+    let last: EntryId | undefined;
+    let cursor;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      const page = await this.#conversation.entries(
+        {
+          order: "ascending",
+          ...(after === null ? {} : { minEntryId: after }),
+        },
+        100,
+        cursor,
+        context
+      );
+      for (const entry of page.items) {
+        if (entry.id !== after) {
+          last = entry.id;
+          const message = shownOf(entry);
+          if (message !== undefined) {
+            shown.push(message);
+          }
+        }
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    if (last === undefined) {
+      return;
+    }
+    if (shown.length > 0) {
+      await this.#host(scope).keepTurnMessages(scope.chatId, shown);
+    }
+    const through = last;
+    await this.#conversation.commit(async (tx) => {
+      const doc = await tx.doc(CopiedDoc);
+      doc.after = through;
+    }, context);
+  }
+
+  /** Shows the Workspace the answer streaming in, as `pi.live` has it. */
+  #showPartial(live: unknown): void {
+    const parsed = liveSchema.safeParse(live ?? {});
+    const partial = parsed.success
+      ? (parsed.data.generation?.message ?? null)
+      : null;
+    const json = JSON.stringify(partial);
+    if (json === this.#shown) {
+      return;
+    }
+    this.#shown = json;
+    this.#ctx.waitUntil(this.#showing(partial));
+  }
+
+  async #showing(partial: AssistantMessage | null): Promise<void> {
+    const request = await this.#request();
+    if (request !== undefined) {
+      await this.#host(request.scope).showPartial(
+        request.scope.chatId,
+        partial
+      );
+    }
+  }
+}

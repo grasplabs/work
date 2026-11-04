@@ -27,6 +27,7 @@ export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { ChatState } from "@grasp-os/chat/state";
+export { ChatSession } from "./chat-session.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export { Workspace } from "./workspace.ts";
 

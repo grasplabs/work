@@ -30,9 +30,6 @@ import type { CodeRunStatus } from "./code-run-statuses.ts";
 // where a code step shows its code: code is for computing, reading what
 // no tool reads, and testing what the agent built.
 
-/** Most calls of these tools one model response may make. */
-export const maxToolCallsPerResponse = 20;
-
 /** Most lines `searchFiles` answers with. */
 const maxMatches = 100;
 
@@ -65,7 +62,7 @@ const callAs = async (
   call: (scope: AgentScope, guard: () => void) => Promise<unknown>
 ) => {
   const source = JSON.stringify({ tool, input });
-  const runId = runs.open({
+  const runId = await runs.open({
     toolCallId,
     sourceHash: await sourceHash(source),
     sourceChars: source.length,

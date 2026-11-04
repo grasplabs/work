@@ -33,7 +33,6 @@ import {
   askQuestions,
   executeCode,
   instructions,
-  latestSections,
   filesNoteText,
   readApi,
   resultRunId,
@@ -477,6 +476,43 @@ export const rebase = async (
     base.base = reset;
     base.rebasing = false;
   }, context);
+};
+
+/**
+ * `history` with each section of the system prompt (the APIs, memory,
+ * skills) given only where it was given last: an earlier value,
+ * which may hold what the chat can no longer read (memory a person lost,
+ * a skill unlisted), never reaches the model, on a provider that replays
+ * every system message as on one that keeps the latest. A system message
+ * left with nothing to say is dropped; one that declares tools is kept.
+ */
+const latestSections = (history: readonly Message[]): Message[] => {
+  const given = new Set<string>();
+  const kept: Message[] = [];
+  for (const message of history.toReversed()) {
+    if (message.role !== "system" || message.sections === undefined) {
+      kept.push(message);
+      continue;
+    }
+    const sections = Object.fromEntries(
+      Object.entries(message.sections).filter(([name]) => !given.has(name))
+    );
+    for (const name of Object.keys(message.sections)) {
+      given.add(name);
+    }
+    const { sections: _all, ...rest } = message;
+    const empty =
+      Object.keys(sections).length === 0 &&
+      message.content.length === 0 &&
+      message.toolsAdded === undefined &&
+      message.toolsRemoved === undefined;
+    if (!empty) {
+      kept.push(
+        Object.keys(sections).length === 0 ? rest : { ...rest, sections }
+      );
+    }
+  }
+  return kept.toReversed();
 };
 
 /** Why a turn stops when what it may read can't be told. */
