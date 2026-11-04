@@ -202,13 +202,7 @@ import {
   ruleSql,
 } from "./store-rules.ts";
 import type { RuleCaller } from "./store-rules.ts";
-import {
-  dropChangeValues,
-  forgetChangeValues,
-  runChange,
-  tableStepsOf,
-  undoChange,
-} from "./store-schema-changes.ts";
+import { runChange, tableStepsOf, undoChange } from "./store-schema-changes.ts";
 import {
   dropSearches,
   installSearches,
@@ -654,7 +648,6 @@ const purgedTables = [
   "sdk_search_docs",
   "sdk_schemas",
   "sdk_schema_changes",
-  "sdk_schema_change_values",
   "sdk_schema_backfills",
   "sdk_reserved_fields",
   "sdk_abandoned_targets",
@@ -2472,7 +2465,6 @@ export class StoreHost {
         .update(store)
         .set({ contractHash: change.hash, contractManifest: change.text })
         .run();
-      dropChangeValues(this.#db);
     }
   }
 
@@ -2510,7 +2502,6 @@ export class StoreHost {
       .update(store)
       .set({ contractHash: change.hash, contractManifest: change.text })
       .run();
-    dropChangeValues(this.#db);
     this.#supersede(readSchemaManifest(change.text).manifest, now);
   }
 
@@ -3110,8 +3101,6 @@ export class StoreHost {
         .run();
       // An import of theirs staged and never landed: its values go.
       this.#db.delete(importRows).where(eq(importRows.principal, person)).run();
-      // What a schema change kept of their records for an undo.
-      forgetChangeValues(this.#db, person);
       return { forgotten: gone.length };
     });
   }
@@ -5964,7 +5953,7 @@ export class StoreHost {
         if (step.kind === "apply") {
           this.#applyIn(step, hash, contractHash);
         } else {
-          this.#undoIn(step.change);
+          this.#undoIn(step.change, hash);
         }
         return true;
       });
@@ -6008,12 +5997,29 @@ export class StoreHost {
   }
 
   /**
+   * The store's next commit, counted: what a schema change's rewrites are
+   * recorded under in the change history, as a commit's writes are.
+   */
+  #nextCommit(): number {
+    const counted = this.#db
+      .update(store)
+      .set({ commits: sql`${store.commits} + 1` })
+      .returning({ commits: store.commits })
+      .get();
+    if (counted === undefined) {
+      throw new Error("A bound store has no row");
+    }
+    return counted.commits;
+  }
+
+  /**
    * `#applyChecked`'s change, in its transaction: every record checked
-   * and rewritten where the plan's answers or defaults change it, its
-   * document before kept for an undo; then the contract moved (compared
-   * and set), the schemas it no longer covers left behind, and the change
-   * recorded. Throws `migration.required` with the questions of every
-   * record that doesn't fit, which throws the transaction out.
+   * and rewritten where the plan's answers or defaults change it, each
+   * rewrite recorded in the change history under a commit of its own;
+   * then the contract moved (compared and set), the schemas it no longer
+   * covers left behind, and the change recorded. Throws
+   * `migration.required` with the questions of every record that doesn't
+   * fit, which throws the transaction out.
    */
   #applyIn(
     step: Extract<CheckedStep, { kind: "apply" }>,
@@ -6028,8 +6034,7 @@ export class StoreHost {
     if (base?.manifest === null || base?.manifest === undefined) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
-    // Past the newest change: no undo reaches the one before any more.
-    dropChangeValues(this.#db);
+    const commit = this.#nextCommit();
     const recorded = this.#db
       .insert(schemaChanges)
       .values({
@@ -6037,6 +6042,7 @@ export class StoreHost {
         baseManifest: base.manifest,
         contractHash,
         schemaHash,
+        commit,
         plan: planRecord(step.plan, {
           base: step.baseHash,
           schema: schemaHash,
@@ -6055,9 +6061,10 @@ export class StoreHost {
       this.#tableRows().map(({ name, tableId }) => [name, tableId])
     );
     const run = runChange(this.#db, tableStepsOf(step.plan, tableIds), {
-      changeId: recorded.changeId,
+      commit,
       schemaHash,
       now,
+      sensitive: this.#sensitivity(),
     });
     if (!run.questions.empty) {
       throw migrationErrors.create("migration.required", {
@@ -6080,14 +6087,15 @@ export class StoreHost {
   }
 
   /**
-   * Undoes `change`, in `#applyChecked`'s transaction: the records it
-   * rewrote get their documents back, every record of the tables it
-   * checked must fit the contract before it (`migration.undo_blocked`,
-   * with their questions, throwing the transaction out), the contract
-   * moves back, and the schemas it left behind are in force again, those
-   * the contract before doesn't cover left behind in their place.
+   * Undoes `change` as schema `schemaHash` is made current, in
+   * `#applyChecked`'s transaction: the records it rewrote get back what
+   * the change history holds they held before (store-schema-changes.ts,
+   * `undoChange`), every other record of the tables it checked must fit
+   * the contract before it (`migration.undo_blocked`, with their
+   * questions, throwing the transaction out), the contract moves back,
+   * and the schemas it left behind are in force again.
    */
-  #undoIn(change: typeof schemaChanges.$inferSelect): void {
+  #undoIn(change: typeof schemaChanges.$inferSelect, schemaHash: string): void {
     const now = Date.now();
     const base = readSchemaManifest(change.baseManifest).manifest;
     const plan = undonePlanSchema.parse(JSON.parse(change.plan));
@@ -6095,14 +6103,22 @@ export class StoreHost {
       ...plan.checks.map(([table]) => table),
       ...plan.filledFields.map(([table]) => table),
     ]);
-    const run = undoChange(this.#db, {
-      changeId: change.changeId,
-      base,
-      tables: this.#tableRows()
-        .filter(({ name }) => names.has(name))
-        .map(({ name, tableId }) => ({ table: name, tableId })),
-      now,
-    });
+    const run = undoChange(
+      this.#db,
+      {
+        commit: change.commit,
+        base,
+        tables: this.#tableRows()
+          .filter(({ name }) => names.has(name))
+          .map(({ name, tableId }) => ({ table: name, tableId })),
+      },
+      {
+        commit: this.#nextCommit(),
+        schemaHash,
+        now,
+        sensitive: this.#sensitivity(),
+      }
+    );
     if (!run.questions.empty) {
       throw migrationErrors.create("migration.undo_blocked", {
         questions: run.questions.list(),
@@ -6128,7 +6144,6 @@ export class StoreHost {
       .set({ undoneAt: now })
       .where(eq(schemaChanges.changeId, change.changeId))
       .run();
-    dropChangeValues(this.#db);
     this.#rewrote(run.changedTables);
   }
 
@@ -6822,7 +6837,6 @@ export class StoreHost {
     if (moved === undefined) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
-    dropChangeValues(this.#db);
     if (pending.migrations !== null) {
       this.#supersede(pending.manifest, Date.now());
       this.#db

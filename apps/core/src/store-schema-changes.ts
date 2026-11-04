@@ -17,10 +17,12 @@ import type {
   SchemaQuestion,
   StoreFields,
 } from "@grasp-os/shared/stores";
-import { and, asc, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, lt } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
+import { z } from "zod";
 
-import { records, schemaChangeValues } from "./db/data-store/schema.ts";
+import { recordChanges, records } from "./db/data-store/schema.ts";
+import { recordChangesIn } from "./store-changes.ts";
 import { fitsTable } from "./store-migrations.ts";
 import { validates } from "./store-queries.ts";
 
@@ -42,10 +44,12 @@ import { validates } from "./store-queries.ts";
 //   and nothing else), and only when what the answer made fits the field;
 //   otherwise the record is reported and nothing is applied. Nothing is
 //   removed: a field the schema leaves out stays in every record and in
-//   the contract, and a rewritten record's document before the change is
-//   kept (`sdk_schema_change_values`) for its undo.
+//   the contract, and every rewrite is recorded in the store's change
+//   history (`sdk_record_changes`, source `schema_change`, under a commit
+//   of its own) with what the fields held before, where its undo reads
+//   them from.
 // - A partial migration: a crash, a timeout or a record that fails
-//   halfway. The check, every rewrite, the undo copies, the contract's
+//   halfway. The check, every rewrite and its history, the contract's
 //   move and the schemas it leaves behind are one SQLite transaction
 //   (`transactionSync`), which a failure anywhere in it rolls back whole,
 //   so the version in force goes on serving the records as they were.
@@ -79,15 +83,21 @@ import { validates } from "./store-queries.ts";
 //   (store-migrations.ts): that the record exists, and which of a field's
 //   checks it fails. A question lists at most `schemaQuestionRecordsMax`
 //   records, and counts the rest.
-// - An undo overwriting what was written since: it puts back a record's
-//   document only where the record is still at the revision the change
-//   wrote; every other record of the tables it changed must fit the
-//   contract before as it is, or the undo is refused, naming them, with
-//   nothing written. A record deleted since stays deleted.
-// - The undo copies outliving what they copy: they go with their record
-//   (a trigger of this migration's), with a person's erasure for the
-//   records they own, and once the contract moves past the change, when
-//   no undo can reach them, in the transaction that moves it.
+// - An undo overwriting what was written since: it puts back what a
+//   record's fields held only where the record is still at the revision
+//   the change wrote (no change of it recorded since: every write that
+//   moves a revision records one, and a fill or a transform, which don't,
+//   can't run while the contract is the change's own); every other record
+//   of the tables it changed must fit the contract before as it is, or the
+//   undo is refused, naming them, with nothing written. A record deleted
+//   since stays deleted.
+// - What an undo puts back outliving the rules that govern it: it is read
+//   from the change history, never kept apart, so its own rules hold. A
+//   sensitive table's history keeps no values, a person's erasure clears
+//   the values of what they wrote (the change's row is recorded for the
+//   record's owner; an erased change of the record before it, by whoever
+//   wrote it, counts too), and retention prunes it: in each case there is
+//   nothing to put back, and the record is checked as it is instead.
 
 type Db = DrizzleSqliteDODatabase;
 
@@ -314,12 +324,15 @@ const eachRecord = (
   }
 };
 
-/** Where a change's rewrites go, when it applies them. */
+/** Where a change's rewrites, or an undo's, go and how they are recorded. */
 export interface ChangeWrite {
-  readonly changeId: number;
+  /** The store's commit they are recorded under in the change history. */
+  readonly commit: number;
   /** The schema being made current: what each rewritten record is stamped with. */
   readonly schemaHash: string;
   readonly now: number;
+  /** Whether a table's history keeps field names only. */
+  readonly sensitive: (table: string) => boolean;
 }
 
 /** What a run of a change found and did. */
@@ -331,11 +344,13 @@ export interface ChangeRun {
 }
 
 /**
- * Writes `fields` over `record` for change `write`, moving its revision
- * on, and keeps its document before for an undo.
+ * Writes `fields` over `record` of `table` for `write`, moving its
+ * revision on, and records the change in the store's history (source
+ * `schema_change`), for the record's owner.
  */
 const rewrite = (
   db: Db,
+  table: string,
   record: typeof records.$inferSelect,
   fields: StoreFields,
   write: ChangeWrite
@@ -354,28 +369,37 @@ const rewrite = (
       )
     )
     .run();
-  db.insert(schemaChangeValues)
-    .values({
-      changeId: write.changeId,
-      tableId: record.tableId,
-      recordId: record.recordId,
-      ownerId: record.ownerId,
-      revision: record.revision + 1,
-      valueJson: record.valueJson,
-      schemaHash: record.schemaHash,
-    })
-    .run();
+  recordChangesIn(
+    db,
+    [
+      {
+        tableId: record.tableId,
+        tableName: table,
+        recordId: record.recordId,
+        before: storedFieldsSchema.parse(JSON.parse(record.valueJson)),
+        after: fields,
+        sensitive: write.sensitive(table),
+      },
+    ],
+    {
+      source: "schema_change",
+      actor: { type: "system" },
+      commit: write.commit,
+      principal: record.ownerId,
+    },
+    write.now
+  );
 };
 
 /**
  * Runs a change over every record of `steps`' tables: a dry run that
  * writes nothing, or, with `write`, one that rewrites each record the
- * change settles differently (its revision moved on) and keeps its
- * document before for an undo. Either way it answers the questions the
- * records that don't fit ask. A run that writes must be inside the
- * transaction that moves the contract, and that transaction must be
- * thrown out when any question is asked: the run itself goes on past a
- * record that fails, to count them all.
+ * change settles differently (its revision moved on) and records it in
+ * the change history. Either way it answers the questions the records
+ * that don't fit ask. A run that writes must be inside the transaction
+ * that moves the contract, and that transaction must be thrown out when
+ * any question is asked: the run itself goes on past a record that
+ * fails, to count them all.
  */
 export const runChange = (
   db: Db,
@@ -409,7 +433,7 @@ export const runChange = (
       // Once a record failed, the transaction is thrown out: nothing more
       // is written, and the rest only counted.
       if (settled.changed && write !== undefined && questions.empty) {
-        rewrite(db, record, settled.fields, write);
+        rewrite(db, table.table, record, settled.fields, write);
         changedTables.add(record.tableId);
         tally.rewritten += 1;
       }
@@ -420,12 +444,12 @@ export const runChange = (
 
 /** A change to undo, as its record holds it. */
 export interface UndoneChange {
-  readonly changeId: number;
+  /** The commit its rewrites were recorded under. */
+  readonly commit: number;
   /** The contract before the change, which every record must fit again. */
   readonly base: SchemaManifest;
   /** The tables it checked, by name, with their IDs. */
   readonly tables: readonly { table: string; tableId: string }[];
-  readonly now: number;
 }
 
 /** The first of `declared`'s fields `fields` doesn't fit, and why. */
@@ -445,16 +469,76 @@ const firstMisfit = (
   return { field: "", reason: "invalid" };
 };
 
+const fieldNamesSchema = z.array(z.string());
+
 /**
- * Undoes change `change` in the transaction that moves the contract back:
- * every record it rewrote and nobody changed since gets its document back
- * (its revision moved on, so a reader holding the change's version knows
- * it changed); every other record of the tables it checked must fit the
- * contract before as it is. Answers the questions of those that don't,
- * and what it put back. As with `runChange`, the transaction must be
- * thrown out when any question is asked.
+ * What `record` held before the change whose history row is `row`, as
+ * the history keeps it: its fields with the changed ones put back as they
+ * were. None when the history kept no values (a sensitive table, values
+ * too large, or erased), when an earlier change of the record had its
+ * values erased (what the record held came from a person since erased),
+ * or when the record changed since.
  */
-export const undoChange = (db: Db, change: UndoneChange): ChangeRun => {
+const heldBefore = (
+  db: Db,
+  record: typeof records.$inferSelect,
+  row: typeof recordChanges.$inferSelect | undefined
+): StoreFields | undefined => {
+  if (row === undefined || row.beforeJson === null) {
+    return undefined;
+  }
+  const ofRecord = and(
+    eq(recordChanges.tableId, record.tableId),
+    eq(recordChanges.recordId, record.recordId)
+  );
+  const changedSince = db
+    .select({ id: recordChanges.id })
+    .from(recordChanges)
+    .where(and(ofRecord, gt(recordChanges.id, row.id)))
+    .limit(1)
+    .get();
+  const erasedBefore = db
+    .select({ id: recordChanges.id })
+    .from(recordChanges)
+    .where(
+      and(
+        ofRecord,
+        lt(recordChanges.id, row.id),
+        eq(recordChanges.valuesLeftOut, "erased")
+      )
+    )
+    .limit(1)
+    .get();
+  if (changedSince !== undefined || erasedBefore !== undefined) {
+    return undefined;
+  }
+  const held: Record<string, unknown> = {
+    ...storedFieldsSchema.parse(JSON.parse(record.valueJson)),
+  };
+  for (const name of fieldNamesSchema.parse(JSON.parse(row.fields))) {
+    Reflect.deleteProperty(held, name);
+  }
+  return storedFieldsSchema.parse({
+    ...held,
+    ...storedFieldsSchema.parse(JSON.parse(row.beforeJson)),
+  });
+};
+
+/**
+ * Undoes change `change` in the transaction that moves the contract back,
+ * for `write`: every record it rewrote whose history still holds what it
+ * held before, and nobody changed since, gets that back (its revision
+ * moved on, so a reader holding the change's version knows it changed),
+ * recorded in the history in turn; every other record of the tables it
+ * checked must fit the contract before as it is. Answers the questions of
+ * those that don't, and what it put back. As with `runChange`, the
+ * transaction must be thrown out when any question is asked.
+ */
+export const undoChange = (
+  db: Db,
+  change: UndoneChange,
+  write: ChangeWrite
+): ChangeRun => {
   const questions = new Questions();
   const changedTables = new Set<string>();
   const tally = { rewritten: 0 };
@@ -462,42 +546,28 @@ export const undoChange = (db: Db, change: UndoneChange): ChangeRun => {
     const declared = Object.hasOwn(change.base.tables, table)
       ? (change.base.tables[table]?.fields ?? {})
       : {};
-    const kept = new Map(
+    const rows = new Map(
       db
         .select()
-        .from(schemaChangeValues)
+        .from(recordChanges)
         .where(
           and(
-            eq(schemaChangeValues.changeId, change.changeId),
-            eq(schemaChangeValues.tableId, tableId)
+            eq(recordChanges.source, "schema_change"),
+            eq(recordChanges.commit, change.commit),
+            eq(recordChanges.tableId, tableId)
           )
         )
         .all()
         .map((row) => [row.recordId, row])
     );
     eachRecord(db, tableId, (record) => {
-      const before = kept.get(record.recordId);
-      if (
-        before?.valueJson !== null &&
-        before?.valueJson !== undefined &&
-        before.revision === record.revision
-      ) {
-        db.update(records)
-          .set({
-            valueJson: before.valueJson,
-            revision: record.revision + 1,
-            updatedAt: Math.max(change.now, record.updatedAt),
-            schemaHash: before.schemaHash,
-          })
-          .where(
-            and(
-              eq(records.tableId, tableId),
-              eq(records.recordId, record.recordId)
-            )
-          )
-          .run();
-        changedTables.add(tableId);
-        tally.rewritten += 1;
+      const before = heldBefore(db, record, rows.get(record.recordId));
+      if (before !== undefined && fitsTable(declared, before)) {
+        if (questions.empty) {
+          rewrite(db, table, record, before, write);
+          changedTables.add(tableId);
+          tally.rewritten += 1;
+        }
         return;
       }
       const fields = storedFieldsSchema.parse(JSON.parse(record.valueJson));
@@ -508,32 +578,4 @@ export const undoChange = (db: Db, change: UndoneChange): ChangeRun => {
     });
   }
   return { questions, rewritten: tally.rewritten, changedTables };
-};
-
-/**
- * Clears the undo copies of the records `personId` owns: their erasure
- * (store-host.ts, `forgetPerson`). An undo then checks those records as
- * they are, as it does a record edited since.
- */
-export const forgetChangeValues = (db: Db, personId: string): void => {
-  db.update(schemaChangeValues)
-    .set({ valueJson: null })
-    .where(
-      and(
-        eq(schemaChangeValues.ownerId, personId),
-        isNotNull(schemaChangeValues.valueJson)
-      )
-    )
-    .run();
-};
-
-/**
- * Removes every undo copy: called in the transaction that moves the
- * contract on by any other way than an undo, past the only change an undo
- * can reach (the newest, while the contract is still its own).
- */
-export const dropChangeValues = (db: Db): void => {
-  db.delete(schemaChangeValues)
-    .where(sql`1 = 1`)
-    .run();
 };

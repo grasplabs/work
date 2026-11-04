@@ -75,6 +75,35 @@ const questionsOf = (refused: { details: unknown }) =>
     })
     .parse(refused.details).questions;
 
+/** A sensitive notes table whose status is one of `values`. */
+const sensitive = (values: [string, ...string[]]) =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable({
+          title: v.string(),
+          status: v.enum(values),
+        }).sensitive(),
+      }),
+      { tables: { notes: { read: "appMembers", write: "appMembers" } } }
+    )
+  );
+/** An undo refused over the status of `ids`, in that order. */
+const blocked = (...ids: (string | undefined)[]) => ({
+  code: "migration.undo_blocked",
+  details: {
+    questions: [
+      {
+        table: "notes",
+        field: "status",
+        rows: ids.length,
+        records: ids.map((id) => ({ id, reason: "invalid" })),
+        answers: ["migration"],
+      },
+    ],
+  },
+});
+
 /** Notes whose `size` is `size`. */
 const sizes = (
   size: ReturnType<typeof v.string> | ReturnType<typeof v.number>
@@ -112,7 +141,10 @@ const insert = async (
   return id;
 };
 
-/** The store's own record of its schema changes and their undo copies. */
+/**
+ * The store's own record of its schema changes, and how many changes of
+ * records they recorded in the change history.
+ */
 const changeRows = async (store: OpenStore) =>
   await runInDurableObject(objectOf(store), (_instance, state) => ({
     changes: state.storage.sql
@@ -121,8 +153,10 @@ const changeRows = async (store: OpenStore) =>
       )
       .toArray()
       .map(({ undone, rewritten }) => ({ undone: undone !== null, rewritten })),
-    copies: state.storage.sql
-      .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_schema_change_values")
+    history: state.storage.sql
+      .exec<{ n: number }>(
+        "SELECT count(*) AS n FROM sdk_record_changes WHERE source = 'schema_change'"
+      )
       .one().n,
   }));
 
@@ -176,7 +210,7 @@ describe("a narrowing every record fits", () => {
       untouched: true,
       newWrites: "ok",
       oldWrites: "migration.incompatible_write",
-      changes: { changes: [{ undone: false, rewritten: 0 }], copies: 0 },
+      changes: { changes: [{ undone: false, rewritten: 0 }], history: 0 },
     });
   });
 });
@@ -291,7 +325,7 @@ describe("an answer", () => {
         revision: (before.get(ids[0] ?? "")?.revision ?? 0) + 1,
       },
       kept: true,
-      changes: { changes: [{ undone: false, rewritten: 1 }], copies: 1 },
+      changes: { changes: [{ undone: false, rewritten: 1 }], history: 1 },
     });
   });
 
@@ -364,7 +398,7 @@ describe("all or nothing", () => {
       code: "migration.required",
       rows: 1,
       contract: true,
-      changes: { changes: [], copies: 0 },
+      changes: { changes: [], history: 0 },
       stillWrites: "ok",
     });
     const after = await notesOf(store);
@@ -425,12 +459,12 @@ describe("all or nothing", () => {
       crashed: true,
       halfway: {
         contract: true,
-        changes: { changes: [], copies: 0 },
+        changes: { changes: [], history: 0 },
         records: 1200,
       },
       unchanged: true,
       applied: true,
-      changes: { changes: [{ undone: false, rewritten: 1200 }], copies: 1200 },
+      changes: { changes: [{ undone: false, rewritten: 1200 }], history: 1200 },
     });
   });
 });
@@ -487,7 +521,7 @@ describe("an undo", () => {
       edited: { title: "B", status: "done" },
       added: { title: "D", status: "done" },
       contract: true,
-      changes: { changes: [{ undone: true, rewritten: 2 }], copies: 0 },
+      changes: { changes: [{ undone: true, rewritten: 2 }], history: 3 },
       oldWrites: "ok",
       newWrites: "migration.not_current",
     });
@@ -500,32 +534,70 @@ describe("an undo", () => {
     });
   });
 
-  it("keeps nothing of a person's records once they are erased, and checks those records as they are", async () => {
-    const { store, first, ids } = await storeOf(todo, [
-      { title: "A", status: "todo" },
-    ]);
-    const second = await store.defineTables(open, consumer(2), [], [mapTodo]);
-    await activate(store, second.schemaHash, 2);
-    const kept = await changeRows(store);
-    await objectOf(store).forgetPerson(store.id, "ada");
+  it("puts back nothing a person wrote once they are erased, owner or not, and checks those records as they are", async () => {
+    // Ada's two notes; Grace, a member too, edits the second.
+    const undoAfterErasing = async (person: string) => {
+      const { store, first, ids } = await storeOf(todo, [
+        { title: "A", status: "todo" },
+        { title: "B", status: "done" },
+      ]);
+      await commit(
+        store,
+        first,
+        [
+          {
+            op: "patch",
+            table: "notes",
+            id: ids[1] ?? "",
+            expectedRevision: 1,
+            fields: { status: "todo" },
+          },
+        ],
+        "grace"
+      );
+      const second = await store.defineTables(open, consumer(2), [], [mapTodo]);
+      await activate(store, second.schemaHash, 2);
+      await objectOf(store).forgetPerson(store.id, person);
+      const refused = await refusalOf(activate(store, first, 1));
+      return { ids, refused };
+    };
+    // Grace wrote what Ada's second note held, but doesn't own it.
+    const grace = await undoAfterErasing("grace");
+    // Ada owns both: the change's own history of them is hers, and so is
+    // what her first note held.
+    const ada = await undoAfterErasing("ada");
 
-    const refused = await refusalOf(activate(store, first, 1));
+    expect({ grace: grace.refused, ada: ada.refused }).toStrictEqual({
+      grace: blocked(grace.ids[1]),
+      ada: blocked(...ada.ids.toSorted()),
+    });
+  });
+
+  it("of a sensitive table checks its records as they are: its history keeps no values", async () => {
+    const { store, first, ids } = await storeOf(sensitive(["todo", "done"]), [
+      { title: "A", status: "todo" },
+      { title: "B", status: "done" },
+    ]);
+    const second = await store.defineTables(
+      sensitive(["open", "done"]),
+      consumer(2),
+      [],
+      [mapTodo]
+    );
+    await activate(store, second.schemaHash, 2);
+    const kept = await runInDurableObject(objectOf(store), (_instance, state) =>
+      state.storage.sql
+        .exec<{ fields: string; before: string | null; leftOut: string }>(
+          "SELECT fields, before_json AS before, values_left_out AS leftOut FROM sdk_record_changes WHERE source = 'schema_change'"
+        )
+        .toArray()
+    );
+
     expect({
-      kept: kept.copies,
-      erased: await runInDurableObject(
-        objectOf(store),
-        (_instance, state) =>
-          state.storage.sql
-            .exec<{ n: number }>(
-              "SELECT count(*) AS n FROM sdk_schema_change_values WHERE value_json IS NOT NULL"
-            )
-            .one().n
-      ),
-      refused,
+      kept,
+      refused: await refusalOf(activate(store, first, 1)),
     }).toStrictEqual({
-      kept: 1,
-      erased: 0,
-      // What it held before is gone: as it is, it doesn't fit version 1.
+      kept: [{ fields: '["status"]', before: null, leftOut: "sensitive" }],
       refused: {
         code: "migration.undo_blocked",
         details: {

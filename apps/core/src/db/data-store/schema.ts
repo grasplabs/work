@@ -474,9 +474,11 @@ export const backfills = sqliteTable(
  * The schema changes the store applied as a release was made current,
  * after checking every record (store-schema-changes.ts): a narrowing, a
  * conversion, a rename, a changed access mode or row rule. Each with the
- * contract before and after it, the schemas it left behind, and when it
- * was undone. Never removed: the store's record of how its contract
- * moved.
+ * contract before and after it, the commit its rewrites are recorded
+ * under in the change history (`sdk_record_changes`, source
+ * `schema_change`), which its undo reads what records held from, the
+ * schemas it left behind, and when it was undone. Never removed: the
+ * store's record of how its contract moved.
  */
 export const schemaChanges = sqliteTable(
   "sdk_schema_changes",
@@ -489,6 +491,8 @@ export const schemaChanges = sqliteTable(
     contractHash: text("contract_hash").notNull(),
     /** The schema whose activation applied it. */
     schemaHash: text("schema_hash").notNull(),
+    /** The store's commit its rewrites are recorded under. */
+    commit: integer().notNull(),
     /** The plan, as canonical JSON. */
     plan: text().notNull(),
     /** The schemas it left behind, as canonical JSON: `[hash, ...]`. */
@@ -500,39 +504,6 @@ export const schemaChanges = sqliteTable(
     undoneAt: integer("undone_at"),
   },
   (table) => [index("sdk_schema_changes_contract").on(table.contractHash)]
-);
-
-/**
- * What a schema change (`sdk_schema_changes`) rewrote: each record's
- * document as it was before, and the revision the change wrote it at.
- * Undoing the change puts the document back where the record is still at
- * that revision; one edited since is checked against the contract before
- * instead, never overwritten. Kept until the store's contract moves past
- * the change, when no undo can reach it any more; a person's erasure
- * clears the documents of records they own.
- */
-export const schemaChangeValues = sqliteTable(
-  "sdk_schema_change_values",
-  {
-    changeId: integer("change_id").notNull(),
-    tableId: text("table_id").notNull(),
-    recordId: text("record_id").notNull(),
-    ownerId: text("owner_id").notNull(),
-    /** The revision the change wrote the record at. */
-    revision: integer().notNull(),
-    /** The document before the change; null once erased. */
-    valueJson: text("value_json"),
-    /** The schema the record was last written under before the change. */
-    schemaHash: text("schema_hash").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.changeId, table.tableId, table.recordId],
-    }),
-    // What a record's deletion removes with it (this migration's trigger).
-    index("sdk_schema_change_values_record").on(table.tableId, table.recordId),
-    index("sdk_schema_change_values_owner").on(table.ownerId),
-  ]
 );
 
 /**

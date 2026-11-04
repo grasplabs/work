@@ -49,7 +49,11 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   that kept no values (`admittedHistoryOf`; app-data.ts, store-host.ts).
 //   A migration's rewrite keeps no change, and never moves a field a row
 //   rule reads (store-migrations.ts, `rule_changed`), so the states a
-//   history is rebuilt through admit the same people across it.
+//   history is rebuilt through admit the same people across it. A schema
+//   change's rewrite keeps one (source `schema_change`, for the record's
+//   owner, its undo's only source of what the record held), and never
+//   moves a field a rule reads either (sdk schema-plan.ts,
+//   `rule_field_rewritten`).
 
 const dayMs = 24 * 60 * 60 * 1000;
 
