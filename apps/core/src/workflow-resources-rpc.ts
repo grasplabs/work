@@ -7,6 +7,7 @@ import type {
   AppWorkflowBinding,
   CatalogContractEntry,
   PendingWorkflowBindings,
+  ListedWorkflowBindingApproval,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
@@ -36,12 +37,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
+  listWorkflowBindings,
   pendingWorkflowBindings,
   workflowPendingBindings,
 } from "./workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
-  listWorkflowBindings,
   revokeWorkflowBinding,
 } from "./workflow-bindings.ts";
 import {
@@ -415,7 +416,7 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async bindings(id: string): Promise<WorkflowBindingApproval[]> {
+  async bindings(id: string): Promise<ListedWorkflowBindingApproval[]> {
     return await withPerson(
       this.#check,
       async (person) => await listWorkflowBindings(this.#env, person, id)

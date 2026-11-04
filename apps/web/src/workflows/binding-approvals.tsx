@@ -9,12 +9,17 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
+import { i18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
+import { roleLabel } from "../labels.ts";
 import {
   PeopleTeamsPicker,
   readPeopleAndTeams,
@@ -34,12 +39,81 @@ import { useCoreAction } from "../use-core-action.ts";
 // kinds slow to read (a connector, a store operation, a template), so it
 // leads to the workflow's page for those. Core checks every approval
 // again: that the person is one of the organization's admins, and that the
-// target serves.
+// target serves. The workflow's page lists the bindings approved in the
+// same frame, each with what it reaches (`targetWords`).
 
 /** One binding that waits. */
 export type PendingBinding = PendingWorkflowBindings["bindings"][number];
 
 type Offered = PendingBinding["offered"][number];
+
+/** The names of people and teams, by ID, where they are known. */
+export interface KnownNames {
+  people: ReadonlyMap<string, string>;
+  teams: ReadonlyMap<string, string>;
+}
+
+const noNames: KnownNames = { people: new Map(), teams: new Map() };
+
+/** A decision's decider (`person:`, `team:` or `role:` and an ID), in words. */
+const deciderWords = (decider: string, known: KnownNames): string => {
+  const [type, id = ""] = decider.split(":");
+  if (type === "person") {
+    return known.people.get(id) ?? id;
+  }
+  if (type === "team") {
+    return known.teams.get(id) ?? id;
+  }
+  return roleLabel(id);
+};
+
+/**
+ * What `target` reaches, in words: `label` where core named it (an offer's),
+ * else what the target itself names, a decision's deciders by the names
+ * `known` holds.
+ */
+export const targetWords = (
+  target: WorkflowBindingTarget,
+  label = "",
+  known: KnownNames = noNames
+): string => {
+  if (label !== "") {
+    return label;
+  }
+  switch (target.kind) {
+    case "model": {
+      return target.model;
+    }
+    case "connector": {
+      return target.contract;
+    }
+    case "storeOperation": {
+      return target.operation;
+    }
+    case "template": {
+      const { templateId, version } = target;
+      return i18n._(msg`Template ${templateId}, version ${version}`);
+    }
+    case "decision": {
+      const deciders = formatList(
+        target.deciders.map((decider) => deciderWords(decider, known))
+      );
+      return i18n._(msg`Answered by ${deciders}`);
+    }
+    case "knowledge": {
+      return i18n._(msg`A Brain collection it may read`);
+    }
+    case "event": {
+      return i18n._(msg`The events its contract admits`);
+    }
+    case "files": {
+      return i18n._(msg`The run's own files`);
+    }
+    default: {
+      return target satisfies never;
+    }
+  }
+};
 
 /** Approves `alias` with `target`, for the version listed. */
 type Approve = (alias: string, target: WorkflowBindingTarget) => Promise<void>;
@@ -59,16 +133,7 @@ const OfferedChoice = ({
   const { t } = useLingui();
   const [chosen, setChosen] = useState(0);
   const choice = offered[chosen] ?? offered[0];
-  // What an offered target is, in words: what it names, or what it is.
-  const wordsOf = ({ target, label }: Offered) => {
-    if (target.kind === "event") {
-      return t`The events its contract admits`;
-    }
-    if (target.kind === "files") {
-      return t`The run's own files`;
-    }
-    return label === "" ? target.kind : label;
-  };
+  const wordsOf = ({ target, label }: Offered) => targetWords(target, label);
   return (
     <div className="flex flex-wrap items-end gap-2">
       {offered.length === 1 ? (
@@ -244,6 +309,35 @@ const BindingChoice = ({
   );
 };
 
+/**
+ * One binding of a version: its alias and kind, with its contract where
+ * the reader may see it, above `children`.
+ */
+export const BindingFrame = ({
+  alias,
+  kind,
+  contractId,
+  children,
+}: {
+  alias: string;
+  kind: string;
+  contractId: string | null;
+  children: ReactNode;
+}) => {
+  const { t } = useLingui();
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border px-4 py-3">
+      <span className="flex flex-wrap items-center gap-2">
+        <code className="font-mono">{alias}</code>
+        <span className="text-muted-foreground">
+          {contractId === null ? kind : t`${kind}: ${contractId}`}
+        </span>
+      </span>
+      {children}
+    </li>
+  );
+};
+
 /** One binding that waits: what it reaches, and how it is approved. */
 const BindingRow = ({
   binding,
@@ -255,26 +349,20 @@ const BindingRow = ({
   busy: boolean;
   onApprove: Approve;
   elsewhere: string | undefined;
-}) => {
-  const { t } = useLingui();
-  const { alias, kind, contractId } = binding;
-  return (
-    <li className="flex flex-col gap-2 rounded-lg border px-4 py-3">
-      <span className="flex flex-wrap items-center gap-2">
-        <code className="font-mono">{alias}</code>
-        <span className="text-muted-foreground">
-          {t`${kind}: ${contractId}`}
-        </span>
-      </span>
-      <BindingChoice
-        binding={binding}
-        busy={busy}
-        elsewhere={elsewhere}
-        onApprove={onApprove}
-      />
-    </li>
-  );
-};
+}) => (
+  <BindingFrame
+    alias={binding.alias}
+    contractId={binding.contractId}
+    kind={binding.kind}
+  >
+    <BindingChoice
+      binding={binding}
+      busy={busy}
+      elsewhere={elsewhere}
+      onApprove={onApprove}
+    />
+  </BindingFrame>
+);
 
 /**
  * The bindings of one version that wait, each approved through

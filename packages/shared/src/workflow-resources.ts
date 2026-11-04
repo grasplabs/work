@@ -527,6 +527,17 @@ export interface WorkflowBindingApproval {
 }
 
 /**
+ * An active approval as a workflow's listing names it: with what its
+ * target names, as an offer of the same target is named
+ * (`PendingWorkflowBindings`): a connector's or store operation's grant
+ * by its binding name, a Brain collection by its name, a model by its ID;
+ * empty where the target names nothing, or its grant is gone.
+ */
+export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
+  label: string;
+}
+
+/**
  * A version of a workflow whose catalog bindings an admin hasn't approved,
  * so its starts are refused (`workflow.binding_unapproved`): each binding,
  * with the targets core can offer now that would serve it, each checked as
@@ -549,7 +560,7 @@ export interface PendingWorkflowBindings {
     kind: CatalogBindingKind;
     /** The catalog contract it calls. */
     contractId: string;
-    /** Each target offered, with what it names: a model's ID, a collection's name; empty for one that names nothing. */
+    /** Each target offered, with what it names (`ListedWorkflowBindingApproval`). */
     offered: { target: WorkflowBindingTarget; label: string }[];
   }[];
 }
@@ -1388,8 +1399,8 @@ export interface WorkflowResourcesApi {
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
   setParams: (id: string, input: unknown) => Promise<WorkflowParams>;
-  /** Its approved bindings, for anyone with a role. */
-  bindings: (id: string) => Promise<WorkflowBindingApproval[]>;
+  /** Its active approvals, each named, for anyone with a role. */
+  bindings: (id: string) => Promise<ListedWorkflowBindingApproval[]>;
   /** Approves a binding; for the organization's admins. */
   approveBinding: (
     id: string,

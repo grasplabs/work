@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
+import { Confirmed } from "../confirmed.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
 import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
@@ -186,71 +187,6 @@ const SigningNote = () => {
         old is refused.
       </Trans>
     </p>
-  );
-};
-
-/**
- * A confirmation before `onConfirm`, behind a small button. It closes as
- * soon as it is confirmed, and confirms nothing while a change runs, so a
- * second click can't make the change twice (rotating again would end the
- * secret just shown); what goes wrong shows in the row.
- */
-const Confirmed = ({
-  button,
-  label,
-  title,
-  description,
-  confirm,
-  busy,
-  onConfirm,
-}: {
-  button: string;
-  /** The button's name with the trigger it is for, for screen readers. */
-  label: string;
-  title: string;
-  description: string;
-  confirm: string;
-  busy: boolean;
-  onConfirm: () => void;
-}) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button
-        aria-label={label}
-        disabled={busy}
-        onClick={() => {
-          setOpen(true);
-        }}
-        size="sm"
-        variant="outline"
-      >
-        {button}
-      </Button>
-      <AlertDialog onOpenChange={setOpen} open={open}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{title}</AlertDialogTitle>
-            <AlertDialogDescription>{description}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busy}
-              onClick={() => {
-                setOpen(false);
-                onConfirm();
-              }}
-              variant="destructive"
-            >
-              {confirm}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
   );
 };
 

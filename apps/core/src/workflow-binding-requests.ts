@@ -2,7 +2,11 @@ import { collections } from "@grasp-os/brain/schema";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
-import type { PendingWorkflowBindings } from "@grasp-os/shared/workflow-resources";
+import type {
+  ListedWorkflowBindingApproval,
+  PendingWorkflowBindings,
+  WorkflowBindingTarget,
+} from "@grasp-os/shared/workflow-resources";
 import {
   and,
   asc,
@@ -15,8 +19,10 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import type { Acting } from "./auth/identity.ts";
 import {
   permissions,
+  workflowBindingApprovals,
   workflowResourceLifecycles,
   workflowResources,
 } from "./db/core/schema.ts";
@@ -25,6 +31,7 @@ import { requireMemberAdmin } from "./permissions.ts";
 import { latestTemplateVersions } from "./resource-templates.ts";
 import { grantedStore, servedIn, storeGrantFor } from "./store-operations.ts";
 import {
+  approvalOf,
   approvalServing,
   operationServesContract,
   requireTargetServes,
@@ -112,26 +119,67 @@ const heldOf = async (
     )
     .orderBy(asc(permissions.id));
 
-/** The workflow's own active permissions to read a collection, as targets, by the collection's name. */
-const knowledgeTargets = async (env: Env, id: string): Promise<Offered[]> => {
-  const rows = await heldOf(env, id, "collection");
+/**
+ * What `target` names, as an offer of it and an approval of it are
+ * listed: a connector's or store operation's by `grant`, the name of the
+ * workflow's own grant it goes through (its binding name), a Brain
+ * collection by `grant`, the collection's name, a model by its ID; empty
+ * where it names nothing, or its grant is gone.
+ */
+const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
+  switch (target.kind) {
+    case "model": {
+      return target.model;
+    }
+    case "connector": {
+      return grant === undefined ? "" : `${grant}: ${target.contract}`;
+    }
+    case "storeOperation": {
+      return grant === undefined ? "" : `${grant}: ${target.operation}`;
+    }
+    case "knowledge": {
+      return grant ?? "";
+    }
+    // A template's offer is named by its contract as it is read
+    // (`templateTargets`); an approval of one, by nothing.
+    case "template":
+    case "decision":
+    case "event":
+    case "files": {
+      return "";
+    }
+    default: {
+      return target satisfies never;
+    }
+  }
+};
+
+/** The names of the Brain collections `ids`, by ID. */
+const collectionNames = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<Map<string, string>> => {
   const named =
-    rows.length === 0
+    ids.length === 0
       ? []
       : await drizzle(env.KNOWLEDGE)
           .select({ id: collections.id, name: collections.name })
           .from(collections)
-          .where(
-            inArray(
-              collections.id,
-              rows.map(({ objectId }) => objectId)
-            )
-          );
-  const names = new Map(named.map(({ id: each, name }) => [each, name]));
-  return rows.map(({ id: permissionId, objectId }) => ({
-    target: { kind: "knowledge", permissionId },
-    label: names.get(objectId) ?? "",
-  }));
+          .where(inArray(collections.id, [...ids]));
+  return new Map(named.map(({ id, name }) => [id, name]));
+};
+
+/** The workflow's own active permissions to read a collection, as targets, by the collection's name. */
+const knowledgeTargets = async (env: Env, id: string): Promise<Offered[]> => {
+  const rows = await heldOf(env, id, "collection");
+  const names = await collectionNames(
+    env,
+    rows.map(({ objectId }) => objectId)
+  );
+  return rows.map(({ id: permissionId, objectId }) => {
+    const target = { kind: "knowledge", permissionId } as const;
+    return { target, label: labelOf(target, names.get(objectId)) };
+  });
 };
 
 /**
@@ -154,10 +202,12 @@ const connectorTargets = async (env: Env, id: string): Promise<Offered[]> => {
       }
     }
     for (const contract of contracts) {
-      offered.push({
-        target: { kind: "connector", permissionId: row.id, contract },
-        label: `${row.binding}: ${contract}`,
-      });
+      const target = {
+        kind: "connector",
+        permissionId: row.id,
+        contract,
+      } as const;
+      offered.push({ target, label: labelOf(target, row.binding) });
     }
   }
   return offered;
@@ -235,15 +285,13 @@ const operationTargets = async (
         (operation.kind === "query" || operation.kind === "mutation") &&
         operationServesContract(operation, contract)
       ) {
-        offered.push({
-          target: {
-            kind: "storeOperation",
-            permissionId: row.id,
-            operation: path,
-            operationKind: operation.kind,
-          },
-          label: `${row.binding}: ${path}`,
-        });
+        const target = {
+          kind: "storeOperation",
+          permissionId: row.id,
+          operation: path,
+          operationKind: operation.kind,
+        } as const;
+        offered.push({ target, label: labelOf(target, row.binding) });
       }
     }
   }
@@ -283,10 +331,10 @@ const candidatesOf = async (
   switch (binding.kind) {
     case "model": {
       const { models } = await modelSettings(env);
-      return models.map((model) => ({
-        target: { kind: "model", model },
-        label: model,
-      }));
+      return models.map((model) => {
+        const target = { kind: "model", model } as const;
+        return { target, label: labelOf(target) };
+      });
     }
     case "event": {
       return [{ target: { kind: "event" }, label: "" }];
@@ -526,4 +574,67 @@ export const workflowPendingBindings = async (
     ],
     true
   );
+};
+
+/**
+ * What the workflow's own active grants of the kinds a target goes
+ * through are called, by permission ID: a Brain collection's by the
+ * collection's name, a connection's or store's by its binding name.
+ */
+const grantNamesOf = async (
+  env: Env,
+  id: string
+): Promise<Map<string, string>> => {
+  const [read, connections, stores] = await Promise.all([
+    heldOf(env, id, "collection"),
+    heldOf(env, id, "connection"),
+    heldOf(env, id, "store"),
+  ]);
+  const names = await collectionNames(
+    env,
+    read.map(({ objectId }) => objectId)
+  );
+  const grants = new Map<string, string>();
+  for (const { id: permissionId, objectId } of read) {
+    const name = names.get(objectId);
+    if (name !== undefined) {
+      grants.set(permissionId, name);
+    }
+  }
+  for (const { id: permissionId, binding } of [...connections, ...stores]) {
+    grants.set(permissionId, binding);
+  }
+  return grants;
+};
+
+/**
+ * Workflow `id`'s active approvals, by alias, each named as an offer of
+ * its target is (`labelOf`), for anyone with a role.
+ */
+export const listWorkflowBindings = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<ListedWorkflowBindingApproval[]> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const [rows, grants] = await Promise.all([
+    drizzle(env.DB)
+      .select()
+      .from(workflowBindingApprovals)
+      .where(
+        and(
+          eq(workflowBindingApprovals.workflowResourceId, workflow.id),
+          eq(workflowBindingApprovals.status, "active")
+        )
+      )
+      .orderBy(asc(workflowBindingApprovals.alias)),
+    grantNamesOf(env, workflow.id),
+  ]);
+  return rows.map((row) => {
+    const approval = approvalOf(row);
+    const { target } = approval;
+    const grant =
+      "permissionId" in target ? grants.get(target.permissionId) : undefined;
+    return { ...approval, label: labelOf(target, grant) };
+  });
 };

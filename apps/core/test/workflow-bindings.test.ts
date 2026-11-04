@@ -40,6 +40,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import {
+  listWorkflowBindings,
   pendingWorkflowBindings,
   workflowPendingBindings,
 } from "../src/workflow-binding-requests.ts";
@@ -1010,6 +1011,8 @@ describe("approving a workflow's binding", () => {
 });
 
 describe("bindings waiting on an admin", () => {
+  beforeAll(chooseModel);
+
   it("list a live version's and a go-live version's unapproved bindings for admins, with the targets that would serve, until one is approved and lets a start through", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1194,13 +1197,24 @@ describe("bindings waiting on an admin", () => {
     )
       .bind(workflow.id)
       .first<{ count: number }>();
+    const after = await offeredOf();
+    // Granted again and approved: listed by the collection's name, as offered.
+    const regranted = await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "collection", collectionId: handbook.id },
+      actions: ["read"],
+      binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await approve({ kind: "knowledge", permissionId: regranted });
+    const listed = await listWorkflowBindings(env, admin, workflow.id);
 
     expect({
       before,
       othersGrant,
       revokedSinceOffered,
       approvals: approvals?.count,
-      after: await offeredOf(),
+      after,
+      listed: listed.map(({ alias, label }) => ({ alias, label })),
     }).toStrictEqual({
       before: [
         [{ target: { kind: "knowledge", permissionId }, label: "Handbook" }],
@@ -1209,6 +1223,7 @@ describe("bindings waiting on an admin", () => {
       revokedSinceOffered: "workflow.binding_invalid",
       approvals: 0,
       after: [[]],
+      listed: [{ alias: "docs", label: "Handbook" }],
     });
   });
 
@@ -1325,8 +1340,11 @@ describe("bindings waiting on an admin", () => {
       target: offered.target,
       reviewed: { version: 1 },
     });
+    const listed = await listWorkflowBindings(env, admin, workflow.id);
 
     expect({
+      // Named as it was offered.
+      listed: listed.map(({ alias, label }) => ({ alias, label })),
       inbox: inbox
         .filter((each) => each.workflow.id === workflow.id)
         .flatMap(({ bindings }) => bindings.map(({ offered: each }) => each)),
@@ -1363,6 +1381,7 @@ describe("bindings waiting on an admin", () => {
       refused: "workflow.binding_unapproved",
       after: [],
       started: "ok",
+      listed: [{ alias: "mail", label: `${binding}: graph.mail@1` }],
     });
   });
 
@@ -1408,6 +1427,84 @@ describe("bindings waiting on an admin", () => {
       own: [{ version: 2, live: false, aliases: ["summary"] }],
       // Neither live nor asked to go live: not the inbox's.
       inbox: [],
+    });
+  });
+
+  it("list a binding again once an admin revokes its approval, which refuses its starts until one approves it again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const staff = await person("admin", true);
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const approve = async () =>
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "summary",
+        target: { kind: "model", model: allowedModel },
+        reviewed: { version: 1 },
+      });
+    const waiting = async () => {
+      const pending = await workflowPendingBindings(env, admin, workflow.id);
+      return pending.map(({ version, live, bindings }) => ({
+        version,
+        live,
+        aliases: bindings.map(({ alias }) => alias),
+      }));
+    };
+    const approval = await approve();
+    const approved = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    const refusedTo = {
+      builder: await outcome(
+        revokeWorkflowBinding(env, ada, workflow.id, approval.id)
+      ),
+      staff: await outcome(
+        revokeWorkflowBinding(env, staff, workflow.id, approval.id)
+      ),
+    };
+    const stillApproved = await outcome(start(ada, workflow.id));
+
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const revoked = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    await approve();
+    const approvedAgain = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target }) =>
+          action === "workflow.binding.revoked" && target?.id === workflow.id
+      )
+      .map(({ actor, detail }) => ({ actor, detail }));
+
+    expect({
+      approved,
+      refusedTo,
+      stillApproved,
+      revoked,
+      approvedAgain,
+      audited,
+    }).toStrictEqual({
+      approved: { waiting: [], start: "ok" },
+      refusedTo: { builder: "role.forbidden", staff: "role.forbidden" },
+      stillApproved: "ok",
+      revoked: {
+        waiting: [{ version: 1, live: true, aliases: ["summary"] }],
+        start: "workflow.binding_unapproved",
+      },
+      approvedAgain: { waiting: [], start: "ok" },
+      audited: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { approval: approval.id },
+        },
+      ],
     });
   });
 
