@@ -19,15 +19,10 @@ export type RecordChangeOp = (typeof recordChangeOps)[number];
 /**
  * What made a change: a commit of the App's (or a consumer's) mutation, a
  * cascade of a deletion (in that commit or after it, as the store's
- * cascade job), an import of a table's CSV, or a migration's transform
- * rewriting a field a table's row rules read.
+ * cascade job), or an import of a table's CSV. A migration's transform
+ * keeps no change: it never moves a field a row rule reads.
  */
-export const recordChangeSources = [
-  "commit",
-  "cascade",
-  "import",
-  "migration",
-] as const;
+export const recordChangeSources = ["commit", "cascade", "import"] as const;
 export type RecordChangeSource = (typeof recordChangeSources)[number];
 
 /**
@@ -35,8 +30,7 @@ export type RecordChangeSource = (typeof recordChangeSources)[number];
  * declared sensitive (`defineTable(...).sensitive()`), the values were
  * larger than a change keeps, the change didn't read them (a cascade job
  * deletes a record without loading it), the person who made it was
- * erased, and what they wrote with them, or a migration rewrote it, which
- * keeps no values: a record's history as
+ * erased, and what they wrote with them: a record's history as
  * a reader its table's row rules choose rows for reads it stops there,
  * as its states before can't be told.
  */
@@ -45,7 +39,6 @@ export const valuesLeftOutReasons = [
   "too_large",
   "unread",
   "erased",
-  "rewritten",
 ] as const;
 export type ValuesLeftOut = (typeof valuesLeftOutReasons)[number];
 

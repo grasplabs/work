@@ -2473,3 +2473,185 @@ describe("a store's public operations and its tables' row rules", () => {
     });
   });
 });
+
+/**
+ * A CRM whose plans only its builders read and change, and whose memos
+ * everyone with a role in it does, by role rules on member tables.
+ */
+const rolesCrmFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  plans: defineTable({ text: v.string() }).access({ read: [rows.role("builder")] }),
+  memos: defineTable({ text: v.string() }).access({ read: [rows.role("user")] }),
+});
+`,
+  "operations/crm.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const addPlan = mutation({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("plans", args);
+    return null;
+  },
+});
+
+export const plans = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("plans").take(100)).map(({ text }) => text),
+});
+
+export const addMemo = mutation({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("memos", args);
+    return null;
+  },
+});
+
+export const memos = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("memos").take(100)).map(({ text }) => text),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { addMemo, addPlan, memos, plans } from "./operations/crm.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Roles CRM",
+  schema,
+  access: {
+    tables: {
+      plans: { read: "appMembers", write: "appMembers" },
+      memos: { read: "appMembers", write: "appMembers" },
+    },
+  },
+  operations: { crm: { addMemo, addPlan, memos, plans } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
+
+/** An App that reads and adds the CRM's plans and memos through its public operations. */
+const rolesDeskFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const crm = resource.store("crm", {
+  operations: {
+    "crm.plans": { kind: "query", args: {}, returns: v.array(v.string()) },
+    "crm.memos": { kind: "query", args: {}, returns: v.array(v.string()) },
+    "crm.addPlan": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
+    "crm.addMemo": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
+  },
+});
+
+/** What a call answered, as JSON, or the code it failed with. */
+const attempt = async (work: () => Promise<unknown>): Promise<string> => {
+  try {
+    return JSON.stringify(await work());
+  } catch (error) {
+    return \`error:\${String(Reflect.get(Object(error), "code"))}\`;
+  }
+};
+
+export const plans = action({
+  args: {},
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("crm.plans", {})),
+});
+
+export const memos = action({
+  args: {},
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("crm.memos", {})),
+});
+
+export const addPlan = action({
+  args: { text: v.string() },
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("crm.addPlan", args)),
+});
+
+export const addMemo = action({
+  args: { text: v.string() },
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("crm.addMemo", args)),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { addMemo, addPlan, crm, memos, plans } from "./operations/desk.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: { desk: { addMemo, addPlan, memos, plans } },
+  internalOperations: {},
+  screens: [],
+  uses: [crm],
+});
+`,
+};
+
+describe("a store's public operations and its tables' role rules", () => {
+  it("serve another App's calls as a member's, never a builder's: a builders' rule admits no row, a users' rule every one", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(rolesCrmFiles, "Roles CRM");
+    const desk = await sealedApp(rolesDeskFiles, "Desk");
+    await bind(
+      admin,
+      desk,
+      await deskGrant(admin, desk, crm, [
+        "crm.plans",
+        "crm.memos",
+        "crm.addPlan",
+        "crm.addMemo",
+      ])
+    );
+    await call(crm.owner, crm, "crm.addPlan", { text: "Launch plan" });
+    await call(crm.owner, crm, "crm.addMemo", { text: "Team memo" });
+
+    expect({
+      // The admin builds every App, the CRM included: in it, they read
+      // the builders' plans; through Desk, as a member, none.
+      adminInCrm: await call(admin, crm, "crm.plans"),
+      adminPlansThroughDesk: await call(admin, desk, "desk.plans"),
+      adminMemosThroughDesk: await call(admin, desk, "desk.memos"),
+      deskOwnerPlans: await call(desk.owner, desk, "desk.plans"),
+      // A builders' plan can't be written through Desk; a memo can.
+      addedPlan: await call(admin, desk, "desk.addPlan", { text: "Forged" }),
+      addedMemo: await call(desk.owner, desk, "desk.addMemo", {
+        text: "Desk memo",
+      }),
+      plansAfter: await call(crm.owner, crm, "crm.plans"),
+      memosAfter: await call(crm.owner, crm, "crm.memos"),
+    }).toStrictEqual({
+      adminInCrm: ["Launch plan"],
+      adminPlansThroughDesk: [],
+      adminMemosThroughDesk: ["Team memo"],
+      deskOwnerPlans: [],
+      addedPlan: "error:resource.unavailable",
+      addedMemo: null,
+      plansAfter: ["Launch plan"],
+      memosAfter: ["Team memo", "Desk memo"],
+    });
+  });
+});

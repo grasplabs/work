@@ -37,7 +37,13 @@ import type { Fixture } from "./sealed-apps.ts";
 //   fit its input before App code sees it", "hands the handler only the
 //   fields its input declares".
 // - One owner's data reaches another owner's record through module state:
-//   "refuses a batch that mixes owners of a table with owner access".
+//   "refuses a batch that mixes owners of a table with owner access"; one
+//   person's or team's on a table with row rules: "refuses a batch that
+//   mixes two people's or two teams' rows", and fixtures of different
+//   people run a batch each: "runs fixtures of different people …".
+// - The transform moves a record into someone else's sight by rewriting
+//   a field a row rule reads: "refuses an output that changes a field a
+//   row rule reads".
 // - A caller hands it managed fields, or a batch past its bounds: "refuses
 //   rows holding managed fields", "refuses a batch past its bounds".
 // - The transform answers differently each time, through the prototypes,
@@ -273,13 +279,14 @@ const namedSchema = (details: unknown): string => {
  */
 const sealedMigrating = async (
   names: readonly string[],
-  files: (fromSchema: string, toSchema: string) => Record<string, string>
+  files: (fromSchema: string, toSchema: string) => Record<string, string>,
+  first: Record<string, string> = baseFiles(names)
 ): Promise<{
   fixture: Fixture;
   release: Release;
   refused: { code: unknown; details: unknown };
 }> => {
-  const fixture = await appWith(baseFiles(names));
+  const fixture = await appWith(first);
   const base = await seal(fixture);
   const fromSchema = base.manifest.schemaHash;
   await commitFiles(
@@ -682,7 +689,9 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
       note("n1", { title: "Mine" }, "u_alice"),
       note("n2", { title: "Theirs" }, "u_bob"),
     ];
-    await expect(run("remembers-rows", mixed)).rejects.toThrow(/mixes owners/u);
+    await expect(run("remembers-rows", mixed)).rejects.toThrow(
+      /shows to different people/u
+    );
     await expect(
       run("remembers-rows", [
         note("n1", { title: "Mine" }, "u_alice"),
@@ -774,6 +783,186 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     await expect(run("derive-category", many)).rejects.toThrow(
       /past its bounds/u
     );
+  });
+});
+
+/**
+ * Salaries read by the person each names and the team it is for, each
+ * migration's table its own, with `fields`.
+ */
+const salariesSchema = (names: readonly string[], fields: string): string =>
+  `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+
+export const salaryFields = {
+${fields}
+};
+
+export default defineSchema({
+${names
+  .map(
+    (name) =>
+      `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
+  )
+  .join("\n")}
+});
+`;
+
+const salaryBase = `  employee: v.person(),
+  team: v.string(),
+  amount: v.number(),`;
+
+/** The App registering `names`' migrations, when `registered`. */
+const salariesApp = (names: readonly string[], registered: boolean): string =>
+  appOf(names, registered).replaceAll(
+    '{ read: "owner", write: "owner" }',
+    '{ read: "appMembers", write: "appMembers" }'
+  );
+
+/** Module state of each salary migration: the row before, while a call lasts. */
+const salaryPrelude = "let previous: number | undefined;";
+
+/** Transforms of salaries: each adds a band, as version 2 requires. */
+const salaryHandlers = {
+  // Carries the previous row's amount into the next one, through the
+  // module state a batch's rows share (`previous`, `salaryPrelude`):
+  // within one person's rows that is their own; across people it would
+  // show one's salary to another.
+  "carries-amount": `(ctx, row) => {
+    const amount = previous ?? row.amount;
+    previous = row.amount;
+    return { ...row, amount, band: amount > 50000 ? "high" : "low" };
+  }`,
+  // Hands every salary to its author, or to their team, to read.
+  "hands-to-me": `(ctx, row) => ({ ...row, employee: "u_mallory", band: "low" })`,
+  "moves-team": `(ctx, row) => ({ ...row, team: "t_mallory", band: "low" })`,
+} as const;
+
+/** What each salary migration's fixtures are: two people's, as records are. */
+const salaryFixtures = `[
+    { row: { employee: "u_ann", team: "t_a", amount: 70000 }, expect: { employee: "u_ann", team: "t_a", amount: 70000, band: "high" } },
+    { row: { employee: "u_bob", team: "t_a", amount: 30000 }, expect: { employee: "u_bob", team: "t_a", amount: 30000, band: "low" } },
+  ]`;
+
+let salariesOnce: ReturnType<typeof sealedMigrating> | undefined;
+const sealedSalaries = async () =>
+  await (salariesOnce ??= sealedMigrating(
+    Object.keys(salaryHandlers),
+    (fromSchema, toSchema) => {
+      const names = Object.keys(salaryHandlers);
+      return {
+        "schema.ts": salariesSchema(
+          names,
+          `${salaryBase}\n  band: v.enum(["low", "high"]),`
+        ),
+        ...Object.fromEntries(
+          Object.entries(salaryHandlers).map(([name, handler]) => [
+            `migrations/${name}.ts`,
+            migrationSource(name, handler, {
+              fromSchema,
+              toSchema,
+              fixtures: salaryFixtures,
+              prelude: salaryPrelude,
+              input:
+                "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
+            }).replaceAll("noteFields", "salaryFields"),
+          ])
+        ),
+        "app.ts": salariesApp(names, true),
+      };
+    },
+    {
+      "schema.ts": salariesSchema(Object.keys(salaryHandlers), salaryBase),
+      "app.ts": salariesApp(Object.keys(salaryHandlers), false),
+    }
+  ));
+
+/** A salary record of `employee` in `team`. */
+const salary = (
+  id: string,
+  employee: string,
+  team: string,
+  amount: number
+): TransformRow => ({
+  id,
+  owner: "u_importer",
+  fields: { employee, team, amount },
+});
+
+// A builder, or the AI for them, who can't read Bob's salary ships a
+// migration of a table whose row rules read who a row is for: carrying
+// Bob's amount into their own row through module state, or handing his
+// row to themselves or their team, would let them read it.
+describe("transforming a table with row rules", { timeout: 120_000 }, () => {
+  const runSalaries = async (
+    name: keyof typeof salaryHandlers,
+    batch: readonly TransformRow[]
+  ) => {
+    const { release } = await sealedSalaries();
+    return await transformBatch(env, release, name, batch);
+  };
+
+  it("refuses a batch that mixes two people's or two teams' rows, which only a caller's bug sends", async () => {
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_mallory", "t_a", 30_000),
+      ])
+    ).rejects.toThrow(/shows to different people/u);
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_bob", "t_b", 30_000),
+      ])
+    ).rejects.toThrow(/shows to different people/u);
+    // One person's rows of one team: what carries stays theirs.
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_bob", "t_a", 30_000),
+      ])
+    ).resolves.toMatchObject({
+      ok: true,
+      rows: [
+        { fields: { employee: "u_bob", amount: 90_000 } },
+        { fields: { employee: "u_bob", amount: 90_000 } },
+      ],
+    });
+  });
+
+  it.each([
+    ["hands-to-me", "employee"],
+    ["moves-team", "team"],
+  ] as const)(
+    "refuses an output that changes a field a row rule reads: %s",
+    async (name, field) => {
+      const outcome = await runSalaries(name, [
+        salary("s1", "u_bob", "t_a", 90_000),
+      ]);
+      expect(outcome).toStrictEqual({
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "rule_changed",
+          issues: [
+            `${field}: A migration doesn't change a field a row rule reads; a write changes who sees a record`,
+          ],
+        },
+      });
+    }
+  );
+
+  it("runs fixtures of different people a batch each as the release is sealed, and records a rule field's change as their failure", async () => {
+    const { release } = await sealedSalaries();
+    const evidence = new Map(
+      release.manifest.migrationEvidence.map((found) => [
+        found.migration,
+        found,
+      ])
+    );
+    expect({
+      carries: evidence.get("carries-amount")?.failure ?? null,
+      hands: evidence.get("hands-to-me")?.failure?.reason,
+    }).toStrictEqual({ carries: null, hands: "rule_changed" });
   });
 });
 

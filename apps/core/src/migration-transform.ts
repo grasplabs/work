@@ -13,6 +13,7 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 import type { Release } from "./app-releases.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv, SandboxedWorker } from "./sandboxed.ts";
+import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 
 // Running an App's explicit migration (spec 17.2) on a batch of records:
 // the transform is App code, so it runs only in an isolate with no env and
@@ -47,14 +48,24 @@ import type { SandboxedEnv, SandboxedWorker } from "./sandboxed.ts";
 //   as at inspection), and an answer past `transformAnswerMaxBytes` is
 //   refused. A sandbox that didn't answer at all is
 //   `SandboxUnavailableError`, never the App's failure.
-// - The transform carries one owner's data into another owner's record:
-//   module state survives between the rows of one call (a fresh isolate
-//   per call ends it between calls), so on a table whose read or write
-//   access is `owner` a batch holds one owner's records only. Each row
-//   carries its owner, which the host supplies and the handler never
-//   sees, and a batch that mixes owners there is refused as a caller's
-//   bug. A migration still reads and rewrites every record of its table,
-//   whoever owns it: the version review says so.
+// - The transform carries one person's or team's data into a record
+//   others see: module state survives between the rows of one call (a
+//   fresh isolate per call ends it between calls), so a batch holds rows
+//   of one audience only (store-rules.ts, `audienceKey`): one owner's on a
+//   table whose access mode or a rule reads the owner, and one value of
+//   each field its row rules read. Each row carries its owner, which the
+//   host supplies and the handler never sees, and a batch that mixes
+//   audiences is refused as a caller's bug. A migration still reads and
+//   rewrites every record of its table, whoever may read it: the version
+//   review says so.
+// - The transform moves a record into other people's sight by rewriting a
+//   field a row rule reads (a team, an assignee): refused
+//   (`rule_changed`), here, so its fixtures catch it as its release is
+//   sealed, and again by the store as it commits (store-migrations.ts,
+//   `outputRefusal`). Who a record reaches changes only through writes,
+//   which pass the rules before and after. A transform answers only for
+//   the records of its own table it was handed, never another table's,
+//   so it can't move rows into a table whose rules admit more people.
 // - The transform answers differently each time: randomness and clocks
 //   are taken away while it runs and while its answer is serialized (sdk
 //   runner, `runMigration`). Best effort, not a boundary: a value captured
@@ -145,7 +156,8 @@ export type TransformFailure =
         | "invalid_input"
         | "threw"
         | "invalid_output"
-        | "too_large";
+        | "too_large"
+        | "rule_changed";
       readonly issues: readonly string[];
     }
   | {
@@ -161,6 +173,9 @@ export type TransformOutcome =
 
 /** What a transform needs of a sealed release. */
 export type TransformRelease = Pick<Release, "app" | "modules" | "sdk">;
+
+/** A table of a release's schema, as a transform's checks read it. */
+type TransformTable = TransformRelease["app"]["schema"]["tables"][string];
 
 /**
  * The isolate's main module, the module its request is in, and the one
@@ -271,6 +286,31 @@ const validated = (
     ? { fields: json }
     : { issues: ["The value isn't an object of fields"] };
 };
+
+/** Field `name` of `fields` as canonical text; undefined when absent. */
+const fieldText = (fields: StoreFields, name: string): string | undefined =>
+  Object.hasOwn(fields, name) ? canonicalJson(fields[name] ?? null) : undefined;
+
+/**
+ * The first of `names` whose value differs between `before` and `after`
+ * (present in one and not the other included), or undefined.
+ */
+export const firstChanged = (
+  names: Iterable<string>,
+  before: StoreFields,
+  after: StoreFields
+): string | undefined => {
+  for (const name of names) {
+    if (fieldText(before, name) !== fieldText(after, name)) {
+      return name;
+    }
+  }
+  return undefined;
+};
+
+/** Why an output that changes `field`, which a row rule reads, is refused. */
+export const ruleChangedIssue = (field: string): string =>
+  `${field}: A migration doesn't change a field a row rule reads; a write changes who sees a record`;
 
 /** `fields` with only the keys `keep` holds. */
 const picked = (
@@ -393,12 +433,12 @@ const answerOf = (
 
 /**
  * Refuses a batch only a caller's bug sends: past its bounds, holding a
- * managed field, or mixing owners of a table whose read or write access
- * is `owner` (see the header).
+ * managed field, or mixing rows `table`'s access mode or row rules show
+ * to different people (see the header).
  */
 const requireBatch = (
   managed: readonly string[],
-  access: { readonly read: string; readonly write: string },
+  table: TransformTable,
   rows: readonly TransformRow[]
 ): void => {
   if (
@@ -413,10 +453,10 @@ const requireBatch = (
   ) {
     throw new Error("A transform's rows hold managed fields");
   }
-  const owned = access.read === "owner" || access.write === "owner";
-  if (owned && new Set(rows.map(({ owner }) => owner)).size > 1) {
+  const audience = audienceOf(table);
+  if (new Set(rows.map((row) => audienceKey(audience, row))).size > 1) {
     throw new Error(
-      "A transform's batch of a table with owner access mixes owners"
+      "A transform's batch mixes rows its table shows to different people"
     );
   }
 };
@@ -449,7 +489,7 @@ export const transformBatch = async (
   if (target === undefined) {
     throw new Error("A migration's table isn't in its release's schema");
   }
-  requireBatch(release.app.schema.managedFields, target.access, rows);
+  requireBatch(release.app.schema.managedFields, target, rows);
   if (rows.length === 0) {
     return { ok: true, rows: [] };
   }
@@ -527,6 +567,17 @@ export const transformBatch = async (
       ...picked(row.fields, (key) => !Object.hasOwn(target.fields, key)),
       ...checked.fields,
     };
+    const moved = firstChanged(ruleFieldsOf(target.rules), row.fields, fields);
+    if (moved !== undefined) {
+      return {
+        ok: false,
+        failure: {
+          id: row.id,
+          reason: "rule_changed",
+          issues: [ruleChangedIssue(moved)],
+        },
+      };
+    }
     if (encoder.encode(canonicalJson(fields)).byteLength > documentMaxBytes) {
       return {
         ok: false,
@@ -545,7 +596,7 @@ export const transformBatch = async (
 /** The ID a fixture's record has as its migration runs on it. */
 const fixtureId = (index: number): string => `fixture-${index + 1}`;
 
-/** The owner of every fixture's record: one owner, as a batch requires. */
+/** The owner of every fixture's record: the App's own data, no one's. */
 const fixtureOwner = "fixture";
 
 /** `fields`, only the keys `declared` holds. */
@@ -602,17 +653,36 @@ const fixtureEvidence = async (
     owner: fixtureOwner,
     fields: row,
   }));
-  const outcome = await transformBatch(env, release, name, rows);
-  if (!outcome.ok) {
-    const { id, reason, issues } = outcome.failure;
-    const index = rows.findIndex((row) => row.id === id);
-    return failed(index === -1 ? null : index, reason, issues);
+  const target = Object.hasOwn(release.app.schema.tables, table)
+    ? release.app.schema.tables[table]
+    : undefined;
+  if (target === undefined) {
+    throw new Error("A migration's table isn't in its release's schema");
   }
-  const target = release.app.schema.tables[table]?.fields ?? {};
+  // Fixtures of different audiences run as records do, a batch for each
+  // (`requireBatch`), each in its own isolate.
+  const audience = audienceOf(target);
+  const batches = Map.groupBy(rows, (row) => audienceKey(audience, row));
+  const answered = new Map<string, TransformRow>();
+  for (const batch of batches.values()) {
+    // One sandbox call at a time, as for each migration (below).
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const outcome = await transformBatch(env, release, name, batch);
+    if (!outcome.ok) {
+      const { id, reason, issues } = outcome.failure;
+      const index = rows.findIndex((row) => row.id === id);
+      return failed(index === -1 ? null : index, reason, issues);
+    }
+    for (const row of outcome.rows) {
+      answered.set(row.id, row);
+    }
+  }
   for (const [index, { expect: expected }] of fixtures.entries()) {
-    const answered = outcome.rows[index];
-    if (expected !== null && answered !== undefined) {
-      const actual = canonicalJson(declaredFields(answered.fields, target));
+    const transformed = answered.get(fixtureId(index));
+    if (expected !== null && transformed !== undefined) {
+      const actual = canonicalJson(
+        declaredFields(transformed.fields, target.fields)
+      );
       const wanted = canonicalJson(expected);
       if (actual !== wanted) {
         return failed(index, "unexpected_output", [

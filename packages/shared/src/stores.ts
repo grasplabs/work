@@ -695,6 +695,7 @@ export interface MigrationFailure {
     | "invalid_answer"
     | "outside_contract"
     | "reference_changed"
+    | "rule_changed"
     | "fixtures_failed";
   issues: string[];
 }

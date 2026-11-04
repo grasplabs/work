@@ -11,6 +11,7 @@ import {
   queryMaxResults,
   queryMaxScannedEntries,
 } from "@grasp-os/shared/store-limits";
+import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields, WriterRoles } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -33,6 +34,7 @@ import type { SessionCheck } from "../src/session-check.ts";
 import { reviewVersion } from "../src/version-review.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { refusalOf } from "./migrated-apps.ts";
 import { migrationBatch, objectOf } from "./pending-stores.ts";
 import { appWith, person } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -46,8 +48,10 @@ import { manifestHash, newRecordId } from "./store-schemas.ts";
 // reads them (`operationRoles`). The cases follow the threat model:
 // every read path (get, queries and their terminals, pages, searches,
 // groups, related records), every write (insert, patch, replace, delete,
-// a reference, a cascade) and a team left between two calls, for two
-// people in different teams, a builder and someone outside the App.
+// a reference, a cascade, a restricted deletion a hidden row refers to),
+// a team left between two calls, and a migration's transform (one team's
+// rows a batch, never a rule's field rewritten), for two people in
+// different teams, a builder and someone outside the App.
 
 const schema = defineSchema({
   requests: defineTable({
@@ -1398,22 +1402,21 @@ const commitAs = async (
   });
 };
 
-describe("a record's history across a migration", () => {
-  /**
-   * A store with one ticket `by` inserted for `team`, then migrated to
-   * v2 by a transform that rewrites every ticket with `rewrite`, then
-   * patched by Ada in Sales: the ticket's ID and the v2 schema's hash.
-   */
-  const migrated = async (
-    inserted: { by: string; team: string },
-    rewrite: (fields: StoreFields) => StoreFields
-  ): Promise<{ store: OpenStore; id: string; schemaHash: string }> => {
-    const store = await openStore(
-      env,
-      await createStore(env, await person("builder"))
-    );
-    const first = await store.defineTables(v1Text, consumer(1));
+/** A store holding a ticket for each of `tickets`, under v1. */
+const ticketsStore = async (
+  tickets: readonly { by: string; team: string }[]
+): Promise<{ store: OpenStore; ids: string[] }> => {
+  const store = await openStore(
+    env,
+    await createStore(env, await person("builder"))
+  );
+  const first = await store.defineTables(v1Text, consumer(1));
+  const ids: string[] = [];
+  for (const [index, { by, team }] of tickets.entries()) {
     const id = newRecordId();
+    ids.push(id);
+    // One commit after the other, as people's would be.
+    // oxlint-disable-next-line no-await-in-loop -- see above
     await commitAs(
       store,
       first.schemaHash,
@@ -1422,49 +1425,156 @@ describe("a record's history across a migration", () => {
           op: "insert",
           table: "tickets",
           id,
-          fields: { title: "First title", team: inserted.team },
+          fields: { title: `Ticket ${index}`, team },
         },
       ],
-      inserted.by,
-      [inserted.team]
+      by,
+      [team]
     );
-    const second = await store.defineTables(v2Text, consumer(2), [
-      {
-        name: "rewrite-tickets",
-        table: "tickets",
-        fromSchema: first.schemaHash,
-        toSchema: await manifestHash(v2Text),
-      },
-    ]);
-    const target = second.contract.hash;
-    for (let batch = 1; ; batch += 1) {
-      // One batch after the other, as the backfill's run takes them.
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const read = await migrationBatch(store, target, batch);
-      if (read.state !== "transform") {
-        break;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const transformed = await objectOf(store).commitTransformed(
-        store.id,
-        JSON.stringify({
-          target,
-          attempt: 1,
-          batch,
-          phase: read.phase,
-          table: read.table,
-          through: read.through,
-          rows: read.rows.map(({ id: row, revision, fields }) => ({
-            id: row,
-            revision,
-            fields: rewrite(fields),
-          })),
-        })
-      );
-      if (transformed.state !== "running") {
-        break;
-      }
+  }
+  return { store, ids };
+};
+
+/**
+ * Migrates `store` to v2, standing in for core's transform as the
+ * backfill's run would: each batch the store hands out answered with
+ * `rewrite` of each of its rows. What each batch held, and the last
+ * batch's outcome.
+ */
+const migrateTickets = async (
+  store: OpenStore,
+  rewrite: (fields: StoreFields) => StoreFields
+): Promise<{
+  batches: StoreFields[][];
+  last: unknown;
+  schemaHash: string;
+}> => {
+  const second = await store.defineTables(v2Text, consumer(2), [
+    {
+      name: "rewrite-tickets",
+      table: "tickets",
+      fromSchema: await manifestHash(v1Text),
+      toSchema: await manifestHash(v2Text),
+    },
+  ]);
+  const target = second.contract.hash;
+  const batches: StoreFields[][] = [];
+  let last: unknown;
+  for (let batch = 1; ; batch += 1) {
+    // One batch after the other, as the backfill's run takes them.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const read = await migrationBatch(store, target, batch);
+    if (read.state !== "transform") {
+      last = read;
+      break;
     }
+    batches.push(read.rows.map(({ fields }) => fields));
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    last = await objectOf(store).commitTransformed(
+      store.id,
+      JSON.stringify({
+        target,
+        attempt: 1,
+        batch,
+        phase: read.phase,
+        table: read.table,
+        through: read.through,
+        rows: read.rows.map(({ id: row, revision, fields }) => ({
+          id: row,
+          revision,
+          fields: rewrite(fields),
+        })),
+      })
+    );
+    if (
+      typeof last !== "object" ||
+      last === null ||
+      Reflect.get(last, "state") !== "running"
+    ) {
+      break;
+    }
+  }
+  return { batches, last, schemaHash: second.schemaHash };
+};
+
+/** The team of each ticket of `store`, as it stores them. */
+const storedTeams = async (store: OpenStore): Promise<unknown[]> =>
+  await runInDurableObject(objectOf(store), (_instance, state) =>
+    state.storage.sql
+      .exec<{ value: string }>(
+        "SELECT value_json AS value FROM sdk_records ORDER BY record_id"
+      )
+      .toArray()
+      .map(({ value }) => storedFieldsSchema.parse(JSON.parse(value)).team)
+  );
+
+// A migration's transform reads every ticket, whichever team it is for.
+// A builder in Sales, or the AI for them, ships one that hands Support's
+// tickets to Sales, or carries one team's ticket into another's through
+// the module state a batch's rows share (migration-transform.ts).
+describe("a migration of a table with row rules", () => {
+  it("hands a transform one team's tickets a batch, however they interleave", async () => {
+    const { store } = await ticketsStore(
+      Array.from({ length: 7 }, (_, index) => ({
+        by: "bob",
+        team: index % 3 === 0 ? "support" : "sales",
+      }))
+    );
+
+    const { batches, last } = await migrateTickets(store, (fields) => ({
+      ...fields,
+      kind: "ticket",
+    }));
+
+    expect({
+      teams: batches.map((held) => [...new Set(held.map(({ team }) => team))]),
+      held: batches.flat().length,
+      last,
+    }).toMatchObject({
+      teams: batches.map((held) => [held[0]?.team]),
+      held: 7,
+      last: { state: "ready" },
+    });
+    expect(batches.length).toBeGreaterThan(2);
+  });
+
+  it("refuses a transform that moves a ticket to another team, writing nothing of its batch", async () => {
+    const { store } = await ticketsStore([
+      { by: "bob", team: "support" },
+      { by: "bob", team: "support" },
+    ]);
+
+    const { last } = await migrateTickets(store, (fields) => ({
+      ...fields,
+      team: "sales",
+      kind: "ticket",
+    }));
+
+    expect({ last, teams: await storedTeams(store) }).toMatchObject({
+      last: {
+        state: "failed",
+        failure: {
+          table: "tickets",
+          migration: "rewrite-tickets",
+          reason: "rule_changed",
+          issues: [
+            "team: A migration doesn't change a field a row rule reads; a write changes who sees a record",
+          ],
+        },
+      },
+      teams: ["support", "support"],
+    });
+  });
+});
+
+describe("a record's history across a migration", () => {
+  it("keeps a migration out of the history, and the history before it in sight", async () => {
+    const { store, ids } = await ticketsStore([{ by: "ada", team: "sales" }]);
+    const [id = ""] = ids;
+    const { schemaHash } = await migrateTickets(store, (fields) => ({
+      ...fields,
+      kind: "ticket",
+    }));
     await objectOf(store).activateReady(
       store.id,
       await manifestHash(v2Text),
@@ -1472,7 +1582,7 @@ describe("a record's history across a migration", () => {
     );
     await commitAs(
       store,
-      second.schemaHash,
+      schemaHash,
       [
         {
           op: "patch",
@@ -1486,19 +1596,7 @@ describe("a record's history across a migration", () => {
       "ada",
       ["sales"]
     );
-    return { store, id, schemaHash: second.schemaHash };
-  };
 
-  /** The ticket's history as Ada, in Sales, reads it. */
-  const historyForAda = async ({
-    store,
-    id,
-    schemaHash,
-  }: {
-    store: OpenStore;
-    id: string;
-    schemaHash: string;
-  }) => {
     const { changes } = await store.history(
       {
         schemaHash,
@@ -1512,50 +1610,25 @@ describe("a record's history across a migration", () => {
       id,
       null
     );
-    return changes.map(({ op, source, before, after }) => ({
-      op,
-      source,
-      before,
-      after,
-    }));
-  };
-
-  it("shows nothing from before a migration moved the record into the reader's team: a ticket handed to Sales brings none of Support's past", async () => {
-    const ticket = await migrated({ by: "bob", team: "support" }, (fields) => ({
-      ...fields,
-      team: "sales",
-      kind: "ticket",
-    }));
-    // Only Ada's own change shows. The migration's rewrite of the team
-    // kept no values, so nothing older can be told: not the insert in
-    // Support, nor the move itself.
-    await expect(historyForAda(ticket)).resolves.toStrictEqual([
+    expect(
+      changes.map(({ op, source, before, after }) => ({
+        op,
+        source,
+        before,
+        after,
+      }))
+    ).toStrictEqual([
       {
         op: "update",
         source: "commit",
-        before: { title: "First title" },
-        after: { title: "Sales' ticket" },
-      },
-    ]);
-  });
-
-  it("keeps a migration that moves no rule's field out of the history, and the history before it in sight", async () => {
-    const ticket = await migrated({ by: "ada", team: "sales" }, (fields) => ({
-      ...fields,
-      kind: "ticket",
-    }));
-    await expect(historyForAda(ticket)).resolves.toStrictEqual([
-      {
-        op: "update",
-        source: "commit",
-        before: { title: "First title" },
+        before: { title: "Ticket 0" },
         after: { title: "Sales' ticket" },
       },
       {
         op: "insert",
         source: "commit",
         before: {},
-        after: { title: "First title", team: "sales" },
+        after: { title: "Ticket 0", team: "sales" },
       },
     ]);
   });
@@ -1852,5 +1925,75 @@ describe("writing a table with row rules", () => {
       removed,
       after: outcome(await call(of, of.bob, "countNotes")),
     }).toStrictEqual({ before: 1, adaSees: 0, removed: null, after: 0 });
+  });
+});
+
+describe("deleting a record a row the rules hide refers to", () => {
+  it("refuses, naming only the record deleted, never the row that refers to it", async () => {
+    // Plans everyone reads; holds on them each read by their team.
+    const text = manifestText(
+      schemaManifest(
+        defineSchema({
+          plans: defineTable({ title: v.string() }),
+          holds: defineTable({
+            plan: v.id("plans"),
+            reason: v.string(),
+            team: v.string(),
+          }).access({ read: [rows.team("team")] }),
+        }),
+        {
+          tables: {
+            plans: { read: "appMembers", write: "appMembers" },
+            holds: { read: "appMembers", write: "appMembers" },
+          },
+        }
+      )
+    );
+    const store = await openStore(
+      env,
+      await createStore(env, await person("builder"))
+    );
+    const { schemaHash } = await store.defineTables(text, consumer(1));
+    const plan = newRecordId();
+    await commitAs(
+      store,
+      schemaHash,
+      [{ op: "insert", table: "plans", id: plan, fields: { title: "Launch" } }],
+      "ada",
+      ["sales"]
+    );
+    // Bob, in Support, holds Ada's plan for a reason only Support reads.
+    await commitAs(
+      store,
+      schemaHash,
+      [
+        {
+          op: "insert",
+          table: "holds",
+          id: newRecordId(),
+          fields: { plan, reason: "Legal review", team: "support" },
+        },
+      ],
+      "bob",
+      ["support"]
+    );
+
+    const refused = await refusalOf(
+      async () =>
+        await commitAs(
+          store,
+          schemaHash,
+          [{ op: "delete", table: "plans", id: plan, expectedRevision: 1 }],
+          "ada",
+          ["sales"]
+        )
+    );
+
+    // That something refers to the plan can't be kept from Ada: deleting
+    // it would leave the hold dangling. What refers to it, and why, is.
+    expect(refused).toStrictEqual({
+      code: "data.referenced",
+      details: { table: "plans", id: plan },
+    });
   });
 });

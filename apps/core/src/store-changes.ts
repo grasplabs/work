@@ -47,9 +47,9 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   a record its rules admit them to now, and then only the changes whose
 //   before and after states the rules admit them to, nothing past a change
 //   that kept no values (`admittedHistoryOf`; app-data.ts, store-host.ts).
-//   A migration that rewrites a field a read rule reads keeps such a
-//   change, so the states before a rewrite that moved the record into the
-//   reader's sight never show.
+//   A migration's rewrite keeps no change, and never moves a field a row
+//   rule reads (store-migrations.ts, `rule_changed`), so the states a
+//   history is rebuilt through admit the same people across it.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -72,11 +72,6 @@ export interface ChangeInput {
   readonly after: StoreFields | null;
   /** The fields were never read (a cascade job's deletion). */
   readonly unread?: true;
-  /**
-   * A migration's transform rewrote a field a row rule reads:
-   * which fields changed is kept, never their values.
-   */
-  readonly rewritten?: true;
   readonly sensitive: boolean;
 }
 
@@ -172,8 +167,6 @@ export const recordChangesIn = (
     let afterJson: string | null = null;
     if (change.unread === true) {
       leftOut = "unread";
-    } else if (change.rewritten === true) {
-      leftOut = "rewritten";
     } else if (change.sensitive) {
       leftOut = "sensitive";
     } else {
