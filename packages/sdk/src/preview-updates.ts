@@ -105,14 +105,19 @@ const continues = (gathering: Gathering, part: PreviewPart): boolean => {
 };
 
 /**
- * `code` as a module address: a `data:` module. Evaluating the same
- * address twice evaluates nothing the second time, so evaluating a
- * version again (`take`) gives it a comment of its own at the end,
- * `again`; the bytes checked are the rest.
+ * `code`, evaluation number `evaluation` in this frame, as a module
+ * address: a `data:` module. A browser evaluates one address once, and
+ * hands the module it made for each import after: code that came before
+ * (an update back to an earlier write, A then B then A, or a rollback)
+ * would register nothing, and the screen stay as it is while the update
+ * counts as applied. So every evaluation gets an address of its own:
+ * the code checked byte for byte, then one comment line naming the
+ * evaluation, which the module runs nothing of. The frame's policy
+ * allows `data:` modules as such, whatever comes after the comma.
  */
-const moduleAddress = (code: string, again = 0): string =>
+const moduleAddress = (code: string, evaluation: number): string =>
   `data:text/javascript;charset=utf-8,${encodeURIComponent(
-    again === 0 ? code : `${code}\n//# grasp-refresh-again=${again}`
+    `${code}\n//# grasp-evaluation=${evaluation}`
   )}`;
 
 /**
@@ -134,12 +139,12 @@ export const previewReceiver = (
    * go on.
    */
   const swap = async (
-    code: string,
-    again: number
+    code: string
   ): Promise<"rendered" | "unevaluated" | "broken" | "reset"> => {
     const failuresBefore = frame.renderFailures();
+    evaluations += 1;
     try {
-      await frame.evaluate(moduleAddress(code, again));
+      await frame.evaluate(moduleAddress(code, evaluations));
     } catch (error) {
       frame.discard();
       frame.report(error);
@@ -157,7 +162,7 @@ export const previewReceiver = (
   const take = async (version: Version): Promise<PreviewApplied> => {
     const css = applied?.css;
     frame.setCss(version.css);
-    const swapped = await swap(version.code, 0);
+    const swapped = await swap(version.code);
     if (swapped === "rendered") {
       applied = version;
       return "applied";
@@ -173,10 +178,7 @@ export const previewReceiver = (
       return "reset";
     }
     // What rendered last, back: evaluated anew, so Refresh takes it.
-    evaluations += 1;
-    return (await swap(last.code, evaluations)) === "rendered"
-      ? "failed"
-      : "reset";
+    return (await swap(last.code)) === "rendered" ? "failed" : "reset";
   };
 
   return async (part) => {

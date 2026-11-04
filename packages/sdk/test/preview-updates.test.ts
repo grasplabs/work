@@ -44,18 +44,25 @@ const rendersOf = (url: string): string =>
 
 /**
  * A frame whose modules "render" what their code says: what is on
- * screen, the CSS, what was evaluated and reported.
+ * screen, the CSS, what was evaluated and reported. Like a browser's
+ * module map, it evaluates one address once: importing it again hands
+ * back the module made then, and registers nothing anew.
  */
 const fakeFrame = () => {
   const evaluated: string[] = [];
   const reported: string[] = [];
   const seen = { screen: "opened", css: "", evaluated, reported };
+  const modules = new Set<string>();
   let staged = "";
   let failures = 0;
   const frame: PreviewFrame = {
     evaluate: async (url) => {
       await Promise.resolve();
       seen.evaluated.push(url);
+      if (modules.has(url)) {
+        return {};
+      }
+      modules.add(url);
       const code = rendersOf(url);
       if (code === "syntax error") {
         throw new SyntaxError("Unexpected token");
@@ -64,11 +71,17 @@ const fakeFrame = () => {
       return {};
     },
     commit: () => {
-      if (staged.startsWith("throw")) {
+      if (staged === "") {
+        // Nothing registered: Refresh swaps nothing.
+        return;
+      }
+      const code = staged;
+      staged = "";
+      if (code.startsWith("throw")) {
         failures += 1;
         seen.screen = "error boundary";
       } else {
-        seen.screen = staged.replace("render:", "");
+        seen.screen = code.replace("render:", "");
       }
     },
     discard: () => {
@@ -172,21 +185,37 @@ describe("a preview's frame taking its draft's updates", () => {
     await receive(await update(1, "render:one"));
     const failing = await receive(await update(2, "throw"));
     const back = seen.screen;
-    // Evaluated anew, under another address, so Refresh takes it again.
-    const again = seen.evaluated.at(-1) ?? "";
     const fixed = await receive(await update(3, "render:three"));
-    expect({
-      failing,
-      back,
-      again: again.includes("grasp-refresh-again"),
-      fixed,
-      screen: seen.screen,
-    }).toStrictEqual({
+    expect({ failing, back, fixed, screen: seen.screen }).toStrictEqual({
       failing: "failed",
       back: "one",
-      again: true,
       fixed: "applied",
       screen: "three",
+    });
+  });
+
+  it("swaps code back in that it evaluated before, as an update back to an earlier write, under an address of its own each time", async () => {
+    const { frame, seen } = fakeFrame();
+    const receive = previewReceiver(frame);
+    const answers = [
+      await receive(await update(1, "render:A")),
+      await receive(await update(2, "render:B")),
+      // The agent writes the screen back as it was: the same code.
+      await receive(await update(3, "render:A")),
+    ];
+    expect({
+      answers,
+      screen: seen.screen,
+      addresses: new Set(seen.evaluated).size,
+      // What is evaluated is the code checked, and one comment after it.
+      checked: seen.evaluated.every((url) =>
+        decodeURIComponent(url).includes("\n//# grasp-evaluation=")
+      ),
+    }).toStrictEqual({
+      answers: ["applied", "applied", "applied"],
+      screen: "A",
+      addresses: 3,
+      checked: true,
     });
   });
 

@@ -56,7 +56,7 @@ const refreshMarkers = [
   "performReactRefresh",
   kitModuleName("@grasp-os/sdk/preview-refresh"),
   // The receiver of a preview's updates (@grasp-os/sdk's preview-updates.ts).
-  "grasp-refresh-again",
+  "grasp-evaluation=",
 ];
 
 /** The preview kit's own modules, which a production frame never loads. */

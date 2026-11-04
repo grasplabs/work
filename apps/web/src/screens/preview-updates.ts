@@ -1,4 +1,5 @@
 import type { PreviewApplied, PreviewPart } from "@grasp-os/sdk/screen-runtime";
+import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
@@ -69,16 +70,39 @@ export const partsOf = (refresh: PreviewRefresh): PreviewPart[] => {
   }));
 };
 
+/** The bytes a frame holds once it evaluated `refresh`: its module and its CSS. */
+const loadedBytes = (refresh: PreviewRefresh): number =>
+  refresh.bytes + refresh.css.length;
+
+/**
+ * What handing the frame `update` may make it evaluate, at most: the
+ * update itself, and, should it fail to render, a copy of `applied`, the
+ * last that rendered, swapped back in (@grasp-os/sdk's preview-updates.ts).
+ * A frame keeps every module it evaluated, so each counts, whether it
+ * worked or not.
+ */
+const mostEvaluated = (
+  update: PreviewRefresh,
+  applied: PreviewRefresh
+): { modules: number; bytes: number } => ({
+  modules: 2,
+  bytes: loadedBytes(update) + loadedBytes(applied),
+});
+
 /** Why core's answer can't come in through Refresh, if it can't. */
 const resetNeeded = (
   update: PreviewRefresh,
+  applied: PreviewRefresh,
   kit: ReadonlySet<string>,
-  taken: { revisions: number; bytes: number }
-): boolean =>
-  update.kit.some((name) => !kit.has(name)) ||
-  taken.revisions + 1 > platformLimits.previewResetRevisions ||
-  taken.bytes + update.bytes + update.css.length >
-    platformLimits.previewResetBytes;
+  evaluated: { modules: number; bytes: number }
+): boolean => {
+  const most = mostEvaluated(update, applied);
+  return (
+    update.kit.some((name) => !kit.has(name)) ||
+    evaluated.modules + most.modules > platformLimits.previewResetRevisions ||
+    evaluated.bytes + most.bytes > platformLimits.previewResetBytes
+  );
+};
 
 /**
  * Follows the draft's revisions for one open frame of a preview of
@@ -102,12 +126,19 @@ export class PreviewUpdates {
   /** The revision the frame is trying now, while it is handed one. */
   #trying: number | undefined;
   #health: PreviewHealth = "working";
-  /** What the frame took since it started, which bounds it. */
-  readonly #taken = { revisions: 0, bytes: 0 };
+  /** The update the frame shows: the last that rendered. */
+  #applied: PreviewRefresh;
+  /**
+   * What the frame evaluated since it started, which bounds it (spec 18.1,
+   * `previewResetRevisions`, `previewResetBytes`): every update handed
+   * over and every copy swapped back in, as modules and bytes.
+   */
+  readonly #evaluated = { modules: 0, bytes: 0 };
 
   constructor(app: string, opened: PreviewRefresh, host: PreviewUpdatesHost) {
     this.#app = app;
     this.#opened = opened;
+    this.#applied = opened;
     this.#host = host;
     this.#kit = new Set(opened.kit);
     this.#shown = opened.revision;
@@ -207,8 +238,13 @@ export class PreviewUpdates {
       if (screenErrors.codeOf(error) === "screen.build_failed") {
         this.#say("fixing");
       }
-      // Anything else (a newer load took its place, core out of reach) is
-      // asked again at the chat's next write.
+      // A newer ask (another tab's) took its place in core's line: this
+      // frame still needs the draft, so it asks again, behind that one,
+      // rather than show an older write until the next. Anything else
+      // (core out of reach) is asked again at the chat's next write.
+      if (appErrors.codeOf(error) === "app.preview_superseded") {
+        this.#asked = this.#shown;
+      }
       return undefined;
     }
     // Only the App the frame was opened for, and only a revision past
@@ -230,7 +266,7 @@ export class PreviewUpdates {
     if (toFrame === undefined || this.#closed) {
       return false;
     }
-    if (resetNeeded(update, this.#kit, this.#taken)) {
+    if (resetNeeded(update, this.#applied, this.#kit, this.#evaluated)) {
       this.#reset();
       return false;
     }
@@ -250,6 +286,7 @@ export class PreviewUpdates {
     } finally {
       this.#trying = undefined;
     }
+    this.#count(update, answer);
     if (answer === "reset") {
       this.#reset();
       return false;
@@ -259,14 +296,34 @@ export class PreviewUpdates {
       this.#say("fixing");
       return true;
     }
-    this.#taken.revisions += 1;
-    this.#taken.bytes += update.bytes + update.css.length;
+    this.#applied = update;
     if (update.revision !== this.#shown) {
       this.#shown = update.revision;
       this.#host.moved(update.revision);
     }
     this.#say("working");
     return true;
+  }
+
+  /**
+   * Counts what the frame evaluated handing it `update`, answered
+   * `answer`: nothing for an update it refused unread; the update for one
+   * it took; for one that failed, the update and a copy of the last that
+   * rendered, as one that rendered with an error is swapped back (the
+   * frame doesn't say which way it failed, so the most it may have).
+   */
+  #count(update: PreviewRefresh, answer: PreviewApplied): void {
+    if (answer === "refused" || answer === "more") {
+      return;
+    }
+    const most = mostEvaluated(update, this.#applied);
+    if (answer === "failed") {
+      this.#evaluated.modules += most.modules;
+      this.#evaluated.bytes += most.bytes;
+      return;
+    }
+    this.#evaluated.modules += 1;
+    this.#evaluated.bytes += loadedBytes(update);
   }
 
   #reset(): void {

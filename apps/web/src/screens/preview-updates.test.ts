@@ -1,4 +1,5 @@
 import type { PreviewApplied, PreviewPart } from "@grasp-os/sdk/screen-runtime";
+import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -195,6 +196,20 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     });
   });
 
+  it("asks again when another tab's ask took its place in core's line, rather than show an older write", async () => {
+    const { updates, seen, toFrame } = following([
+      async () =>
+        await Promise.reject(appErrors.create("app.preview_superseded")),
+      answered(refreshAt(2)),
+    ]);
+    updates.follow(toFrame);
+    updates.revise(2);
+    await vi.waitFor(() => {
+      expect(seen.moved).toStrictEqual([2]);
+    });
+    expect(seen.asked).toBe(2);
+  });
+
   it("says a problem the screen reported is being fixed, once", () => {
     const { updates, seen } = following([]);
     updates.problem();
@@ -226,6 +241,36 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     expect(
       [newKit, tooLarge, refreshGaveUp].map(({ seen }) => seen.handed)
     ).toStrictEqual([[1], [1], [1, 2]]);
+  });
+
+  it("counts every update a frame evaluated toward its reset, those that failed and the copy swapped back for each, not only those it took", async () => {
+    const revisions = Array.from({ length: 64 }, (_, at) => at + 2);
+    const { updates, seen, toFrame } = following(
+      revisions.map((revision) => answered(refreshAt(revision))),
+      (part) => (part.revision === 1 ? "applied" : "failed")
+    );
+    updates.follow(toFrame);
+    for (const revision of revisions) {
+      if (seen.resets > 0) {
+        break;
+      }
+      updates.revise(revision);
+      // Handed over, or the frame started afresh instead.
+      // oxlint-disable-next-line no-await-in-loop -- one write after another
+      await vi.waitFor(() => {
+        expect(seen.handed.length + seen.resets).toBe(revision);
+      });
+    }
+    // The screen it opened, then each broken write and the copy swapped
+    // back for it: two a write, so the frame starts afresh before it holds
+    // more modules than one frame may.
+    const failedWrites = Math.floor(
+      (platformLimits.previewResetRevisions - 1) / 2
+    );
+    expect({
+      resets: seen.resets,
+      handed: seen.handed.length,
+    }).toStrictEqual({ resets: 1, handed: 1 + failedWrites });
   });
 
   it("hands a large module over in parts no longer than a part may be, the CSS once", () => {

@@ -1325,6 +1325,9 @@ describe("a screen's navigation, as the page takes it", () => {
  * call's revision, each report, and each live query it follows, with the
  * page's relay of it, which core pushes to.
  */
+/** A query's answer of one title. */
+const value = (title: string) => ({ ok: true, value: [title] });
+
 const previewOver = (answer: unknown) => {
   const calls: number[] = [];
   const cancels: number[] = [];
@@ -1451,6 +1454,45 @@ describe("a preview's frame as its draft changes", () => {
     );
     await outdated.target.callFunction("{}");
     expect([failed.problems(), outdated.problems()]).toStrictEqual([1, 0]);
+  });
+
+  it("hands the frame every data change of a live query across screen writes, each numbered past the last it was handed", async () => {
+    const { target, relays, reporting } = previewOver({ result: { ok: true } });
+    const handed: unknown[] = [];
+    await target.watchQuery(
+      "{}",
+      new RpcStub(async (push: unknown) => {
+        handed.push(push);
+        await Promise.resolve();
+      })
+    );
+    // Core numbers each subscription's pushes from its own start.
+    await relays[0]?.({ revision: 1, result: value("a") });
+    await relays[0]?.({ revision: 2, result: value("b") });
+    reporting.at = 2;
+    target.moved(2);
+    await vi.waitFor(() => {
+      expect(relays).toHaveLength(2);
+    });
+    await relays[1]?.({ revision: 1, result: value("b") });
+    await relays[1]?.({ revision: 2, result: value("c") });
+    reporting.at = 3;
+    target.moved(3);
+    await vi.waitFor(() => {
+      expect(relays).toHaveLength(3);
+    });
+    await relays[2]?.({ revision: 1, result: value("c") });
+    await relays[2]?.({ revision: 2, result: value("d") });
+    // Each change reaches the frame numbered past the one before, so its
+    // client, which shows only a newer push, shows every one.
+    expect(handed).toStrictEqual([
+      { revision: 1, result: value("a") },
+      { revision: 2, result: value("b") },
+      { revision: 3, result: value("b") },
+      { revision: 4, result: value("c") },
+      { revision: 5, result: value("c") },
+      { revision: 6, result: value("d") },
+    ]);
   });
 
   it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {

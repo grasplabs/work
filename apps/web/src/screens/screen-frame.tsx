@@ -613,6 +613,28 @@ const FramedScreen = ({
     setAttempt((last) => last + 1);
     reloadTo.current?.();
   };
+  // A chat's preview that failed to start (its first build didn't build,
+  // its screen wasn't there, it didn't start in time) takes no updates:
+  // only a running frame follows the draft's revisions. So a newer
+  // revision than the one it failed at starts it afresh, as a draft that
+  // fixes it should show; one that runs takes it in place.
+  const failedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.status !== "failed" || revision === undefined) {
+      failedAt.current = null;
+      return;
+    }
+    if (failedAt.current === null) {
+      failedAt.current = revision;
+      return;
+    }
+    if (revision > failedAt.current) {
+      // As `reload`, from here: nothing was offered to a failed start.
+      setState({ status: "loading" });
+      setAttempt((last) => last + 1);
+      reloadTo.current?.();
+    }
+  }, [state, revision]);
   // Another version made current: a screen with nothing unsaved switches
   // at once; one holding edits asks once first (spec 11.5).
   const changeState = (next: ScreenState) => {

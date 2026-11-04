@@ -368,3 +368,45 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
     core[Symbol.dispose]();
   }
 });
+
+test("a preview whose first screen doesn't build shows it once the agent's next write fixes it", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    const app = await api.apps.create({ name });
+    const page = await pageOf(builder);
+    await page.goto(`/apps/${app.id}/edit`);
+    await expect(page.getByText("Nothing built yet")).toBeVisible();
+
+    const { opener } = modelScripts.fixesBrokenTally;
+    const chat = page.getByRole("region", { name: "Chat" });
+    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+    await ask.fill(opener);
+    await ask.press("Enter");
+    await expect(
+      chat.getByText("The tally's screen doesn't build yet.")
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Its first build fails: the preview says so, and takes no updates.
+    const preview = page.getByRole("region", { name: `Preview of ${name}` });
+    await expect(
+      preview.getByText("This page doesn't build. Ask a builder to fix it.")
+    ).toBeVisible({ timeout: 30_000 });
+
+    // The next write fixes it: the preview starts afresh and shows it.
+    await ask.fill("Fix the screen.");
+    await ask.press("Enter");
+    await expect(chat.getByText("The tally works now.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(preview.frameLocator("iframe").getByRole("status")).toHaveText(
+      "0 in the preview",
+      { timeout: 30_000 }
+    );
+  } finally {
+    core[Symbol.dispose]();
+  }
+});

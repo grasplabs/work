@@ -186,6 +186,30 @@ export const modelScripts = {
       says(approvalDrawn),
     ],
   },
+  /**
+   * An App's own chat whose first screen doesn't build: the agent writes
+   * the tally with a screen that doesn't parse, then, asked, fixes it.
+   */
+  fixesBrokenTally: {
+    opener: "Build a tally, and get it working.",
+    replies: [
+      (said) =>
+        calls("writesbr1", "writeFile", {
+          app: readIn(said, ownApp),
+          files: {
+            ...tallyFiles("in the preview"),
+            "screens/tally.tsx": "export default function Tally( {",
+          },
+        }),
+      says("The tally's screen doesn't build yet."),
+      (said) =>
+        calls("fixestly1", "writeFile", {
+          app: readIn(said, ownApp),
+          files: { "screens/tally.tsx": tallyScreen("Add one") },
+        }),
+      says("The tally works now."),
+    ],
+  },
 } as const satisfies Record<string, ModelScript>;
 
 const textPartSchema = z.object({ type: z.literal("text"), text: z.string() });

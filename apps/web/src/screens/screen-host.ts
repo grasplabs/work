@@ -919,7 +919,30 @@ interface PreviewWatch {
   /** Its current subscription was refused as of a revision moved past. */
   outdated: boolean;
   ended: boolean;
+  /**
+   * The highest push number the frame was handed (`QuerySnapshotPush`'s
+   * `revision`): core numbers each subscription's pushes afresh, and the
+   * frame's client shows only a push numbered past the last it showed.
+   */
+  handed: number;
 }
+
+/**
+ * `push`, the push of a subscription that took another's place, numbered
+ * past `after`, the highest the frame was handed before it: core numbers
+ * a subscription's pushes from where its own evaluation stands, which the
+ * frame's client, following one query throughout, would take for older
+ * than what it shows and drop. Their order, a repeat included, is kept.
+ */
+const renumbered = (push: unknown, after: number): unknown => {
+  if (typeof push !== "object" || push === null || !("revision" in push)) {
+    return push;
+  }
+  const { revision } = push;
+  return typeof revision === "number"
+    ? { ...push, revision: after + revision }
+    : push;
+};
 
 /** Releases `subscription`, gone already or not. */
 const releaseWatch = async (
@@ -983,6 +1006,9 @@ export const previewTarget = (
     watch.generation += 1;
     watch.outdated = false;
     const { generation } = watch;
+    // The first subscription's pushes go as core numbers them; each that
+    // takes another's place, past what the frame was handed already.
+    const after = generation === 1 ? 0 : watch.handed;
     const current = (): boolean => watch.generation === generation;
     const relay = Object.assign(
       async (push: unknown): Promise<unknown> => {
@@ -990,7 +1016,18 @@ export const previewTarget = (
           watch.outdated ||= current();
           return null;
         }
-        return current() ? await watch.toFrame(push) : null;
+        if (!current()) {
+          return null;
+        }
+        const numbered = renumbered(push, after);
+        const at: unknown =
+          typeof numbered === "object" && numbered !== null
+            ? Reflect.get(numbered, "revision")
+            : undefined;
+        if (typeof at === "number") {
+          watch.handed = Math.max(watch.handed, at);
+        }
+        return await watch.toFrame(numbered);
       },
       {
         [Symbol.dispose]: () => {
@@ -1134,6 +1171,7 @@ export const previewTarget = (
         generation: 0,
         outdated: false,
         ended: false,
+        handed: 0,
       };
       const subscription = subscribe(watch);
       watch.subscription = subscription;
