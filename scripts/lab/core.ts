@@ -13,6 +13,7 @@ import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import {
   interviewApiPath,
   interviewProgressSchema,
+  participationNotice,
 } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
@@ -242,6 +243,8 @@ export type LinkSession = z.output<typeof sessionSchema>;
 export interface Link {
   /** Opens the link on this device: its key the first time, and what was said. */
   open: (key?: string) => Promise<LinkSession>;
+  /** Agrees to take part, as their page asks before anything they say is recorded (GRA-329). */
+  participate: (key: string) => Promise<void>;
   /** Keeps where the interview is; the version it was kept as. */
   save: (
     key: string,
@@ -333,6 +336,14 @@ export const linkOn = (link: string): Link => {
           ...(key === undefined ? {} : { key }),
         })
       ),
+    participate: async (key) => {
+      await interviewCall({
+        action: "participate",
+        secret,
+        key,
+        notice: participationNotice.version,
+      });
+    },
     save: async (key, version, progress) => {
       const saved = savedSchema.parse(
         await interviewCall({ action: "save", secret, key, version, progress })

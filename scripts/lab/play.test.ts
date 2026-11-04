@@ -51,6 +51,9 @@ const scriptedLink = (turns: StephenTurn[]) => {
         progress: null,
         version: 0,
       }),
+    participate: async () => {
+      await Promise.resolve();
+    },
     save: async (_key, version, progress) => {
       saved.push(progress);
       return await Promise.resolve(version + 1);
