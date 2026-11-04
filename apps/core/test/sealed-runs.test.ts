@@ -2606,7 +2606,7 @@ try {
 // the host: a step the table doesn't have in items (a fork's branch, a
 // loop of items at once, a nested task named as if in no loop, a key in
 // another form); an item its loop's enter step never recorded, past its
-// count or of a loop it never entered or skipped; items skipped,
+// count or of a loop it never entered or skipped; items gone back to,
 // reordered, run after the run left their loop, or run over by entering
 // the loop again; a loop past the platform's 1,000 items; a catch or a
 // deadline of another item than the one running; a step past a failure
@@ -2741,7 +2741,7 @@ return { sent, caught, slept };`);
     });
   });
 
-  it("refuses items skipped, reordered, run after the run left their loop, or run over by entering it again", async () => {
+  it("runs items in increasing order, past items that ran no step, and refuses one gone back to, run after the run left its loop, or run over by entering it again", async () => {
     const looping = await sealedWorkflow();
     const run = async (body: string) =>
       await ranAs(
@@ -2749,8 +2749,13 @@ return { sent, caught, slept };`);
         moduleOf(`${enterRows('["a", "b", "c"]')} const sent = []; ${body}`)
       );
     expect({
-      skipped: await run(
-        `sent.push(${notifyAt("0")}); return ${notifyAt("2")};`
+      // Items whose work was all skipped run no step: the next goes on.
+      emptyFirst: await run(`sent.push(${notifyAt("1")}); return sent;`),
+      emptyMiddle: await run(
+        `sent.push(${notifyAt("0")}); sent.push(${notifyAt("2")}); return sent;`
+      ),
+      backAfterSkip: await run(
+        `sent.push(${notifyAt("2")}); return ${notifyAt("1")};`
       ),
       reordered: await run(
         `sent.push(${notifyAt("0")}); sent.push(${notifyAt("1")}); return ${checkAt("0")};`
@@ -2770,11 +2775,13 @@ return { sent, caught, slept };`);
 } };`
       ),
     }).toStrictEqual({
-      skipped: refusedAs(
-        `Item 2 of loop "rows" doesn't run now: its items run in order, each once.`
+      emptyFirst: { ended: ["string"], tampered: [] },
+      emptyMiddle: { ended: ["string", "string"], tampered: [] },
+      backAfterSkip: refusedAs(
+        `Item 1 of loop "rows" doesn't run now: its items run in increasing order, each once.`
       ),
       reordered: refusedAs(
-        `Item 0 of loop "rows" doesn't run now: its items run in order, each once.`
+        `Item 0 of loop "rows" doesn't run now: its items run in increasing order, each once.`
       ),
       afterLeaving: refusedAs(`Loop "rows" has no item 1 here.`),
       stoppedEarly: { ended: ["string"], tampered: [] },
@@ -2829,7 +2836,7 @@ return "woke";`);
         "A run goes on past a failure only once a catch took it."
       ),
       otherCatch: refusedAs(
-        `Item 1 of loop "rows" doesn't run now: its items run in order, each once.`
+        `Item 1 of loop "rows" doesn't run now: its items run in increasing order, each once.`
       ),
       otherDeadline: refusedAs(
         `Step "${engineStep("nap", "task@1")}" isn't one the build seals.`
@@ -2887,7 +2894,7 @@ return await step.do("mark", { key: "task@0/0", description: "Its task" }, async
     expect({ nested, withoutItemStep }).toStrictEqual({
       nested: { ended: ["x", "y"], tampered: [] },
       withoutItemStep: refusedAs(
-        `Item 0 of loop "lines" doesn't run now: its items run in order, each once.`
+        `Item 0 of loop "lines" doesn't run now: its items run in increasing order, each once.`
       ),
     });
   });

@@ -129,13 +129,15 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   Each index must be of an item the loop's enter step recorded (at most
 //   the platform's 1,000 a collection, `workflow.collection_invalid`
 //   past them), in a loop the run is still in, and of the item running
-//   now; only the innermost may move on, to the next item alone, by its
+//   now; only the innermost may move on, to a later item only, by its
 //   item step where its loop seals one (its `while`) and never by a catch.
+//   An item passed over ran no step, its work all skipped: flow decided in
+//   the isolate, as an `if` is, every call still held to its template.
 //   A loop the run left (a step outside its items ran) runs no item more,
 //   and no step starts twice, so its enter step can't open it again: so
-//   items run in their order, none skipped, none repeated, and a run's
+//   items run in increasing order, none repeated, and a run's
 //   steps stay bounded by its tasks and its recorded items (and the run's
-//   own step ceiling). Stopping early is flow, as an `if` is. Each item's
+//   own step ceiling). Stopping early is flow too. Each item's
 //   steps have names, effects' keys, deadlines and retries of their own,
 //   and a failure pending in an item holds every step but a catch back,
 //   taken only by a try around its task: one in its own item (the item
@@ -1260,10 +1262,12 @@ class SealedRun implements SealedRunKind {
    * Why `step` may not run in the items its path names, run as `use`; or
    * nothing. Each item must be one its loop's enter step recorded, in a
    * loop the run is still in (`#loops`), and the one running now; only at
-   * the innermost level may the step start that loop's next item: its
-   * item step when the loop seals one, otherwise any step but a catch.
-   * So items run in their order, none skipped, none after the run left
-   * their loop, and an item step starts its item, once.
+   * the innermost level may the step start a later item of that loop than
+   * the one running: its item step when the loop seals one, otherwise any
+   * step but a catch. An item between them ran no step (its work all
+   * skipped, or the code's choice, as an `if` is). So items run in
+   * increasing order, none again, none after the run left their loop, and
+   * an item step starts its item, once.
    */
   #loopRefusal(step: ResolvedStep, use: HostStepUse): string | undefined {
     const { path, loops, kind } = step;
@@ -1277,12 +1281,12 @@ class SealedRun implements SealedRunKind {
       const startsItem = innermost && kind === "item";
       const next =
         innermost &&
-        index === loop.current + 1 &&
+        index > loop.current &&
         use !== "caught" &&
         (startsItem ||
           this.#loopTasks.get(id)?.steps.includes("item") === false);
       if (index === loop.current ? startsItem : !next) {
-        return `Item ${index} of loop "${id}" doesn't run now: its items run in order, each once.`;
+        return `Item ${index} of loop "${id}" doesn't run now: its items run in increasing order, each once.`;
       }
     }
     return undefined;
