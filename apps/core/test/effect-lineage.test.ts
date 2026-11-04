@@ -450,7 +450,7 @@ export default workflow(
   { params: {}, input: emailMessage, triggers: [{ type: "email", address: "${local}" }] },
   async (step, { env, input }) =>
     await step.do("send", { description: "Mail the address again", sideEffect: true, retries: { limit: 0 }, input: null }, async () =>
-      (await env.APP.callFunction({ contractId: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })) as Json
+      (await env.APP.callFunction({ name: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })) as Json
     )
 );
 `,

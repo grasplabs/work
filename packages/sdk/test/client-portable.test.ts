@@ -38,7 +38,7 @@ const tokenOf = (sub: string, exp?: number): string =>
     .join(".");
 
 /** The function a request names. */
-const contractIdPattern = /"contractId":"(?<contractId>[^"]+)"/u;
+const contractIdPattern = /"name":"(?<contractId>[^"]+)"/u;
 
 /** A host with nobody signed in. */
 const noToken = async (): Promise<string | null> => await Promise.resolve(null);
@@ -1049,7 +1049,6 @@ describe("a portable host's client", () => {
     });
     const following = failureOrNothing(
       live.watch(
-        app,
         "{}",
         () => {},
         () => {}
@@ -1060,6 +1059,7 @@ describe("a portable host's client", () => {
     asked.resolve({
       text: tokenOf("ann"),
       principal: "ann",
+      app,
       expiresAt: undefined,
     });
     expect({

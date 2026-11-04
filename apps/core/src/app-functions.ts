@@ -614,10 +614,10 @@ export const runInvocationFor = async (
  */
 const publicFunctionOf = (
   release: Release,
-  reference: { readonly contractId: string; readonly kind: string }
+  reference: { readonly name: string; readonly kind: string }
 ) => {
-  const operation = Object.hasOwn(release.app.operations, reference.contractId)
-    ? release.app.operations[reference.contractId]
+  const operation = Object.hasOwn(release.app.operations, reference.name)
+    ? release.app.operations[reference.name]
     : undefined;
   if (operation === undefined || operation.visibility !== "public") {
     throw operationErrors.create("operation.not_found");
@@ -638,11 +638,10 @@ const isOverBytes = (text: string, max: number): boolean =>
 /** A call's request, as a screen or agent sends it (spec 32.6). */
 const functionRequestSchema = z
   .strictObject({
+    // A function's name and kind, nothing more: resolved in the release
+    // that answers the call, the App's current one for a page.
     reference: z.strictObject({
-      resourceId: z.string().min(1).max(128),
-      resourceVersion: z.int().min(1),
-      contractId: z.string().min(1).max(256),
-      fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+      name: z.string().min(1).max(256),
       kind: z.enum(["query", "mutation", "action"]),
     }),
     input: z.unknown(),
@@ -686,18 +685,22 @@ export const readFunctionRequest = (request: unknown): FunctionRequest => {
 };
 
 /**
- * The path of the public function `reference` names exactly in
- * `release`: refused as one that doesn't exist (`operation.not_found`)
- * when there is none or it is internal, `operation.kind_mismatch` for
- * another kind, and `version.mismatch` for another App, version or
- * contract than the release's.
+ * The path of the public function `reference` names in `release`, the
+ * release that answers the call: refused as one that doesn't exist
+ * (`operation.not_found`) when there is none or it is internal, and
+ * `operation.kind_mismatch` for another kind. A page's calls always name
+ * the App's current release, whatever build it runs (its lease only
+ * says who opened it and what core served), so an old page, a replayed
+ * lease or a forged name reaches only the current code's public
+ * functions, with what their own validators accept; a page whose
+ * function is gone hears so and switches to the new version.
  */
 export const publicOperationOf = (
   release: Release,
   reference: FunctionRequest["reference"]
 ): string => {
-  const operation = Object.hasOwn(release.app.operations, reference.contractId)
-    ? release.app.operations[reference.contractId]
+  const operation = Object.hasOwn(release.app.operations, reference.name)
+    ? release.app.operations[reference.name]
     : undefined;
   // An internal function is refused as one that doesn't exist.
   if (operation === undefined || operation.visibility !== "public") {
@@ -706,56 +709,12 @@ export const publicOperationOf = (
   if (operation.kind !== reference.kind) {
     throw operationErrors.create("operation.kind_mismatch");
   }
-  if (
-    reference.resourceId !== release.manifest.resourceId ||
-    reference.resourceVersion !== release.manifest.resourceVersion ||
-    release.fingerprints[operation.path] !== reference.fingerprint
-  ) {
-    throw versionErrors.create("version.mismatch");
-  }
   return operation.path;
 };
 
-/**
- * `reference` as a screen pins it (spec 11.5): a screen opened on another
- * version of the App than the one current now keeps calling with that
- * version's references until it switches, a dirty editor among them
- * saving before it does. Which version it was opened on is core's own
- * word, signed into the frame's lease (`pinnedVersion`, screen-delivery.ts's
- * `LeasedBuild`), never what the frame's reference says. Threat model:
- *
- * - A screen of a revoked release calls on: while its pinned version
- *   isn't the current one, that version's release must not be revoked
- *   (`version.revoked`, `version.not_sealed` otherwise), whatever version
- *   its reference names, the current one too.
- * - A pinned call reaches a handler of another contract: a reference of
- *   the pinned version names the current release instead, and the
- *   resolution that follows compares its contract as it would any
- *   reference's: the same fingerprint as the current release's function,
- *   and it runs on the current handler, which takes and answers exactly
- *   what the screen's contract says; another, and it is refused
- *   (`version.mismatch`).
- * - Anyone else borrows the rule: only a screen's calls carry a pinned
- *   version (`FunctionCallOptions.pinnedVersion`, `invokeAppAction`); a
- *   call without a lease, an agent's, another App's or a workflow's names
- *   the version that runs.
- */
-const pinnedReference = async (
-  env: Env,
-  release: Release,
-  reference: FunctionRequest["reference"],
-  pinnedVersion: number | undefined
-): Promise<FunctionRequest["reference"]> => {
-  const { resourceId, resourceVersion } = release.manifest;
-  if (pinnedVersion === undefined || pinnedVersion === resourceVersion) {
-    return reference;
-  }
-  await requireNotRevoked(env, appIdSchema.parse(resourceId), pinnedVersion);
-  return reference.resourceId === resourceId &&
-    reference.resourceVersion === pinnedVersion
-    ? { ...reference, resourceVersion }
-    : reference;
-};
+/** The fingerprint of the contract of `release`'s function at `path`, if it has one. */
+export const fingerprintOf = (release: Release, path: string): string | null =>
+  release.fingerprints[path] ?? null;
 
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
@@ -814,12 +773,6 @@ interface FunctionCallOptions {
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
   /**
-   * A screen's call: the version its lease says the screen was opened
-   * on, whose references are held to their contract in the one that runs
-   * (`pinnedReference`).
-   */
-  readonly pinnedVersion?: number;
-  /**
    * Given, the call may read a paginated list's window (a screen's): what
    * charges the person for its pages past what the caller paid
    * (`WindowRequest.charge`).
@@ -850,6 +803,12 @@ interface FunctionCallOptions {
    * starts with its own.
    */
   readonly sources?: InvocationSources;
+  /**
+   * A call from another App's function, through its reviewed binding: the
+   * release and contract the binding was checked against, the only ones
+   * it runs on (`version.mismatch` otherwise).
+   */
+  readonly pinned?: { readonly version: number; readonly fingerprint: string };
 }
 
 /**
@@ -896,18 +855,18 @@ const referenceIn = async (
   workflowQuery: ResolvedWorkflowQuery | undefined;
   preference: ResolvedPreferenceOperation | undefined;
 }> => {
-  if (isWorkflowQueryPath(reference.contractId)) {
+  if (isWorkflowQueryPath(reference.name)) {
     return {
-      path: reference.contractId,
-      workflowQuery: await workflowQueryOf(release, reference),
+      path: reference.name,
+      workflowQuery: workflowQueryOf(release, reference),
       preference: undefined,
     };
   }
   // The App's preferences (app-preferences.ts): core's too, under the
   // `preferences` segment the SDK likewise keeps for the platform.
-  if (isPreferencePath(reference.contractId)) {
+  if (isPreferencePath(reference.name)) {
     return {
-      path: reference.contractId,
+      path: reference.name,
       workflowQuery: undefined,
       preference: await preferenceOperationOf(release, reference),
     };
@@ -1008,7 +967,7 @@ const answeredWorkflowQuery = async (
     return {
       result,
       provenance: null,
-      fingerprint: call.reference.fingerprint,
+      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1067,7 +1026,7 @@ const answeredPreferences = async (
     return {
       result,
       provenance: null,
-      fingerprint: call.reference.fingerprint,
+      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1145,7 +1104,7 @@ const answeredPeople = async (
     return {
       result: { ok: true, value },
       provenance: null,
-      fingerprint: call.reference.fingerprint,
+      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1176,6 +1135,36 @@ const observedInvocation = (
   };
 };
 
+/**
+ * What `call` of `by`'s names in App `app`'s current release, the one
+ * that answers every page's call: refused for anyone without a role in
+ * the App, who learns nothing of it, and while no version is current.
+ */
+const currentResolution = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
+  app: unknown,
+  call: FunctionRequest,
+  pinned: FunctionCallOptions["pinned"]
+) => {
+  const found = await usableApp(env, by, app);
+  if (found.currentVersion === null) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  const release = await loadRelease(env, found.id, found.currentVersion);
+  const resolved = await referenceIn(release, call.reference);
+  // Another App's call runs only on what its binding was checked against.
+  if (
+    pinned !== undefined &&
+    (pinned.version !== found.currentVersion ||
+      fingerprintOf(release, resolved.path) !== pinned.fingerprint)
+  ) {
+    throw versionErrors.create("version.mismatch");
+  }
+  return { release, appId: found.id, ...resolved };
+};
+
 const callFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams"> &
@@ -1191,7 +1180,6 @@ const callFunction = async (
     kind,
     observeReads,
     chargeWindow,
-    pinnedVersion,
     agent,
     chain,
     fromRun,
@@ -1216,7 +1204,7 @@ const callFunction = async (
     return refused(error);
   }
   // Who calls, and the organization's people: core's own.
-  if (isPeoplePath(call.reference.contractId)) {
+  if (isPeoplePath(call.reference.name)) {
     return await answeredPeople(env, {
       by,
       app,
@@ -1228,37 +1216,13 @@ const callFunction = async (
       agent,
     });
   }
-  let release: Release;
-  let path: string;
-  let appId: string;
-  let workflowQuery: ResolvedWorkflowQuery | undefined;
-  let preference: ResolvedPreferenceOperation | undefined;
+  let resolved: Awaited<ReturnType<typeof currentResolution>>;
   try {
-    // Anyone without a role in the App learns nothing of it.
-    const found = await usableApp(env, by, app);
-    if (found.currentVersion === null) {
-      throw versionErrors.create("version.not_sealed");
-    }
-    appId = found.id;
-    // The release of the App's current version: its manifest names the
-    // App and the version the reference must name.
-    release = await loadRelease(env, found.id, found.currentVersion);
-    call = {
-      ...call,
-      reference: await pinnedReference(
-        env,
-        release,
-        call.reference,
-        pinnedVersion
-      ),
-    };
-    ({ path, workflowQuery, preference } = await referenceIn(
-      release,
-      call.reference
-    ));
+    resolved = await currentResolution(env, by, app, call, options.pinned);
   } catch (error) {
     return refused(error);
   }
+  const { release, path, appId, workflowQuery, preference } = resolved;
   if (preference !== undefined) {
     return await answeredPreferences(env, {
       by,
@@ -1365,7 +1329,7 @@ const callFunction = async (
     return {
       result,
       provenance: sources.snapshot(),
-      fingerprint: call.reference.fingerprint,
+      fingerprint: fingerprintOf(release, path),
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1486,7 +1450,7 @@ export const callVisitorFunction = async (
   });
   try {
     const call = callAllowed(request, { kind: undefined, windowed: false });
-    const { contractId } = call.reference;
+    const { name: contractId } = call.reference;
     // Who they are, and nothing of the directory (app-people.ts): no grant
     // opens it to a visitor.
     if (isPeoplePath(contractId)) {
@@ -1503,7 +1467,7 @@ export const callVisitorFunction = async (
           value: await answerPeople(visitorPeopleOf(caller), read, call.input),
         },
         provenance: null,
-        fingerprint: call.reference.fingerprint,
+        fingerprint: null,
         manifestHash: null,
       };
     }
@@ -1540,7 +1504,7 @@ export const callVisitorFunction = async (
     return {
       result,
       provenance: null,
-      fingerprint: call.reference.fingerprint,
+      fingerprint: fingerprintOf(release, path),
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1552,8 +1516,9 @@ export const callVisitorFunction = async (
  * Calls a public function of App `app` for `by` (spec 32.6): `request`
  * is the call as its caller sent it, as text, bounded before it is read.
  * It runs only against the release of the App's current version, and
- * only if its reference names exactly a public function there (see the
- * header); then through the operation host, which decides the rest.
+ * only if its reference names a public function of its kind there
+ * (`publicOperationOf`); then through the operation host, which checks
+ * its arguments with the function's own validator and decides the rest.
  * Never throws.
  */
 export const callAppFunction = async (
@@ -1675,7 +1640,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<FunctionCallOptions, "pinnedVersion" | "tellsForm"> = {}
+  options: Pick<FunctionCallOptions, "tellsForm"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
@@ -1706,9 +1671,7 @@ export const windowExtentOf = (request: unknown): number | undefined => {
 export const asksPreferenceWindow = (request: unknown): boolean => {
   try {
     const call = readFunctionRequest(request);
-    return (
-      call.window !== undefined && isPreferencePath(call.reference.contractId)
-    );
+    return call.window !== undefined && isPreferencePath(call.reference.name);
   } catch {
     return false;
   }
@@ -1725,9 +1688,7 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
     return true;
   }
   try {
-    return isWorkflowQueryPath(
-      readFunctionRequest(request).reference.contractId
-    );
+    return isWorkflowQueryPath(readFunctionRequest(request).reference.name);
   } catch {
     return false;
   }
@@ -1745,9 +1706,7 @@ export const callsDecisionQuery = (request: unknown): boolean => {
     return true;
   }
   try {
-    return isDecisionQueryPath(
-      readFunctionRequest(request).reference.contractId
-    );
+    return isDecisionQueryPath(readFunctionRequest(request).reference.name);
   } catch {
     return false;
   }
@@ -1784,9 +1743,7 @@ export const evaluateAppQuery = async (
   app: unknown,
   request: string,
   deadline: number,
-  chargeWindow: (pages: number, whole: number) => Promise<void>,
-  /** The version the screen's lease says it was opened on (`pinnedReference`). */
-  pinnedVersion?: number
+  chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<EvaluatedQuery> => {
   if (isWorkflowRequest(request)) {
     return await workflowWatchRead(env, by, app, request);
@@ -1796,7 +1753,6 @@ export const evaluateAppQuery = async (
     deadline,
     kind: "query",
     chargeWindow,
-    ...(pinnedVersion === undefined ? {} : { pinnedVersion }),
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },
@@ -1822,13 +1778,10 @@ export const invokeAppAction = async (
     progress,
     cancelled,
     deadline,
-    pinnedVersion,
   }: {
     readonly progress?: ProgressSink;
     readonly cancelled: AbortSignal;
     readonly deadline: number;
-    /** A screen's: the version its lease names (`pinnedReference`). */
-    readonly pinnedVersion?: number | undefined;
   }
 ): Promise<{
   readonly result: OperationResult;
@@ -1852,10 +1805,7 @@ export const invokeAppAction = async (
       throw versionErrors.create("version.not_sealed");
     }
     const release = await loadRelease(env, found.id, found.currentVersion);
-    const path = publicOperationOf(
-      release,
-      await pinnedReference(env, release, call.reference, pinnedVersion)
-    );
+    const path = publicOperationOf(release, call.reference);
     resolved = path;
     const invocation = await invocationFor(env, release, {
       by,
@@ -1895,19 +1845,13 @@ export const invokeAppAction = async (
 };
 
 /**
- * A function as a workflow step names it: a generated reference, or just
- * its path and kind. Only those are read; a reference's App, version and
- * fingerprint, where it has them, must be exactly the run's.
+ * A function as a workflow step names it: a generated reference, its name
+ * and kind. The run is pinned to its version (`caller.run`), so nothing
+ * more is read.
  */
 const runReferenceSchema = z.object({
-  contractId: z.string().min(1).max(256),
+  name: z.string().min(1).max(256),
   kind: z.enum(["query", "mutation", "action"]),
-  resourceId: z.string().min(1).max(128).optional(),
-  resourceVersion: z.int().min(1).optional(),
-  fingerprint: z
-    .string()
-    .regex(/^[0-9a-f]{64}$/u)
-    .optional(),
 });
 
 /**
@@ -1933,17 +1877,6 @@ export const callRunFunction = async (
     }
     const release = await loadRelease(env, app, version);
     const operation = publicFunctionOf(release, named.data);
-    const { resourceId, resourceVersion, fingerprint } = named.data;
-    // Another App's function, another version's or another contract's:
-    // refused before any of its input is read.
-    if (
-      (resourceId !== undefined && resourceId !== app) ||
-      (resourceVersion !== undefined && resourceVersion !== version) ||
-      (fingerprint !== undefined &&
-        release.fingerprints[operation.path] !== fingerprint)
-    ) {
-      throw versionErrors.create("version.mismatch");
-    }
     return await callOperation(
       hostedRelease(env, release),
       await runInvocationFor(

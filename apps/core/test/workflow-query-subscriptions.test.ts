@@ -234,7 +234,7 @@ const followingRuns = async (
     .frame(fixture.app, lease)
     .watchQuery(
       JSON.stringify({
-        reference: await queryReference(release, "followUp", "runs"),
+        reference: queryReference(release, "followUp", "runs"),
         input: { pagination: {} },
       }),
       follower.callback
@@ -256,23 +256,13 @@ const followingRuns = async (
 };
 
 /** Starts a run of `followUp` for `by` through the App's action: its ID. */
-const kickOff = async (
-  by: Acting & Identity,
-  app: string,
-  release: Awaited<ReturnType<typeof loadRelease>>
-): Promise<string> => {
+const kickOff = async (by: Acting & Identity, app: string): Promise<string> => {
   const started = await callAppFunction(
     env,
     by,
     app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: "requests.kickOff",
-        fingerprint: release.fingerprints["requests.kickOff"] ?? "",
-        kind: "action",
-      },
+      reference: { name: "requests.kickOff", kind: "action" },
       input: { who: "Ada" },
     })
   );
@@ -345,13 +335,13 @@ const latestDecisions = (
 
 describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
   it("show a run the App starts for the person, then each change of its status, with no subscribing again", async () => {
-    const { builder, workflow, app, release, follower, subscription } =
+    const { builder, workflow, app, follower, subscription } =
       await followingRuns();
     const before = latestRuns(follower.received);
 
     // The App starts one for them: the screen shows it running, pushed to
     // the same subscription.
-    const runId = await kickOff(builder, app, release);
+    const runId = await kickOff(builder, app);
     await showing(follower, [`${runId}: running`]);
     // Cancelled while it waits: the screen shows that too.
     await terminateResourceRun(env, builder, workflow, runId);
@@ -421,7 +411,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
           ]);
         }
       );
-      const runId = await kickOff(builder, app, following.release);
+      const runId = await kickOff(builder, app);
       await vi.waitFor(
         async () => {
           const status = await env.DB.prepare(
@@ -483,7 +473,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       .frame(fixture.app, lease)
       .watchQuery(
         JSON.stringify({
-          reference: await queryReference(release, "followUp", "decisions"),
+          reference: queryReference(release, "followUp", "decisions"),
           input: { pagination: {} },
         }),
         follower.callback
@@ -600,7 +590,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       .frame(fixture.app, lease)
       .watchQuery(
         JSON.stringify({
-          reference: await queryReference(release, "followUp", "decisions"),
+          reference: queryReference(release, "followUp", "decisions"),
           input: { pagination: {} },
         }),
         follower.callback

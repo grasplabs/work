@@ -2028,7 +2028,7 @@ export const titles = action({
       "workflows/notify.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("notify", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("save", { description: "Save it" }, async () => ((await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "notify" })).ok ? 1 : 0));
+  return await step.do("save", { description: "Save it" }, async () => ((await env.APP.callFunction({ name: "counter.hits", kind: "query" }, { name: "notify" })).ok ? 1 : 0));
 });
 `,
       "workflows/notify.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";

@@ -39,6 +39,7 @@ import {
   refusalOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
+import { currentVersionOf } from "./apps.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
@@ -348,19 +349,21 @@ interface KeyedTarget {
 }
 
 /**
- * The release versions an invocation's answer comes from: the caller's,
- * and the one it runs, or ran, under (`ActionInvocation.version`), which a
- * join, an attach or a receipt may have from before a publish.
+ * The release versions an invocation's answer comes from: the App's
+ * current one, which answers every page's call, and the one it runs, or
+ * ran, under (`ActionInvocation.version`), which a join, an attach or a
+ * receipt may have from before a publish.
  */
 const releasesOf = async (
+  env: Env,
   invocation: ReturnType<typeof actionInvocation>,
   userId: string,
-  call: FunctionRequest
+  app: AppId
 ): Promise<readonly number[]> => {
   const running = await invocation.version(userId);
   return [
     ...new Set([
-      call.reference.resourceVersion,
+      await currentVersionOf(env, app),
       ...(running === undefined ? [] : [running]),
     ]),
   ];
@@ -430,7 +433,7 @@ const withheld = (
 interface KeyedAnswer {
   readonly result: unknown;
   readonly provenance: null;
-  readonly fingerprint: string;
+  readonly fingerprint: string | null;
   readonly manifestHash: null;
 }
 
@@ -476,7 +479,6 @@ const keyedAnswer = async (
     call,
     streaming: false,
     attach: false,
-    ...(build === undefined ? {} : { pinnedVersion: build.version }),
     ...(tellsForm ? { form: { key } } : {}),
   });
   const text = await new Response(frames).text();
@@ -487,11 +489,11 @@ const keyedAnswer = async (
   if (frame === undefined) {
     throw new Error("The invocation ended without a result.");
   }
-  const versions = await releasesOf(invocation, person.userId, call);
+  const versions = await releasesOf(env, invocation, person.userId, id);
   const answer: KeyedAnswer = {
     result: frame.result,
     provenance: null,
-    fingerprint: call.reference.fingerprint,
+    fingerprint: null,
     manifestHash: null,
   };
   // Checked again before the answer is handed over, as a stream's relay
@@ -614,17 +616,9 @@ const boundedCall = async (
             text,
             Date.now() + screenCallMs,
             windowCharger(env, person, id),
-            // A portable host has no lease: nothing pins its calls, and no
-            // form it sends is told to the App's webhooks. A screen's keyed
-            // mutation commits its form with its writes.
-            portableSession === undefined
-              ? {
-                  ...(build === undefined
-                    ? {}
-                    : { pinnedVersion: build.version }),
-                  tellsForm: true,
-                }
-              : {}
+            // No form a portable host sends is told to the App's webhooks.
+            // A screen's keyed mutation commits its form with its writes.
+            portableSession === undefined ? { tellsForm: true } : {}
           )
         )
     );
@@ -1202,12 +1196,11 @@ const appStreamResponse = async (
       call,
       streaming: true,
       attach: action === "attach",
-      ...(build === undefined ? {} : { pinnedVersion: build.version }),
       ...(tellsForm ? { form: { key } } : {}),
     });
     // The release it runs under, besides the caller's: a join or an attach
     // may follow a run a release published since started.
-    const versions = await releasesOf(invocation, person.userId, call);
+    const versions = await releasesOf(env, invocation, person.userId, id);
     return new Response(
       relay(frames, {
         env,

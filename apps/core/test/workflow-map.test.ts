@@ -34,12 +34,7 @@ const call = async (
   kind: "query" | "mutation" | "action",
   input: unknown = {}
 ): Promise<OperationResult> =>
-  await calledAs(
-    await person.api.whoami(),
-    app,
-    { contractId: path, kind },
-    input
-  );
+  await calledAs(await person.api.whoami(), app, { name: path, kind }, input);
 
 /** What a call answered; a refusal fails the test, saying why. */
 const valueOf = (result: OperationResult): unknown => {

@@ -293,13 +293,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     expect(their.token).not.toBe(mine.token);
     // The builder's invocation itself, reached in the admin's name.
     const request = JSON.stringify({
-      reference: {
-        resourceId: api.stamp.resourceId,
-        resourceVersion: api.stamp.resourceVersion,
-        contractId: api.stamp.contractId,
-        fingerprint: api.stamp.fingerprint,
-        kind: "action",
-      },
+      reference: { name: api.stamp.name, kind: "action" },
       input: { title: "Mine", pauseMs: 0 },
       idempotencyKey: keyed.idempotencyKey,
     });
@@ -413,13 +407,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     const input = { title: "Ran" };
     await client.action(api.stamp, input, keyed);
     const request = JSON.stringify({
-      reference: {
-        resourceId: api.stamp.resourceId,
-        resourceVersion: api.stamp.resourceVersion,
-        contractId: api.stamp.contractId,
-        fingerprint: api.stamp.fingerprint,
-        kind: "action",
-      },
+      reference: { name: api.stamp.name, kind: "action" },
       input: { ...input, pauseMs: 0 },
       idempotencyKey: keyed.idempotencyKey,
     });
@@ -615,7 +603,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     );
   });
 
-  it("refuses arguments and options the call can't take before sending anything", async () => {
+  it("refuses arguments by the function's validator in core, and options the call can't take before sending anything", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client, net } = clientFor(opened);
@@ -624,7 +612,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     ).resolves.toMatchObject({
       code: "contract.invalid_args",
       category: "contract",
-      details: { issues: [{ path: ["title"] }] },
+      details: { issues: [expect.stringContaining("title")] },
     });
     await expect(
       failureOf(

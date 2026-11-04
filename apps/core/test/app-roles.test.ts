@@ -80,7 +80,7 @@ const functionOutcome = async (
   app: string
 ): Promise<string> => {
   const answered = await calledAs(await api.whoami(), app, {
-    contractId: "desk.missing",
+    name: "desk.missing",
     kind: "query",
   });
   return answered.ok ? "ok" : answered.error.code;

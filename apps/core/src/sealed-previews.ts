@@ -41,6 +41,7 @@ import type { Live } from "./action-invocation.ts";
 import { operationRoles } from "./app-access.ts";
 import {
   publicOperationOf,
+  fingerprintOf,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -463,6 +464,29 @@ const receiptsKept = 8;
 const receiptBytes = 16 * 1024;
 
 /**
+ * The call `request` asks of a preview, as `options` take it: refused as
+ * `contract.invalid_request` when it isn't of the kind asked for, or reads
+ * a window but isn't a screen's query.
+ */
+const previewRequestOf = (
+  request: unknown,
+  options: PreviewCallOptions
+): FunctionRequest => {
+  const call = readFunctionRequest(request);
+  if (options.kind !== undefined && call.reference.kind !== options.kind) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  // A window is a screen's, and a query's only, as on a version.
+  if (
+    call.window !== undefined &&
+    (options.chargeWindow === undefined || call.reference.kind !== "query")
+  ) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  return call;
+};
+
+/**
  * The key of `personId`'s invocation of the action `call` names under
  * `key`, as a live invocation's name (`invocationName`): never anyone
  * else's, nor another action's under the same key.
@@ -471,13 +495,7 @@ const streamName = (
   personId: string,
   call: FunctionRequest,
   key: string
-): string =>
-  canonicalJson([
-    personId,
-    call.reference.contractId,
-    call.reference.fingerprint,
-    key,
-  ]);
+): string => canonicalJson([personId, call.reference.name, key]);
 
 /**
  * The streaming action `request` names, with the key it must have:
@@ -718,17 +736,7 @@ export class SealedPreviews {
     });
     let call: FunctionRequest;
     try {
-      call = readFunctionRequest(request);
-      if (options.kind !== undefined && call.reference.kind !== options.kind) {
-        throw operationErrors.create("contract.invalid_request");
-      }
-      // A window is a screen's, and a query's only, as on a version.
-      if (
-        call.window !== undefined &&
-        (options.chargeWindow === undefined || call.reference.kind !== "query")
-      ) {
-        throw operationErrors.create("contract.invalid_request");
-      }
+      call = previewRequestOf(request, options);
     } catch (error) {
       return refused(error);
     }
@@ -742,7 +750,7 @@ export class SealedPreviews {
       // A workflow reference's queries read runs through the App's
       // binding of the workflow; a preview binds no resource, so there is
       // none to read through, whatever the alias.
-      if (isWorkflowQueryPath(call.reference.contractId)) {
+      if (isWorkflowQueryPath(call.reference.name)) {
         throw operationErrors.create("resource.unavailable");
       }
       const deadline =
@@ -817,7 +825,7 @@ export class SealedPreviews {
         answer: {
           result,
           provenance: null,
-          fingerprint: call.reference.fingerprint,
+          fingerprint: fingerprintOf(release, path),
           manifestHash: release.manifestHash,
         },
         reads,
@@ -856,7 +864,7 @@ export class SealedPreviews {
       requestId: string;
     }
   ): Promise<PreviewAnswer> | undefined {
-    const { contractId } = call.reference;
+    const { name: contractId } = call.reference;
     if (isPreferencePath(contractId)) {
       return this.#preferences(chatId, personId, app, running, {
         release,
@@ -908,7 +916,7 @@ export class SealedPreviews {
       answer: {
         result: { ok: true, value },
         provenance: null,
-        fingerprint: call.reference.fingerprint,
+        fingerprint: null,
         manifestHash: release.manifestHash,
       },
       reads: undefined,
@@ -992,7 +1000,7 @@ export class SealedPreviews {
       answer: {
         result,
         provenance: null,
-        fingerprint: call.reference.fingerprint,
+        fingerprint: null,
         manifestHash: release.manifestHash,
       },
       reads,

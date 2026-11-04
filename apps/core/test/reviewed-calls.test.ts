@@ -222,7 +222,7 @@ const hostHeldTo = async (
 };
 
 /** The App's counter's `hit`, as a step calls it. */
-const hit = { contractId: "counter.hit", kind: "action" } as const;
+const hit = { name: "counter.hit", kind: "action" } as const;
 
 /** A step function that answers 1 at once. */
 const ranOne = async (): Promise<Settled<unknown>> =>
@@ -429,7 +429,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     app = env.APP;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => {
-    await app.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "tidied", execution: crypto.randomUUID() });
+    await app.callFunction({ name: "counter.hit", kind: "action" }, { name: "tidied", execution: crypto.randomUUID() });
     return "tidied";
   });`,
       { prepare: null, "tidy-up": null }
@@ -494,7 +494,7 @@ queueMicrotask(() => {
   try {
     Object.assign(me, {
       run: async (engine: { do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>; env: { APP: { callFunction: (...args: object[]) => Promise<unknown> } } }) => {
-        await engine.do("tidy:x1", {}, async () => await engine.env.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "swapped", execution: "swapped" }));
+        await engine.do("tidy:x1", {}, async () => await engine.env.APP.callFunction({ name: "counter.hit", kind: "action" }, { name: "swapped", execution: "swapped" }));
         return "swapped";
       },
     });

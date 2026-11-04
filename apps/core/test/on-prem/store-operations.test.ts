@@ -119,19 +119,12 @@ const bound = async (admin: Person, desk: Sealed, crm: Sealed) => {
 
 /** What `sealed`'s owner gets calling `desk.list`. */
 const list = async (sealed: Sealed): Promise<unknown> => {
-  const { release } = sealed;
   const answer = await callAppFunction(
     env,
     sealed.owner,
     sealed.app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: "desk.list",
-        fingerprint: release.fingerprints["desk.list"] ?? "",
-        kind: "action",
-      },
+      reference: { name: "desk.list", kind: "action" },
       input: {},
     })
   );

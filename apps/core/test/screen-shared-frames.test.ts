@@ -176,16 +176,11 @@ const follower = () => {
 /** A query's call as the client sends it. */
 const requestOf = (
   reference: OperationReference<unknown, unknown, ReferenceKind>,
-  input: unknown
+  input: unknown,
+  kind: ReferenceKind = "query"
 ): string =>
   JSON.stringify({
-    reference: {
-      resourceId: reference.resourceId,
-      resourceVersion: reference.resourceVersion,
-      contractId: reference.contractId,
-      fingerprint: reference.fingerprint,
-      kind: reference.kind,
-    },
+    reference: { name: reference.name, kind },
     input,
   });
 

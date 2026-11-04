@@ -54,7 +54,7 @@ const sentOf = (body: string): Sent => {
   const reference = read("reference");
   const contractId: unknown =
     typeof reference === "object" && reference !== null
-      ? Reflect.get(reference, "contractId")
+      ? Reflect.get(reference, "name")
       : undefined;
   const key = read("idempotencyKey");
   return {

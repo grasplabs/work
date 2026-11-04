@@ -1134,13 +1134,7 @@ export default app({
         { userId: admin.userId, role: "admin", teams: [] },
         appId,
         JSON.stringify({
-          reference: {
-            resourceId: current.manifest.resourceId,
-            resourceVersion: current.manifest.resourceVersion,
-            contractId: path,
-            fingerprint: current.fingerprints[path] ?? "",
-            kind: "mutation",
-          },
+          reference: { name: path, kind: "mutation" },
           input,
         })
       );

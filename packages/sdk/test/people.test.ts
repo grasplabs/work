@@ -3,42 +3,32 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { GraspClient } from "../src/client-core.ts";
-import { contractFingerprint } from "../src/generate.ts";
-import {
-  peopleFingerprints,
-  peopleOperations,
-  peopleReferences,
-} from "../src/people.ts";
+import { peopleOperations, peopleReferences } from "../src/people.ts";
 import type { PeopleDirectory } from "../src/people.ts";
 import { GraspProvider, usePeople } from "../src/react.ts";
 
 // The reads a screen makes through `useUser` and `usePeople` name their
-// contract by a fingerprint fixed in the SDK, which core compares with the
-// one its own SDK makes: they must be the contracts' own. And the
-// directory a screen holds is one per client, so an effect that depends on
-// it doesn't run again on every render.
+// read, and core checks what they take. And the directory a screen holds
+// is one per client, so an effect that depends on it doesn't run again on
+// every render.
 
 describe("the people reads' references", () => {
-  it("name each read's own contract fingerprint", async () => {
-    const made = Object.fromEntries(
-      await Promise.all(
-        Object.entries(peopleOperations).map(
-          async ([read, operation]) =>
-            [read, await contractFingerprint(operation)] as const
-        )
+  it("name each read and nothing more: core checks what it takes", () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(peopleReferences).map(([read, reference]) => [
+          read,
+          reference,
+        ])
+      )
+    ).toStrictEqual(
+      Object.fromEntries(
+        Object.entries(peopleOperations).map(([read, operation]) => [
+          read,
+          { name: operation.path, kind: "query", visibility: "public" },
+        ])
       )
     );
-    const named = Object.fromEntries(
-      Object.entries(peopleReferences).map(([read, reference]) => [
-        read,
-        reference.fingerprint,
-      ])
-    );
-
-    expect({ made, named }).toStrictEqual({
-      made: peopleFingerprints,
-      named: peopleFingerprints,
-    });
   });
 });
 

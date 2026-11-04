@@ -3,7 +3,9 @@ import { describe, expect, test } from "vite-plus/test";
 
 import {
   contractFingerprint,
+  declaredWorkflows,
   decisionFingerprint,
+  preferenceOperations,
   eventFingerprint,
   generateModules,
   inspectApp,
@@ -12,6 +14,7 @@ import {
   registerFunctions,
   symbolicModules,
   workflowFingerprint,
+  workflowQueries,
 } from "../src/host.ts";
 import type {
   AppManifest,
@@ -151,70 +154,75 @@ describe("generated modules", () => {
     ).resolves.toStrictEqual(await generateModules(manifest, identity));
   });
 
-  test("pin each function's exact contract, which any change to it changes", async () => {
+  test("change the contract fingerprint a binding pins with any change to a function", async () => {
     const manifest = notesManifest();
     const create = manifest.operations["notes.create"];
     if (create === undefined) {
       throw new Error("No notes.create");
     }
-    expect(api.notes.create.fingerprint).toBe(
-      await contractFingerprint(create)
-    );
+    const pinned = await contractFingerprint(create);
     const changes = [
       { ...create, kind: "action" as const },
       { ...create, visibility: "internal" as const },
       { ...create, returns: v.string().descriptor },
+      { ...create, returns: null },
       { ...create, stream: v.null().descriptor },
     ];
     for (const change of changes) {
       // One after the other: each is compared with the original.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await expect(contractFingerprint(change)).resolves.not.toBe(
-        api.notes.create.fingerprint
-      );
+      await expect(contractFingerprint(change)).resolves.not.toBe(pinned);
     }
   });
 
-  test("hold data only: the 32.1 keys, frozen all the way down", () => {
-    expect(Object.keys(api.notes.create).toSorted()).toStrictEqual(
-      [
-        "args",
-        "contractId",
-        "fingerprint",
-        "kind",
-        "mode",
-        "resourceId",
-        "resourceVersion",
-        "returns",
-        "visibility",
-      ].toSorted()
-    );
+  test("hold a function's name, kind and visibility only, frozen all the way down", () => {
+    // A mutation's: its name, kind and arguments, built with the code.
+    expect(api.notes.create).toStrictEqual({
+      name: "notes.create",
+      kind: "mutation",
+      args: notesManifest().operations["notes.create"]?.args,
+    });
+    // A query's: its name and what it answers.
+    expect(Object.keys(api.notes.list).toSorted()).toStrictEqual([
+      "name",
+      "returns",
+    ]);
+    // A streaming action's is an action's: core knows it streams.
+    expect(Object.keys(api.notes.exportAll).toSorted()).toStrictEqual([
+      "args",
+      "kind",
+      "name",
+    ]);
     // The phantom types exist in types only.
     expect(Object.getOwnPropertySymbols(api.notes.create)).toStrictEqual([]);
-    expect(textOf(api.notes.create)).toBe(textOf({ ...api.notes.create }));
     expect([
       Object.isFrozen(api),
       Object.isFrozen(api.notes),
-      Object.isFrozen(api.notes.create.args),
+      Object.isFrozen(api.notes.create),
       Object.isFrozen(permissions.files.operations),
       Object.isFrozen(screens.note.input),
-    ]).toStrictEqual([true, true, true, true, true]);
-    expect(
-      Reflect.set(api.notes.create, "contractId", "notes.remove")
-    ).toBeFalsy();
+      Reflect.set(api.notes.create, "name", "notes.remove"),
+    ]).toStrictEqual([true, true, true, true, true, false]);
   });
 
-  test("give a streaming action stream mode and its progress descriptor, and no other function either", () => {
-    expect([
-      api.notes.exportAll.mode,
-      api.notes.exportAll.stream,
-    ]).toStrictEqual([
-      "stream",
-      v.object({ done: v.number().integer().min(0) }).descriptor,
+  test("name functions the same whatever release or version they are generated for", async () => {
+    // Without workflows, whose references still carry the release they
+    // were bound in: every reference here is a name.
+    const manifest = { ...notesManifest(), workflows: {} };
+    const [one, other] = await Promise.all([
+      generateModules(manifest, identity),
+      generateModules(manifest, {
+        resourceId: "app_00000000000000000000000other",
+        resourceVersion: 7,
+      }),
     ]);
-    expect([api.notes.create.mode, "stream" in api.notes.create]).toStrictEqual(
-      ["single", false]
-    );
+    expect({
+      api:
+        other["server/_generated/api.ts"] === one["server/_generated/api.ts"],
+      internal:
+        other["server/_generated/internal.ts"] ===
+        one["server/_generated/internal.ts"],
+    }).toStrictEqual({ api: true, internal: true });
   });
 
   test("keep internal functions out of the browser's api", () => {
@@ -228,11 +236,7 @@ describe("generated modules", () => {
       "tally",
       "update",
     ]);
-    expect(internal.notes.count).toMatchObject({
-      contractId: "notes.count",
-      visibility: "internal",
-      kind: "query",
-    });
+    expect(internal.notes.count).toMatchObject({ name: "notes.count" });
     expect(referencesText).not.toContain("notes.count");
   });
 
@@ -292,38 +296,28 @@ describe("generated modules", () => {
     });
   });
 
-  test("export preferences as a get query and an update mutation, pinned as any function is", () => {
-    expect(Object.keys(preferences).toSorted()).toStrictEqual([
-      "get",
-      "update",
-    ]);
-    // What core rebuilds from the release's preferences must match exactly.
-    expect(preferences.get).toMatchObject({
-      contractId: "preferences.get",
-      kind: "query",
-      visibility: "public",
-      mode: "single",
-      resourceId: identity.resourceId,
-      resourceVersion: identity.resourceVersion,
+  test("export preferences as a get query and an update mutation, named as any function is", () => {
+    expect({
+      get: Object.keys(preferences.get).toSorted(),
+      update: [preferences.update.name, preferences.update.kind],
+    }).toStrictEqual({
+      get: ["name", "returns"],
+      update: ["preferences.update", "mutation"],
     });
-    expect(preferences.get.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
-    expect(preferences.update).toMatchObject({
-      contractId: "preferences.update",
-      kind: "mutation",
-      visibility: "public",
-      mode: "single",
-    });
-    expect(preferences.update.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
   });
 
   test("answer every preference and `_rev`, and take a strict, all-optional patch", () => {
+    const declared = notesManifest().preferences;
+    if (declared === null) {
+      throw new Error("The fixture declares preferences");
+    }
+    const operations = preferenceOperations(declared);
     expect(
-      schemaOf(preferences.get.returns)["~standard"].validate({
-        compact: true,
-        _rev: 3,
-      })
+      schemaOf(operations.get.returns ?? v.null().descriptor)[
+        "~standard"
+      ].validate({ compact: true, _rev: 3 })
     ).toStrictEqual({ value: { compact: true, _rev: 3 } });
-    const updateArgs = schemaOf(preferences.update.args)["~standard"];
+    const updateArgs = schemaOf(operations.update.args)["~standard"];
     expect(
       updateArgs.validate({ expectedRevision: 0, patch: {} })
     ).toStrictEqual({ value: { expectedRevision: 0, patch: {} } });
@@ -544,46 +538,24 @@ describe("workflow references", () => {
     );
   });
 
-  test("expose runs, history, the decision inbox and a decision as public query references of their own contracts", async () => {
+  test("expose runs, history, the decision inbox and a decision as public query references, by name", async () => {
     const queries = Object.entries(workflows).flatMap(([alias, reference]) =>
       Object.entries<AnyOperationReference>(reference.queries).map(
         ([name, query]) => ({
-          name,
+          path: `workflows.${alias}.queries.${name}`,
           query,
-          manifest: {
-            path: `workflows.${alias}.queries.${name}`,
-            kind: "query" as const,
-            visibility: "public" as const,
-            args: query.args,
-            returns: query.returns,
-            stream: null,
-            uses: [],
-            tables: {},
-          },
         })
       )
     );
-    expect(
-      queries.map(({ manifest }) => manifest.path).toSorted()
-    ).toStrictEqual(
+    expect(queries.map(({ path }) => path).toSorted()).toStrictEqual(
       ["archiveNotes", "summarizeNote"].flatMap((alias) =>
         ["decision", "decisions", "history", "runs"].map(
           (name) => `workflows.${alias}.queries.${name}`
         )
       )
     );
-    const fingerprints = await Promise.all(
-      queries.map(async ({ manifest }) => await contractFingerprint(manifest))
-    );
-    for (const [index, { query, manifest }] of queries.entries()) {
-      expect(query).toMatchObject({
-        ...identity,
-        contractId: manifest.path,
-        kind: "query",
-        visibility: "public",
-        mode: "single",
-        fingerprint: fingerprints[index],
-      });
+    for (const { path, query } of queries) {
+      expect(query.name).toBe(path);
     }
     // A workflow that asks nobody has no inbox, and no decision rows.
     const files = await generatedWith([
@@ -626,7 +598,14 @@ describe("workflow references", () => {
   });
 
   test("answer only what each query declares: declared keys, no output, a known context", () => {
-    const { queries } = workflows.summarizeNote;
+    // What core checks each query's answer against, by the binding.
+    const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
+      ({ alias }) => alias === "summarizeNote"
+    );
+    if (bound === undefined) {
+      throw new Error("The fixture binds summarizeNote");
+    }
+    const queries = workflowQueries(bound);
     const historyRow = {
       id: "h-1",
       sequence: 4,
@@ -694,8 +673,10 @@ describe("workflow references", () => {
     const accepted = Object.fromEntries(
       Object.entries(cases).map(([what, [query, value]]) => [
         what,
-        schemaOf(query.returns)["~standard"].validate(value).issues ===
-          undefined,
+        query?.returns !== undefined &&
+          query.returns !== null &&
+          schemaOf(query.returns)["~standard"].validate(value).issues ===
+            undefined,
       ])
     );
     expect(accepted).toStrictEqual({
@@ -1082,9 +1063,7 @@ describe("references in uses", () => {
     const tally = looseAction({
       args: {},
       returns: v.number(),
-      uses: [
-        { contractId: "notes.secret", visibility: "internal", kind: "query" },
-      ],
+      uses: [{ name: "notes.secret", visibility: "internal", kind: "query" }],
       handler: () => 1,
     });
     const { manifest } = inspectApp(
@@ -1097,18 +1076,8 @@ describe("references in uses", () => {
 
   test.each([
     [
-      "another kind than what is registered there",
-      { contractId: "notes.secret", visibility: "internal", kind: "mutation" },
-      "doesn't match what is registered there",
-    ],
-    [
-      "another visibility",
-      { contractId: "notes.secret", visibility: "public", kind: "query" },
-      "doesn't match what is registered there",
-    ],
-    [
       "a path nothing is registered at",
-      { contractId: "notes.missing", visibility: "internal", kind: "query" },
+      { name: "notes.missing", visibility: "internal", kind: "query" },
       "doesn't register",
     ],
   ])("with %s are refused", (_case, reference, message) => {
@@ -1124,7 +1093,7 @@ describe("references in uses", () => {
   });
 
   test("let a symbolic reference take its kind from the registration, and hold a mutation to queries", () => {
-    const symbolic = { contractId: "notes.send", visibility: "public" };
+    const symbolic = { name: "notes.send", visibility: "public" };
     const change = looseMutation({
       args: {},
       returns: v.null(),
@@ -1153,12 +1122,12 @@ describe("references in uses", () => {
     await expect(runFunction(notes, "notes.tally", {}, channel)).resolves.toBe(
       3
     );
-    expect(calls).toStrictEqual([["query", reference.contractId, {}]]);
+    expect(calls).toStrictEqual([["query", reference.name, {}]]);
   });
 });
 
 describe("reserved segments", () => {
-  test.each(["contractId", "visibility", "kind", "then"])(
+  test.each(["name", "then"])(
     "no function registers at a segment named %s, at any depth",
     (name) => {
       expect(
@@ -1655,7 +1624,7 @@ describe("reading a manifest back", () => {
           "mutation"
         );
       },
-      "doesn't match what is registered there",
+      "isn't what its declaration makes",
     ],
     [
       "a use of something unregistered",
@@ -1666,7 +1635,7 @@ describe("reading a manifest back", () => {
           "notes.missing"
         );
       },
-      "never IDs or names",
+      "doesn't register",
     ],
     [
       "a resource a function uses that the App doesn't declare",

@@ -287,8 +287,6 @@ export const useQueryChecks = (): void => {
   expectTypeOf<keyof typeof queries>().toEqualTypeOf<
     "runs" | "history" | "decisions" | "decision"
   >();
-  expectTypeOf(queries.runs.kind).toEqualTypeOf<"query">();
-  expectTypeOf(queries.runs.visibility).toEqualTypeOf<"public">();
   // @ts-expect-error -- a query, never a command
   void useMutation(queries.runs);
   // @ts-expect-error -- no generated start beside the queries

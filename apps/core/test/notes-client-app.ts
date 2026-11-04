@@ -1,4 +1,5 @@
 import type { Id, OperationReference, ReferenceKind } from "@grasp-os/sdk";
+import { referenceOf } from "@grasp-os/sdk/host";
 
 import type { Release } from "../src/app-releases.ts";
 
@@ -181,25 +182,14 @@ export const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   path: string
 ): OperationReference<Args, Return, Kind> => {
   const operation = release.app.operations[path];
-  const fingerprint = release.fingerprints[path];
-  if (operation === undefined || fingerprint === undefined) {
+  if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  // The same data the host generates into `@server/_generated/api` for this release (sdk
+  // The same data the host generates into `@server/_generated/api` (sdk
   // generate.ts), typed by hand as it would be.
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: path,
-    fingerprint,
-    // SAFETY: each call below names the kind the release declares.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    kind: operation.kind as Kind,
-    visibility: "public",
-    mode: "single",
-    args: operation.args,
-    returns: operation.returns,
-  };
+  // SAFETY: each call below names the kind the release declares.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return referenceOf(operation) as OperationReference<Args, Return, Kind>;
 };
 
 /** The App's `api`, as its screens import it from `@server/_generated/api`. */

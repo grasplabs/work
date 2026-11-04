@@ -537,7 +537,7 @@ const decisionInbox = async () => {
     window?: number
   ): Promise<unknown> => {
     const request = JSON.stringify({
-      reference: await queryReference(release, "review", name),
+      reference: queryReference(release, "review", name),
       input,
       ...(window === undefined ? {} : { window: { extent: window } }),
     });

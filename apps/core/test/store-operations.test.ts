@@ -257,13 +257,7 @@ const call = async (
     by,
     sealed.app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path] ?? "",
-        kind: operation?.kind ?? "query",
-      },
+      reference: { name: path, kind: operation?.kind ?? "query" },
       input,
     })
   );

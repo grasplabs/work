@@ -249,13 +249,7 @@ const calls = {
         1,
         "stream",
         JSON.stringify({
-          reference: {
-            resourceId: app,
-            resourceVersion: 1,
-            contractId: "notes.run",
-            fingerprint: "0".repeat(64),
-            kind: "action",
-          },
+          reference: { name: "notes.run", kind: "action" },
           input: {},
           idempotencyKey: crypto.randomUUID(),
         }),

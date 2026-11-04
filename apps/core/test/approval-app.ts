@@ -64,7 +64,7 @@ export default app({
  * An ask's code that keeps its recipients and whether it is the reminder
  * in the approval App (`approvals.remember`), failing as it refuses.
  */
-const remember = `        const remembered = (await env.APP.callFunction({ contractId: "approvals.remember", kind: "mutation" }, { recipients: recipients.map(({ userId, name, email, link }) => ({ userId, name, email, link })), reminder })) as { ok: true } | { ok: false; error: { message: string; code: string } };
+const remember = `        const remembered = (await env.APP.callFunction({ name: "approvals.remember", kind: "mutation" }, { recipients: recipients.map(({ userId, name, email, link }) => ({ userId, name, email, link })), reminder })) as { ok: true } | { ok: false; error: { message: string; code: string } };
         if (!remembered.ok) {
           throw Object.assign(new Error(remembered.error.message), { code: remembered.error.code });
         }`;

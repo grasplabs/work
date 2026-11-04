@@ -501,7 +501,7 @@ describe("paths", () => {
     ],
     [
       "an export named as a reference's own data",
-      { notes: { kind: list } },
+      { notes: { name: list } },
       "a reference itself answers",
     ],
   ])("%s is refused", (_case, modules, message) => {
@@ -963,7 +963,6 @@ describe("declarations", () => {
     ["`input`", { input: {}, returns: v.null() }, "not `input`"],
     ["`output`", { args: {}, output: v.null() }, "not `output`"],
     ["`reads`", { args: {}, returns: v.null(), reads: [] }, "no `reads`"],
-    ["no `returns`", { args: {} }, "declares what it `returns`"],
     [
       "`uses` on a query",
       { args: {}, returns: v.null(), uses: [] },

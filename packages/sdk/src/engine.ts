@@ -65,7 +65,7 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  *
  * A public function of the App's own release (spec 8: a query, mutation
  * or action) is `env.APP.callFunction(reference, input)`: `reference` is
- * the function's generated reference, or just `{ contractId, kind }`. It
+ * the function's generated reference, `{ name, kind }`. It
  * runs in the release of the version the run is pinned to, as the run,
  * and answers what the function answered or why it failed, as data:
  * `{ ok: true, value }` or `{ ok: false, error }`, where `error` has the

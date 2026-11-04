@@ -360,13 +360,7 @@ const call = async (
     by,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path] ?? "",
-        kind: operation?.kind ?? "action",
-      },
+      reference: { name: path, kind: operation?.kind ?? "action" },
       input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })
@@ -588,13 +582,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       mailer.by,
       mailer.release.manifest.resourceId,
       JSON.stringify({
-        reference: {
-          resourceId: mailer.release.manifest.resourceId,
-          resourceVersion: 1,
-          contractId: "mail.inbox",
-          fingerprint: mailer.release.fingerprints["mail.inbox"] ?? "",
-          kind: "action",
-        },
+        reference: { name: "mail.inbox", kind: "action" },
         input: {},
       })
     );

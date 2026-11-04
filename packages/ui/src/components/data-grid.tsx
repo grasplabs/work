@@ -1059,7 +1059,7 @@ export const DataGrid = <Reference extends AnyQuery>({
   >[];
 
   const text: DataGridText = { ...pageText(dataGridTexts), ...ownText };
-  const fields = recordFieldsOf(query.returns);
+  const fields = recordFieldsOf(query.returns ?? null);
   const columns = specs.map((spec) => readColumn(spec, fields));
   const [typed, setTyped] = useState("");
   const search = useSettled(typed, searchSettleMs);

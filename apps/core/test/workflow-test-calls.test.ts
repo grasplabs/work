@@ -284,7 +284,7 @@ const activated = async (
 /** What the App's own store holds, as its builder reads it once current. */
 const ownStoreOf = async (app: RequestsApp): Promise<unknown> => {
   const result = await calledAs(app.builder, app.app, {
-    contractId: "requests.list",
+    name: "requests.list",
     kind: "query",
   });
   return result.ok ? result.value : result.error.code;
@@ -541,13 +541,7 @@ describe(
         await session.call(
           "desk-user",
           JSON.stringify({
-            reference: {
-              resourceId: app.release.manifest.resourceId,
-              resourceVersion: app.release.manifest.resourceVersion,
-              contractId: "requests.list",
-              fingerprint: app.release.fingerprints["requests.list"],
-              kind: "query",
-            },
+            reference: { name: "requests.list", kind: "query" },
             input: {},
           })
         )

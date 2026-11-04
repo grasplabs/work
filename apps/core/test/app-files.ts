@@ -5,7 +5,7 @@ import type {
   ReferenceKind,
 } from "@grasp-os/sdk";
 import { GraspError } from "@grasp-os/sdk/client";
-import { fileChannel, GraspClient } from "@grasp-os/sdk/host";
+import { fileChannel, GraspClient, referenceOf } from "@grasp-os/sdk/host";
 import type { FileChannel, FileTransport } from "@grasp-os/sdk/host";
 import {
   appFilesPath,
@@ -211,23 +211,12 @@ const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   path: string
 ): OperationReference<Args, Return, Kind> => {
   const operation = release.app.operations[path];
-  const fingerprint = release.fingerprints[path];
-  if (operation === undefined || fingerprint === undefined) {
+  if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: path,
-    fingerprint,
-    // SAFETY: each call below names the kind the release declares.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    kind: operation.kind as Kind,
-    visibility: "public",
-    mode: "single",
-    args: operation.args,
-    returns: operation.returns,
-  };
+  // SAFETY: each call below names the kind the release declares.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return referenceOf(operation) as OperationReference<Args, Return, Kind>;
 };
 
 interface FileArgs {

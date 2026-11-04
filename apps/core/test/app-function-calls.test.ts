@@ -436,7 +436,7 @@ const askingWorkflow = (id: string): Record<string, string> => ({
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("ask", { description: "Ask", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${JSON.stringify({ contractId: "asker.go", kind: "action" })}, {})) as Json
+    (await env.APP.callFunction(${JSON.stringify({ name: "asker.go", kind: "action" })}, {})) as Json
   )
 );
 `,
@@ -558,13 +558,7 @@ const call = async (
     by,
     sealed.app,
     JSON.stringify({
-      reference: {
-        resourceId: current.manifest.resourceId,
-        resourceVersion: current.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: current.fingerprints[path] ?? "",
-        kind: operation?.kind ?? "query",
-      },
+      reference: { name: path, kind: operation?.kind ?? "query" },
       input,
     }),
     Date.now() + 30_000,
@@ -598,17 +592,10 @@ const startScreenAction = async (
   path: string,
   input: unknown
 ): Promise<{ name: string; result: Promise<unknown> }> => {
-  const { release: current } = sealed;
   const key = crypto.randomUUID();
   const request = readFunctionRequest(
     JSON.stringify({
-      reference: {
-        resourceId: current.manifest.resourceId,
-        resourceVersion: current.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: current.fingerprints[path] ?? "",
-        kind: "action",
-      },
+      reference: { name: path, kind: "action" },
       input,
       idempotencyKey: key,
     })
@@ -1034,19 +1021,12 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
       chatId: chatIdSchema.parse(crypto.randomUUID()),
     };
-    const { release: current } = first;
     await callAppFunction(
       env,
       admin,
       first.app,
       JSON.stringify({
-        reference: {
-          resourceId: current.manifest.resourceId,
-          resourceVersion: current.manifest.resourceVersion,
-          contractId: "relay.go",
-          fingerprint: current.fingerprints["relay.go"] ?? "",
-          kind: "action",
-        },
+        reference: { name: "relay.go", kind: "action" },
         input: {},
       }),
       Date.now() + 30_000,
@@ -1194,9 +1174,9 @@ describe("a run calling another App's functions", { timeout: 90_000 }, () => {
       id: builder.userId,
       role: "user",
     });
-    const kick = JSON.stringify({ contractId: "desk.kick", kind: "action" });
+    const kick = JSON.stringify({ name: "desk.kick", kind: "action" });
     const later = JSON.stringify({
-      contractId: "desk.kickLater",
+      name: "desk.kickLater",
       kind: "action",
     });
     const { id } = await builder.api.apps.create({ name: "Kicking desk" });
@@ -1378,7 +1358,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
     const answered = await callRunFunction(
       env,
       caller,
-      { contractId: "desk.add", kind: "action" },
+      { name: "desk.add", kind: "action" },
       { text: "stale" },
       `step:${crypto.randomUUID()}`
     );

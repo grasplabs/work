@@ -25,7 +25,7 @@ import type {
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
-  StreamingFunction,
+  IsStreaming,
   WorkflowEventReference,
 } from "./references.ts";
 import { tablesOf } from "./schema.ts";
@@ -103,7 +103,8 @@ export type FunctionReference<
   Vis extends Visibility = Visibility,
   ArgsIn = unknown,
   Return = unknown,
-> = Callable<Kind, Vis, ArgsIn, Return>;
+  Progress = unknown,
+> = Callable<Kind, Vis, ArgsIn, Return, Progress>;
 
 /** Any function reference: its phantom members are only ever read. */
 export type AnyReference = FunctionReference;
@@ -292,9 +293,10 @@ type RunMutation<Uses extends readonly Use[]> = <
  * streaming one isn't callable here: its progress has no one to go to.
  */
 type RunAction<Uses extends readonly Use[]> = <
-  Reference extends Exclude<UsedOfKind<Uses, "action">, StreamingFunction>,
+  Reference extends UsedOfKind<Uses, "action">,
 >(
-  reference: Reference,
+  reference: Reference &
+    (true extends IsStreaming<Reference> ? never : unknown),
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
@@ -479,17 +481,30 @@ type Answer<Returns extends AnySchema> =
   | Infer<Returns>
   | Promise<Infer<Returns>>;
 
-/** A declared server function, as the App registers it. */
+/**
+ * A declared server function, as the App registers it. `Return` is what
+ * it answers: what its `returns` schema infers, or, where it declares
+ * none, what its handler answers.
+ */
 export interface ServerFunction<
   Kind extends FunctionKind,
   Vis extends Visibility,
   Shape extends ValueShape,
-  Returns extends AnySchema,
+  Return,
   Ctx,
   Stream extends AnySchema | null = null,
-> extends FunctionReference<Kind, Vis, ObjectInput<Shape>, Infer<Returns>> {
+> extends Callable<
+  Kind,
+  Vis,
+  ObjectInput<Shape>,
+  Return,
+  Stream extends AnySchema ? Infer<Stream> : never
+> {
+  readonly kind: Kind;
+  readonly visibility: Vis;
   readonly args: ObjectSchema<Shape>;
-  readonly returns: Returns;
+  /** Its `returns` schema, which the host checks its answers against; null where it declares none. */
+  readonly returns: AnySchema | null;
   readonly uses: readonly Use[];
   /** An action's progress snapshots (spec 10.7.6), or null. */
   readonly stream: Stream;
@@ -501,12 +516,28 @@ export interface ServerFunction<
  * called with: only the runner calls it, with the context of its kind.
  */
 export interface AnyFunction extends FunctionReference {
+  readonly kind: FunctionKind;
+  readonly visibility: Visibility;
   readonly args: AnySchema;
-  readonly returns: AnySchema;
+  readonly returns: AnySchema | null;
   readonly uses: readonly Use[];
   readonly stream: AnySchema | null;
   readonly handler: (ctx: never, args: never) => unknown;
 }
+
+/**
+ * `Definition` without `returns`: what its handler answers is its return,
+ * which the host checks only as JSON (spec 32.6).
+ */
+type WithoutReturns<
+  Definition extends { readonly handler: (...args: never[]) => unknown },
+  Result,
+> = Omit<Definition, "returns" | "handler"> & {
+  readonly returns?: undefined;
+  readonly handler: (
+    ...args: Parameters<Definition["handler"]>
+  ) => Result | Promise<Result>;
+};
 
 /** A query's declaration. */
 export interface QueryDefinition<
@@ -685,13 +716,11 @@ const defineFunction = (
   if (!isPlainObject(args)) {
     refuse(`A ${kind}'s \`args\` is a map of field names to schemas.`);
   }
-  if (returns === undefined) {
-    refuse(
-      `A ${kind} declares what it \`returns\`; use \`v.null()\` for nothing.`
-    );
-  }
+  // Optional: without it, the handler's answer is its return (spec 32.6).
   // Throws for anything but a `v` schema.
-  descriptorOf(returns);
+  if (returns !== undefined) {
+    descriptorOf(returns);
+  }
   if (stream !== undefined) {
     descriptorOf(stream);
   }
@@ -708,7 +737,7 @@ const defineFunction = (
     args: argsSchema,
     // SAFETY: `descriptorOf` above accepted it, so it is a `v` schema.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    returns: returns as AnySchema,
+    returns: (returns ?? null) as AnySchema | null,
     uses: usesOf(uses),
     // SAFETY: as `returns`, when given.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -742,6 +771,24 @@ type ManagedShape<TableName extends string> = ReturnType<
 export interface ActionConstructor<Vis extends Visibility> {
   <
     const Shape extends ValueShape,
+    Result,
+    Stream extends AnySchema,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: WithoutReturns<
+      StreamActionDefinition<Shape, AnySchema, Uses, Stream>,
+      Result
+    >
+  ): ServerFunction<
+    "action",
+    Vis,
+    Shape,
+    Result,
+    StreamActionCtx<Uses, Infer<Stream>>,
+    Stream
+  >;
+  <
+    const Shape extends ValueShape,
     Returns extends AnySchema,
     Stream extends AnySchema,
     const Uses extends readonly Use[] = readonly [],
@@ -751,56 +798,81 @@ export interface ActionConstructor<Vis extends Visibility> {
     "action",
     Vis,
     Shape,
-    Returns,
+    Infer<Returns>,
     StreamActionCtx<Uses, Infer<Stream>>,
     Stream
   >;
+  <
+    const Shape extends ValueShape,
+    Result,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: WithoutReturns<
+      ActionDefinition<Shape, AnySchema, Uses>,
+      Result
+    >
+  ): ServerFunction<"action", Vis, Shape, Result, ActionCtx<Uses>>;
   <
     const Shape extends ValueShape,
     Returns extends AnySchema,
     const Uses extends readonly Use[] = readonly [],
   >(
     declaration: ActionDefinition<Shape, Returns, Uses>
-  ): ServerFunction<"action", Vis, Shape, Returns, ActionCtx<Uses>>;
+  ): ServerFunction<"action", Vis, Shape, Infer<Returns>, ActionCtx<Uses>>;
+}
+
+/** `query` and `internalQuery`, with or without `returns`. */
+export interface QueryConstructor<
+  Tables extends AnyTables,
+  Vis extends Visibility,
+> {
+  <const Shape extends ValueShape, Result>(
+    declaration: WithoutReturns<
+      QueryDefinition<Tables, Shape, AnySchema>,
+      Result
+    >
+  ): ServerFunction<"query", Vis, Shape, Result, QueryCtx<Tables>>;
+  <const Shape extends ValueShape, Returns extends AnySchema>(
+    declaration: QueryDefinition<Tables, Shape, Returns>
+  ): ServerFunction<"query", Vis, Shape, Infer<Returns>, QueryCtx<Tables>>;
+}
+
+/** `mutation` and `internalMutation`, with or without `returns`. */
+export interface MutationConstructor<
+  Tables extends AnyTables,
+  Vis extends Visibility,
+> {
+  <
+    const Shape extends ValueShape,
+    Result,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: WithoutReturns<
+      MutationDefinition<Tables, Shape, AnySchema, Uses>,
+      Result
+    >
+  ): ServerFunction<"mutation", Vis, Shape, Result, MutationCtx<Tables, Uses>>;
+  <
+    const Shape extends ValueShape,
+    Returns extends AnySchema,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: MutationDefinition<Tables, Shape, Returns, Uses>
+  ): ServerFunction<
+    "mutation",
+    Vis,
+    Shape,
+    Infer<Returns>,
+    MutationCtx<Tables, Uses>
+  >;
 }
 
 /** The server constructors and `doc`, specialized to one schema. */
 export interface ServerModule<Tables extends AnyTables> {
-  readonly query: <const Shape extends ValueShape, Returns extends AnySchema>(
-    declaration: QueryDefinition<Tables, Shape, Returns>
-  ) => ServerFunction<"query", "public", Shape, Returns, QueryCtx<Tables>>;
-  readonly internalQuery: <
-    const Shape extends ValueShape,
-    Returns extends AnySchema,
-  >(
-    declaration: QueryDefinition<Tables, Shape, Returns>
-  ) => ServerFunction<"query", "internal", Shape, Returns, QueryCtx<Tables>>;
-  readonly mutation: <
-    const Shape extends ValueShape,
-    Returns extends AnySchema,
-    const Uses extends readonly Use[] = readonly [],
-  >(
-    declaration: MutationDefinition<Tables, Shape, Returns, Uses>
-  ) => ServerFunction<
-    "mutation",
-    "public",
-    Shape,
-    Returns,
-    MutationCtx<Tables, Uses>
-  >;
-  readonly internalMutation: <
-    const Shape extends ValueShape,
-    Returns extends AnySchema,
-    const Uses extends readonly Use[] = readonly [],
-  >(
-    declaration: MutationDefinition<Tables, Shape, Returns, Uses>
-  ) => ServerFunction<
-    "mutation",
-    "internal",
-    Shape,
-    Returns,
-    MutationCtx<Tables, Uses>
-  >;
+  readonly query: QueryConstructor<Tables, "public">;
+  readonly internalQuery: QueryConstructor<Tables, "internal">;
+  readonly mutation: MutationConstructor<Tables, "public">;
+  readonly internalMutation: MutationConstructor<Tables, "internal">;
   readonly action: ActionConstructor<"public">;
   readonly internalAction: ActionConstructor<"internal">;
   /**
@@ -853,5 +925,5 @@ export const serverModule = <Tables extends AnyTables>(
 /** The arguments a caller passes to function `Fn`, as `InferInput` has them. */
 export type FunctionArgs<Fn extends AnyFunction> = InferInput<Fn["args"]>;
 
-/** What function `Fn` returns, as `Infer` has it. */
-export type FunctionReturn<Fn extends AnyFunction> = Infer<Fn["returns"]>;
+/** What function `Fn` returns: its `returns` schema's, or its handler's. */
+export type FunctionReturn<Fn extends AnyFunction> = ReturnOf<Fn>;

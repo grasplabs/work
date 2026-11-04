@@ -121,8 +121,8 @@ const formSubmissionSchema = z.strictObject({
   app: z.string().min(1),
   userId: z.string().min(1),
   kind: z.string().min(1),
-  contractId: z.string().min(1),
-  fingerprint: z.string(),
+  /** The function the form called, by name. */
+  name: z.string().min(1),
   /** The submission's idempotency key. */
   key: z.string().min(1),
   operation: z.string().min(1),
@@ -179,13 +179,12 @@ export const formSubmissionOf = ({
     read !== undefined &&
     new TextEncoder().encode(JSON.stringify(values)).byteLength <=
       valuesMaxBytes;
-  const { kind, contractId, fingerprint } = call.reference;
+  const { kind, name } = call.reference;
   const submission: FormSubmission = {
     app,
     userId,
     kind,
-    contractId,
-    fingerprint,
+    name,
     key,
     operation,
     startedAt,
@@ -209,22 +208,12 @@ const submissionIdOf = async ({
   app,
   userId,
   kind,
-  contractId,
-  fingerprint,
+  name,
   key,
   startedAt,
 }: FormSubmission): Promise<string> =>
   await sha256Hex(
-    canonicalJson([
-      "form_sent",
-      kind,
-      userId,
-      app,
-      contractId,
-      fingerprint,
-      key,
-      startedAt,
-    ])
+    canonicalJson(["form_sent", kind, userId, app, name, key, startedAt])
   );
 
 /**

@@ -274,7 +274,8 @@ export interface OperationManifest {
   readonly kind: FunctionKind;
   readonly visibility: Visibility;
   readonly args: ValueDescriptor;
-  readonly returns: ValueDescriptor;
+  /** What it answers, checked by the host; null where it declares no `returns`. */
+  readonly returns: ValueDescriptor | null;
   readonly stream: ValueDescriptor | null;
   readonly uses: readonly UseManifest[];
   /**
@@ -418,17 +419,12 @@ export const reservedSegments: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * Path segments no function registers at, at any depth: the names a
- * reference answers as data (`contractId`, `visibility`, `kind`), which a
- * reference tree can't also hold as children, and `then`, which would
- * make a reference look like a promise to whatever awaits it.
+ * Path segments no function registers at, at any depth: `name`, which a
+ * reference answers as data and a reference tree can't also hold as a
+ * child, and `then`, which would make a reference look like a promise to
+ * whatever awaits it.
  */
-export const referenceKeys: ReadonlySet<string> = new Set([
-  "contractId",
-  "visibility",
-  "kind",
-  "then",
-]);
+export const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
 
 const requiredKeys = ["name", "schema", "access", "screens"] as const;
 
@@ -1169,14 +1165,6 @@ const usedFunction = (
   if (reference === undefined || target === undefined) {
     return refuse(`\`${path}\` uses a function the App doesn't register.`);
   }
-  if (
-    target.visibility !== reference.visibility ||
-    (reference.kind !== undefined && target.kind !== reference.kind)
-  ) {
-    return refuse(
-      `\`${path}\` uses a reference to \`${reference.path}\` that doesn't match what is registered there: regenerate the App's references.`
-    );
-  }
   return { target: reference.path, kind: target.kind };
 };
 
@@ -1410,7 +1398,7 @@ export const registerFunctions = <
         kind: fn.kind,
         visibility: fn.visibility,
         args: fn.args.descriptor,
-        returns: fn.returns.descriptor,
+        returns: fn.returns === null ? null : fn.returns.descriptor,
         stream: fn.stream === null ? null : fn.stream.descriptor,
         uses: Object.freeze(
           usesOf(fn, path, paths, functions, resources, workflows)

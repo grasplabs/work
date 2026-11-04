@@ -286,12 +286,11 @@ export class PortableLive {
   }
 
   /**
-   * Follows the query `request` names of `app` (`ClientTransport.watch`):
-   * `onSnapshot` gets each push, `onLost` is called once core, or the
-   * connection, let go of it.
+   * Follows the query `request` names (`ClientTransport.watch`) of the App
+   * the person's token is good for: `onSnapshot` gets each push, `onLost`
+   * is called once core, or the connection, let go of it.
    */
   async watch(
-    app: string,
     request: string,
     onSnapshot: (push: unknown) => void,
     onLost: () => void
@@ -304,7 +303,7 @@ export class PortableLive {
     if (generation !== this.#generation) {
       throw new Error("The live connections were closed meanwhile.");
     }
-    const link = this.#linkFor(rpc, app, token);
+    const link = this.#linkFor(rpc, token.app, token);
     link.followed += 1;
     clearTimeout(link.idle);
     link.idle = undefined;

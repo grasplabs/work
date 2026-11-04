@@ -305,7 +305,7 @@ apps: {
   files(app: string, version?: number): Promise<Record<string, string>>;
   /**
    * Calls a public function (query, mutation or action) of an App's current
-   * version for the person, through a sealed reference: \`request\` is the
+   * version for the person, by its reference, its name and kind: \`request\` is the
    * call as JSON text, \`{ reference, input, idempotencyKey? }\`, sent as a
    * stream: \`env.apps.call(app, new Blob([JSON.stringify(call)]).stream())\`.
    * At most 132 KiB, sent in full within 5 seconds. Calls made at once may run one at a time, in

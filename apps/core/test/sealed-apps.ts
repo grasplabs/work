@@ -1,10 +1,5 @@
-import {
-  contractFingerprint,
-  declaredWorkflows,
-  workflowQueries,
-} from "@grasp-os/sdk/host";
+import { declaredWorkflows, workflowQueries } from "@grasp-os/sdk/host";
 import type { WorkflowQueryName } from "@grasp-os/sdk/host";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
@@ -12,9 +7,9 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease, sealRelease } from "../src/app-releases.ts";
+import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp, findApp } from "../src/apps.ts";
+import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, shareStore } from "../src/data-stores.ts";
 import {
@@ -97,49 +92,27 @@ export const seal = async (
 
 /** A public function of an App's release, as a screen names it. */
 export interface FunctionName {
-  /** Its contract, `<module>.<name>` as the App's `operations` group it. */
-  readonly contractId: string;
+  /** Its name, `<module>.<export>`, as its server modules lay it out. */
+  readonly name: string;
   readonly kind: "query" | "mutation" | "action";
 }
 
 /**
- * The fingerprint a reference names for a function the release lacks:
- * well formed, so the call is refused for what it names, not its shape.
- */
-const noFingerprint = "0".repeat(64);
-
-/**
  * What `by` gets calling `name` of App `app` with `input`, as a screen
- * calls it (`callAppFunction`): against the release of the App's current
- * version, by its reference there, or one of no version when it has none.
+ * calls it (`callAppFunction`): by its name, answered by the release of
+ * the App's current version.
  */
 export const calledAs = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: string,
-  { contractId, kind }: FunctionName,
+  { name, kind }: FunctionName,
   input: unknown = {}
 ): Promise<OperationResult> => {
-  const id = appIdSchema.parse(app);
-  const { currentVersion } = await findApp(env, id);
-  const released =
-    currentVersion === null
-      ? undefined
-      : await loadRelease(env, id, currentVersion);
-  const fingerprints = released?.fingerprints ?? {};
   const answered = await callAppFunction(
     env,
     by,
     app,
-    JSON.stringify({
-      reference: {
-        resourceId: app,
-        resourceVersion: currentVersion ?? 1,
-        contractId,
-        fingerprint: fingerprints[contractId] ?? noFingerprint,
-        kind,
-      },
-      input,
-    })
+    JSON.stringify({ reference: { name, kind }, input })
   );
   return answered.result;
 };
@@ -196,7 +169,7 @@ export const sweptAway = async (app: AppId, version: number): Promise<void> => {
  * The reference to query `name` of the workflow the App declares as
  * `alias`, as `@server/_generated/api` generates it from `release`.
  */
-export const queryReference = async (
+export const queryReference = (
   release: Release,
   alias: string,
   name: WorkflowQueryName
@@ -209,11 +182,5 @@ export const queryReference = async (
   if (operation === undefined) {
     throw new Error(`No query ${name} of ${alias}`);
   }
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: operation.path,
-    fingerprint: await contractFingerprint(operation),
-    kind: "query" as const,
-  };
+  return { name: operation.path, kind: "query" as const };
 };

@@ -49,8 +49,8 @@ const countingTransport = (transport: ClientTransport) => {
   let gate: Promise<unknown> | undefined;
   return {
     transport: {
-      call: async (request: string, app: string) => {
-        const answer = await transport.call(request, app);
+      call: async (request: string) => {
+        const answer = await transport.call(request);
         await gate;
         return answer;
       },

@@ -151,21 +151,6 @@ export const peopleOperations: Readonly<
   team: described("team"),
 });
 
-/**
- * Each read's contract fingerprint (`contractFingerprint`), fixed here so
- * a screen names it without a digest: core refuses a read whose
- * fingerprint isn't the one its own SDK makes (`version.mismatch`), so a
- * screen sealed with another contract is told, never answered in a shape
- * it doesn't expect. people.test.ts holds them to the contracts.
- */
-export const peopleFingerprints: Readonly<Record<PeopleOperationName, string>> =
-  {
-    user: "0dbe0da92407b09709500f34a8b1e0a0dfddda4bf84492ee43546584f410013f",
-    find: "f1538b1cacfa22be9293d76140ae785efa4a000e2d14ddaf3b5eb7bb4c1187bb",
-    search: "56bdf9f1ce66d252e0c36f25e4a0910560000532b910ed4ca77e7d88c3b964e5",
-    team: "bc78994e9287646b568949cdc4a0c38f6399c11cb6ed156bb0fda82121cb5482",
-  };
-
 /** The reference a screen reads `Name` through. */
 type PeopleReference<Name extends PeopleOperationName> = OperationReference<
   InferInput<(typeof contracts)[Name]["args"]>,
@@ -178,15 +163,9 @@ const referenceTo = <Name extends PeopleOperationName>(
   read: Name
 ): PeopleReference<Name> =>
   Object.freeze({
-    resourceId: "people",
-    resourceVersion: 1,
-    contractId: peopleOperations[read].path,
-    fingerprint: peopleFingerprints[read],
+    name: peopleOperations[read].path,
     kind: "query",
-    mode: "single",
     visibility: "public",
-    args: peopleOperations[read].args,
-    returns: peopleOperations[read].returns,
   });
 
 /**

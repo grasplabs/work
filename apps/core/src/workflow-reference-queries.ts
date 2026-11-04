@@ -1,11 +1,9 @@
 import {
-  contractFingerprint,
   declaredWorkflows,
   schemaFromDescriptor,
   workflowQueries,
 } from "@grasp-os/sdk/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
-import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -169,22 +167,16 @@ export interface ResolvedWorkflowQuery {
 }
 
 /**
- * The workflow query `reference` names in `release`, checked as a function
- * reference is: one the release generates, of its exact App and version,
- * kind and fingerprint (`operation.not_found`, `operation.kind_mismatch`,
- * `version.mismatch`).
+ * The workflow query `reference` names in `release`, resolved as a
+ * function reference is, by its name in the release that answers
+ * (`operation.not_found`, `operation.kind_mismatch`): a workflow that
+ * release no longer binds has no queries.
  */
-export const workflowQueryOf = async (
+export const workflowQueryOf = (
   release: Release,
-  reference: {
-    readonly resourceId: string;
-    readonly resourceVersion: number;
-    readonly contractId: string;
-    readonly fingerprint: string;
-    readonly kind: string;
-  }
-): Promise<ResolvedWorkflowQuery> => {
-  const match = queryPath.exec(reference.contractId)?.groups;
+  reference: { readonly name: string; readonly kind: string }
+): ResolvedWorkflowQuery => {
+  const match = queryPath.exec(reference.name)?.groups;
   const alias = match?.alias ?? "";
   const bound = declaredWorkflows(release.app, release.workflows).find(
     (workflow) => workflow.alias === alias
@@ -199,13 +191,6 @@ export const workflowQueryOf = async (
   }
   if (reference.kind !== operation.kind) {
     throw operationErrors.create("operation.kind_mismatch");
-  }
-  if (
-    reference.resourceId !== release.manifest.resourceId ||
-    reference.resourceVersion !== release.manifest.resourceVersion ||
-    reference.fingerprint !== (await contractFingerprint(operation))
-  ) {
-    throw versionErrors.create("version.mismatch");
   }
   return {
     alias,

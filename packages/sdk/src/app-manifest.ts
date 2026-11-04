@@ -149,7 +149,7 @@ const useFrom = (
     const visibility = isPlainObject(target) ? target.visibility : undefined;
     // A reference by its path, which `app` resolves against what is
     // registered there, as it does a generated one.
-    return { contractId: use.path, visibility, kind: use.kind };
+    return { name: use.path, visibility, kind: use.kind };
   }
   if (hasExactly(use, ["type", "kind", "alias"]) && use.type === "resource") {
     const declared =
@@ -229,9 +229,12 @@ const functionFrom = (
   const listed: readonly unknown[] = uses;
   const declaration: Record<string, unknown> = {
     args: shapeFrom(input.args, path),
-    returns: schemaFrom(input.returns),
     handler: inert,
   };
+  // Left out where the function declares none, as in code.
+  if (input.returns !== null) {
+    declaration.returns = schemaFrom(input.returns);
+  }
   // Only what the kind's declaration has: a query's has no `uses`, and
   // only an action's has `stream`. Anything else is the constructor's to
   // refuse, as it would in code.

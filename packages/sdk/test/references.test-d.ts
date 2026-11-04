@@ -11,8 +11,6 @@ import type {
   AnyOperationReference,
   ArgsOf,
   Id,
-  Infer,
-  InferInput,
   OperationReference,
   ProgressOf,
   ReturnOf,
@@ -59,9 +57,7 @@ declare const action: <
 ) => Promise<ReturnOf<Reference>>;
 /** A single answer only: a streaming reference has its own entry. */
 declare const single: (
-  reference: OperationReference<unknown, unknown, "action"> & {
-    readonly mode: "single";
-  }
+  reference: OperationReference<unknown, unknown, "action">
 ) => void;
 declare const noteId: Id<"notes">;
 
@@ -70,41 +66,36 @@ expectTypeOf<ArgsOf<typeof api.notes.create>>().toEqualTypeOf<
   ArgsOf<typeof create>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.create>>().toEqualTypeOf<
-  Infer<(typeof create)["returns"]>
+  ReturnOf<typeof create>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.list>>().toEqualTypeOf<
-  InferInput<(typeof list)["args"]>
+  ArgsOf<typeof list>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.list>>().toEqualTypeOf<
-  Infer<(typeof list)["returns"]>
+  ReturnOf<typeof list>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.get>>().toEqualTypeOf<
-  Infer<(typeof get)["returns"]>
+  ReturnOf<typeof get>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.update>>().toEqualTypeOf<
   ArgsOf<typeof update>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.update>>().toEqualTypeOf<
-  Infer<(typeof update)["returns"]>
+  ReturnOf<typeof update>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.remove>>().toEqualTypeOf<
   ArgsOf<typeof remove>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.tally>>().toEqualTypeOf<
-  Infer<(typeof tally)["returns"]>
+  ReturnOf<typeof tally>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.exportAll>>().toEqualTypeOf<
   ArgsOf<typeof exportAll>
 >();
 
-// Kind, visibility and mode are literals, never a union to fall back on.
-expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation">();
-expectTypeOf(api.notes.list.kind).toEqualTypeOf<"query">();
-expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action">();
-expectTypeOf(api.notes.create.visibility).toEqualTypeOf<"public">();
-expectTypeOf(internal.notes.count.visibility).toEqualTypeOf<"internal">();
-expectTypeOf(api.notes.create.mode).toEqualTypeOf<"single">();
-expectTypeOf(api.notes.exportAll.mode).toEqualTypeOf<"stream">();
+// A mutation's and an action's kind is its literal, which `useForm` sends by.
+expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation" | undefined>();
+expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action" | undefined>();
 
 // A streaming reference carries its progress type; any other none.
 expectTypeOf<ProgressOf<typeof api.notes.exportAll>>().toEqualTypeOf<{
@@ -117,16 +108,7 @@ single(api.notes.exportAll);
 
 // The phantom members are no names an editor offers or JSON holds.
 expectTypeOf<Extract<keyof typeof api.notes.create, string>>().toEqualTypeOf<
-  | "resourceId"
-  | "resourceVersion"
-  | "contractId"
-  | "fingerprint"
-  | "kind"
-  | "mode"
-  | "stream"
-  | "visibility"
-  | "args"
-  | "returns"
+  "name" | "kind" | "args" | "returns"
 >();
 
 // Calls infer from the reference alone: no cast, no generic argument.
@@ -134,10 +116,10 @@ expectTypeOf(
   mutation(api.notes.create, { title: "Launch" })
 ).resolves.toEqualTypeOf<Id<"notes">>();
 expectTypeOf(query(api.notes.get, { id: noteId })).resolves.toEqualTypeOf<
-  Infer<(typeof get)["returns"]>
+  ReturnOf<typeof get>
 >();
 expectTypeOf(query(api.notes.list, { pagination: {} })).resolves.toEqualTypeOf<
-  Infer<(typeof list)["returns"]>
+  ReturnOf<typeof list>
 >();
 expectTypeOf(action(api.notes.tally, {})).resolves.toEqualTypeOf<number>();
 
@@ -222,6 +204,3 @@ const anyReferences: readonly AnyOperationReference[] = [
   internal.notes.count,
 ];
 void anyReferences;
-// And its mode says so: either, never only a stream.
-const anyModes: readonly AnyOperationReference["mode"][] = ["single", "stream"];
-void anyModes;

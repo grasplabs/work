@@ -1,3 +1,4 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { FormApi } from "@tanstack/react-form";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -6,7 +7,7 @@ import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import { DraftStore, writeDraft } from "../src/form-drafts.ts";
 import type { DraftPersistence } from "../src/form-drafts.ts";
-import { bindForm, FormBinding } from "../src/form.ts";
+import { FormBinding } from "../src/form.ts";
 import type { DraftSlot, FormApiOf } from "../src/form.ts";
 import type { ArgsOf } from "../src/references.ts";
 import { draftLookupMs, pageDrafts } from "../src/screen-runtime.ts";
@@ -24,6 +25,15 @@ import { api } from "./notes/server/_generated/api.ts";
 // wrote is the frame after a refresh.
 
 const id = "01890000-0000-7000-8000-000000000001";
+
+/** What the save takes, as its reference carries it. */
+const updateArgs = (() => {
+  const { args } = api.notes.update;
+  if (args === undefined) {
+    throw new Error("A mutation's reference carries its arguments");
+  }
+  return args;
+})();
 
 /** A note as `notes.get` answers it, at `rev`. */
 const note = (rev: number, change: Record<string, unknown> = {}) => ({
@@ -59,8 +69,8 @@ const page = (initial: Record<string, string> = {}) => {
 
 const slotOf = (store: DraftStore): DraftSlot => ({
   store,
-  key: `record:${JSON.stringify([api.notes.update.resourceId, api.notes.update.contractId, id])}`,
-  fingerprint: api.notes.update.fingerprint,
+  key: `record:${canonicalText([api.notes.update.name, id])}`,
+  fingerprint: canonicalText(updateArgs),
 });
 
 /** What the host answers a save of a revision someone else's overtook. */
@@ -102,7 +112,7 @@ const editor = (
   record: Record<string, unknown>,
   store: DraftStore,
   send: (input: unknown) => Promise<unknown>,
-  args: ValueDescriptor = api.notes.update.args,
+  args: ValueDescriptor = updateArgs,
   mapper: (baseline: unknown) => unknown = (baseline) =>
     isPlainObject(baseline)
       ? { id: baseline._id, expectedRevision: baseline._rev }
@@ -389,7 +399,7 @@ describe("a record form's draft", () => {
       note(3),
       store,
       saves().send,
-      api.notes.update.args,
+      updateArgs,
       (baseline) => {
         if (failing) {
           throw new Error("The mapper's data is gone.");
@@ -466,7 +476,7 @@ describe("a record form's draft", () => {
     const binding = new FormBinding(
       {
         kind: "record",
-        args: api.notes.update.args,
+        args: updateArgs,
         fields: ["title"],
         send: saves().send,
       },
@@ -648,7 +658,7 @@ describe("a record form's draft", () => {
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
           input as ArgsOf<typeof api.notes.update>
         ),
-      api.notes.update.args
+      updateArgs
     );
     type("title", "Mine");
     await settle(binding.submit());
@@ -656,42 +666,6 @@ describe("a record form's draft", () => {
       draft: internals.drafts.get(slotOf(internals.drafts).key),
       page: [...kept.kept.keys()],
     }).toStrictEqual({ draft: undefined, page: [] });
-  });
-});
-
-describe("a draft of two Apps' saves of the same path and note", () => {
-  it("is each App's own, through the one client", () => {
-    const client = new GraspClient({
-      call: async () =>
-        await Promise.resolve({ result: { ok: true, value: null } }),
-      watch: async () => {
-        await Promise.resolve();
-        throw new Error("Nothing here follows a query.");
-      },
-    });
-    const mount = (reference: unknown) => {
-      const binding = bindForm(client, reference, {
-        record: note(3),
-        fields: ["title", "body"],
-        args: (baseline: unknown) =>
-          isPlainObject(baseline)
-            ? { id: baseline._id, expectedRevision: baseline._rev }
-            : {},
-      });
-      const form = new FormApi({ defaultValues: binding.initialValues });
-      form.mount();
-      // SAFETY: as `editor` attaches one.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
-      binding.attach(form as unknown as FormApiOf<Record<string, unknown>>);
-      binding.supply(note(3));
-      binding.setMounted(true);
-      return { binding, form };
-    };
-    const ours = mount(api.notes.update);
-    ours.form.setFieldValue("title", "Ours");
-    ours.binding.fieldChanged("title");
-    const theirs = mount({ ...api.notes.update, resourceId: "another-app" });
-    expect(theirs.form.state.values.title).toBe("Before");
   });
 });
 
@@ -802,7 +776,7 @@ const rendered = (store: DraftStore) => {
   const binding = new FormBinding(
     {
       kind: "record",
-      args: api.notes.update.args,
+      args: updateArgs,
       fields: ["title", "body"],
       send: saves().send,
     },
@@ -944,7 +918,7 @@ describe("a draft across a refresh and an abandoned render", () => {
     const later = new FormBinding(
       {
         kind: "record",
-        args: api.notes.update.args,
+        args: updateArgs,
         fields: ["title", "body"],
         send: saves().send,
       },
@@ -1008,7 +982,7 @@ describe("a draft across a refresh and an abandoned render", () => {
     void new FormBinding(
       {
         kind: "record",
-        args: api.notes.update.args,
+        args: updateArgs,
         fields: ["title", "body"],
         send: saves().send,
       },

@@ -2111,13 +2111,7 @@ describe("erasing a person", () => {
           app,
           userId,
           call: {
-            reference: {
-              resourceId: "requests",
-              resourceVersion: 1,
-              kind: "action",
-              contractId: "requests",
-              fingerprint: "f",
-            },
+            reference: { name: "requests", kind: "action" },
             input: { reason: `${key} of ${userId}` },
           },
           key,

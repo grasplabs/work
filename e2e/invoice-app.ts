@@ -69,7 +69,7 @@ export default app({
 const intakeCode = `import { person, workflow, z } from "@grasp-os/sdk/workflow";
 
 /** The App's \`setStatus\`, as a step names it. */
-const setStatus = { contractId: "invoices.setStatus", kind: "mutation" } as const;
+const setStatus = { name: "invoices.setStatus", kind: "mutation" } as const;
 
 export default workflow(
   "invoice-intake",

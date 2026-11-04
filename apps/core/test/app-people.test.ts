@@ -209,10 +209,7 @@ const newTeam = async (name: string): Promise<{ id: string; name: string }> => {
 const requestOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
     reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path] ?? "",
+      name: path,
       kind: release.app.operations[path]?.kind ?? "query",
     },
     input,
@@ -243,14 +240,7 @@ const readRequestOf = (
   forged: Record<string, unknown> = {}
 ): string =>
   JSON.stringify({
-    reference: {
-      resourceId: reference.resourceId,
-      resourceVersion: reference.resourceVersion,
-      contractId: reference.contractId,
-      fingerprint: reference.fingerprint,
-      kind: reference.kind,
-      ...forged,
-    },
+    reference: { name: reference.name, kind: "query", ...forged },
     input,
   });
 
@@ -401,7 +391,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     const answered = await callRunFunction(
       env,
       caller,
-      { contractId: "dir.me", kind: "query" },
+      { name: "dir.me", kind: "query" },
       {},
       `step:${crypto.randomUUID()}`
     );
@@ -428,8 +418,9 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     expect({
       fromServer: callerOf(await call(app, claimed, "dir.me")),
       fromScreen: callerOf(await read(app, claimed, peopleReferences.user, {})),
-      // Another App and version named: the call's own App answers.
-      otherApp: callerOf(
+      // Another App and version named: a reference is a name, and nothing
+      // more is read.
+      otherApp: valueOf(
         await read(
           app,
           ana,
@@ -461,9 +452,9 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       fromServer: anaAs,
       fromScreen: anaAs,
-      otherApp: anaAs,
+      otherApp: "contract.invalid_request",
       naming: "contract.invalid_args",
-      otherContract: "version.mismatch",
+      otherContract: "contract.invalid_request",
     });
   });
 

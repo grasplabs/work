@@ -279,13 +279,7 @@ const windowRequest = (
     path
   );
   return JSON.stringify({
-    reference: {
-      resourceId: reference.resourceId,
-      resourceVersion: reference.resourceVersion,
-      contractId: reference.contractId,
-      fingerprint: reference.fingerprint,
-      kind: reference.kind,
-    },
+    reference: { name: reference.name, kind: "query" },
     input,
     window,
   });
@@ -685,10 +679,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       // Through the function route as well.
       const { call } = pageTransport(opened, opened.screens, { follows: 0 });
       const throughRoute = answerOf(
-        await call(
-          windowRequest(opened, "notes.list", {}, { extent: 160 }),
-          opened.app
-        )
+        await call(windowRequest(opened, "notes.list", {}, { extent: 160 }))
       );
       expect({
         loadMore,
@@ -977,10 +968,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     try {
       const { call } = pageTransport(opened, opened.screens, { follows: 0 });
       const answered = answerOf(
-        await call(
-          windowRequest(opened, "notes.list", {}, { extent: 300 }),
-          opened.app
-        )
+        await call(windowRequest(opened, "notes.list", {}, { extent: 300 }))
       );
       expect({ answered, laterPages }).toStrictEqual({
         answered: "screen.answer_too_large",
@@ -1056,15 +1044,13 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     list.stop();
   });
 
-  it("refuses a list of a query that doesn't page, a caller's own pagination, and a first page it can't ask for", async () => {
+  it("refuses a caller's own pagination, and a first page it can't ask for", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
     const internals = clientInternals(client);
-    const id = await client.mutation(api.create, { title: "Only" });
 
     expect({
-      notPaged: thrownBy(() => internals.pager(api.get, { id }, 5)),
       ownPagination: thrownBy(() =>
         internals.pager(api.list, { pagination: { pageSize: 5 } }, 5)
       ),
@@ -1072,7 +1058,6 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       tooMany: thrownBy(() => internals.pager(api.list, {}, 101)),
       fine: thrownBy(() => internals.pager(api.list, {}, 100)),
     }).toStrictEqual({
-      notPaged: "contract.not_paginated",
       ownPagination: "contract.invalid_args",
       none: "contract.invalid_args",
       tooMany: "contract.invalid_args",
@@ -1120,7 +1105,7 @@ describe(
 
       const { call } = pageTransport(opened, opened.screens, { follows: 0 });
       const raw = async (request: string): Promise<unknown> =>
-        answerOf(await call(request, opened.app));
+        answerOf(await call(request));
       const second = await client.query(api.list, {
         pagination: { pageSize: 2, cursor: nextCursor },
       });
@@ -1194,7 +1179,7 @@ describe(
       const { call } = pageTransport(opened, opened.screens, { follows: 0 });
       const ask = async (request: string): Promise<string> => {
         try {
-          const answered = answerOf(await call(request, opened.app));
+          const answered = answerOf(await call(request));
           return typeof answered === "string" ? answered : "ok";
         } catch (error) {
           return error instanceof Error && "code" in error
@@ -1203,13 +1188,7 @@ describe(
         }
       };
       const one = JSON.stringify({
-        reference: {
-          resourceId: api.list.resourceId,
-          resourceVersion: api.list.resourceVersion,
-          contractId: api.list.contractId,
-          fingerprint: api.list.fingerprint,
-          kind: api.list.kind,
-        },
+        reference: { name: api.list.name, kind: "query" },
         input: { pagination: { pageSize: 1 } },
       });
       // With the person's requests full and none coming back meanwhile: a
@@ -1250,8 +1229,7 @@ describe(
               {
                 extent: liveWindowMaxItems,
               }
-            ),
-            opened.app
+            )
           );
           return "ok";
         } catch (error) {
@@ -1338,20 +1316,14 @@ describe(
       );
       const sent = (idempotencyKey?: string) =>
         JSON.stringify({
-          reference: {
-            resourceId: reference.resourceId,
-            resourceVersion: reference.resourceVersion,
-            contractId: reference.contractId,
-            fingerprint: reference.fingerprint,
-            kind: reference.kind,
-          },
+          reference: { name: reference.name, kind: "action" },
           input: { word: "ran" },
           window: { extent: 10 },
           ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
         });
       const answers = [
-        answerOf(await call(sent(), opened.app)),
-        answerOf(await call(sent(crypto.randomUUID()), opened.app)),
+        answerOf(await call(sent())),
+        answerOf(await call(sent(crypto.randomUUID()))),
       ];
       expect(answers).toStrictEqual([
         "contract.invalid_request",
@@ -1399,8 +1371,7 @@ describe(
           .safeParse(
             answerOf(
               await call(
-                windowRequest(opened, "notes.list", {}, { extent: 160 }),
-                opened.app
+                windowRequest(opened, "notes.list", {}, { extent: 160 })
               )
             )
           );

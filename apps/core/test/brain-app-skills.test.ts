@@ -245,13 +245,7 @@ const called = async (
     owner,
     app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId,
-        fingerprint: release.fingerprints[contractId] ?? "",
-        kind: operation.kind,
-      },
+      reference: { name: contractId, kind: operation.kind },
       input,
     })
   );

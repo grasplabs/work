@@ -14,7 +14,6 @@ import {
   fences,
   fencingRefusalOf,
   GraspError,
-  issueDetails,
   nothingRanCodes,
   hidesOutcome,
   readAnswer,
@@ -40,15 +39,13 @@ import { DraftStore } from "./form-drafts.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import type {
   ArgsOf,
+  IsStreaming,
   OperationReference,
   ProgressOf,
   ReferenceKind,
   ReturnOf,
 } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
-import { validateValue } from "./value-interpreter.ts";
-import { readDescriptor } from "./value-read.ts";
 
 // The session client (spec 10.1, 10.7.1): the one object a screen's
 // queries, mutations and actions go through. The platform makes one per
@@ -178,7 +175,7 @@ import { readDescriptor } from "./value-read.ts";
  * response.
  */
 export interface ClientTransport {
-  call: (request: string, app: string) => Promise<unknown>;
+  call: (request: string) => Promise<unknown>;
   /**
    * Follows the query `request` names (spec 11): `onSnapshot` gets each
    * push of core's (`{ revision, result }`), and `onLost` is called once
@@ -306,12 +303,15 @@ export type StreamReference = OperationReference<
   "action",
   "public",
   unknown
-> & {
-  // Spelled out: compared through its type parameters alone, a reference
-  // that answers once (its progress `never`) would pass for one that
-  // streams.
-  readonly mode: "stream";
-};
+>;
+
+/**
+ * `Reference`, only if it streams: compared through its type parameters
+ * alone, a reference that answers once (its progress `never`) would pass
+ * for one that streams.
+ */
+export type Streaming<Reference> = Reference &
+  (true extends IsStreaming<Reference> ? unknown : never);
 
 /** Options of a streaming action's call through `client.stream`. */
 export interface StreamOptions<Progress> extends SubmitOptions {
@@ -338,119 +338,52 @@ export type CallArguments<Reference, Options> =
     ? [args?: ArgsOf<Reference>, options?: Options]
     : [args: ArgsOf<Reference>, options?: Options];
 
-/** A reference as the client read it: what it sends, and its input's descriptor. */
+/**
+ * A reference as the client sends it: the function's name, read from the
+ * reference, and the kind of call the method or hook makes (a query, a
+ * mutation or an action), as Convex's client does. Core resolves the name
+ * in the App's current release, refuses a function of another kind and
+ * checks the arguments with the function's own validator.
+ */
 export interface ReadReference {
+  readonly name: string;
   readonly kind: ReferenceKind;
-  /** The descriptor of its progress, for a streaming action only. */
-  readonly stream: ValueDescriptor | undefined;
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-  readonly contractId: string;
-  readonly fingerprint: string;
-  readonly args: ValueDescriptor;
 }
 
-const fingerprintPattern = /^[0-9a-f]{64}$/u;
-
-/** References read already, by the object App code passes. */
-const readReferences = new WeakMap<object, ReadReference>();
-
-/** Whether `value` names a public function of `kind`, of either mode. */
-const isReferenceOf = (
-  value: unknown,
-  kind: ReferenceKind
-): value is Record<string, unknown> & {
-  resourceId: string;
-  resourceVersion: number;
-  contractId: string;
-  fingerprint: string;
-  mode: "single" | "stream";
-} =>
-  isPlainObject(value) &&
-  value.kind === kind &&
-  value.visibility === "public" &&
-  (value.mode === "single" || (kind === "action" && value.mode === "stream")) &&
-  typeof value.resourceId === "string" &&
-  Number.isInteger(value.resourceVersion) &&
-  typeof value.contractId === "string" &&
-  typeof value.fingerprint === "string" &&
-  fingerprintPattern.test(value.fingerprint);
-
 /**
- * `value` as a public reference of `kind` and `mode`, read as data, its
- * descriptors checked; `contract.mode_mismatch` for an action of the
- * other mode, `contract.invalid_request` for anything else.
+ * `value`, a reference, as a call of `kind` sends it;
+ * `contract.invalid_request` for anything that names no function, or a
+ * mutation's or an action's reference, which says its kind, of another.
  */
-const readReference = (
-  value: unknown,
-  kind: ReferenceKind,
-  mode: "single" | "stream" = "single"
-): ReadReference => {
-  const known =
-    typeof value === "object" && value !== null
-      ? readReferences.get(value)
-      : undefined;
+const readReference = (value: unknown, kind: ReferenceKind): ReadReference => {
   if (
-    known !== undefined &&
-    known.kind === kind &&
-    (known.stream !== undefined) === (mode === "stream")
+    !isPlainObject(value) ||
+    typeof value.name !== "string" ||
+    value.name.length === 0 ||
+    (value.kind !== undefined && value.kind !== kind)
   ) {
-    return known;
-  }
-  if (!isReferenceOf(value, kind)) {
     throw clientError("contract.invalid_request");
   }
-  if (value.mode !== mode) {
-    throw clientError("contract.mode_mismatch");
-  }
-  let args: ValueDescriptor;
-  let stream: ValueDescriptor | undefined;
-  try {
-    args = readDescriptor(value.args, 1, { nodes: 0 });
-    stream =
-      mode === "stream"
-        ? readDescriptor(value.stream, 1, { nodes: 0 })
-        : undefined;
-  } catch {
-    throw clientError("contract.invalid_request");
-  }
-  const read: ReadReference = {
-    kind,
-    stream,
-    resourceId: value.resourceId,
-    resourceVersion: value.resourceVersion,
-    contractId: value.contractId,
-    fingerprint: value.fingerprint,
-    args,
-  };
-  readReferences.set(value, read);
-  return read;
+  return { name: value.name, kind };
 };
 
-/** What a request names of a reference: exactly what the host reads. */
-const wireReference = (reference: ReadReference) => ({
-  resourceId: reference.resourceId,
-  resourceVersion: reference.resourceVersion,
-  contractId: reference.contractId,
-  fingerprint: reference.fingerprint,
-  kind: reference.kind,
-});
-
 /**
- * `args` normalized as the host normalizes them (defaults filled in,
- * strings trimmed), an omitted input as `{}`; or `contract.invalid_args`
- * with what is wrong, before anything is sent.
+ * `args` as the request carries them, an omitted input as `{}`;
+ * `contract.invalid_args` for anything but an object. What they must be
+ * beyond that is the function's validator's to say, in core, which also
+ * normalizes them (defaults, trimming) before the handler sees them.
  */
-const normalized = (reference: ReadReference, args: unknown): Json => {
-  const checked = validateValue(reference.args, args ?? {});
-  if (checked.issues !== undefined) {
+const inputOf = (args: unknown): Json => {
+  const input = args ?? {};
+  if (!isPlainObject(input)) {
     throw clientError("contract.invalid_args", {
-      issues: issueDetails(checked.issues),
+      issues: [{ message: "The arguments are an object.", path: [] }],
     });
   }
-  // SAFETY: the interpreter answers a fresh JSON copy of what it accepted.
+  // SAFETY: sent as JSON text, which keeps only what JSON holds; core
+  // reads it as data and checks it with the function's validator.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return checked.value as Json;
+  return input as Json;
 };
 
 const queryOptionKeys: ReadonlySet<string> = new Set(["signal"]);
@@ -841,9 +774,11 @@ export interface ClientInternals {
   subscribePager: (pager: Pager, onChange: () => void) => () => void;
   /** Reads again every query that failed and is still read. */
   retryFailed: () => void;
+  /** The person's unsaved record-form drafts, cleared at every fence. */
+  drafts: DraftStore;
   /**
-   * `value` as a public, single-answer reference of `kind`, read as data,
-   * its descriptor checked; or `contract.invalid_request`.
+   * `value`, a reference, as a call of `kind` sends it; or
+   * `contract.invalid_request`.
    */
   readReference: (value: unknown, kind: ReferenceKind) => ReadReference;
   /**
@@ -858,8 +793,6 @@ export interface ClientInternals {
   ) => Promise<unknown>;
   /** How workflow runs reach the host (client-workflow.ts). */
   readonly workflowLink: WorkflowLink;
-  /** The person's unsaved record-form drafts, cleared at every fence. */
-  drafts: DraftStore;
   /** How many times the client was fenced: what a file preview follows. */
   fences: () => number;
   /** What the latest fence was for, if there was one. */
@@ -920,11 +853,8 @@ export interface WorkflowLink {
   readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
 }
 
-/** What a submission is scoped by: its App, contract and kind. */
-export type SubmissionTarget = Pick<
-  ReadReference,
-  "kind" | "resourceId" | "contractId"
->;
+/** What a submission is scoped by: its function and kind. */
+export type SubmissionTarget = ReadReference;
 
 /** How a streaming action's call goes, beyond its progress and result. */
 export interface StreamEvents {
@@ -1127,21 +1057,6 @@ const pageSizeError = (name: string): GraspError =>
     ],
   });
 
-/** Whether a descriptor (read as data) is an object with field `name`. */
-const hasField = (descriptor: unknown, name: string): boolean =>
-  isPlainObject(descriptor) &&
-  descriptor.kind === "object" &&
-  isPlainObject(descriptor.fields) &&
-  Object.hasOwn(descriptor.fields, name);
-
-/**
- * Whether `reference` takes the reserved `pagination` argument (spec
- * 9.2), as core checks a window's query; core checks every page it
- * answers too (`contract.not_paginated`).
- */
-const declaresPages = (reference: unknown): boolean =>
-  isPlainObject(reference) && hasField(reference.args, "pagination");
-
 /** What a skipped list shows: nothing, and nothing to load. */
 export const skippedPage: PagerSnapshot = Object.freeze({
   view: Object.freeze({
@@ -1224,12 +1139,11 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   (settled.kind === "failed" && settled.error.code === "data.conflict");
 
 /**
- * Where a key left unknown is remembered: by App, operation and key, as
- * the host scopes a key's receipt; not by the App's version, so a resend
- * after a new release is still checked.
+ * Where a key left unknown is remembered: by function and key, as the
+ * host scopes a key's receipt (the client serves one App).
  */
 const uncertainScope = (reference: SubmissionTarget, key: string): string =>
-  canonicalJson([reference.resourceId, reference.contractId, key]);
+  canonicalJson([reference.name, key]);
 
 /**
  * The code of the refusal `settled` is, if it withholds the outcome of
@@ -1389,11 +1303,7 @@ const openedUnlessAborted = async (
  * generation is no longer current, `#call`).
  */
 interface Connection {
-  readonly call: (
-    request: string,
-    app: string,
-    bound: Bound
-  ) => Promise<Settled>;
+  readonly call: (request: string, bound: Bound) => Promise<Settled>;
 }
 
 /** Why a call bound to `bound` is refused unsent, if it is. */
@@ -1404,7 +1314,7 @@ const frameConnection = (
   transport: ClientTransport,
   stale: StaleRefusal
 ): Connection => ({
-  call: async (request, app, bound) => {
+  call: async (request, bound) => {
     // Fenced since the call began (a retry of a lost answer among them):
     // refused unsent, as the fence was.
     const refused = stale(bound);
@@ -1412,7 +1322,7 @@ const frameConnection = (
       return { kind: "failed", error: refused };
     }
     try {
-      return readAnswer(await transport.call(request, app));
+      return readAnswer(await transport.call(request));
     } catch (error) {
       return readRejection(error);
     }
@@ -1433,7 +1343,7 @@ const portableConnection = (
     token: tokenOf,
   }: { stale: StaleRefusal; token: () => Promise<PortableToken> }
 ): Connection => ({
-  call: async (request, app, bound) => {
+  call: async (request, bound) => {
     const before = stale(bound);
     if (before !== undefined) {
       return { kind: "failed", error: before };
@@ -1453,7 +1363,8 @@ const portableConnection = (
       return { kind: "failed", error: after };
     }
     bound.principal = token.principal;
-    return await portable.send(request, app, token.text);
+    // The App the token is good for: a client serves one App.
+    return await portable.send(request, token.app, token.text);
   },
 });
 
@@ -1767,7 +1678,7 @@ export class GraspClient {
    * following it: the host cancels it once no one does.
    */
   async stream<Reference extends StreamReference>(
-    reference: Reference,
+    reference: Streaming<Reference>,
     ...[args, options]: StreamArguments<Reference>
   ): Promise<ReturnOf<Reference>> {
     const value = await this.#stream(reference, args, options);
@@ -1783,15 +1694,15 @@ export class GraspClient {
     options: unknown,
     events?: StreamEvents
   ): Promise<unknown> {
-    const read = readReference(reference, "action", "stream");
+    const read = readReference(reference, "action");
     const { signal, idempotencyKey, onProgress } = readOptions(
       options,
       streamOptionKeys
     );
-    const input = normalized(read, args);
+    const input = inputOf(args);
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
-      reference: wireReference(read),
+      reference: read,
       input,
       idempotencyKey: key,
     });
@@ -1830,16 +1741,13 @@ export class GraspClient {
         listening = false;
       }
     };
-    /** A snapshot, if newer than the last and as its descriptor allows. */
+    /** A snapshot, if newer than the last: core checked it against the stream's schema. */
     const onProgressFrame = (frameSeq: number, value: unknown): void => {
-      if (frameSeq <= seen || read.stream === undefined) {
+      if (frameSeq <= seen) {
         return;
       }
-      const checked = validateValue(read.stream, value);
-      if (checked.issues === undefined) {
-        seen = frameSeq;
-        progressed(frozen(checked.value));
-      }
+      seen = frameSeq;
+      progressed(frozen(value));
     };
     /** Resolves once the invocation first answered (true), or never will. */
     const opened = Promise.withResolvers<boolean>();
@@ -1934,7 +1842,6 @@ export class GraspClient {
     });
     try {
       return await this.#settleStream(follow, {
-        resourceId: read.resourceId,
         key,
         events,
         signal,
@@ -1954,12 +1861,10 @@ export class GraspClient {
   async #settleStream(
     follow: (what: "stream" | "attach") => Promise<Followed>,
     {
-      resourceId,
       key,
       events,
       signal,
     }: {
-      readonly resourceId: string;
       readonly key: string;
       readonly events: StreamEvents | undefined;
       readonly signal: AbortSignal | undefined;
@@ -1976,13 +1881,13 @@ export class GraspClient {
         // Its start may have reached the host, and what it ran saved
         // something: the App's queries are read again, as on every other
         // exit that leaves its outcome unknown.
-        this.#changed(resourceId);
+        this.#changed();
         throw clientError("stream.cancelled", { idempotencyKey: key });
       }
       const settled: Settled =
         followed.kind === "settled" ? followed.settled : { kind: "lost" };
       if (settled.kind === "value") {
-        this.#changed(resourceId);
+        this.#changed();
         return settled.value;
       }
       // A refusal of a reconnect before it reached the invocation (the
@@ -2000,7 +1905,7 @@ export class GraspClient {
         }
         refused += 1;
         if (!startAgain(followed, what, refused)) {
-          this.#changed(resourceId);
+          this.#changed();
           // An outcome the host can't tell carries the key, so a caller that
           // let the client pick it can still recover the receipt by it.
           throw error.category === "uncertain" ? withKey(error, key) : error;
@@ -2010,7 +1915,7 @@ export class GraspClient {
         recoveringSince ??= Date.now();
         if (recoveryOver(tries, recoveringSince)) {
           // What it ran may have committed: the App's queries are read again.
-          this.#changed(resourceId);
+          this.#changed();
           throw clientError("stream.outcome_unknown", { idempotencyKey: key });
         }
         events?.onRecovering();
@@ -2025,7 +1930,7 @@ export class GraspClient {
       await sleep(wait, signal);
       if (isAborted(signal)) {
         // As above: it may have run, and saved something.
-        this.#changed(resourceId);
+        this.#changed();
         throw clientError("stream.cancelled", { idempotencyKey: key });
       }
     }
@@ -2064,7 +1969,7 @@ export class GraspClient {
   /** See `ClientInternals.entry`. */
   #entry(reference: unknown, args: unknown): QueryEntry {
     const read = readReference(reference, "query");
-    return this.#entryFor(read, normalized(read, args));
+    return this.#entryFor(read, inputOf(args));
   }
 
   /**
@@ -2074,7 +1979,7 @@ export class GraspClient {
   #entryFor(read: ReadReference, input: Json, extent?: number): QueryEntry {
     // A query's request is bounded as a submission's is, before it is sent.
     const request = JSON.stringify({
-      reference: wireReference(read),
+      reference: read,
       input,
       ...(extent === undefined ? {} : { window: { extent } }),
     });
@@ -2086,10 +1991,7 @@ export class GraspClient {
       });
     }
     const key = canonicalJson([
-      read.resourceId,
-      read.resourceVersion,
-      read.contractId,
-      read.fingerprint,
+      read.name,
       input,
       ...(extent === undefined ? [] : [{ window: extent }]),
     ]);
@@ -2174,19 +2076,11 @@ export class GraspClient {
     if (!isPageSize(initialPageSize)) {
       throw pageSizeError("initialPageSize");
     }
+    // Paginated because the caller asked for pages (`usePaginatedQuery`):
+    // core refuses a query that takes none (`contract.not_paginated`).
     const read = readReference(reference, "query");
-    if (!declaresPages(reference)) {
-      throw clientError("contract.not_paginated");
-    }
-    const input = GraspClient.#listInput(read, args);
-    const key = canonicalJson([
-      read.resourceId,
-      read.resourceVersion,
-      read.contractId,
-      read.fingerprint,
-      input,
-      initialPageSize,
-    ]);
+    const input = GraspClient.#listInput(args);
+    const key = canonicalJson([read.name, input, initialPageSize]);
     const known = this.#pagers.get(key);
     if (known !== undefined) {
       return known;
@@ -2232,11 +2126,11 @@ export class GraspClient {
   }
 
   /**
-   * A list's arguments, without `pagination`, normalized as the host
-   * normalizes them: checked with a placeholder page, which is then left
-   * out. `pagination` among them is refused: the client supplies it.
+   * A list's arguments, without `pagination`, as JSON: the host checks
+   * them with the query's validator, a page added. `pagination` among
+   * them is refused: the client supplies it.
    */
-  static #listInput(read: ReadReference, args: unknown): Json {
+  static #listInput(args: unknown): Json {
     if (isPlainObject(args) && Object.hasOwn(args, "pagination")) {
       throw clientError("contract.invalid_args", {
         issues: [
@@ -2249,20 +2143,7 @@ export class GraspClient {
         ],
       });
     }
-    const page = { pageSize: 1, cursor: null };
-    let withPage: unknown = args;
-    if (args === undefined) {
-      withPage = { pagination: page };
-    } else if (isPlainObject(args)) {
-      withPage = { ...args, pagination: page };
-    }
-    const checked = normalized(read, withPage);
-    if (!isPlainObject(checked)) {
-      throw clientError("contract.not_paginated");
-    }
-    return Object.fromEntries(
-      Object.entries(checked).filter(([name]) => name !== "pagination")
-    );
+    return inputOf(args);
   }
 
   /** See `ClientInternals.subscribePager`. */
@@ -2667,18 +2548,18 @@ export class GraspClient {
   }
 
   /** How `entry`'s query is followed: over the frame, or the live connection. */
-  #watchOf(entry: QueryEntry): ClientTransport["watch"] | undefined {
+  #watchOf(): ClientTransport["watch"] | undefined {
     const live = this.#live;
     if (live === undefined) {
       return this.#transport?.watch;
     }
-    const app = entry.reference.resourceId;
+    // The App the person's token is good for: a client serves one App.
     return async (request, onSnapshot, onLost) =>
-      await live.watch(app, request, onSnapshot, onLost);
+      await live.watch(request, onSnapshot, onLost);
   }
 
   async #connect(entry: QueryEntry, live: Live): Promise<void> {
-    const watch = this.#watchOf(entry);
+    const watch = this.#watchOf();
     if (watch === undefined) {
       return;
     }
@@ -2770,7 +2651,7 @@ export class GraspClient {
         entry.live = undefined;
       }
       if (error.code === accessChangedCode) {
-        this.#accessChanged(entry.reference.resourceId, error);
+        this.#accessChanged(error);
       }
       show(entry, { value: undefined, error });
     }
@@ -2861,11 +2742,7 @@ export class GraspClient {
             throw early;
           }
           // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-          settled = await this.#call(
-            request,
-            entry.reference.resourceId,
-            bound
-          );
+          settled = await this.#call(request, bound);
         } finally {
           release();
         }
@@ -2916,8 +2793,8 @@ export class GraspClient {
    * One call through the transport, settled. A refusal of the person or
    * the build fences every cache before its caller hears of it.
    */
-  async #call(request: string, app: string, bound: Bound): Promise<Settled> {
-    const settled = await this.#connection.call(request, app, bound);
+  async #call(request: string, bound: Bound): Promise<Settled> {
+    const settled = await this.#connection.call(request, bound);
     // A refusal of a request sent before the latest fence is of who or
     // what that fence already cleared: it doesn't fence whoever came after.
     // So is a call the connection refused unsent (`Connection`), since
@@ -3041,7 +2918,7 @@ export class GraspClient {
   }
 
   /**
-   * The person's roles in App `resourceId` dropped (`screen.access_changed`,
+   * The person's roles in the App dropped (`screen.access_changed`,
    * pushed as a followed query's last result): what any query of the App
    * keeps that nobody reads was read under the old roles: forgotten, so
    * whoever reads it next reads it afresh, under the new. One read but
@@ -3053,11 +2930,8 @@ export class GraspClient {
    * with this, and one that followed again since shows what it read
    * under the new roles.
    */
-  #accessChanged(resourceId: string, error: GraspError): void {
+  #accessChanged(error: GraspError): void {
     for (const entry of this.#queries.values()) {
-      if (entry.reference.resourceId !== resourceId) {
-        continue;
-      }
       if (!wanted(entry)) {
         clearTimeout(entry.evict);
         entry.evict = undefined;
@@ -3087,18 +2961,16 @@ export class GraspClient {
   }
 
   /**
-   * After a change the host confirmed: every query of the same App is
-   * marked old, so an imperative read doesn't join one sent before it.
+   * After a change the host confirmed: every query of the App is marked
+   * old, so an imperative read doesn't join one sent before it.
    */
-  #changed(resourceId: string): void {
+  #changed(): void {
     // Core pushes what the change made out of date to every followed
     // query: the marks only keep a later imperative read from joining an
     // older one (`#readCurrent`).
     for (const entry of this.#queries.values()) {
-      if (entry.reference.resourceId === resourceId) {
-        entry.stale = true;
-        entry.changes += 1;
-      }
+      entry.stale = true;
+      entry.changes += 1;
     }
   }
 
@@ -3143,7 +3015,7 @@ export class GraspClient {
     options: unknown
   ): Promise<unknown> {
     const { signal, idempotencyKey } = readOptions(options, submitOptionKeys);
-    const input = normalized(reference, args);
+    const input = inputOf(args);
     // A key an unknown outcome was left under is the person's it was sent
     // for: sent again for someone who signed in since, the host would take
     // it as theirs, and commit the first person's change as them.
@@ -3156,7 +3028,7 @@ export class GraspClient {
     }
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
-      reference: wireReference(reference),
+      reference,
       input,
       idempotencyKey: key,
     });
@@ -3176,9 +3048,7 @@ export class GraspClient {
     // token only tells after the first save was keyed.
     const scoped = canonicalJson([
       this.#generation,
-      reference.resourceId,
-      reference.resourceVersion,
-      reference.contractId,
+      reference.name,
       reference.kind,
       key,
     ]);
@@ -3229,13 +3099,13 @@ export class GraspClient {
       let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const answered = await this.#call(request, reference.resourceId, bound);
+        const answered = await this.#call(request, bound);
         // An answer that isn't one says nothing of the outcome: it is
         // recovered under the same key, as a lost one is, never taken for
         // a refusal that would leave the caller to send it afresh.
         const settled = readSettled(answered, events?.read);
         if (showsStale(settled, isAction)) {
-          this.#changed(reference.resourceId);
+          this.#changed();
         }
         const now = Date.now();
         const verdict = submissionVerdict(settled, {

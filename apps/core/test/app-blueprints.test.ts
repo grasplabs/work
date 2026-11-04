@@ -87,7 +87,7 @@ export default app({
 /** The App's notes, as `person` reads them through its sealed query. */
 const notesOf = async (person: Person, app: string): Promise<unknown> =>
   await calledAs(await person.api.whoami(), app, {
-    contractId: "notes.list",
+    name: "notes.list",
     kind: "query",
   });
 
@@ -354,7 +354,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
     await calledAs(
       await owner.api.whoami(),
       source,
-      { contractId: "notes.add", kind: "mutation" },
+      { name: "notes.add", kind: "mutation" },
       { text: "Only the source's" }
     );
     await share(owner, source, maker, "user");

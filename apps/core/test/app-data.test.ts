@@ -157,25 +157,18 @@ type Notes = Awaited<ReturnType<typeof notesApp>>;
  * for them: what it answered.
  */
 const call = async (
-  { app, version }: Notes,
+  { app }: Notes,
   by: Person,
   path: string,
   input: Json,
   agentId?: string
 ): Promise<unknown> => {
-  const current = await loadRelease(env, appIdSchema.parse(app), version);
   const answer = await callAppFunction(
     env,
     { userId: by.userId, role: by.role, teams: [] },
     app,
     JSON.stringify({
-      reference: {
-        resourceId: current.manifest.resourceId,
-        resourceVersion: current.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: current.fingerprints[path] ?? "",
-        kind: "mutation",
-      },
+      reference: { name: path, kind: "mutation" },
       input,
     }),
     Date.now() + 30_000,

@@ -74,13 +74,7 @@ export default app({
 /** The call of `path` with `input`, as the chat's code writes it. */
 const callOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path],
-      kind: release.app.operations[path]?.kind,
-    },
+    reference: { name: path, kind: release.app.operations[path]?.kind },
     input,
   });
 

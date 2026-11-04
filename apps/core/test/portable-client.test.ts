@@ -171,13 +171,7 @@ const requestFor = (
   input: unknown
 ): string =>
   JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path],
-      kind: release.app.operations[path]?.kind,
-    },
+    reference: { name: path, kind: release.app.operations[path]?.kind },
     input,
   });
 

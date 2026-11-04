@@ -19,19 +19,7 @@ export const internal: {
 } = frozen({
   notes: {
     count: {
-      "args": {
-        "descriptorVersion": 1,
-        "fields": {},
-        "kind": "object",
-        "nullable": false,
-        "presence": "required"
-      },
-      "contractId": "notes.count",
-      "fingerprint": "2e22308345ef99902eb2ca54ff645206f0735cf899dd4e52d41e069ab6d8b9aa",
-      "kind": "query",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
+      "name": "notes.count",
       "returns": {
         "descriptorVersion": 1,
         "integer": true,
@@ -39,8 +27,7 @@ export const internal: {
         "min": 0,
         "nullable": false,
         "presence": "required"
-      },
-      "visibility": "internal"
+      }
     },
   },
 });

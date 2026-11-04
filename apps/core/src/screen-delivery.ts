@@ -82,10 +82,13 @@ const encoder = new TextEncoder();
 
 /**
  * One build of an App's screen as core handed it out: its hash, and the
- * App's version it was opened from, whose release the frame's calls are
- * pinned to (app-functions.ts, `pinnedReference`) and whose revocation
- * stops it (`standingOf`). The same hash can be a screen of several
- * versions, so the version is signed with it, never read from the frame.
+ * App's version it was opened from, whose revocation stops it
+ * (`standingOf`). It says what core served and to whom, never which code
+ * answers: every call of the frame's is answered by the App's current
+ * release (app-functions.ts, `publicOperationOf`), so a lease kept from
+ * an older version reaches only the current code. The same hash can be a
+ * screen of several versions, so the version is signed with it, never
+ * read from the frame.
  */
 export interface LeasedBuild {
   readonly artifact: string;

@@ -10,6 +10,7 @@ import { serverModule } from "../src/server.ts";
 import type {
   ActionCtx,
   ArgsOf,
+  FunctionReference,
   MutationCtx,
   NotifyReceipt,
   PeopleNotification,
@@ -135,9 +136,11 @@ query({
   handler: () => "1",
 });
 
-// `returns` is mandatory, and there is no `input`/`output` form.
-// @ts-expect-error -- no `returns`
-query({ args: {}, handler: () => null });
+// Without `returns`, the handler's answer is the return.
+expectTypeOf(query({ args: {}, handler: () => ({ count: 1 }) })).toExtend<
+  FunctionReference<"query", "public", Record<never, never>, { count: number }>
+>();
+// There is no `input`/`output` form.
 // @ts-expect-error -- `input` is superseded by `args`
 query({ input: {}, returns: v.null(), handler: () => null });
 // @ts-expect-error -- `output` is superseded by `returns`

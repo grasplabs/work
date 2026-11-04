@@ -919,8 +919,7 @@ const eventOf = (
 /** What a workflow's commands are scoped by, as a mutation's are. */
 const targetOf = (read: ReadWorkflow): SubmissionTarget => ({
   kind: "mutation",
-  resourceId: read.resourceId,
-  contractId: read.contractId,
+  name: read.contractId,
 });
 
 /**

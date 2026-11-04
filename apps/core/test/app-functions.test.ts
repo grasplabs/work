@@ -238,7 +238,7 @@ let reads = 0;
  * listed.
  */
 const shifty = {
-  get contractId() {
+  get name() {
     reads += 1;
     return reads <= 2 ? "notes.count" : "notes.create";
   },
@@ -322,13 +322,7 @@ const referenceTo = (release: Release, path: string) => {
   if (operation === undefined) {
     throw new Error(`No ${path}`);
   }
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: path,
-    fingerprint: release.fingerprints[path] ?? "",
-    kind: operation.kind,
-  };
+  return { name: path, kind: operation.kind };
 };
 
 type Caller = Fixture["owner"];
@@ -613,159 +607,157 @@ describe("another App's store", { timeout: 120_000 }, () => {
   });
 });
 
-describe(
-  "a reference that isn't the contract that runs",
-  { timeout: 120_000 },
-  () => {
-    it.each([
-      [
-        "another fingerprint",
-        { fingerprint: "0".repeat(64) },
-        "version.mismatch",
-      ],
-      ["another version", { resourceVersion: 2 }, "version.mismatch"],
-      ["another App", { resourceId: "app_other" }, "version.mismatch"],
-      [
-        "another kind",
-        { kind: "mutation" as const },
-        "operation.kind_mismatch",
-      ],
-      [
-        "a path nothing is at",
-        { contractId: "notes.missing" },
-        "operation.not_found",
-      ],
-    ])(
-      "is refused with %s, before its input is read",
-      async (_case, forged, code) => {
-        const notes = await sealedNotes();
-        // Input that would be refused if it were read.
-        expect(
-          codeOf(await call(notes, notes.owner, "notes.get", { id: 1 }, forged))
-        ).toBe(code);
-      }
+// A page names a function by its name and kind, nothing more, and core
+// resolves the name in the App's current release, checking what the call
+// passes with that function's own validator. Threat model, each closed
+// here: a reference forged to name something else, or to carry a version
+// or contract; a call of an internal function; arguments the function
+// doesn't take; a page still open after a publish, calling a function the
+// new version changed or dropped; a lease kept from an older version, which
+// never makes core run that version's code (screen-delivery.test.ts
+// replays one through the page's route). Calls between Apps stay pinned by
+// their reviewed binding (app-function-calls.test.ts).
+describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
+  it.each([
+    ["another kind", { kind: "mutation" as const }, "operation.kind_mismatch"],
+    ["a name nothing is at", { name: "notes.missing" }, "operation.not_found"],
+    [
+      "a version beside the name",
+      { resourceVersion: 1 },
+      "contract.invalid_request",
+    ],
+    [
+      "a contract beside the name",
+      { fingerprint: "0".repeat(64) },
+      "contract.invalid_request",
+    ],
+  ])(
+    "is refused with %s, before its input is read",
+    async (_case, forged, code) => {
+      const notes = await sealedNotes();
+      // Input that would be refused if it were read.
+      expect(
+        codeOf(
+          await callAppFunction(
+            env,
+            notes.owner,
+            notes.app,
+            JSON.stringify({
+              reference: {
+                ...referenceTo(notes.release, "notes.get"),
+                ...forged,
+              },
+              input: { id: 1 },
+            })
+          )
+        )
+      ).toBe(code);
+    }
+  );
+
+  it("is refused to an internal function as to one that doesn't exist", async () => {
+    const notes = await sealedNotes();
+    expect(codeOf(await call(notes, notes.owner, "notes.count", {}, {}))).toBe(
+      "operation.not_found"
     );
+  });
 
-    it("is refused to an internal function as to one that doesn't exist, fingerprint and all", async () => {
-      const notes = await sealedNotes();
-      expect(codeOf(await call(notes, notes.owner, "notes.count", {}))).toBe(
-        "operation.not_found"
-      );
+  it("is checked by the function's own validator", async () => {
+    const notes = await sealedNotes();
+    expect({
+      wrongType: codeOf(await call(notes, notes.owner, "notes.get", { id: 1 })),
+      undeclared: codeOf(
+        await call(notes, notes.owner, "notes.bump", { extra: true })
+      ),
+      missing: codeOf(await call(notes, notes.owner, "notes.create", {})),
+    }).toStrictEqual({
+      wrongType: "contract.invalid_args",
+      undeclared: "contract.invalid_args",
+      missing: "contract.invalid_args",
     });
+  });
 
-    it("is held to its contract, from a screen still open on the version before: the same contract runs on the version current now, another never", async () => {
-      const notes = await sealedNotes();
-      const pinned = {
-        same: referenceTo(notes.release, "notes.bump"),
-        changed: referenceTo(notes.release, "notes.get"),
-      };
-      // Version 2 keeps `bump`'s contract, and renames `get`'s argument.
-      const files = notesFiles("Notes, renamed");
-      const operations = files["server/notes.ts"] ?? "";
-      const get = `export const get = query({
+  it("is answered by the version current now, from a page still open on the one before", async () => {
+    const notes = await sealedNotes();
+    const opened = {
+      get: referenceTo(notes.release, "notes.get"),
+      bump: referenceTo(notes.release, "notes.bump"),
+    };
+    // Version 2 renames `get`'s argument and takes `bump` out of its API.
+    const files = notesFiles("Notes, renamed");
+    const operations = files["server/notes.ts"] ?? "";
+    const get = `export const get = query({
   args: { id: v.id("notes") },
   returns: doc("notes").nullable(),
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });`;
-      expect(operations).toContain(get);
-      files["server/notes.ts"] = operations.replace(
+    expect(operations).toContain(get);
+    files["server/notes.ts"] = operations
+      .replace(
         get,
         get
           .replace("{ id: v.id", "{ noteId: v.id")
           .replace("args.id", "args.noteId")
+      )
+      .replace(
+        "export const bump = query(",
+        "export const bump = internalQuery("
       );
-      await commitFiles(env, notes.owner, notes.app, files, "Rename");
-      const next = await seal(notes, 2);
-      await setCurrentVersion(env, notes.owner, notes.app, 2);
-      const fromScreen = async (
-        reference: ReturnType<typeof referenceTo>,
-        input: unknown
-      ): Promise<string> =>
-        codeOf(
-          await callScreenFunction(
-            env,
-            notes.owner,
-            notes.app,
-            JSON.stringify({ reference, input }),
-            Date.now() + 30_000,
-            async () => {
-              // A window's pages cost nothing here.
-            },
-            // Opened on version 1, as its lease says.
-            { pinnedVersion: 1 }
-          )
-        );
-      const before = {
-        same: await fromScreen(pinned.same, {}),
-        changed: await fromScreen(pinned.changed, { id: "0" }),
-        // Anyone else names the version that runs.
-        agent: codeOf(
-          await call(
-            { ...notes, release: next },
-            notes.owner,
-            "notes.bump",
-            {},
-            pinned.same
-          )
-        ),
-      };
-      const admin = await person("admin");
-      await revokeRelease(
-        env,
-        admin,
-        { app: notes.app, version: 1 },
-        "Leaks data"
+    await commitFiles(env, notes.owner, notes.app, files, "Rename");
+    await seal(notes, 2);
+    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    const fromScreen = async (
+      reference: ReturnType<typeof referenceTo>,
+      input: unknown
+    ): Promise<string> =>
+      codeOf(
+        await callScreenFunction(
+          env,
+          notes.owner,
+          notes.app,
+          JSON.stringify({ reference, input }),
+          Date.now() + 30_000,
+          async () => {
+            // A window's pages cost nothing here.
+          }
+        )
       );
-      expect({
-        before,
-        revoked: {
-          pinned: await fromScreen(pinned.same, {}),
-          // The screen's own word for its version counts for nothing.
-          forged: await fromScreen({ ...pinned.same, resourceVersion: 2 }, {}),
-          // And its build, opened on version 1, gets nothing more either.
-          delivery: deliveryOf(
-            await standingOf(env, notes.app, {
-              artifact: "a".repeat(64),
-              version: 1,
-            })
-          ),
-        },
-      }).toStrictEqual({
-        before: {
-          same: "ok",
-          changed: "version.mismatch",
-          agent: "version.mismatch",
-        },
-        revoked: {
-          pinned: "version.revoked",
-          forged: "version.revoked",
-          delivery: "revoked",
-        },
-      });
+    const noteId = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Kept" })
+    );
+    const before = {
+      changed: await fromScreen(opened.get, { id: noteId }),
+      renamed: await fromScreen(opened.get, { noteId }),
+      gone: await fromScreen(opened.bump, {}),
+    };
+    // Version 1's release revoked: the calls are version 2's, so they go on,
+    // while a build opened on version 1 gets nothing more.
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: notes.app, version: 1 },
+      "Leaks data"
+    );
+    expect({
+      before,
+      afterRevoked: await fromScreen(opened.get, { noteId }),
+      oldBuild: deliveryOf(
+        await standingOf(env, notes.app, {
+          artifact: "a".repeat(64),
+          version: 1,
+        })
+      ),
+    }).toStrictEqual({
+      before: {
+        changed: "contract.invalid_args",
+        renamed: "ok",
+        gone: "operation.not_found",
+      },
+      afterRevoked: "ok",
+      oldBuild: "revoked",
     });
-
-    it("is refused once another version runs, which runs its own code", async () => {
-      const notes = await sealedNotes();
-      const old = referenceTo(notes.release, "notes.bump");
-      await commitFiles(
-        env,
-        notes.owner,
-        notes.app,
-        notesFiles("Notes, renamed"),
-        "Rename"
-      );
-      const next = await seal(notes, 2);
-      await setCurrentVersion(env, notes.owner, notes.app, 2);
-      const current = { ...notes, release: next };
-      expect(
-        codeOf(await call(current, notes.owner, "notes.bump", {}, old))
-      ).toBe("version.mismatch");
-      expect(codeOf(await call(current, notes.owner, "notes.bump", {}))).toBe(
-        "ok"
-      );
-    });
-  }
-);
+  });
+});
 
 describe("what a function answers", { timeout: 120_000 }, () => {
   it("is read as it is, never as JSON would quietly make it", async () => {

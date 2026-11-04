@@ -363,6 +363,8 @@ export const operationServesContract = (
     jsonSchemaOf(operation.args, { exact: true }),
     schemaOfDescriptor(contract.input)
   ) &&
+  // An operation that declares no `returns` promises no output to check.
+  operation.returns !== null &&
   sameShape(
     jsonSchemaOf(operation.returns, { exact: true }),
     schemaOfDescriptor(contract.output)
