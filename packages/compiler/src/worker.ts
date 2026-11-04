@@ -891,7 +891,7 @@ export type OpenWorkflowBuild =
  * Builds the module the host generated from a JSON workflow
  * (`openWorkflowEntry`): type-checked against the SDK's own declarations,
  * then compiled as workflow code is, importing only
- * `@grasp-os/sdk/open-workflow` (`generatedWorkflowCode`). Generated code
+ * `@grasp-os/sdk/workflow` (`generatedWorkflowCode`). Generated code
  * is held to the type check that App workflows aren't (spec 19.1): it is
  * the host's own output, so a type error is the generator's, and nothing
  * is sealed that doesn't check.

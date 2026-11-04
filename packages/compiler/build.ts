@@ -34,7 +34,7 @@ import { compileModule } from "./src/compile.ts";
 import {
   computeRunnerImports,
   computeSdkImports,
-  openWorkflowSdkImports,
+  generatedWorkflowSdkImports,
   sdkImports,
 } from "./src/imports.ts";
 import {
@@ -1057,7 +1057,7 @@ const buildAppCompiler = async (
     types: collectTypes([
       ...imports,
       "lucide-react",
-      ...openWorkflowSdkImports,
+      ...generatedWorkflowSdkImports,
       ...computeSdkImports,
       // An App's server code is type-checked against what it and its
       // generated modules import (app-code.ts).
@@ -1086,11 +1086,14 @@ const buildAppCompiler = async (
   // App workflows and the code generated from JSON workflows share one set:
   // each imports only its own entry of it (imports.ts).
   const workflowSdkModules = modulesOf(
+    // Generated code imports one of the App workflows' entries: each once.
     await buildSdkModules([
-      ...sdkImports,
-      ...openWorkflowSdkImports,
-      ...computeSdkImports,
-      ...computeRunnerImports,
+      ...new Set([
+        ...sdkImports,
+        ...generatedWorkflowSdkImports,
+        ...computeSdkImports,
+        ...computeRunnerImports,
+      ]),
     ])
   );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
