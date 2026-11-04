@@ -782,6 +782,14 @@ describe("a changed access mode", () => {
   });
 });
 
+/** The Notes App's schema with titles of at most 100. */
+const shortTitles = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  notes: defineTable({ title: v.string().min(1).max(100) }),
+});
+`;
+
 /** The Notes App's registration, its notes shared as `read` says. */
 const notesApp = (read: NotesAccess) => `import { app } from "@grasp-os/sdk";
 import schema from "./schema.ts";
@@ -959,6 +967,112 @@ describe("making the release current", { timeout: 180_000 }, () => {
       second: ["Ada's", "Grace's"],
       owed: 0,
     });
+  });
+
+  it("refuses another version's activation while one is in flight, so the loser never leaves the winner behind", async () => {
+    const { fixture, store, shared } = await sharedNext();
+    // Version 3 narrows the titles to 100: once applied, version 2's longer
+    // titles no longer fit, and version 2 is left behind.
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "schema.ts": shortTitles },
+      "Shorter titles"
+    );
+    await seal(fixture, 3);
+    // Version 3 is made current while version 2's activation is in
+    // flight: its store step done, its batch not yet sent.
+    let loser = "";
+    const racing = racingDb(async () => {
+      loser = await failure(
+        async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      );
+    }, makingCurrent);
+    await setCurrentVersion(
+      { ...env, DB: racing },
+      fixture.owner,
+      fixture.app,
+      2
+    );
+    const winner = {
+      current: await currentOf(fixture.app),
+      writes: await codeOf(
+        insert(store, shared, { title: "x".repeat(150) }, "ada")
+      ),
+    };
+    // Asked again after the winner's commit: it goes through. The long
+    // title goes first, as version 3 never takes it.
+    const long = [...(await notesOf(store))].find(
+      ([, note]) =>
+        typeof note.fields.title === "string" && note.fields.title.length > 100
+    );
+    await commit(
+      store,
+      shared,
+      [
+        {
+          op: "delete",
+          table: "notes",
+          id: long?.[0] ?? "",
+          expectedRevision: long?.[1].revision ?? 1,
+        },
+      ],
+      "ada"
+    );
+    const retried = await failure(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+
+    expect({
+      loser,
+      winner,
+      retried,
+      current: await currentOf(fixture.app),
+    }).toStrictEqual({
+      loser: "migration.busy",
+      winner: { current: 2, writes: "ok" },
+      retried: "ok",
+      current: 3,
+    });
+  });
+
+  it("holds other activations back no longer than the alarm takes, once one stopped before its commit", async () => {
+    const { fixture, store, shared } = await sharedNext();
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "schema.ts": shortTitles },
+      "Shorter titles"
+    );
+    await seal(fixture, 3);
+    // Version 2's make-current stopped after its store step, before its
+    // batch: D1 never made it current.
+    const object = objectOf(store);
+    await object.activateReady(
+      fixture.store,
+      shared,
+      { resourceId: fixture.app, resourceVersion: 2 },
+      { id: crypto.randomUUID(), kind: "app" }
+    );
+    const held = await failure(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+    // The store's alarm, once it is due: version 1 is current, not 2.
+    await runInDurableObject(object, (_instance, state) => {
+      state.storage.sql.exec("UPDATE sdk_rules_owed SET due_at = 0");
+    });
+    await runDurableObjectAlarm(object);
+    const released = await failure(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+
+    expect({
+      held,
+      released,
+      current: await currentOf(fixture.app),
+    }).toStrictEqual({ held: "migration.busy", released: "ok", current: 3 });
   });
 
   it("applies the rules as the version is made current", async () => {

@@ -562,7 +562,7 @@ export interface RulesStore {
 }
 
 /** The version of `resource` core's database has current, if any. */
-const currentVersionOf = async (
+export const currentVersionOf = async (
   env: Env,
   resource: OwedResource
 ): Promise<number | null> => {

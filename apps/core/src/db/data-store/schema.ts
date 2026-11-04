@@ -306,7 +306,9 @@ export const owedResourceKinds = ["app", "workflow"] as const;
  * follow once it committed (`applyRules`). Core settles it once they did;
  * one core never settled (a crash after the commit) is the alarm's from
  * `due_at` on, which applies them itself (store-backfill.ts,
- * `applyCurrentRules`).
+ * `applyCurrentRules`), or drops them when core's database has another
+ * version current. While it is held, it is also the activation in flight:
+ * another version's activation is refused (`migration.busy`).
  */
 export const rulesOwed = sqliteTable(
   "sdk_rules_owed",
@@ -315,6 +317,9 @@ export const rulesOwed = sqliteTable(
     owedId: text("owed_id").primaryKey(),
     resourceKind: text("resource_kind", { enum: owedResourceKinds }).notNull(),
     resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    /** The schema the version was activated on. */
+    schemaHash: text("schema_hash").notNull(),
     owedAt: integer("owed_at").notNull(),
     /** When the alarm takes it up, or tries it again. */
     dueAt: integer("due_at").notNull(),

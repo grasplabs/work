@@ -95,6 +95,7 @@ import {
   lte,
   max,
   min,
+  ne,
   notInArray,
   or,
   sql,
@@ -142,6 +143,7 @@ import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { recordBackfillAbandoned } from "./store-abandon.ts";
 import {
   applyCurrentRules,
+  currentVersionOf,
   keepStoreBackfillGoing,
   owedRulesSchema,
 } from "./store-backfill.ts";
@@ -1435,6 +1437,13 @@ const underContractRules = (
           })
         ),
       };
+
+/** Who owes rules a store holds: a version of a resource, as text. */
+const owedKey = (owed: {
+  kind: string;
+  resourceId: string;
+  version: number;
+}): string => canonicalText([owed.kind, owed.resourceId, owed.version]);
 
 /** A table's access mode and row rules, as canonical text. */
 const rulesOf = (table: ManifestTable | undefined): string =>
@@ -5837,6 +5846,14 @@ export class StoreHost {
    * they follow the commit (`applyRules`), or the alarm applies them
    * (`#applyOwedRules`). Without `owed` (a preview, whose version is
    * current at once), the rules are applied with the rest.
+   *
+   * The owed rules are also the activation in flight: while the store
+   * owes them for another version or schema (whatever the resource), this
+   * one is refused before anything moves (`migration.busy`, retryable).
+   * So of two versions made current at once, the one that loses in core's
+   * database never applied its change here, and never leaves the winner's
+   * schema behind; it is asked again once the winner's are settled, after
+   * its commit or by the alarm.
    */
   async activateReady(
     storeId: StoreId,
@@ -5863,6 +5880,20 @@ export class StoreHost {
       // alarm to apply whatever rules core's database ends up with.
       this.ctx.storage.transactionSync(() => {
         this.#bind(storeId, false);
+        const another = this.#db
+          .select({ owedId: rulesOwed.owedId })
+          .from(rulesOwed)
+          .where(
+            or(
+              ne(rulesOwed.resourceId, named.resourceId),
+              ne(rulesOwed.resourceVersion, named.resourceVersion),
+              ne(rulesOwed.schemaHash, hash)
+            )
+          )
+          .get();
+        if (another !== undefined) {
+          throw migrationErrors.create("migration.busy", { retryable: true });
+        }
         const now = Date.now();
         this.#db
           .insert(rulesOwed)
@@ -5870,6 +5901,8 @@ export class StoreHost {
             owedId: owing.id,
             resourceKind: owing.kind,
             resourceId: named.resourceId,
+            resourceVersion: named.resourceVersion,
+            schemaHash: hash,
             owedAt: now,
             dueAt: now + rulesOwedGraceMs,
           })
@@ -6280,11 +6313,15 @@ export class StoreHost {
 
   /**
    * The alarm's turn at the rules the store owes that core never settled
-   * (a crash after its commit, say), once due: those of the version core's
-   * database has current, for each resource owed, applied by core's own
-   * way (store-backfill.ts, `applyCurrentRules`) with this host for its
-   * store. Settled once applied; tried again a while later while a target
-   * is pending, or when it fails.
+   * (a crash after its commit, say), once due. Owed for the version core's
+   * database has current: its rules applied by core's own way
+   * (store-backfill.ts, `applyCurrentRules`) with this host for its store,
+   * and settled once they are; tried again a while later while a target
+   * is pending, or when it fails. Owed for any other version: settled at
+   * once, as that version never became current or is current no more (the
+   * version that is applies its own), so a make-current that stopped
+   * before or after its commit holds other activations back
+   * (`activateReady`) no longer than the alarm takes to come.
    */
   async #applyOwedRules(): Promise<void> {
     const now = Date.now();
@@ -6293,6 +6330,7 @@ export class StoreHost {
         owedId: rulesOwed.owedId,
         kind: rulesOwed.resourceKind,
         resourceId: rulesOwed.resourceId,
+        version: rulesOwed.resourceVersion,
       })
       .from(rulesOwed)
       .where(lte(rulesOwed.dueAt, now))
@@ -6301,36 +6339,36 @@ export class StoreHost {
       return;
     }
     const storeId = this.#storeId();
-    const resources = new Map(
-      due.map(({ kind, resourceId }) => [
-        `${kind}:${resourceId}`,
-        { kind, id: resourceId },
-      ])
-    );
-    for (const [key, resource] of resources) {
+    const owners = new Map(due.map((owed) => [owedKey(owed), owed]));
+    for (const [key, { kind, resourceId, version }] of owners) {
       const ids = due
-        .filter(({ kind, resourceId }) => `${kind}:${resourceId}` === key)
+        .filter((owed) => owedKey(owed) === key)
         .map(({ owedId }) => owedId);
-      let applied = false;
+      const resource = { kind, id: resourceId };
+      let settled = false;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one resource at a time
-        applied = await applyCurrentRules(
-          this.env,
-          {
-            id: storeId,
-            applyRules: async (schemaHash) =>
-              await this.applyRules(storeId, schemaHash),
-          },
-          resource
-        );
+        const current = await currentVersionOf(this.env, resource);
+        settled =
+          current !== version ||
+          // oxlint-disable-next-line no-await-in-loop -- one resource at a time
+          (await applyCurrentRules(
+            this.env,
+            {
+              id: storeId,
+              applyRules: async (schemaHash) =>
+                await this.applyRules(storeId, schemaHash),
+            },
+            resource
+          ));
       } catch (error) {
         log.error("store.rules_apply_failed", {
           storeId,
-          resourceId: resource.id,
+          resourceId,
           ...errorFields(error),
         });
       }
-      if (applied) {
+      if (settled) {
         this.#db.delete(rulesOwed).where(inArray(rulesOwed.owedId, ids)).run();
       } else {
         this.#db
