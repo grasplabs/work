@@ -13,13 +13,7 @@
  * them at run time, whatever the data's field names are.
  */
 import { checkExpression } from "@grasp-os/sdk/expression-check";
-import {
-  callMethod,
-  checkJson,
-  optionalChain,
-  readMember,
-  spreadValue,
-} from "@grasp-os/sdk/workflow";
+import { callMethod, optionalChain, readMember } from "@grasp-os/sdk/workflow";
 import { describe, expect, it } from "vite-plus/test";
 
 const roots = ["input", "steps", "params", "run"] as const;
@@ -40,8 +34,6 @@ const run = (
     "$read",
     "$call",
     "$opt",
-    "$spread",
-    "$json",
     ...roots,
     `return ${checked.code};`
   );
@@ -49,8 +41,6 @@ const run = (
     readMember,
     callMethod,
     optionalChain,
-    spreadValue,
-    checkJson,
     ...roots.map((root) => values[root]),
   ]);
 };
@@ -217,19 +207,18 @@ describe("a method call", () => {
 });
 
 describe("a member read", () => {
-  it("refuses a getter, a function and an object that isn't plain data", () => {
+  // Roots are JSON by the run host's contract; should one carry a getter
+  // or a function after all, no expression reaches it.
+  it("refuses a getter and a function, even through a spread", () => {
     const getter = Object.defineProperty({}, "a", {
       get: () => 1,
       enumerable: true,
     });
-    class Thing {
-      a = 1;
-    }
     expect([
       outcome("input.a", { input: getter }),
       outcome("input.f", { input: { f: () => 1 } }),
-      outcome("input.a", { input: new Thing() }),
-      outcome("input.a", { input: new Map([["a", 1]]) }),
+      outcome("({ ...input }).f", { input: { f: () => 1 } }),
+      outcome("[...input.list][0]", { input: { list: [() => 1] } }),
       outcome("input.a.b", { input: { a: null } }),
     ]).toStrictEqual(Array.from({ length: 5 }, () => ({ threw: "TypeError" })));
   });
@@ -254,71 +243,5 @@ describe("an optional chain", () => {
       chained: { value: undefined },
       called: { value: undefined },
     });
-  });
-});
-
-describe("a root that isn't JSON data", () => {
-  it("fails the expression before it reads anything, however deep", () => {
-    let reads = 0;
-    const getter = Object.defineProperty({}, "a", {
-      get: () => {
-        reads += 1;
-        return 1;
-      },
-      enumerable: true,
-    });
-    const sources = [
-      // Spread, template and operators take a value whole, with no read.
-      "{ ...input }",
-      "[...input.list]",
-      "`${input}`",
-      "input + 1",
-      "input == 1",
-      "input.x",
-    ];
-    const inputs: unknown[] = [
-      getter,
-      { list: [getter] },
-      { deep: [{ f: () => 1 }] },
-      { list: [Symbol("s")] },
-      { at: new Date(0) },
-      { [Symbol("s")]: 1 },
-    ];
-    const outcomes = inputs.flatMap((input) =>
-      sources.map((source) => outcome(source, { input }))
-    );
-    expect({
-      threw: outcomes.every(
-        (result) => "threw" in result && result.threw === "TypeError"
-      ),
-      reads,
-    }).toStrictEqual({ threw: true, reads: 0 });
-  });
-
-  it("is only a root the expression reads", () => {
-    expect(
-      outcome("params.limit", { input: () => 1, params: { limit: 2 } })
-    ).toStrictEqual({ value: 2 });
-  });
-});
-
-describe("a spread", () => {
-  it("is of a plain array or an object of data only", () => {
-    const accessor = Object.defineProperty({}, "a", {
-      get: () => 1,
-      enumerable: true,
-    });
-    const refusals = [accessor, "abc", new Set([1]), null].map((value) => {
-      try {
-        spreadValue(value);
-        return "spread";
-      } catch (error) {
-        return error instanceof TypeError ? "refused" : "other";
-      }
-    });
-    expect(refusals).toStrictEqual(Array.from({ length: 4 }, () => "refused"));
-    expect(run("[...input.a, ...[3]]", { input: { a: [1, 2] } })).toStrictEqual(
-      [1, 2, 3]
-    );
   });
 });

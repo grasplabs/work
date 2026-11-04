@@ -83,7 +83,7 @@ describe("what a workflow expression may be", () => {
     expect(checkExpression(" input.a ")).toStrictEqual({
       ok: true,
       source: " input.a ",
-      code: '($json(input), ($read(input, "a")))',
+      code: '($read(input, "a"))',
       forTypes: { code: " input.a ", added: [] },
     });
   });
@@ -303,16 +303,6 @@ describe("calling code", () => {
     });
   });
 
-  it("checks the roots it reads are JSON first, and only those", () => {
-    expect({
-      none: generated("[1, 'a']"),
-      two: generated("params.a ?? run.id"),
-    }).toStrictEqual({
-      none: '([1, "a"])',
-      two: '($json(params, run), (($read(params, "a")) ?? ($read(run, "id"))))',
-    });
-  });
-
   it("spreads nothing into a call", () => {
     expect(verdict("input.lines.concat(...input.more)")).toBe(
       "expression.syntax"
@@ -341,29 +331,15 @@ describe("changing state", () => {
   });
 });
 
-describe("what parses differently in TypeScript", () => {
-  it("is refused: no comparison of a comparison, no bitwise operators", () => {
+describe("operators", () => {
+  it("are those that work on values: no bitwise ones, no `in` or `instanceof`", () => {
     expect(
       [
-        // A generic call in TypeScript: `input.f<input.b>(input.c)`.
-        "input.f < input.b > (input.c)",
-        "input.f < input.b > input.c",
-        "(input.a < input.b) >= input.c",
-        "input.f < input.b <= input.c",
-        // TypeScript's own generic call, which is JavaScript too.
-        "input.f<string>(input.a)",
-      ].map(verdict)
-    ).toStrictEqual(
-      Array.from({ length: 5 }, () => "expression.chained-comparison")
-    );
-    expect(
-      [
-        // `input.f<input.b | input.c>(input.d)` in TypeScript.
-        "input.f < input.b | input.c > (input.d)",
-        "input.f < input.b & input.c > (input.d)",
+        "input.a | input.b",
+        "input.a & input.b",
         "input.a ^ input.b",
         "~input.a",
-        "input.f < (input.b >> input.c)",
+        "input.a >> 1",
         "input.a << 2",
         "input.a >>> 0",
         "'a' in input",
@@ -372,7 +348,7 @@ describe("what parses differently in TypeScript", () => {
     ).toStrictEqual(Array.from({ length: 9 }, () => "expression.operator"));
   });
 
-  it("is refused as TypeScript syntax, which JavaScript doesn't parse", () => {
+  it("are JavaScript's: TypeScript's own syntax doesn't parse", () => {
     expect(
       [
         "input.a as string",
@@ -402,9 +378,7 @@ describe("splicing into the generated code", () => {
 
   it("generates code with no comment to swallow the code after it", () => {
     const checked = checkExpression("input.a // the amount\n");
-    expect(checked.ok && checked.code).toBe(
-      '($json(input), ($read(input, "a")))'
-    );
+    expect(checked.ok && checked.code).toBe('($read(input, "a"))');
   });
 
   it("refuses a regular expression, whose work no limit of ours bounds", () => {
@@ -415,26 +389,26 @@ describe("splicing into the generated code", () => {
 describe("the code generated from an expression", () => {
   it("reads and calls only through the guards", () => {
     expect(generated("input.lines.map((line) => line.amount).at(-1)")).toBe(
-      '($json(input), ($call($call($read(input, "lines"), "map", [line => ($read(line, "amount"))]), "at", [-(1)])))'
+      '($call($call($read(input, "lines"), "map", [line => $read(line, "amount")]), "at", [-1]))'
     );
   });
 
-  it("parenthesizes every operand, so TypeScript reads no type arguments", () => {
+  it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {
     // `input.a<input.b, input.c>(input.d)`, a generic call, in TypeScript.
     expect(generated("[input.a < input.b, input.c > (input.d)]")).toBe(
-      '($json(input), ([(($read(input, "a")) < ($read(input, "b"))), (($read(input, "c")) > ($read(input, "d")))]))'
+      '([($read(input, "a") < $read(input, "b")), ($read(input, "c") > $read(input, "d"))])'
     );
   });
 
   it("writes every object key as a computed string: `__proto__` stays a field", () => {
     expect(generated("{ a: input.a, 'b c': 1, 2: null, ...input.d }")).toBe(
-      '($json(input), ({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$spread($read(input, "d"))\n}))'
+      '({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$read(input, "d")\n})'
     );
   });
 
   it("short-circuits a `?.` chain as JavaScript does", () => {
     expect(generated("input.a?.b.c")).toBe(
-      '($json(input), ($opt($read(input, "a"), $0 => $read($read($0, "b"), "c"))))'
+      '($opt($read(input, "a"), $0 => $read($read($0, "b"), "c")))'
     );
   });
 
@@ -457,7 +431,7 @@ describe("the code generated from an expression", () => {
 describe("a chain in parentheses", () => {
   it("is a chain of its own: `(a?.b).c` reads `.c` of whatever `a?.b` gives", () => {
     expect(generated("(input.a?.b).c")).toBe(
-      '($json(input), ($read($opt($read(input, "a"), $0 => $read($0, "b")), "c")))'
+      '($read($opt($read(input, "a"), $0 => $read($0, "b")), "c"))'
     );
   });
 
@@ -479,42 +453,26 @@ const typed = (source: string): string => {
 };
 
 describe("what TypeScript type-checks", () => {
-  it("is the source with every operand and comparison in parentheses, read as JavaScript reads it", () => {
+  it("is the source with every comparison in parentheses, read as JavaScript reads it", () => {
     expect(typed("[input.a < input.b, input.c > (input.d)]")).toBe(
-      "[((input.a) < (input.b)), ((input.c) > ((input.d)))]"
+      "[(input.a < input.b), (input.c > (input.d))]"
     );
     expect(typed("!input.a ? -input.b : input.c ?? 1")).toBe(
-      "(!(input.a)) ? (-(input.b)) : ((input.c) ?? (1))"
+      "!input.a ? -input.b : input.c ?? 1"
     );
   });
 
-  it("holds no comment, and an expression holds no `@ts-` directive", () => {
-    expect(typed("input.a // the amount\n+ 1")).toBe(
-      `((input.a)${" ".repeat(14)}\n+ (1))`
+  it("holds no comment, so no `@ts-` directive reaches TypeScript", () => {
+    expect(typed("input.a // @ts-ignore\n+ 1")).toBe(
+      `input.a${" ".repeat(14)}\n+ 1`
     );
-    expect([
-      verdict("input.a // @ts-ignore"),
-      verdict("/* @ts-expect-error */ input.a"),
-      verdict("input.a\n// @ts-nocheck\n+ 1"),
-    ]).toStrictEqual(Array.from({ length: 3 }, () => "expression.syntax"));
   });
-});
 
-describe("a callback's parameters", () => {
-  it("never take a root's name: one name, one value", () => {
-    expect(
-      [
-        "[1, 2].map((input) => input + 1)",
-        "input.lines.map((steps) => steps)",
-        "input.lines.filter((line, run) => run > 0)",
-      ].map(verdict)
-    ).toStrictEqual(Array.from({ length: 3 }, () => "expression.callback"));
-    expect(
-      checkExpression("input.a.map((item) => item)", { roots: ["item"] })
-    ).toMatchObject({
-      ok: false,
-      errors: [{ code: "expression.callback" }],
-    });
+  it("blanks a comment unit for unit, so what follows keeps its place", () => {
+    // An emoji is two UTF-16 units, as offsets count them: two spaces.
+    expect(typed("input.a /*😀*/ < input.b")).toBe(
+      `(input.a ${" ".repeat(6)} < input.b)`
+    );
   });
 });
 
@@ -535,33 +493,23 @@ describe("the roots an expression reads", () => {
     });
   });
 
-  it("are never a global's name, or anything but a plain identifier", () => {
+  it("are plain identifiers, bound as parameters, and not a default one again", () => {
     const refused = [
       // The default ones again.
       "input",
       "run",
-      // Globals, of this isolate or only of others (`window`, `document`,
-      // `process`, `require`, `Deno`): one fixed list wherever it runs.
-      "globalThis",
-      "document",
-      "require",
-      "Deno",
-      "Function",
+      // Not bindable as a parameter in a module.
       "eval",
-      "fetch",
-      "Object",
-      "undefined",
       "arguments",
-      "self",
-      "window",
-      "process",
       "this",
       "yield",
       "let",
       "await",
+      // Not a plain identifier, so not spliced into code as one.
       "item.total",
       "a b",
       "",
+      "$item",
       String.raw`\u0069tem`,
       "ítem",
       "item)=>globalThis;((x",
@@ -577,6 +525,11 @@ describe("the roots an expression reads", () => {
       }),
       "accepted as a root"
     ).toStrictEqual([]);
+    // Bound as a parameter, a root named like a global reads the root.
+    expect(checkExpression("fetch.url", { roots: ["fetch"] })).toMatchObject({
+      ok: true,
+      code: '($read(fetch, "url"))',
+    });
   });
 });
 

@@ -1,7 +1,6 @@
 import { parseExpression } from "@babel/parser";
-import type { Comment, Node } from "@babel/types";
+import type { Node } from "@babel/types";
 import { messageOf } from "@grasp-os/shared/errors";
-import globals from "globals";
 
 import {
   literalKey,
@@ -70,10 +69,8 @@ const blockedProperties = new Set([
 ]);
 
 /**
- * Operators that work on values alone. Not bitwise operators, which no
- * workflow needs and which, beside `<` and `>`, read as type arguments in
- * TypeScript (`chainedComparison`); not `in` and `instanceof`, which ask
- * about prototypes.
+ * Operators that work on values alone: not bitwise operators, which no
+ * workflow needs, nor `in` and `instanceof`, which ask about prototypes.
  */
 const binaryOperators = new Set([
   "+",
@@ -92,8 +89,6 @@ const binaryOperators = new Set([
   ">=",
 ]);
 
-const comparisons = new Set(["<", ">", "<=", ">="]);
-
 /** Not `delete`, which changes data, `void` and `~`. */
 const unaryOperators = new Set(["!", "-", "+", "typeof"]);
 
@@ -105,8 +100,7 @@ export type ExpressionErrorCode =
   | "expression.computed-key"
   | "expression.method"
   | "expression.callback"
-  | "expression.operator"
-  | "expression.chained-comparison";
+  | "expression.operator";
 
 /** A problem in an expression, where it is (in its source) and how to fix it. */
 export interface ExpressionError {
@@ -146,8 +140,6 @@ const fixes: Record<ExpressionErrorCode, string> = {
     "Pass one arrow function with plain parameters and an expression body, e.g. (line) => line.total, as the only argument of map, filter, some, every, find or findIndex.",
   "expression.operator":
     "Use arithmetic, comparison, logical or conditional operators; read fields with ?. instead of `in`.",
-  "expression.chained-comparison":
-    "Compare once, and join comparisons with && or ||.",
 };
 
 const located = (
@@ -181,13 +173,10 @@ const isCallbackArrow = (node: Node): boolean =>
 class Checker {
   readonly errors: ExpressionError[] = [];
 
-  private readonly roots: ReadonlySet<string>;
-
   /** The roots, as a global's error names them. */
   private readonly rootList: string;
 
   constructor(roots: ReadonlySet<string>) {
-    this.roots = roots;
     this.rootList = [...roots].join(", ");
   }
 
@@ -206,23 +195,6 @@ class Checker {
         (start?.column ?? 0) + 1
       )
     );
-  }
-
-  /**
-   * Comments are notes, never directives: a `@ts-` one would steer the
-   * type check if it reached TypeScript. None does (`typeForm` prints no
-   * comment), and the expression says so here.
-   */
-  comments(comments: readonly Comment[]): void {
-    for (const comment of comments) {
-      if (comment.value.includes("@ts-")) {
-        this.fail(
-          comment,
-          "expression.syntax",
-          "A comment can't hold a TypeScript directive (`@ts-…`)."
-        );
-      }
-    }
   }
 
   private property(node: Node, name: string): void {
@@ -305,20 +277,9 @@ class Checker {
       if (callback.type === "ArrowFunctionExpression") {
         const inner = new Set(scope);
         for (const param of callback.params) {
-          if (param.type !== "Identifier") {
-            continue;
+          if (param.type === "Identifier") {
+            inner.add(param.name);
           }
-          // One namespace: a root's name always means the root, inside a
-          // callback too, so the generated code checks the roots it
-          // reads by name alone, and no reader mistakes one for the other.
-          if (this.roots.has(param.name)) {
-            this.fail(
-              param,
-              "expression.callback",
-              `\`${param.name}\` is one of the workflow's values; name the parameter something else.`
-            );
-          }
-          inner.add(param.name);
         }
         this.visit(callback.body, inner);
       }
@@ -453,19 +414,6 @@ class Checker {
             "expression.operator",
             `\`${node.operator}\` is not an operator an expression has.`
           );
-        } else if (
-          comparisons.has(node.operator) &&
-          node.left.type === "BinaryExpression" &&
-          comparisons.has(node.left.operator)
-        ) {
-          // `a < b > (c)` is a generic call in TypeScript, which the
-          // generated code is: TypeScript would call `a` with `c`.
-          this.fail(
-            node,
-            "expression.chained-comparison",
-            "A comparison can't compare another comparison."
-          );
-          return;
         }
         this.visit(node.left, scope);
         this.visit(node.right, scope);
@@ -530,28 +478,6 @@ const syntaxError = (source: string, error: unknown): ExpressionError => {
  */
 const plainName = /^[A-Za-z_][\w$]*$/u;
 
-/**
- * Every global name of the hosts JavaScript runs on, from one fixed list
- * (the `globals` package: the language's own, browsers', workers',
- * service workers', Node's, CommonJS's, Deno's and Bun's), never the
- * running isolate's `globalThis`, so the SDK and the compiler, in
- * isolates with different globals, refuse the same roots. And
- * `arguments`, which an arrow reads from the function around it.
- */
-const globalNames = new Set([
-  "arguments",
-  ...[
-    globals.builtin,
-    globals.browser,
-    globals.worker,
-    globals.serviceworker,
-    globals.node,
-    globals.commonjs,
-    globals.denoBuiltin,
-    globals.bunBuiltin,
-  ].flatMap((names) => Object.keys(names)),
-]);
-
 /** Whether `name` binds as a parameter: no reserved word, by Babel. */
 const isBindable = (name: string): boolean => {
   try {
@@ -574,12 +500,10 @@ const defaultRoots = new Set<string>(expressionRoots);
 /**
  * The roots an expression may read: `expressionRoots`, always in scope,
  * and the further ones of where it runs (`item` inside a `forEach`,
- * `error` in a catch). Each further one is a plain identifier the
- * generated code binds as a parameter, not one of the default roots
- * again, and never a global's name: even shadowed, an expression that
- * reads `globalThis` would read differently wherever the binding isn't.
- * A wrong root is the caller's mistake, not the expression's, so it
- * throws.
+ * `error` in a catch). Each further one is a plain identifier, as the
+ * generated code binds it as a parameter (so a root named like a global
+ * reads the root), and not one of the default roots again. A wrong root
+ * is the caller's mistake, not the expression's, so it throws.
  */
 export const checkRoots = (
   further: readonly string[] = []
@@ -588,11 +512,6 @@ export const checkRoots = (
     if (!(plainName.test(name) && isBindable(name))) {
       throw new Error(
         `"${name}" can't be an expression's root: a root is a plain identifier.`
-      );
-    }
-    if (globalNames.has(name)) {
-      throw new Error(
-        `"${name}" can't be an expression's root: it is a global's name.`
       );
     }
     if (defaultRoots.has(name)) {
@@ -627,7 +546,6 @@ export const checkExpression = (
     return { ok: false, errors: [syntaxError(source, error)] };
   }
   const checker = new Checker(roots);
-  checker.comments(parsed.comments ?? []);
   checker.visit(parsed, roots);
   if (checker.errors.length > 0) {
     return { ok: false, errors: checker.errors };
@@ -635,7 +553,7 @@ export const checkExpression = (
   return {
     ok: true,
     source,
-    code: lowerExpression(parsed, roots),
+    code: lowerExpression(parsed),
     forTypes: typeForm(parsed, source, parsed.comments ?? []),
   };
 };

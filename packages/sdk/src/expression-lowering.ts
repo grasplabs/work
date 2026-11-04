@@ -16,8 +16,17 @@ export const literalKey = (node: Node): string | undefined => {
   return undefined;
 };
 
-const parenthesized = (node: t.Expression): t.Expression =>
-  t.parenthesizedExpression(node);
+/**
+ * A comparison, which the generated code and the type form put in
+ * parentheses: TypeScript reads `a < b, c > (d)` as a generic call with
+ * type arguments `b, c`, but no type argument list closes across a `)`.
+ */
+const isComparison = (node: Node): boolean =>
+  node.type === "BinaryExpression" &&
+  (node.operator === "<" ||
+    node.operator === ">" ||
+    node.operator === "<=" ||
+    node.operator === ">=");
 
 const nonNull = <T>(value: T | null): T => {
   if (value === null) {
@@ -35,12 +44,10 @@ export const runtimeNames = {
   read: "$read",
   call: "$call",
   optional: "$opt",
-  spread: "$spread",
-  json: "$json",
 } as const;
 
 /** How a generated workflow module imports the guards its expressions call. */
-export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional}, spreadValue as ${runtimeNames.spread}, checkJson as ${runtimeNames.json} } from "@grasp-os/sdk/workflow";`;
+export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional} } from "@grasp-os/sdk/workflow";`;
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
@@ -62,41 +69,18 @@ const keyOf = (node: Node): string | number => {
  * A checked syntax tree as the code that runs, printed from the tree
  * itself (`@babel/generator`), never from the source: what runs is what
  * was checked. Every member read goes through `$read` and every call
- * through `$call` (expression-runtime.ts), a `?.` through `$opt`, a
- * spread through `$spread`; every operand and every comparison is
- * parenthesized, so TypeScript reads no comparison as type arguments
- * (`[a < b, c > (d)]`); and every object key is a computed
- * string, so `__proto__` is an own field, never the prototype.
+ * through `$call` (expression-runtime.ts), a `?.` through `$opt`; every
+ * comparison is in parentheses (`isComparison`); and every object key is
+ * a computed string, so `__proto__` is an own field, never the prototype.
  */
 class Lowering {
   /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
   private next = 0;
 
-  /** The roots the expression reads, which it checks are JSON first. */
-  readonly readRoots = new Set<string>();
-
-  private readonly roots: ReadonlySet<string>;
-
-  constructor(roots: ReadonlySet<string>) {
-    this.roots = roots;
-  }
-
-  /** `...value`, of a plain array or object only (`$spread`). */
-  private spread(node: Node): t.SpreadElement {
-    return t.spreadElement(
-      t.callExpression(t.identifier(runtimeNames.spread), [
-        this.expression(node),
-      ])
-    );
-  }
-
   expression(node: Node): t.Expression {
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- the checker allows no other
     switch (node.type) {
       case "Identifier": {
-        if (this.roots.has(node.name)) {
-          this.readRoots.add(node.name);
-        }
         return t.identifier(node.name);
       }
       case "StringLiteral": {
@@ -126,7 +110,7 @@ class Lowering {
         return t.arrayExpression(
           node.elements.map((element) =>
             element?.type === "SpreadElement"
-              ? this.spread(element.argument)
+              ? t.spreadElement(this.expression(element.argument))
               : this.expression(nonNull(element))
           )
         );
@@ -135,7 +119,7 @@ class Lowering {
         return t.objectExpression(
           node.properties.map((property) => {
             if (property.type === "SpreadElement") {
-              return this.spread(property.argument);
+              return t.spreadElement(this.expression(property.argument));
             }
             if (property.type !== "ObjectProperty") {
               throw new Error("A checked object literal has only fields.");
@@ -149,38 +133,31 @@ class Lowering {
         );
       }
       case "UnaryExpression": {
-        return t.unaryExpression(
-          node.operator,
-          parenthesized(this.expression(node.argument))
-        );
+        return t.unaryExpression(node.operator, this.expression(node.argument));
       }
       case "BinaryExpression": {
         if (node.left.type === "PrivateName") {
           throw new Error("A checked expression has no private names.");
         }
-        // The comparison itself in parentheses too: TypeScript reads
-        // `(a) < (b), (c) > (d)` as type arguments, since `(b)` is a type,
-        // but no type argument list closes across a `)`.
-        return parenthesized(
-          t.binaryExpression(
-            node.operator,
-            parenthesized(this.expression(node.left)),
-            parenthesized(this.expression(node.right))
-          )
+        const binary = t.binaryExpression(
+          node.operator,
+          this.expression(node.left),
+          this.expression(node.right)
         );
+        return isComparison(node) ? t.parenthesizedExpression(binary) : binary;
       }
       case "LogicalExpression": {
         return t.logicalExpression(
           node.operator,
-          parenthesized(this.expression(node.left)),
-          parenthesized(this.expression(node.right))
+          this.expression(node.left),
+          this.expression(node.right)
         );
       }
       case "ConditionalExpression": {
         return t.conditionalExpression(
-          parenthesized(this.expression(node.test)),
-          parenthesized(this.expression(node.consequent)),
-          parenthesized(this.expression(node.alternate))
+          this.expression(node.test),
+          this.expression(node.consequent),
+          this.expression(node.alternate)
         );
       }
       case "MemberExpression":
@@ -292,46 +269,26 @@ class Lowering {
         }
         return t.identifier(param.name);
       }),
-      parenthesized(this.expression(node.body))
+      this.expression(node.body)
     );
   }
 }
 
 /**
  * The code a checked expression runs as (`Lowering`): one parenthesized
- * expression, with no comment, printed from its syntax tree. It first
- * checks that each root it reads is JSON (`$json`), on every evaluation,
- * so what the guards rely on holds whatever the caller passed.
+ * expression, with no comment, printed from its syntax tree.
  */
-export const lowerExpression = (
-  checked: Node,
-  roots: ReadonlySet<string>
-): string => {
-  const lowering = new Lowering(roots);
-  const value = lowering.expression(checked);
-  const read = [...lowering.readRoots];
-  const expression =
-    read.length === 0
-      ? value
-      : t.sequenceExpression([
-          t.callExpression(
-            t.identifier(runtimeNames.json),
-            read.map((root) => t.identifier(root))
-          ),
-          t.parenthesizedExpression(value),
-        ]);
-  return `(${generate(expression, { comments: false }).code})`;
-};
+export const lowerExpression = (checked: Node): string =>
+  `(${generate(new Lowering().expression(checked), { comments: false }).code})`;
 
 /**
  * An expression as TypeScript type-checks it: its source with every
- * operand and comparison in parentheses (as `Lowering` writes them) and
- * every comment blanked, so TypeScript reads
- * what JavaScript does (`[a < b, c > (d)]` as two comparisons, never a
- * generic call) and no `// @ts-ignore` reaches it. Built from the checked
- * tree's node positions rather than printed, so a position in `code` leads back
- * to the source exactly (`sourcePosition`). It has no guards, so its
- * types are the data's.
+ * comparison in parentheses (`isComparison`), as its code has them, and
+ * every comment blanked, so TypeScript reads what JavaScript does
+ * (`[a < b, c > (d)]` as two comparisons, never a generic call) and no
+ * `// @ts-ignore` reaches it. The source plus parentheses, not printed,
+ * so a position in `code` leads back to the source exactly
+ * (`sourcePosition`). It has no guards, so its types are the data's.
  */
 export interface TypeForm {
   readonly code: string;
@@ -342,8 +299,13 @@ export interface TypeForm {
 /** JavaScript's line terminators, as Babel and TypeScript count lines. */
 const lineBreak = /\r\n?|[\n\u2028\u2029]/u;
 
-/** Whatever isn't a line terminator, to blank a comment and keep its lines. */
-const notLineBreak = /[^\r\n\u2028\u2029]/gu;
+/**
+ * Each UTF-16 unit that isn't a line terminator, to blank a comment and
+ * keep its lines and length: without `u`, an emoji's two units are two
+ * spaces, as the parentheses' offsets count it.
+ */
+// oxlint-disable-next-line eslint/require-unicode-regexp -- see above
+const notLineBreak = /[^\r\n\u2028\u2029]/g;
 
 /** The checked tree's source as `TypeForm` holds it. */
 export const typeForm = (
@@ -352,7 +314,7 @@ export const typeForm = (
   comments: readonly Comment[]
 ): TypeForm => {
   // Parentheses to add, by source offset: closing before opening where
-  // one operand ends as the next begins.
+  // one comparison ends as the next begins.
   const insertions: { at: number; text: ")" | "(" }[] = [];
   const wrap = (node: Node): void => {
     if (node.start === null || node.start === undefined) {
@@ -364,21 +326,8 @@ export const typeForm = (
     insertions.push({ at: node.start, text: "(" }, { at: node.end, text: ")" });
   };
   t.traverseFast(checked, (node) => {
-    if (node.type === "BinaryExpression") {
-      // As `Lowering` writes one: the operator's own parentheses keep
-      // TypeScript from reading `(a) < (b), (c) > (d)` as type arguments.
+    if (isComparison(node)) {
       wrap(node);
-      wrap(node.left);
-      wrap(node.right);
-    } else if (node.type === "LogicalExpression") {
-      wrap(node.left);
-      wrap(node.right);
-    } else if (node.type === "ConditionalExpression") {
-      wrap(node.test);
-      wrap(node.consequent);
-      wrap(node.alternate);
-    } else if (node.type === "UnaryExpression") {
-      wrap(node.argument);
     }
   });
   const order = { ")": 0, "(": 1 };

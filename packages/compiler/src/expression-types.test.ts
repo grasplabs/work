@@ -158,11 +158,21 @@ describe("type-checking a workflow's expressions", () => {
 
   it("can't be silenced from inside an expression", () => {
     const { expressions } = check({
-      ignored: { source: "input.custmer // @ts-ignore" },
+      ignored: { source: "// @ts-ignore\ninput.custmer" },
+      // An emoji is two UTF-16 units: the error stays at its column after it.
+      emoji: { source: "/*\u{1F600}*/ input.custmer < 1" },
     });
-    expect(expressions.ignored?.map(({ code }) => code)).toStrictEqual([
-      "expression.syntax",
-    ]);
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, line, column }) => ({ code, line, column })),
+        ])
+      )
+    ).toStrictEqual({
+      ignored: [{ code: "TS2551", line: 2, column: 7 }],
+      emoji: [{ code: "TS2551", line: 1, column: 14 }],
+    });
   });
 
   it("holds a result to the type the workflow needs", () => {
@@ -208,10 +218,8 @@ describe("type-checking a workflow's expressions", () => {
     }).toStrictEqual({ fine: [], wrong: [{ code: "TS2551", column: 6 }] });
   });
 
-  it("takes no root that is a global's name, a default one again, or no identifier", () => {
+  it("takes no root that is a default one again, or no plain identifier", () => {
     const refused = [
-      "globalThis",
-      "Function",
       "eval",
       "input",
       "item: unknown) => globalThis; ((x",

@@ -25,7 +25,7 @@ const checked = checkExpression("input.lines.map((line) => line.total)");
 console.log(JSON.stringify(checked.ok && checked.code));`;
 
 const expected = JSON.stringify(
-  '($json(input), ($call($read(input, "lines"), "map", [line => ($read(line, "total"))])))'
+  '($call($read(input, "lines"), "map", [line => $read(line, "total")]))'
 );
 
 /** Runs a module under plain Node, outside Vitest, and gives what it printed. */
