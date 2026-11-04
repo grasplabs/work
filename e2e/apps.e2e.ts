@@ -9,8 +9,8 @@ import { origin } from "./stack.ts";
 
 // Reaching Apps from the product: sign in, find an App in the Apps list,
 // open it, and use its page with live data from its App's functions; its
-// workflows and who opens it are in its details. Only the people core opens
-// Apps to see them.
+// workflows and who opens it are in its settings. Only the people core
+// opens Apps to see them.
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
@@ -208,39 +208,21 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Apps" }).click();
-  const tiles = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  const cards = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
   const search = page.getByRole("textbox", { name: "Search the Apps" });
-  const tab = (label: string) =>
-    page.getByRole("tab", { name: new RegExp(`^${label}`, "u") });
-  /** What each tab counts, in the order they stand. */
-  const counts = async () =>
-    await Promise.all(
-      ["All", "Published", "Draft"].map(
-        async (label) => await tab(label).textContent()
-      )
-    );
 
-  // A search by name finds this run's Apps, one tile each whatever their
-  // screens, and the tabs count what it leaves: five published, two
-  // drafts.
+  // A search by name finds this run's Apps, one card each whatever their
+  // screens, each saying where it stands.
   await search.fill(run);
-  await expect(tiles).toHaveCount(7);
-  expect(await counts()).toStrictEqual(["All7", "Published5", "Draft2"]);
-  await tab("Draft").click();
-  await expect(tiles).toHaveCount(2);
-  await expect(tiles.getByRole("link", { name: `legal ${run}` })).toBeVisible();
-  await tab("Published").click();
-  await expect(tiles).toHaveCount(5);
-  await tab("All").click();
-  await expect(tiles).toHaveCount(7);
+  await expect(cards).toHaveCount(7);
+  await expect(cards.filter({ hasText: "Published" })).toHaveCount(5);
+  await expect(cards.filter({ hasText: "Draft" })).toHaveCount(2);
 
-  // The App with two screens is one tile, with two pages.
+  // The App with two screens is one card; opened, its two pages are tabs
+  // in its bar.
   await search.fill(`books ${run}`);
-  await expect(tiles).toHaveCount(1);
-  await expect(tiles).toContainText("2 pages");
-  expect(await counts()).toStrictEqual(["All1", "Published1", "Draft0"]);
-  // Opened, its two pages are tabs in its bar.
-  await tiles.getByRole("link", { name: `books ${run}` }).click();
+  await expect(cards).toHaveCount(1);
+  await cards.getByRole("link", { name: `books ${run}` }).click();
   await expect(page).toHaveURL(
     new RegExp(`/apps/${ids.get("books") ?? ""}$`, "u")
   );
@@ -254,79 +236,64 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(
     page.getByText(`No App is called “nothing-${run}”`)
   ).toBeVisible();
-  await expect(tiles).toHaveCount(0);
-  expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
+  await expect(cards).toHaveCount(0);
   await search.fill("");
 
-  // On the Apps page each App is a tile with its name, which opens it on
-  // its own page, on its first page.
-  const tile = tiles.filter({ hasText: name });
-  await expect(tile).toContainText("1 page");
-  await tile.getByRole("link", { name }).click();
+  // Each App's card opens it, on its first page.
+  await cards.filter({ hasText: name }).getByRole("link", { name }).click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
-  await counterScreen(page);
-
-  // Its details: what its version holds, its workflows, integrations and
-  // members.
-  await page
-    .getByRole("navigation", { name: "App views" })
-    .getByRole("link", { name: "Details" })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}/details$`, "u"));
+  const counter = await counterScreen(page);
+  // One page heading: the App's bar names it.
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-  await expect(page.getByText("Counts clicks")).toBeVisible();
-  await expect(page.getByText("Version 1")).toBeVisible();
-  // It opens on its pages, as the prototype's made engines do.
-  await expect(page.getByRole("tab", { name: /^Pages/u })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-  // Its workflows, in the workflows table, and their runs.
-  await page.getByRole("tab", { name: /^Workflows/u }).click();
-  await expect(
-    page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
-  ).toHaveText("tally");
-  await expect(page.getByText("No runs yet.")).toBeVisible();
-
-  // A builder sees the integrations it uses; this one uses none.
-  await page.getByRole("tab", { name: "Integrations" }).click();
-  await expect(
-    page.getByText("This App doesn't use an integration yet.")
-  ).toBeVisible();
-
-  await page.getByRole("tab", { name: "Members" }).click();
-  await expect(page.getByText("Created by you.")).toBeVisible();
-
-  // Its pages open on the App's own page, under the way back to Apps.
-  await page.getByRole("tab", { name: /^Pages/u }).click();
-  await page
-    .getByRole("list", { name: "Pages" })
-    .getByRole("link", { name: "counter" })
-    .click();
-  await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
-  );
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
       name: "Apps",
     })
   ).toBeVisible();
-  const counter = await counterScreen(page);
-  // One page heading: the App's bar names it.
-  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
+  await page.getByRole("button", { name: `More for ${name}` }).click();
   await expect(
-    page.getByRole("link", { name: "Open full page" })
+    page.getByRole("menuitem", { name: "Open full page" })
   ).toHaveAttribute("href", `/apps/${app}/full?screen=counter`);
+  await page.keyboard.press("Escape");
+
+  // Its settings, beside the chat in its workspace: what it is, its
+  // workflows and their runs, its connections and its members.
+  await page.getByRole("link", { name: "Edit" }).click();
+  await page
+    .getByRole("navigation", { name: "Workspace views" })
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await expect(page.getByLabel("What it is for")).toHaveValue("Counts clicks");
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await sections.getByRole("link", { name: "Workflows" }).click();
+  await expect(
+    page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
+  ).toHaveText("tally");
+  await expect(page.getByText("No runs yet.")).toBeVisible();
+  // A builder sees the connections it uses; this one uses none.
+  await sections.getByRole("link", { name: "Connections" }).click();
+  await expect(
+    page.getByText("This App doesn't use a connection yet.")
+  ).toBeVisible();
+  await sections.getByRole("link", { name: "Sharing" }).click();
+  await expect(page.getByText("Created by you.")).toBeVisible();
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   pageOf,
 }) => {
-  const everyone = ["Chat", "Brain", "Apps", "Workflows", "Integrations"];
+  const everyone = [
+    "Chat",
+    "Brain",
+    "Projects",
+    "Apps",
+    "Workflows",
+    "Integrations",
+  ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
@@ -451,7 +418,7 @@ test("someone with the user role finds no App to open", async ({ pageOf }) => {
   // The Apps page has none for them, and no way to make one.
   await page.goto("/apps");
   await expect(
-    page.getByText("The Apps your colleagues are making show here.")
+    page.getByText("The Apps your colleagues share with you show here.")
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "New App" })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -480,27 +447,20 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   }
 });
 
-test("a runs read that never comes leaves the engine usable, and says so in its tab", async ({
+test("a runs read that never comes leaves the App's workflows usable, and says so", async ({
   pageOf,
 }) => {
   const page = await pageOf(builder);
   const gate = await callGate(page, '["workflows","runs"]');
   gate.hold();
-  await page.goto(`/apps/${app}/details`);
+  await page.goto(`/apps/${app}/settings?section=workflows`);
 
-  await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(
     page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
   ).toHaveText("tally");
   await expect(
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("tab", { name: /^Pages/u }).click();
-  await expect(
-    page.getByRole("list", { name: "Pages" }).getByRole("link", {
-      name: "counter",
-    })
-  ).toBeVisible();
   gate.release();
 });
 

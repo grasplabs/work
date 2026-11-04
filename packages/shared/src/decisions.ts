@@ -69,7 +69,15 @@ export interface DecisionView {
    * The independent workflow whose run asks (a JSON workflow's
    * `grasp.decision` call); none for an App's workflow.
    */
-  workflowResource?: { id: WorkflowResourceId; name: string };
+  workflowResource?: {
+    id: WorkflowResourceId;
+    name: string;
+    /**
+     * Present when core confirmed, as the decision was read for its page,
+     * that the reader may open the workflow's own page.
+     */
+    opens?: true;
+  };
   /** The workflow's ID in its App, or an independent workflow's name. */
   workflow: WorkflowId;
   run: RunId;

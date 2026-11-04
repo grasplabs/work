@@ -531,8 +531,9 @@ export interface StoreReach {
  */
 export interface PermissionsApi {
   /**
-   * Asks for a permission for an App or agent; it allows nothing until an
-   * admin grants it. Admins and builders; for an App, only its builders.
+   * Asks for a permission for an App, an agent, or an independent
+   * workflow, store or trigger; it allows nothing until an admin grants
+   * it. Admins and builders; for any but an agent, only its builders.
    */
   request: (request: PermissionRequest) => Promise<Permission>;
   /**

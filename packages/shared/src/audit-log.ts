@@ -158,9 +158,10 @@ const typeRules: readonly {
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },
   { action: "app.called", type: "action" },
-  // Whether an App's screens get its data (core's src/screen-trust.ts):
-  // an admin approving one exact build or taking that back, and a screen
-  // refused the data because its build isn't approved.
+  // Code refused an App's data (core's src/screen-delivery.ts): a screen
+  // of a revoked release, or a portable host while the App's data isn't
+  // `ordinary`. An admin approving a screen's build or taking that back
+  // is no longer recorded, but past records stay decisions.
   { action: "app.artifact.refused", type: "action" },
   { action: "app.artifact", type: "decision" },
   // A portable host's access to an App (core's app-token-route.ts and

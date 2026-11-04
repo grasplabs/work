@@ -1321,16 +1321,14 @@ const readTextsOf = async (
 
 /**
  * The persona's Workspace object's tables that a chat's code could change
- * and no turn changes on its own: drafts, attachments, projects, build
- * jobs and dashboards; and its chats, messages, sources and code runs, but
+ * and no turn changes on its own: drafts, attachments, build jobs
+ * and dashboards; and its chats, messages, sources and code runs, but
  * the trial's own chat, whose turns write those as they go.
  */
 const workspaceTables = [
   "chat_drafts",
   "chat_draft_files",
   "chat_attachments",
-  "chat_projects",
-  "chat_project_documents",
   "chat_build_jobs",
   "dashboards",
   "dashboard_widgets",
@@ -1380,7 +1378,7 @@ const workspaceStateOf = async (
 /**
  * What a turn of the chat may add to but never change, a row each: its
  * messages, sources and code runs, and its own fixed fields (title,
- * person, agent, project, creation).
+ * person, agent, creation).
  */
 const chatRowsOf = async (
   place: Workspace,
@@ -1395,7 +1393,7 @@ const chatRowsOf = async (
     return [
       ...rows(
         "chats",
-        "SELECT id, title, created_at, person_id, agent_id, project_id FROM chats WHERE id = ?"
+        "SELECT id, title, created_at, person_id, agent_id FROM chats WHERE id = ?"
       ),
       ...rows("chat_messages", "SELECT * FROM chat_messages WHERE chat_id = ?"),
       ...rows("chat_sources", "SELECT * FROM chat_sources WHERE chat_id = ?"),

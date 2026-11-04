@@ -1,10 +1,9 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type { SignInAgainItem } from "@grasp-os/shared/waiting";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
-import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react";
+import { KeyRoundIcon } from "lucide-react";
 import { useState } from "react";
 
 import { integrationKey } from "../connections/integrations.ts";
@@ -31,8 +30,7 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // wait for them to say whether each happened (`outcome-card.tsx`); permission requests, which wait for an admin;
 // packages proposed for an engine, which wait for someone given the
 // permission to approve them. The rest is settled on its own page, and is
-// listed under the pile with the way there, not counted on it: the current
-// pages of Apps whose code nobody approved (read in the App's details),
+// listed under the pile with the way there, not counted on it:
 // workflows failed while acting for the person, with a way to ask the
 // agent to fix it, connections they can sign in to again, and what the
 // inbox settles (`in-inbox.tsx`), each a way to its item there.
@@ -79,57 +77,6 @@ const PartNotLoaded = ({ part }: { part: Loaded<unknown> }) =>
       <NotLoaded page={part} />
     </div>
   );
-
-/** An App with pages to approve: its next step is the App's details, where their code is approved. */
-const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
-  const { t } = useLingui();
-  const { app, name, screens } = waiting;
-  const count = screens.length;
-  return (
-    <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
-      <ItemMark icon={ShieldCheckIcon} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-muted-foreground text-xs">
-          <Trans context="kind of thing that waits">App approval</Trans>
-        </span>
-        <span className="truncate">
-          <Plural
-            one={`${name} has # page whose code nobody approved`}
-            other={`${name} has # pages whose code nobody approved`}
-            value={count}
-          />
-        </span>
-      </div>
-      <Link
-        aria-label={t`Review the pages of ${name}`}
-        className={buttonVariants({ size: "xs" })}
-        params={{ app }}
-        to="/apps/$app/details"
-      >
-        <Trans>Review</Trans>
-      </Link>
-    </li>
-  );
-};
-
-const ScreensGroup = ({ screens }: { screens: Loaded<ScreensWaiting[]> }) => {
-  const { t } = useLingui();
-  if (screens.state !== "ready") {
-    return <PartNotLoaded part={screens} />;
-  }
-  if (screens.data.length === 0) {
-    return null;
-  }
-  return (
-    <DashboardGroup title={t`Apps to approve`}>
-      <ul aria-label={t`Apps to approve`}>
-        {screens.data.map((waiting) => (
-          <ScreensRow key={waiting.app} waiting={waiting} />
-        ))}
-      </ul>
-    </DashboardGroup>
-  );
-};
 
 const FailedGroup = ({
   failed,
@@ -243,7 +190,7 @@ export const ToDo = ({
     useMatch({ from: "/_shell/dashboard", select: (match) => match.updatedAt })
   ).toISOString();
   const inbox = inInbox(waiting, identity, readAt);
-  const { failed, reconnect, screens } = waiting;
+  const { failed, reconnect } = waiting;
   // A part of the pile that couldn't be read says so below it.
   const notLoaded = (
     [
@@ -261,9 +208,7 @@ export const ToDo = ({
     failed.state !== "ready" ||
     failed.data.page.notifications.length > 0 ||
     reconnect.state !== "ready" ||
-    reconnect.data.length > 0 ||
-    (screens !== undefined &&
-      (screens.state !== "ready" || screens.data.length > 0));
+    reconnect.data.length > 0;
   return (
     <>
       <TodoPile items={pileOf(waiting, identity)} onSaid={setSaid} />
@@ -290,7 +235,6 @@ export const ToDo = ({
             <PartNotLoaded key={key} part={part} />
           ))}
           <InboxGroup items={inbox} />
-          {screens === undefined ? null : <ScreensGroup screens={screens} />}
           <FailedGroup
             failed={failed}
             older={older}

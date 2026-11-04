@@ -135,6 +135,12 @@ const interviewOf = (
         : { at: interview.updatedAt, phase: interview.stoppedAt },
     // Core counts the facts kept apart from those taken out; the admin counts every one written.
     counted: { facts: interview.facts + interview.out, out: interview.out },
+    ...(typeof interview.version === "string"
+      ? { stephen: interview.version }
+      : {}),
+    ...(typeof interview.locale === "string"
+      ? { language: interview.locale }
+      : {}),
   };
 };
 

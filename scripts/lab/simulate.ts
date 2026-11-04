@@ -12,6 +12,7 @@ import { adminCommand } from "../seed/admin-command.ts";
 import { inTurns, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
 import { mixesFor, mixLine, tempersOf } from "./drift.ts";
+import { timetableFor } from "./events.ts";
 import type { AnswerKey } from "./keys/types.ts";
 import { realPlayerV2 } from "./people-v2.ts";
 import type { PeopleVersion } from "./people-v2.ts";
@@ -20,6 +21,7 @@ import { employeeSystem, modelPlayer } from "./person.ts";
 import { playInterview } from "./play.ts";
 import { askerOf, keepPractice } from "./practice.ts";
 import type { Practice, PracticePerson } from "./practice.ts";
+import { protectedOf, surfaceFor } from "./surface.ts";
 
 export interface SimulateOptions {
   /** Only these people, by roster id or key id. */
@@ -93,6 +95,7 @@ export const simulate = async (
   log(
     `A model plays ${open.length} people${ideal ? ", who tell all they know" : `, as people really answer (people ${people}, seed ${seed})`}`
   );
+  const guarded = protectedOf(key);
   const played = await inTurns(open, parallel, async (person) => {
     const employee = key.employees.find((each) => each.id === person.employee);
     const link = links.get(person.id);
@@ -109,6 +112,7 @@ export const simulate = async (
     const [leading = "plain", ...also] = tempersOf(mix);
     const temper = v2 ? leading : (tempers[place] ?? "plain");
     const mark = `${key.id}:${employee.id}:${seed}`;
+    const surface = surfaceFor(mark);
     const playerV2 = v2
       ? realPlayerV2({
           asker,
@@ -126,6 +130,8 @@ export const simulate = async (
           mix,
           seed: mark,
           locale: practice.locale,
+          surface,
+          guarded,
         })
       : null;
     if (playerV2 !== null) {
@@ -160,6 +166,7 @@ export const simulate = async (
       locale: practice.locale,
       interviewer,
       ...(ideal ? {} : { clock: "talk" as const }),
+      ...(v2 ? { events: timetableFor(place, mark) } : {}),
       ...(deviced === undefined ? {} : { key: deviced }),
     });
     const { key: device, answers: _answers, ...kept } = interview;
@@ -169,7 +176,7 @@ export const simulate = async (
       interviewer,
       people: peopleOf(ideal, v2),
       ...(ideal ? {} : { temper, seed }),
-      ...(playerV2 === null ? {} : { mix, states: playerV2.states }),
+      ...(playerV2 === null ? {} : { mix, states: playerV2.states, surface }),
     };
     // Kept at once, so an interview that fails later loses none before it.
     keepPractice(practice);

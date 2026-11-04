@@ -25,7 +25,6 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
@@ -47,7 +46,7 @@ import {
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
 import { seedRuns } from "./seed/runs.ts";
-import { approvedScreens, engineScreens } from "./seed/screens.ts";
+import { engineScreens } from "./seed/screens.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -245,32 +244,6 @@ const seedCollection = async (
 };
 
 /**
- * Checks, as an admin, that every screen of the App's current version
- * builds, and approves those not approved yet when `approve`, so its
- * people see their data in them. A screen left unapproved still has to
- * build: one that doesn't fails the seed, not the first person to open it.
- */
-const reviewScreens = async (
-  adminSession: Session,
-  app: string,
-  approve: boolean
-): Promise<void> => {
-  const review = await adminSession.api.screenTrust.review(app);
-  const artifacts = builtArtifacts(review.screens);
-  if (artifacts.length < review.screens.length) {
-    throw new Error(`Not every screen of ${review.name} builds`);
-  }
-  if (!approve || review.screens.every(({ trust }) => trust === "approved")) {
-    return;
-  }
-  await adminSession.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts,
-  });
-};
-
-/**
  * Brings an engine seeded before it had its apps, or with older ones, to
  * the seed's screens, as its next version made current. Only the seed's
  * own change is made current: a later version that holds exactly the
@@ -457,7 +430,7 @@ const seedStartPermissions = async (
 
 /**
  * An engine: created by its owner with its workflows and apps, its version
- * made current by an admin, its apps approved where the seed says so,
+ * made current by an admin,
  * shared with its teams, its workflows' owners and deciders set, and,
  * while it has none, its runs. Returns its ID, and how many runs it got.
  */
@@ -538,9 +511,6 @@ const seedEngine = async (
   // as someone left it, a draft they took it back to included.
   if (existing === undefined) {
     await adminSession.api.apps.publish(app.id);
-  }
-  if (Object.keys(screens).length > 0) {
-    await reviewScreens(adminSession, app.id, approvedScreens.has(seed.name));
   }
   const shared = await owner.api.apps.members.list(app.id);
   for (const { team, role } of seed.teams) {

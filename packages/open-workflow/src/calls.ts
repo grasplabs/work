@@ -17,6 +17,7 @@ import {
   allowKeys,
   at,
   dataValue,
+  durationAt,
   expressionOnly,
   literalText,
   objectAt,
@@ -57,10 +58,10 @@ export const profileCalls: Readonly<Record<string, ProfileCall>> = {
   },
   "grasp.decision": {
     required: ["binding", "recipients", "prompt", "input"],
-    optional: [],
+    optional: ["ask", "remindAfter"],
     binding: "decision",
     purpose:
-      "A person's check or approval: asks `recipients` (`person:<id>`, `team:<id>` or `role:<name>`) the `prompt` and waits for their answer (`approved`, and the contract's response).",
+      "A person's check or approval: asks `recipients` (`person:<id>`, `team:<id>` or `role:<name>`) the `prompt` and waits for their answer (`approved`, and the contract's response). `remindAfter` asks once more when nobody answered that long after asking; `ask` names one of the workflow's own actions (an operation binding of `local:code/…`) that tells them, with `{ recipients, reminder }`, in place of Grasp's own notice.",
   },
   "grasp.connector": {
     required: ["binding", "operation", "arguments"],
@@ -217,6 +218,70 @@ const checkModelCall = (args: CallArgs): void => {
   }
 };
 
+/** Someone a decision asks, as the host passes them to its ask action. */
+const sampleRecipient = {
+  userId: "user",
+  name: "Ada",
+  email: "ada@example.com",
+  link: "https://example.com/decisions/decision",
+};
+
+/**
+ * What the host passes a decision's ask action: a first ask, which may
+ * find nobody to ask, and a reminder, which never goes to nobody.
+ */
+const askSamples = [
+  { recipients: [sampleRecipient], reminder: false },
+  { recipients: [], reminder: false },
+  { recipients: [sampleRecipient], reminder: true },
+];
+
+/**
+ * A decision's `ask`: an operation binding to one of the workflow's own
+ * actions, which the host runs, in a step of its own, with the people it
+ * asks and whether it reminds them. A catalog operation is refused: what
+ * the host passes it is no contract's input.
+ */
+const checkDecisionAsk = (
+  args: CallArgs,
+  value: JsonValue,
+  pointer: string
+): void => {
+  const binding = bindingFor(
+    args.checker,
+    value,
+    pointer,
+    args.site,
+    "operation"
+  );
+  if (binding === undefined) {
+    return;
+  }
+  if (!binding.contractKey.startsWith("local:")) {
+    args.checker.report.error(
+      "binding.contract_mismatch",
+      at(args.site, pointer),
+      "Name an operation binding of one of the workflow's own actions (local:code/<file>.ts#<export>).",
+      { expected: "local action" }
+    );
+    return;
+  }
+  // What the host passes it, a first ask and a reminder alike: an action
+  // that takes neither would fail only once it is asked to tell someone.
+  const input = binding.contract?.input;
+  const takes = askSamples.every(
+    (sample) => input?.["~standard"].validate(sample).issues === undefined
+  );
+  if (input !== undefined && !takes) {
+    args.checker.report.error(
+      "binding.contract_mismatch",
+      at(args.site, pointer),
+      "Name an action that takes { recipients: [{ userId, name, email, link }], reminder }, as the host passes it.",
+      { expected: "{ recipients, reminder }" }
+    );
+  }
+};
+
 const checkDecisionCall = (args: CallArgs): void => {
   const { checker, site } = args;
   const binding = callBinding(args, "decision");
@@ -245,6 +310,16 @@ const checkDecisionCall = (args: CallArgs): void => {
   // it never cuts short: a longer prompt is refused, here and at run time.
   textOrExpression(checker, prompt, promptPointer, site, maxDecisionPrompt);
   callData(args, "input", binding?.contract?.input);
+  const [ask, askPointer] = args.field("ask");
+  if (ask !== undefined) {
+    checkDecisionAsk(args, ask, askPointer);
+  }
+  const [remindAfter, remindPointer] = args.field("remindAfter");
+  if (remindAfter !== undefined) {
+    // Literal, as the task's timeout is: the build seals both as numbers,
+    // and refuses a reminder that wouldn't come before the deadline.
+    durationAt(checker, remindAfter, remindPointer, site);
+  }
 };
 
 /** What each named call checks in its `with`. */

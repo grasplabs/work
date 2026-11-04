@@ -2,7 +2,6 @@ import { peopleReferences } from "@grasp-os/sdk/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { screenLimits } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -13,11 +12,13 @@ import { loadRelease } from "../src/app-releases.ts";
 import { deliveredToVisitor } from "../src/app-visitors.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { leasedBuild } from "../src/screen-trust.ts";
+import { revokeRelease } from "../src/release-retention.ts";
+import { leasedBuild } from "../src/screen-delivery.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import {
   auditedDuring,
   openRpc,
@@ -189,37 +190,27 @@ export const ${name} = query({
   };
 };
 
-/** Commits `files` as the App's current version, its screen approved. */
+/** Commits `files` as the App's current version. */
 const released = async (
   builder: Person,
-  admin: Person,
   app: string,
   files: Record<string, string>
 ): Promise<number> => {
   const { version } = await builder.api.apps.files.commit(app, files, "Next");
   await builder.api.apps.versions.setCurrent(app, version);
-  const review = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   return version;
 };
 
 /** A published Portal at its own link, visited by anyone at `domain`. */
 const portal = async (domain: string) => {
-  const [builder, admin] = await Promise.all([
-    signedInApi(idp, "builder"),
-    signedInApi(idp, "admin"),
-  ]);
+  const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Portal" });
   const link = `portal-${unique()}`;
   await builder.api.apps.setLink(id, link);
   await builder.api.apps.setVisitors(id, [{ kind: "domain", value: domain }]);
-  const version = await released(builder, admin, id, portalFiles());
+  const version = await released(builder, id, portalFiles());
   await published(id);
-  return { builder, admin, app: id, link, version };
+  return { builder, app: id, link, version };
 };
 
 /** Posts a visitor's request, as their page does. */
@@ -560,7 +551,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
 
   it("keep no grant once it is taken away: fewer grants, another version, the list or unpublishing", async () => {
     const domain = newDomain();
-    const { builder, admin, app, link, version } = await portal(domain);
+    const { builder, app, link, version } = await portal(domain);
     const mail = await mailbox();
     await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
     const ana = await visitor(mail, link, `ana@${domain}`);
@@ -569,7 +560,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     await builder.api.apps.setVisitorGrants(app, []);
     const withdrawn = await call(app, version, ana, "portal.mine");
     await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
-    const next = await released(builder, admin, app, portalFiles("2"));
+    const next = await released(builder, app, portalFiles("2"));
     // The new version grants nothing until granted again.
     const newVersion = await call(app, next, ana, "portal.mine");
     await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
@@ -690,8 +681,8 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
   });
 
   it("grant 50 long-named functions, and audit every one granted and taken away in full", async () => {
-    const { builder, admin, app } = await portal(newDomain());
-    const version = await released(builder, admin, app, manyFiles());
+    const { builder, app } = await portal(newDomain());
+    const version = await released(builder, app, manyFiles());
     const kept = manyPaths.slice(0, 25);
     const taken = manyPaths.slice(25);
 
@@ -827,13 +818,14 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     }).toStrictEqual({ added: null, mine: [text] });
   });
 
-  it("hand over neither answer nor error once the screen's approval is taken back while the call runs, and audit it", async () => {
-    // Each on a fresh, approved Portal: the approval is taken back inside
-    // the run, after it was admitted, so only the check before handing
-    // over can refuse it.
+  it("hand over neither answer nor error once the screen's release is revoked while the call runs, and audit it", async () => {
+    // Each on a fresh Portal: its release is revoked inside the run, after
+    // it was admitted, so only the check before handing over can refuse
+    // it.
     const revokedWhile = async (ends: "answer" | "error") => {
       const domain = newDomain();
-      const { admin, app, link } = await portal(domain);
+      const { app, link, version } = await portal(domain);
+      const admin = await actingPerson("admin");
       const mail = await mailbox();
       const ana = await visitor(mail, link, `ana@${domain}`);
       const sessions = await env.DB.prepare(
@@ -858,7 +850,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
             { app: appId, sessionId, build },
             async () => {
               ran = true;
-              await admin.api.screenTrust.revoke(app, build?.artifact ?? "");
+              await revokeRelease(env, admin, { app: appId, version }, "Leaks");
               if (ends === "error") {
                 throw new Error("what the App read");
               }

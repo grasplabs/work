@@ -1,3 +1,4 @@
+import type { Result } from "@grasp-os/shared/lab-runs";
 /**
  * `compare` (round.ts) on two runs of the next-question bench: the noise
  * is what runs of the first one's Stephen differ by, so two runs of the
@@ -5,7 +6,6 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Result } from "./results.ts";
 import { comparison } from "./round.ts";
 
 const run = (id: string, talks: string, right: number[]): Result => ({

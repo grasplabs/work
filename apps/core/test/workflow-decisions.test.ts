@@ -29,6 +29,7 @@ import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -37,6 +38,7 @@ import {
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { listAllRuns } from "../src/workflows/overview.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
@@ -874,6 +876,39 @@ describe("asking the people a JSON workflow's decision is for", () => {
       afterAnswer: false,
       asksAfterReplay: 1,
       end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("lists its waiting run with a link to it to someone who may answer it, and to the run's person without one", async () => {
+    const { owner, reviewer: asked, workflow } = await approvalWorkflow();
+    // A builder of the workflow, who sees each of its runs.
+    await env.DB.prepare(
+      "UPDATE members SET role = 'builder' WHERE user_id = ?"
+    )
+      .bind(asked.userId)
+      .run();
+    const reviewer = identityOf(asked.userId, "builder");
+    await shareWorkflowResource(env, owner, workflow.id, {
+      type: "person",
+      id: reviewer.userId,
+      role: "builder",
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const listedFor = async (by: Identity) => {
+      const { runs } = await listAllRuns(env, by);
+      const run = runs.find(({ id }) => id === runId);
+      return run?.type === "resource"
+        ? { status: run.status, decision: run.decision }
+        : run;
+    };
+
+    expect({
+      reviewer: await listedFor(reviewer),
+      owner: await listedFor(owner),
+    }).toStrictEqual({
+      reviewer: { status: "running", decision },
+      owner: { status: "running", decision: undefined },
     });
   });
 

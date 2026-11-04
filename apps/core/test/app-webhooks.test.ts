@@ -7,7 +7,6 @@ import { toHex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { streamRetentionMs } from "@grasp-os/shared/operation-limits";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -177,7 +176,7 @@ const notesApp = async (builder: Person) => {
 };
 
 /**
- * A builder's Notes App, published, its screen's build approved and open:
+ * A builder's Notes App, published, and its screen open:
  * a screen that can send its forms.
  */
 const openNotes = async () => {
@@ -187,12 +186,6 @@ const openNotes = async () => {
   ]);
   const { app, version } = await notesApp(builder);
   await published(app);
-  const review = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const { lease } = await builder.api.screens.open(app, "notes");
   const release = await loadRelease(env, app, version);
   return { builder, admin, app, lease, release };

@@ -1,5 +1,9 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { maxFailedStarts } from "@grasp-os/shared/workflows";
@@ -9,13 +13,15 @@ import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
+  permissions,
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { stopNoticed } from "../notifications.ts";
-import { nextOccurrence } from "../trigger-resources.ts";
+import { allowingPermissionSql } from "../permissions.ts";
+import { nextOccurrence, startStatusSql } from "../trigger-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 
 // Starting the runs of independent schedule triggers (platform
@@ -108,6 +114,11 @@ interface DueSchedule {
   nextAt: Date;
   failedStarts: number;
   attempts: number;
+  /**
+   * Its `start` still waits for an admin, asked for as it was created and
+   * neither granted nor refused: its occurrences are skipped, untried.
+   */
+  awaitingStart: boolean;
   workflowId: string;
   workflowVersion: number;
   cron: string;
@@ -307,6 +318,50 @@ const movedOn = async (
 };
 
 /**
+ * Moves `schedule` on from its occurrence, untried, while its trigger's
+ * `start` waits for an admin: to its next occurrence after `now`, its
+ * counts as they were, nothing audited. Waiting is no failure, and the
+ * trigger's page says it waits, so no refusal is tried, counted toward
+ * stopping, or logged for each occurrence. Only over the schedule read,
+ * and only while the trigger still holds no active `start`: whether it
+ * moved on. One that didn't is tried as any other: granted since, it
+ * starts; moved on by another clock run, its start is refused without a
+ * record (`stillNext`, `asRead`).
+ */
+const skipped = async (
+  env: Env,
+  schedule: DueSchedule,
+  now: Date
+): Promise<boolean> => {
+  const moved = await drizzle(env.DB)
+    .update(triggerSchedules)
+    .set({
+      nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
+      attempts: 0,
+      lastAttemptAt: null,
+    })
+    .where(
+      and(
+        asRead(schedule),
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowingPermissionSql(
+          {
+            type: "trigger",
+            triggerId: triggerIdSchema.parse(schedule.triggerId),
+          },
+          undefined,
+          {
+            type: "workflow",
+            workflowId: workflowResourceIdSchema.parse(schedule.workflowId),
+          },
+          "start"
+        )})`
+      )
+    )
+    .returning({ triggerId: triggerSchedules.triggerId });
+  return moved.length > 0;
+};
+
+/**
  * One clock run's turn at `schedule`'s due occurrence, as a small state
  * machine, so whatever stopped an earlier turn (core dying anywhere) and
  * whatever changed since (a grant revoked, the trigger disabled or moved,
@@ -318,9 +373,10 @@ const movedOn = async (
  *    authority it had then, is sent to the engine by the start repair
  *    (resource-runs.ts) if it wasn't; no grant, capacity or permission
  *    read now holds a started occurrence back.
- * 2. Not started: a start is tried, admitted only while the occurrence
- *    is still the schedule's next (`stillNext`) and, being keyed by the
- *    occurrence, once. Admitted, it moves on.
+ * 2. Not started: while the trigger's `start` waits for an admin, read
+ *    again as it moves on, it is skipped, untried (`skipped`). Otherwise a start is tried, admitted
+ *    only while the occurrence is still the schedule's next (`stillNext`)
+ *    and, being keyed by the occurrence, once. Admitted, it moves on.
  * 3. The try failed: recorded only while no start of it was admitted
  *    (`unadmitted`); one admitted meanwhile moves on instead.
  */
@@ -331,6 +387,10 @@ const startScheduled = async (
 ): Promise<void> => {
   if (await admitted(env, schedule)) {
     await movedOn(env, schedule, now);
+    return;
+  }
+  // Granted since it was read: tried as any other.
+  if (schedule.awaitingStart && (await skipped(env, schedule, now))) {
     return;
   }
   try {
@@ -395,6 +455,7 @@ export const startDueScheduleTriggers = async (
       nextAt: triggerSchedules.nextAt,
       failedStarts: triggerSchedules.failedStarts,
       attempts: triggerSchedules.attempts,
+      awaitingStart: sql`${startStatusSql} = 'requested'`.mapWith(Boolean),
       workflowId: triggerResourceVersions.workflowResourceId,
       workflowVersion: triggerResourceVersions.workflowResourceVersion,
       cron: triggerResourceVersions.scheduleCron,

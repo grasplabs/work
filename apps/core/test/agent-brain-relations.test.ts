@@ -154,10 +154,11 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       .join("");
 
     expect({
-      refused: refused?.text.includes("may not use that part of the Brain"),
+      // Without the permission, no `env.brain` to call, so none refused.
+      unoffered: refused?.text.includes("This chat has no API named env.brain"),
       // No list of every name for a caller that isn't a person.
       listed: listings.at(-1)?.text,
-    }).toStrictEqual({ refused: true, listed: "Returned:\nbrain.invalid" });
+    }).toStrictEqual({ unoffered: true, listed: "Returned:\nbrain.invalid" });
     // The declaration says the shape the call answers with.
     expect(declared).toContain(
       "Promise<{ relations: Relation[]; truncated: boolean }>"

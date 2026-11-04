@@ -9,7 +9,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, useState } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -17,10 +17,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AppsOverview } from "./apps-overview.tsx";
 
 // The Apps page as people read it, from the Apps core lists
-// (`apps.overview`): each App one tile that opens it, however many
-// screens (pages) it has, the newest first; its pages counted, never
-// listed as apps of their own. Archived Apps stay out of All, under a tab
-// of their own.
+// (`apps.overview`): each App one card that opens the live App, however
+// many screens it has, the newest first, with where it stands; a search
+// over their names; New App for who builds.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -56,11 +55,11 @@ const overview = (
   },
 });
 
-/** The Apps page for someone who builds, listing `listed`. */
-const shown = async (listed: AppOverview[]): Promise<void> => {
+/** The Apps page for someone who `builds` or not, listing `listed`. */
+const shown = async (listed: AppOverview[], builds = true): Promise<void> => {
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => <AppsOverview builds listed={listed} />,
+      component: () => <AppsOverview builds={builds} listed={listed} />,
     }),
     history: createMemoryHistory(),
   });
@@ -77,70 +76,34 @@ const shown = async (listed: AppOverview[]): Promise<void> => {
   });
 };
 
-/** What a tile says of its App's pages: one of `pageCounts`, or nothing. */
-const pageCounts = ["2 pages", "1 page", "No pages yet"];
+/** Each card's name, where it leads and the status it shows. */
+const cards = () =>
+  [...document.querySelectorAll('ul[aria-label="Apps"] > li')].map((card) => ({
+    name: card.querySelector("a")?.textContent,
+    href: card.querySelector("a")?.getAttribute("href"),
+    status: card.querySelector('[data-slot="badge"]')?.textContent,
+  }));
 
-/** Each tile's name, where it leads and what it says of its pages. */
-const tiles = () =>
-  [...document.querySelectorAll('ul[aria-label="Apps"] > li')].map((tile) => {
-    const link = tile.querySelector("a");
-    return {
-      name: link?.textContent,
-      href: link?.getAttribute("href"),
-      meta: pageCounts.find((count) => tile.textContent.includes(count)) ?? "",
-    };
-  });
-
-/**
- * The Apps page listing `before` until Refresh is pressed, then `after`, as
- * a new read of the same page.
- */
-const shownThenRefreshed = async (
-  before: AppOverview[],
-  after: AppOverview[]
-): Promise<void> => {
-  const Refreshing = () => {
-    const [listed, setListed] = useState(before);
-    return (
-      <>
-        <button
-          onClick={() => {
-            setListed(after);
-          }}
-          type="button"
-        >
-          Refresh
-        </button>
-        <AppsOverview builds listed={listed} />
-      </>
-    );
-  };
-  const router = createRouter({
-    routeTree: createRootRoute({ component: Refreshing }),
-    history: createMemoryHistory(),
-  });
-  const host = document.createElement("div");
-  document.body.append(host);
+/** Types `value` into the search, as React hears a person type. */
+const search = async (value: string): Promise<void> => {
+  const box = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Search the Apps"]'
+  );
+  if (box === null) {
+    throw new TypeError("No search");
+  }
   await act(async () => {
-    root = createRoot(host);
-    root.render(
-      <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
-      </I18nProvider>
-    );
-    await router.load();
+    const prototype = Reflect.getPrototypeOf(box) ?? {};
+    Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(box, value);
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
   });
 };
 
-/** Presses the button or tab whose text starts with `name`. */
-const press = (name: string): void => {
-  const target = [
-    ...document.querySelectorAll<HTMLElement>('button, [role="tab"]'),
-  ].find((each) => each.textContent.startsWith(name));
-  act(() => {
-    target?.click();
-  });
-};
+const newApp = (): string | null | undefined =>
+  [...document.querySelectorAll("a")]
+    .find((link) => link.textContent === "New App")
+    ?.getAttribute("href");
 
 describe(AppsOverview, () => {
   afterEach(() => {
@@ -151,108 +114,78 @@ describe(AppsOverview, () => {
     document.body.replaceChildren();
   });
 
-  it("lists Apps, not their screens: an App with two screens is one tile with two pages, the newest App first", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", [
-      "home",
-      "invoice",
-    ]);
-    const holidays = overview("Holidays", "2026-10-20T08:00:00.000Z", [
-      "requests",
-    ]);
-    const intake = overview("Intake", "2026-10-25T08:00:00.000Z", [], "draft");
-
-    await shown([invoices, holidays, intake]);
-
-    expect(tiles()).toStrictEqual([
-      {
-        name: "Intake",
-        href: `/apps/${intake.app.id}`,
-        meta: "No pages yet",
-      },
-      {
-        name: "Holidays",
-        href: `/apps/${holidays.app.id}`,
-        meta: "1 page",
-      },
-      {
-        name: "Invoices",
-        href: `/apps/${invoices.app.id}`,
-        meta: "2 pages",
-      },
-    ]);
-  });
-
-  it("keeps archived Apps out of All, under a tab of their own", async () => {
-    const live = overview("Invoices", "2026-10-01T08:00:00.000Z", ["home"]);
-    const put = overview(
-      "Old intake",
-      "2026-10-02T08:00:00.000Z",
+  it("lists each App once, the newest first, with where it stands, each opening the live App", async () => {
+    const invoices = overview(
+      "Invoices",
+      "2026-10-01T08:00:00.000Z",
+      ["home", "invoice"],
+      "published"
+    );
+    const holidays = overview(
+      "Holidays",
+      "2026-10-20T08:00:00.000Z",
+      [],
+      "draft"
+    );
+    const old = overview(
+      "Old desk",
+      "2026-09-01T08:00:00.000Z",
       ["home"],
       "archived"
     );
+    await shown([invoices, old, holidays]);
 
-    await shown([live, put]);
-    const all = tiles().map(({ name }) => name);
-    const archivedTab = [
-      ...document.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ].find((tab) => tab.textContent.startsWith("Archived"));
-    act(() => {
-      archivedTab?.click();
-    });
-
-    expect({
-      all,
-      archived: tiles().map(({ name }) => name),
-    }).toStrictEqual({ all: ["Invoices"], archived: ["Old intake"] });
-  });
-
-  it("shows every App again when the status picked holds none after a refresh", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", ["home"]);
-    const intake = overview(
-      "Intake",
-      "2026-10-02T08:00:00.000Z",
-      ["home"],
-      "draft"
-    );
-    await shownThenRefreshed(
-      [invoices, intake],
-      // The draft was published meanwhile.
-      [invoices, { ...intake, app: { ...intake.app, status: "published" } }]
-    );
-    press("Draft");
-    const drafts = tiles().map(({ name }) => name);
-
-    press("Refresh");
-
-    expect({
-      drafts,
-      after: tiles().map(({ name }) => name),
-      tabs: document.querySelectorAll('[role="tab"]').length,
-    }).toStrictEqual({
-      drafts: ["Intake"],
-      after: ["Intake", "Invoices"],
-      tabs: 0,
+    expect({ cards: cards(), newApp: newApp() }).toStrictEqual({
+      cards: [
+        { name: "Holidays", href: `/apps/${holidays.app.id}`, status: "Draft" },
+        {
+          name: "Invoices",
+          href: `/apps/${invoices.app.id}`,
+          status: "Published",
+        },
+        { name: "Old desk", href: `/apps/${old.app.id}`, status: "Archived" },
+      ],
+      newApp: "/apps/new",
     });
   });
 
-  it("keeps archived Apps under their tab when every App is archived", async () => {
+  it("narrows the Apps to those whose name has what is searched, and says when none has", async () => {
     await shown([
-      overview("Old intake", "2026-10-02T08:00:00.000Z", ["home"], "archived"),
+      overview("Invoices", "2026-10-01T08:00:00.000Z", ["home"]),
+      overview("Invoice archive", "2026-10-02T08:00:00.000Z", ["home"]),
+      overview("Holidays", "2026-10-03T08:00:00.000Z", ["home"]),
     ]);
-    const tabs = [...document.querySelectorAll<HTMLElement>('[role="tab"]')];
-    const all = tiles().map(({ name }) => name);
-    act(() => {
-      tabs.find((tab) => tab.textContent.startsWith("Archived"))?.click();
-    });
+
+    await search("invoice");
+    const found = cards().map(({ name }) => name);
+    await search("payroll");
 
     expect({
-      tabs: tabs.map((tab) => tab.textContent),
-      all,
-      archived: tiles().map(({ name }) => name),
+      found,
+      none: cards(),
+      said: document.body.textContent.includes("No App is called “payroll”"),
     }).toStrictEqual({
-      tabs: ["All0", "Archived1"],
-      all: [],
-      archived: ["Old intake"],
+      found: ["Invoice archive", "Invoices"],
+      none: [],
+      said: true,
+    });
+  });
+
+  it("offers New App to who builds alone, also before there is any App", async () => {
+    await shown([], true);
+    const builder = {
+      newApp: newApp(),
+      said: document.body.textContent.includes("No Apps yet"),
+    };
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown([], false);
+
+    expect({ builder, user: newApp() }).toStrictEqual({
+      builder: { newApp: "/apps/new", said: true },
+      user: undefined,
     });
   });
 });

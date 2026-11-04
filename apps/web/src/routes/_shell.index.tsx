@@ -1,4 +1,4 @@
-import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
@@ -18,7 +18,6 @@ import { ComposerNote } from "../chat/composer-note.tsx";
 import { Composer } from "../chat/composer.tsx";
 import { ConnectionRequests } from "../chat/connection-requests.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
-import { ProjectShelf } from "../chat/project-shelf.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
@@ -40,13 +39,12 @@ import { useTour } from "../tour/tour-state.ts";
 // (grasplabs/prototype `routes/index.tsx`): the open chat has the page's
 // whole width, its answers streaming in as the agent writes them, the
 // changes it holds for the person to confirm, and a side panel with the
-// versions it built up for review. The person's other chats and their
-// projects are one ⌘K window away (chat/chat-switcher.tsx), behind the
+// versions it built up for review. The person's other chats are one ⌘K
+// window away (chat/chat-switcher.tsx), behind the
 // first of the quiet icons top right; the others start a new chat and
 // hold what can be done with this one. A new chat starts on Grasp's buddy
 // and the question "What should we look at today?", centred in the middle
-// of the page, with questions to start from and the person's projects as
-// quiet rows under the box (the first time, Stephen's offer of his tour
+// of the page, with questions to start from under the box (the first time, Stephen's offer of his tour
 // stands in the question's place, tour/tour-layer.tsx); once its agent
 // writes a draft of an App, the
 // chat moves left and the App's preview stands on the right
@@ -56,8 +54,6 @@ interface ChatPage {
   chats: ChatSummary[];
   /** The open chat, when it is past the end of `chats`. */
   beyond?: ChatSummary;
-  /** The person's projects, newest first. */
-  projects: ChatProject[];
   /** The models a question may name, the default first. */
   models: string[];
   /** The efforts each of them takes (`chats.efforts()`). */
@@ -108,30 +104,16 @@ const readSourceNames = async (
 
 /**
  * A new chat: Grasp's buddy, the question, and the box to ask in, with
- * questions to start from and the person's projects under it; started
- * from a project, it is made in that project.
+ * questions to start from under it.
  */
 const NewChat = ({
   models,
   efforts,
-  project,
-  chats,
-  projects,
 }: {
   models: string[];
   efforts: Record<string, ModelEfforts>;
-  project: ChatProject | undefined;
-  chats: readonly ChatSummary[];
-  projects: readonly ChatProject[];
 }) => {
-  const { composer, ask } = useAsk(
-    undefined,
-    models,
-    efforts,
-    "page",
-    project?.id
-  );
-  const projectName = project?.name;
+  const { composer, ask } = useAsk(undefined, models, efforts, "page");
   const { identity } = Route.useRouteContext();
   // Offered the tour, his question stands in the greeting's place, and
   // nothing to start from under the box until it is answered.
@@ -161,53 +143,26 @@ const NewChat = ({
               </h1>
             )}
           </div>
-          {projectName === undefined ? null : (
-            <p className="text-muted-foreground text-center">
-              <Trans>New chat in the project {projectName}</Trans>
-            </p>
-          )}
           <Composer running={false} {...composer} />
-          {project === undefined && !offered ? (
-            <div className="flex flex-col gap-6">
-              <StartingQuestions
-                disabled={composer.busy || models.length === 0}
-                onPick={(question) => {
-                  void ask(question);
-                }}
-              />
-              <ProjectShelf chats={chats} projects={projects} />
-            </div>
-          ) : null}
+          {offered ? null : (
+            <StartingQuestions
+              disabled={composer.busy || models.length === 0}
+              onPick={(question) => {
+                void ask(question);
+              }}
+            />
+          )}
         </div>
       </div>
     </section>
   );
 };
 
-/** The page's crumbs: Chat, the open chat's project if it is in one, the chat. */
-const crumbsOf = (
-  chatLabel: string,
-  chat: ChatSummary | undefined,
-  projects: readonly ChatProject[]
-) => {
-  if (chat === undefined) {
-    return [{ label: chatLabel }];
-  }
-  const project = projects.find(({ id }) => id === chat.projectId);
-  return [
-    { label: chatLabel, to: "/" as const },
-    ...(project === undefined
-      ? []
-      : [
-          {
-            label: project.name,
-            to: "/projects/$projectId" as const,
-            params: { projectId: project.id },
-          },
-        ]),
-    { label: chat.title },
-  ];
-};
+/** The page's crumbs: Chat, then the open chat. */
+const crumbsOf = (chatLabel: string, chat: ChatSummary | undefined) =>
+  chat === undefined
+    ? [{ label: chatLabel }]
+    : [{ label: chatLabel, to: "/" as const }, { label: chat.title }];
 
 /**
  * One chat, followed as it streams, in the studio with the App its agent
@@ -345,7 +300,7 @@ const OpenChat = ({
 
 const Chat = () => {
   const page = Route.useLoaderData();
-  const { chat: open, project: startIn } = Route.useSearch();
+  const { chat: open } = Route.useSearch();
   const { t } = useLingui();
   // Open from the start where the dock's "Open in chat" asked for it.
   const [panel, setPanel] = useState(Route.useSearch().panel === true);
@@ -362,7 +317,6 @@ const Chat = () => {
           createdAt: "",
           lastAt: "",
           running: false,
-          projectId: null,
           appId: null,
           via: "web",
         });
@@ -378,8 +332,7 @@ const Chat = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
-  const { chats, projects, models, efforts, sourceNames, organizationName } =
-    page.data;
+  const { models, efforts, sourceNames, organizationName } = page.data;
   return (
     <>
       <SiteHeader
@@ -429,28 +382,21 @@ const Chat = () => {
                   chat={chat}
                   // Its own: copied, a dialog open, for this chat alone.
                   key={chat.id}
-                  projects={projects}
                   sourceNames={sourceNames}
                 />
               </>
             )}
           </div>
         }
-        crumbs={crumbsOf(t`Chat`, chat, projects)}
+        crumbs={crumbsOf(t`Chat`, chat)}
         // On a phone, Chat alone beside the chat's four icons, as in the
-        // prototype; the project and the chat from sm up.
+        // prototype; the chat too from sm up.
         phoneCrumbs="first"
       />
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">
         {chat === undefined ? (
-          <NewChat
-            chats={chats}
-            efforts={efforts}
-            models={models}
-            project={projects.find(({ id }) => id === startIn)}
-            projects={projects}
-          />
+          <NewChat efforts={efforts} models={models} />
         ) : (
           <OpenChat
             chat={chat}
@@ -487,21 +433,15 @@ export const Route = createFileRoute("/_shell/")({
   pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
-  ): { chat?: string; panel?: true; project?: string } => ({
+  ): { chat?: string; panel?: true } => ({
     ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
     ...(search.panel === true ? { panel: true } : {}),
-    // A new chat started from a project.
-    ...(typeof search.project === "string" ? { project: search.project } : {}),
   }),
   // Chat opens on the open chat, the one the dock carries on, whatever led
   // here (the sidebar, the logo); only "New chat" lets go of it first.
   beforeLoad: ({ search }) => {
     const active = activeChat();
-    if (
-      search.chat === undefined &&
-      search.project === undefined &&
-      active !== undefined
-    ) {
+    if (search.chat === undefined && active !== undefined) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", search: { chat: active }, replace: true });
     }
@@ -509,10 +449,9 @@ export const Route = createFileRoute("/_shell/")({
   loaderDeps: ({ search }) => ({ chat: search.chat }),
   loader: async ({ context: { core }, deps: { chat } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
-      const [chats, projects, models, efforts, sourceNames, organizationName] =
+      const [chats, models, efforts, sourceNames, organizationName] =
         await Promise.all([
           session.chats.list(),
-          session.chats.projects(),
           session.chats.models(),
           session.chats.efforts(),
           readSourceNames(session),
@@ -527,7 +466,6 @@ export const Route = createFileRoute("/_shell/")({
       return {
         chats,
         ...(beyond === undefined ? {} : { beyond }),
-        projects,
         models,
         efforts,
         sourceNames,

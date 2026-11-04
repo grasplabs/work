@@ -23,6 +23,7 @@ import {
   workflowOwners,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
+import { viaProjectSql } from "../project-sql.ts";
 
 // Who owns a workflow: the person who answers for it. They are shown with
 // it (the Workflows page, its view) and told when a run a trigger started
@@ -92,7 +93,7 @@ const inTeam = alias(teamMembers, "open_to_team");
 /**
  * That the person `userId` (an ID, or a column holding one) has a role in
  * App `app` now, as SQL: an admin, its owner, or someone it is shared with,
- * as a person or through a team they are in. As `appsFoundBy` decides it
+ * as a person, through a team or through a project they are in. As `appsFoundBy` decides it
  * for whoever lists their notifications; what the App read
  * (app-provenance.ts) can't be decided in SQL, and isn't part of it.
  */
@@ -105,7 +106,8 @@ export const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
       AND ((${sharedWith.memberType} = 'person' AND ${sharedWith.memberId} = ${userId})
         OR (${sharedWith.memberType} = 'team' AND ${sharedWith.memberId} IN (
           SELECT ${inTeam.teamId} FROM ${teamMembers} AS ${inTeam}
-          WHERE ${inTeam.userId} = ${userId})))
+          WHERE ${inTeam.userId} = ${userId}))
+        OR ${viaProjectSql(sharedWith.memberType, sharedWith.memberId, userId)})
   )
 )`;
 

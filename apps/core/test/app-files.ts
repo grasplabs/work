@@ -16,7 +16,6 @@ import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -399,39 +398,30 @@ const clientOf = (screen: Screen, app: string) => {
 export const appsOf = (idp: Idp) => {
   const personApi = async (role: Role) => await signedInApi(idp, role);
 
-  /** A builder's Notes App, made current, its screen approved by an admin. */
+  /** A builder's Notes App, made current, and an admin of its organization. */
   const releasedApp = async (builder: Person) => {
     const admin = await personApi("admin");
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(id);
     const { version } = await builder.api.apps.files.commit(id, files, "First");
     await builder.api.apps.versions.setCurrent(id, version);
-    const review = await admin.api.screenTrust.review(id);
-    const artifacts = builtArtifacts(review.screens);
-    await admin.api.screenTrust.approve(id, {
-      version: review.version,
-      generation: review.generation,
-      artifacts,
-    });
     return {
       app: id,
       release: await loadRelease(env, id, version),
       admin,
-      artifacts,
     };
   };
 
   /** A builder's App, open in their screen, with its client and API. */
   const openedApp = async () => {
     const builder = await personApi("builder");
-    const { app, release, admin, artifacts } = await releasedApp(builder);
+    const { app, release, admin } = await releasedApp(builder);
     const screen = await screenOf(builder, app);
     return {
       builder,
       app,
       release,
       admin,
-      artifacts,
       api: apiOf(release),
       screen,
       ...clientOf(screen, app),

@@ -9,6 +9,7 @@ import {
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A chat bound to an App (`chats.forApp`), through `/rpc` as the App's
@@ -16,9 +17,13 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // changes the App with them. What could go wrong: someone who doesn't
 // build the App gets a chat for it, or one for an App that is archived or
 // isn't there; two asks make two chats; one person gets another's chat;
-// the binding goes unrecorded; the chat's agent isn't told the App.
+// the binding goes unrecorded; the chat's agent isn't told the App, and a
+// build asked there makes a second App instead of changing this one.
 
 const idp = mockIdp();
+
+/** The App a model request's system prompt names, as the request's JSON has it. */
+const appNamed = /<app id=\\"(?<id>[^"\\]+)\\">/u;
 
 /** A builder's App, and the people around it. */
 const anApp = async () => {
@@ -151,6 +156,55 @@ describe("a chat for an App", () => {
     }).toStrictEqual({
       bound: [{ isError: false, text: `Returned:\n${app.id}` }],
       other: [{ isError: false, text: "Returned:\nnull" }],
+    });
+  });
+
+  it("has its agent build the App it is for, never a second one beside it", async () => {
+    const { builder, app } = await anApp();
+    const { stub } = await personalChatsOf(builder.userId);
+    // A model that knows only what the chat told it: the App it builds, as
+    // the system prompt names it. Its code tries to make an App first, as
+    // a model asked to "build" might, then writes to the App it was told.
+    const told: (string | undefined)[] = [];
+    await answeringProvider((requests) => {
+      if (requests.length > 1) {
+        return says("Built it.");
+      }
+      const prompt = JSON.stringify(requests.at(-1)?.body);
+      const named = appNamed.exec(prompt)?.groups?.id;
+      told.push(named);
+      return codeStep(`export default async (self, env) => {
+  let refused = null;
+  try {
+    await env.build.create({ name: "Invoices, again" });
+  } catch (error) {
+    refused = error.code;
+  }
+  await env.build.write(${JSON.stringify(named)}, { "screens/home.tsx": "export default () => null;\\n" });
+  return refused;
+};`);
+    });
+    const chat = await builder.api.chats.forApp(app.id);
+
+    await stub.ask(chat.id, { text: "Build a list of open invoices.", model });
+
+    const drafts = await builder.api.chats.drafts(chat.id);
+    const apps = await builder.api.apps.list();
+    expect({
+      told,
+      code: await codeResults(stub, chat.id),
+      drafts: drafts.map(({ app: drafted, changed }) => ({
+        app: drafted,
+        changed,
+      })),
+      apps: apps
+        .filter(({ owner }) => owner === builder.userId)
+        .map(({ id }) => id),
+    }).toStrictEqual({
+      told: [app.id],
+      code: [{ isError: false, text: "Returned:\napp.chat_has_app" }],
+      drafts: [{ app: app.id, changed: ["screens/home.tsx"] }],
+      apps: [app.id],
     });
   });
 });

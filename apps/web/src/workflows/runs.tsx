@@ -178,13 +178,26 @@ const RunOutcome = ({
   model: string | undefined;
 }) => {
   const { t } = useLingui();
+  const decide =
+    run.decision === undefined ? null : (
+      <Link
+        className="underline-offset-4 hover:underline"
+        params={{ decision: run.decision }}
+        to="/decisions/$decision"
+      >
+        <Trans>Decide</Trans>
+      </Link>
+    );
   if (run.type === "resource") {
     return (
-      <RunResult
-        aiProvider={run.aiProvider}
-        queued={run.queued}
-        status={run.status}
-      />
+      <div className="flex flex-col items-start gap-1">
+        <RunResult
+          aiProvider={run.aiProvider}
+          queued={run.queued}
+          status={run.status}
+        />
+        {decide}
+      </div>
     );
   }
   return (
@@ -194,15 +207,7 @@ const RunOutcome = ({
         queued={run.queued}
         status={run.status}
       />
-      {run.decision === undefined ? null : (
-        <Link
-          className="underline-offset-4 hover:underline"
-          params={{ decision: run.decision }}
-          to="/decisions/$decision"
-        >
-          <Trans>Decide</Trans>
-        </Link>
-      )}
+      {decide}
       {run.failure === undefined || run.detailsRemoved ? null : (
         <span className="text-muted-foreground text-xs">
           {run.failure.step === null

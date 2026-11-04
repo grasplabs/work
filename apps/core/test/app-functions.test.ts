@@ -19,7 +19,7 @@ import {
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { deliveryOf, standingOf } from "../src/screen-trust.ts";
+import { deliveryOf, standingOf } from "../src/screen-delivery.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";

@@ -37,6 +37,7 @@ const notFoundCodes = new Set([
   "brain.work_not_found",
   "decision.not_found",
   "screen.not_found",
+  "project.not_found",
 ]);
 
 // Read off the error itself: a family's codes are only known to

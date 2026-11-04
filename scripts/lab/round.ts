@@ -11,6 +11,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { compare, noiseOf, shown } from "@grasp-os/shared/lab-compare";
+import type { CaseScore } from "@grasp-os/shared/lab-compare";
+import { markOf } from "@grasp-os/shared/lab-runs";
+import type { Bench, Result } from "@grasp-os/shared/lab-runs";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import {
@@ -43,7 +47,6 @@ import {
   trustedFrom,
 } from "./check.ts";
 import type { KeptScores } from "./check.ts";
-import { compare, noiseOf, shown } from "./compare.ts";
 import {
   ask,
   drawnAgain,
@@ -62,7 +65,6 @@ import type { Practice } from "./practice.ts";
 import { detailsFolder, reportInputOf, reportPage } from "./report.ts";
 import {
   keepResult,
-  markOf,
   meansLine,
   resultNamed,
   results,
@@ -70,7 +72,6 @@ import {
   setOf,
   stephenVersion,
 } from "./results.ts";
-import type { Bench, CaseScore, Result } from "./results.ts";
 
 /** Why a round stops: a sentence for whoever ran it. */
 export class RoundStopError extends Error {

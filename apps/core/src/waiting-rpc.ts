@@ -35,7 +35,6 @@ import type { NotificationsRpc } from "./notifications.ts";
 import type { PendingActionsRpc } from "./pending-actions.ts";
 import type { PermissionsRpc } from "./permissions-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import type { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
@@ -62,7 +61,6 @@ export interface WaitingSources {
   unknownOutcomes: UnknownOutcomesRpc;
   permissions: PermissionsRpc;
   dependencies: DependenciesRpc;
-  screenTrust: ScreenTrustRpc;
   apps: AppsRpc;
   notifications: NotificationsRpc;
   connections: ConnectionsRpc;
@@ -355,20 +353,6 @@ const parts: Parts = {
         verdicts: ["approve", "reject"],
         request,
         policyGeneration,
-      })),
-    };
-  },
-  screens: async ({ screenTrust }, { admin }) => {
-    const engines = admin ? await screenTrust.waiting() : [];
-    return {
-      items: engines.map((waiting) => ({
-        kind: "appApproval",
-        id: `appApproval:${waiting.app}`,
-        at: null,
-        urgent: false,
-        waitsOn: { type: "admin" },
-        verdicts: [],
-        waiting,
       })),
     };
   },

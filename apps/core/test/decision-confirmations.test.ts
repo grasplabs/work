@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { answerDecision } from "../src/decisions/decisions.ts";
 import { allEvents } from "./audit-events.ts";
 import { asking, confirmedAnswer, outputOf, week } from "./decisions.ts";
-import type { Person } from "./decisions.ts";
+import type { Asking, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, whileEngineRefuses } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // The one-use confirmation a person gives in the trusted host decision UI
@@ -23,6 +23,13 @@ const idp = mockIdp();
 
 const personApi = async (role: "admin" | "builder" | "user"): Promise<Person> =>
   await signedInApi(idp, role);
+
+/**
+ * A run of a new approval workflow of `builder`'s asking as `input` says,
+ * its contracts and bindings an admin's, once it has asked.
+ */
+const askingAs = async (builder: Person, input: Asking) =>
+  await asking({ admin: await personApi("admin"), builder }, input);
 
 /** `person`'s confirmation of `answer` to `decision`, as reviewed now. */
 const confirmationOf = async (
@@ -64,18 +71,21 @@ const refusalsOf = async (decision: string) => {
 };
 
 describe("decision confirmations", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
+  afterEach(endLiveResourceRuns);
 
   it("take an answer only with its person's confirmation of exactly that answer to exactly that decision", async () => {
     const admin = await personApi("admin");
     const anna = await personApi("user");
     const ben = await personApi("user");
     const team = await newTeam(admin, [anna, ben]);
-    const { run, decision } = await asking(admin, {
+    const { run, decision } = await askingAs(admin, {
       from: `team:${team}`,
       timeout: week,
     });
-    const other = await asking(admin, { from: `team:${team}`, timeout: week });
+    const other = await askingAs(admin, {
+      from: `team:${team}`,
+      timeout: week,
+    });
     const rejecting = await confirmationOf(anna, decision, {
       approved: false,
       payload: { comment: "Wrong total" },
@@ -129,7 +139,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
       stillOpen,
       answered: answered.status,
       keptAfter,
-      output: await outputOf(admin, run.id),
+      output: await outputOf(run),
       refusals: await refusalsOf(decision),
     }).toStrictEqual({
       refused: {
@@ -146,10 +156,10 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
       // answer anything any more, and isn't kept.
       keptAfter: 0,
       output: {
-        timedOut: false,
+        answered: true,
         approved: false,
         by: anna.userId,
-        payload: { comment: "Wrong total" },
+        value: { comment: "Wrong total" },
       },
       refusals: Array.from({ length: 6 }, () => ({
         code: "decision.unconfirmed",
@@ -160,7 +170,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
   it("use a confirmation once, keep only the latest one, and never one past its time", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    const { decision } = await asking(builder, {
+    const { decision } = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
@@ -209,7 +219,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
   it("refuse an answer confirmed against a review context that changed since, as a conflict", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    const { decision } = await asking(builder, {
+    const { decision } = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
@@ -261,19 +271,20 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
   it("take the confirmation only with its answer, and give a recorded answer back without asking again", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    // The run's cancel is admitted while the engine can't stop it: the
-    // decision takes no answer, and the confirmation isn't spent on it.
-    const cancelled = await asking(builder, {
+    // The run is cancelled once its person confirmed: the decision takes
+    // no answer, and the confirmation isn't spent on it.
+    const cancelled = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
     const unspent = await confirmationOf(decider, cancelled.decision, {
       approved: true,
     });
-    await whileEngineRefuses(
-      (method) => method === "terminate",
-      async () => await outcome(builder.api.workflows.cancel(cancelled.run.id))
+    await builder.api.workflowResources.terminateRun(
+      cancelled.run.workflow,
+      cancelled.run.run
     );
+    await outputOf(cancelled.run);
     const refused = await outcome(
       decider.api.decisions.answer(
         cancelled.decision,
@@ -283,7 +294,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
     );
     const keptAfterRefusal = await keptFor(cancelled.decision);
 
-    const { run, decision } = await asking(builder, {
+    const { run, decision } = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
@@ -306,7 +317,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
     const otherReview = await outcome(
       decider.api.decisions.review(decision, { approved: false })
     );
-    const output = await outputOf(builder, run.id);
+    const output = await outputOf(run);
     const logged = await allEvents();
     const answers = logged.filter(
       ({ action, target }) =>
@@ -329,10 +340,10 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
       review: "recorded",
       otherReview: "decision.closed",
       output: {
-        timedOut: false,
+        answered: true,
         approved: true,
         by: decider.userId,
-        payload: null,
+        value: null,
       },
       answers: 1,
       kept: 0,
@@ -342,7 +353,7 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
   it("show the answer as it is recorded, and take it whatever order its payload's keys come in", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    const { run, decision } = await asking(builder, {
+    const { run, decision } = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
@@ -372,16 +383,16 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
     expect({
       response: JSON.stringify(review.response),
       answered,
-      output: await outputOf(builder, run.id),
+      output: await outputOf(run),
     }).toStrictEqual({
       response:
         '{"approved":true,"payload":{"comment":"ok","nested":{"a":null,"b":1},"total":42}}',
       answered: "ok",
       output: {
-        timedOut: false,
+        answered: true,
         approved: true,
         by: decider.userId,
-        payload: { comment: "ok", nested: { a: null, b: 1 }, total: 42 },
+        value: { comment: "ok", nested: { a: null, b: 1 }, total: 42 },
       },
     });
   });
@@ -420,19 +431,19 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
         )
       );
     };
-    const reminted = await asking(builder, {
+    const reminted = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
-    const emptied = await asking(builder, {
+    const emptied = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
-    const extended = await asking(builder, {
+    const extended = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });
-    const expiring = await asking(builder, {
+    const expiring = await askingAs(builder, {
       from: `person:${decider.userId}`,
       timeout: week,
     });

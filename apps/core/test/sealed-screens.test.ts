@@ -189,21 +189,6 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is reviewed by the hash it is opened with", async () => {
-    const { builder, app } = await published();
-    const admin = await signedInApi(idp, "admin");
-    await clearBuildCache();
-
-    const review = await admin.api.screenTrust.review(app);
-    const opened = await builder.api.screens.open(app, "inbox");
-
-    expect({
-      reviewed: review.screens.find(({ screen }) => screen === "inbox")
-        ?.artifact,
-      built: await cachedBuilds(),
-    }).toStrictEqual({ reviewed: opened.artifact, built: 0 });
-  });
-
   it("carries every screen's hash in the candidate's report", async () => {
     const { builder, app, id } = await published();
     const bundle = await builder.api.screens.open(app, "desk");

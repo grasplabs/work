@@ -23,11 +23,12 @@ import { loadRelease } from "./app-releases.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { identify } from "./auth/identity.ts";
+import { policyOf } from "./data-policy.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
+import { delivering, leasedBuild, personRefusal } from "./screen-delivery.ts";
 import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
@@ -54,19 +55,20 @@ import { routeMember } from "./staff-audit.ts";
 //   else's: a request naming anyone else is refused before it is counted
 //   or read (`personRefusal`).
 // - Someone without a role in the App, a version whose release was
-//   revoked, a build nobody approved, an App archived (nobody uses one):
-//   the session, the role and the App's status (`usableApp`),
-//   the current version's release and its revocation are read on every
-//   request, inside `delivering`, which checks the lease's build is still
-//   trusted before and after. A check and its open each decide anew, so a
+//   revoked, an App archived (nobody uses one): the session, the role and
+//   the App's status (`usableApp`), the current version's release and its
+//   revocation are read on every request, inside `delivering`, which
+//   checks the lease's build still gets the App's data before and after. A check and its open each decide anew, so a
 //   revocation while the person reads the confirmation opens nothing.
 // - A screen opens what its App didn't declare: the origins are the
 //   current release's `resource.links` declaration's, never what the
 //   request says; a resource of another kind, or none, opens nothing.
-// - An App that read restricted data sends it out in a URL: such an App's
-//   links open only once the person confirmed each in the page's dialog
-//   (`confirm` in a check's answer); an open claiming a click is refused
-//   (`link.confirmation_required`).
+// - A screen sends what it read out in a URL: no admin reviews a screen's
+//   code, so unless an admin classified the App's data `ordinary`
+//   (data-policy.ts), and always once the App read restricted data, its
+//   links open only once the person confirmed each in the page's dialog,
+//   which shows the whole URL (`confirm` in a check's answer); an open
+//   claiming a click is refused (`link.confirmation_required`).
 // - A flood: each request counts against the person's requests of the
 //   App's screens (`admitted`) before anything else is read.
 // - The record holds what it shouldn't: each open is audited with its
@@ -185,8 +187,13 @@ interface Decided {
   readonly url: string;
   readonly origin: string;
   readonly version: number;
-  /** Whether the App read restricted data: each open needs the dialog. */
+  /**
+   * Whether each open needs the person's confirmation, the whole URL
+   * shown: the App's data isn't `ordinary`, or it read restricted data.
+   */
   readonly confirm: boolean;
+  /** Whether the App read restricted data. */
+  readonly restricted: boolean;
 }
 
 /**
@@ -218,11 +225,16 @@ const decided = async (
       target.reason === "invalid" ? "link.invalid" : "link.not_allowed"
     );
   }
+  const [restricted, { output }] = await Promise.all([
+    appHost(env, app).isRestricted(),
+    policyOf(env, found.id),
+  ]);
   return {
     url: target.url,
     origin: target.origin,
     version: found.currentVersion,
-    confirm: await appHost(env, app).isRestricted(),
+    confirm: restricted || output !== "ordinary",
+    restricted,
   };
 };
 
@@ -246,7 +258,7 @@ const auditOpen = async (
         origin: opened.origin,
         version: opened.version,
         intent,
-        restricted: opened.confirm,
+        restricted: opened.restricted,
       },
     }),
   ]);

@@ -27,6 +27,7 @@ import { adminCommand, adminSnapshot } from "../seed/admin-command.ts";
 import { origin } from "../seed/local.ts";
 import { ask, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
+import { eventKinds } from "./events.ts";
 import { folderOf, keepJson, keepText, keptJson, openFolder } from "./kept.ts";
 import { hiddenFolder, isHidden } from "./keys/index.ts";
 import { roleName } from "./keys/types.ts";
@@ -62,6 +63,27 @@ const playedSchema = z.object({
         ),
       })
     )
+    .optional(),
+  /** People v2: what happened to them on the way (events.ts), at which answer, and for a split message whether he waited. */
+  events: z
+    .array(
+      z.object({
+        kind: z.enum(eventKinds),
+        answer: z.int(),
+        waited: z.boolean().optional(),
+      })
+    )
+    .optional(),
+  /** People v2: how they type (surface.ts), put on each answer after the model wrote it. */
+  surface: z
+    .object({
+      typos: z.number(),
+      phone: z.boolean(),
+      capitals: z.enum(["always", "rarely", "never"]),
+      dropsStops: z.number(),
+      splits: z.number(),
+      mixesDutch: z.boolean(),
+    })
     .optional(),
   seed: z.int().optional(),
   said: z.array(z.array(z.string())),

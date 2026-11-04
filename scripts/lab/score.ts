@@ -13,6 +13,7 @@ import path from "node:path";
 
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import type { LabInterview } from "@grasp-os/shared/lab";
+import type { Result } from "@grasp-os/shared/lab-runs";
 
 import {
   cardColumns,
@@ -41,7 +42,6 @@ import type { Said } from "./person.ts";
 import { askerOf } from "./practice.ts";
 import type { Practice, PracticePerson } from "./practice.ts";
 import { keepResult, setOf, stephenVersion } from "./results.ts";
-import type { Result } from "./results.ts";
 
 /** How many interviews are judged at once. */
 const judgedAtOnce = 3;

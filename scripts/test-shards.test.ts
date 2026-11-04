@@ -108,6 +108,25 @@ describe("splitting the test files between shards", () => {
     expect(shardSeconds(parallel)).toBeLessThan(projectStartSeconds + 20);
   });
 
+  it("counts a project that runs its files one after another as such, beside a group's files run at once, whichever comes first", () => {
+    const builds = [
+      file("compiler build-a", 60, { serial: true }),
+      file("compiler build-b", 60, { serial: true }),
+      file("compiler build-c", 60, { serial: true }),
+    ];
+    const others = [file("core a", 20), file("core b", 20)];
+
+    // The builds' 180 s one after another, not 180 s spread over the files
+    // a runner works through at once, wherever they stand in the shard.
+    expect([
+      shardSeconds([...others, ...builds]),
+      shardSeconds([...builds, ...others]),
+    ]).toStrictEqual([
+      2 * projectStartSeconds + 180,
+      2 * projectStartSeconds + 180,
+    ]);
+  });
+
   it("adds a shard's groups up, as it runs them one after another", () => {
     expect(
       shardSeconds([file("core", 100), file("screens", 100, { group: 1 })])

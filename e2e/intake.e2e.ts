@@ -79,8 +79,6 @@ const intakeFor = async (admin: Person): Promise<string> => {
       target: { kind: "model", model: e2eModel },
       reviewed: { version: 1 },
     });
-    const { generation } = await api.screenTrust.review(created.app.id);
-    await api.screenTrust.classify(created.app.id, "ordinary", generation);
     return created.app.id;
   } finally {
     core[Symbol.dispose]();

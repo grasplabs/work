@@ -65,6 +65,7 @@ const candidates: ShareCandidates = {
     { id: "user-bo", name: "Bo" },
   ],
   teams: [{ id: "team-sales", name: "Sales" }],
+  projects: [],
 };
 
 /** Core's App members, kept as builders change them, and each change asked. */

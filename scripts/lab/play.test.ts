@@ -12,6 +12,7 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Link } from "./core.ts";
+import { askedFor, awayLine, pasteOf, splitOf } from "./events.ts";
 import type { Answer, Player } from "./person.ts";
 import { agrees, playInterview } from "./play.ts";
 
@@ -171,5 +172,195 @@ describe("whether a reply agrees to what was read back", () => {
     ["No, at ten.", false],
   ])("%s", (reply, agreed) => {
     expect(agrees(reply)).toBe(agreed);
+  });
+});
+
+/** Someone who says `answers` in order and agrees to every part read back; it keeps what each answer was asked for. */
+const askedPlayer = (answers: Answer[]) => {
+  const prompts: string[] = [];
+  const player: Player = {
+    name: "Sanne",
+    answer: async (_lines, asked, at) => {
+      if (at.readback) {
+        return await Promise.resolve({ say: "Yes, that’s right.", said: [] });
+      }
+      prompts.push(asked);
+      return await Promise.resolve(answers.shift() ?? { say: "…", said: [] });
+    },
+  };
+  return { player, prompts };
+};
+
+const toReadBack = stephen({
+  say: "I'll read back what I wrote down.",
+  facts: [step("You open the invoice mail.")],
+  wants: "readback",
+});
+
+describe("what happens to them on the way", () => {
+  it("called away: they say so, he answers, and after the minutes away they answer the question from before", async () => {
+    const { link, asked } = scriptedLink([
+      stephen({ say: "How did the last invoice come in?" }),
+      stephen({ say: "Of course, I'll wait." }),
+      toReadBack,
+    ]);
+    const { player, prompts } = askedPlayer([
+      { say: "Back. By mail, as always.", said: ["S1"] },
+    ]);
+    const played = await playInterview(link, player, {
+      locale: "en",
+      clock: "talk",
+      events: [{ kind: "interrupted", at: 0, away: 3, pick: 1 }],
+    });
+    expect({
+      first: played.said[0],
+      prompts,
+      events: played.events,
+    }).toStrictEqual({
+      first: [],
+      prompts: [askedFor.back],
+      events: [{ kind: "interrupted", answer: 1 }],
+    });
+    expect((asked[2]?.minutes ?? 0) - (asked[1]?.minutes ?? 0)).toBeGreaterThan(
+      3
+    );
+    expect(asked[1]?.lines.at(-1)?.text).toBe(awayLine("en", 1));
+  });
+
+  it("back much later: the link is opened again, he gets a resume, and the time away counts as the page counts it", async () => {
+    const { link, asked } = scriptedLink([
+      stephen({ say: "How did the last invoice come in?" }),
+      stephen({
+        say: "Welcome back. We were at the last invoice: how did it come in?",
+      }),
+      toReadBack,
+    ]);
+    let opens = 0;
+    const counted: Link = {
+      ...link,
+      open: async (key) => {
+        opens += 1;
+        return await link.open(key);
+      },
+    };
+    const { player } = askedPlayer([{ say: "By mail.", said: ["S1"] }]);
+    const played = await playInterview(counted, player, {
+      locale: "en",
+      clock: "talk",
+      events: [{ kind: "resumes later", at: 0, away: 20 }],
+    });
+    expect({
+      opens,
+      events: asked.map(({ event }) => event),
+      happened: played.events,
+      lines: asked[1]?.lines.length,
+    }).toStrictEqual({
+      opens: 2,
+      events: ["start", "resume", "answer"],
+      happened: [{ kind: "resumes later", answer: 0 }],
+      lines: 1,
+    });
+    expect(asked[1]?.minutes).toBe(5);
+  });
+
+  it("the wrong thing pasted: no fact of theirs in it, all of it untrue, and next they say it was a mistake", async () => {
+    const { link } = scriptedLink([
+      stephen({ say: "What did you do first?" }),
+      stephen({ say: "That looks like a formula. What did you mean?" }),
+      toReadBack,
+    ]);
+    const { player, prompts } = askedPlayer([
+      { say: "Oops, wrong paste. I opened the mail.", said: ["S1"] },
+    ]);
+    const played = await playInterview(link, player, {
+      locale: "en",
+      events: [{ kind: "wrong paste", at: 0, pick: 0 }],
+    });
+    expect({
+      said: played.said,
+      moves: played.moves,
+      untrue: played.untrue[0],
+      prompts,
+    }).toStrictEqual({
+      said: [[], ["S1"]],
+      moves: ["wrong paste", null],
+      untrue: [`(pasted by mistake) ${pasteOf("en", 0)}`],
+      prompts: [askedFor.afterPaste],
+    });
+  });
+
+  it("one answer in two messages: when he waits for the rest it is one line, and when he speaks to the first part it is two", async () => {
+    const say =
+      "I open the order list first, then I check the prices against the sheet and send it on.";
+    const [start = "", rest = ""] = splitOf(say) ?? [];
+    const play = async (afterFirst: StephenTurn) => {
+      const { link, asked } = scriptedLink([
+        stephen({ say: "What did you do first?" }),
+        afterFirst,
+        toReadBack,
+      ]);
+      const { player } = askedPlayer([{ say, said: ["S1"] }]);
+      const played = await playInterview(link, player, {
+        locale: "en",
+        events: [{ kind: "split message", at: 0 }],
+      });
+      return {
+        sent: asked.map(({ lines }) => lines.at(-1)?.text),
+        said: played.said,
+        events: played.events,
+      };
+    };
+    await expect(play(stephen({ say: "", more: true }))).resolves.toStrictEqual(
+      {
+        sent: [undefined, start, `${start} ${rest}`],
+        said: [["S1"]],
+        events: [{ kind: "split message", answer: 1, waited: true }],
+      }
+    );
+    await expect(
+      play(stephen({ say: "Right, the list. Then?" }))
+    ).resolves.toStrictEqual({
+      sent: [undefined, start, rest],
+      said: [[], ["S1"]],
+      events: [{ kind: "split message", answer: 1, waited: false }],
+    });
+  });
+
+  it("a question read wrongly: only one about how often or how long, so the event waits for one", async () => {
+    const { link } = scriptedLink([
+      stephen({ say: "What did you do first?" }),
+      stephen({ say: "How often does that happen in a normal week?" }),
+      toReadBack,
+    ]);
+    const { player, prompts } = askedPlayer([
+      { say: "I opened the mail.", said: ["S1"] },
+      { say: "About ten minutes.", said: [] },
+    ]);
+    const played = await playInterview(link, player, {
+      locale: "en",
+      events: [{ kind: "misread", at: 0 }],
+    });
+    expect({
+      prompts,
+      events: played.events,
+      moves: played.moves,
+    }).toStrictEqual({
+      prompts: [
+        "Your answer to Stephen’s last line, and nothing else:",
+        askedFor.misread,
+      ],
+      events: [{ kind: "misread", answer: 2 }],
+      moves: [null, "misread"],
+    });
+  });
+
+  it("with nothing planned, the played interview has no events", async () => {
+    const { link } = scriptedLink([
+      stephen({ say: "What did you do first?" }),
+      toReadBack,
+    ]);
+    const { player } = askedPlayer([{ say: "I opened the mail.", said: [] }]);
+    const played = await playInterview(link, player, { locale: "en" });
+    expect(played.events).toBeUndefined();
   });
 });

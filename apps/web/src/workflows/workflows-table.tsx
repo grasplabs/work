@@ -214,7 +214,8 @@ const Lead = ({
             aria-label={t`Open the App ${name}`}
             className="focus-visible:ring-ring/50 relative z-10 flex-none rounded-lg outline-none focus-visible:ring-3"
             params={{ app: workflow.app }}
-            to="/apps/$app/details"
+            search={{ section: "workflows" }}
+            to="/apps/$app/settings"
           />
         }
       >
@@ -279,7 +280,8 @@ const Place = ({ workflow }: { workflow: WorkflowSummary }) =>
     <Link
       className="relative z-10 truncate underline-offset-4 hover:underline"
       params={{ app: workflow.app }}
-      to="/apps/$app/details"
+      search={{ section: "workflows" }}
+      to="/apps/$app/settings"
     >
       {workflow.appName}
     </Link>

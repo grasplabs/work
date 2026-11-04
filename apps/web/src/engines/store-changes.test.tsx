@@ -558,23 +558,23 @@ describe("why a version wasn't made current", () => {
     }).toStrictEqual({
       invalid: {
         text: "This version changes the App's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.",
-        link: "An admin can see the record that holds it back, and abandon the change, in the App's details.",
+        link: "An admin can see the record that holds it back, and abandon the change, in the App's settings.",
       },
       tooLarge: {
         text: "This version changes the App's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.",
-        link: "An admin can see the record that holds it back, and abandon the change, in the App's details.",
+        link: "An admin can see the record that holds it back, and abandon the change, in the App's settings.",
       },
       stalled: {
         text: "This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress.",
-        link: "No record is to blame, so an admin can only abandon the change, in the App's details.",
+        link: "No record is to blame, so an admin can only abandon the change, in the App's settings.",
       },
       migration: {
         text: "This version changes the App's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.",
-        link: "An admin can see what went wrong, and abandon the change, in the App's details.",
+        link: "An admin can see what went wrong, and abandon the change, in the App's settings.",
       },
       unnamed: {
         text: "This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress.",
-        link: "No record is to blame, so an admin can only abandon the change, in the App's details.",
+        link: "No record is to blame, so an admin can only abandon the change, in the App's settings.",
       },
     });
   });

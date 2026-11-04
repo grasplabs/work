@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   SteeredWrite,
@@ -67,7 +67,7 @@ import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { ShareWorkflow } from "../workflows/share-workflow.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { definitionTitle } from "../workflows/step-body.ts";
-import { TestRun } from "../workflows/test-run.tsx";
+import { TracedRun } from "../workflows/traced-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
 import { VersionSource } from "../workflows/version-source.tsx";
@@ -391,6 +391,7 @@ const WorkflowHeader = ({
   title,
   status,
   onChange,
+  onFiles,
   askable,
   me,
 }: {
@@ -399,6 +400,8 @@ const WorkflowHeader = ({
   title: string;
   status: WorkflowLifecycle | undefined;
   onChange: (next: WorkflowLifecycle) => void;
+  /** Shows its Files and apps, where its bindings are approved. */
+  onFiles: () => void;
   askable: Loaded<boolean>;
   me: string;
 }) => (
@@ -414,7 +417,7 @@ const WorkflowHeader = ({
             workflow={resource.id}
           />
         )}
-        <StartIndependentRun workflow={resource.id} />
+        <StartIndependentRun onFiles={onFiles} workflow={resource.id} />
         <WorkflowSettings askable={askable} me={me} resource={resource} />
       </div>
     </div>
@@ -533,7 +536,7 @@ const checkpointOf = (
 
 /**
  * For its builders, who read its draft: its Flow, the draft drawn, with a
- * test run of its current version under it; and Definition, the JSON
+ * real run of its current version to start and follow under it; and Definition, the JSON
  * behind it. `onDraft` takes what a save on either left; `onTab` shows
  * another tab.
  */
@@ -575,7 +578,13 @@ const DraftTabs = ({
             <NotLoadedState page={draft} />
           )}
           {currentVersion === null ? null : (
-            <TestRun version={currentVersion} workflow={workflow} />
+            <TracedRun
+              onFiles={() => {
+                onTab("files");
+              }}
+              version={currentVersion}
+              workflow={workflow}
+            />
           )}
         </div>
       </TabsContent>
@@ -641,6 +650,7 @@ const WorkflowResourceView = ({
   activity,
   names,
   admin,
+  approves,
   opens,
 }: {
   resource: WorkflowResource;
@@ -654,9 +664,11 @@ const WorkflowResourceView = ({
   names: Names;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
+  /** Whether they approve its bindings: an admin of its own, not Grasp staff. */
+  approves: boolean;
   /**
    * The tab it opens on, if a link asked for one (a run count's: `runs`;
-   * an inbox item's: `triggers`).
+   * an inbox item's: `triggers`; a start refused for its bindings: `files`).
    */
   opens: WorkflowSearch["tab"];
 }) => {
@@ -704,6 +716,9 @@ const WorkflowResourceView = ({
             askable={askable}
             me={names.me}
             onChange={onChange}
+            onFiles={() => {
+              setTab("files");
+            }}
             resource={resource}
             status={status}
             title={headingOf(latest, resource.name)}
@@ -793,6 +808,7 @@ const WorkflowResourceView = ({
         <TabsContent value="files">
           <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             <FilesAndApps
+              approves={approves}
               currentVersion={currentVersion}
               versions={versions}
               workflow={resource.id}
@@ -922,6 +938,7 @@ const WorkflowResourcePage = () => {
           key={resource.data.id}
           activity={activity}
           admin={isAdmin(identity.role)}
+          approves={isMemberAdmin(identity)}
           askable={askable}
           draft={draft}
           lifecycle={lifecycle}
@@ -939,12 +956,12 @@ const WorkflowResourcePage = () => {
 
 /** What a link to a workflow's page may ask of it: the tab it opens on. */
 interface WorkflowSearch {
-  tab?: "runs" | "triggers";
+  tab?: "runs" | "triggers" | "files";
 }
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   validateSearch: (search: Record<string, unknown>): WorkflowSearch =>
-    search.tab === "runs" || search.tab === "triggers"
+    search.tab === "runs" || search.tab === "triggers" || search.tab === "files"
       ? { tab: search.tab }
       : {},
   pendingComponent: PageLoading,

@@ -134,6 +134,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "app.member.refused",
     text: msg`Was refused adding a member to an App`,
   },
+  // No longer recorded (pages need no approval), but past records stay.
   { action: "app.artifact.approved", text: msg`Approved a page's code` },
   {
     action: "app.artifact.revoked",
@@ -141,11 +142,11 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   {
     action: "app.artifact.refused",
-    text: msg`A page nobody approved was refused the App's data`,
+    text: msg`A page was refused the App's data`,
   },
   {
     action: "app.output.classified",
-    text: msg`Changed whether an App's data needs approved pages`,
+    text: msg`Changed whether an App's data goes to code outside Grasp`,
   },
   { action: "app.webhook.added", text: msg`Added a webhook to an App` },
   {

@@ -153,7 +153,7 @@ export const releaseManifestSchema = z.strictObject({
   /** One per explicit migration the App declares, in its order. */
   migrationEvidence: z.array(migrationEvidenceSchema).max(16),
   // Always `unreviewed` as sealed: trust is never the manifest's to say
-  // (approval and revocation are the host's records of its hash).
+  // (revocation is the host's record).
   artifactTrust: z.literal("unreviewed"),
 });
 

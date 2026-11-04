@@ -47,6 +47,8 @@ import {
 import type { Direction, Mind, Temper } from "./people.ts";
 import { told } from "./person.ts";
 import type { Answer, Asker, At, Player, Said } from "./person.ts";
+import { clean, typed } from "./surface.ts";
+import type { Surface } from "./surface.ts";
 
 /** Which practice people a run talked to: v1, one temper each that never changes; v2, a mix and a state that drifts. */
 export const peopleVersions = ["v1", "v2"] as const;
@@ -360,6 +362,8 @@ export const realPlayerV2 = ({
   locale,
   start,
   rules = driftRules,
+  surface = clean,
+  guarded = new Set<string>(),
 }: {
   asker: Asker;
   name: string;
@@ -371,6 +375,10 @@ export const realPlayerV2 = ({
   /** A cast sheet's own start state and drift rules. */
   start?: State;
   rules?: DriftRules;
+  /** How they type (surface.ts), put on each answer after the model wrote it; clean when not set. */
+  surface?: Surface;
+  /** The words the answer key scores by, which their typing leaves alone (`protectedOf`). */
+  guarded?: ReadonlySet<string>;
 }): Player & { states: StateAt[] } => {
   let mind = freshMindV2(mix, seed, start);
   const states: StateAt[] = [];
@@ -433,7 +441,12 @@ export const realPlayerV2 = ({
         schema: answerSchema,
         maxTokens: 800,
       });
-      const say = answer.say.trim() || "…";
+      // The model writes it clean; how they type it is code's (surface.ts).
+      const say =
+        typed(answer.say.trim(), surface, `${seed}:${mind.answers}`, {
+          guarded,
+          locale,
+        }).text || "…";
       const move =
         step.direction.move ??
         ownMoves.find((each) => each === answer.move) ??

@@ -4,7 +4,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -430,7 +430,7 @@ const ConnectionItem = ({
         <Holders
           id={connection.id}
           held={held}
-          mayRevoke={admin && !identity.staff}
+          mayRevoke={isMemberAdmin(identity)}
         />
       )}
     </li>

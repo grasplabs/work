@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { saidOf, snippetOf } from "../src/chat-search.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { searchHitsMax } from "../src/workspace.ts";
 import { model, says, transcript } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -15,8 +14,8 @@ import type { Answer } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Finding a chat by what was said in it, through `/rpc` as the ⌘K window
-// asks: every word searched for must be in the chat's title, its project's
-// name or what was said, and one found by what was said shows where. The
+// asks: every word searched for must be in the chat's title or what was
+// said, and one found by what was said shows where. The
 // ways it can fail: someone finds another person's chat (an admin too);
 // code, its results or the model's thoughts match as if they were said; a
 // deleted chat is still found; a chat kept before searches were is never
@@ -163,11 +162,10 @@ describe("what a search looks through", () => {
 });
 
 describe("chats.search", () => {
-  it("finds a person's chat by its title, its project or what was said, the latest first", async () => {
+  it("finds a person's chat by its title or what was said, the latest first", async () => {
     const ann = await person();
-    const project = await ann.chats.createProject("Moving office");
     const lease = await ann.chats.create("Invoices");
-    const travel = await ann.chats.create("Travel", project.id);
+    const travel = await ann.chats.create("Moving office");
     await ask(
       ann,
       lease.id,
@@ -178,7 +176,7 @@ describe("chats.search", () => {
 
     expect({
       bySaid: await found(ann, "LEASE march"),
-      byProjectAndSaid: await found(ann, "moving lyon"),
+      byTitleAndSaid: await found(ann, "moving lyon"),
       byTitle: await found(ann, "invoices"),
       notEveryWord: await found(ann, "lease lyon"),
       latestFirst: await found(ann, "the"),
@@ -190,11 +188,13 @@ describe("chats.search", () => {
           said: "When does the Hoogvliet [lease] end?",
         },
       ],
-      byProjectAndSaid: [{ title: "Travel", said: "Book the train to [Lyon]" }],
+      byTitleAndSaid: [
+        { title: "Moving office", said: "Book the train to [Lyon]" },
+      ],
       byTitle: [{ title: "Invoices", said: null }],
       notEveryWord: [],
       latestFirst: [
-        { title: "Travel", said: "Book [the] train to Lyon" },
+        { title: "Moving office", said: "Book [the] train to Lyon" },
         {
           title: "Invoices",
           said: "When does [the] Hoogvliet lease end?",
@@ -244,31 +244,6 @@ describe("chats.search", () => {
         said: "Who signs for [Hoogvliet]?",
       },
     ]);
-  });
-
-  it("looks in one project before it keeps a page's worth", async () => {
-    const ann = await person();
-    const project = await ann.chats.createProject("Lyon office");
-    await ann.chats.create("Lease in Lyon", project.id);
-    // Each more recent than the project's, and one more than a page holds.
-    await Promise.all(
-      Array.from(
-        { length: searchHitsMax },
-        async (_, index) => await ann.chats.create(`Lease ${index}`)
-      )
-    );
-
-    const everywhere = await ann.chats.search("lease");
-    const inProject = await ann.chats.search("lease", project.id);
-    expect({
-      everywhere: everywhere.length,
-      lyonAmongThem: everywhere.some(({ chat }) => chat.projectId !== null),
-      inProject: inProject.map(({ chat }) => chat.title),
-    }).toStrictEqual({
-      everywhere: searchHitsMax,
-      lyonAmongThem: false,
-      inProject: ["Lease in Lyon"],
-    });
   });
 
   it("keeps finding what was said in a chat longer than one row holds", async () => {

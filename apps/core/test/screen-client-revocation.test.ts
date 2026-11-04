@@ -515,6 +515,81 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
+  it("clears the screen of someone taken out of a project the App is shared with, of the App taken out of it, or of the project deleted", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const [ada, ben, cy, dee] = await Promise.all([
+      personApi("user"),
+      personApi("user"),
+      personApi("user"),
+      personApi("user"),
+    ]);
+    const team = await newTeam(admin, [dee]);
+    /** A project of the App's builder, the App shared with everyone in it. */
+    const projectWith = async (
+      ...people: { userId: string }[]
+    ): Promise<string> => {
+      const { id } = await opened.builder.api.projects.create({
+        name: `Project ${unique()}`,
+      });
+      for (const person of people) {
+        // oxlint-disable-next-line no-await-in-loop -- one member at a time
+        await opened.builder.api.projects.addMember(id, {
+          type: "person",
+          id: person.userId,
+          role: "user",
+        });
+      }
+      await opened.builder.api.projects.file(id, {
+        item: { type: "app", id: opened.app },
+        share: true,
+      });
+      return id;
+    };
+    const followed = async (person: typeof ada) => {
+      const { lease } = await person.api.screens.open(opened.app, "notes");
+      return await followedList(opened, person.api.screens, lease);
+    };
+    const takenOut = await projectWith(ada);
+    const unfiled = await projectWith(ben);
+    const deleted = await projectWith(cy);
+    const throughTeam = await projectWith();
+    await opened.builder.api.projects.addMember(throughTeam, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const [adaSees, benSees, cySees, deeSees] = await Promise.all([
+      followed(ada),
+      followed(ben),
+      followed(cy),
+      followed(dee),
+    ]);
+
+    await opened.builder.api.projects.removeMember(takenOut, {
+      type: "person",
+      id: ada.userId,
+    });
+    await opened.builder.api.projects.unfile(unfiled, {
+      type: "app",
+      id: opened.app,
+    });
+    await opened.builder.api.projects.remove(deleted);
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: team,
+      userId: dee.userId,
+    });
+
+    await expect(
+      Promise.all([adaSees, benSees, cySees, deeSees].map(whenLetGo))
+    ).resolves.toStrictEqual([
+      refusedAndLetGo,
+      refusedAndLetGo,
+      refusedAndLetGo,
+      refusedAndLetGo,
+    ]);
+  });
+
   it("clears the screen of someone whose team, the App's way to them, is deleted", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");

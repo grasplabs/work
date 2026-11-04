@@ -235,8 +235,9 @@ export const screenLimits = {
 
 /**
  * What the frame posts to the page once it listens for its screen:
- * `{ type, load }`, with the `load` its address carried, so the page can
- * tell this load of the frame from an earlier one.
+ * `{ type, load, supported }`, with the `load` its address carried, so the
+ * page can tell this load of the frame from an earlier one, and whether
+ * the browser can run a screen at all.
  */
 export const screenFrameReady = "grasp:screen-ready";
 

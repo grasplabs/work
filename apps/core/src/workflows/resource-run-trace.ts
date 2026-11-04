@@ -92,7 +92,7 @@ const retryBackoff = /^:retry:[1-9]\d*:wait$/u;
 
 /** A decision task's look at its decision, or its wait for its wake. */
 const decisionPart =
-  /^:decision:(?:asked|reached|outcome|(?:wait|woken):\d+)$/u;
+  /^:decision:(?:asked|remind|reminded|reached|outcome|(?:wait|woken):\d+)$/u;
 
 /** A decision's wait or look as core names it, past `decisionPollStepPrefix`. */
 const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;

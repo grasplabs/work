@@ -46,9 +46,12 @@ export const workflowNameSchema = z
     "Lowercase letters, digits and dashes, starting and ending with a letter or digit"
   );
 
-/** Whom a workflow is shared with, and in which role. */
+/**
+ * Whom a workflow is shared with, and in which role: a person, a team, or
+ * everyone in a project (@grasp-os/shared/projects).
+ */
 export const workflowMemberSchema = z.strictObject({
-  type: z.enum(["person", "team"]),
+  type: z.enum(["person", "team", "project"]),
   id: identifierSchema,
 });
 
@@ -201,7 +204,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.binding_invalid":
     "That target can't serve this binding: check its kind, its contract and that the workflow holds the permission it needs.",
   "workflow.binding_unapproved":
-    "A binding of this version has no approval that serves its exact contract, so it can't start.",
+    "An admin hasn't approved what this version reaches yet, so it can't start. Ask for it to go live, or ask an admin to approve it on the workflow's Files and apps tab.",
   "workflow.binding_conflict":
     "Someone changed this binding as you did. Read it again, then retry.",
   "workflow.params_invalid":
@@ -410,6 +413,9 @@ export interface CatalogContractEntry {
   publishedAt: string;
 }
 
+/** Most people, teams and roles one decision binding names. */
+export const decisionDecidersMax = 16;
+
 /** Who answers a decision binding: people, teams or an organization role. */
 const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
 
@@ -460,7 +466,7 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("decision"),
-    deciders: z.array(deciderSchema).min(1).max(16),
+    deciders: z.array(deciderSchema).min(1).max(decisionDecidersMax),
   }),
   z.strictObject({ kind: z.literal("event") }),
   // One Knowledge collection, through a permission the workflow itself
@@ -521,17 +527,22 @@ export interface WorkflowBindingApproval {
 }
 
 /**
- * A version of a workflow that runs, or waits to go live, whose catalog
- * bindings an admin hasn't approved, so its starts are refused
- * (`workflow.binding_unapproved`): each binding, with the targets core can
- * offer now that would serve it, each checked as an approval is. A
- * binding with none offered is approved where its target is chosen in
- * full (its workflow's page).
+ * A version of a workflow whose catalog bindings an admin hasn't approved,
+ * so its starts are refused (`workflow.binding_unapproved`): each binding,
+ * with the targets core can offer now that would serve it, each checked as
+ * an approval is. A decision is offered none: the admin names its
+ * deciders. Across workflows (`pendingBindings`) only what is quick to
+ * read is offered (models, events, files, Knowledge); a connector, store
+ * operation or template is offered on the workflow's own read
+ * (`pendingBindingsOf`).
  */
 export interface PendingWorkflowBindings {
   workflow: { id: string; name: string };
   version: number;
-  /** Whether it is the version that runs now, rather than the one asked to go live. */
+  /**
+   * Whether it is the version a start runs now, rather than one asked to
+   * go live or, on the workflow's own read, its newest.
+   */
   live: boolean;
   bindings: {
     alias: string;
@@ -904,16 +915,26 @@ export interface WorkflowVersionSource {
   files: Record<string, string>;
 }
 
-/** The organization's people and teams, by name, to share a workflow with. */
+/**
+ * The organization's people and teams, by name, to share a workflow with,
+ * and the projects the person builds, whose everyone it may be shared with.
+ */
 export interface WorkflowShareCandidates {
   people: { id: string; name: string }[];
   teams: { id: string; name: string }[];
+  projects: { id: string; name: string }[];
 }
 
 /** Someone a workflow is shared with. */
 export interface WorkflowMember {
-  type: "person" | "team";
+  type: "person" | "team" | "project";
   id: string;
+  /**
+   * A project's name, for a project row: null for a project the person
+   * isn't in, whose name is its members' alone. People and teams are
+   * named from the share candidates.
+   */
+  projectName?: string | null;
   role: WorkflowRole;
   addedBy: string;
   addedAt: string;
@@ -1382,6 +1403,13 @@ export interface WorkflowResourcesApi {
    * for the organization's own admins, never Grasp staff.
    */
   pendingBindings: () => Promise<PendingWorkflowBindings[]>;
+  /**
+   * Its versions whose bindings no admin approved, each with the targets
+   * core can offer, of every kind: the version a start runs now, the one
+   * asked to go live and its newest (a test run's); for the organization's
+   * own admins, never Grasp staff.
+   */
+  pendingBindingsOf: (id: string) => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */

@@ -292,7 +292,7 @@ describe("in a group chat", setUpTime, () => {
 
   it("gives the agent no way to act or hold a write, only to read", async () => {
     const actsWith = codeStep(
-      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "knowledge"].filter((name) => env[name] !== undefined).join(",");`
+      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "knowledge"].filter((name) => { try { return env[name] !== undefined; } catch { return false; } }).join(",");`
     );
     const ann = await member(
       idp,

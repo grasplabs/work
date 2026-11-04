@@ -5,6 +5,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import { jsonPointerPattern } from "./json.ts";
 import type { Json } from "./json.ts";
+import type { PermissionStatus } from "./permissions.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
 // the session's `workflowResources.triggers` serves them: each a resource
@@ -214,12 +215,28 @@ export interface WorkflowTrigger {
    * enables it again, which starts its schedule afresh.
    */
   stopped: boolean;
+  /**
+   * Where its `start` on its workflow stands, which it asks an admin for
+   * as it is created (under `triggerStartBinding`): `active` once
+   * granted, `requested` while it waits, `revoked` once refused or taken
+   * back, when its builders ask again with a new request
+   * (`PermissionsApi.request`, under the same binding). Null only if it
+   * holds none, as no trigger made since it asks does.
+   */
+  start: PermissionStatus | null;
 }
+
+/**
+ * The binding name a trigger's `start` on its workflow is asked for under,
+ * as it is created and whenever it is asked for again.
+ */
+export const triggerStartBinding = "START";
 
 /**
  * An independent workflow's triggers over `/rpc`
  * (`workflowResources.triggers`). A trigger starts nothing until an admin
- * grants it `start` on its workflow, a permission of its own.
+ * grants it `start` on its workflow, a permission of its own, which it
+ * asks for as it is created.
  */
 export interface WorkflowTriggersApi {
   /**
@@ -230,7 +247,9 @@ export interface WorkflowTriggersApi {
   list: (workflowId: string) => Promise<WorkflowTrigger[]>;
   /**
    * Creates a trigger (`workflowTriggerCreateSchema`) that acts for the
-   * caller, who must build the workflow; audited.
+   * caller, who must build the workflow, and with it the request for its
+   * `start` on the workflow (under `triggerStartBinding`), which waits for
+   * an admin; both audited. Deleting the trigger revokes it.
    */
   create: (input: unknown) => Promise<CreatedWorkflowTrigger>;
   /**
