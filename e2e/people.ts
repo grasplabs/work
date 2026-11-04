@@ -350,6 +350,7 @@ const cast = {
   chat: { user: "user" },
   unknownOutcome: { admin: "admin", other: "admin", member: "user" },
   chatDock: { user: "user" },
+  chatPackages: { builder: "builder" },
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },

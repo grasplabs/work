@@ -1013,6 +1013,78 @@ describe("dependency approval", () => {
     await expect(waitingFor(builder.api)).resolves.toStrictEqual([]);
   });
 
+  it("waits on every chat and builder that asked for the same packages, and tells each chat how any builder decided", async () => {
+    const { builder, app } = await builderWithApp();
+    const coBuilder = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const chats = await personalChatsOf(builder.userId);
+    const [first, second] = [await chats.newChat(), await chats.newChat()];
+    const identity = await builder.api.whoami();
+    /** `identity`, as the agent of chat `chat` acts for them (agent-builds.ts). */
+    const viaChat = (chat: string) => ({
+      ...identity,
+      actor: { ...chats.agent, onBehalfOf: identity.userId },
+      via: {
+        ...chats.agent,
+        onBehalfOf: identity.userId,
+        workspaceId: chats.id,
+        chatId: chat,
+      },
+    });
+    // Asked for in one chat, then the same in another, and by a co-builder.
+    const asked = await proposeForTests(
+      env,
+      viaChat(first.chat.id),
+      proposalFor(app)
+    );
+    const again = await proposeForTests(
+      env,
+      viaChat(second.chat.id),
+      proposalFor(app)
+    );
+    const byCoBuilder = await proposeAs(coBuilder, proposalFor(app));
+    const cards = async () =>
+      await Promise.all(
+        [first, second].map(async ({ chat }) => {
+          const { requests } = await builder.api.chats.packageRequests(chat.id);
+          return requests.map(({ id }) => id);
+        })
+      );
+    const before = {
+      same: [again.id, byCoBuilder.id],
+      cards: await cards(),
+      inboxes: [await waitingFor(builder.api), await waitingFor(coBuilder.api)],
+    };
+    // Any builder decides it, whoever asked first.
+    await approve(coBuilder.api, asked);
+    const notes = await Promise.all(
+      [first, second].map(async ({ chat }) => {
+        const messages: unknown[] = await transcript(chats.stub, chat.id);
+        return messages.some(
+          (message) =>
+            z
+              .object({ role: z.literal("system"), content: z.string() })
+              .safeParse(message).data?.content ===
+            `The npm packages you asked for (request ${asked.id}) were approved: the App may use them now.`
+        );
+      })
+    );
+
+    expect({ before, notes, after: await cards() }).toStrictEqual({
+      before: {
+        same: [asked.id, asked.id],
+        cards: [[asked.id], [asked.id]],
+        inboxes: [[asked.id], [asked.id]],
+      },
+      notes: [true, true],
+      after: [[], []],
+    });
+  });
+
   it("refuses a builder once the App is no longer theirs to build: unshared, off the team or out of the organization", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();

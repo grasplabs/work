@@ -101,6 +101,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_decision_recipients": { company: "who a decision asked" },
   "core.workflow_decision_confirmations": { erased: "runs" },
   "core.dependency_requests": { company: "package requests and decisions" },
+  "core.dependency_request_askers": { company: "who asked for packages" },
   "core.dependency_approvers": {
     company: "package approvers (unused; GRA-1547 drops it)",
   },
@@ -522,6 +523,7 @@ export const reviewedPersonColumns: Readonly<
   ],
   "core.dependency_build_leases": ["subject_id", "subject_type"],
   "core.dependency_locks": ["subject_id", "subject_type"],
+  "core.dependency_request_askers": ["person_id"],
   "core.dependency_requests": [
     "decided_by",
     "ended_by",

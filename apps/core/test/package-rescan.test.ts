@@ -625,13 +625,15 @@ describe("an advisory published after an approval", () => {
     }).toStrictEqual({ revoked: true, found: [], told: [] });
   });
 
-  it("tells advisories up to the approval's cap, then nothing more, and logs that it reached it", async () => {
+  it("tells a bounded number of new advisories a run, the rest on later runs, up to the approval's cap, and logs that it reached it", async () => {
     const app = await approvedApp();
-    // The tests' cap is two (vite.config.ts): the third is never told.
+    // The tests' limits (vite.config.ts): two told a run, three kept in
+    // all. Of four new advisories, two are told, then one, then none.
     for (const ghsa of [
       "GHSA-aaaa-cccc-2222",
       "GHSA-aaaa-cccc-3333",
       "GHSA-aaaa-cccc-4444",
+      "GHSA-aaaa-cccc-5555",
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one advisory at a time
       await advise(app.dep, {
@@ -640,16 +642,19 @@ describe("an advisory published after an approval", () => {
       });
     }
     const warn = vi.spyOn(console, "warn");
-    let first: Awaited<ReturnType<typeof auditedDuring>> = [];
-    let next: Awaited<ReturnType<typeof auditedDuring>> = [];
+    const runs: unknown[][] = [];
     let capped = 0;
     try {
-      first = await auditedDuring(async () => {
-        await rescanPackages(env, new Date(Date.now() + 8 * malwareRecheckMs));
-      });
-      next = await auditedDuring(async () => {
-        await rescanPackages(env, new Date(Date.now() + 10 * malwareRecheckMs));
-      });
+      for (const later of [8, 10, 12]) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        const logged = await auditedDuring(async () => {
+          await rescanPackages(
+            env,
+            new Date(Date.now() + later * malwareRecheckMs)
+          );
+        });
+        runs.push(advisoriesFound(logged, app.request.graphHash));
+      }
       capped = warn.mock.calls.filter(([entry]) => {
         const logged = JSON.stringify(entry);
         return (
@@ -663,16 +668,16 @@ describe("an advisory published after an approval", () => {
 
     const told = await advisedOf(app.builder);
 
-    expect({
-      first: advisoriesFound(first, app.request.graphHash),
-      next: advisoriesFound(next, app.request.graphHash),
-      told: told.length,
-      capped,
-    }).toStrictEqual({
-      first: ["GHSA-aaaa-cccc-2222", "GHSA-aaaa-cccc-3333"],
-      next: [],
-      told: 1,
-      capped: 2,
+    expect({ runs, told: told.length, capped }).toStrictEqual({
+      runs: [
+        ["GHSA-aaaa-cccc-2222", "GHSA-aaaa-cccc-3333"],
+        ["GHSA-aaaa-cccc-4444"],
+        [],
+      ],
+      // One notice a run that told any.
+      told: 2,
+      // Each run saw more new advisories than the cap had room for.
+      capped: 3,
     });
   });
 });

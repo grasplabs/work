@@ -16,8 +16,6 @@ import { ChatSwitcherButton, HeaderIcon } from "../chat/chat-switcher.tsx";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { ComposerNote } from "../chat/composer-note.tsx";
 import { Composer } from "../chat/composer.tsx";
-import { ConnectionRequests } from "../chat/connection-requests.tsx";
-import { HeldWrites } from "../chat/held-writes.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
@@ -25,6 +23,7 @@ import { ChatStudio } from "../chat/studio.tsx";
 import { StartingQuestions } from "../chat/suggestions.tsx";
 import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
+import { WaitingCards } from "../chat/waiting-cards.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
@@ -253,8 +252,7 @@ const OpenChat = ({
                 ) : null}
               </div>
             )}
-            <HeldWrites chatId={chat.id} version={view.held} />
-            <ConnectionRequests chatId={chat.id} version={view.held} />
+            <WaitingCards chatId={chat.id} version={view.held} />
           </ChatThread>
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
             <BuildsFailure read={builds} />

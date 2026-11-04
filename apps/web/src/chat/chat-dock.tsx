@@ -37,9 +37,8 @@ import { OpenChat, useDockWidth, useUnfoldOnPointer } from "./dock-frame.tsx";
 import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
-import { HeldWrites } from "./held-writes.tsx";
-import { PackageRequests } from "./package-requests.tsx";
 import { useAsk } from "./use-ask.ts";
+import { WaitingCards } from "./waiting-cards.tsx";
 
 // The conversation, with its Markdown and code highlighting, loads once a
 // chat is open: most pages show the dock folded or empty.
@@ -289,8 +288,7 @@ const DockThread = ({
             <ErrorText>{view.stopped ?? undefined}</ErrorText>
           </div>
         )}
-        <HeldWrites chatId={chatId} version={view.held} />
-        <PackageRequests chatId={chatId} version={view.held} />
+        <WaitingCards chatId={chatId} version={view.held} />
       </ChatThread>
     </Suspense>
   );

@@ -237,7 +237,8 @@ export const coreProject = (
               artifactBytes: 256 * 1024,
               appLocks: 3,
               workflowPackageChars: 64 * 1024,
-              advisoriesNoticed: 2,
+              advisoriesNoticed: 3,
+              advisoriesPerScan: 2,
             },
             // The gateway runs call the model through; tests fake the AI binding.
             // Who core's mail is from (src/mail.ts); tests capture what

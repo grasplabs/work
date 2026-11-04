@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8912d525-8c44-4956-9e58-325dc6b91790",
+  "id": "87d4009e-71a4-46da-af11-2b29d28d7918",
   "prevId": "2eff0f57-ac10-4218-a7c3-49d3ef78fbd6",
   "tables": {
     "access_revocations": {
@@ -4673,6 +4673,83 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "dependency_request_askers": {
+      "name": "dependency_request_askers",
+      "columns": {
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asked_at": {
+          "name": "asked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "dependency_request_askers_person_idx": {
+          "name": "dependency_request_askers_person_idx",
+          "columns": [
+            "person_id",
+            "chat_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "dependency_request_askers_request_id_dependency_requests_id_fk": {
+          "name": "dependency_request_askers_request_id_dependency_requests_id_fk",
+          "tableFrom": "dependency_request_askers",
+          "tableTo": "dependency_requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dependency_request_askers_request_id_person_id_chat_id_pk": {
+          "columns": [
+            "request_id",
+            "person_id",
+            "chat_id"
+          ],
+          "name": "dependency_request_askers_request_id_person_id_chat_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

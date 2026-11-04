@@ -32,9 +32,12 @@ export const seedDependencyRequest = async ({
   targets,
   graph,
   approved,
+  requestedVia,
 }: {
   app: string;
   requestedBy: string;
+  /** The chat whose agent asked for them, as core records it; none for a person's own ask. */
+  requestedVia?: { workspaceId: string; chatId: string; agentId: string };
   purpose: string;
   targets: DependencyTarget[];
   graph: DependencyGraph;
@@ -57,7 +60,17 @@ export const seedDependencyRequest = async ({
     ? `${quoted(requestedBy)}, ${now}, ${generationNow}`
     : "NULL, NULL, NULL";
   await execute(
-    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (${quoted(id)}, 'app', ${quoted(app)}, 'rev-1', ${quoted(graphHash)}, ${quoted(JSON.stringify(targets.toSorted()))}, ${quoted(purpose)}, ${quoted(snapshot)}, ${quoted(summary)}, ${canonical.direct.length}, ${canonical.packages.length}, 0, 0, NULL, ${quoted(approved ? "approved" : "pending")}, ${quoted(requestedBy)}, NULL, ${now}, ${generationNow}, ${decided}, NULL)`,
+    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (${quoted(id)}, 'app', ${quoted(app)}, 'rev-1', ${quoted(graphHash)}, ${quoted(JSON.stringify(targets.toSorted()))}, ${quoted(purpose)}, ${quoted(snapshot)}, ${quoted(summary)}, ${canonical.direct.length}, ${canonical.packages.length}, 0, 0, NULL, ${quoted(approved ? "approved" : "pending")}, ${quoted(requestedBy)}, ${
+      requestedVia === undefined
+        ? "NULL"
+        : quoted(
+            JSON.stringify({
+              type: "agent",
+              onBehalfOf: requestedBy,
+              ...requestedVia,
+            })
+          )
+    }, ${now}, ${generationNow}, ${decided}, NULL)`,
     "core"
   );
   return { id, graphHash };

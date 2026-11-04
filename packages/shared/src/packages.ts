@@ -346,6 +346,11 @@ export const packageLimits = {
    * nothing more of the graph, and logs that it reached it.
    */
   advisoriesNoticed: 2000,
+  /**
+   * New advisories of one graph one re-scan records and tells, each as
+   * its own audit event; the rest wait for the next run.
+   */
+  advisoriesPerScan: 25,
 } as const;
 export type PackageLimits = Record<keyof typeof packageLimits, number>;
 

@@ -2745,6 +2745,36 @@ export const dependencyRequests = sqliteTable(
 );
 
 /**
+ * Everyone who asked for a pending dependency request
+ * (src/dependencies/requests.ts): the person, and the chat whose agent
+ * asked for them (`chat_id`, with its Workspace object; '' for the
+ * person's own ask). The same packages asked for again, from another chat
+ * or by another builder, are the same request, which waits on each of
+ * them there: on the card in each chat, and in each one's inbox. Any
+ * builder of its subject decides it. Goes with its request.
+ */
+export const dependencyRequestAskers = sqliteTable(
+  "dependency_request_askers",
+  {
+    requestId: text("request_id")
+      .notNull()
+      .references(() => dependencyRequests.id, { onDelete: "cascade" }),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    workspaceId: text("workspace_id"),
+    askedAt: timestamp("asked_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.requestId, table.personId, table.chatId] }),
+    // What waits on a person, in their inbox or one of their chats.
+    index("dependency_request_askers_person_idx").on(
+      table.personId,
+      table.chatId
+    ),
+  ]
+);
+
+/**
  * Whether the deployment is open to the company, in its one row (`id` is
  * `gate`; none yet is open). Grasp's staff close it while the company is
  * onboarding, and open it with their go: until then only the admins named

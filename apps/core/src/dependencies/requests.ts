@@ -85,6 +85,7 @@ import {
   dependencyAdmissionRefusals,
   dependencyLocks,
   dependencyPolicy,
+  dependencyRequestAskers,
   dependencyRequests,
   users,
   workflowResources,
@@ -494,6 +495,22 @@ interface Checked {
   snapshot: string;
 }
 
+/**
+ * The statement that records `by` as asking for request `request`, from
+ * the chat whose agent acted for them, if one did
+ * (`dependency_request_askers`): once each, and only while it waits, so a
+ * request replaced meanwhile gets no asker.
+ */
+const askedBy = (db: DrizzleD1Database, request: string, by: Acting) =>
+  db
+    .insert(dependencyRequestAskers)
+    // The table's columns, in its order.
+    .select(
+      sql`SELECT ${request}, ${by.userId}, ${by.via?.chatId ?? ""}, ${by.via?.workspaceId ?? null}, ${Date.now()}
+        WHERE EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${request} AND ${dependencyRequests.status} = 'pending')`
+    )
+    .onConflictDoNothing();
+
 /** A new pending request's row for `checked`. */
 const newRequest = (
   { proposal, subject, graph, graphHash, targets, snapshot }: Checked,
@@ -638,10 +655,11 @@ const attempt = async (
     waiting.targets === targets &&
     (await sameReview(db, waiting.id, snapshot))
   ) {
+    // It waits on whoever asked for it again too, from wherever they did.
     return {
       request: waiting,
       lock,
-      statements: lockFirst.length === 0 ? [] : [...live, ...lockFirst],
+      statements: [...live, ...lockFirst, askedBy(db, waiting.id, by)],
     };
   }
   const row = newRequest(checked, by, latest?.id ?? null, generation);
@@ -671,6 +689,7 @@ const attempt = async (
       ...superseded,
       ...lockFirst,
       db.insert(dependencyRequests).values(row),
+      askedBy(db, row.id, by),
       outboxed(
         db,
         requestEntry(actor, "requested", row, {
@@ -993,11 +1012,20 @@ export const waitingDependencies = async (
           .from(dependencyRequests)
           .where(
             and(
-              eq(dependencyRequests.requestedBy, by.userId),
               eq(dependencyRequests.status, "pending"),
-              chatId === undefined
-                ? undefined
-                : sql`json_extract(${dependencyRequests.requestedVia}, '$.chatId') = ${chatId}`
+              or(
+                // A request asked for before askers were kept: its asker.
+                and(
+                  eq(dependencyRequests.requestedBy, by.userId),
+                  chatId === undefined
+                    ? undefined
+                    : sql`json_extract(${dependencyRequests.requestedVia}, '$.chatId') = ${chatId}`
+                ),
+                sql`EXISTS (SELECT 1 FROM ${dependencyRequestAskers}
+                  WHERE ${dependencyRequestAskers.requestId} = ${dependencyRequests.id}
+                    AND ${dependencyRequestAskers.personId} = ${by.userId}
+                    ${chatId === undefined ? sql`` : sql`AND ${dependencyRequestAskers.chatId} = ${chatId}`})`
+              )
             )
           )
           .orderBy(dependencyRequests.requestedAt, dependencyRequests.id),
@@ -1212,35 +1240,60 @@ const refusalsAudited = async <T>(
 };
 
 /**
- * Tells the chat whose agent asked for `request` how it was decided
+ * Tells each chat whose agent asked for `request` how it was decided
  * (`Workspace.packagesDecided`), as a chat's connection is (permissions.ts
  * `tellChat`): the agent learns it on its next turn, and the chat's page
- * reads what waits again. Nothing for a request a person made themselves.
- * The decision stands however this goes.
+ * reads what waits again. Nothing for a person's own ask. The decision
+ * stands however this goes.
  */
-const tellChat = async (
+const tellChats = async (
   env: Env,
   request: Listed,
   decision: "approved" | "denied"
 ): Promise<void> => {
+  const askers = await drizzle(env.DB)
+    .select({
+      personId: dependencyRequestAskers.personId,
+      chatId: dependencyRequestAskers.chatId,
+      workspaceId: dependencyRequestAskers.workspaceId,
+    })
+    .from(dependencyRequestAskers)
+    .where(eq(dependencyRequestAskers.requestId, request.id));
   const via = request.requestedVia;
-  if (via === null) {
-    return;
-  }
-  try {
-    await workspace(
-      env,
-      workspaceIdSchema.parse(via.workspaceId)
-    ).packagesDecided(via.chatId, request.requestedBy, {
-      request: request.id,
-      decision,
-    });
-  } catch (error) {
-    log.warn("chat.packages_decided_failed", {
-      chatId: via.chatId,
-      ...errorFields(error),
-    });
-  }
+  // A request asked for before askers were kept names its chat itself.
+  const chats = new Map(
+    [
+      ...askers,
+      ...(via === null
+        ? []
+        : [
+            {
+              personId: request.requestedBy,
+              chatId: via.chatId,
+              workspaceId: via.workspaceId,
+            },
+          ]),
+    ].flatMap((asker) =>
+      asker.chatId === "" || asker.workspaceId === null
+        ? []
+        : [[`${asker.workspaceId}/${asker.chatId}`, asker] as const]
+    )
+  );
+  await Promise.all(
+    [...chats.values()].map(async ({ personId, chatId, workspaceId }) => {
+      try {
+        await workspace(
+          env,
+          workspaceIdSchema.parse(workspaceId)
+        ).packagesDecided(chatId, personId, { request: request.id, decision });
+      } catch (error) {
+        log.warn("chat.packages_decided_failed", {
+          chatId,
+          ...errorFields(error),
+        });
+      }
+    })
+  );
 };
 
 /**
@@ -1347,7 +1400,7 @@ const decide = async (
   if (!decided) {
     throw whyNotWritten(standing, true);
   }
-  await tellChat(env, decided, status);
+  await tellChats(env, decided, status);
   return await toRequest(env, decided);
 };
 
@@ -1361,7 +1414,7 @@ const decide = async (
  * one reviewed, the policy generation is the one reviewed, `by` still
  * builds its subject (`buildsSubjectSql`) and an App is not archived, in
  * the batch that records it.
- * The chat that asked is told (`tellChat`). A refusal of who decides is
+ * The chat that asked is told (`tellChats`). A refusal of who decides is
  * audited (`dependency.decision_refused`), with why, for a request that
  * is there; one of an ID nobody has is only logged, so asking with made-up
  * IDs can't fill the audit trail.
@@ -2213,9 +2266,6 @@ interface DueGraph {
   graphHash: string;
 }
 
-/** Most new advisories one re-scan of a graph records, each as its own event. */
-const advisoriesAuditedMax = 25;
-
 /** An approval in force of a graph, as the re-scan read it. */
 interface ReadApproval {
   id: string;
@@ -2285,15 +2335,21 @@ const noticeAdvisories = async (
         .map((each) => [each.advisory.id, each] as const)
     ).values(),
   ].toSorted((a, b) => a.advisory.id.localeCompare(b.advisory.id));
-  const fresh = unknown.slice(0, Math.max(0, max - told.size));
-  if (fresh.length < unknown.length) {
+  const room = Math.max(0, max - told.size);
+  if (unknown.length > room) {
     log.warn("dependencies.advisories_capped", {
       [subject.type]: subject.id,
       graphHash,
       max,
-      untold: unknown.length - fresh.length,
+      untold: unknown.length - room,
     });
   }
+  // A bounded number a run, each recorded as its own event and kept as
+  // told: the rest wait for the next run, never skipped.
+  const fresh = unknown.slice(
+    0,
+    Math.min(room, packageLimitsOf(env.PACKAGE_LIMITS).advisoriesPerScan)
+  );
   const [first] = fresh;
   if (first === undefined) {
     await db.update(dependencyRequests).set({ scannedAt: at }).where(inForce);
@@ -2309,27 +2365,25 @@ const noticeAdvisories = async (
     subject,
     read.map(({ id }) => id)
   );
-  const [recorded, ...more] = fresh
-    .slice(0, advisoriesAuditedMax)
-    .map(({ advisory, package: ref }) =>
-      createAuditEvent(
-        {
-          actor: coreActor,
-          action: "dependency.advisory_found",
-          target: auditTargetOf(subject),
-          detail: {
-            [subject.type]: subject.id,
-            graphHash,
-            package: ref.name,
-            version: ref.version,
-            advisory: advisory.id,
-            severity: advisory.severity,
-            found: fresh.length,
-          },
+  const [recorded, ...more] = fresh.map(({ advisory, package: ref }) =>
+    createAuditEvent(
+      {
+        actor: coreActor,
+        action: "dependency.advisory_found",
+        target: auditTargetOf(subject),
+        detail: {
+          [subject.type]: subject.id,
+          graphHash,
+          package: ref.name,
+          version: ref.version,
+          advisory: advisory.id,
+          severity: advisory.severity,
+          found: fresh.length,
         },
-        "core"
-      )
-    );
+      },
+      "core"
+    )
+  );
   if (recorded === undefined) {
     return;
   }
