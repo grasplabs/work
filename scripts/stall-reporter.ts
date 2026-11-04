@@ -9,11 +9,17 @@
 //   CI keeps as an artifact, so the log itself isn't flooded;
 // - GRASP_STALL_REPORT_AFTER_MINUTES after the process started, shortly
 //   before the step's own timeout, prints each file and test still running
-//   and for how long. None at all means the hang is in teardown or in
-//   shutting the pool down;
+//   and for how long. None at all means the hang is outside any test,
+//   after the files ended;
 // - ends the run, after naming it, once a test has run
 //   GRASP_TEST_OVERDUE_GRACE_SECONDS past its own timeout, or a file has
 //   reported nothing for that long past the longest its tests may take.
+//   Past that grace too, with no file left running, it ends a run that
+//   Vitest still hasn't ended: a hang outside any test, such as a worker
+//   that never says it finished after its file ended, which would
+//   otherwise wait for the step's timeout without saying where it is
+//   stuck. (Shutting the pool down comes after the run's end, which
+//   Vitest bounds itself.)
 //   Vitest times a test out from inside its worker, so a test that blocks
 //   the worker (a loop that never yields, say) or whose request workerd
 //   cancels as hung takes that timer with it, and the run would wait for
@@ -294,6 +300,8 @@ export default class StallReporter implements Reporter {
   readonly #outputFlushTimeoutMs: number;
   #timer: NodeJS.Timeout | undefined;
   #overdueTimer: NodeJS.Timeout | undefined;
+  /** When a file or test last reported anything; never before the first. */
+  #lastHeard: number | undefined;
   #ended = false;
 
   // Vitest constructs a reporter given by path with no settings, or an
@@ -442,6 +450,7 @@ export default class StallReporter implements Reporter {
 
   #started(testModule: ReportedModule): void {
     const now = Date.now();
+    this.#lastHeard = now;
     const running = this.#modules.get(testModule.id);
     this.#modules.set(testModule.id, {
       testModule,
@@ -451,6 +460,7 @@ export default class StallReporter implements Reporter {
   }
 
   #heardFrom(testModule: ReportedModule, now = Date.now()): void {
+    this.#lastHeard = now;
     const running = this.#modules.get(testModule.id);
     if (running !== undefined) {
       running.heard = now;
@@ -488,6 +498,7 @@ export default class StallReporter implements Reporter {
    * or not any of its events arrived.
    */
   #moduleDone(testModule: ReportedModule): void {
+    this.#lastHeard = Date.now();
     this.#modules.delete(testModule.id);
     this.#recover(testModule);
     for (const [id, { testCase }] of this.#cases) {
@@ -545,6 +556,17 @@ export default class StallReporter implements Reporter {
       ) {
         return `${moduleName(testModule)} has reported nothing for ${seconds(now - heard)}, longer than any of its tests may take`;
       }
+    }
+    // No file runs, yet the run hasn't ended: whatever keeps it from
+    // ending is outside every test. Between files that lasts a moment.
+    const lastHeard = this.#lastHeard;
+    if (
+      this.#modules.size === 0 &&
+      this.#cases.size === 0 &&
+      lastHeard !== undefined &&
+      now - lastHeard > graceMs
+    ) {
+      return `no file has run for ${seconds(now - lastHeard)}, and the run hasn't ended: it hangs outside any test, after its files ended (a worker's teardown after its file)`;
     }
     return undefined;
   }
