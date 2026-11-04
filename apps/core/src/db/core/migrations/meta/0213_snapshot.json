@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "edd0e5af-30d6-4963-a1e1-15e4e0d95272",
+  "id": "8912d525-8c44-4956-9e58-325dc6b91790",
   "prevId": "2eff0f57-ac10-4218-a7c3-49d3ef78fbd6",
   "tables": {
     "access_revocations": {
@@ -4445,6 +4445,82 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "dependency_approvers": {
+      "name": "dependency_approvers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject_type": {
+          "name": "subject_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "granted_by": {
+          "name": "granted_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "granted_at": {
+          "name": "granted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_by": {
+          "name": "revoked_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "dependency_approvers_live_idx": {
+          "name": "dependency_approvers_live_idx",
+          "columns": [
+            "subject_type",
+            "subject_id"
+          ],
+          "isUnique": true,
+          "where": "status = 'active'"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "dependency_build_leases": {
       "name": "dependency_build_leases",
       "columns": {
@@ -4799,6 +4875,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "scanned_at": {
+          "name": "scanned_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "advisories_noticed": {
           "name": "advisories_noticed",
           "type": "text",
@@ -4849,6 +4932,14 @@
           "name": "dependency_requests_malware_idx",
           "columns": [
             "malware_checked_at",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "dependency_requests_scan_idx": {
+          "name": "dependency_requests_scan_idx",
+          "columns": [
+            "scanned_at",
             "status"
           ],
           "isUnique": false

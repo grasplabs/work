@@ -1244,27 +1244,38 @@ const tellChat = async (
 };
 
 /**
- * Why a write of `by`'s on `subject` found nothing to change, read from
- * the database as the write read it: they no longer build it, or were
- * demoted or removed (`dependency.forbidden`); a decision's App was
- * archived (`app.archived`); or what they reviewed changed
- * (`dependency.stale`).
+ * What a write of `by`'s on `subject` needs of them and the subject, read
+ * in the write's own batch, before it, so it sees exactly what the write
+ * saw: whether they build it, and whether it is archived. One row,
+ * whatever became of the request.
  */
-const whyNotWritten = async (
-  env: Env,
+const standingStatement = (
+  db: DrizzleD1Database,
   by: Identity,
-  subject: DependencySubject,
+  subject: DependencySubject
+) =>
+  db
+    .select({
+      builds: sql<number>`${buildsSubjectSql(by.userId, subject)}`,
+      archived: sql<number>`${archivedSql(subject)}`,
+    })
+    .from(sql`(SELECT 1) AS one`);
+
+/**
+ * Why a write found nothing to change, from what its batch read
+ * (`standingStatement`): `by` no longer builds the subject, or was demoted
+ * or removed (`dependency.forbidden`); a decision's App was archived
+ * (`app.archived`); or what they reviewed changed (`dependency.stale`).
+ */
+const whyNotWritten = (
+  standing: { builds: number; archived: number } | undefined,
   /** A decision, which an archived App refuses too. */
   deciding: boolean
-): Promise<Error> => {
-  // As the write read it: the database, never the session's role.
-  const now = await drizzle(env.DB).get<{ builds: number; archived: number }>(
-    sql`SELECT ${buildsSubjectSql(by.userId, subject)} AS builds, ${archivedSql(subject)} AS archived`
-  );
-  if (now.builds === 0) {
+): Error => {
+  if (standing === undefined || standing.builds === 0) {
     return dependencyErrors.create("dependency.forbidden");
   }
-  if (deciding && now.archived !== 0) {
+  if (deciding && standing.archived !== 0) {
     return appErrors.create("app.archived");
   }
   return dependencyErrors.create("dependency.stale");
@@ -1296,7 +1307,8 @@ const decide = async (
   }
   const status = approved ? "approved" : "denied";
   const db = drizzle(env.DB);
-  const [[decided]] = await auditedBatch(env, db, [
+  const [[standing], [decided]] = await auditedBatch(env, db, [
+    standingStatement(db, by, subject),
     db
       .update(dependencyRequests)
       .set({
@@ -1333,7 +1345,7 @@ const decide = async (
     ...unusedLockStatements(db, subject),
   ]);
   if (!decided) {
-    throw await whyNotWritten(env, by, subject, true);
+    throw whyNotWritten(standing, true);
   }
   await tellChat(env, decided, status);
   return await toRequest(env, decided);
@@ -1938,7 +1950,8 @@ const end = async (
   const reviewedIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
   const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${buildsSubjectSql(by.userId, subject)}`;
   const status: Row["status"] = ending;
-  const [, ended] = await auditedBatch(env, db, [
+  const [[standing], , ended] = await auditedBatch(env, db, [
+    standingStatement(db, by, subject),
     outboxedEventWhere(db, event, lands),
     db
       .update(dependencyRequests)
@@ -1974,7 +1987,7 @@ const end = async (
     ...unusedLockStatements(db, subject),
   ]);
   if (ended.length !== ids.length) {
-    throw await whyNotWritten(env, by, subject, false);
+    throw whyNotWritten(standing, false);
   }
   // Landed: the answer is what the batch returned, and reading names
   // can't turn it into a failure.

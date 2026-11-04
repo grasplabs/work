@@ -1072,12 +1072,15 @@ describe("dependency approval", () => {
 
   it("decides in one write: leaving the organization, being unshared or demoted, the App archived, a replacement or a policy change just before it lands refuses it", async () => {
     const admin = await personApi("admin");
+    interface Raced {
+      approver: Person;
+      builder: Person;
+      app: string;
+    }
     const racedBy = async (
-      first: (raced: {
-        approver: Person;
-        builder: Person;
-        app: string;
-      }) => Promise<unknown>
+      first: (raced: Raced) => Promise<unknown>,
+      /** Just after the decision's write: before anything reads after it. */
+      then?: (raced: Raced) => Promise<unknown>
     ) => {
       const { builder, app } = await builderWithApp();
       // A co-builder decides, so the owner can still act on the App.
@@ -1092,12 +1095,21 @@ describe("dependency approval", () => {
       const { policyGeneration } = await approver.api.dependencies.waiting();
       // After the decision's own checks passed, just before its write.
       let raced = false;
-      const db = racingDb(async () => {
-        if (!raced) {
-          raced = true;
-          await first({ approver, builder, app });
+      let followed = false;
+      const db = racingDb(
+        async () => {
+          if (!raced) {
+            raced = true;
+            await first({ approver, builder, app });
+          }
+        },
+        async () => {
+          if (!followed) {
+            followed = true;
+            await then?.({ approver, builder, app });
+          }
         }
-      });
+      );
       let result = "";
       const events = await auditedDuring(async () => {
         result = await outcome(
@@ -1151,6 +1163,19 @@ describe("dependency approval", () => {
     const replaced = await racedBy(async ({ builder, app }) => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
     });
+    // Replaced just before the write, and unshared just after it: refused
+    // for what the write saw, never for what changed after.
+    const replacedThenUnshared = await racedBy(
+      async ({ builder, app }) => {
+        await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
+      },
+      async ({ approver, builder, app }) => {
+        await builder.api.apps.members.remove(app, {
+          type: "person",
+          id: approver.userId,
+        });
+      }
+    );
     const policyChanged = await racedBy(async () => {
       const impact = await elsewhere.api.dependencies.impact(ended.id);
       await elsewhere.api.dependencies.retire(ended.id, {
@@ -1176,6 +1201,7 @@ describe("dependency approval", () => {
       demoted,
       archived,
       replaced,
+      replacedThenUnshared,
       policyChanged,
     }).toStrictEqual({
       removedFromOrganization: forbidden,
@@ -1188,6 +1214,12 @@ describe("dependency approval", () => {
         refused: [],
       },
       replaced: {
+        result: "dependency.stale",
+        status: "gone",
+        ...nothing,
+        refused: [],
+      },
+      replacedThenUnshared: {
         result: "dependency.stale",
         status: "gone",
         ...nothing,

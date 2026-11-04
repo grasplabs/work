@@ -20,6 +20,7 @@ const leftOpen = new Set([
   "workflow_resource_run_controls",
   "sdk_release_pins",
   "sdk_release_tombstones",
+  "dependency_approvers",
 ]);
 
 /**

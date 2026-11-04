@@ -2687,7 +2687,7 @@ export const dependencyRequests = sqliteTable(
     endedReason: text("ended_reason"),
     /**
      * Read and written by nothing: replaced by `scanned_at`, and dropped,
-     * with its index, by the follow-up of expand then contract.
+     * with its index, by GRA-1547 (expand, then contract).
      */
     malwareCheckedAt: timestamp("malware_checked_at"),
     /**
@@ -2791,6 +2791,30 @@ export const dependencyPolicy = sqliteTable("dependency_policy", {
   id: text().primaryKey(),
   generation: integer().notNull(),
 });
+
+/**
+ * Who held `dependencies.approve`, which builders' own approval replaced
+ * (GRA-1525): read and written by nothing. Kept so code still running
+ * during a deploy finds it; GRA-1547 drops it (expand, then contract).
+ */
+export const dependencyApprovers = sqliteTable(
+  "dependency_approvers",
+  {
+    id: text().primaryKey(),
+    subjectType: text("subject_type", { enum: ["person", "team"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("dependency_approvers_live_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`status = 'active'`),
+  ]
+);
 
 /**
  * The exact lock (`grasp.lock.json`) the resolver produced for one of an
