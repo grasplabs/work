@@ -768,6 +768,8 @@ export interface Turn {
   scope: Omit<AgentScope, "runId">;
   runs: CodeRuns;
   loader: WorkerLoader;
+  /** Core's static assets, where Grasp's reference is (build-reference.ts). */
+  assets: Fetcher;
   /** Where code runs on-prem, or nowhere but `loader` (`sessionHost`). */
   sandbox?: () => Fetcher | undefined;
   /** Each code run's wall-clock limit (`codeTimeoutMs`). */
@@ -1318,6 +1320,7 @@ export const runTurn = async ({
   scope,
   runs,
   loader,
+  assets,
   sandbox,
   codeTimeoutMs,
   recallFirst,
@@ -1350,7 +1353,7 @@ export const runTurn = async ({
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
-    ...dedicatedTools({ apis, scope, runs }, history),
+    ...dedicatedTools({ apis, scope, runs, assets }, history),
     ...(thinkingTool === undefined ? [] : [thinkingTool]),
     // Only in Grasp's own chat, where the questions take the composer's
     // place; a chat app's chat asks in words.

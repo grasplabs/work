@@ -144,6 +144,13 @@ const guessed = registration.replace(
   '{ cards: "appMembers" }'
 );
 
+/** The board's operations with a type error on their line 15. */
+const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
+
+/** Code that calls the draft of `app`'s `cards.list`, and nothing more. */
+const calling = (app: string) =>
+  `export default async (self, env) => await env.build.call(${JSON.stringify(app)}, "cards.list", {});`;
+
 /** Code that checks the draft of `app` and calls its `cards.list`. */
 const checking = (app: string) => `export default async (self, env) => {
   const check = await env.build.check(${JSON.stringify(app)});
@@ -196,7 +203,15 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       toolStep("readFile", { path: "@grasp-os/sdk/src/nothing.ts" }),
       toolStep("writeFile", { app: app.id, files }),
       codeStep(checking(app.id)),
-      toolStep("writeFile", { app: app.id, files: { "app.ts": registration } }),
+      toolStep("writeFile", {
+        app: app.id,
+        files: { "app.ts": registration, "operations/cards.ts": mistyped },
+      }),
+      codeStep(calling(app.id)),
+      toolStep("writeFile", {
+        app: app.id,
+        files: { "operations/cards.ts": operations },
+      }),
       codeStep(checking(app.id)),
       says("The board is drafted.")
     );
@@ -209,7 +224,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
 
     const tools = await toolResults(stub, chat.id);
     const [sdk, blueprint, search, missing] = tools;
-    const [guess, fixed] = await codeResults(stub, chat.id);
+    const [guess, typed, fixed] = await codeResults(stub, chat.id);
     const drafts = await builder.api.chats.drafts(chat.id);
     expect({
       sdk: sdk?.text.includes("export interface AppDefinition<"),
@@ -249,6 +264,16 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       diagnostics: [{ file: null, line: null, refused: true }],
       called: { ok: false, code: "version.inspection_failed", refused: true },
     });
+    // A type error, as the seal's build names it: its file and line.
+    const typeError = z
+      .object({ ok: z.literal(false), code: z.string(), message: z.string() })
+      .parse(returned(typed?.text));
+    expect({
+      code: typeError.code,
+      located: typeError.message
+        .split("\n")
+        .some((line) => line.startsWith("operations/cards.ts:15: ")),
+    }).toStrictEqual({ code: "version.build_failed", located: true });
     expect(returned(fixed?.text)).toStrictEqual({
       passed: true,
       server: "ok",

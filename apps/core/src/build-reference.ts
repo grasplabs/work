@@ -1,5 +1,4 @@
 import { referenceFiles } from "@grasp-os/compiler";
-import { env } from "cloudflare:workers";
 
 // What a chat's agent reads to write an App that checks: the SDK's and the
 // UI kit's sources exactly as App code is type-checked against them (the
@@ -17,12 +16,13 @@ const blueprintsFolder = "blueprints/";
  * `@grasp-os/ui/src/components/card.tsx`, `blueprints/board-page/app.ts`.
  * The platform's own text, never anyone's data.
  */
-export const buildReference = async (): Promise<
-  Readonly<Record<string, string>>
-> => {
+export const buildReference = async (
+  /** Core's static assets, where the compiler's release is. */
+  assets: Fetcher
+): Promise<Readonly<Record<string, string>>> => {
   // Loaded only when read: a chat that never builds never loads them.
   const [sources, { default: blueprints }] = await Promise.all([
-    referenceFiles(env.ASSETS),
+    referenceFiles(assets),
     import("#blueprints"),
   ]);
   return {
