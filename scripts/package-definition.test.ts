@@ -189,7 +189,6 @@ const definitionOf = (
       provenance: {
         manifestHash: hash("1"),
         definitionHash: hash("2"),
-        evaluatorHash: hash("3"),
         buildHash: hash("4"),
         profile: "grasp-open-workflow/1",
       },

@@ -507,7 +507,7 @@ export const editWorkflowDraft = async (
   const built = await checkModules(env, workflow.id, expectedRevision, modules);
   const problems = boundedProblems([
     ...built.problems,
-    ...(await definitionProblems(env, by, workflow, source, built.contracts)),
+    ...(await definitionProblems(env, source, built.contracts)),
   ]);
   const { inspection } = built;
   const kept =

@@ -306,9 +306,9 @@ const createShippedWorkflows = async (
   // workflow is made: a creation counts toward the creator's quota for
   // good, deleted or not, so none is made for a definition that wouldn't
   // publish.
-  for (const { name, definition } of named) {
+  for (const { definition } of named) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const problems = await definitionProblems(env, by, { name }, definition);
+    const problems = await definitionProblems(env, definition);
     if (problems.length > 0) {
       throw workflowResourceErrors.create("workflow.definition_invalid", {
         // Each a code, a pointer and fixed text, as publication refuses it.

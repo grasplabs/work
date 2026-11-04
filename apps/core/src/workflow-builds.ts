@@ -5,14 +5,7 @@ import {
   packageModulePrefix,
   workflowSdkModules,
 } from "@grasp-os/compiler";
-import {
-  generatedPath,
-  generateWorkflow,
-  generatorVersion,
-  taskAtLine,
-} from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
-import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
@@ -35,6 +28,12 @@ import {
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
+import type { CheckedWorkflow } from "@grasp-os/workflow-schema/check";
+import {
+  generateWorkflow,
+  generatorVersion,
+  taskAtLine,
+} from "@grasp-os/workflow-schema/generate";
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
@@ -52,8 +51,9 @@ import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
-// its definition, validated at publication, lowered into SDK TypeScript
-// (@grasp-os/open-workflow's generate.ts), type-checked and compiled into
+// its definition, checked at publication, translated into TypeScript on
+// `@grasp-os/sdk/workflow` (@grasp-os/workflow-schema's generate.ts),
+// type-checked and compiled into
 // JavaScript by the App compiler, as App code is, and sealed with the
 // version: the original JSON, the generated code, the compiled module, the
 // expression table it names its expressions from, a source map and the SDK
@@ -85,9 +85,9 @@ import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 //   retention sweep never takes a reservation of a workflow version
 //   (release-retention.ts): versions are never deleted.
 // - Injection through the definition into code, and code reaching past
-//   the SDK: closed by the generator (literals only, expressions by
-//   number) and the compiler (generated code may import the open-workflow
-//   SDK alone); see generate.ts.
+//   the SDK: closed by the generator (literals only, expressions printed
+//   from their checked syntax tree) and the compiler (generated code may
+//   import `@grasp-os/sdk/workflow` alone); see generate.ts.
 // - A load whose request is cancelled mid-read (workerd never settles it)
 //   holds every later load of that version in the isolate, or a load that
 //   failed or ran on past its time is served as verified: loads of one
@@ -622,13 +622,14 @@ export interface CompiledBuild {
 
 /**
  * Compiles `checked` (published as `definition`, its exact text) into a
- * build: generated, built in the compiler's isolate and hashed, nothing
- * stored yet. A definition with constructs the generator doesn't lower
- * makes a build that isn't executable, naming them. Generated code that
- * doesn't build is the platform's fault, never the definition's: it is
- * logged and refused (`workflow.build_failed`), and nothing is published.
- * The workflow's own compute modules (`compiled`, workflow-modules.ts),
- * already built and inspected, are sealed with it.
+ * build of workflow `whose`: generated (@grasp-os/workflow-schema's
+ * generate.ts), built in the compiler's isolate and hashed, nothing stored
+ * yet. Every checked document generates: the format has nothing the
+ * generator doesn't lower. Generated code that doesn't build is the
+ * platform's fault, never the definition's: it is logged and refused
+ * (`workflow.build_failed`), and nothing is published. The workflow's own
+ * compute modules (`compiled`, workflow-modules.ts), already built and
+ * inspected, are sealed with it.
  */
 export const compileWorkflow = async (
   env: Env,
@@ -638,20 +639,7 @@ export const compileWorkflow = async (
   whose: string,
   compiled?: CompiledModules
 ): Promise<CompiledBuild> => {
-  const generated = generateWorkflow(checked);
-  if (!generated.ok) {
-    return {
-      build: {
-        executable: false,
-        unsupported: generated.unsupported.map((construct) => ({
-          pointer: construct.pointer,
-          taskId: construct.taskId ?? null,
-          feature: construct.feature,
-        })),
-      },
-      bytes: new Map(),
-    };
-  }
+  const generated = generateWorkflow(checked, whose);
   // A build that runs past the build wait, or whose isolate gave up (its
   // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
   // a crash, its deadline, never cached, screens.ts), is the platform's to
@@ -682,7 +670,7 @@ export const compileWorkflow = async (
   }
   if (!built.ok) {
     const [first] = built.diagnostics;
-    // In the definition's terms: the task whose generated code the first
+    // In the definition's terms: the step whose generated code the first
     // diagnostic is in, by its JSON Pointer and ID.
     const task =
       first?.line === undefined
@@ -703,98 +691,31 @@ export const compileWorkflow = async (
   const sdk = await workflowSdkModules(env.ASSETS);
   const texts = new Map<string, string>([
     [definitionArtifact, definition],
-    [generatedPath, generated.source],
+    [openWorkflowEntry, generated.source],
     [
       tasksArtifact,
-      canonicalJson({
-        tasks: generated.tasks.map(
-          ({
-            id,
-            kind,
-            pointer,
-            milliseconds,
-            duration,
-            call,
-            listen,
-            run,
-            error,
-            catch: handler,
-            inputFrom,
-            outputAs,
-            exportAs,
-            timeoutMs,
-            steps,
-            schemas,
-            scope,
-            branches,
-            loop,
-            fork,
-          }) => ({
-            id,
-            kind,
-            pointer,
-            steps,
-            scope: [...scope],
-            branches: [...branches],
-            ...(loop === undefined
-              ? {}
-              : { loop: z.json().parse(structuredClone(loop)) }),
-            ...(fork === undefined ? {} : { fork: { ...fork } }),
-            // The SDK's descriptors and the templates, as the plain JSON
-            // they are.
-            schemas: z.json().parse(structuredClone(schemas)),
-            ...(milliseconds === undefined ? {} : { milliseconds }),
-            ...(duration === undefined
-              ? {}
-              : { duration: z.json().parse(structuredClone(duration)) }),
-            ...(call === undefined
-              ? {}
-              : { call: z.json().parse(structuredClone(call)) }),
-            ...(listen === undefined
-              ? {}
-              : { listen: z.json().parse(structuredClone(listen)) }),
-            ...(run === undefined
-              ? {}
-              : { run: z.json().parse(structuredClone(run)) }),
-            ...(error === undefined
-              ? {}
-              : { error: z.json().parse(structuredClone(error)) }),
-            ...(handler === undefined
-              ? {}
-              : { catch: z.json().parse(structuredClone(handler)) }),
-            ...(inputFrom === undefined
-              ? {}
-              : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
-            ...(outputAs === undefined
-              ? {}
-              : { outputAs: z.json().parse(structuredClone(outputAs)) }),
-            ...(exportAs === undefined
-              ? {}
-              : { exportAs: z.json().parse(structuredClone(exportAs)) }),
-            ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      // The table as the plain JSON it is, read back by `tasksFileSchema`.
+      canonicalJson(
+        z.json().parse(
+          structuredClone({
+            tasks: generated.tasks,
+            expressions: generated.expressions,
+            workflow: generated.workflow,
+            params: generated.params,
+            limits: generated.limits,
           })
-        ),
-        expressions: generated.expressions.map((expression) =>
-          z.json().parse(
-            structuredClone({
-              ...expression,
-              loopVariables: [...expression.loopVariables],
-            })
-          )
-        ),
-        workflow: { ...generated.workflow },
-        params: [...generated.params],
-        limits: { ...generated.limits },
-      }),
+        )
+      ),
     ],
     [
       sourceMapArtifact,
       canonicalJson({
-        generated: generatedPath,
-        tasks: generated.tasks.map(({ id, pointer, line }) => ({
-          id,
+        generated: openWorkflowEntry,
+        tasks: generated.spans.map(({ taskId, pointer, from, to }) => ({
+          id: taskId,
           pointer,
-          line,
+          from,
+          to,
         })),
       }),
     ],
@@ -1298,7 +1219,7 @@ const verifiedBuild = async (
       computeText = text;
     } else if (entry.path === tasksArtifact) {
       tasksText = text;
-    } else if (entry.path === generatedPath) {
+    } else if (entry.path === openWorkflowEntry) {
       source = text;
     }
   }

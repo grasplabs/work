@@ -160,7 +160,6 @@ export const definitionPackageSchema = z.strictObject({
         manifestHash: sha256Schema.nullable(),
         /** The SHA-256 of `workflow.json` as exported. */
         definitionHash: sha256Schema,
-        evaluatorHash: sha256Schema,
         /** The build's identity, null when anything was withheld, as above. */
         buildHash: sha256Schema.nullable(),
         profile: z.string().min(1).max(128),

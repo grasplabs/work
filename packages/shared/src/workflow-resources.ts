@@ -118,11 +118,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.name_busy":
     "What names the deleted workflow kept changing while its name was released. Try again in a moment.",
   "workflow.definition_invalid":
-    "The workflow definition doesn't pass the grasp-open-workflow/1 profile.",
-  "workflow.identity_mismatch":
-    "The definition names another workflow than this one: its namespace and name must be the workflow's own.",
-  "workflow.version_exists":
-    "This workflow already has a version with this semantic version and different content: give the new one a version of its own.",
+    "The workflow definition isn't a valid grasp-workflow/1 document.",
   "workflow.version_conflict":
     "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
@@ -134,8 +130,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
-  "workflow.evaluator_changed":
-    "This version was published for an expression evaluator the platform no longer runs, so its runs can't evaluate as it was published. Publish it again as a new version.",
   "workflow.build_failed":
     "The code generated from this definition didn't build, so it wasn't published. Report it to Grasp.",
   "workflow.build_slow":
