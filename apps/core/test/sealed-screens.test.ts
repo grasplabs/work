@@ -22,7 +22,13 @@ import {
 } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { frameDocument, loadFrame, pathOf, routed } from "./screen-frames.ts";
+import {
+  frameDocument,
+  loadFrame,
+  moduleKeyOf,
+  pathOf,
+  routed,
+} from "./screen-frames.ts";
 import { artifactKey, failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -132,10 +138,6 @@ const published = async () => {
 /** Where a build's frame manifest is staged in R2. */
 const manifestKey = frameKey;
 
-/** Where a module an import map names is staged in R2. */
-const moduleKeyOf = (address: string): string =>
-  `screen-modules/${new URL(address).pathname.split("/").at(-1) ?? ""}`;
-
 /** The sha384 Subresource Integrity of `served`, as a browser checks it. */
 const sha384 = async (served: string | Uint8Array): Promise<string> =>
   `sha384-${toBase64(
@@ -170,7 +172,7 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
 
     expect({
       artifact: bundle.artifact === sealed.artifact,
-      entry: frame?.screen.entry,
+      entry: frame?.entry,
       // What the frame loads is what was sealed, module for module.
       modules: Object.keys(frame?.modules ?? {}).toSorted(),
       // Nothing was compiled for it: the cache a build fills is still empty.
@@ -325,7 +327,7 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuses a staged module whose code and name were both changed, however it is named", async () => {
+  it("refuses a staged module whose code and what core stored beside it were both changed", async () => {
     const { builder, app } = await published();
     const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
     const [, address] = Object.entries(frame?.addresses ?? {}).find(([named]) =>
@@ -333,7 +335,7 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
     ) ?? ["", ""];
 
     await env.FILES.put(moduleKeyOf(address), "export default 1;", {
-      customMetadata: { name: "app~elsewhere" },
+      customMetadata: { mac: "AAAA" },
     });
 
     const { status } = await served(pathOf(address));
@@ -344,13 +346,16 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app } = await published();
     const bundle = await builder.api.screens.open(app, "desk");
     const frame = await loadFrame(bundle);
-    const [name, address] = Object.entries(frame?.addresses ?? {}).find(
-      ([named]) => named.startsWith("app~")
+    const [, address] = Object.entries(frame?.addresses ?? {}).find(([named]) =>
+      named.startsWith("app~")
     ) ?? ["", ""];
     const huge = new Uint8Array(frameObjectMaxBytes + 1);
 
     const key = moduleKeyOf(address);
-    await env.FILES.put(key, huge, { customMetadata: { name } });
+    const kept = await env.FILES.head(key);
+    await env.FILES.put(key, huge, {
+      customMetadata: kept?.customMetadata ?? {},
+    });
     const module = await served(pathOf(address));
     const moduleKept = await env.FILES.head(key);
 
@@ -367,6 +372,7 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
         entry: "app~huge",
         runtime: "app~huge",
         modules: { "app~huge": "x".repeat(frameObjectMaxBytes + 1) },
+        addresses: { "app~huge": "d".repeat(64) },
         kit: {},
         css: "",
       });
@@ -394,6 +400,7 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
       entry: "app~bom",
       runtime: "app~bom",
       modules: { "app~bom": bom, "app~surrogate": surrogate },
+      addresses: { "app~bom": "1".repeat(64), "app~surrogate": "2".repeat(64) },
       kit: {},
       css: "",
     };
@@ -468,11 +475,11 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
         status: edited.status,
         cache: edited.headers.get("cache-control"),
       },
-      reopened: reopened?.screen.entry,
+      reopened: reopened?.entry,
     }).toStrictEqual({
       moved: { status: 404, cache: "no-store" },
       edited: { status: 404, cache: "no-store" },
-      reopened: deskFrame?.screen.entry,
+      reopened: deskFrame?.entry,
     });
   });
 

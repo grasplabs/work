@@ -1,6 +1,6 @@
 import type {
   PreviewApplied,
-  PreviewPart,
+  PreviewLoad,
   ScreenBridge,
   Theme,
 } from "@grasp-os/sdk/screen-runtime";
@@ -101,7 +101,7 @@ export interface FrameTarget {
    * screen's target has none, and nothing is ever sent to its frame.
    */
   followUpdates?: (
-    toFrame: (part: PreviewPart) => Promise<PreviewApplied>
+    toFrame: (load: PreviewLoad) => Promise<PreviewApplied>
   ) => void;
 }
 
@@ -125,15 +125,15 @@ const isFrameCallback = (value: unknown): value is RpcStub<FrameCallback> =>
 const isThemeCallback = (value: unknown): value is RpcStub<ThemeCallback> =>
   value instanceof RpcStub;
 
-type PartReceiver = (part: PreviewPart) => Promise<unknown>;
+type LoadReceiver = (load: PreviewLoad) => Promise<unknown>;
 
 /** A stub the frame passed for its receiver of a preview's updates. */
-const isPartReceiver = (value: unknown): value is RpcStub<PartReceiver> =>
+const isLoadReceiver = (value: unknown): value is RpcStub<LoadReceiver> =>
   value instanceof RpcStub;
 
-/** What a frame may answer a part of an update with. */
+/** What a frame may answer a version of its screen with. */
 const previewAnswers: ReadonlySet<unknown> = new Set<PreviewApplied>([
-  "more",
+  "broken",
   "applied",
   "failed",
   "reset",
@@ -540,18 +540,18 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
    * frame's word, read as one of the answers it may give, never more:
    * the page decides what the frame is handed (preview-updates.ts).
    */
-  refresh(onPart: unknown): void {
+  refresh(onLoad: unknown): void {
     const follow = this.#target.followUpdates;
-    if (this.#refreshed || follow === undefined || !isPartReceiver(onPart)) {
+    if (this.#refreshed || follow === undefined || !isLoadReceiver(onLoad)) {
       return;
     }
     this.#refreshed = true;
-    const toFrame = onPart.dup();
+    const toFrame = onLoad.dup();
     this.#cleanups.push(() => {
       toFrame[Symbol.dispose]();
     });
-    follow(async (part) => {
-      const answer: unknown = await toFrame(part);
+    follow(async (load) => {
+      const answer: unknown = await toFrame(load);
       return isPreviewAnswer(answer) ? answer : "refused";
     });
   }

@@ -1,6 +1,9 @@
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { env, exports } from "cloudflare:workers";
+import { z } from "zod";
+
+import { frameKey } from "../src/screen-frame.ts";
 
 // What a browser loads for a screen's frame, through core's own routes:
 // the frame's document for a build, its policy, and each module it names.
@@ -52,11 +55,17 @@ export interface LoadedFrame {
   status: number;
   /** The frame's policy, by directive. */
   policy: Map<string, string[]>;
-  /** What the document says it runs. */
+  /** What the document says it runs: `entry` is its screen module's address. */
   screen: { artifact: string; entry: string; runtime: string; css: string };
-  /** Each module the import map names, by name, with the code its address serves. */
+  /** The screen's module, by name. */
+  entry: string;
+  /**
+   * Each module it loads, by name, with the code its address serves: the
+   * kit's its import map names, and the App's, which import each other
+   * by address beside the screen's own.
+   */
   modules: Record<string, string>;
-  /** The import map's addresses, by name. */
+  /** Each module's address, by name. */
   addresses: Record<string, string>;
   /** The import map's Subresource Integrity, by address. */
   integrity: Record<string, string>;
@@ -87,6 +96,44 @@ export const frameDocument = async (
   return await routed(`${screenFramePath}?${query}`);
 };
 
+/**
+ * The App's modules of the build `artifact` staged, by name, as their
+ * addresses: what its frame's document names only by the screen's own,
+ * read from the manifest core staged.
+ */
+const stagedAppModules = async (
+  artifact: string
+): Promise<Record<string, string>> => {
+  const stored = await env.FILES.get(frameKey(artifact));
+  const manifest: unknown = await stored?.json();
+  const app: unknown =
+    typeof manifest === "object" && manifest !== null && "app" in manifest
+      ? manifest.app
+      : {};
+  return z.record(z.string(), z.string()).parse(app);
+};
+
+const modulePathPattern =
+  /^\/screen-modules\/(?<scope>[^/]+)\/(?<token>[^/]+)\/(?<hash>[^/]+)\.js$/u;
+
+/** A module's address, `/screen-modules/<scope>/<token>/<hash>.js`, in parts. */
+export const modulePartsOf = (
+  address: string
+): { scope: string; token: string; hash: string } => {
+  const {
+    scope = "",
+    token = "",
+    hash = "",
+  } = modulePathPattern.exec(new URL(address).pathname)?.groups ?? {};
+  return { scope, token, hash };
+};
+
+/** Where a module is staged in R2, from its address. */
+export const moduleKeyOf = (address: string): string => {
+  const { scope, hash } = modulePartsOf(address);
+  return `screen-modules/${scope}/${hash}.js`;
+};
+
 /** A path and query of an absolute address, as core is asked for it. */
 export const pathOf = (address: string): string => {
   const { pathname, search } = new URL(address);
@@ -115,9 +162,19 @@ export const loadFrame = async (
   // SAFETY: as above, core's own document.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const screen = jsonIn(screenPattern, html) as LoadedFrame["screen"];
+  // The App's modules, which import each other by address beside the
+  // screen's own, by the names core staged them under.
+  const addresses = {
+    ...imports,
+    ...Object.fromEntries(
+      Object.entries(await stagedAppModules(framed.artifact)).map(
+        ([name, address]) => [name, new URL(`${address}.js`, screen.entry).href]
+      )
+    ),
+  };
   const modules = Object.fromEntries(
     await Promise.all(
-      Object.entries(imports).map(async ([name, address]) => {
+      Object.entries(addresses).map(async ([name, address]) => {
         const served = await routed(pathOf(address));
         return [name, await served.text()] as const;
       })
@@ -132,12 +189,16 @@ export const loadFrame = async (
       )
       .map(async ({ groups }) => await hashSource(groups?.text ?? ""))
   );
+  const [entry = ""] =
+    Object.entries(addresses).find(([, address]) => address === screen.entry) ??
+    [];
   return {
     status: response.status,
     policy: policyOf(response),
     screen,
+    entry,
     modules,
-    addresses: imports,
+    addresses,
     integrity,
     inline,
   };

@@ -172,11 +172,11 @@ describe("what a screen loads", { timeout: 60_000 }, () => {
       ),
     }).toStrictEqual({
       small: {
-        modules: [small.screen.entry],
+        modules: [small.entry],
         specialist: specialist.map(() => false),
       },
       heavy: {
-        modules: [heavy.screen.entry],
+        modules: [heavy.entry],
         specialist: specialist.map(() => true),
       },
       empty: [],

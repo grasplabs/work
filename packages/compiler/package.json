@@ -36,6 +36,7 @@
     "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
+    "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "eslint": "catalog:",
     "eslint-plugin-import-x": "catalog:",

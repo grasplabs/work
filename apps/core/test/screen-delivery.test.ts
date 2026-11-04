@@ -21,7 +21,12 @@ import { classifyOutput } from "../src/data-policy-rpc.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
+import {
+  appModulesOf,
+  kitModulesOf,
+  loadFrame,
+  modulePartsOf,
+} from "./screen-frames.ts";
 import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
@@ -544,10 +549,16 @@ describe("screen delivery", { timeout: 60_000 }, () => {
           canonicalJson({
             profile: "production",
             code: {
-              entry: frame.screen.entry,
+              entry: frame.entry,
               runtime: frame.screen.runtime,
               modules: Object.fromEntries(
                 appModulesOf(frame).map((name) => [name, frame.modules[name]])
+              ),
+              addresses: Object.fromEntries(
+                appModulesOf(frame).map((name) => [
+                  name,
+                  modulePartsOf(frame.addresses[name] ?? "").hash,
+                ])
               ),
               kit: kitModulesOf(frame),
               css: frame.screen.css,

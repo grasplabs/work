@@ -23,6 +23,7 @@ import {
   frameDocument,
   kitModulesOf,
   loadFrame,
+  modulePartsOf,
   pathOf,
   policyOf,
   routed,
@@ -192,16 +193,20 @@ const frameStatus = async (framed: Framed): Promise<number> => {
   return response.status;
 };
 
-/** The token an address of an import map carries. */
-const tokenOf = (address: string): string =>
-  new URL(address).searchParams.get("token") ?? "";
+/** The token a module's address carries. */
+const tokenOf = (address: string): string => modulePartsOf(address).token;
 
-/** An address of an import map without its token. */
-const without = (address: string): string => new URL(address).pathname;
+/** A module's address without its token. */
+const without = (address: string): string => {
+  const { scope, hash } = modulePartsOf(address);
+  return `/screen-modules/${scope}/${hash}.js`;
+};
 
-/** An address of an import map with `token` in place of its own. */
-const withToken = (address: string, token: string): string =>
-  `${without(address)}?${new URLSearchParams({ token }).toString()}`;
+/** A module's address with `token` in place of its own. */
+const withToken = (address: string, token: string): string => {
+  const { scope, hash } = modulePartsOf(address);
+  return `/screen-modules/${scope}/${token}/${hash}.js`;
+};
 
 /** Runs the clock's sweep at `ahead` until it has read everything once. */
 const sweptAt = async (ahead: number): Promise<void> => {
@@ -280,7 +285,7 @@ describe("screens", { timeout: 60_000 }, () => {
       version: bundle.version,
       frame: frame.screen.artifact,
       runtime: frame.screen.runtime,
-      entry: appModulesOf(frame).includes(frame.screen.entry),
+      entry: appModulesOf(frame).includes(frame.entry),
       kit: {
         runtime: Object.hasOwn(kit, frame.screen.runtime),
         hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/sdk/screen")),
@@ -393,7 +398,9 @@ describe("screens", { timeout: 60_000 }, () => {
     if (frame === null) {
       throw new Error("An opened screen has a frame");
     }
-    const [first, second] = Object.values(frame.addresses);
+    // A kit module, and the screen's own, each under its scope's token.
+    const [first] = Object.values(frame.addresses);
+    const second = frame.addresses[frame.entry];
     if (first === undefined || second === undefined) {
       throw new Error("The screen loads modules");
     }

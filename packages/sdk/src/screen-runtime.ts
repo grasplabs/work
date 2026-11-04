@@ -25,7 +25,7 @@ import { createRoot } from "react-dom/client";
 import { clientInternals, GraspClient } from "./client-core.ts";
 import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
-import { appModuleAddresses, calledByApp } from "./console-origin.ts";
+import { calledByApp } from "./console-origin.ts";
 import { portFileTransport } from "./file-port.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import { portLinkTransport } from "./link-port.ts";
@@ -127,43 +127,40 @@ export interface ScreenBridge {
   /**
    * A chat's preview's frame alone (preview-runtime.ts): hands the page
    * the frame's receiver of its draft's updates, which the page calls
-   * with each part of each update in turn. Once per frame; a live
+   * with each version of the screen in turn. Once per frame; a live
    * screen's page never calls it.
    */
-  refresh: (onPart: (part: PreviewPart) => Promise<PreviewApplied>) => void;
+  refresh: (onLoad: (load: PreviewLoad) => Promise<PreviewApplied>) => void;
 }
 
 /**
- * One part of an update of a chat's preview: a run of the screen's new
- * module, in order, each part naming the whole it belongs to. The last
- * one (`part === parts - 1`) also carries the CSS of that revision. A
- * module comes in parts so no message on the frame's port is larger than
- * a call's answer may be.
+ * A version of a chat's preview's screen for its frame to import: the
+ * address of the screen's module among the frame's own (core's
+ * screen-frame.ts), and the CSS of that version.
  */
-export interface PreviewPart {
-  /** The draft's revision the module was built from. */
-  revision: number;
-  part: number;
-  parts: number;
-  code: string;
-  /** The whole module's UTF-8 bytes, counted, and their SHA-256 in hex. */
-  bytes: number;
-  sha256: string;
+export interface PreviewLoad {
+  /** The address of the screen's module. */
+  entry: string;
+  /**
+   * Which evaluation of the frame's modules to import it in: from 1 on,
+   * every module is evaluated afresh, once, as in no frame before, so
+   * code the frame ran before registers anew with Refresh.
+   */
+  visit: number;
   css: string;
 }
 
 /**
- * What the frame says of a part: `more` until the last; then `applied`
- * (its screen shows it), `failed` (it didn't evaluate or render, and the
- * screen shows the last version that did), `reset` (React Fast Refresh
- * can't go on in this frame: it needs a fresh start) or `refused` (not
- * an update the frame takes: a revision it is past, a broken sequence, or
- * bytes that aren't what the page said).
+ * What the frame says of a version: `applied` (its screen shows it),
+ * `failed` (it didn't evaluate: the screen shows what it showed),
+ * `broken` (it evaluated, and failed to render), `reset` (React Fast
+ * Refresh can't go on in this frame: it needs a fresh start) or `refused`
+ * (not a version as the page sends one).
  */
 export type PreviewApplied =
-  | "more"
   | "applied"
   | "failed"
+  | "broken"
   | "reset"
   | "refused";
 
@@ -608,8 +605,12 @@ export const reportProblem = (
   report({ kind, ...describe(value) });
 };
 
-/** Sends the screen's uncaught errors and `console.error` calls to the page. */
-const reportProblems = (): void => {
+/**
+ * Sends the screen's uncaught errors and `console.error` calls to the
+ * page: `screen` is the address of the screen's module, beside which
+ * every App module of the frame is (core's screen-frame.ts).
+ */
+const reportProblems = (screen: string): void => {
   addEventListener("error", (event) => {
     report({ kind: "error", ...describe(event.error ?? event.message) });
   });
@@ -617,11 +618,7 @@ const reportProblems = (): void => {
     report({ kind: "rejection", ...describe(event.reason) });
   });
   const logError = console.error.bind(console);
-  // Read once: the App's modules are those the document's import map
-  // names (`app~…`); a preview's updates are `data:` modules.
-  const appModules = appModuleAddresses(
-    document.querySelector('script[type="importmap"]')?.textContent ?? undefined
-  );
+  const appDirectory = new URL("./", screen).href;
   console.error = (...args: unknown[]) => {
     logError(...args);
     const [first] = args;
@@ -631,7 +628,7 @@ const reportProblems = (): void => {
     const fromApp = calledByApp(
       new Error("console.error called").stack ?? "",
       import.meta.url,
-      appModules
+      appDirectory
     );
     report({
       kind: fromApp ? "console" : "warning",
@@ -743,7 +740,7 @@ export const runScreen = async (
   hooks: ScreenHooks = {}
 ): Promise<void> => {
   const page = connectBridge(port);
-  reportProblems();
+  reportProblems(screen);
   const root = document.createElement("div");
   document.body.append(root);
   try {

@@ -202,8 +202,8 @@ const reader = <T>(keep: boolean, turns?: Turns) => {
 
 /**
  * Loader isolates' code, never kept (`reader`): the compiler's source is
- * 22 MB as a string, its kit 11 MB of types, and esbuild's WebAssembly 14
- * MB, while core's isolate has 128 MB for everything it does, the chat's
+ * 22 MB as a string, its kit 11 MB of types, and the package builder's
+ * esbuild WebAssembly 14 MB, while core's isolate has 128 MB for everything it does, the chat's
  * agent and the connections of the people on it included. Kept for good
  * in every isolate that ever built, they left too little for the rest,
  * and core ran out of memory (staging, November 2026). Only the Loader
@@ -224,9 +224,8 @@ const workerCodeRead = reader<WorkerLoaderWorkerCode>(false, platformCodeTurns);
 const wasmRead = reader<ArrayBuffer>(false);
 
 /**
- * esbuild's WebAssembly, as the compiler (for a preview's entries) and the
- * package builder both load it: one read shared by both while it runs,
- * as it is the largest file either reads.
+ * esbuild's WebAssembly, as the package builder loads it: one read shared
+ * by the builds that start at once, as it is the largest file it reads.
  */
 const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
   await wasmRead(
@@ -345,22 +344,15 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await workerCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kitJson, wasm] = await Promise.all([
+    const [source, kitJson] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
-      esbuildWasmOf(assets),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
       ...isolateSettings,
       mainModule: "compiler.js",
-      modules: {
-        "compiler.js": source,
-        [kitModule]: { json: kit },
-        // Compiled as the isolate loads; the isolate itself can't. What
-        // bundles a preview's entries (preview-entry.ts).
-        "esbuild.wasm": { wasm },
-      },
+      modules: { "compiler.js": source, [kitModule]: { json: kit } },
     };
   });
 
@@ -444,17 +436,15 @@ const platformCodeRead = reader<PlatformCode>(true, platformCodeTurns);
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await platformCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kit, wasm] = await Promise.all([
+    const [source, kit] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
-      esbuildWasmOf(assets),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
-        "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,

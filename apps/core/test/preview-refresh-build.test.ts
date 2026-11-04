@@ -53,7 +53,7 @@ const refreshMarkers = [
   "performReactRefresh",
   kitModuleName("@grasp-os/sdk/preview-refresh"),
   // The receiver of a preview's updates (@grasp-os/sdk's preview-updates.ts).
-  "grasp-evaluation=",
+  "The screen's module has no default export to render.",
 ];
 
 /** The preview kit's own modules, which a production frame never loads. */
@@ -78,7 +78,7 @@ const framed = async (
 
 /** The frame's screen module, as served. */
 const entryOf = (frame: LoadedFrame): string =>
-  frame.modules[frame.screen.entry] ?? "";
+  frame.modules[frame.entry] ?? "";
 
 /** Which of `markers` any of the frame's modules has. */
 const found = (frame: LoadedFrame, markers: readonly string[]): string[] =>
@@ -152,7 +152,7 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
         family: true,
         registered: true,
         signed: true,
-        modules: [preview.screen.entry],
+        modules: [preview.entry],
       },
       sameArtifact: false,
     });

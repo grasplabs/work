@@ -19,7 +19,6 @@ import type {
   PreviewRefresh,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   authErrors,
   internalErrors,
@@ -76,8 +75,11 @@ import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import type { LeasedBuild } from "./screen-delivery.ts";
 import {
+  appModules,
   frameAccess,
+  previewFrame,
   stageFrame,
+  stageModules,
   updatingFrameAccess,
 } from "./screen-frame.ts";
 import {
@@ -269,26 +271,26 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
 const encoder = new TextEncoder();
 
 /**
- * The refresh of `screen` at `revision` that `built`, a preview's build,
- * holds: its entry with the size and SHA-256 its frame checks before it
- * evaluates it (@grasp-os/sdk's preview-runtime.ts).
+ * What the open frame of a preview imports of `built`, a build of its
+ * draft at `revision` (@grasp-os/sdk's preview-runtime.ts): its screen's
+ * module, by address, and the App's and the kit's modules it loads.
  */
-const refreshOf = async (
+const refreshOf = (
   revision: number,
-  screen: string,
-  { code: frame, refresh }: Pick<BuiltScreen, "code" | "refresh">
-): Promise<PreviewRefresh> => {
-  const code = refresh?.code ?? "";
-  return {
-    revision,
-    screen,
-    code,
-    bytes: encoder.encode(code).byteLength,
-    sha256: await sha256Hex(code),
-    css: frame.css,
-    kit: refresh?.kit ?? [],
-  };
-};
+  { screen, code }: Pick<BuiltScreen, "screen" | "code">
+): PreviewRefresh => ({
+  revision,
+  screen,
+  entry: code.addresses[code.entry] ?? "",
+  modules: Object.fromEntries(
+    Object.entries(code.modules).map(([name, text]) => [
+      code.addresses[name] ?? "",
+      encoder.encode(text).byteLength,
+    ])
+  ),
+  css: code.css,
+  kit: Object.keys(code.kit),
+});
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
@@ -747,12 +749,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * Screen `screen` of the chat's draft of `app` at `revision`, the
-   * newest the asker knows of, as one module for its open preview to swap
-   * in (`PreviewRefresh`): only while the person builds the App, as for
-   * `preview`. One build per revision and screen, shared by every preview
-   * that asks for it (preview-builds.ts); `app.preview_outdated` once the
-   * draft moved past `revision`, as the asker then hears of a newer one.
-   * Nothing is staged for a frame, nothing is sealed when the draft's
+   * newest the asker knows of, its modules staged for its open preview to
+   * import and swap in (`PreviewRefresh`): only while the person builds
+   * the App, as for `preview`. One build per revision and screen, shared
+   * by every preview that asks for it (preview-builds.ts);
+   * `app.preview_outdated` once the draft moved past `revision`, as the
+   * asker then hears of a newer one. No frame is staged, nothing is
+   * sealed when the draft's
    * server code is as it was (sealed-previews.ts), and its build skips the
    * type check and lint, so a write reaches the screen at once; the
    * agent's check of the draft has them.
@@ -780,14 +783,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           id,
           screen
         );
-        if (screenBuild.refresh === undefined) {
-          // A preview's build always has its entries: the build is at fault.
-          throw new Error("The preview's build has no entry to refresh.");
-        }
-        return {
-          app: id,
-          refresh: await refreshOf(built, screenBuild.screen, screenBuild),
-        };
+        // Under the preview's own scope, where its open frame loads them
+        // (screen-frame.ts): the kit's are those it loaded already.
+        const { scope } = await previewFrame(chatId, id, screenBuild.artifact);
+        await stageModules(this.#env, appModules(screenBuild.code, scope));
+        return { app: id, refresh: refreshOf(built, screenBuild) };
       };
       const updated = await this.#chatsOf(by.userId).previewBuild(
         chatIdOf(chatId),
@@ -892,25 +892,26 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
     // A preview reads no real data; its frame still runs exactly this
     // build and nothing else, until the page hands it an update.
-    await stageFrame(this.#env, built.artifact, built.code, { preview: true });
+    const { scope, artifact } = await previewFrame(chatId, id, built.artifact);
+    await stageFrame(this.#env, artifact, built.code, {
+      preview: true,
+      scope,
+    });
     // Only the draft as it is now takes updates, and only its frame's
     // policy allows them (screen-frame.ts): a version opened read-only
     // stays as it was.
-    const updates =
-      revision !== readOnlyRevision && built.refresh !== undefined;
+    const updates = revision !== readOnlyRevision;
     return {
       app: id,
       name,
       revision,
       screens,
       screen: built.screen,
-      artifact: built.artifact,
+      artifact,
       frameToken: updates
-        ? await updatingFrameAccess(this.#env, built.artifact)
-        : await frameAccess(this.#env, built.artifact),
-      ...(updates
-        ? { refresh: await refreshOf(revision, built.screen, built) }
-        : {}),
+        ? await updatingFrameAccess(this.#env, artifact)
+        : await frameAccess(this.#env, artifact),
+      ...(updates ? { refresh: refreshOf(revision, built) } : {}),
     };
   }
 

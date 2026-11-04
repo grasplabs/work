@@ -1,5 +1,4 @@
 import type { PreviewBundle, PreviewUpdate } from "@grasp-os/shared/chat";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -19,7 +18,7 @@ import {
   previewStores,
   requestFor,
 } from "./previews.ts";
-import { loadFrame } from "./screen-frames.ts";
+import { loadFrame, pathOf, routed } from "./screen-frames.ts";
 import type { LoadedFrame } from "./screen-frames.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -52,27 +51,33 @@ const sealedManifestSchema = z
   })
   .loose();
 
-/** An update of `app`'s preview at `revision`, its code `code`, as a build answers one. */
+/** An update of `app`'s preview at `revision`, its screen's module `entry`, as a build answers one. */
 const builtAt = (
   app: AppId,
   revision: number,
-  code: string
+  entry: string
 ): PreviewUpdate => ({
   app,
-  refresh: {
-    revision,
-    screen: "desk",
-    code,
-    bytes: code.length,
-    sha256: "",
-    css: "",
-    kit: [],
-  },
+  refresh: { revision, screen: "desk", entry, modules: {}, css: "", kit: [] },
 });
 
-/** The code of what a build answered, an update. */
-const codeBuilt = (built: PreviewBundle | PreviewUpdate): string =>
-  built.refresh?.code ?? "";
+/** The screen's module of what a build answered, an update. */
+const entryBuilt = (built: PreviewBundle | PreviewUpdate): string =>
+  built.refresh?.entry ?? "";
+
+/**
+ * The code core serves of `refresh`'s module `address`, from the module
+ * directory of `frame`, the preview's frame: what the frame imports.
+ */
+const servedFrom = async (
+  frame: LoadedFrame | null,
+  address: string
+): Promise<{ status: number; code: string }> => {
+  const response = await routed(
+    pathOf(new URL(`${address}.js`, frame?.screen.entry).href)
+  );
+  return { status: response.status, code: await response.text() };
+};
 
 /** What the test reads of a staged frame's manifest. */
 const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
@@ -115,10 +120,11 @@ const sealedAt = async (
   );
 
 describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
-  it("answers the screen of the draft now as one module, its size and SHA-256 for the frame to check, within the kit the frame loaded", async () => {
+  it("answers the screen of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const opened = await chats.preview(chatId, app, "desk");
+    const frame = await loadFrame(opened);
     const next = await write(
       { "screens/desk.tsx": deskSaying("Hot") },
       revision
@@ -134,19 +140,24 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const secondStarted = performance.now();
     const second = await chats.previewUpdate(chatId, app, "desk", again);
     const secondMs = performance.now() - secondStarted;
-    // What the frame checks before it evaluates anything.
-    const { refresh } = updated;
-    const bytes = new TextEncoder().encode(refresh.code).byteLength;
     console.info(
       `preview update after a screen write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
     );
+    const { refresh } = updated;
+    const before = Object.keys(opened.refresh?.modules ?? {});
+    const entry = await servedFrom(frame, refresh.entry);
+    const secondEntry = await servedFrom(frame, second.refresh.entry);
     expect({
       app: updated.app,
       revision: refresh.revision,
       screen: refresh.screen,
-      says: refresh.code.includes('"Hot "'),
-      bytes: refresh.bytes === bytes,
-      sha256: refresh.sha256 === (await sha256Hex(refresh.code)),
+      says: entry.code.includes('"Hot "'),
+      served: entry.status,
+      // The screen's module alone changed: its components are where the
+      // frame loaded them.
+      changed: Object.keys(refresh.modules).filter(
+        (address) => !before.includes(address)
+      ),
       css: refresh.css.length > 0,
       withinKit: refresh.kit.every((name) =>
         (opened.refresh?.kit ?? []).includes(name)
@@ -154,15 +165,15 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       opened: opened.refresh?.revision,
       second: {
         revision: second.refresh.revision,
-        says: second.refresh.code.includes('"Again "'),
+        says: secondEntry.code.includes('"Again "'),
       },
     }).toStrictEqual({
       app,
       revision: next,
       screen: "desk",
       says: true,
-      bytes: true,
-      sha256: true,
+      served: 200,
+      changed: [refresh.entry],
       css: true,
       withinKit: true,
       opened: revision,
@@ -270,18 +281,24 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       1
     );
     const readOnly = await loadFrame(readOnlyOpened);
+    /** Whether `frame`'s policy runs any module of its own directory. */
+    const takesUpdates = (frame: LoadedFrame | null): boolean =>
+      scripts(frame).includes(
+        new URL("./", frame?.screen.entry ?? "https://core/").href
+      );
     expect({
       sameBuild: readOnlyOpened.artifact === opened.artifact,
-      published: scripts(published).includes("data:"),
-      preview: scripts(preview).includes("data:"),
-      readOnly: scripts(readOnly).includes("data:"),
-      // Still no network, eval or `blob:` in any.
+      published: takesUpdates(published),
+      preview: takesUpdates(preview),
+      readOnly: takesUpdates(readOnly),
+      // Still no network, eval, `data:` or `blob:` in any.
       connect: [published, preview, readOnly].map((frame) =>
         frame?.policy.get("connect-src")
       ),
       eval: [published, preview, readOnly].map((frame) =>
         scripts(frame).some(
-          (source) => source.includes("eval") || source === "blob:"
+          (source) =>
+            source.includes("eval") || source === "blob:" || source === "data:"
         )
       ),
     }).toStrictEqual({
@@ -511,7 +528,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       )
     );
     expect({
-      newer: codeBuilt(newer),
+      newer: entryBuilt(newer),
       older,
       elsewhere,
       built,

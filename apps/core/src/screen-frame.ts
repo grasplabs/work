@@ -1,10 +1,12 @@
 import {
   fromBase64Url,
   sha256Hex,
+  sha256HexOfBytes,
   toBase64,
   toBase64Url,
 } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -35,7 +37,8 @@ import { screenFramePolicy } from "./security-headers.ts";
 // That policy names, by hash or by exact address, every script the build
 // may run, and nothing else: this document's own two inline scripts (the
 // import map and the bootstrap below) and each module of the build at
-// `/screen-modules/<hash>.js`, where core serves exactly those bytes. No
+// `/screen-modules/<scope>/<token>/<hash>.js`, where core serves exactly
+// those bytes. No
 // `'unsafe-inline'`, no `data:` or `blob:`, no eval. So code that comes
 // from anywhere but the build doesn't run, even when the build's own code
 // lets it in: HTML an App's server sends that the screen renders (an
@@ -61,8 +64,13 @@ export interface FrameCode {
   entry: string;
   /** The kit module that renders it (@grasp-os/sdk/screen-runtime). */
   runtime: string;
-  /** The App's modules, by flat name. */
+  /**
+   * The App's modules, by flat name, each importing the others by address
+   * (@grasp-os/compiler's module-addresses.ts).
+   */
   modules: Record<string, string>;
+  /** Each of `modules`' address, by flat name. */
+  addresses: Record<string, string>;
   /** The kit's modules the App's need, by flat name. */
   kit: Record<string, string>;
   css: string;
@@ -70,10 +78,22 @@ export interface FrameCode {
 
 // Who may load a build's frame and modules. A sandboxed frame sends no
 // cookies, so its document and modules can't ask for a session; instead
-// each address carries a token core made for exactly that build or
-// module, which expires: the page gets the frame's with the build
+// each address carries a token core made for exactly that build or scope
+// of modules, which expires: the page gets the frame's with the build
 // (`ScreenBundle.frameToken`), the frame's document the modules'. A hash
 // alone, from an audit entry say, reads nothing.
+//
+// Modules are kept and served by scope: the kit's (`kitScope`), shared by
+// every frame; a build's own, for a published screen (its artifact); and
+// a chat's preview's of an App (`previewScope`), shared by every frame of
+// it and every write of its draft. An App's modules import each other by
+// address relative to their own (@grasp-os/compiler's
+// module-addresses.ts), so the token is a segment of the path, which a
+// relative import keeps, and not a query, which it drops. A scope's token
+// reads only that scope's modules: a module is kept under its scope with
+// core's MAC over the scope, its address and its bytes, checked on serve
+// (`screenModuleResponse`), so another scope's address, or bytes moved
+// from one, reads nothing.
 
 /** What the tokens' key is for: no other MAC of core's passes for one. */
 const accessPurpose = "grasp-os screen frame access";
@@ -145,7 +165,7 @@ export const windowedAccessEnd = (now: number): number =>
 /**
  * A token for `subject` that holds until the end of the next window of
  * `moduleAccessWindowMs` (`windowedAccessEnd`): the same for everything
- * asked in one window. The subject says what it is for (`module:…`,
+ * asked in one window. The subject says what it is for (`modules:…`,
  * `package-artifact:…`), so one never passes for another.
  */
 export const windowedAccess = async (
@@ -154,12 +174,35 @@ export const windowedAccess = async (
   now: number
 ): Promise<string> => await accessToken(env, subject, windowedAccessEnd(now));
 
-/** A token for the module `hash`, for a frame's import map. */
+/** The scope of the kit's modules, which every frame shares. */
+const kitScope = "kit";
+
+/**
+ * Where a chat's preview of App `app` is staged: the scope its modules
+ * are kept in, shared by every frame of it and every write of its draft,
+ * and the artifact its frame of `artifact`, a build of the draft, is
+ * staged under. The build's own artifact is a hash of its code alone,
+ * the same in every chat that previews the same code: its frame here
+ * names this scope, so it is this preview's only.
+ */
+export const previewFrame = async (
+  chatId: string,
+  app: string,
+  artifact: string
+): Promise<{ scope: string; artifact: string }> => {
+  const scope = await sha256Hex(canonicalJson(["preview", chatId, app]));
+  return {
+    scope,
+    artifact: await sha256Hex(canonicalJson([artifact, scope])),
+  };
+};
+
+/** A token for the modules of `scope`, a segment of their address. */
 const moduleAccess = async (
   env: Env,
-  hash: string,
+  scope: string,
   now: number
-): Promise<string> => await windowedAccess(env, `module:${hash}`, now);
+): Promise<string> => await windowedAccess(env, `modules:${scope}`, now);
 
 /** What a token looks like: also the one path segment it may be. */
 export const accessTokenPattern =
@@ -198,40 +241,56 @@ export const hasFrameAccess = async (
 // bucket without core's secret could otherwise swap a module or a
 // manifest, and the frame would run it with the App's data. So:
 //
-// - A module is served only when its bytes, with the name it was staged
-//   under, hash to the address it is asked at, the one its token signs
-//   (`screenModuleResponse`). The name is kept beside it, in the object's
-//   metadata: a changed name passes no more than changed code does.
+// - A module is served only with core's MAC over its scope, its address
+//   and its bytes (`stagedMac`): it can't be changed, or moved to another
+//   address or scope, without core's secret.
 // - A manifest is served only with core's MAC over it and the build it
-//   is for (`manifestMac`): it can't be written, edited, or moved to
-//   another build without core's secret.
+//   is for: it can't be written, edited, or moved to another build either.
 // - Either one that doesn't pass is refused, logged and deleted, so the
 //   next open stages the build again from the sealed bytes.
 //
-// On top of that, the import map names each module's sha384 (`integrity`,
-// Subresource Integrity), carried in the MAC'd manifest, so the browser
-// checks the bytes it got too, whatever sits between core and it. Both,
-// rather than SRI alone: a browser that doesn't read an import map's
-// `integrity` ignores it, and SRI alone would let a tampered object sit
-// in R2 until the build is staged again. The check on serve holds for
-// every browser, so it is the one this relies on.
+// On top of that, the import map names the sha384 of each module the
+// frame loads first (`integrity`, Subresource Integrity), carried in the
+// MAC'd manifest, so the browser checks the bytes it got too, whatever
+// sits between core and it. Both, rather than SRI alone: a browser that
+// doesn't read an import map's `integrity` ignores it, and SRI alone
+// would let a tampered object sit in R2 until the build is staged again.
+// The check on serve holds for every browser, so it is the one this
+// relies on, and the only one for the modules a preview's frame loads
+// later (`previewScripts`): an import map can't change once modules
+// loaded, a second one only in Chromium, and that inline script would
+// need a nonce the screen's own code could read; a module the frame
+// fetched itself and imported from a `blob:` address can't import
+// another so, as no two modules that import each other can name each
+// other's `blob:` address, and would need a loader of our own.
 
-const moduleHashPattern = /^[0-9a-f]{64}$/u;
+const hashPattern = /^[0-9a-f]{64}$/u;
 
-/** What core keeps of a build for its frame: its modules by name, as the hashes they are served under. */
+/**
+ * What core keeps of a build for its frame: its modules by name, as the
+ * addresses they are kept under, the kit's in `kitScope` and the App's in
+ * `scope`.
+ */
 const frameManifestSchema = z
   .strictObject({
     entry: z.string(),
     runtime: z.string(),
     css: z.string(),
-    imports: z.record(z.string(), z.string().regex(moduleHashPattern)),
-    /** Each module's Subresource Integrity, by its hash. */
+    /** Where its App modules are kept: its artifact, or its preview's. */
+    scope: z.string().regex(hashPattern),
+    kit: z.record(z.string(), z.string().regex(hashPattern)),
+    app: z.record(z.string(), z.string().regex(hashPattern)),
+    /** Each module's Subresource Integrity, by its address. */
     integrity: z.record(z.string(), z.string().startsWith("sha384-")),
     /** A chat's preview's frame, whose policy takes its updates (`previewScripts`). */
     preview: z.boolean(),
   })
-  .refine(({ imports, integrity }) =>
-    Object.values(imports).every((hash) => Object.hasOwn(integrity, hash))
+  .refine(
+    ({ entry, kit, app, integrity }) =>
+      Object.hasOwn(app, entry) &&
+      [...Object.values(kit), ...Object.values(app)].every((hash) =>
+        Object.hasOwn(integrity, hash)
+      )
   );
 
 type FrameManifest = z.infer<typeof frameManifestSchema>;
@@ -239,29 +298,32 @@ type FrameManifest = z.infer<typeof frameManifestSchema>;
 /** What the manifests' MAC key is for: no other MAC of core's passes for one. */
 const manifestPurpose = "grasp-os screen frame manifest";
 
-/** What a manifest's MAC covers: its text, as the manifest of `artifact`. */
-const manifestSubject = (artifact: string, text: string): Uint8Array =>
-  encoder.encode(canonicalJson([artifact, text]));
+/** What the staged modules' MAC key is for, as `manifestPurpose`. */
+const modulePurpose = "grasp-os screen module";
 
-/** Core's MAC over `text` as the manifest of the build `artifact`. */
-const manifestMac = async (
+/** Core's MAC under `purpose` over `subject` (canonical JSON), base64url. */
+const stagedMac = async (
   env: Env,
-  artifact: string,
-  text: string
+  purpose: string,
+  subject: Json
 ): Promise<string> => {
-  const key = await derivedHmacKey(env, manifestPurpose, ["sign", "verify"]);
+  const key = await derivedHmacKey(env, purpose, ["sign", "verify"]);
   return toBase64Url(
     new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, manifestSubject(artifact, text))
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(canonicalJson(subject))
+      )
     )
   );
 };
 
-/** Whether `mac` is core's for `text` as the manifest of `artifact`. */
-const isManifestOf = async (
+/** Whether `mac` is core's under `purpose` over `subject`. */
+const isStagedMac = async (
   env: Env,
-  artifact: string,
-  text: string,
+  purpose: string,
+  subject: Json,
   mac: string | undefined
 ): Promise<boolean> => {
   if (mac === undefined) {
@@ -273,24 +335,21 @@ const isManifestOf = async (
   } catch {
     return false;
   }
-  const key = await derivedHmacKey(env, manifestPurpose, ["sign", "verify"]);
+  const key = await derivedHmacKey(env, purpose, ["sign", "verify"]);
   return await crypto.subtle.verify(
     "HMAC",
     key,
     bytes,
-    manifestSubject(artifact, text)
+    encoder.encode(canonicalJson(subject))
   );
 };
 
-// A module is staged, hashed, checked and served as the same UTF-8
-// bytes, never as a string read back: reading text drops a leading BOM,
-// and a lone surrogate doesn't survive encoding, so a hash of the string
-// staged and one of the text read would differ, and the screen fail on
-// every open. Its code is decoded only to hash, keeping a BOM.
-const moduleDecoder = new TextDecoder("utf-8", {
-  fatal: true,
-  ignoreBOM: true,
-});
+/** What a staged module's MAC covers: where it is kept, and its bytes. */
+const moduleSubject = async (
+  scope: string,
+  hash: string,
+  bytes: Uint8Array
+): Promise<Json> => [scope, hash, await sha256HexOfBytes(bytes)];
 
 /**
  * The most bytes of one staged module, or of a build's manifest: no more
@@ -307,26 +366,9 @@ const oversizedBuild = (): Error =>
     reason: "The screen's build has a module larger than one may be.",
   });
 
-/** The hash a module is served under: of its name and its code. */
-const codeHash = async (name: string, code: string): Promise<string> =>
+/** A kit module's address: the hash of its name and its code. */
+const kitAddress = async (name: string, code: string): Promise<string> =>
   await sha256Hex(canonicalJson([name, code]));
-
-/**
- * The hash of a module staged as `bytes`: of its name and its code as
- * they decode. Null for bytes that aren't UTF-8, which core never stages.
- */
-const moduleHash = async (
-  name: string,
-  bytes: Uint8Array
-): Promise<string | null> => {
-  let code: string;
-  try {
-    code = moduleDecoder.decode(bytes);
-  } catch {
-    return null;
-  }
-  return await codeHash(name, code);
-};
 
 /** A module's Subresource Integrity: the sha384 of the bytes served. */
 const moduleIntegrity = async (bytes: Uint8Array): Promise<string> =>
@@ -343,9 +385,9 @@ const day = 24 * 60 * 60 * 1000;
 export const frameKeepMs = 30 * day;
 
 /**
- * How old a staged build may be and still be opened as it is: past this,
- * opening it stages it again, modules and all, so a build in use is never
- * as old as the sweep's limit.
+ * How old a staged manifest or module may be and still be used as it is:
+ * past this, staging it again puts it anew, so one in use is never as old
+ * as the sweep's limit.
  */
 const frameRefreshMs = frameKeepMs / 2;
 
@@ -356,82 +398,145 @@ const modulesPrefix = "screen-modules/";
  * The format of a staged manifest (`frameManifestSchema`), in its key: a
  * manifest staged in another format is under another key, so no open
  * finds it, and the build is staged again in this one, rather than read
- * as a manifest it isn't. Raised with each change of the format: `2`
- * says whether a build is a preview's. What is left under an older key
- * goes with the sweep (`sweepScreenFrames`), which reads the whole prefix.
+ * as a manifest it isn't. Raised with each change of the format: `3`
+ * keeps modules by scope. What is left under an older key goes with the
+ * sweep (`sweepScreenFrames`), which reads the whole prefix.
  */
-const frameManifestFormat = 2;
+const frameManifestFormat = 3;
 
 export const frameKey = (artifact: string): string =>
   `${framesPrefix}${artifact}.v${frameManifestFormat}.json`;
 
-const moduleKey = (hash: string): string => `${modulesPrefix}${hash}.js`;
+const moduleKey = (scope: string, hash: string): string =>
+  `${modulesPrefix}${scope}/${hash}.js`;
 
-/** `/screen-modules/<hash>.js`: one module of a build, as the frame imports it. */
+/**
+ * `/screen-modules/<scope>/<token>/<hash>.js`: one module, as a frame
+ * imports it. A preview's frame may put a number of its own before the
+ * hash (`/<visit>/<hash>.js`): the same module, at an address the frame
+ * hasn't evaluated yet, so it evaluates it afresh (@grasp-os/sdk's
+ * preview-updates.ts); the modules it imports, relative to it, are then
+ * evaluated afresh too. One asked without a token is a module all the
+ * same, refused as one.
+ */
 const modulePath = new RegExp(
-  `^${screenModulePath}/(?<hash>[0-9a-f]{64})\\.js$`,
+  `^${screenModulePath}/(?<scope>${kitScope}|[0-9a-f]{64})/(?:(?<token>[^/]{1,96})/)?(?:\\d{1,9}/)?(?<hash>[0-9a-f]{64})\\.js$`,
   "u"
 );
 
-/** Whether every module `hashes` names is stored. */
-const allStaged = async (env: Env, hashes: string[]): Promise<boolean> => {
+/** One module to stage: where it is kept, and its bytes. */
+interface StagedModule {
+  scope: string;
+  hash: string;
+  bytes: Uint8Array;
+}
+
+/** Whether `object`, staged before `now`, is to be staged anew. */
+const isStale = (object: R2Object | null, now: Date): boolean =>
+  object === null ||
+  now.getTime() - object.uploaded.getTime() >= frameRefreshMs;
+
+/**
+ * Keeps `modules` where frames load them, each with core's MAC (checked
+ * on serve, as above): only those not kept yet, or kept long enough ago
+ * that the sweep would soon take them. Two stagings at once both write
+ * the same bytes.
+ */
+export const stageModules = async (
+  env: Env,
+  modules: readonly StagedModule[],
+  now = new Date()
+): Promise<void> => {
+  if (modules.some(({ bytes }) => bytes.byteLength > frameObjectMaxBytes)) {
+    throw oversizedBuild();
+  }
+  await Promise.all(
+    modules.map(async ({ scope, hash, bytes }) => {
+      const key = moduleKey(scope, hash);
+      if (!isStale(await env.FILES.head(key), now)) {
+        return;
+      }
+      const mac = await stagedMac(
+        env,
+        modulePurpose,
+        await moduleSubject(scope, hash, bytes)
+      );
+      await env.FILES.put(key, bytes, { customMetadata: { mac } });
+    })
+  );
+};
+
+/** The App's modules of `code`, kept under `scope` at their addresses. */
+export const appModules = (
+  { modules, addresses }: Pick<FrameCode, "modules" | "addresses">,
+  scope: string
+): StagedModule[] =>
+  Object.entries(modules).map(([name, code]) => ({
+    scope,
+    hash: addresses[name] ?? "",
+    bytes: encoder.encode(code),
+  }));
+
+/** Whether every module of `manifest` is stored. */
+const allStaged = async (
+  env: Env,
+  { scope, kit, app }: FrameManifest
+): Promise<boolean> => {
+  const keys = [
+    ...Object.values(kit).map((hash) => moduleKey(kitScope, hash)),
+    ...Object.values(app).map((hash) => moduleKey(scope, hash)),
+  ];
   const found = await Promise.all(
-    hashes.map(async (hash) => await env.FILES.head(moduleKey(hash)))
+    keys.map(async (key) => await env.FILES.head(key))
   );
   return found.every((head) => head !== null);
 };
 
 /**
- * Keeps a build where its frame loads it: each module under the hash of
- * its name and code (one name, one module: the same code under two names
- * stays two modules), with its name beside it, and the build's manifest
- * under its own hash, with core's MAC (checked on serve, as above). The
- * modules go first, so a manifest is never there without them. A manifest
- * staged within `frameRefreshMs`, with every module of it still there, is
- * all of it; anything else is staged again in full, so the sweep never
- * takes a module of a build in use for long: its modules are never older
- * than its manifest, and one the sweep took anyway (it can't delete only
- * if unchanged) is put back here, and noticed by the frame's document.
- * Two opens at once both write it, the same bytes. A chat's preview's
- * build is staged as one (`preview`), which only its policy says.
+ * Keeps a build where its frame loads it: its App modules under `scope`
+ * (its artifact, or its preview's, `previewFrame`) at their addresses,
+ * the kit's under `kitScope` at theirs (`stageModules`), and the build's
+ * manifest under its artifact, with core's MAC (checked on serve, as
+ * above). The modules go first, so a manifest is never there without
+ * them; the sweep may still take one (it can't delete only if
+ * unchanged), which the frame's document notices, and the next open puts
+ * back. Two opens at once both write it, the same bytes. A chat's
+ * preview's build is staged as one (`preview`), which only its policy
+ * says.
  */
 export const stageFrame = async (
   env: Env,
   artifact: string,
-  { entry, runtime, modules, kit, css }: FrameCode,
-  { preview = false, now = new Date() }: { preview?: boolean; now?: Date } = {}
+  code: FrameCode,
+  {
+    preview = false,
+    scope = artifact,
+    now = new Date(),
+  }: { preview?: boolean; scope?: string; now?: Date } = {}
 ): Promise<void> => {
-  const named = await Promise.all(
-    Object.entries({ ...kit, ...modules }).map(async ([name, source]) => {
-      // Encoding makes any lone surrogate U+FFFD: hashed as it decodes,
-      // so as it is checked when served.
-      const bytes = encoder.encode(source);
-      const code = moduleDecoder.decode(bytes);
-      return { name, bytes, hash: await codeHash(name, code) };
-    })
+  const kit = await Promise.all(
+    Object.entries(code.kit).map(async ([name, source]) => ({
+      name,
+      scope: kitScope,
+      hash: await kitAddress(name, source),
+      bytes: encoder.encode(source),
+    }))
   );
-  if (named.some(({ bytes }) => bytes.byteLength > frameObjectMaxBytes)) {
-    throw oversizedBuild();
-  }
-  const staged = await env.FILES.head(frameKey(artifact));
-  if (
-    staged !== null &&
-    now.getTime() - staged.uploaded.getTime() < frameRefreshMs &&
-    (await allStaged(
-      env,
-      named.map(({ hash }) => hash)
-    ))
-  ) {
+  const app = appModules(code, scope);
+  await stageModules(env, [...kit, ...app], now);
+  if (!isStale(await env.FILES.head(frameKey(artifact)), now)) {
     return;
   }
   const manifest: FrameManifest = {
-    entry,
-    runtime,
-    css,
-    imports: Object.fromEntries(named.map(({ name, hash }) => [name, hash])),
+    entry: code.entry,
+    runtime: code.runtime,
+    css: code.css,
+    scope,
+    kit: Object.fromEntries(kit.map(({ name, hash }) => [name, hash])),
+    app: code.addresses,
     integrity: Object.fromEntries(
       await Promise.all(
-        named.map(
+        [...kit, ...app].map(
           async ({ bytes, hash }) =>
             [hash, await moduleIntegrity(bytes)] as const
         )
@@ -443,13 +548,10 @@ export const stageFrame = async (
   if (encoder.encode(text).byteLength > frameObjectMaxBytes) {
     throw oversizedBuild();
   }
-  await Promise.all(
-    named.map(async ({ name, bytes, hash }) => {
-      await env.FILES.put(moduleKey(hash), bytes, { customMetadata: { name } });
-    })
-  );
   await env.FILES.put(frameKey(artifact), text, {
-    customMetadata: { mac: await manifestMac(env, artifact, text) },
+    customMetadata: {
+      mac: await stagedMac(env, manifestPurpose, [artifact, text]),
+    },
   });
 };
 
@@ -541,23 +643,23 @@ const refused = (
   });
 
 /**
- * A module of a build, as the frame imports it, or null when the path
- * isn't one: only with a token core made for that module that hasn't
- * expired (`frameAccess`), and only bytes that hash to its address.
+ * A module, as a frame imports it, or null when the path isn't one: only
+ * with a token core made for its scope that hasn't expired, and only
+ * bytes core's MAC says it kept there.
  */
 export const screenModuleResponse = async (
   env: Env,
   url: URL
 ): Promise<Response | null> => {
-  const hash = modulePath.exec(url.pathname)?.groups?.hash;
-  if (hash === undefined) {
+  const { scope, token, hash } = modulePath.exec(url.pathname)?.groups ?? {};
+  if (scope === undefined || hash === undefined) {
     return null;
   }
-  const token = url.searchParams.get("token");
-  if (!(await hasFrameAccess(env, `module:${hash}`, token))) {
+  if (!(await hasFrameAccess(env, `modules:${scope}`, token ?? null))) {
     return refused(403);
   }
-  const module = await env.FILES.get(moduleKey(hash));
+  const key = moduleKey(scope, hash);
+  const module = await env.FILES.get(key);
   if (module === null) {
     return refused(404);
   }
@@ -565,17 +667,23 @@ export const screenModuleResponse = async (
     // Larger than core stages: not read.
     await module.body.cancel();
     log.error("screen_frame.module_corrupt", { hash, bytes: module.size });
-    await env.FILES.delete(moduleKey(hash));
+    await env.FILES.delete(key);
     return refused(404, [], "no-store");
   }
   const bytes = new Uint8Array(await module.arrayBuffer());
-  const name = module.customMetadata?.name;
-  if (name === undefined || (await moduleHash(name, bytes)) !== hash) {
-    // Not what core staged under this address: never served. Gone, so
-    // the frame's document finds it missing and the next open stages the
-    // build again; meanwhile a miss nothing caches.
+  if (
+    !(await isStagedMac(
+      env,
+      modulePurpose,
+      await moduleSubject(scope, hash, bytes),
+      module.customMetadata?.mac
+    ))
+  ) {
+    // Not what core staged here: never served. Gone, so the frame's
+    // document finds it missing and the next open stages the build
+    // again; meanwhile a miss nothing caches.
     log.error("screen_frame.module_corrupt", { hash });
-    await env.FILES.delete(moduleKey(hash));
+    await env.FILES.delete(key);
     return refused(404, [], "no-store");
   }
   return new Response(bytes, {
@@ -969,37 +1077,39 @@ const scriptJson = (value: unknown): string =>
   JSON.stringify(value).replaceAll("<", "\\u003c");
 
 // A chat's preview takes each write of its draft in the frame it has open
-// (spec 19.2.1): the page hands the frame the screen as one new module,
-// which the frame evaluates as a `data:` module and swaps in with React
-// Fast Refresh, keeping what the screen holds (@grasp-os/sdk's
-// preview-runtime.ts). A frame's policy is fixed when its document loads,
-// so no new module address could be named in it: a preview's frame, and
-// only one both staged as a preview's build (`preview`, under core's MAC)
-// and framed with a token core made for taking updates
-// (`updatingFrameAccess`, the draft as it is now alone), allows `data:`
-// modules too (the decision on GRA-409). A version opened read-only is
-// the same build at times, so the token decides, not the build. The ways
-// it could fail, and what closes each:
+// (spec 19.2.1), as Vite's dev server takes a change: core stages the
+// write's modules under the preview's scope (`previewFrame`), and the page
+// hands the frame the address of its screen's module, which the frame
+// imports from its own module address and swaps in with React Fast
+// Refresh, keeping what the screen holds (@grasp-os/sdk's
+// preview-runtime.ts). Only the modules a write changed have new
+// addresses, so only they load. A frame's policy is fixed when its
+// document loads, so it can't name those addresses: a preview's frame,
+// and only one both staged as a preview's build (`preview`, under core's
+// MAC) and framed with a token core made for taking updates
+// (`updatingFrameAccess`, the draft as it is now alone), allows its whole
+// module directory (`previewScripts`), the preview's scope under the
+// frame's token. A version opened read-only is the same build at times,
+// so the token decides, not the build. The ways it could fail, and what
+// closes each:
 //
 // - The production frame's policy loosens: it is built from the same
-//   list without `previewScripts`, byte for byte as before, and a
-//   preview's build has an artifact of its own profile, never one a
-//   production frame is staged under (screens.ts).
-// - The frame runs a module of another App, or of another revision: the
-//   update reaches the frame only over its own bridge, never as a window
-//   message, from the page, which asked core for it for the one App and
-//   chat the frame was opened for (core refuses anyone who doesn't build
-//   that App, chats-rpc.ts), and drops an answer that names another App.
-//   Each update names its revision; the page sends only one past the
-//   last it applied, and the frame takes only those.
-// - The frame runs other bytes than core built: it checks each update's
-//   size and SHA-256 against what core answered before evaluating it.
-// - Draft code loads code of its own as a `data:` module: it already runs
-//   unreviewed draft code there, with fixture data, no resources, no
-//   network (`connect-src 'none'`) and an opaque origin, and `data:` adds
-//   no reach beyond the frame. Still no `blob:`, no eval and no inline
-//   script but the document's own.
-const previewScripts = ["data:"];
+//   list without `previewScripts`, and a preview's build has an artifact
+//   of its own profile and preview, never one a production frame is
+//   staged under (screens.ts, `previewFrame`).
+// - The frame runs a module of another App, another chat, or a release
+//   revoked since: the directory is its own preview's scope, under a
+//   token for that scope alone, and core serves a module there only with
+//   its MAC over that scope (`screenModuleResponse`), which only staging
+//   the preview's own draft puts there (chats-rpc.ts, which refuses
+//   anyone who doesn't build the App).
+// - The frame runs other bytes than core built: core checks its MAC over
+//   the bytes as it serves them.
+// - Draft code loads a module of its own: it already runs unreviewed
+//   draft code there, with fixture data, no resources, no network
+//   (`connect-src 'none'`) and an opaque origin; the directory adds only
+//   modules of the same draft. Still no `data:`, no `blob:`, no eval and
+//   no inline script but the document's own.
 
 /** A CSP hash source for an inline script with exactly `text`. */
 const hashSource = async (text: string): Promise<string> => {
@@ -1014,10 +1124,9 @@ const hashSource = async (text: string): Promise<string> => {
  * that runs that build's modules and nothing else; core sets its other
  * headers with everyone else's. Only with a token core made for that
  * build that hasn't expired (`frameAccess`); a build core never staged
- * (no manifest) gets a document that runs nothing. Each module's address
- * in the import map carries a token of its own; the policy names the
- * addresses without them, as browsers match a policy's paths without the
- * query.
+ * (no manifest) gets a document that runs nothing. The kit's modules
+ * come in its import map, by flat name, and the screen's module by its
+ * address, each address with a token for its scope as a segment of it.
  */
 export const screenFrameResponse = async (
   env: Env,
@@ -1052,7 +1161,12 @@ export const screenFrameResponse = async (
   const text = tooLarge ? "" : await stored.text();
   const parsed = frameManifestSchema.safeParse(
     !tooLarge &&
-      (await isManifestOf(env, artifact.data, text, stored.customMetadata?.mac))
+      (await isStagedMac(
+        env,
+        manifestPurpose,
+        [artifact.data, text],
+        stored.customMetadata?.mac
+      ))
       ? JSON.parse(text)
       : undefined
   );
@@ -1064,7 +1178,7 @@ export const screenFrameResponse = async (
     return refused(404, [], "no-store");
   }
   const manifest = parsed.data;
-  if (!(await allStaged(env, Object.values(manifest.imports)))) {
+  if (!(await allStaged(env, manifest))) {
     // A module the sweep took from under it: the manifest goes too, so
     // the page's next open stages the whole build again.
     await env.FILES.delete(frameKey(artifact.data));
@@ -1072,22 +1186,26 @@ export const screenFrameResponse = async (
   }
   const origin = signInConfig(env)?.origin ?? url.origin;
   const now = Date.now();
-  const addressOf = (hash: string): string =>
-    `${origin}${screenModulePath}/${hash}.js`;
-  const addressed = await Promise.all(
-    Object.entries(manifest.imports).map(async ([name, hash]) => {
-      const access = await moduleAccess(env, hash, now);
-      const query = new URLSearchParams({ token: access }).toString();
-      return { name, hash, address: `${addressOf(hash)}?${query}` };
-    })
-  );
+  const directoryOf = async (scope: string): Promise<string> =>
+    `${origin}${screenModulePath}/${scope}/${await moduleAccess(env, scope, now)}/`;
+  const kitDirectory = await directoryOf(kitScope);
+  const appDirectory = await directoryOf(manifest.scope);
+  const kit = Object.entries(manifest.kit).map(([name, hash]) => ({
+    name,
+    hash,
+    address: `${kitDirectory}${hash}.js`,
+  }));
+  const app = Object.values(manifest.app).map((hash) => ({
+    hash,
+    address: `${appDirectory}${hash}.js`,
+  }));
   const imports: Record<string, string> = Object.fromEntries(
-    addressed.map(({ name, address }) => [name, address])
+    kit.map(({ name, address }) => [name, address])
   );
-  // Keyed by the address a module resolves to, token and all, as the
-  // browser matches it.
+  // Keyed by the address a module resolves to, as the browser matches it:
+  // the App's modules import each other relative to their own.
   const integrity: Record<string, string> = Object.fromEntries(
-    addressed.map(({ hash, address }) => [
+    [...kit, ...app].map(({ hash, address }) => [
       address,
       manifest.integrity[hash] ?? "",
     ])
@@ -1095,16 +1213,18 @@ export const screenFrameResponse = async (
   const importMap = scriptJson({ imports, integrity });
   const screen = scriptJson({
     artifact: artifact.data,
-    entry: manifest.entry,
+    entry: `${appDirectory}${manifest.app[manifest.entry] ?? ""}.js`,
     runtime: manifest.runtime,
     css: manifest.css,
   });
+  // A preview's build, framed to take its draft's updates: its whole
+  // module directory, for the modules its draft's writes add.
+  const previewScripts = manifest.preview && updating ? [appDirectory] : [];
   const scripts = [
     await hashSource(bootstrap),
     await hashSource(importMap),
-    ...new Set(Object.values(manifest.imports).map((hash) => addressOf(hash))),
-    // A preview's build, framed to take its draft's updates: both.
-    ...(manifest.preview && updating ? previewScripts : []),
+    ...new Set([...kit, ...app].map(({ address }) => address)),
+    ...previewScripts,
   ];
   // The page's language, one it speaks or English: never text of the
   // page's own in the document.

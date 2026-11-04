@@ -21,6 +21,7 @@ import type { RpcStub } from "capnweb";
 import { commit, discard, refresh } from "./preview-refresh.ts";
 import { previewReceiver } from "./preview-updates.ts";
 import type {
+  PreviewLoad,
   ScreenBridge,
   ScreenComponent,
   ScreenHooks,
@@ -60,15 +61,13 @@ const nextTask = async (): Promise<void> => {
   await promise;
 };
 
-/** The SHA-256 of `bytes`, in hex. */
-const sha256 = async (bytes: Uint8Array): Promise<string> =>
-  [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+/**
+ * Where `load`'s module is, beside `screen`, the address the frame first
+ * loaded the screen's module at: in the same directory, the preview's
+ * own (core's screen-frame.ts), under its visit from 1 on.
+ */
+const addressOf = (screen: string, { entry, visit }: PreviewLoad): string =>
+  new URL(visit === 0 ? `${entry}.js` : `${visit}/${entry}.js`, screen).href;
 
 /**
  * The style element the frame's document put the screen's CSS in, which
@@ -121,8 +120,8 @@ export const runScreen = async (
     }
     following = true;
     const receive = previewReceiver({
-      evaluate: async (url) => {
-        const evaluated: unknown = await import(url);
+      evaluate: async (load) => {
+        const evaluated: unknown = await import(addressOf(screen, load));
         return evaluated;
       },
       commit,
@@ -133,16 +132,16 @@ export const runScreen = async (
       },
       renderFailures: () => failures,
       settle: nextTask,
+      css: () => screenStyle().textContent,
       setCss: (css) => {
         screenStyle().textContent = css;
       },
       report: (value) => {
         screens.reportProblem("error", value);
       },
-      sha256,
     });
-    void page.refresh(async (part) => {
-      const answer = await receive(part);
+    void page.refresh(async (load) => {
+      const answer = await receive(load);
       if (answer === "applied") {
         rendersNothing(root);
       }

@@ -375,6 +375,7 @@ const cast = {
     approver: "user",
   },
   chatPreview: { builder: "builder" },
+  previewParity: { admin: "admin" },
   appBuilt: { builder: "builder", user: "user" },
   workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
   languages: { member: "user" },
