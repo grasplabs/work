@@ -687,9 +687,11 @@ const viewRuns = async (
 };
 
 /**
- * For each of the waiting runs `runIds`, the latest of its open decisions
- * `by` may answer now (`answerableBy`), if any: one read of their open
- * decisions (`workflow_decisions_run_status_idx`).
+ * For each of the runs `runIds`, an App's or an independent workflow's,
+ * the latest of its open decisions `by` may answer now (`answerableBy`),
+ * if any: one read of their decisions by run
+ * (`workflow_decisions_run_status_idx`, `..._resource_run_step_idx`), its
+ * status unary-plussed off the organization-wide status index.
  */
 const answerableDecisions = async (
   env: Env,
@@ -715,7 +717,8 @@ const answerableDecisions = async (
           sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
           sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`
         ),
-        stillOpen(workflowDecisions, now)
+        sql`+${workflowDecisions.status} = 'open'`,
+        gt(workflowDecisions.expiresAt, now)
       )
     )
     .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id));

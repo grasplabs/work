@@ -386,33 +386,34 @@ export const FilesAndApps = ({
     };
   }, [core, workflow, currentVersion, versionsRead, approves]);
 
-  // Once a binding is approved: what still waits, and the apps its
-  // approvals connect, read again; only the latest read is shown, as one
-  // started before a later approval would miss it.
+  // Once a binding is approved: what still waits, read again and shown as
+  // soon as it lands, and the apps its approvals connect, apart. Only the
+  // latest of each read is shown, as one started before a later approval
+  // would miss it.
   const rereads = useRef(0);
   const approved = async (): Promise<void> => {
     rereads.current += 1;
     const reread = rereads.current;
-    const [waiting, connected] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) =>
-          await session.workflowResources.pendingBindingsOf(workflow)
-      ),
-      versionsRead
-        ? loadFromCore(
-            core,
-            async (session) =>
-              await readApps(session, workflow, currentVersion, current)
-          )
-        : undefined,
-    ]);
-    if (reread !== rereads.current) {
-      return;
+    const latest = (): boolean => reread === rereads.current;
+    const waiting = loadFromCore(
+      core,
+      async (session) =>
+        await session.workflowResources.pendingBindingsOf(workflow)
+    );
+    const connected = versionsRead
+      ? loadFromCore(
+          core,
+          async (session) =>
+            await readApps(session, workflow, currentVersion, current)
+        )
+      : undefined;
+    const waited = await waiting;
+    if (latest()) {
+      setPending(waited);
     }
-    setPending(waiting);
-    if (connected !== undefined) {
-      setApps(connected);
+    const appsRead = await connected;
+    if (appsRead !== undefined && latest()) {
+      setApps(appsRead);
     }
   };
 

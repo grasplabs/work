@@ -308,6 +308,13 @@ const candidatesOf = async (
   }
 };
 
+/**
+ * What one workflow's read has offered so far, by binding kind and
+ * contract: the same for each of its versions that declares it, and for a
+ * template whatever the contract, as any template version serves one.
+ */
+type Offers = Map<string, Promise<Offered[]>>;
+
 /** Those of the candidates for `binding` that would serve it now. */
 const offeredFor = async (
   env: Env,
@@ -335,12 +342,28 @@ const offeredFor = async (
   return offered;
 };
 
+/** What `offers` holds for `binding`, worked out by `offer` the first time. */
+const offersOf = async (
+  offers: Offers,
+  binding: CatalogBinding,
+  offer: () => Promise<Offered[]>
+): Promise<Offered[]> => {
+  const key =
+    binding.kind === "template"
+      ? binding.kind
+      : `${binding.kind}:${binding.contractId}`;
+  const known = offers.get(key) ?? offer();
+  offers.set(key, known);
+  return await known;
+};
+
 /** Version `version` of workflow `id`'s catalog bindings no approval serves, with what core offers. */
 const unapprovedOf = async (
   env: Env,
   id: string,
   version: number,
-  everyKind: boolean
+  everyKind: boolean,
+  offers: Offers
 ): Promise<PendingWorkflowBindings["bindings"]> => {
   const versions = await bindingsOf(env, id, version);
   const unapproved: PendingWorkflowBindings["bindings"] = [];
@@ -357,7 +380,11 @@ const unapprovedOf = async (
       kind: binding.kind,
       contractId: binding.contractId,
       // oxlint-disable-next-line no-await-in-loop -- one binding at a time
-      offered: await offeredFor(env, id, binding, everyKind),
+      offered: await offersOf(
+        offers,
+        binding,
+        async () => await offeredFor(env, id, binding, everyKind)
+      ),
     });
   }
   return unapproved;
@@ -376,13 +403,20 @@ const waitingOf = async (
 ): Promise<PendingWorkflowBindings[]> => {
   const pending: PendingWorkflowBindings[] = [];
   const seen = new Set<number>();
+  const offers: Offers = new Map();
   for (const { version, live } of versions) {
     if (version === null || seen.has(version)) {
       continue;
     }
     seen.add(version);
     // oxlint-disable-next-line no-await-in-loop -- one workflow version at a time, three at most
-    const bindings = await unapprovedOf(env, workflow.id, version, everyKind);
+    const bindings = await unapprovedOf(
+      env,
+      workflow.id,
+      version,
+      everyKind,
+      offers
+    );
     if (bindings.length > 0) {
       pending.push({
         workflow: { id: workflow.id, name: workflow.name },
