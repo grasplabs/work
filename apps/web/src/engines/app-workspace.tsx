@@ -61,6 +61,7 @@ import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useWide } from "../frame/wide.ts";
+import { PreviewFrame } from "../screens/screen-frame.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   AppChat,
@@ -84,8 +85,10 @@ import { useAppRead } from "./use-app-read.ts";
 // Settings), the chat's panel, Share and Publish. The main area, by
 // default, previews the draft Grasp is building in the App's chat: the
 // compiled screens of core's draft, which change nothing and read no real
-// data. The chat that builds it is docked on the right, its edge dragged
-// to make it wider or narrower; on a narrow window it opens over the page.
+// data; once proposed, the version up for review, built the same way and
+// read-only, so builders see what they publish. The chat that builds it
+// is docked on the right, its edge dragged to make it wider or narrower;
+// on a narrow window it opens over the page.
 //
 // Publishing is what makes changes live. The chat's agent proposes its
 // draft as the App's next version once it is done; Publish then reviews
@@ -601,8 +604,59 @@ const DraftArea = ({
 };
 
 /**
+ * The version proposed, previewed before it is published: read-only, as
+ * an earlier version of the draft is, and the way to publish it.
+ */
+const PendingArea = ({
+  app,
+  chatId,
+  version,
+}: {
+  app: App;
+  chatId: string;
+  version: number;
+}) => {
+  const { t } = useLingui();
+  const { id, name } = app;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
+        <Badge variant="secondary">
+          <EyeIcon data-icon="inline-start" />
+          <Trans context="an app's draft, not live">Preview</Trans>
+        </Badge>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
+          <Trans>
+            Version {version} is ready to publish: this preview changes nothing
+            and reads no real data.
+          </Trans>
+        </span>
+        <ReviewAndPublish app={app} size="sm" version={version}>
+          <Trans>Review and publish</Trans>
+        </ReviewAndPublish>
+      </div>
+      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
+        <section
+          aria-label={t`Preview of ${name}`}
+          className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
+        >
+          <PreviewFrame
+            app={id}
+            appVersion={version}
+            chatId={chatId}
+            // Another version proposed is a fresh start.
+            key={version}
+          />
+        </section>
+      </div>
+    </div>
+  );
+};
+
+/**
  * The main area's preview: the chat's draft of the App, while Grasp builds
- * one; otherwise where the App stands, never the live App itself.
+ * one; then the version proposed, until it is published; otherwise where
+ * the App stands, never the live App itself.
  */
 const PreviewArea = ({
   app,
@@ -620,6 +674,9 @@ const PreviewArea = ({
     return <DraftArea chatId={chatId} shown={draft} />;
   }
   const { pendingVersion, currentVersion, name } = app;
+  if (pendingVersion !== null && chatId !== undefined) {
+    return <PendingArea app={app} chatId={chatId} version={pendingVersion} />;
+  }
   if (pendingVersion !== null) {
     return (
       <PreviewState

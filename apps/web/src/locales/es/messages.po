@@ -10123,6 +10123,7 @@ msgid "Preview"
 msgstr "Vista previa"
 
 #: src/chat/studio.tsx
+#: src/engines/app-workspace.tsx
 msgid "Preview of {name}"
 msgstr "Vista previa de {name}"
 
@@ -10133,6 +10134,10 @@ msgstr "Vista previa de la página {screen}"
 #: src/screens/screen-frame.tsx
 msgid "Preview of the draft's first page"
 msgstr "Vista previa de la primera página del borrador"
+
+#: src/screens/screen-frame.tsx
+msgid "Preview of the version's first page"
+msgstr "Vista previa de la primera página de la versión"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
@@ -14921,6 +14926,10 @@ msgstr "La versión {version} no tiene una compilación que se ejecute, así que
 #: src/workflows/start-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran."
 msgstr "La versión {version} no tiene una compilación que se ejecute, así que no se ejecutó nada."
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."
+msgstr "La versión {version} está lista para publicarse: esta vista previa no cambia nada ni lee datos reales."
 
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."

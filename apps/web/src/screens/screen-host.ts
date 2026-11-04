@@ -1491,10 +1491,6 @@ export const runScreen = (
   );
 };
 
-/**
- * Runs `screen` (the draft's first when none is named) of the chat's
- * draft of `app` in `frame`, as a preview (`runFrame`).
- */
 /** How long a preview whose load a newer one replaced waits before asking again. */
 export const supersededRetryMs = 250;
 
@@ -1525,6 +1521,11 @@ export const openPreview = async <T>(
   }
 };
 
+/**
+ * Runs `screen` (the draft's first when none is named) of the chat's
+ * draft of `app` in `frame`, as a preview (`runFrame`): of its draft's
+ * `version`, or of the App's `appVersion`, read-only.
+ */
 export const runPreview = (
   frame: HTMLIFrameElement,
   {
@@ -1532,7 +1533,14 @@ export const runPreview = (
     app,
     screen,
     version,
-  }: { chatId: string; app: string; screen?: string; version?: number },
+    appVersion,
+  }: {
+    chatId: string;
+    app: string;
+    screen?: string;
+    version?: number;
+    appVersion?: number;
+  },
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void
 ): (() => void) =>
@@ -1541,7 +1549,14 @@ export const runPreview = (
     {
       open: async (session) =>
         await openPreview(
-          async () => await session.chats.preview(chatId, app, screen, version)
+          async () =>
+            await session.chats.preview(
+              chatId,
+              app,
+              screen,
+              version,
+              appVersion
+            )
         ),
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to

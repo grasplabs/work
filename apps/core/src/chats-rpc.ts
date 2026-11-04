@@ -50,6 +50,8 @@ import {
   createApp,
   draftFiles,
   editableApp,
+  findVersion,
+  readTree,
   screensIn,
 } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
@@ -80,7 +82,10 @@ import {
   withinAnswer,
 } from "./screens-rpc.ts";
 import { screenCode } from "./screens.ts";
-import { draftVersionReferences } from "./sealed-previews.ts";
+import {
+  draftVersionReferences,
+  readOnlyReferences,
+} from "./sealed-previews.ts";
 import type { PreviewAnswer } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -673,15 +678,21 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * while the person builds the App, as the agent must to write it. With
    * `version`, of that version of the draft, read-only: built the same
    * way, but at `readOnlyRevision`, so its calls are all refused
-   * (`app.preview_outdated`).
+   * (`app.preview_outdated`). With `appVersion` instead, of that version
+   * of the App (the one proposed, before it is published), read-only the
+   * same way: from the person's own chat, as its draft's would be.
    */
   async preview(
     chatId: string,
     app: string,
     screen?: string,
-    version?: number
+    version?: number,
+    appVersion?: number
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
+      if (version !== undefined && appVersion !== undefined) {
+        throw screenErrors.create("screen.invalid");
+      }
       // As its recheck (`buildsNow`): an archived App has no preview.
       const { id, name } = await editableApp(this.#env, by, app);
       // One update of the preview loads at a time, and one waits, the
@@ -718,7 +729,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           chatId,
           id,
           name,
-          { screen, version },
+          { screen, version, appVersion },
           limit.signal
         );
         stopped = settledOf(loading);
@@ -767,42 +778,88 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
-   * The bundle of `chatId`'s preview of App `id`, built from its draft
-   * now, or from its draft's `version`, until `signal` stops it.
+   * What `chatId`'s preview of App `id` builds: the files of its draft
+   * now, of its draft's `version`, or of the App's `appVersion`, the
+   * references their screens import, and the revision its calls name.
+   * Every one but the draft now is read-only (`readOnlyRevision`).
    */
-  async #loadPreview(
+  async #previewed(
     by: Identity,
     chatId: string,
     id: AppId,
-    name: string,
-    { screen, version }: { screen?: string; version?: number },
-    signal: AbortSignal
-  ): Promise<PreviewBundle> {
+    { version, appVersion }: { version?: number; appVersion?: number }
+  ): Promise<{
+    files: Map<string, string>;
+    references: () => Promise<string | null>;
+    revision: number;
+  }> {
     const chats = this.#chatsOf(by.userId);
+    if (appVersion !== undefined) {
+      // The chat's own person's, as each kind of preview is
+      // (`takePreviewUpdate` checked it), of a version they may read.
+      const row = await findVersion(this.#env, id, appVersion);
+      const files = await readTree(this.#env, id, row.tree);
+      return {
+        files,
+        references: async () =>
+          await readOnlyReferences(this.#env, id, row.version, files),
+        revision: readOnlyRevision,
+      };
+    }
     const draft =
       version === undefined
         ? await chats.previewDraft(chatIdOf(chatId), by.userId, id)
         : await chats.draftVersion(chatIdOf(chatId), by.userId, id, version);
-    signal.throwIfAborted();
-    const files = await draftFiles(this.#env, id, draft);
-    signal.throwIfAborted();
-    const screens = screensIn(files);
-    if (screens.length === 0) {
-      throw screenErrors.create("screen.not_found");
-    }
-    // A draft of spec 8's layout: its screens import the references its
-    // draft release generates, the very release their calls run on.
-    const withReferences = await withReferencesText(
-      Object.fromEntries(files),
-      async () =>
-        (version === undefined
+    return {
+      files: await draftFiles(this.#env, id, draft),
+      references: async () =>
+        version === undefined
           ? await chats.previewReferences(
               chatIdOf(chatId),
               by.userId,
               id,
               draft.revision
             )
-          : await draftVersionReferences(this.#env, id, draft)) ?? undefined
+          : await draftVersionReferences(this.#env, id, draft),
+      // A version opened read-only names no revision a draft is at, so
+      // nothing it calls runs, even when it is the draft as it is now.
+      revision: version === undefined ? draft.revision : readOnlyRevision,
+    };
+  }
+
+  /**
+   * The bundle of `chatId`'s preview of App `id`, built from its draft
+   * now, from its draft's `version`, or from the App's `appVersion`
+   * (`#previewed`), until `signal` stops it.
+   */
+  async #loadPreview(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    name: string,
+    {
+      screen,
+      version,
+      appVersion,
+    }: { screen?: string; version?: number; appVersion?: number },
+    signal: AbortSignal
+  ): Promise<PreviewBundle> {
+    const { files, references, revision } = await this.#previewed(
+      by,
+      chatId,
+      id,
+      { version, appVersion }
+    );
+    signal.throwIfAborted();
+    const screens = screensIn(files);
+    if (screens.length === 0) {
+      throw screenErrors.create("screen.not_found");
+    }
+    // An App of spec 8's layout: its screens import the references its
+    // draft release generates, the very release their calls run on.
+    const withReferences = await withReferencesText(
+      Object.fromEntries(files),
+      async () => (await references()) ?? undefined
     );
     signal.throwIfAborted();
     const built = await screenCode(
@@ -821,9 +878,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       app: id,
       name,
-      // A version opened read-only names no revision a draft is at, so
-      // nothing it calls runs, even when it is the draft as it is now.
-      revision: version === undefined ? draft.revision : readOnlyRevision,
+      revision,
       screens,
       screen: built.screen,
       artifact: built.artifact,
