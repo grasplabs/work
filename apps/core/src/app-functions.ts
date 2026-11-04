@@ -1890,7 +1890,7 @@ const runReferenceSchema = z.object({
 
 /**
  * Calls a public function of a workflow run's own App for one of its
- * steps (`env.APP.callFunction`, workflows/host.ts): only in the release
+ * steps (`env.APP.callFunction`, workflows/app-run.ts): only in the release
  * of the version the run is pinned to, as the run (`runInvocationFor`),
  * under `idempotencyKey`, which core derived from the step's. What it
  * answers, or why it failed, as a screen's call gets it (spec 32.6).

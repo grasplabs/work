@@ -281,9 +281,9 @@ const brain: ErasureStep = {
  * pass that died before sending it; the engine ends it. A run that starts for
  * them after (a trigger of an App they own, a schedule of theirs) does
  * nothing: every step of every run checks first that the person it acts
- * for is still a member (`requireActivePerson`, the hosts'
- * `#requirePerson`), so it fails at its first step. Moving ownership of
- * what they owned is an admin's. Then the one-use
+ * for is still a member (`requireActivePerson`, through app-run.ts's and
+ * resource-host.ts's `requirePerson`), so it fails at its first step.
+ * Moving ownership of what they owned is an admin's. Then the one-use
  * confirmations they were given to answer decisions go. The decisions
  * they answered keep who did, as company history.
  */

@@ -363,7 +363,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     if (!callReviewed(calls, running.step, binding)) {
       const error = workflowErrors.create("workflow.call_not_reviewed");
       error.message = `Step "${stepNameOf(running.step).name}" called ${binding}, which the review of this version doesn't show it calling: call each binding only in the step's own function, where the review shows it.`;
-      // As the host's `#requireReviewed`: it fails this step's attempt,
+      // As the App run's `#requireReviewed` (app-run.ts): it fails this step's attempt,
       // caught or not, but isn't tampering, so the run goes on.
       running.refused = error;
       throw error;
