@@ -416,8 +416,8 @@ class AppRun implements RunKind {
    */
   stepRefusal(step: string, use: HostStepUse): Error | undefined {
     // A sealed run's own: an App's workflow never sleeps until a deadline
-    // its step recorded, nor runs a JSON workflow's catch.
-    if (use === "sleepUntil" || use === "caught") {
+    // its step recorded, runs a JSON workflow's catch, nor waits for events.
+    if (use === "sleepUntil" || use === "caught" || use === "listen") {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one an App's workflow runs that way: run steps only as the workflow's function writes them.`;
       return error;

@@ -207,6 +207,12 @@ export interface WorkflowEngine {
    */
   sleepUntil?: (name: string, until: number) => Promise<void>;
   /**
+   * A generated workflow's event wait (`step.listen`): the engine decides
+   * what it waits for, and how long, from the step alone, and answers how
+   * it ended. Only a sealed build's run host has it.
+   */
+  listen?: (name: string) => Promise<unknown>;
+  /**
    * A generated workflow's catch step (`step.caught`): `takes` is asked
    * whether its catch takes the error the engine offers, and the step
    * answers what it recorded. Only a sealed build's run host has it.

@@ -39,9 +39,11 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
+import { eventTypeKey } from "./event-envelopes.ts";
 import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
   DecisionWait,
+  EventWaitPlan,
   HostControls,
   HostedRun,
   HostStepUse,
@@ -54,7 +56,7 @@ import type {
 } from "./host.ts";
 import type { AttemptAdmission } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
-import { runAuthority } from "./resource-authority.ts";
+import { requireCallAuthority, runAuthority } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
@@ -378,6 +380,27 @@ type ForTask = Extract<SealedTask, { kind: "for" }>;
 const isSequentialLoop = (task: SealedTask | undefined): task is ForTask =>
   task?.kind === "for" && task.loop.concurrency === 1;
 
+/** The furthest ahead a deadline may be, as the engine sleeps: a year. */
+const maxDeadlineMs = 365 * 86_400_000;
+
+/** A `listen` task. */
+type ListenTask = Extract<SealedTask, { kind: "listen" }>;
+
+/**
+ * Whether `task` is an event wait the run host runs: one that takes the
+ * first event of any of its sealed types, through its sealed binding,
+ * until its timeout of at most a year. A listen for all of its filters,
+ * or matching or correlating on an event's attributes, has no steps here,
+ * so it never runs: no format sealing for the run host writes one.
+ */
+const isEventWait = (task: SealedTask | undefined): task is ListenTask =>
+  task?.kind === "listen" &&
+  task.listen.strategy !== "all" &&
+  task.timeoutMs <= maxDeadlineMs &&
+  task.listen.filters.every(
+    (filter) => filter.attributes.length === 0 && filter.correlate === undefined
+  );
+
 /**
  * The steps `build` seals, by `<task>:<kind>`, the item indices of their
  * engine names left out (`stepNameOf`): the workflow's own, every task's
@@ -398,6 +421,7 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
     const runs =
       task.kind !== "fork" &&
       (task.kind !== "for" || isSequentialLoop(task)) &&
+      (task.kind !== "listen" || isEventWait(task)) &&
       task.scope.every((id) => isSequentialLoop(tasks.get(id)));
     if (runs) {
       for (const kind of task.steps) {
@@ -667,9 +691,6 @@ const sleepsOf = (task: SealedTask): boolean =>
 const sleepsUntil = (task: SealedTask): boolean =>
   (task.kind === "wait" && task.duration !== undefined) ||
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
-
-/** The furthest ahead a deadline may be, as the engine sleeps: a year. */
-const maxDeadlineMs = 365 * 86_400_000;
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
 const maxRetryDelayMs = 365 * 86_400_000;
@@ -1358,8 +1379,12 @@ class SealedRun implements SealedRunKind {
   ): boolean {
     const { task, kind, path } = sealed;
     const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
+    const listens = kind === "task" && isEventWait(task);
     if (use === "do") {
-      return kind !== "catch" && kind !== "answer" && !sleeps;
+      return kind !== "catch" && kind !== "answer" && !sleeps && !listens;
+    }
+    if (use === "listen") {
+      return listens;
     }
     if (use === "waitForDecision") {
       return kind === "answer";
@@ -1818,6 +1843,60 @@ class SealedRun implements SealedRunKind {
       throw isExpectedError(error)
         ? namedError("NonRetryableError", error.message, error.code)
         : error;
+    }
+  }
+
+  /**
+   * What event wait step `step` (an event wait's own) takes, from its
+   * build alone: the first event of the run's inbox of any of its sealed
+   * types through its sealed binding (each kept under the engine's type
+   * naming both, `eventTypeKey`, so no other binding's event matches),
+   * until its sealed timeout. Refused unless the run may still take
+   * events through that binding (`#requireEventAuthority`).
+   */
+  async eventWait(step: string): Promise<EventWaitPlan> {
+    const task = this.#stepOf(step)?.task;
+    if (!isEventWait(task)) {
+      throw new Error(`Step "${step}" is no event wait's`);
+    }
+    const { binding, filters } = task.listen;
+    await this.#requireEventAuthority(binding);
+    return {
+      match: await Promise.all(
+        filters.map(async ({ type }) => ({
+          type: await eventTypeKey(binding, type),
+        }))
+      ),
+      timeoutMs: task.timeoutMs,
+    };
+  }
+
+  /**
+   * Refuses a wait for events through `alias` unless the run may still
+   * take them: an event binding its start froze, its authority holding
+   * now (resource-authority.ts, `requireCallAuthority`), as a call's must
+   * (`workflow.event_denied`). A test run's binding is its checkpoint's,
+   * and nothing outside it is asked.
+   */
+  async #requireEventAuthority(alias: string): Promise<void> {
+    const { calling } = this.run;
+    if (calling.candidate !== undefined) {
+      if (calling.candidate.get(alias)?.kind !== "event") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      return;
+    }
+    const binding = calling.bindings.get(alias);
+    if (binding?.kind !== "event") {
+      throw workflowResourceErrors.create("workflow.event_denied");
+    }
+    try {
+      await requireCallAuthority(this.#env, calling, binding);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      throw error;
     }
   }
 
