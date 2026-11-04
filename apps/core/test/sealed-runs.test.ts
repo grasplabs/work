@@ -1269,6 +1269,13 @@ const enterPause = (until: string): string =>
 const sleepPause = (until: string): string =>
   `await step.sleepUntil("pause", { key: "task", description: "Its sleep", until: ${until} });`;
 
+/** A round's own failure, its retry's decision refused as tampering. */
+const roundFailedRefused = {
+  ended: "internal.unexpected",
+  why: "Something went wrong.",
+  tampered: ["workflow.invalid"],
+};
+
 /** A retry choice naming `by`'s catch, retrying. */
 const retryingBy = (by: string): string =>
   `, retry: async () => ({ by: ${JSON.stringify(by)}, retry: true })`;
@@ -1433,7 +1440,7 @@ try {
       await waitingRun(sealed),
       moduleOf(`
 try {
-  ${taskStep("fetch", '(() => { const error = new Error("lost"); error.code = "connect.outcome_unknown"; throw error; })()')};
+  ${taskStep("fetch", '(() => { const error = new Error("Execution timed out, CPU time limit"); error.code = "connect.outcome_unknown"; throw error; })()')};
 } catch (thrown) {
   return { code: thrown.code ?? null, caught: ${catchStep("guarded", "async () => true")} };
 }`)
@@ -1539,8 +1546,9 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
     }).toStrictEqual({
       notTransient: failedWith("expression.failed"),
       notTransientDecided: 0,
-      failing: refusedAs("A retry with no conditions has nothing to fail on."),
-      forged: refusedAs(`Task "outer"'s catch can't take the failure.`),
+      // Refused, which ends the run; the step fails as its round did.
+      failing: roundFailedRefused,
+      forged: roundFailedRefused,
       forgedRan: 0,
     });
   });

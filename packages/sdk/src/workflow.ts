@@ -444,8 +444,9 @@ export interface SleepOptions extends StepOptions {
 
 /**
  * An error a generated workflow's catch takes, as its run host maps the
- * failure (spec 13.7): its type and status, the task it came from
- * (`instance`), and the platform's words for it.
+ * failure: its kind (`type`) and `status`, the task it came from
+ * (`instance`), and the platform's words for it. Whatever format the
+ * workflow was written in, the host decides which kinds a catch may take.
  */
 export interface CaughtError {
   readonly type: string;

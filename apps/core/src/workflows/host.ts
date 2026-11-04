@@ -2347,7 +2347,7 @@ export class RunHost extends RpcTarget {
 
   /**
    * Whether step `step`, whose round `round` failed with `error`, runs
-   * again in its place (spec 13.7): only as its kind offers
+   * again in its place: only as its kind offers
    * (`RunKind.retryOffer`: a sealed run's step in the list of a `try`
    * whose catch retries, while its policy has rounds left and the
    * failure may be tried again), and its code's `retry` chooses, the
@@ -2355,9 +2355,8 @@ export class RunHost extends RpcTarget {
    * that records it (`#decideRetry`), then a durable sleep of the backoff
    * it decided, each named after the round it leads to. Answers when the
    * first round failed, which every later decision reads; `undefined`
-   * when it doesn't run again, and the step fails as its round did; a
-   * decision that failed fails the step with that failure. Fresh or
-   * replayed alike.
+   * when it doesn't run again, and the step fails as its round did,
+   * whatever a decision itself failed with. Fresh or replayed alike.
    */
   async #retried(
     step: string,
@@ -2381,19 +2380,26 @@ export class RunHost extends RpcTarget {
       return undefined;
     }
     const prefix = waitStep(await waitKeyOf(step), "retry", round + 1);
-    // A decision that failed fails the step with its failure, journaled.
-    const decided = retryDecisionSchema.parse(
-      await this.#step.do(
-        `${prefix}:decide`,
-        stepConfig({}),
-        async (context) =>
-          await this.#decideRetry(step, context, offer, {
-            retry,
-            firstFailedAt,
-            stepDone,
-          })
-      )
-    );
+    let decided: RetryDecision;
+    try {
+      decided = retryDecisionSchema.parse(
+        await this.#step.do(
+          `${prefix}:decide`,
+          stepConfig({}),
+          async (context) =>
+            await this.#decideRetry(step, context, offer, {
+              retry,
+              firstFailedAt,
+              stepDone,
+            })
+        )
+      );
+    } catch {
+      // The round's failure goes on unchanged, whatever its decision
+      // failed with: a refusal of it was recorded as tampering already,
+      // which ends the run (`#refuseTampering`).
+      return undefined;
+    }
     if (!decided.retry) {
       return undefined;
     }

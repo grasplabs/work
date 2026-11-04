@@ -121,12 +121,14 @@ describe("a sealed run's retry decision", () => {
     });
     const outer = tryOf("outer", retrying("constant"));
     const tries = [inner, middle, outer];
-    const decide = (choice: unknown, around: readonly Try[] = tries) =>
+    const decide = (choice?: unknown, around: readonly Try[] = tries) =>
       retryDecided(around, caught, 1, choice, now()).retry;
     expect({
       innerOrOuter: [decide(by("inner")), decide(by("outer"))],
       notRetrying: decide(by("inner", false)),
       none: decide(null, [inner]),
+      // Its code failed to choose: an inner catch's `when` may have failed.
+      failedInside: decide(),
       refused: {
         // Its filter doesn't take the error; nor a task around it.
         middle: refused(() => decide(by("middle"))),
@@ -140,11 +142,14 @@ describe("a sealed run's retry decision", () => {
           decide(by("outer"), [tryOf("inner", retrying("constant")), outer])
         ),
         unshaped: refused(() => decide({ by: "inner" })),
+        // Nothing for its code to decide, and it failed.
+        failedOutside: refused(() => decide(undefined, [outer])),
       },
     }).toStrictEqual({
       innerOrOuter: [true, true],
       notRetrying: false,
       none: false,
+      failedInside: false,
       refused: {
         middle: true,
         elsewhere: true,
@@ -152,6 +157,7 @@ describe("a sealed run's retry decision", () => {
         outerNotRetrying: true,
         pastIt: true,
         unshaped: true,
+        failedOutside: true,
       },
     });
   });

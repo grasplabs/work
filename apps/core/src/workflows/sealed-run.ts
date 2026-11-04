@@ -9,6 +9,7 @@ import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
@@ -38,6 +39,7 @@ import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
 import {
   forIsolate,
+  isCoreMarker,
   modelCallLimitOf,
   settle,
   unbilledAiWaitOf,
@@ -492,6 +494,9 @@ const sealedRetries = {
   backoff: "exponential",
 } as const satisfies NonNullable<StepLimits["retries"]>;
 
+/** What a failure only a task's code reports says, past its code. */
+const taskFailed = "The task failed.";
+
 /** The codes of a task's own data that didn't fit its schema. */
 const dataCodes: ReadonlySet<string> = new Set([
   "workflow.task_data_invalid",
@@ -501,7 +506,7 @@ const dataCodes: ReadonlySet<string> = new Set([
 /**
  * `error`, a failure only the isolate reports, as the host takes it: an
  * expression's or a task's data's by its code, any other the task's own
- * runtime failure, with no code. Never a timeout, a host's code or one no
+ * runtime failure, with no code, each in the platform's words. Never a timeout, a host's code or one no
  * catch may take: the host keeps what it made itself (`#hostFailures`).
  */
 const isolateFailure = (error: StepError): StepError => {
@@ -511,11 +516,16 @@ const isolateFailure = (error: StepError): StepError => {
   const kept =
     expressionErrors.codeOf(error) !== undefined ||
     (code !== undefined && dataCodes.has(code));
-  return {
-    name: "Error",
-    message: error.message,
-    ...(kept ? { code } : {}),
-  };
+  // The platform's words for it, never its code's: a message the isolate
+  // chose could read back as a timeout or a CPU kill (host.ts,
+  // `forIsolate`), and could quote what the run read.
+  return kept
+    ? {
+        name: "Error",
+        message: expectedMessageOf(code ?? "") ?? taskFailed,
+        code,
+      }
+    : { name: "Error", message: taskFailed };
 };
 
 /**
@@ -643,7 +653,10 @@ export const retryDecided = (
     // Its code failed to choose (an expression of a `when` that failed):
     // no retry, unless a catch and its policy with no conditions had
     // nothing for it to decide.
-    if (forcedRetry(tries[forced], round)) {
+    const firstTaking = tries.findIndex((around) =>
+      matchesFilter(error, around.catch.errors)
+    );
+    if (firstTaking === forced && forcedRetry(tries[forced], round)) {
       throw tampering("A retry with no conditions has nothing to fail on.");
     }
     return stop;
@@ -692,6 +705,20 @@ const deadlineUnfit = (value: unknown): StepError | undefined => {
           issues: ["until: Give a time in milliseconds at most a year ahead."],
         })
       );
+};
+
+/**
+ * Whether `value` is one the host records of a step: JSON within a step's
+ * result, and no marker of core's (host.ts, `#doStep`).
+ */
+const recordable = (value: unknown): boolean => {
+  if (isCoreMarker(value) || !z.json().optional().safeParse(value).success) {
+    return false;
+  }
+  return (
+    new TextEncoder().encode(JSON.stringify(value) ?? "").byteLength <=
+    platformLimits.stepPayloadBytes
+  );
 };
 
 /** Whether `value` is a list. */
@@ -1089,6 +1116,11 @@ class SealedRun implements SealedRunKind {
     attempt: StepAttempt,
     value: unknown
   ): Promise<Settled<unknown>> {
+    // What the host refuses of any step's record (host.ts, `#doStep`), of
+    // one whose call took effect: failed after it, for good.
+    if (this.#effected.has(attempt) && !recordable(value)) {
+      return { ok: false, error: failedAfterEffect };
+    }
     const { task, kind } = this.#steps.get(attempt.step) ?? {};
     if (kind === "catch") {
       return await this.#caughtChecked(attempt, task, value);
