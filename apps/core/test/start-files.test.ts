@@ -598,7 +598,6 @@ describe(
         name: "scan.png",
         type: "image/png",
         size: bytes.length,
-        ownerId: "user-ada",
         chunks: [{ key, sha256: await sha256HexOfBytes(bytes) }],
       };
       let reads = 0;

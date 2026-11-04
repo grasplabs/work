@@ -6223,6 +6223,10 @@ msgstr "Half my Monday goes on invoices. Most miss an order number, so I’m ema
 msgid "handbook/leave"
 msgstr "handbook/leave"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "Handed an email attachment to a run"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Handed over to it"

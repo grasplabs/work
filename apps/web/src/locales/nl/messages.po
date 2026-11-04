@@ -6223,6 +6223,10 @@ msgstr "Mijn halve maandag gaat op aan facturen. Vaak mist het ordernummer, dus 
 msgid "handbook/leave"
 msgstr "handboek/verlof"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "Een e-mailbijlage aan een run gegeven"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Eraan overgedragen"

@@ -1217,7 +1217,10 @@ export const decideWorkflowStart = async (
   invoker: StartInvoker,
   id: unknown,
   request: unknown,
-  /** The App files the start may hand its run: an App's screen's only. */
+  /**
+   * The files the start may hand its run: an App's, for its screen's or
+   * code's start; a message's attachments, for its email trigger's.
+   */
   files?: StartFiles
 ): Promise<StartDecision> => {
   const { version, input, key } = workflowResourceErrors.parse(
@@ -1680,7 +1683,10 @@ export const startWorkflow = async (
    * throws to start nothing (a caller that may no longer act).
    */
   beforeAdmit?: () => void,
-  /** The App files the start may hand its run: an App's screen's only. */
+  /**
+   * The files the start may hand its run: an App's, for its screen's or
+   * code's start; a message's attachments, for its email trigger's.
+   */
   files?: StartFiles
 ): Promise<WorkflowStart> => {
   const decision = await decideWorkflowStart(env, invoker, id, request, files);

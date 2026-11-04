@@ -915,7 +915,7 @@ const AddTrigger = ({
             onChange={(changed) => {
               setMapping(changed.target.value);
             }}
-            placeholder='{ "subject": "/subject", "from": "/from/address" }'
+            placeholder='{ "subject": "/subject", "from": "/from/address", "attachments": "/attachments" }'
             spellCheck={false}
             value={mapping}
             variant="code"

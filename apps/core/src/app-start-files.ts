@@ -51,6 +51,8 @@ export const appStartFiles = (
     loaded ??= typeof release === "function" ? await release() : release;
     return loaded;
   };
+  // Who uploaded each file read, for its audit event.
+  const owners = new Map<string, string>();
   return {
     read: async (fileId) => {
       const { app: declared, store } = await releaseOf();
@@ -94,12 +96,12 @@ export const appStartFiles = (
         fileId,
         readable
       );
+      owners.set(content.id, content.ownerId);
       return {
         id: content.id,
         name: content.name,
         type: content.mimeType,
         size: content.size,
-        ownerId: content.ownerId,
         chunks: content.chunks.map(({ key, sha256 }) => ({ key, sha256 })),
       };
     },
@@ -118,7 +120,7 @@ export const appStartFiles = (
             store: loaded?.store?.storeId ?? "",
             workflow: workflowId,
             run: runId,
-            uploadedBy: file.ownerId,
+            uploadedBy: owners.get(file.id) ?? "",
             via: via.kind,
             ...(via.agent === null ? {} : { agent: via.agent }),
           },

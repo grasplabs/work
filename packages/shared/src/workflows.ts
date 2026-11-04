@@ -306,6 +306,13 @@ export const inboundEmailSchema = z.object({
       filename: z.string().nullable(),
       mimeType: z.string(),
       size: z.int(),
+      /**
+       * The attachment as a file of the run, `{ id }`, read through the
+       * workflow's own files binding: given only to an independent
+       * workflow's email trigger, and only for an attachment a run file
+       * may be (inbound-email.ts in core).
+       */
+      file: z.object({ id: z.string() }).optional(),
     })
   ),
 });
