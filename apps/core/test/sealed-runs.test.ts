@@ -2391,7 +2391,7 @@ const codeOf = async (work: () => Promise<unknown>): Promise<unknown> => {
 const refusedPastTheSdk = (step: string) => ({
   ended: "workflow.invalid",
   tampered: ["workflow.invalid"],
-  untaken: true,
+  untaken: "workflow.invalid",
   refused: [{ step, errorCode: "workflow.invalid" }],
 });
 
