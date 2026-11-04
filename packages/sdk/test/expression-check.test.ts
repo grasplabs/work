@@ -109,7 +109,7 @@ describe("reaching a global", () => {
 
   it("is refused written with Unicode escapes", () => {
     expect([
-      verdict(String.raw`globalThis`),
+      verdict(String.raw`globalTh\u0069s`),
       verdict(String.raw`\u{65}val('1')`),
     ]).toStrictEqual(["expression.global", "expression.global"]);
   });
@@ -134,8 +134,8 @@ describe("the prototype chain of the data", () => {
         "input?.constructor",
         "input['constructor']",
         "input?.['__proto__']",
-        String.raw`input.constructor`,
-        String.raw`input['constructor']`,
+        String.raw`input.\u0063onstructor`,
+        String.raw`input['\u0063onstructor']`,
         String.raw`input['\x5f_proto__']`,
         "input.__defineGetter__",
         "input.__lookupSetter__",
@@ -161,7 +161,7 @@ describe("the prototype chain of the data", () => {
       [
         "{ __proto__: input }",
         "{ '__proto__': input }",
-        String.raw`{ __proto__: input }`,
+        String.raw`{ \u005f_proto__: input }`,
         "{ constructor: input }",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 4 }, () => "expression.property"));
@@ -372,6 +372,59 @@ describe("splicing into the generated code", () => {
   });
 });
 
+describe("the roots an expression reads", () => {
+  it("are the caller's where it names them, such as a loop's item", () => {
+    const roots = ["input", "steps", "params", "run", "item"];
+    expect({
+      item: checkExpression("item.total > params.limit", { roots }).ok,
+      // Only those named: without `item`, it is a global.
+      byDefault: verdict("item.total"),
+      // The roots named replace the default ones.
+      replaced: checkExpression("input.a", { roots: ["error"] }),
+    }).toMatchObject({
+      item: true,
+      byDefault: "expression.global",
+      replaced: { ok: false, errors: [{ code: "expression.global" }] },
+    });
+  });
+
+  it("are never a global's name, or anything but a plain identifier", () => {
+    const refused = [
+      "globalThis",
+      "Function",
+      "eval",
+      "fetch",
+      "Object",
+      "undefined",
+      "arguments",
+      "self",
+      "window",
+      "process",
+      "this",
+      "yield",
+      "let",
+      "await",
+      "item.total",
+      "a b",
+      "",
+      String.raw`\u0069tem`,
+      "ítem",
+      "item)=>globalThis;((x",
+    ];
+    expect(
+      refused.filter((root) => {
+        try {
+          checkExpression("1", { roots: ["input", root] });
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+      "accepted as a root"
+    ).toStrictEqual([]);
+  });
+});
+
 describe("an error", () => {
   it("says where it is and how to fix it", () => {
     const checked = checkExpression("input.lines.map((l) =>\n  globalThis)");
@@ -380,8 +433,9 @@ describe("an error", () => {
       errors: [
         {
           code: "expression.global",
-          message: "`globalThis` is not one of the workflow's values.",
-          fix: "Start from input, steps, params or run, or a callback's own parameter.",
+          message:
+            "`globalThis` is not one of the workflow's values: input, steps, params, run.",
+          fix: "Start from one of the values the message names, or a callback's own parameter.",
           offset: 25,
           line: 2,
           column: 3,

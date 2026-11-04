@@ -7,7 +7,9 @@
  */
 import {
   checkExpression,
+  checkRoots,
   expressionCode,
+  expressionRoots,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError } from "@grasp-os/sdk/expression-check";
 
@@ -23,6 +25,13 @@ export interface ExpressionScopeTypes {
   readonly steps: Readonly<Record<string, string>>;
   readonly params: string;
   readonly run: string;
+  /**
+   * Roots beside those four, by name, with their types: `item` inside a
+   * `forEach`, `error` in a catch. Each name is held to what
+   * `checkExpression` takes as a root: a plain identifier, never a
+   * global's name.
+   */
+  readonly roots?: Readonly<Record<string, string>>;
 }
 
 /** An expression and, where the workflow needs one, the type of its result. */
@@ -78,15 +87,30 @@ const fromSubset = ({
 /**
  * Checks each expression against the subset first, then the ones that
  * pass against `scope`'s types, each as the body of a function of
- * `input`, `steps`, `params` and `run`, as the generated code runs it.
- * `kitTypes` holds TypeScript's own declarations (`libLocation`), as the
- * kit does.
+ * `input`, `steps`, `params`, `run` and `scope.roots`, as the generated
+ * code runs it. `kitTypes` holds TypeScript's own declarations
+ * (`libLocation`), as the kit does. Throws when a root of
+ * `scope.roots` repeats one of the four or isn't one `checkExpression`
+ * takes.
  */
 export const checkExpressionTypes = (
   scope: ExpressionScopeTypes,
   expressions: Readonly<Record<string, TypedExpression>>,
   kitTypes: Record<string, string>
 ): ExpressionTypeCheck => {
+  const extra = Object.entries(scope.roots ?? {});
+  const defaults = new Set<string>(expressionRoots);
+  for (const [name] of extra) {
+    if (defaults.has(name)) {
+      throw new Error(`"${name}" is already one of an expression's roots.`);
+    }
+  }
+  const roots = [...expressionRoots, ...extra.map(([name]) => name)];
+  // Before any name reaches the code: plain identifiers, no global's.
+  checkRoots(roots);
+  const extraParameters = extra
+    .map(([name, type]) => `, ${name}: ${typeCode(type)}`)
+    .join("");
   const errors: Record<string, ExpressionTypeError[]> = {};
   const steps = Object.entries(scope.steps)
     .map(
@@ -106,7 +130,7 @@ export const checkExpressionTypes = (
   for (const [index, [name, { source, result }]] of Object.entries(
     expressions
   ).entries()) {
-    const checked = checkExpression(source);
+    const checked = checkExpression(source, { roots });
     if (!checked.ok) {
       errors[name] = checked.errors.map(fromSubset);
       continue;
@@ -118,7 +142,7 @@ export const checkExpressionTypes = (
       code += `type Result${index} = ${typeCode(result)};\n`;
       returns = `: Result${index}`;
     }
-    const head = `export const e${index} = (input: Input, steps: Steps, params: Params, run: Run)${returns} =>\n`;
+    const head = `export const e${index} = (input: Input, steps: Steps, params: Params, run: Run${extraParameters})${returns} =>\n`;
     const first = lineCount(code + head) + 1;
     code += `${head}${expressionCode(checked)};\n`;
     placed.push({ name, first, last: first + lineCount(source) - 1 });

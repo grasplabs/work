@@ -115,4 +115,41 @@ describe("type-checking a workflow's expressions", () => {
       scopeErrors: [],
     });
   });
+
+  it("reads a further root, such as a loop's item, by the type it is given", () => {
+    const { expressions } = checkExpressionTypes(
+      { ...scope, roots: { item: "{ amount: number }" } },
+      {
+        fine: { source: "item.amount > params.limit", result: "boolean" },
+        wrong: { source: "item.amout" },
+      },
+      kitTypes
+    );
+    expect({
+      fine: expressions.fine,
+      wrong: expressions.wrong?.map(({ code, column }) => ({ code, column })),
+    }).toStrictEqual({ fine: [], wrong: [{ code: "TS2551", column: 6 }] });
+  });
+
+  it("takes no root that is a global's name, a default one again, or no identifier", () => {
+    const refused = [
+      "globalThis",
+      "Function",
+      "eval",
+      "input",
+      "item: unknown) => globalThis; ((x",
+    ].filter((name) => {
+      try {
+        checkExpressionTypes(
+          { ...scope, roots: { [name]: "unknown" } },
+          {},
+          kitTypes
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(refused, "accepted as a root").toStrictEqual([]);
+  });
 });

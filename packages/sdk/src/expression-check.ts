@@ -28,10 +28,8 @@ import { messageOf } from "@grasp-os/shared/errors";
  * CPU limit stops it.
  */
 
-/** The workflow's values an expression may start from. */
+/** The workflow's values an expression may start from, by default. */
 export const expressionRoots = ["input", "steps", "params", "run"] as const;
-
-const roots = new Set<string>(expressionRoots);
 
 /**
  * Array methods that take a callback, which must be the call's only
@@ -146,7 +144,7 @@ const fixes: Record<ExpressionErrorCode, string> = {
   "expression.syntax":
     "Write one expression of property reads, literals, operators and the allowed methods.",
   "expression.global":
-    "Start from input, steps, params or run, or a callback's own parameter.",
+    "Start from one of the values the message names, or a callback's own parameter.",
   "expression.property":
     "Read the data's own fields; the prototype chain is out of reach.",
   "expression.computed-key":
@@ -198,6 +196,13 @@ const isCallbackArrow = (node: Node): boolean =>
 
 class Checker {
   readonly errors: ExpressionError[] = [];
+
+  /** The roots, as a global's error names them. */
+  private readonly rootList: string;
+
+  constructor(roots: ReadonlySet<string>) {
+    this.rootList = [...roots].join(", ");
+  }
 
   private fail(node: Node, code: ExpressionErrorCode, message: string): void {
     const start = node.loc?.start;
@@ -316,7 +321,7 @@ class Checker {
           this.fail(
             node,
             "expression.global",
-            `\`${node.name}\` is not one of the workflow's values.`
+            `\`${node.name}\` is not one of the workflow's values: ${this.rootList}.`
           );
         }
         break;
@@ -468,11 +473,89 @@ const syntaxError = (source: string, error: unknown): ExpressionError => {
   );
 };
 
+/** A root's name: ASCII, unescaped, so it reads the same wherever it's written. */
+const plainName = /^[A-Za-z_$][\w$]*$/u;
+
+/**
+ * Global names of the hosts JavaScript runs on that this isolate may not
+ * have (`isGlobal` asks it for the rest), and `arguments`, which an arrow
+ * reads from the function around it.
+ */
+const hostGlobals = new Set([
+  "arguments",
+  "global",
+  "window",
+  "self",
+  "document",
+  "process",
+  "require",
+  "module",
+  "exports",
+  "Deno",
+  "Bun",
+]);
+
+const isGlobal = (name: string): boolean =>
+  hostGlobals.has(name) || Reflect.has(globalThis, name);
+
+/** Whether `name` binds as a parameter: no reserved word, by Babel. */
+const isBindable = (name: string): boolean => {
+  try {
+    const parsed = parseExpression(`(${name}) => 0`, {
+      sourceType: "module",
+      plugins: [],
+    });
+    return (
+      parsed.type === "ArrowFunctionExpression" &&
+      parsed.params[0]?.type === "Identifier" &&
+      parsed.params[0].name === name
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The roots an expression may read, as a caller names them: the default
+ * ones, or those of where it runs (`item` inside a `forEach`, `error` in
+ * a catch). Each is a plain identifier the generated code binds as a
+ * parameter, never a global's name: even shadowed, an expression that
+ * reads `globalThis` would read differently wherever the binding isn't.
+ * A wrong root is the caller's mistake, not the expression's, so it
+ * throws.
+ */
+export const checkRoots = (names: readonly string[]): ReadonlySet<string> => {
+  for (const name of names) {
+    if (!(plainName.test(name) && isBindable(name))) {
+      throw new Error(
+        `"${name}" can't be an expression's root: a root is a plain identifier.`
+      );
+    }
+    if (isGlobal(name)) {
+      throw new Error(
+        `"${name}" can't be an expression's root: it is a global's name.`
+      );
+    }
+  }
+  return new Set(names);
+};
+
+/** How an expression is checked. */
+export interface CheckOptions {
+  /** The values it may read by name; `expressionRoots` by default. */
+  readonly roots?: readonly string[];
+}
+
 /**
  * Checks a workflow expression against the subset: every problem found,
  * each with its code, position and fix, or the source to generate from.
+ * Throws when a root in `options` is not a plain, non-global identifier.
  */
-export const checkExpression = (source: string): CheckedExpression => {
+export const checkExpression = (
+  source: string,
+  options: CheckOptions = {}
+): CheckedExpression => {
+  const roots = checkRoots(options.roots ?? expressionRoots);
   let parsed: Expression;
   try {
     // As a module, as the generated code is one: strict, no HTML comments.
@@ -481,7 +564,7 @@ export const checkExpression = (source: string): CheckedExpression => {
   } catch (error) {
     return { ok: false, errors: [syntaxError(source, error)] };
   }
-  const checker = new Checker();
+  const checker = new Checker(roots);
   checker.visit(parsed, roots);
   return checker.errors.length === 0
     ? { ok: true, source }
