@@ -2154,6 +2154,8 @@ describe("a sealed run's decisions on the run host", () => {
         '{ recipients: [input.reviewer, "role:admin"], prompt: "Approve the invoice", input: { invoice: input.invoice } }'
       ),
       uncovered: await run(`person:${outsider.userId}`, reviewAsks),
+      // A person's bare ID: its code's `from` couldn't be it exactly.
+      bareId: await run(reviewer.userId, reviewAsks),
       ownPerson: await run(`person:${by.userId}`, reviewAsks),
     }).toStrictEqual({
       otherPrompt: refusedAs("prompt isn't the value the build sealed."),
@@ -2162,6 +2164,7 @@ describe("a sealed run's decisions on the run host", () => {
         "recipients isn't a list of the 1 items the build sealed."
       ),
       uncovered: failedWith("workflow.call_denied"),
+      bareId: failedWith("workflow.call_invalid"),
       ownPerson: failedWith("workflow.call_invalid"),
     });
   });
@@ -2261,7 +2264,7 @@ describe("a sealed run's decisions on the run host", () => {
     });
   });
 
-  it("never takes an answer from the run's own person, nor one its binding no longer allows", async () => {
+  it("never takes an answer from the run's own person, nor asks or takes one its binding no longer allows", async () => {
     // A workflow of its own: its binding is revoked.
     const revocable = await decisionWorkflow();
     const { by, builder, admin, workflow, approval } = revocable;
@@ -2291,13 +2294,48 @@ describe("a sealed run's decisions on the run host", () => {
         }),
       }
     );
-    expect({ refused, ownRun, revokedRun }).toStrictEqual({
+    // Revoked once it opened, before its people are asked: nobody is.
+    const unasked = await decisionWorkflow();
+    const beforeAsk = await reviewRun(unasked, "role:builder");
+    const { step: steps, leaseOf } = newerEngine();
+    const askRevoked = await ranAs(
+      beforeAsk,
+      reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+      {
+        engine: {
+          leaseOf,
+          step: {
+            ...steps,
+            do: async (name, config, fn) => {
+              if (name === "review:task#ask") {
+                await revokeWorkflowBinding(
+                  env,
+                  unasked.admin,
+                  unasked.workflow.id,
+                  unasked.approval.id
+                );
+              }
+              return await steps.do(name, config, fn);
+            },
+          },
+        },
+      }
+    );
+    expect({
+      refused,
+      ownRun,
+      revokedRun,
+      askRevoked,
+      asked: await asksAudited(beforeAsk),
+    }).toStrictEqual({
       refused: "decision.forbidden",
       ownRun: {
         ended: { decided: { timedOut: true }, told: [0] },
         tampered: [],
       },
       revokedRun: failedWith("workflow.call_denied"),
+      askRevoked: failedWith("workflow.call_denied"),
+      asked: 0,
     });
   });
 

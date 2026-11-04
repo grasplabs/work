@@ -248,6 +248,19 @@ const decisionBinding = (
 };
 
 /**
+ * Decides again the authority of `run`'s decision binding `alias`
+ * (`requireCallAuthority`): `workflow.call_denied` once it is revoked, or
+ * isn't a decision binding of its start.
+ */
+export const requireDecisionAuthority = async (
+  env: Env,
+  run: CallingRun,
+  alias: string
+): Promise<void> => {
+  await requireCallAuthority(env, run, decisionBinding(run, alias));
+};
+
+/**
  * The response schema of decision contract `contract`: what an answer's
  * payload must be. A contract without one, or with one taking nothing the
  * decision page sends, could take no answer the run takes: refused before

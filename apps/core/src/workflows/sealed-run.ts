@@ -72,6 +72,7 @@ import {
   openRunDecision,
   promptOf,
   recipientsOf,
+  requireDecisionAuthority,
   takeDecision,
 } from "./resource-decisions.ts";
 import {
@@ -204,7 +205,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   step records what it asks, its task step opens it, a step of its own
 //   asks its people, and a wait takes the answer. The enter step's record
 //   is held to the build's templates as a call's arguments are (`matched`):
-//   every literal exact, a slot any JSON, never a sensitive parameter. The
+//   every literal exact, a slot any JSON, never a sensitive parameter; its
+//   recipients each named once, as deciders (`person:`, `team:` or
+//   `role:`), the first of them its code's `from`. The
 //   host opens the decision from that record alone, on the binding the
 //   build seals (resource-decisions.ts, `openRunDecision`): each recipient
 //   one the binding's frozen deciders cover now, never the run's own
@@ -213,7 +216,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   is left of the run's age), whatever its code asks. Its task step must
 //   record exactly the decision the host opened in it, its asking step
 //   asks only that one, by the host's own notice (`askDeciders`: the
-//   isolate learns nobody's address), and never reminds, and its wait is
+//   isolate learns nobody's address), its authority decided again first,
+//   and never reminds, and its wait is
 //   for that decision only, until its deadline (`decisionWait`). The
 //   outcome is read from the decision's row, never from the event that
 //   wakes the run nor from the isolate, and taken only as the binding
@@ -1347,7 +1351,16 @@ class SealedRun implements SealedRunKind {
       );
     }
     try {
-      recipientsOf(record.data.recipients);
+      const { recipients } = record.data;
+      // As deciders already, so its code's `from` (`step.decision`, a
+      // person value) can be the first of them exactly.
+      if (
+        canonicalJson(recipientsOf(recipients)) !== canonicalJson(recipients)
+      ) {
+        throw callInvalid(
+          "recipients: Name each once, as person:, team: or role:."
+        );
+      }
       promptOf(record.data.prompt);
     } catch (error) {
       return { ok: false, error: forIsolate(error) };
@@ -1713,7 +1726,8 @@ class SealedRun implements SealedRunKind {
   /**
    * Asks the people of the decision decision task step `attempt` (its
    * `#ask`) is for, by the host's own notice (`askDeciders`): only the
-   * decision its task step opened, and never as a reminder. Its code
+   * decision its task step opened, never as a reminder, and only while
+   * its binding's authority still holds. Its code
    * learns nobody's address: it is answered no recipients.
    */
   async #askDecision(
@@ -1733,8 +1747,13 @@ class SealedRun implements SealedRunKind {
           "decision"
         );
       }
+      // Its people are shown what it asks: never once its binding was
+      // revoked, or its run's evidence can't be read, since it opened.
+      const { calling } = this.run;
+      await requireDecisionAuthority(this.#env, calling, task.call.binding);
+      await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
-      await askDeciders(this.#env, this.run.calling, opened);
+      await askDeciders(this.#env, calling, opened);
       return [];
     });
   }
