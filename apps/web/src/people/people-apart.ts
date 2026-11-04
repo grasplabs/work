@@ -4,21 +4,19 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react";
 
 // Telling apart people of the same name, wherever people are listed by
-// name. Someone whose name another person on the page shares is told
-// apart by their email where the page has it, which only an admin's does,
-// else by the end of their ID. Core tells anyone but an admin no more of
+// name: someone whose name another person on the page shares is told
+// apart by the end of their ID. Core tells anyone but an admin no more of
 // a person than their name and ID (app-members.ts `shareCandidates`,
 // workflow-share-candidates.ts): their address, role and teams aren't
 // theirs to read. The ID is already what a share names, so its end says
-// nothing new, and it is the same for that person in every list and over
-// time, unlike a count ("Eva (2)") that shifts as people come and go.
+// nothing new, and it is the same for that person in every list, for
+// admins too, and over time, unlike a count ("Eva (2)") that shifts as
+// people come and go, or an email only some pages have.
 
 /** Someone listed by name. */
 export interface Named {
   id: string;
   name: string;
-  /** Only in an admin's lists. */
-  email?: string;
 }
 
 /** How many of the end of an ID tell a namesake apart. */
@@ -51,7 +49,9 @@ export const peopleApart = (
 ): PeopleApart => {
   const seen = new Set<string>();
   const shared = new Set<string>();
-  for (const { name } of among) {
+  // Each person once, though lists the page merges both hold them.
+  const people = new Map(among.map((each) => [each.id, each.name] as const));
+  for (const name of people.values()) {
     const key = nameKey(name);
     if (seen.has(key)) {
       shared.add(key);
@@ -63,7 +63,7 @@ export const peopleApart = (
       return undefined;
     }
     const end = person.id.slice(-idEndLength);
-    return person.email ?? language._(msg`ID …${end}`);
+    return language._(msg`ID …${end}`);
   };
   return {
     hint,

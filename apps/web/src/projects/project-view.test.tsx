@@ -422,6 +422,23 @@ describe("A project's page", () => {
     });
   });
 
+  it("names members of the same name apart, to take out", async () => {
+    const { session } = fakeProjects();
+    const [ada] = project("builder").members;
+    if (ada === undefined) {
+      throw new TypeError("No member to copy");
+    }
+    await shown(session, {
+      ...project("builder"),
+      members: [ada, { ...ada, id: "user-ada-222222" }],
+    });
+
+    expect([
+      button("Take Ada (ID …er-ada) out of the project") !== undefined,
+      button("Take Ada (ID …222222) out of the project") !== undefined,
+    ]).toStrictEqual([true, true]);
+  });
+
   it("names who loses access before taking a shared workflow out", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));

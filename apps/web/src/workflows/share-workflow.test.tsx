@@ -236,13 +236,30 @@ describe("sharing an independent workflow from its page", () => {
       .filter(({ value }) => value.startsWith("person:"))
       .map(({ textContent }) => textContent);
 
+    // The Bo it is shared with is the only one it lists, so plainly.
+    const sharedBo = button("Stop sharing with Bo") !== undefined;
+    await pick("Share with", "person:user-bo-222333");
+    await act(async () => {
+      document
+        .querySelector("form")
+        ?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true })
+        );
+      await settled();
+    });
+
     expect({
       labels,
-      // The Bo it is shared with is the only one it lists, so plainly.
-      sharedBo: select("Role of Bo") === null,
+      sharedBo,
+      // Shared with both, each is named apart.
+      bothBos: [
+        button("Stop sharing with Bo (ID …bo)") !== undefined,
+        button("Stop sharing with Bo (ID …222333)") !== undefined,
+      ],
     }).toStrictEqual({
       labels: ["Ada", "Bo (ID …222333)"],
-      sharedBo: false,
+      sharedBo: true,
+      bothBos: [true, true],
     });
   });
 

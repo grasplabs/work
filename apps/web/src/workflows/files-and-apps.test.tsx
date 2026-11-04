@@ -410,7 +410,7 @@ describe("a workflow's Files and apps tab", () => {
     });
   });
 
-  it("tells apart deciders of the same name, picked and to remove", async () => {
+  it("tells apart deciders of the same name by the end of their ID, picked and to remove", async () => {
     const { session, approved, answerFirstCatalog } = fakeCore(
       [],
       [
@@ -432,12 +432,12 @@ describe("a workflow's Files and apps tab", () => {
       ])
     );
 
-    await pick("a.lovelace@acme.test");
+    await pick("ID …222222");
     // The other Ada is still told apart from the one picked.
-    await pick("ada@acme.test");
+    await pick("ID …111111");
     const removable = [
-      button("Remove Ada Lovelace (a.lovelace@acme.test)") !== undefined,
-      button("Remove Ada Lovelace (ada@acme.test)") !== undefined,
+      button("Remove Ada Lovelace (ID …222222)") !== undefined,
+      button("Remove Ada Lovelace (ID …111111)") !== undefined,
     ];
     await press(button("Approve approval"));
 

@@ -234,9 +234,9 @@ describe("Settings › Packages › Who approves packages", () => {
     });
   });
 
-  it("tells an admin apart people of the same name by their email", async () => {
+  it("tells an admin apart people of the same name by the end of their ID", async () => {
     const twin = {
-      userId: "user-ada-2",
+      userId: "user-ada-222222",
       name: "Ada Lovelace",
       email: "a.lovelace@acme.test",
     };
@@ -244,14 +244,14 @@ describe("Settings › Packages › Who approves packages", () => {
     await shown(session);
 
     const names = await offered();
-    await add("a.lovelace@acme.test");
-    await add("ada@acme.test");
+    await add("ID …222222");
+    await add("ID …er-ada");
 
     expect({ names, asked, listed: listed() }).toStrictEqual({
       // Grace's name is hers alone, so it says nothing more.
       names: [
-        expect.stringMatching(/Ada Lovelaceada@acme\.test$/u),
-        expect.stringMatching(/Ada Lovelacea\.lovelace@acme\.test$/u),
+        expect.stringMatching(/Ada LovelaceID …er-ada$/u),
+        expect.stringMatching(/Ada LovelaceID …222222$/u),
         expect.stringMatching(/Grace Hopper$/u),
         "Platform",
       ],
@@ -259,10 +259,10 @@ describe("Settings › Packages › Who approves packages", () => {
         ["grant", { type: "person", userId: twin.userId }],
         ["grant", { type: "person", userId: ada.userId }],
       ],
-      // Both approve, each named by the email the list read.
+      // Both approve, each named as the list named them.
       listed: [
-        ["Ada Lovelace (a.lovelace@acme.test)", "Person"],
-        ["Ada Lovelace (ada@acme.test)", "Person"],
+        ["Ada Lovelace (ID …222222)", "Person"],
+        ["Ada Lovelace (ID …er-ada)", "Person"],
       ],
     });
   });
