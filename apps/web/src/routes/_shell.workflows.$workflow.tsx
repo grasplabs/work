@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   SteeredWrite,
@@ -938,7 +938,7 @@ const WorkflowResourcePage = () => {
           key={resource.data.id}
           activity={activity}
           admin={isAdmin(identity.role)}
-          approves={isAdmin(identity.role) && !identity.staff}
+          approves={isMemberAdmin(identity)}
           askable={askable}
           draft={draft}
           lifecycle={lifecycle}

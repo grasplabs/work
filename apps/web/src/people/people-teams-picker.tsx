@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
-import { PersonOption } from "./person-picker.tsx";
+import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // The organization's people and teams to add one of to a list: who
@@ -114,12 +114,7 @@ export const PeopleTeamsPicker = ({
         {label}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72" variant="flush">
-        {/* Names match as typed, not letter by letter, as in the owner picker. */}
-        <Command
-          filter={(value: string, search: string) =>
-            value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
-          }
-        >
+        <Command filter={matchTyped}>
           <CommandInput placeholder={t`Search people and teams`} />
           <CommandList>
             {candidates === null ? (
@@ -157,8 +152,8 @@ export const PeopleTeamsPicker = ({
                         onSelect={() => {
                           pick({ type: "team", id: team.id, name: team.name });
                         }}
-                        // A team's ID keeps it apart from a person of the same name.
-                        value={`${team.name} ${team.id}`}
+                        keywords={[team.name]}
+                        value={subjectKey({ type: "team", id: team.id })}
                       >
                         <UsersIcon className="text-muted-foreground" />
                         <span className="flex-1 truncate">{team.name}</span>

@@ -8628,8 +8628,8 @@ msgstr "Personne ne pourra plus l’ouvrir ni le démarrer. Ses versions sont co
 msgid "Nobody comes in: Grasp does all of it."
 msgstr "Personne n’intervient : Grasp fait tout."
 
+#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
-#: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
 
@@ -9931,6 +9931,7 @@ msgid "Pending"
 msgstr "En attente"
 
 #: src/chat/builds.tsx
+#: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
@@ -10523,8 +10524,8 @@ msgstr "Relecture"
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "La lecture a échoué à répétition, vos déclencheurs n'y lancent donc plus rien de nouveau pour l'instant. Grasp continue d'essayer ; si cela ne revient pas, vérifiez la connexion."
 
+#: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
-#: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
 msgstr "Lecture des personnes et des équipes…"
 
@@ -11647,8 +11648,8 @@ msgstr "Rechercher des membres"
 msgid "Search people"
 msgstr "Rechercher des personnes"
 
+#: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
-#: src/settings/package-approvers.tsx
 msgid "Search people and teams"
 msgstr "Rechercher des personnes et des équipes"
 
@@ -12941,6 +12942,7 @@ msgstr "Équipe : {name}"
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
+#: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
