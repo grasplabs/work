@@ -828,8 +828,8 @@ export interface ChatsApi {
   /**
    * A new App (`apps.create`'s input), owned by the person, with its own
    * chat (`forApp`), made together. Like every App, it stays until a
-   * person removes it. Refused, making nothing, when the person has no
-   * room for another chat. Only for a builder.
+   * person removes it. Refused before anything is made when the person
+   * has no room for another chat. Only for a builder.
    */
   newApp: (input: {
     name: string;

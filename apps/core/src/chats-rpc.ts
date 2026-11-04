@@ -30,7 +30,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { roleErrors } from "@grasp-os/shared/roles";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   screenErrors,
@@ -387,8 +387,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     description: string;
   }): Promise<ChatSummary & { appId: string }> {
     return await withPerson(this.#check, async (person) => {
+      requireBuilder(person);
       // No room for its chat: refused before an App is made, so asking
-      // again doesn't leave one behind each time.
+      // again doesn't leave one behind each time. A chat that fails after
+      // all leaves its App, which stays as every App does (`forApp` gives
+      // it a chat).
       await this.#chatsOf(person.userId).requireRoomForChat(person.userId);
       const made = await createApp(this.#env, person, input);
       const chat = await this.#appChat(person, made.id, made.name);
