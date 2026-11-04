@@ -70,6 +70,12 @@ export class ChatSession extends DurableObject<Env> {
     await harness.steer(text);
   }
 
+  /** Tells the chat's agent `text` for its turn under way or its next. */
+  async note(text: string): Promise<void> {
+    const harness = await this.#harness();
+    await harness.note(text);
+  }
+
   /** Stops the turn under way, if there is one. */
   async abort(): Promise<void> {
     const harness = await this.#harness();

@@ -3889,49 +3889,50 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Tells the agent of `personId`'s own chat how a write it had held for
-   * them ended (pending-actions.ts), which it otherwise never learns: kept
-   * as a system message, so every later request of the chat carries it,
-   * and one landing in the middle of a turn never parts a code step from
-   * its result. The person isn't shown it: they decided it. No turn starts.
+   * them ended (pending-actions.ts), which it otherwise never learns: a
+   * notice in its context (`ChatSession.note`), which the turn under way
+   * reads before its next request, or else the next turn. The person isn't
+   * shown it: they decided it. No turn starts.
    */
-  heldDecided(
+  async heldDecided(
     chatId: unknown,
     personId: string,
     held: { id: string; action: string },
     outcome: HeldOutcome
-  ): void {
+  ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const { id, action } = heldSchema.parse(held);
-    const message: Message = {
-      role: "system",
-      content: `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`,
-      timestamp: Date.now(),
-    };
-    this.#store(chat.id, message);
+    await this.#note(
+      chat.id,
+      `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
+    );
+  }
+
+  /** Tells the chat's agent `text` (`ChatSession.note`). */
+  async #note(chatId: ChatId, text: string): Promise<void> {
+    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
+    await chatSession(this.env, workspaceId, chatId).note(text);
   }
 
   /**
    * Tells the agent of `personId`'s own chat how a connection it asked for
    * there was decided (chat-connections.ts), as `heldDecided` does a
-   * write: a system message for its next turn, and the page reads what
+   * write: a notice for its turn under way or its next, and the page reads what
    * waits again. No turn starts: the person says what to do next.
    */
-  connectionDecided(
+  async connectionDecided(
     chatId: unknown,
     personId: string,
     { binding, decision }: { binding: string; decision: "granted" | "denied" }
-  ): void {
+  ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const name = bindingNameSchema.parse(binding);
-    const message: Message = {
-      role: "system",
-      content:
-        decision === "granted"
-          ? `The connection you asked for as "${name}" was granted, in this chat only: \`env.connections.call("${name}", …)\` works now.`
-          : `The connection you asked for as "${name}" was denied: this chat can't use it. Don't ask for it again unless the person says so.`,
-      timestamp: Date.now(),
-    };
-    this.#store(chat.id, message);
+    await this.#note(
+      chat.id,
+      decision === "granted"
+        ? `The connection you asked for as "${name}" was granted, in this chat only: \`env.connections.call("${name}", …)\` works now.`
+        : `The connection you asked for as "${name}" was denied: this chat can't use it. Don't ask for it again unless the person says so.`
+    );
     this.heldChanged(chat.id);
   }
 

@@ -639,6 +639,29 @@ export class ChatHarness {
     );
   }
 
+  /**
+   * Tells the chat's agent `text`, never shown as the person's and starting
+   * no turn: the turn under way reads it before its next request, and
+   * otherwise the next turn does, as an entry of the context.
+   */
+  async note(text: string): Promise<void> {
+    const live = await this.#harness.snapshot(
+      LiveDoc,
+      this.#conversation.id,
+      context
+    );
+    if (live?.run !== undefined) {
+      await this.steer(text);
+      return;
+    }
+    await this.#conversation.commit(async (tx) => {
+      await tx.appendEntry(this.#conversation.id, {
+        kind: noticeKind,
+        model: [{ role: "user", content: text, timestamp: Date.now() }],
+      });
+    }, context);
+  }
+
   /** Stops the turn under way, if any: its request or tool call in flight ends. */
   async abort(): Promise<void> {
     await this.#conversation.abort(context);
