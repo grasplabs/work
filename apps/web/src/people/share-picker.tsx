@@ -25,6 +25,7 @@ import { FolderIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
 import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
@@ -93,13 +94,15 @@ export const RoleSelect = ({
 
 /**
  * The button (`children`) and its list. `offered` is undefined while it is
- * read: `onOpen` asks for it each time the list opens.
+ * read: `onOpen` asks for it each time the list opens, and `failure`
+ * says why a read didn't come.
  */
 export const SharePicker = ({
   offered,
   onOpen,
   onPick,
   disabled,
+  failure,
   roleHeading,
   roleName,
   empty,
@@ -109,6 +112,7 @@ export const SharePicker = ({
   onOpen: () => void;
   onPick: (picked: Picked, role: ShareRole) => void;
   disabled: boolean;
+  failure: string | undefined;
   /** Over the role: "Share as". */
   roleHeading: ReactNode;
   /** The role's name for screen readers. */
@@ -152,8 +156,14 @@ export const SharePicker = ({
           <CommandList>
             {people === undefined || teams === undefined ? (
               <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-                <Spinner />
-                <Trans>Reading people and teams…</Trans>
+                {failure === undefined ? (
+                  <>
+                    <Spinner />
+                    <Trans>Reading people and teams…</Trans>
+                  </>
+                ) : (
+                  <ErrorText>{failure}</ErrorText>
+                )}
               </div>
             ) : (
               <>

@@ -88,6 +88,7 @@ const AddPerson = ({ project }: { project: Project }) => {
       <div>
         <SharePicker
           disabled={busy}
+          failure={failure}
           empty={<Trans>Nobody else to add.</Trans>}
           offered={candidates}
           onOpen={() => {

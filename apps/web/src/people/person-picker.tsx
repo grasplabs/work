@@ -44,7 +44,7 @@ export const matchTyped = (
   search: string,
   keywords?: string[]
 ): number =>
-  (keywords?.join(" ") ?? value)
+  (keywords === undefined || keywords.length === 0 ? value : keywords.join(" "))
     .toLowerCase()
     .includes(search.trim().toLowerCase())
     ? 1

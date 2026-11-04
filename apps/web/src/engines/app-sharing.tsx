@@ -139,6 +139,7 @@ export const ShareApp = ({
     <div className="flex flex-col items-end gap-1">
       <SharePicker
         disabled={busy}
+        failure={failure}
         empty={<Trans>Nobody else to share with.</Trans>}
         offered={offered}
         onOpen={() => {
