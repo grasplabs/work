@@ -6,6 +6,10 @@ import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
   transformBatch,
+  failedOutside,
+  inputMismatch,
+  outputMismatch,
+  threwOnRecord,
   transformBatchMaxRows,
 } from "../src/migration-transform.ts";
 import type { TransformRow } from "../src/migration-transform.ts";
@@ -37,7 +41,18 @@ import type { Fixture } from "./sealed-apps.ts";
 //   fit its input before App code sees it", "hands the handler only the
 //   fields its input declares".
 // - One owner's data reaches another owner's record through module state:
-//   "refuses a batch that mixes owners of a table with owner access".
+//   "refuses a batch that mixes owners of a table with owner access"; one
+//   person's or team's on a table with row rules: "refuses a batch that
+//   mixes two people's or two teams' rows", and fixtures of different
+//   people run a batch each: "runs fixtures of different people …".
+// - The transform moves a record into someone else's sight by rewriting
+//   a field a row rule reads: "refuses an output that changes a field a
+//   row rule reads".
+// - The transform writes a record its builders can't read into its
+//   failure, through what it throws, a stack it forges or a key it
+//   writes: "shows nothing App code can influence of a failure …", "names
+//   the record whose transform threw, but not what it said …",
+//   "validates every output against the target table".
 // - A caller hands it managed fields, or a batch past its bounds: "refuses
 //   rows holding managed fields", "refuses a batch past its bounds".
 // - The transform answers differently each time, through the prototypes,
@@ -273,13 +288,14 @@ const namedSchema = (details: unknown): string => {
  */
 const sealedMigrating = async (
   names: readonly string[],
-  files: (fromSchema: string, toSchema: string) => Record<string, string>
+  files: (fromSchema: string, toSchema: string) => Record<string, string>,
+  first: Record<string, string> = baseFiles(names)
 ): Promise<{
   fixture: Fixture;
   release: Release;
   refused: { code: unknown; details: unknown };
 }> => {
-  const fixture = await appWith(baseFiles(names));
+  const fixture = await appWith(first);
   const base = await seal(fixture);
   const fromSchema = base.manifest.schemaHash;
   await commitFiles(
@@ -619,15 +635,17 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   });
 
   it.each([
-    ["writes-managed", "invalid_output"],
-    ["writes-undeclared", "invalid_output"],
-    ["writes-wrong-type", "invalid_output"],
+    // Each owner's notes: the failure names only the declared fields it
+    // fails on, never a key the output made up.
+    ["writes-managed", [outputMismatch]],
+    ["writes-undeclared", [outputMismatch]],
+    ["writes-wrong-type", [outputMismatch, "category: doesn't fit"]],
   ] as const)(
     "validates every output against the target table: %s is refused",
-    async (name, reason) => {
-      await expect(run(name)).resolves.toMatchObject({
+    async (name, issues) => {
+      await expect(run(name)).resolves.toStrictEqual({
         ok: false,
-        failure: { id: "n1", reason },
+        failure: { id: "n1", reason: "invalid_output", issues },
       });
     }
   );
@@ -663,14 +681,10 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     });
   });
 
-  it("names the record whose transform threw", async () => {
+  it("names the record whose transform threw, but not what it said, on a table each owner reads alone", async () => {
     await expect(run("throws")).resolves.toStrictEqual({
       ok: false,
-      failure: {
-        id: "n2",
-        reason: "threw",
-        issues: ["Can't tell this one's category"],
-      },
+      failure: { id: "n2", reason: "threw", issues: [threwOnRecord] },
     });
   });
 
@@ -682,7 +696,9 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
       note("n1", { title: "Mine" }, "u_alice"),
       note("n2", { title: "Theirs" }, "u_bob"),
     ];
-    await expect(run("remembers-rows", mixed)).rejects.toThrow(/mixes owners/u);
+    await expect(run("remembers-rows", mixed)).rejects.toThrow(
+      /shows to different people/u
+    );
     await expect(
       run("remembers-rows", [
         note("n1", { title: "Mine" }, "u_alice"),
@@ -774,6 +790,321 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     await expect(run("derive-category", many)).rejects.toThrow(
       /past its bounds/u
     );
+  });
+});
+
+/**
+ * Salaries read by the person each names and the team it is for, each
+ * migration's table its own, with `fields`; an `open-` or `none-`
+ * migration's table has no rules (`salariesApp` sets who reads it).
+ */
+const salariesSchema = (names: readonly string[], fields: string): string =>
+  `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+
+export const salaryFields = {
+${fields}
+};
+
+export default defineSchema({
+${names
+  .map((name) =>
+    name.startsWith("open-") || name.startsWith("none-")
+      ? `  ${tableOf(name)}: defineTable(salaryFields),`
+      : `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
+  )
+  .join("\n")}
+});
+`;
+
+const salaryBase = `  employee: v.person(),
+  team: v.string(),
+  amount: v.number(),`;
+
+/**
+ * The App registering `names`' migrations, when `registered`: every table
+ * read and changed by its members, but a `none-` migration's, which no one
+ * reads.
+ */
+const salariesApp = (names: readonly string[], registered: boolean): string =>
+  appOf(names, registered)
+    .replaceAll(
+      /(?<table>none_\w+): \{ read: "owner", write: "owner" \}/gu,
+      '$<table>: { read: "none", write: "appMembers" }'
+    )
+    .replaceAll(
+      '{ read: "owner", write: "owner" }',
+      '{ read: "appMembers", write: "appMembers" }'
+    );
+
+/** Module state of each salary migration: the row before, while a call lasts. */
+const salaryPrelude = "let previous: number | undefined;";
+
+/** Transforms of salaries: each adds a band, as version 2 requires. */
+const salaryHandlers = {
+  // Carries the previous row's amount into the next one, through the
+  // module state a batch's rows share (`previous`, `salaryPrelude`):
+  // within one person's rows that is their own; across people it would
+  // show one's salary to another.
+  "carries-amount": `(ctx, row) => {
+    const amount = previous ?? row.amount;
+    previous = row.amount;
+    return { ...row, amount, band: amount > 50000 ? "high" : "low" };
+  }`,
+  // Hands every salary to its author, or to their team, to read.
+  "hands-to-me": `(ctx, row) => ({ ...row, employee: "u_mallory", band: "low" })`,
+  "moves-team": `(ctx, row) => ({ ...row, team: "t_mallory", band: "low" })`,
+  // Writes the salary into its failure, which the builder is shown.
+  "throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
+  // The same, past the stack too: a forged one, its column the salary.
+  "forges-stack": `(ctx, row) => {
+    const error = new Error("Nothing to see");
+    error.stack = \`Error\\n    at handler (app~migrations~forges-stack.js:1:\${row.amount})\`;
+    throw error;
+  }`,
+  // The salary as a key of its output, which validation names.
+  "keys-amount": `(ctx, row) => ({ ...row, band: "low", [String(row.amount)]: 1 }) as never`,
+  "open-throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
+  "none-throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
+  // Throws the salary outside its own body: as the isolate serializes
+  // the batch's answer, after the handler returned.
+  // (A `toJSON` every object inherits, which throws only on the runner's
+  // answer, the one object with an own `ok`.)
+  "stringifies-amount": `(ctx, row) => {
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true,
+      value(this: object): unknown {
+        if (Object.hasOwn(this, "ok")) {
+          throw new Error(\`Salary: \${row.amount}\`);
+        }
+        return this;
+      },
+    });
+    return { ...row, band: "low" };
+  }`,
+  // Declares an input no salary under 100,000 fits (`refinedInput`).
+  "refines-amount": `(ctx, row) => ({ ...row, band: "high" })`,
+  "open-refines-amount": `(ctx, row) => ({ ...row, band: "high" })`,
+} as const;
+
+/** An input that refines a salary's amount: none under 100,000 fits. */
+const refinedInput =
+  "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: v.number().min(100000) }),";
+
+/** What each salary migration's fixtures are: two people's, as records are. */
+const salaryFixtures = `[
+    { row: { employee: "u_ann", team: "t_a", amount: 70000 }, expect: { employee: "u_ann", team: "t_a", amount: 70000, band: "high" } },
+    { row: { employee: "u_bob", team: "t_a", amount: 30000 }, expect: { employee: "u_bob", team: "t_a", amount: 30000, band: "low" } },
+  ]`;
+
+let salariesOnce: ReturnType<typeof sealedMigrating> | undefined;
+const sealedSalaries = async () =>
+  await (salariesOnce ??= sealedMigrating(
+    Object.keys(salaryHandlers),
+    (fromSchema, toSchema) => {
+      const names = Object.keys(salaryHandlers);
+      return {
+        "schema.ts": salariesSchema(
+          names,
+          `${salaryBase}\n  band: v.enum(["low", "high"]),`
+        ),
+        ...Object.fromEntries(
+          Object.entries(salaryHandlers).map(([name, handler]) => [
+            `migrations/${name}.ts`,
+            migrationSource(name, handler, {
+              fromSchema,
+              toSchema,
+              fixtures: salaryFixtures,
+              prelude: salaryPrelude,
+              input: name.endsWith("refines-amount")
+                ? refinedInput
+                : "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
+            }).replaceAll("noteFields", "salaryFields"),
+          ])
+        ),
+        "app.ts": salariesApp(names, true),
+      };
+    },
+    {
+      "schema.ts": salariesSchema(Object.keys(salaryHandlers), salaryBase),
+      "app.ts": salariesApp(Object.keys(salaryHandlers), false),
+    }
+  ));
+
+/** A salary record of `employee` in `team`. */
+const salary = (
+  id: string,
+  employee: string,
+  team: string,
+  amount: number
+): TransformRow => ({
+  id,
+  owner: "u_importer",
+  fields: { employee, team, amount },
+});
+
+// A builder, or the AI for them, who can't read Bob's salary ships a
+// migration of a table whose row rules read who a row is for: carrying
+// Bob's amount into their own row through module state, or handing his
+// row to themselves or their team, would let them read it.
+describe("transforming a table with row rules", { timeout: 120_000 }, () => {
+  const runSalaries = async (
+    name: keyof typeof salaryHandlers,
+    batch: readonly TransformRow[]
+  ) => {
+    const { release } = await sealedSalaries();
+    return await transformBatch(env, release, name, batch);
+  };
+
+  it("refuses a batch that mixes two people's or two teams' rows, which only a caller's bug sends", async () => {
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_mallory", "t_a", 30_000),
+      ])
+    ).rejects.toThrow(/shows to different people/u);
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_bob", "t_b", 30_000),
+      ])
+    ).rejects.toThrow(/shows to different people/u);
+    // One person's rows of one team: what carries stays theirs.
+    await expect(
+      runSalaries("carries-amount", [
+        salary("s1", "u_bob", "t_a", 90_000),
+        salary("s2", "u_bob", "t_a", 30_000),
+      ])
+    ).resolves.toMatchObject({
+      ok: true,
+      rows: [
+        { fields: { employee: "u_bob", amount: 90_000 } },
+        { fields: { employee: "u_bob", amount: 90_000 } },
+      ],
+    });
+  });
+
+  it.each([
+    ["hands-to-me", "employee"],
+    ["moves-team", "team"],
+  ] as const)(
+    "refuses an output that changes a field a row rule reads: %s",
+    async (name, field) => {
+      const outcome = await runSalaries(name, [
+        salary("s1", "u_bob", "t_a", 90_000),
+      ]);
+      expect(outcome).toStrictEqual({
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "rule_changed",
+          issues: [
+            `${field}: A migration doesn't change a field a row rule reads; a write changes who sees a record`,
+          ],
+        },
+      });
+    }
+  );
+
+  it("shows nothing App code can influence of a failure on a record its table hides: not what it threw, in its handler or after, a stack it forged, a key it wrote or an input it refused", async () => {
+    const record = [salary("s1", "u_bob", "t_a", 91_234)];
+    const thrown = await runSalaries("throws-amount", record);
+    const forged = await runSalaries("forges-stack", record);
+    const keyed = await runSalaries("keys-amount", record);
+    const outside = await runSalaries("stringifies-amount", record);
+    const refined = await runSalaries("refines-amount", record);
+    // A table no one reads hides as much.
+    const unread = await runSalaries("none-throws-amount", record);
+    // On a table every member reads, what it threw is shown as it said.
+    const open = await runSalaries("open-throws-amount", record);
+
+    const threw = {
+      ok: false,
+      failure: { id: "s1", reason: "threw", issues: [threwOnRecord] },
+    };
+    expect({
+      thrown,
+      forged,
+      keyed,
+      outside,
+      refined,
+      unread,
+      open,
+      leaked: JSON.stringify([
+        thrown,
+        forged,
+        keyed,
+        outside,
+        refined,
+        unread,
+      ]).includes("91234"),
+    }).toStrictEqual({
+      thrown: threw,
+      forged: threw,
+      keyed: {
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "invalid_output",
+          issues: [outputMismatch],
+        },
+      },
+      outside: {
+        ok: false,
+        failure: {
+          id: null,
+          reason: "invalid_answer",
+          issues: [failedOutside],
+        },
+      },
+      refined: {
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "invalid_input",
+          issues: [inputMismatch, "amount: doesn't fit"],
+        },
+      },
+      unread: threw,
+      open: {
+        ok: false,
+        failure: { id: "s1", reason: "threw", issues: ["Salary: 91234"] },
+      },
+      leaked: false,
+    });
+  });
+
+  it("shows a record that doesn't fit the migration's input in full on a table every member reads", async () => {
+    const outcome = await runSalaries("open-refines-amount", [
+      salary("s1", "u_bob", "t_a", 91_234),
+    ]);
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      failure: { id: "s1", reason: "invalid_input" },
+    });
+    const issues = outcome.ok ? [] : outcome.failure.issues;
+    expect(issues).not.toContain(inputMismatch);
+    expect(issues).toStrictEqual([expect.stringMatching(/^amount: ./u)]);
+  });
+
+  it("runs fixtures of different people a batch each as the release is sealed, and records a rule field's change as their failure", async () => {
+    const { release } = await sealedSalaries();
+    const evidence = new Map(
+      release.manifest.migrationEvidence.map((found) => [
+        found.migration,
+        found,
+      ])
+    );
+    expect({
+      carries: evidence.get("carries-amount")?.failure ?? null,
+      hands: evidence.get("hands-to-me")?.failure?.reason,
+    }).toStrictEqual({ carries: null, hands: "rule_changed" });
   });
 });
 

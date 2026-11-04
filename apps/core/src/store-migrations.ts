@@ -1,7 +1,6 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { holdsId } from "@grasp-os/sdk/host";
 import type { SchemaManifest } from "@grasp-os/sdk/host";
-import { canonicalJson } from "@grasp-os/shared/json";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { MigrationFailure, StoreFields } from "@grasp-os/shared/stores";
 import { and, asc, eq, lte, sql } from "drizzle-orm";
@@ -10,11 +9,15 @@ import { z } from "zod";
 
 import { migrationWork, records } from "./db/data-store/schema.ts";
 import {
+  firstChanged,
+  ruleChangedIssue,
   transformBatchMaxBytes,
   transformBatchOverhead,
   transformRecordBytes,
 } from "./migration-transform.ts";
 import { validates } from "./store-queries.ts";
+import { audienceKey } from "./store-rules.ts";
+import type { Audience } from "./store-rules.ts";
 
 // An explicit migration as the store runs it (spec 17.2, 17.4 step 5): a
 // pending target whose tables are rewritten by a release's transform
@@ -57,9 +60,19 @@ import { validates } from "./store-queries.ts";
 //   a field that can hold a record ID must come back unchanged
 //   (`reference_changed`); planning refuses adding or changing one
 //   (schema-plan.ts).
-// - One owner's data reaches another's record through the transform's
-//   module state: on a table whose read or write access is `owner`, a
-//   batch holds one owner's records only (the scan goes by owner).
+// - One person's or team's data reaches a record others see through the
+//   transform's module state: a batch holds records of one audience only
+//   (store-rules.ts, `audienceKey`: one owner where the access mode or a
+//   rule reads it, one value of each field a row rule reads), cut where
+//   the next record's differs. The scan goes by owner, so an owner table
+//   cuts few batches; a table whose rules read fields cuts one wherever
+//   consecutive records differ in them.
+// - A transform moves a record into other people's sight by rewriting a
+//   field a row rule reads: refused (`rule_changed`), whatever the
+//   transform answered, for the rules of the target and of the contract
+//   in force. Who a record reaches changes only through writes, which
+//   pass the rules before and after. A transform's output is the same
+//   record's, of the same table: no batch moves records between tables.
 // - A writer pinned to a schema the migration left behind writes after
 //   activation: refused (`migration.incompatible_write`, store-host.ts).
 // - A failure's details leak another record's content: what a transform
@@ -74,8 +87,8 @@ export interface MigratedTable {
   readonly table: string;
   readonly tableId: string;
   readonly migration: string;
-  /** Whether its read or write access is `owner`: batches by owner then. */
-  readonly owned: boolean;
+  /** Who its records reach: a batch holds one audience's only. */
+  readonly audience: Audience;
   /** The highest record ID it held when the target became pending. */
   readonly bound: string;
 }
@@ -147,23 +160,37 @@ const rowOf = (record: RecordRow): MigrationRow => ({
   fields: storedFieldsSchema.parse(JSON.parse(record.valueJson)),
 });
 
+/** The audience of `record` in a table of `audience` (`audienceKey`). */
+const audienceOfRecord = (audience: Audience, record: RecordRow): string =>
+  audienceKey(audience, {
+    owner: record.ownerId,
+    fields:
+      audience.fields.length === 0
+        ? {}
+        : storedFieldsSchema.parse(JSON.parse(record.valueJson)),
+  });
+
 /**
- * The first records of `rows` one batch takes: one owner's where the
- * table is `owned`, and no more bytes than a transform's batch takes
- * (always at least one: a record holds less).
+ * The first records of `rows` one batch takes: those of the first one's
+ * audience up to the first of another, and no more bytes than a
+ * transform's batch takes (always at least one: a record holds less).
  */
-const batchOf = (rows: readonly RecordRow[], owned: boolean): RecordRow[] => {
+const batchOf = (
+  rows: readonly RecordRow[],
+  audience: Audience
+): RecordRow[] => {
   const [first] = rows;
   if (first === undefined) {
     return [];
   }
+  const key = audienceOfRecord(audience, first);
   const taken: RecordRow[] = [];
   // A running total, as the transform measures its batch
   // (`transformBatchBytes`): a record's stored text is its fields'
   // canonical text, and each is measured once.
   let bytes = transformBatchOverhead;
   for (const row of rows) {
-    if (owned && row.ownerId !== first.ownerId) {
+    if (audienceOfRecord(audience, row) !== key) {
       break;
     }
     const added = transformRecordBytes(row.valueJson, taken.length > 0);
@@ -221,7 +248,7 @@ export const nextScanBatch = (
       )
       .limit(migrationBatchSize)
       .all();
-    const taken = batchOf(found, table.owned);
+    const taken = batchOf(found, table.audience);
     const last = taken.at(-1);
     if (last !== undefined) {
       return {
@@ -278,8 +305,8 @@ export const dropWork = (
 };
 
 /**
- * The next batch of queued work of `target`: one table's records (one
- * owner's where it is `owned`), by owner then ID, each transformed again
+ * The next batch of queued work of `target`: one table's records of one
+ * audience (`batchOf`), by owner then ID, each transformed again
  * from what it holds now, whether or not it fits the target (an edit of
  * a transformed record still fits, and its derived fields are stale).
  * Work whose record is gone is dropped as it is found. Null once no work
@@ -316,7 +343,7 @@ export const nextWorkBatch = (
     for (const item of queued) {
       if (
         item.tableId !== first.tableId ||
-        (table.owned && item.ownerId !== first.ownerId)
+        (table.audience.owner && item.ownerId !== first.ownerId)
       ) {
         break;
       }
@@ -336,7 +363,7 @@ export const nextWorkBatch = (
         due.push(record);
       }
     }
-    const taken = batchOf(due, table.owned);
+    const taken = batchOf(due, table.audience);
     if (taken.length > 0) {
       return { table, rows: taken.map((row) => rowOf(row)) };
     }
@@ -400,11 +427,13 @@ export const hasWork = (db: Db, target: string): boolean =>
 /**
  * Why `after`, a transform's output for a record holding `before`, can't
  * commit: it doesn't fit the target table, or the contract in force, or
- * it changes a field that can hold a record ID; undefined when it can.
+ * it changes a field that can hold a record ID, or one of `ruleFields`
+ * (those the row rules of either read); undefined when it can.
  */
 export const outputRefusal = (
   target: Readonly<Record<string, ValueDescriptor>>,
   contract: Readonly<Record<string, ValueDescriptor>>,
+  ruleFields: readonly string[],
   before: StoreFields,
   after: StoreFields
 ): Pick<MigrationFailure, "reason" | "issues"> | undefined => {
@@ -427,21 +456,18 @@ export const outputRefusal = (
       .filter(([, descriptor]) => holdsId(descriptor))
       .map(([name]) => name)
   );
-  for (const name of references) {
-    const was = Object.hasOwn(before, name)
-      ? canonicalJson(before[name] ?? null)
-      : undefined;
-    const now = Object.hasOwn(after, name)
-      ? canonicalJson(after[name] ?? null)
-      : undefined;
-    if (was !== now) {
-      return {
-        reason: "reference_changed",
-        issues: [
-          `${name}: A migration doesn't change a field that refers to records`,
-        ],
-      };
-    }
+  const reference = firstChanged(references, before, after);
+  if (reference !== undefined) {
+    return {
+      reason: "reference_changed",
+      issues: [
+        `${reference}: A migration doesn't change a field that refers to records`,
+      ],
+    };
+  }
+  const ruled = firstChanged(ruleFields, before, after);
+  if (ruled !== undefined) {
+    return { reason: "rule_changed", issues: [ruleChangedIssue(ruled)] };
   }
   return undefined;
 };

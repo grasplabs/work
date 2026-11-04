@@ -190,7 +190,12 @@ import type {
   RecordSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
-import { ruleSql } from "./store-rules.ts";
+import {
+  audienceOf,
+  fieldsRead,
+  ruleFieldsOf,
+  ruleSql,
+} from "./store-rules.ts";
 import type { RuleCaller } from "./store-rules.ts";
 import {
   dropSearches,
@@ -372,9 +377,7 @@ const admittedOnce = (
   table: ManifestTable,
   admits: (fields: StoreFields) => boolean
 ): ((fields: StoreFields) => boolean) => {
-  const ruleFields = (table.rules?.read ?? [])
-    .map((rule) => ("field" in rule ? rule.field : undefined))
-    .filter((field) => field !== undefined);
+  const ruleFields = fieldsRead(table.rules?.read);
   const known = new Map<string, boolean>();
   return (fields) => {
     const key = canonicalJson(
@@ -1010,6 +1013,7 @@ const migrationFailureSchema = z.strictObject({
     "invalid_answer",
     "outside_contract",
     "reference_changed",
+    "rule_changed",
     "fixtures_failed",
   ]),
   issues: z.array(z.string().max(500)).max(20),
@@ -5298,15 +5302,15 @@ export class StoreHost {
     return (pending.migrations?.migrations ?? [])
       .map(([table, migration]): MigratedTable => {
         const tableId = ids.get(table);
-        const access = pending.manifest.tables[table]?.access;
-        if (tableId === undefined || access === undefined) {
+        const declared = pending.manifest.tables[table];
+        if (tableId === undefined || declared === undefined) {
           throw migrationErrors.create("migration.metadata_corrupt");
         }
         return {
           table,
           tableId,
           migration,
-          owned: access.read === "owner" || access.write === "owner",
+          audience: audienceOf(declared),
           bound: pending.scanBounds[tableId] ?? "",
         };
       })
@@ -5709,6 +5713,14 @@ export class StoreHost {
     }
     const targetFields = tableFieldsOf(pending.manifest, table.table);
     const contractFields = tableFieldsOf(contract, table.table);
+    // Rules never change on a table the contract holds (store-rules.ts);
+    // both are read all the same, so neither's fields move.
+    const ruleFields = [
+      ...new Set([
+        ...ruleFieldsOf(pending.manifest.tables[table.table]?.rules),
+        ...ruleFieldsOf(contract.tables[table.table]?.rules),
+      ]),
+    ];
     const writes: { record: typeof records.$inferSelect; valueJson: string }[] =
       [];
     for (const transformed of rows) {
@@ -5730,6 +5742,7 @@ export class StoreHost {
           outputRefusal(
             targetFields,
             contractFields,
+            ruleFields,
             fieldsOf(record),
             transformed.fields
           ) ??
@@ -5794,7 +5807,6 @@ export class StoreHost {
             )
           )
           .run();
-        this.#keepRewritten(record, valueJson);
         wrote = true;
       }
       dropWork(this.#db, target, tableId, record.recordId);
@@ -6056,60 +6068,10 @@ export class StoreHost {
       .run();
     // No history row: a fill adds a defaulted field, never one a row rule
     // reads (rules name fields their table had, and never change on it),
-    // so no history read by rules is rebuilt through it (`#keepRewritten`).
+    // so the states a history read by rules is rebuilt through admit the
+    // same people before and after it. A migration's rewrite keeps none
+    // for the same reason (store-migrations.ts, `rule_changed`).
     return true;
-  }
-
-  /**
-   * Keeps in the record's history that a migration's transform rewrote it
-   * to `valueJson`, when the rewrite changed a field its table's read
-   * rules read (a team, an assignee): which fields changed, made by Grasp,
-   * never their values. A
-   * history read by row rules stops there (`admittedHistoryOf`), as what
-   * the record held before can't be told, so no state from before the
-   * move shows to someone it didn't admit. Any other rewrite keeps
-   * nothing: the states a history is rebuilt through differ only in fields
-   * no rule reads, which decide nothing of what it shows, and a migration
-   * of a large table doesn't crowd every edit out of the store's bounded
-   * history.
-   */
-  #keepRewritten(record: typeof records.$inferSelect, valueJson: string): void {
-    const rules =
-      this.#contractNow()?.tables[this.#tableName(record.tableId)]?.rules;
-    const ruleFields = (rules?.read ?? [])
-      .map((rule) => ("field" in rule ? rule.field : undefined))
-      .filter((field) => field !== undefined);
-    const before = fieldsOf(record);
-    const after = fieldsOf({ valueJson });
-    const moved = ruleFields.some(
-      (field) =>
-        canonicalJson(before[field] ?? null) !==
-        canonicalJson(after[field] ?? null)
-    );
-    if (!moved) {
-      return;
-    }
-    recordChangesIn(
-      this.#db,
-      [
-        {
-          tableId: record.tableId,
-          tableName: this.#tableName(record.tableId),
-          recordId: record.recordId,
-          before,
-          after,
-          rewritten: true,
-          sensitive: false,
-        },
-      ],
-      {
-        source: "migration",
-        actor: { type: "system" },
-        commit: null,
-        principal: record.ownerId,
-      },
-      Date.now()
-    );
   }
 
   /**

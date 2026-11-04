@@ -1,4 +1,6 @@
-import type { RowRule } from "@grasp-os/sdk/host";
+import type { ManifestTable, RowRule, RowRules } from "@grasp-os/sdk/host";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { StoreFields } from "@grasp-os/shared/stores";
 
 import { textExpression } from "./store-expressions.ts";
 import type { Fragment } from "./store-expressions.ts";
@@ -53,6 +55,15 @@ import type { Fragment } from "./store-expressions.ts";
 //   in the App, its builders included, and whoever calls a public
 //   operation of a store the App serves (another App's or a workflow's
 //   person, a member of the store's App for those calls).
+// - A migration's transform, which reads every row of its table whoever
+//   may, moves a row into other people's sight or carries one row's
+//   values into another's: a transform never changes a field a rule
+//   reads (`rule_changed`, store-migrations.ts and
+//   migration-transform.ts), so a row's audience moves only through
+//   writes, which pass the rules before and after; and each batch holds
+//   rows of one audience (`audienceKey`), the module state of its call
+//   ending with it, so whatever it carries between rows stays with the
+//   rows the same people already see.
 // - A rule changed for rows already written under the old one: refused
 //   for every table the store's contract holds, whether it holds records
 //   or not, as an access mode's change is (sdk schema-plan.ts), until
@@ -78,6 +89,57 @@ export const recordColumns: RuleColumns = {
   document: "value_json",
   owner: "owner_id",
 };
+
+/** The fields `rules` read (person and team rules), each once, in order. */
+export const fieldsRead = (rules: readonly RowRule[] | undefined): string[] => [
+  ...new Set(
+    (rules ?? []).flatMap((rule) => ("field" in rule ? [rule.field] : []))
+  ),
+];
+
+/** The fields a table's rules read, for reading or writing. */
+export const ruleFieldsOf = (rules: RowRules | undefined): string[] =>
+  fieldsRead([...(rules?.read ?? []), ...(rules?.write ?? [])]);
+
+/**
+ * What decides which people a table's rows reach, besides App roles: the
+ * row's owner, when its access mode or a rule reads it, and the fields its
+ * rules read. Rows alike in these reach the same people.
+ */
+export interface Audience {
+  readonly owner: boolean;
+  readonly fields: readonly string[];
+}
+
+/** The audience of rows of `table` (see `Audience`). */
+export const audienceOf = (
+  table: Pick<ManifestTable, "access" | "rules">
+): Audience => {
+  const { access, rules } = table;
+  const owner =
+    access.read === "owner" ||
+    access.write === "owner" ||
+    [...(rules?.read ?? []), ...(rules?.write ?? [])].some(
+      (rule) => rule.kind === "owner"
+    );
+  return { owner, fields: ruleFieldsOf(rules) };
+};
+
+/**
+ * A row's audience as one text: equal for two rows exactly when its
+ * owner (where `audience` reads it) and each field its rules read hold the
+ * same value (absent and null alike: neither admits anyone).
+ */
+export const audienceKey = (
+  audience: Audience,
+  row: { readonly owner: string; readonly fields: StoreFields }
+): string =>
+  canonicalJson([
+    audience.owner ? row.owner : null,
+    ...audience.fields.map((field) =>
+      Object.hasOwn(row.fields, field) ? (row.fields[field] ?? null) : null
+    ),
+  ]);
 
 /** Whether the caller is a member of the App, never a visitor. */
 const isMember = (caller: RuleCaller): boolean =>

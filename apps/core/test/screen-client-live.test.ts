@@ -697,64 +697,107 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
     ).toBeFalsy();
   });
 });
+/**
+ * An App whose secrets are read by the team each names, opened by a
+ * member in Sales; its builder is in Sales and Support.
+ */
+const teamSecrets = async () => {
+  const secretFiles = withSecrets();
+  const teamFiles: Record<string, string> = {
+    ...secretFiles,
+    "schema.ts": (secretFiles["schema.ts"] ?? "")
+      .replace(
+        "import { defineSchema, defineTable, v }",
+        "import { defineSchema, defineTable, rows, v }"
+      )
+      .replace(
+        "secrets: defineTable({ text: v.string() }),",
+        'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: [rows.team("team")] }),'
+      ),
+    "operations/notes.ts": (secretFiles["operations/notes.ts"] ?? "").replace(
+      "export const tell = mutation({\n  args: { text: v.string() },",
+      "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
+    ),
+    "app.ts": (secretFiles["app.ts"] ?? "").replace(
+      'secrets: { read: "appBuilders", write: "appBuilders" }',
+      'secrets: { read: "appMembers", write: "appMembers" }'
+    ),
+  };
+  const opened = await openedApp(teamFiles);
+  const member = await personApi("user");
+  await opened.builder.api.apps.members.add(opened.app, {
+    type: "person",
+    id: member.userId,
+    role: "user",
+  });
+  const sales = crypto.randomUUID();
+  const support = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Sales', 'organization', ?), (?, 'Support', 'organization', ?)"
+    ).bind(sales, Date.now(), support, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)"
+    ).bind(
+      crypto.randomUUID(),
+      sales,
+      opened.builder.userId,
+      crypto.randomUUID(),
+      support,
+      opened.builder.userId,
+      crypto.randomUUID(),
+      sales,
+      member.userId
+    ),
+  ]);
+  const { lease } = await member.api.screens.open(opened.app, "notes");
+  const secrets = referenceTo<Record<never, never>, unknown, "query">(
+    opened.release,
+    "notes.secrets"
+  );
+  const tell = referenceTo<{ text: string; team: string }, unknown, "mutation">(
+    opened.release,
+    "notes.tell"
+  );
+  return { opened, member, sales, support, lease, secrets, tell };
+};
+
 describe("live queries and a person's teams", { timeout: 180_000 }, () => {
-  it("never pushes what was read under a team the person has left, even a result that waited", async () => {
-    // The secrets table, read by the team each secret names.
-    const secretFiles = withSecrets();
-    const teamFiles: Record<string, string> = {
-      ...secretFiles,
-      "schema.ts": (secretFiles["schema.ts"] ?? "")
-        .replace(
-          "import { defineSchema, defineTable, v }",
-          "import { defineSchema, defineTable, rows, v }"
-        )
-        .replace(
-          "secrets: defineTable({ text: v.string() }),",
-          'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: [rows.team("team")] }),'
-        ),
-      "operations/notes.ts": (secretFiles["operations/notes.ts"] ?? "").replace(
-        "export const tell = mutation({\n  args: { text: v.string() },",
-        "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
-      ),
-      "app.ts": (secretFiles["app.ts"] ?? "").replace(
-        'secrets: { read: "appBuilders", write: "appBuilders" }',
-        'secrets: { read: "appMembers", write: "appMembers" }'
-      ),
-    };
-    const opened = await openedApp(teamFiles);
-    const member = await personApi("user");
-    await opened.builder.api.apps.members.add(opened.app, {
-      type: "person",
-      id: member.userId,
-      role: "user",
+  it("pushes nothing of a row the person's teams don't read, written while they watch", async () => {
+    const { opened, member, sales, support, lease, secrets, tell } =
+      await teamSecrets();
+    const received: Push[] = [];
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), (push: unknown) => {
+        received.push(pushSchema.parse(push));
+      });
+    await eventually(() => {
+      expect(received).toHaveLength(1);
     });
-    // The builder and the member are both in Sales.
-    const sales = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Sales', 'organization', ?)"
-      ).bind(sales, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO team_members (id, team_id, user_id) VALUES (?, ?, ?), (?, ?, ?)"
-      ).bind(
-        crypto.randomUUID(),
-        sales,
-        opened.builder.userId,
-        crypto.randomUUID(),
-        sales,
-        member.userId
-      ),
-    ]);
-    const { lease } = await member.api.screens.open(opened.app, "notes");
-    const secrets = referenceTo<Record<never, never>, unknown, "query">(
-      opened.release,
-      "notes.secrets"
-    );
-    const tell = referenceTo<
-      { text: string; team: string },
-      unknown,
-      "mutation"
-    >(opened.release, "notes.tell");
+
+    // Support's secret first, then Sales': once Sales' is pushed, every
+    // read after Support's write has been.
+    const { client } = clientFor(opened);
+    await client.mutation(tell, { text: "Support only", team: support });
+    await client.mutation(tell, { text: "Sales news", team: sales });
+    await eventually(() => {
+      expect(
+        received.some(({ result }) =>
+          JSON.stringify(result).includes("Sales news")
+        )
+      ).toBeTruthy();
+    });
+
+    expect(
+      received.some(({ result }) =>
+        JSON.stringify(result).includes("Support only")
+      )
+    ).toBeFalsy();
+  });
+
+  it("never pushes what was read under a team the person has left, even a result that waited", async () => {
+    const { opened, member, sales, lease, secrets, tell } = await teamSecrets();
     const received: Push[] = [];
     const first = Promise.withResolvers<null>();
     // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers

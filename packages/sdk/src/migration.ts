@@ -377,6 +377,25 @@ export const migration = <
 export const isMigration = (value: unknown): value is Migration =>
   typeof value === "object" && value !== null && handlers.has(value);
 
+/** What a migration is refused for using what it can't (`what`). */
+export const impureMessage = (what: string): string =>
+  `A migration is pure: ${what} isn't available while it transforms rows.`;
+
+/** What a handler is refused for answering a promise. */
+export const promiseMessage =
+  "A migration's handler answers its row, not a promise: it has nothing to wait for.";
+
+/**
+ * The SDK's own messages a handler's failure may carry as the runner
+ * refuses it: fixed texts that hold nothing of a row, so the host may show
+ * them for any table (apps/core/src/migration-transform.ts).
+ */
+export const migrationPlatformMessages: readonly string[] = [
+  impureMessage("randomness"),
+  impureMessage("the clock"),
+  promiseMessage,
+];
+
 /** The handler of a migration `migration` declared; throws for anything else. */
 export const migrationHandler = (value: unknown): AnyMigrationHandler => {
   const handler =

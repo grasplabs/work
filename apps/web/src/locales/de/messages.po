@@ -3330,11 +3330,6 @@ msgid "By {by}"
 msgstr "Von {by}"
 
 #: src/engines/app-data.tsx
-msgctxt "a change's source: a new version's migration rewrote it"
-msgid "by a migration"
-msgstr "durch eine Migration"
-
-#: src/engines/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "durch einen Import"
@@ -14911,10 +14906,6 @@ msgstr "{tool} wird verwendet"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "UTC"
 msgstr "UTC"
-
-#: src/engines/app-data.tsx
-msgid "Values aren't kept: Grasp rewrote the record."
-msgstr "Werte werden nicht gespeichert: Grasp hat den Datensatz neu geschrieben."
 
 #: src/engines/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."

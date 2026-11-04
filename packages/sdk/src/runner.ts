@@ -4,7 +4,11 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
-import { migrationHandler } from "./migration.ts";
+import {
+  impureMessage,
+  migrationHandler,
+  promiseMessage,
+} from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
 import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
@@ -475,7 +479,7 @@ export interface MigrationRequest {
 
 /**
  * What a batch answered: each row's output, in order, or the row whose
- * handler threw, and what it said.
+ * handler threw, and what it said. The host reads all of it as hostile.
  */
 export type MigrationAnswer =
   | { readonly ok: true; readonly rows: readonly unknown[] }
@@ -486,9 +490,19 @@ const failureMaxLength = 500;
 
 /** A function that refuses, for what a migration can't use. */
 const unavailable = (what: string) => (): never => {
-  throw new Error(
-    `A migration is pure: ${what} isn't available while it transforms rows.`
-  );
+  throw new Error(impureMessage(what));
+};
+
+/** The message of what a handler threw, bounded. */
+const messageOf = (error: unknown): string => {
+  try {
+    const message: unknown = error instanceof Error ? error.message : undefined;
+    return typeof message === "string"
+      ? message.slice(0, failureMaxLength)
+      : "The handler threw";
+  } catch {
+    return "The handler threw";
+  }
 };
 
 /** What a global held before a transform: its own property, if it had one. */
@@ -707,19 +721,14 @@ export const runMigration = (
       try {
         const output = handler(ctx, row.fields);
         if (isThenable(output)) {
-          throw new Error(
-            "A migration's handler answers its row, not a promise: it has nothing to wait for."
-          );
+          throw new Error(promiseMessage);
         }
         rows.push(asJson(output));
       } catch (error) {
         return {
           ok: false,
           index,
-          message: (error instanceof Error
-            ? error.message
-            : "The handler threw"
-          ).slice(0, failureMaxLength),
+          message: messageOf(error),
         };
       }
     }
