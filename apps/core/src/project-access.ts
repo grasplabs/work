@@ -247,16 +247,12 @@ export const namedProjectsFor = async (
 };
 
 /**
- * The people in project `id` now, by user ID: its owner, the people in it,
- * and everyone in a team in it, each once, while they are members of the
- * organization. Whom a share with the project reaches.
+ * The people in project `id` now, as SQL rows of `person`, each once:
+ * its owner, the people in it, and everyone in a team in it, while they
+ * are members of the organization.
  */
-export const peopleInProject = async (
-  env: Pick<Env, "DB">,
-  id: string
-): Promise<string[]> => {
-  const rows = await drizzle(env.DB).all<{ userId: string }>(
-    sql`SELECT person AS userId FROM (
+const peopleInProjectSql = (id: string): SQL =>
+  sql`(SELECT person FROM (
       SELECT ${projects.ownerId} AS person FROM ${projects} WHERE ${projects.id} = ${id}
       UNION SELECT ${projectMembers.memberId} FROM ${projectMembers}
         WHERE ${projectMembers.projectId} = ${id} AND ${projectMembers.memberType} = 'person'
@@ -264,7 +260,26 @@ export const peopleInProject = async (
         JOIN ${projectMembers} ON ${projectMembers.memberType} = 'team'
           AND ${projectMembers.memberId} = ${teamMembers.teamId}
         WHERE ${projectMembers.projectId} = ${id}
-    ) WHERE ${activeMember(sql.raw("person"))}`
+    ) WHERE ${activeMember(sql.raw("person"))})`;
+
+/** The people in project `id` now, by user ID: whom a share with it reaches. */
+export const peopleInProject = async (
+  env: Pick<Env, "DB">,
+  id: string
+): Promise<string[]> => {
+  const rows = await drizzle(env.DB).all<{ person: string }>(
+    sql`SELECT person FROM ${peopleInProjectSql(id)}`
   );
-  return rows.map(({ userId }) => userId).toSorted();
+  return rows.map(({ person }) => person).toSorted();
+};
+
+/** How many people a share with project `id` reaches now (`peopleInProject`), counted in SQL. */
+export const peopleInProjectCount = async (
+  env: Pick<Env, "DB">,
+  id: string
+): Promise<number> => {
+  const row = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM ${peopleInProjectSql(id)}`
+  );
+  return row.count;
 };

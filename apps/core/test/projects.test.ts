@@ -1,3 +1,4 @@
+import { projectPageSize } from "@grasp-os/shared/projects";
 import type { ProjectItemRef } from "@grasp-os/shared/projects";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -861,6 +862,76 @@ describe("projects", { timeout: 120_000 }, () => {
         },
       ],
       sharesLeft: 0,
+    });
+  });
+
+  it("lists a project bigger than one page in pages, and counts it whole", async () => {
+    const owner = await personApi("builder");
+    const project = await projectOf(owner);
+    const workflows = await Promise.all(
+      Array.from(
+        { length: projectPageSize + 1 },
+        async () => await workflowOf(owner)
+      )
+    );
+    const people = Array.from({ length: projectPageSize + 1 }, () =>
+      crypto.randomUUID()
+    );
+    // Filed and added one after another, so the pages' order is theirs.
+    const now = Date.now();
+    await env.DB.batch([
+      ...workflows.map((id, index) =>
+        env.DB.prepare(
+          "INSERT INTO project_items (project_id, item_type, item_id, added_by, added_at) VALUES (?, 'workflow', ?, ?, ?)"
+        ).bind(project, id, owner.userId, now + index)
+      ),
+      ...people.flatMap((person, index) => [
+        env.DB.prepare(
+          "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Person', ?, 1, ?, ?)"
+        ).bind(person, `${person}@acme.test`, now, now),
+        env.DB.prepare(
+          "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
+        ).bind(crypto.randomUUID(), person, now),
+        env.DB.prepare(
+          "INSERT INTO project_members (project_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+        ).bind(project, person, owner.userId, now + index),
+      ]),
+    ]);
+
+    const first = await owner.api.projects.get(project);
+    const lastItem = first.items.at(-1);
+    const lastMember = first.members.at(-1);
+    if (lastItem === undefined || lastMember === undefined) {
+      throw new Error("The first page holds nothing");
+    }
+    const nextItems = await owner.api.projects.items(project, {
+      at: lastItem.addedAt,
+      type: lastItem.type,
+      id: lastItem.id,
+    });
+    const nextMembers = await owner.api.projects.members(project, {
+      at: lastMember.addedAt,
+      type: lastMember.type,
+      id: lastMember.id,
+    });
+    const listed = await owner.api.projects.list();
+
+    expect({
+      items: [...first.items, ...nextItems.items].map(({ id }) => id),
+      itemPages: [first.items.length, first.moreItems, nextItems.more],
+      members: [...first.members, ...nextMembers.members].map(({ id }) => id),
+      memberPages: [first.members.length, first.moreMembers, nextMembers.more],
+      people: first.people,
+      counted: first.counts.workflows,
+      listedCount: listed.find(({ id }) => id === project)?.counts.workflows,
+    }).toStrictEqual({
+      items: workflows,
+      itemPages: [projectPageSize, true, false],
+      members: people,
+      memberPages: [projectPageSize, true, false],
+      people: projectPageSize + 2,
+      counted: projectPageSize + 1,
+      listedCount: projectPageSize + 1,
     });
   });
 });

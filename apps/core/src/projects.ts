@@ -6,10 +6,12 @@ import {
   newProjectMemberSchema,
   newProjectSchema,
   projectChangesSchema,
+  projectCursorSchema,
   projectErrors,
   projectIcons,
   projectItemRefSchema,
   projectMemberRefSchema,
+  projectPageSize,
 } from "@grasp-os/shared/projects";
 import type {
   FileItem,
@@ -18,12 +20,14 @@ import type {
   Project,
   ProjectChanges,
   ProjectCounts,
+  ProjectCursor,
   ProjectIcon,
   ProjectItem,
   ProjectItemCandidate,
   ProjectItemRef,
-  ProjectMember,
+  ProjectItemsPage,
   ProjectMemberRef,
+  ProjectMembersPage,
   ProjectRole,
   ProjectShareCandidates,
   ProjectSummary,
@@ -32,7 +36,8 @@ import type {
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { and, asc, count, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -66,7 +71,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList, notNullFailed } from "./db/d1.ts";
 import {
-  peopleInProject,
+  peopleInProjectCount,
   requireStillBuilt,
   projectsFoundBy,
   requireProjectRole,
@@ -176,121 +181,94 @@ const visibleTo = async (env: Env, by: Identity): Promise<Visible> => {
   };
 };
 
-/** Whether `by` may open `item` (`visibleTo`). */
-const opens = (visible: Visible, item: ProjectItemRef): boolean =>
-  item.type === "app"
-    ? visible.apps.has(item.id)
-    : visible.workflows.has(item.id);
-
-/** An item in one of the projects read. */
-interface InProject extends ProjectItemRef {
-  projectId: string;
-}
+/** A page and one more: whether more follow, without counting them. */
+const pageAndOne = projectPageSize + 1;
 
 /**
- * The items in `ids`' projects, each once, oldest first: those filed in
- * them and those shared with them, filed or not, so a project shows
- * everything being in it reaches (an item's own Share dialog shares
- * without filing).
+ * The items in `ids`' projects, as SQL rows (`projectId`, `type`, `id`,
+ * `at`) for `FROM`: each once, filed in a project or shared with it (an
+ * item's own Share dialog shares without filing), at when it first came
+ * in. Read, counted and paged in SQL, whatever a project holds.
  */
-const itemsIn = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<InProject[]> => {
-  if (ids.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB).all<{
-    projectId: string;
-    type: string;
-    id: string;
-  }>(sql`SELECT projectId, type, id FROM (
+const itemRowsSql = (ids: readonly string[]): SQL =>
+  sql`(SELECT projectId, type, id, MIN(at) AS at FROM (
       SELECT ${projectItems.projectId} AS projectId, ${projectItems.itemType} AS type, ${projectItems.itemId} AS id, ${projectItems.addedAt} AS at
         FROM ${projectItems} WHERE ${inList(projectItems.projectId, ids)}
       UNION ALL SELECT ${appMembers.memberId}, 'app', ${appMembers.appId}, ${appMembers.addedAt}
         FROM ${appMembers} WHERE ${appMembers.memberType} = 'project' AND ${inList(appMembers.memberId, ids)}
       UNION ALL SELECT ${workflowResourceMembers.memberId}, 'workflow', ${workflowResourceMembers.workflowResourceId}, ${workflowResourceMembers.addedAt}
         FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${inList(workflowResourceMembers.memberId, ids)}
-    ) ORDER BY at, id`);
-  const seen = new Set<string>();
-  return rows.flatMap(({ projectId, type, id }): InProject[] => {
-    const key = `${projectId}:${type}:${id}`;
-    if (seen.has(key) || (type !== "app" && type !== "workflow")) {
-      return [];
-    }
-    seen.add(key);
-    return [{ projectId, type, id }];
-  });
+    ) GROUP BY projectId, type, id)`;
+
+/** That a row of `itemRowsSql` (as `items`) is one `visible` opens, as SQL. */
+const opensSql = (visible: Visible): SQL =>
+  sql`((items.type = 'app' AND ${inList(sql`items.id`, [...visible.apps.keys()])})
+    OR (items.type = 'workflow' AND ${inList(sql`items.id`, [...visible.workflows.keys()])}))`;
+
+/** That a row comes after `after` in a page's order (`at`, `type`, `id`), as SQL. */
+const afterSql = (
+  after: ProjectCursor | undefined,
+  at: SQL,
+  type: SQL,
+  id: SQL
+): SQL => {
+  if (after === undefined) {
+    return sql`1`;
+  }
+  const from = Date.parse(after.at);
+  return sql`(${at} > ${from} OR (${at} = ${from} AND (${type} > ${after.type} OR (${type} = ${after.type} AND ${id} > ${after.id}))))`;
 };
 
 /**
- * The connections each of `items` uses, by item key (`type:id`): those it
- * holds a grant on that isn't revoked.
+ * Each of `ids`' projects' counts, of what `visible` opens: in two reads
+ * whatever the projects hold.
  */
-const connectionsOf = async (
+const countsIn = async (
   env: Env,
-  items: readonly ProjectItemRef[]
-): Promise<Map<string, Set<string>>> => {
-  const appIds = items.filter(({ type }) => type === "app").map(({ id }) => id);
-  const workflowIds = items
-    .filter(({ type }) => type === "workflow")
-    .map(({ id }) => id);
-  const byItem = new Map<string, Set<string>>();
-  if (appIds.length === 0 && workflowIds.length === 0) {
-    return byItem;
+  ids: readonly string[],
+  visible: Visible
+): Promise<Map<string, ProjectCounts>> => {
+  const counts = new Map(
+    ids.map((id): [string, ProjectCounts] => [
+      id,
+      { apps: 0, workflows: 0, connections: 0 },
+    ])
+  );
+  if (ids.length === 0) {
+    return counts;
   }
-  const rows = await drizzle(env.DB)
-    .selectDistinct({
-      type: permissions.subjectType,
-      id: permissions.subjectId,
-      connection: permissions.objectId,
-    })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.objectType, "connection"),
-        ne(permissions.status, "revoked"),
-        or(
-          appIds.length === 0
-            ? undefined
-            : and(
-                eq(permissions.subjectType, "app"),
-                inList(permissions.subjectId, appIds)
-              ),
-          workflowIds.length === 0
-            ? undefined
-            : and(
-                eq(permissions.subjectType, "workflow"),
-                inList(permissions.subjectId, workflowIds)
-              )
-        )
-      )
-    );
-  for (const { type, id, connection } of rows) {
-    const key = `${type}:${id}`;
-    const set = byItem.get(key) ?? new Set<string>();
-    set.add(connection);
-    byItem.set(key, set);
-  }
-  return byItem;
-};
-
-/** The counts of `items`, each one `by` opens. */
-const countsOf = (
-  items: readonly ProjectItemRef[],
-  connections: Map<string, Set<string>>
-): ProjectCounts => {
-  const used = new Set<string>();
-  for (const { type, id } of items) {
-    for (const connection of connections.get(`${type}:${id}`) ?? []) {
-      used.add(connection);
+  const db = drizzle(env.DB);
+  const [byType, byConnections] = await Promise.all([
+    db.all<{ projectId: string; type: string; count: number }>(
+      sql`SELECT items.projectId AS projectId, items.type AS type, count(*) AS count
+        FROM ${itemRowsSql(ids)} AS items WHERE ${opensSql(visible)}
+        GROUP BY items.projectId, items.type`
+    ),
+    // The connections its items hold a grant on that isn't revoked, each once.
+    db.all<{ projectId: string; count: number }>(
+      sql`SELECT items.projectId AS projectId, count(DISTINCT ${permissions.objectId}) AS count
+        FROM ${itemRowsSql(ids)} AS items
+        JOIN ${permissions} ON ${permissions.subjectType} = items.type AND ${permissions.subjectId} = items.id
+        WHERE ${permissions.objectType} = 'connection' AND ${permissions.status} <> 'revoked'
+          AND ${opensSql(visible)}
+        GROUP BY items.projectId`
+    ),
+  ]);
+  for (const { projectId, type, count: held } of byType) {
+    const own = counts.get(projectId);
+    if (own !== undefined && type === "app") {
+      own.apps = held;
+    } else if (own !== undefined && type === "workflow") {
+      own.workflows = held;
     }
   }
-  return {
-    apps: items.filter(({ type }) => type === "app").length,
-    workflows: items.filter(({ type }) => type === "workflow").length,
-    connections: used.size,
-  };
+  for (const { projectId, count: used } of byConnections) {
+    const own = counts.get(projectId);
+    if (own !== undefined) {
+      own.connections = used;
+    }
+  }
+  return counts;
 };
 
 const summaryOf = (
@@ -319,28 +297,128 @@ export const listProjects = async (
   if (rows.length === 0) {
     return [];
   }
-  const [visible, inThem, roles] = await Promise.all([
+  const ids = rows.map(({ id }) => id);
+  const [visible, roles] = await Promise.all([
     visibleTo(env, by),
-    itemsIn(
-      env,
-      rows.map(({ id }) => id)
-    ),
     rolesIn(env, by, rows),
   ]);
-  const shown = inThem.filter((item) => opens(visible, item));
-  const connections = await connectionsOf(env, shown);
+  const counts = await countsIn(env, ids, visible);
   return rows.flatMap((row) => {
     const role = roles.get(row.id);
-    if (role === undefined) {
-      return [];
-    }
-    const own = shown.filter(({ projectId }) => projectId === row.id);
-    return [summaryOf(row, role, countsOf(own, connections))];
+    const own = counts.get(row.id);
+    return role === undefined || own === undefined
+      ? []
+      : [summaryOf(row, role, own)];
   });
 };
 
-/** Who is in project `id` besides its owner, named, still there. */
-const membersOf = async (env: Env, id: string): Promise<ProjectMember[]> => {
+/**
+ * The role project `id`'s row has in each of `items` shared with it, by
+ * item key (`type:id`): one page's, never every share it holds.
+ */
+const sharesOf = async (
+  env: Env,
+  id: string,
+  items: readonly { type: string; id: string }[]
+): Promise<Map<string, ProjectRole>> => {
+  const appIds = items
+    .filter(({ type }) => type === "app")
+    .map((each) => each.id);
+  const workflowIds = items
+    .filter(({ type }) => type === "workflow")
+    .map((each) => each.id);
+  const db = drizzle(env.DB);
+  const [sharedApps, sharedWorkflows] = await db.batch([
+    db
+      .select({ id: appMembers.appId, role: appMembers.role })
+      .from(appMembers)
+      .where(
+        and(
+          eq(appMembers.memberType, "project"),
+          eq(appMembers.memberId, id),
+          inList(appMembers.appId, appIds)
+        )
+      ),
+    db
+      .select({
+        id: workflowResourceMembers.workflowResourceId,
+        role: workflowResourceMembers.role,
+      })
+      .from(workflowResourceMembers)
+      .where(
+        and(
+          eq(workflowResourceMembers.memberType, "project"),
+          eq(workflowResourceMembers.memberId, id),
+          inList(workflowResourceMembers.workflowResourceId, workflowIds)
+        )
+      ),
+  ]);
+  return new Map([
+    ...sharedApps.map(({ id: app, role }): [string, ProjectRole] => [
+      `app:${app}`,
+      role,
+    ]),
+    ...sharedWorkflows.map(({ id: workflow, role }): [string, ProjectRole] => [
+      `workflow:${workflow}`,
+      role,
+    ]),
+  ]);
+};
+
+/**
+ * A page of project `id`'s items that `visible` opens, after `after` or
+ * from the start, in the order they came in, each with the role the
+ * project's share of it has.
+ */
+const itemsPage = async (
+  env: Env,
+  id: string,
+  visible: Visible,
+  after?: ProjectCursor
+): Promise<ProjectItemsPage> => {
+  const db = drizzle(env.DB);
+  const rows = await db.all<{ type: string; id: string; at: number }>(
+    sql`SELECT items.type AS type, items.id AS id, items.at AS at
+      FROM ${itemRowsSql([id])} AS items
+      WHERE ${opensSql(visible)} AND ${afterSql(after, sql`items.at`, sql`items.type`, sql`items.id`)}
+      ORDER BY items.at, items.type, items.id
+      LIMIT ${pageAndOne}`
+  );
+  const page = rows.slice(0, projectPageSize);
+  const shared = await sharesOf(env, id, page);
+  return {
+    items: page.flatMap(({ type, id: itemId, at }): ProjectItem[] => {
+      const seen =
+        type === "app"
+          ? visible.apps.get(itemId)
+          : visible.workflows.get(itemId);
+      if ((type !== "app" && type !== "workflow") || seen === undefined) {
+        return [];
+      }
+      return [
+        {
+          type,
+          id: itemId,
+          name: seen.name,
+          sharedAs: shared.get(`${type}:${itemId}`) ?? null,
+          builds: seen.role === "builder",
+          addedAt: new Date(at).toISOString(),
+        },
+      ];
+    }),
+    more: rows.length > projectPageSize,
+  };
+};
+
+/**
+ * A page of who is in project `id` besides its owner, named, still there,
+ * after `after` or from the start, in the order they were added.
+ */
+const membersPage = async (
+  env: Env,
+  id: string,
+  after?: ProjectCursor
+): Promise<ProjectMembersPage> => {
   const rows = await drizzle(env.DB)
     .select({ row: projectMembers, person: users.name, team: teams.name })
     .from(projectMembers)
@@ -368,6 +446,12 @@ const membersOf = async (env: Env, id: string): Promise<ProjectMember[]> => {
             activeMember(projectMembers.memberId)
           ),
           and(eq(projectMembers.memberType, "team"), isNotNull(teams.id))
+        ),
+        afterSql(
+          after,
+          sql`${projectMembers.addedAt}`,
+          sql`${projectMembers.memberType}`,
+          sql`${projectMembers.memberId}`
         )
       )
     )
@@ -375,95 +459,107 @@ const membersOf = async (env: Env, id: string): Promise<ProjectMember[]> => {
       asc(projectMembers.addedAt),
       asc(projectMembers.memberType),
       asc(projectMembers.memberId)
-    );
-  return rows.map(({ row, person, team }) => ({
-    type: row.memberType,
-    id: row.memberId,
-    name: person ?? team,
-    role: row.role,
-    addedBy: row.addedBy,
-    addedAt: row.addedAt.toISOString(),
-  }));
+    )
+    .limit(pageAndOne);
+  return {
+    members: rows.slice(0, projectPageSize).map(({ row, person, team }) => ({
+      type: row.memberType,
+      id: row.memberId,
+      name: person ?? team,
+      role: row.role,
+      addedBy: row.addedBy,
+      addedAt: row.addedAt.toISOString(),
+    })),
+    more: rows.length > projectPageSize,
+  };
 };
 
-/** The role project `id`'s row has in each item shared with it, by item key. */
-const sharedWithProject = async (
+/** How many of project `id`'s items `visible` opens are shared with it. */
+const sharedCount = async (
   env: Env,
-  id: string
-): Promise<Map<string, ProjectRole>> => {
-  const db = drizzle(env.DB);
-  const [sharedApps, sharedWorkflows] = await db.batch([
-    db
-      .select({ id: appMembers.appId, role: appMembers.role })
-      .from(appMembers)
-      .where(
-        and(eq(appMembers.memberType, "project"), eq(appMembers.memberId, id))
-      ),
-    db
-      .select({
-        id: workflowResourceMembers.workflowResourceId,
-        role: workflowResourceMembers.role,
-      })
-      .from(workflowResourceMembers)
-      .where(
-        and(
-          eq(workflowResourceMembers.memberType, "project"),
-          eq(workflowResourceMembers.memberId, id)
-        )
-      ),
-  ]);
-  return new Map([
-    ...sharedApps.map(({ id: app, role }): [string, ProjectRole] => [
-      `app:${app}`,
-      role,
-    ]),
-    ...sharedWorkflows.map(({ id: workflow, role }): [string, ProjectRole] => [
-      `workflow:${workflow}`,
-      role,
-    ]),
-  ]);
+  id: string,
+  visible: Visible
+): Promise<number> => {
+  const row = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM ${itemRowsSql([id])} AS items
+      WHERE ${opensSql(visible)} AND (
+        (items.type = 'app' AND EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = items.id AND ${appMembers.memberType} = 'project' AND ${appMembers.memberId} = ${id}))
+        OR (items.type = 'workflow' AND EXISTS (SELECT 1 FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.workflowResourceId} = items.id AND ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id})))`
+  );
+  return row.count;
 };
 
-/** Project `id`, as its page shows it to `by`, who is in it. */
+/**
+ * Project `id`, as its page shows it to `by`, who is in it: its counts
+ * whole, and the first page of its items and of its members (`items`,
+ * `members` for the rest).
+ */
 export const getProject = async (
   env: Env,
   by: Identity,
   id: unknown
 ): Promise<Project> => {
   const { project, role } = await requireProjectRole(env, by, id, "user");
-  const [visible, filed, shared, projectMembersList, people, owner] =
+  const visible = await visibleTo(env, by);
+  const [counts, firstItems, firstMembers, people, shared, owner] =
     await Promise.all([
-      visibleTo(env, by),
-      itemsIn(env, [project.id]),
-      sharedWithProject(env, project.id),
-      membersOf(env, project.id),
-      peopleInProject(env, project.id),
+      countsIn(env, [project.id], visible),
+      itemsPage(env, project.id, visible),
+      membersPage(env, project.id),
+      peopleInProjectCount(env, project.id),
+      sharedCount(env, project.id, visible),
       drizzle(env.DB)
         .select({ name: users.name })
         .from(users)
         .where(eq(users.id, project.ownerId))
         .get(),
     ]);
-  const shown = filed.filter((item) => opens(visible, item));
-  const connections = await connectionsOf(env, shown);
-  const items = shown.map(({ type, id: itemId }): ProjectItem => {
-    const seen =
-      type === "app" ? visible.apps.get(itemId) : visible.workflows.get(itemId);
-    return {
-      type,
-      id: itemId,
-      name: seen?.name ?? "",
-      sharedAs: shared.get(`${type}:${itemId}`) ?? null,
-      builds: seen?.role === "builder",
-    };
-  });
   return {
-    ...summaryOf(project, role, countsOf(shown, connections)),
+    ...summaryOf(
+      project,
+      role,
+      counts.get(project.id) ?? { apps: 0, workflows: 0, connections: 0 }
+    ),
     owner: { id: project.ownerId, name: owner?.name ?? null },
-    members: projectMembersList,
-    people: people.length,
-    items,
+    members: firstMembers.members,
+    moreMembers: firstMembers.more,
+    people,
+    items: firstItems.items,
+    moreItems: firstItems.more,
+    shared,
   };
+};
+
+/** The page of project `id`'s items after `after`, for `by`, who is in it. */
+export const listProjectItems = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  after: unknown
+): Promise<ProjectItemsPage> => {
+  const { project } = await requireProjectRole(env, by, id, "user");
+  const cursor = projectErrors.parse(
+    "project.invalid",
+    projectCursorSchema,
+    after
+  );
+  return await itemsPage(env, project.id, await visibleTo(env, by), cursor);
+};
+
+/** The page of project `id`'s members after `after`, for `by`, who is in it. */
+export const listProjectMembers = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  after: unknown
+): Promise<ProjectMembersPage> => {
+  const { project } = await requireProjectRole(env, by, id, "user");
+  const cursor = projectErrors.parse(
+    "project.invalid",
+    projectCursorSchema,
+    after
+  );
+  return await membersPage(env, project.id, cursor);
 };
 
 /** Makes a project for `by`, its owner, with nothing in it. */
@@ -604,17 +700,14 @@ export const removeProject = async (
   // Counted just before the deletion: an item or member added in between
   // goes with it uncounted, which the event's purpose (who deleted it, and
   // when) doesn't need exact.
-  const [held, [inIt]] = await Promise.all([
-    itemsIn(env, [project.id]),
-    db
-      .select({ count: count() })
-      .from(projectMembers)
-      .where(eq(projectMembers.projectId, project.id)),
-  ]);
+  const held = await db.get<{ items: number; members: number }>(
+    sql`SELECT (SELECT count(*) FROM ${itemRowsSql([project.id])}) AS items,
+      (SELECT count(*) FROM ${projectMembers} WHERE ${projectMembers.projectId} = ${project.id}) AS members`
+  );
   const event = createAuditEvent(
     entry(by, "project.deleted", project.id, {
-      items: held.length,
-      members: inIt?.count ?? 0,
+      items: held.items,
+      members: held.members,
     }),
     "core"
   );
@@ -826,10 +919,12 @@ export const projectItemCandidates = async (
   id: unknown
 ): Promise<ProjectItemCandidate[]> => {
   const { project } = await requireProjectRole(env, by, id, "builder");
-  const [visible, filed] = await Promise.all([
-    visibleTo(env, by),
-    itemsIn(env, [project.id]),
-  ]);
+  const visible = await visibleTo(env, by);
+  // Of what they open, what is in it already: as many as they open, at most.
+  const filed = await drizzle(env.DB).all<{ type: string; id: string }>(
+    sql`SELECT items.type AS type, items.id AS id FROM ${itemRowsSql([project.id])} AS items
+      WHERE ${opensSql(visible)}`
+  );
   const inIt = new Set(filed.map(({ type, id: item }) => `${type}:${item}`));
   return [
     ...[...visible.apps].map(([app, { name, role }]): ProjectItemCandidate => ({
@@ -1118,6 +1213,20 @@ export class ProjectsRpc extends CoreRpcTarget implements ProjectsApi {
     return await withPerson(
       this.#check,
       async (by) => await listProjects(this.#env, by)
+    );
+  }
+
+  async items(id: string, after: ProjectCursor): Promise<ProjectItemsPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjectItems(this.#env, by, id, after)
+    );
+  }
+
+  async members(id: string, after: ProjectCursor): Promise<ProjectMembersPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjectMembers(this.#env, by, id, after)
     );
   }
 

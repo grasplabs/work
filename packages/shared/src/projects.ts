@@ -120,6 +120,8 @@ export interface ProjectItem extends ProjectItemRef {
   sharedAs: ProjectRole | null;
   /** Whether the person builds the item, and so may share it. */
   builds: boolean;
+  /** When it came into the project (ISO 8601): where the next page goes on from. */
+  addedAt: string;
 }
 
 /** Someone in a project. Times are ISO 8601. */
@@ -131,18 +133,52 @@ export interface ProjectMember extends ProjectMemberRef {
   addedAt: string;
 }
 
+/** Most items or members one page of a project holds. */
+export const projectPageSize = 50;
+
+/**
+ * Where a page of a project's items or members goes on from: the last one
+ * shown, by when it came in (`at`, ISO 8601), its type and its ID. The
+ * next page lists those after it, in the order they came in.
+ */
+export const projectCursorSchema = z.strictObject({
+  at: z.iso.datetime(),
+  type: identifierSchema,
+  id: identifierSchema,
+});
+export type ProjectCursor = z.infer<typeof projectCursorSchema>;
+
+/** A page of a project's items, and whether more follow. */
+export interface ProjectItemsPage {
+  /** At most {@link projectPageSize}, in the order they came in. */
+  items: ProjectItem[];
+  more: boolean;
+}
+
+/** A page of a project's members, and whether more follow. */
+export interface ProjectMembersPage {
+  /** At most {@link projectPageSize}, in the order they were added. */
+  members: ProjectMember[];
+  more: boolean;
+}
+
 /** A project, as its page shows it. */
 export interface Project extends ProjectSummary {
   owner: { id: string; name: string | null };
-  /** Whoever is in it besides its owner. */
+  /** The first page of whoever is in it besides its owner (`members`). */
   members: ProjectMember[];
+  moreMembers: boolean;
   /** How many people a share with it reaches now, its owner included. */
   people: number;
   /**
-   * What is filed in it, or shared with it, that the person may open: so
-   * its builders see everything being in it reaches.
+   * The first page of what is filed in it, or shared with it, that the
+   * person may open (`items`): so its builders see everything being in it
+   * reaches.
    */
   items: ProjectItem[];
+  moreItems: boolean;
+  /** How many of what the person may open in it are shared with it. */
+  shared: number;
 }
 
 /** An App or workflow the person may file in a project. */
@@ -163,6 +199,10 @@ export interface ProjectsApi {
   /** The projects the person is in, newest first; every one for an admin. */
   list: () => Promise<ProjectSummary[]>;
   get: (id: string) => Promise<Project>;
+  /** The page of a project's items after `after`, as `get` lists them. */
+  items: (id: string, after: ProjectCursor) => Promise<ProjectItemsPage>;
+  /** The page of a project's members after `after`, as `get` lists them. */
+  members: (id: string, after: ProjectCursor) => Promise<ProjectMembersPage>;
   /**
    * Makes a project, with the person as its owner and nothing in it, for
    * someone whose organization role builds.

@@ -29,6 +29,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { usePages } from "./project-pages.ts";
 
 // Who is in a project: its owner, who always builds it, and the people and
 // teams in it, each a user (sees it) or a builder (also changes it). Being
@@ -188,7 +189,6 @@ const RemovePerson = ({
   const nameOf = useMemberName();
   const name = nameOf(member);
   const projectName = project.name;
-  const shared = project.items.filter(({ sharedAs }) => sharedAs !== null);
   return (
     <>
       <AlertDialog>
@@ -212,7 +212,7 @@ const RemovePerson = ({
               </Trans>
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {shared.length === 0 ? (
+              {project.shared === 0 ? (
                 <Trans>
                   Nothing is shared with the project, so they lose no access.
                 </Trans>
@@ -260,6 +260,15 @@ const RemovePerson = ({
 /** The project's people, and for its builders adding and taking them out. */
 export const ProjectPeople = ({ project }: { project: Project }) => {
   const nameOf = useMemberName();
+  const pages = usePages(
+    project,
+    project.members,
+    project.moreMembers,
+    async (session, after) => {
+      const page = await session.projects.members(project.id, after);
+      return { list: page.members, more: page.more };
+    }
+  );
   const builds = project.role === "builder";
   const owner = project.owner.name ?? project.owner.id;
   return (
@@ -271,7 +280,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
             <Trans context="a project's owner">Owner</Trans>
           </span>
         </li>
-        {project.members.map((member) => (
+        {pages.all.map((member) => (
           <li
             className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
             key={`${member.type}:${member.id}`}
@@ -288,6 +297,19 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
           </li>
         ))}
       </ul>
+      {pages.more ? (
+        <Button
+          disabled={pages.busy}
+          onClick={() => {
+            void pages.readMore();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Show more</Trans>
+        </Button>
+      ) : null}
+      <ErrorText>{pages.failure}</ErrorText>
       {builds ? <AddPerson project={project} /> : null}
     </div>
   );

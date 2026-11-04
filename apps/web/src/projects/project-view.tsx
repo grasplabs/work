@@ -35,6 +35,7 @@ import { NewItemDialog } from "./new-item-dialog.tsx";
 import { ProjectCountsLine, ProjectHours } from "./project-counts.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 import { ProjectIcon } from "./project-icon.tsx";
+import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
 import { ProjectPeople } from "./project-people.tsx";
 
@@ -158,48 +159,72 @@ const SharedBadge = ({ role }: { role: ProjectRole }) => {
   );
 };
 
-/** The items of one kind, or a line saying there are none. */
-const Items = ({
-  project,
-  items,
-  empty,
-}: {
-  project: Project;
-  items: ProjectItem[];
-  empty: string;
-}) => {
+/**
+ * What is in the project that the person may open, a page at a time, or a
+ * line saying there is nothing.
+ */
+const Items = ({ project }: { project: Project }) => {
+  const { t } = useLingui();
   const builds = project.role === "builder";
+  const pages = usePages(
+    project,
+    project.items,
+    project.moreItems,
+    async (session, after) => {
+      const page = await session.projects.items(project.id, after);
+      return { list: page.items, more: page.more };
+    }
+  );
+  const items = pages.all;
   if (items.length === 0) {
-    return <EmptyCard>{empty}</EmptyCard>;
+    return <EmptyCard>{t`Nothing in it that you can open.`}</EmptyCard>;
   }
   return (
-    <ul className="flex flex-col divide-y rounded-md border">
-      {items.map((item) => (
-        <li
-          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-          key={`${item.type}:${item.id}`}
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col divide-y rounded-md border">
+        {items.map((item) => (
+          <li
+            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+            key={`${item.type}:${item.id}`}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              {item.type === "app" ? (
+                <LayoutGridIcon
+                  aria-hidden="true"
+                  className="size-4 flex-none"
+                />
+              ) : (
+                <WorkflowIcon aria-hidden="true" className="size-4 flex-none" />
+              )}
+              <ItemLink item={item} />
+            </span>
+            <span className="flex items-center gap-2">
+              {item.sharedAs === null ? (
+                <Badge variant="outline">
+                  <Trans>Not shared with the project</Trans>
+                </Badge>
+              ) : (
+                <SharedBadge role={item.sharedAs} />
+              )}
+              {builds ? <RemoveItem item={item} project={project} /> : null}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {pages.more ? (
+        <Button
+          disabled={pages.busy}
+          onClick={() => {
+            void pages.readMore();
+          }}
+          size="sm"
+          variant="outline"
         >
-          <span className="flex min-w-0 items-center gap-2">
-            {item.type === "app" ? (
-              <LayoutGridIcon aria-hidden="true" className="size-4 flex-none" />
-            ) : (
-              <WorkflowIcon aria-hidden="true" className="size-4 flex-none" />
-            )}
-            <ItemLink item={item} />
-          </span>
-          <span className="flex items-center gap-2">
-            {item.sharedAs === null ? (
-              <Badge variant="outline">
-                <Trans>Not shared with the project</Trans>
-              </Badge>
-            ) : (
-              <SharedBadge role={item.sharedAs} />
-            )}
-            {builds ? <RemoveItem item={item} project={project} /> : null}
-          </span>
-        </li>
-      ))}
-    </ul>
+          <Trans>Show more</Trans>
+        </Button>
+      ) : null}
+      <ErrorText>{pages.failure}</ErrorText>
+    </div>
   );
 };
 
@@ -209,7 +234,6 @@ const DeleteProject = ({ project }: { project: Project }) => {
   const { busy, failure, run } = useCoreAction();
   const projectName = project.name;
   const who = formatList(namesInProject(project));
-  const shared = project.items.filter(({ sharedAs }) => sharedAs !== null);
   return (
     <>
       <AlertDialog>
@@ -225,7 +249,7 @@ const DeleteProject = ({ project }: { project: Project }) => {
               <Trans>Delete {projectName}?</Trans>
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {shared.length === 0 ? (
+              {project.shared === 0 ? (
                 <Trans>
                   Its apps and workflows aren’t deleted, and nothing in it is
                   shared with the project, so nobody loses access.
@@ -274,8 +298,6 @@ export const ProjectView = ({
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const builds = project.role === "builder";
-  const apps = project.items.filter(({ type }) => type === "app");
-  const workflows = project.items.filter(({ type }) => type === "workflow");
   return (
     <>
       <SiteHeader
@@ -324,23 +346,9 @@ export const ProjectView = ({
         />
         <section className="flex flex-col gap-2">
           <SectionTitle>
-            <Trans>Workflows</Trans>
+            <Trans>Apps and workflows</Trans>
           </SectionTitle>
-          <Items
-            empty={t`No workflows in it that you can open.`}
-            items={workflows}
-            project={project}
-          />
-        </section>
-        <section className="flex flex-col gap-2">
-          <SectionTitle>
-            <Trans>Apps</Trans>
-          </SectionTitle>
-          <Items
-            empty={t`No apps in it that you can open.`}
-            items={apps}
-            project={project}
-          />
+          <Items project={project} />
         </section>
         <section className="flex flex-col gap-2">
           <SectionTitle>

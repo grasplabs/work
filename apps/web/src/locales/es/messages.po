@@ -2754,7 +2754,6 @@ msgstr "Responsable de aprobar herramientas nombrado"
 #: src/engines/apps-overview.tsx
 #: src/frame/app-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
-#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.data.tsx
 #: src/routes/_shell.apps.$app_.details.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -2773,6 +2772,10 @@ msgstr "Aplicaciones y agentes con un permiso"
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Apps y conexiones"
+
+#: src/projects/project-view.tsx
+msgid "Apps and workflows"
+msgstr "Apps y flujos de trabajo"
 
 #: src/routes/_shell.projects.index.tsx
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
@@ -8256,10 +8259,6 @@ msgstr "Ninguna aplicación se llama «{asked}»"
 msgid "No App or workflow has approved packages."
 msgstr "Ninguna aplicación ni flujo de trabajo tiene paquetes aprobados."
 
-#: src/projects/project-view.tsx
-msgid "No apps in it that you can open."
-msgstr "No hay apps en él que puedas abrir."
-
 #: src/projects/project-counts.tsx
 msgid "No apps yet"
 msgstr "Aún no hay apps"
@@ -8560,10 +8559,6 @@ msgstr "Aquí aún no hay ningún flujo de trabajo con horas contadas."
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "Aún sin flujo"
-
-#: src/projects/project-view.tsx
-msgid "No workflows in it that you can open."
-msgstr "No hay flujos de trabajo en él que puedas abrir."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -8969,6 +8964,10 @@ msgstr "Nada aquí coincide con el filtro."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Aquí aún no hay nada."
+
+#: src/projects/project-view.tsx
+msgid "Nothing in it that you can open."
+msgstr "No hay nada en él que puedas abrir."
 
 #: src/workflows/workflow-flow.tsx
 msgid "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
@@ -9585,6 +9584,11 @@ msgstr "Otras herramientas"
 #: src/workflows/requests/request-parts.tsx
 msgid "Other topics"
 msgstr "Otros temas"
+
+#: src/projects/project-people-names.ts
+msgctxt "the rest of a list of people"
+msgid "others"
+msgstr "otros"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -11946,6 +11950,8 @@ msgstr "Mostrar menos"
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-people.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Mostrar más"
@@ -15837,7 +15843,6 @@ msgstr "workflow.json"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
-#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.details.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx

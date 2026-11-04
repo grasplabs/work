@@ -2,7 +2,9 @@
 import type {
   FileItem,
   Project,
+  ProjectCursor,
   ProjectItemCandidate,
+  ProjectItemsPage,
   ProjectItemRef,
 } from "@grasp-os/shared/projects";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
@@ -51,6 +53,7 @@ const project = (role: Project["role"]): Project => ({
       addedAt: "2026-11-01T09:00:00.000Z",
     },
   ],
+  moreMembers: false,
   people: 2,
   items: [
     {
@@ -59,8 +62,11 @@ const project = (role: Project["role"]): Project => ({
       name: "Invoices",
       sharedAs: "user",
       builds: true,
+      addedAt: "2026-11-01T10:00:00.000Z",
     },
   ],
+  moreItems: false,
+  shared: 1,
 });
 
 /** Core's projects API, keeping each call it was asked. */
@@ -78,6 +84,27 @@ const fakeProjects = () => {
     unfile: async (_id: string, item: ProjectItemRef): Promise<void> => {
       await Promise.resolve();
       asked.push(["unfile", item.id]);
+    },
+    // The page after Invoices: one more, and then no more.
+    items: async (
+      _id: string,
+      after: ProjectCursor
+    ): Promise<ProjectItemsPage> => {
+      await Promise.resolve();
+      asked.push(["items", after.type, after.id, after.at]);
+      return {
+        items: [
+          {
+            type: "app",
+            id: "app-desk",
+            name: "Desk",
+            sharedAs: null,
+            builds: true,
+            addedAt: "2026-11-02T10:00:00.000Z",
+          },
+        ],
+        more: false,
+      };
     },
   };
   return { session: { projects }, asked };
@@ -230,6 +257,26 @@ describe("A project's page", () => {
       change: undefined,
       delete: undefined,
       listed: true,
+    });
+  });
+
+  it("shows a project bigger than one page a page at a time, reading the next after the last shown", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, { ...project("user"), moreItems: true });
+
+    const before = document.body.textContent?.includes("Desk");
+    await press(button("Show more"));
+
+    expect({
+      before,
+      after: document.body.textContent?.includes("Desk"),
+      showMore: button("Show more"),
+      asked,
+    }).toStrictEqual({
+      before: false,
+      after: true,
+      showMore: undefined,
+      asked: [["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"]],
     });
   });
 });
