@@ -26,6 +26,7 @@ import {
 } from "../src/workflows/retention.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  definitionOf,
   endedRun,
   endLiveResourceRuns,
   greetingTasks,
@@ -88,14 +89,9 @@ const removedWords =
 /** The time `days` from now, for the clock to run at. */
 const daysOn = (days: number): Date => new Date(Date.now() + days * day);
 
-/** Tasks that fail on what the run read: it is no number. */
-const failingTasks = [
-  {
-    greet: {
-      set: { status: "${ $workflow.input.who | tonumber | tostring }" },
-    },
-  },
-];
+/** A definition that fails on what the run read: a text has no `toFixed`. */
+const failing = (): string =>
+  definitionOf([], { status: { $expr: "input.who.toFixed(0)" } });
 
 /** What run `id`'s start receipt keeps of it. */
 const receiptOf = async (id: string) =>
@@ -121,8 +117,11 @@ const outputOf = async (by: Person, workflow: string, runId: string) => {
   return run.output;
 };
 
-/** A run of a workflow of `by`'s running `tasks`, reading the transcript, once ended. */
-const endedReading = async (by: Person, tasks: unknown[]) => {
+/**
+ * A run of a workflow of `by`'s running `tasks` (or the definition they
+ * make), reading the transcript, once ended.
+ */
+const endedReading = async (by: Person, tasks: unknown[] | (() => string)) => {
   const { id } = await publishedWorkflow(by, tasks);
   const runId = await startedBy(by, id, { who: transcript });
   await endedRun(by, id, runId);
@@ -282,7 +281,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     const builder = await signedIn("builder");
     const by = builder;
     const done = await endedReading(by, greetingTasks());
-    const failed = await endedReading(by, failingTasks);
+    const failed = await endedReading(by, failing);
     const read = async () => ({
       done: detailsOf(await runFor(by, done.workflow, done.runId)),
       failed: detailsOf(await runFor(by, failed.workflow, failed.runId)),
