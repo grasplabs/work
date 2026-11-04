@@ -997,7 +997,8 @@ const connectorConfigOf = (row: TriggerRow): Json | null => {
 
 /**
  * A trigger's configuration as it was created, in its kind's schema, from
- * the fields its version keeps; null when it keeps none (a webhook).
+ * the fields its version keeps; null when it keeps none (a webhook). An
+ * email trigger's address is served as its `address`, not in here.
  */
 const configOf = (row: TriggerRow): Json | null => {
   if (row.kind === "email") {

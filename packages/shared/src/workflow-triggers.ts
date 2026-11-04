@@ -197,8 +197,9 @@ export interface WorkflowTrigger {
   enabled: boolean;
   createdAt: string;
   /**
-   * Its configuration as it was created, in its kind's schema; null for a
-   * kind that keeps none (a webhook) or a trigger from before it was kept.
+   * Its configuration as it was created, in its kind's schema (an email
+   * trigger's without its address, which is `address`); null for a kind
+   * that keeps none (a webhook) or a trigger from before it was kept.
    */
   config: Json | null;
   /**
