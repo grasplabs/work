@@ -26,16 +26,16 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   doesn't build, the owner): offered anyway, and refused by the share,
 //   which decides; the dialog says why.
 
-/** Whom workflow `id` may be shared with, for `by`, who may share it. */
-export const workflowShareCandidates = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<WorkflowShareCandidates> => {
-  requireNotStaff(by);
-  await requireWorkflowRole(env, by, id, "builder");
+/**
+ * The organization's people, members now, and its teams, each by name and
+ * ID alone, by name: whom a workflow is shared with, and whom a start
+ * names where its input takes a person (workflow-start-form.ts).
+ */
+export const organizationPeopleAndTeams = async (
+  env: Env
+): Promise<Pick<WorkflowShareCandidates, "people" | "teams">> => {
   const db = drizzle(env.DB);
-  const [people, organizationTeams, builtProjects] = await Promise.all([
+  const [people, organizationTeams] = await Promise.all([
     db
       .select({ id: users.id, name: users.name })
       .from(members)
@@ -52,8 +52,23 @@ export const workflowShareCandidates = async (
       .from(teams)
       .where(eq(teams.organizationId, organizationId))
       .orderBy(asc(teams.name), asc(teams.id)),
-    // Only the projects they build: a project's name is its members'.
-    buildsProjectsOf(env, by),
   ]);
+  return { people, teams: organizationTeams };
+};
+
+/** Whom workflow `id` may be shared with, for `by`, who may share it. */
+export const workflowShareCandidates = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowShareCandidates> => {
+  requireNotStaff(by);
+  await requireWorkflowRole(env, by, id, "builder");
+  const [{ people, teams: organizationTeams }, builtProjects] =
+    await Promise.all([
+      organizationPeopleAndTeams(env),
+      // Only the projects they build: a project's name is its members'.
+      buildsProjectsOf(env, by),
+    ]);
   return { people, teams: organizationTeams, projects: builtProjects };
 };

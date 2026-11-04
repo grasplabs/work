@@ -754,11 +754,17 @@ export interface WorkflowResourceRun {
  * published), and the JSON Schema its input must match exactly (null when
  * it can't be read). A field of the input that takes a person, team or
  * role (`person:<id>`, `team:<id>` or `role:<role>`) carries
- * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it.
+ * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it,
+ * and `people` then says whom it may name: the organization's people,
+ * members now, and its teams, by name; null for a form with no such field.
  */
 export interface WorkflowStartForm {
   version: number | null;
   input: Record<string, unknown> | null;
+  people: {
+    people: { id: string; name: string }[];
+    teams: { id: string; name: string }[];
+  } | null;
 }
 
 /** A workflow resource, as its members see it. */

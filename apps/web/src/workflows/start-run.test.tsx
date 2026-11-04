@@ -48,6 +48,7 @@ const form: WorkflowStartForm = {
     required: ["times", "who"],
     additionalProperties: false,
   },
+  people: null,
 };
 
 /**
@@ -92,23 +93,14 @@ const shown = async (
       asked.push({ app, workflow, input });
       return { id: "run-9" };
     },
-    teams: async () =>
-      await Promise.resolve([{ id: "team-finance", name: "Finance" }]),
-  };
-  const members = {
-    list: async () =>
-      await Promise.resolve([
-        { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
-      ]),
   };
   const core = {
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
         workflows: typeof workflows;
-        members: typeof members;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources, workflows, members }),
+    ): Promise<T> => await action({ workflowResources, workflows }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const route = createRoute({
@@ -141,6 +133,25 @@ const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
     (each) => each.textContent.trim() === text
   );
+
+/** The buttons whose text is `text`. */
+const buttonsNamed = (text: string): HTMLButtonElement[] =>
+  [...document.querySelectorAll("button")].filter(
+    (each) => each.textContent.trim() === text
+  );
+
+/** Clicks `element`, and lets what it does settle. */
+const click = async (
+  element: HTMLElement | null | undefined
+): Promise<void> => {
+  if (!(element instanceof HTMLElement)) {
+    throw new TypeError("Nothing to click");
+  }
+  await act(async () => {
+    element.click();
+    await settled();
+  });
+};
 
 /** Presses the button whose text is `text`, and lets what it does settle. */
 const press = async (text: string): Promise<void> => {
@@ -237,9 +248,14 @@ describe("starting a workflow by hand", () => {
           type: "object",
           properties: {
             approver: { type: "string", "x-grasp-value": { kind: "person" } },
+            watcher: { type: "string", "x-grasp-value": { kind: "person" } },
           },
           required: ["approver"],
           additionalProperties: false,
+        },
+        people: {
+          people: [{ id: "user-ada", name: "Ada Lovelace" }],
+          teams: [{ id: "team-finance", name: "Finance" }],
         },
       }
     );
@@ -250,13 +266,20 @@ describe("starting a workflow by hand", () => {
       asked: asked.length,
       said: said().includes("Fill this in."),
     };
-    await press("Choose…");
+    const [approver, watcher] = buttonsNamed("Choose…");
+    await click(approver);
     const offered = [...document.querySelectorAll('[role="option"]')].map(
       (each) => each.textContent.trim()
     );
     await choose("Everyone with the Admin role");
     await press("Admin");
     await choose("Ada Lovelace");
+    // An optional one picked by mistake is cleared again.
+    await click(watcher);
+    await choose("Finance");
+    await click(
+      document.querySelector<HTMLButtonElement>('[aria-label="Clear watcher"]')
+    );
     await press("Start the run");
 
     expect({ typed, unpicked, offered, asked }).toStrictEqual({
@@ -284,6 +307,7 @@ describe("starting a workflow by hand", () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: null,
       input: null,
+      people: null,
     });
 
     expect(button("Start")).toBeUndefined();

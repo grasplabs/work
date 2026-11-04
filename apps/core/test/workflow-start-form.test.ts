@@ -164,6 +164,8 @@ describe("starting an independent workflow by hand", () => {
           required: ["times", "who"],
           additionalProperties: false,
         },
+        // No field takes a person: nobody to pick.
+        people: null,
       },
       starts: "ok",
       missing: "workflow.start_invalid",
@@ -172,7 +174,7 @@ describe("starting an independent workflow by hand", () => {
     });
   });
 
-  it("marks a field that takes a person, which a start takes as a person, team or role", async () => {
+  it("marks a field that takes a person, offers the organization's people and teams by name to pick, and takes a person, team or role", async () => {
     const { ada, uma } = await greetingWorkflow();
     const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
@@ -193,6 +195,9 @@ describe("starting an independent workflow by hand", () => {
 
     expect({
       properties: form.input?.properties,
+      // Uma, a user, picks from everyone, by name and ID alone.
+      offersAda: form.people?.people.find(({ id }) => id === ada.userId),
+      teams: Array.isArray(form.people?.teams),
       person: await startWith(`person:${ada.userId}`),
       role: await startWith("role:admin"),
     }).toStrictEqual({
@@ -200,6 +205,8 @@ describe("starting an independent workflow by hand", () => {
         approver: { type: "string", "x-grasp-value": { kind: "person" } },
         note: { type: "string" },
       },
+      offersAda: { id: ada.userId, name: "Person" },
+      teams: true,
       person: "ok",
       role: "ok",
     });
@@ -252,7 +259,7 @@ describe("starting an independent workflow by hand", () => {
     }).toStrictEqual({
       live: { version: 1, fields: ["times", "who"] },
       starts: "ok",
-      unpublished: { version: null, input: null },
+      unpublished: { version: null, input: null, people: null },
     });
   });
 });

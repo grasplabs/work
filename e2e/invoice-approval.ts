@@ -43,7 +43,7 @@ export const invoiceApproval = (name: string): string =>
       input: {
         schema: objectOf({
           invoice: { type: "string" },
-          approver: { type: "string" },
+          approver: { type: "string", "x-grasp-value": { kind: "person" } },
         }),
       },
       output: {

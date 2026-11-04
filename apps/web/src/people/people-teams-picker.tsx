@@ -111,7 +111,8 @@ export const PeopleTeamsPicker = ({
   disabled: boolean;
   /** Offer the organization's roles too: everyone who has one. */
   roles?: boolean;
-  onOpen: () => void;
+  /** When the list opens: the moment to read the candidates, if the page reads them then. */
+  onOpen?: () => void;
   onPick: (subject: PickedSubject) => void;
 }) => {
   const { t } = useLingui();
@@ -138,7 +139,7 @@ export const PeopleTeamsPicker = ({
       onOpenChange={(next: boolean) => {
         setOpen(next);
         if (next) {
-          onOpen();
+          onOpen?.();
         }
       }}
       open={open}

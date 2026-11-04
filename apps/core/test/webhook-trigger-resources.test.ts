@@ -462,7 +462,7 @@ describe("a workflow's webhook trigger", () => {
       shown: first && {
         object: first.object,
         // Named, so the admin knows what it starts, and by what.
-        workflowName: first.workflowName,
+        workflowNames: first.workflowNames,
         kind: first.trigger?.kind,
         actions: first.actions,
         requestedBy: first.requestedBy,
@@ -515,7 +515,7 @@ describe("a workflow's webhook trigger", () => {
         standing: ["requested"],
         shown: {
           object: { type: "workflow", workflowId: workflow },
-          workflowName,
+          workflowNames: { [workflow]: workflowName },
           kind: "webhook",
           actions: ["start"],
           requestedBy: builder.userId,

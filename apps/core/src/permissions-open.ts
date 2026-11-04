@@ -161,6 +161,12 @@ const resourcesOpen = async (
   return open.every(Boolean);
 };
 
+/** The independent workflows `permission` names: its subject, its object. */
+const workflowsOf = ({ subject, object }: Permission): string[] => [
+  ...(subject.type === "workflow" ? [subject.workflowId] : []),
+  ...(object.type === "workflow" ? [object.workflowId] : []),
+];
+
 /** The names of independent workflows `ids`, by ID. */
 const namesOfWorkflows = async (
   env: Env,
@@ -184,9 +190,9 @@ const namesOfWorkflows = async (
  * (`app.unreadable`) shows none of its permissions either. Each App named
  * is checked once. One naming an independent workflow, store or trigger
  * only if they have a role in it or manage it (`resourcesOpen`). One a
- * live trigger holds carries what the trigger is (`trigger`), and one on a
- * workflow that workflow's name (`workflowName`), so whoever decides it
- * knows which trigger asks and what it reaches.
+ * live trigger holds carries what the trigger is (`trigger`), and one
+ * naming a workflow that workflow's name (`workflowNames`), so whoever
+ * decides it knows which trigger or workflow asks and what it reaches.
  */
 export const permissionsOpenTo = async (
   env: Env,
@@ -254,23 +260,23 @@ export const permissionsOpenTo = async (
     ),
     namesOfWorkflows(
       env,
-      open.flatMap(({ object }) =>
-        object.type === "workflow" ? [object.workflowId] : []
-      )
+      open.flatMap((permission) => workflowsOf(permission))
     ),
   ]);
   return open.map((permission) => {
-    const { subject: of, object } = permission;
+    const { subject: of } = permission;
     const trigger =
       of.type === "trigger" ? triggers.get(of.triggerId) : undefined;
-    const workflowName =
-      object.type === "workflow"
-        ? workflowNames.get(object.workflowId)
-        : undefined;
+    const ofWorkflows = workflowsOf(permission).flatMap((id) => {
+      const name = workflowNames.get(id);
+      return name === undefined ? [] : [[id, name] as const];
+    });
     return {
       ...permission,
       ...(trigger === undefined ? {} : { trigger }),
-      ...(workflowName === undefined ? {} : { workflowName }),
+      ...(ofWorkflows.length === 0
+        ? {}
+        : { workflowNames: Object.fromEntries(ofWorkflows) }),
     };
   });
 };
