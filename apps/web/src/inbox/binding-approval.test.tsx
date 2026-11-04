@@ -22,8 +22,8 @@ import { inboxItems } from "./items.ts";
 // A workflow's bindings that wait on an admin, in the inbox, against core's
 // workflowResources as the page reaches them over RPC, faked: each binding
 // core offers targets for is approved with exactly the chosen target, for
-// the version shown; one it offers none for says what it needs first, and
-// offers nothing to press.
+// the version shown; one it offers none for leads to the workflow's page,
+// where every kind is offered its targets, and offers nothing to press.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -195,14 +195,20 @@ describe("a workflow's bindings in the inbox", () => {
     });
   });
 
-  it("offers nothing to press for a binding core offers no target for, and says what it needs first", async () => {
+  it("leads to the workflow's page for a binding it offers no target for, with nothing to press", async () => {
     await shown();
 
     expect({
       approve: button("Approve crm"),
-      says: document.body.textContent.includes(
-        "Nothing the workflow may use serves it yet: grant the workflow what it needs first."
-      ),
-    }).toStrictEqual({ approve: undefined, says: true });
+      leads: [...document.querySelectorAll("a")]
+        .filter(
+          (link) =>
+            link.textContent.trim() === "Approve it on the workflow's page"
+        )
+        .map((link) => link.getAttribute("href")),
+    }).toStrictEqual({
+      approve: undefined,
+      leads: ["/workflows/workflow-quotes?tab=files"],
+    });
   });
 });

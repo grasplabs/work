@@ -116,9 +116,9 @@ import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 // deadline. It goes on once someone answers it, on the decision's own
 // page. A run that waits otherwise (a sleep, a feature switched
 // off, a decision past its deadline that it hasn't timed out yet) goes on
-// by itself, and counts as running. The waiting filter reads an App's
-// runs alone (run-view.ts); an independent workflow's run shows its open
-// decision, and waits, where the person may answer it.
+// by itself, and counts as running. Only an App's runs show as waiting
+// yet (run-view.ts); an independent workflow's run leads to an open
+// decision of its that the person may answer.
 //
 // A run that goes on without a decision to wait for, while a step of it
 // waits for a share of the model requests in flight (model-waits.ts),
@@ -911,9 +911,10 @@ export const listAllRuns = async (
           endedAt: row.endedAt?.toISOString() ?? null,
         };
         const answered = answering.get(row.id);
-        return answered === undefined
-          ? queuedRun(listed, queues.get(row.id))
-          : { ...listed, status: "waiting", decision: answered };
+        return queuedRun(
+          answered === undefined ? listed : { ...listed, decision: answered },
+          queues.get(row.id)
+        );
       }
       const { row, decision } = run;
       const listed: AppListedRun = {

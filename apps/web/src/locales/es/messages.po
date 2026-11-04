@@ -2646,6 +2646,10 @@ msgstr "Aprobar {who}"
 msgid "Approve and go live"
 msgstr "Aprobar y publicar"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Approve it on the workflow's page"
+msgstr "Apruébalo en la página del flujo"
+
 #: src/workflows/workflow-status.tsx
 msgid "Approve the change"
 msgstr "Aprobar el cambio"
@@ -14913,8 +14917,8 @@ msgid "Version {version} of {name} is live, but nothing starts it until an admin
 msgstr "La versión {version} de {name} está en producción, pero nada la inicia hasta que un administrador apruebe a qué accede: cada modelo, conexión, almacén o colección que llama."
 
 #: src/workflows/files-and-apps.tsx
-msgid "Version {version}, asked to go live"
-msgstr "Versión {version}, pendiente de pasar a producción"
+msgid "Version {version}, not live yet"
+msgstr "Versión {version}, aún no en producción"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, which runs now"

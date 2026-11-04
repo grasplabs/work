@@ -880,6 +880,7 @@ const BindingsDetail = ({
         <PendingBindingList
           bindings={bindings}
           busy={busy}
+          elsewhere={workflow.id}
           onApprove={approve}
         />
       }

@@ -907,7 +907,7 @@ describe("asking the people a JSON workflow's decision is for", () => {
       reviewer: await listedFor(reviewer),
       owner: await listedFor(owner),
     }).toStrictEqual({
-      reviewer: { status: "waiting", decision },
+      reviewer: { status: "running", decision },
       owner: { status: "running", decision: undefined },
     });
   });

@@ -1310,6 +1310,10 @@ describe("bindings waiting on an admin", () => {
         )
       );
 
+    // Asked to go live, it waits in the admins' inbox too, where a
+    // connector, slow to read, is offered nothing.
+    await requestGoLive(env, ada, workflow.id, { version: 1, revision: 0 });
+    const inbox = await pendingWorkflowBindings(connecting, admin);
     const before = await offeredOf();
     const refused = await startOf();
     const [offered] = before[0]?.bindings[0]?.offered ?? [];
@@ -1323,11 +1327,15 @@ describe("bindings waiting on an admin", () => {
     });
 
     expect({
+      inbox: inbox
+        .filter((each) => each.workflow.id === workflow.id)
+        .flatMap(({ bindings }) => bindings.map(({ offered: each }) => each)),
       before,
       refused,
       after: await offeredOf(),
       started: await startOf(),
     }).toStrictEqual({
+      inbox: [[]],
       before: [
         {
           workflow: { id: workflow.id, name: workflow.name },
@@ -1355,6 +1363,51 @@ describe("bindings waiting on an admin", () => {
       refused: "workflow.binding_unapproved",
       after: [],
       started: "ok",
+    });
+  });
+
+  it("list on the workflow's own read its newest version, which a test run starts, beside the live one it approved", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const asked = await requestGoLive(env, ada, workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    await decideGoLive(env, admin, workflow.id, {
+      version: 1,
+      verdict: "approve",
+      revision: asked.revision,
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "summary",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({
+        name: workflow.name,
+        version: "1.1.0",
+        model: key,
+      }),
+      basedOn: 1,
+    });
+
+    const own = await workflowPendingBindings(env, admin, workflow.id);
+    const inbox = await pendingWorkflowBindings(env, admin);
+
+    expect({
+      own: own.map(({ version, live, bindings }) => ({
+        version,
+        live,
+        aliases: bindings.map(({ alias }) => alias),
+      })),
+      inbox: inbox.filter((each) => each.workflow.id === workflow.id),
+    }).toStrictEqual({
+      own: [{ version: 2, live: false, aliases: ["summary"] }],
+      // Neither live nor asked to go live: not the inbox's.
+      inbox: [],
     });
   });
 

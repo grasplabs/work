@@ -2646,6 +2646,10 @@ msgstr "{who} goedkeuren"
 msgid "Approve and go live"
 msgstr "Goedkeuren en live zetten"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Approve it on the workflow's page"
+msgstr "Keur het goed op de pagina van de workflow"
+
 #: src/workflows/workflow-status.tsx
 msgid "Approve the change"
 msgstr "De wijziging goedkeuren"
@@ -14913,8 +14917,8 @@ msgid "Version {version} of {name} is live, but nothing starts it until an admin
 msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
 
 #: src/workflows/files-and-apps.tsx
-msgid "Version {version}, asked to go live"
-msgstr "Versie {version}, gevraagd om live te gaan"
+msgid "Version {version}, not live yet"
+msgstr "Versie {version}, nog niet live"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, which runs now"

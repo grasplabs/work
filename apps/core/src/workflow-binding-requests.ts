@@ -22,7 +22,7 @@ import {
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin } from "./permissions.ts";
-import { templateVersionsOf } from "./resource-templates.ts";
+import { latestTemplateVersions } from "./resource-templates.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
@@ -43,18 +43,20 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 //   admin's to name, so none is offered; the binding is listed without
 //   one, and the admin names them as they approve it (checked as any
 //   approval is).
-// - A long list of candidates: a connector's are the contracts connect
-//   lists for each of the workflow's own connection grants, a store
-//   operation's the paths each of its own store grants lists, a
-//   template's the newest `templatesOffered` published versions; each
-//   checked before it is offered.
+// - A long or slow read: a connector's candidates are the contracts
+//   connect lists for each of the workflow's own connection grants (a
+//   Composio one read from its server), a store operation's the paths each
+//   of its own store grants lists, a template's the latest version of the
+//   `templatesOffered` newest templates; each checked before it is
+//   offered. So they are offered on one workflow's own read alone, never
+//   across workflows, where those kinds list without offers.
 // - A long read: at most `pendingWorkflowsMax` workflows, the most
 //   recently created first.
 
 /** Most workflows one read lists. */
 const pendingWorkflowsMax = 50;
 
-/** Most published template versions offered for one template binding: the newest. */
+/** Most templates offered for one template binding: the newest, each at its latest version. */
 const templatesOffered = 20;
 
 type CatalogBinding = Extract<PinnedBinding, { resourceId: null }>;
@@ -167,9 +169,9 @@ const operationTargets = async (env: Env, id: string): Promise<Offered[]> => {
   );
 };
 
-/** The newest published template versions, each pinned by its content's hash. */
+/** The newest templates' latest versions, each pinned by its content's hash. */
 const templateTargets = async (env: Env): Promise<Offered[]> => {
-  const published = await templateVersionsOf(env, undefined, templatesOffered);
+  const published = await latestTemplateVersions(env, templatesOffered);
   return published.map(
     ({ templateId, version, contract, contentHash }): Offered => ({
       target: { kind: "template", templateId, version, contentHash },
@@ -178,12 +180,25 @@ const templateTargets = async (env: Env): Promise<Offered[]> => {
   );
 };
 
-/** The targets core can pick for `binding` of workflow `id`, before they are checked. */
+/**
+ * The targets core can pick for `binding` of workflow `id`, before they
+ * are checked; a connector's, store operation's and template's only when
+ * `everyKind` (one workflow's own read).
+ */
 const candidatesOf = async (
   env: Env,
   id: string,
-  binding: CatalogBinding
+  binding: CatalogBinding,
+  everyKind: boolean
 ): Promise<Offered[]> => {
+  if (
+    !everyKind &&
+    (binding.kind === "connector" ||
+      binding.kind === "operation" ||
+      binding.kind === "template")
+  ) {
+    return [];
+  }
   switch (binding.kind) {
     case "model": {
       const { models } = await modelSettings(env);
@@ -224,10 +239,11 @@ const candidatesOf = async (
 const offeredFor = async (
   env: Env,
   id: string,
-  binding: CatalogBinding
+  binding: CatalogBinding,
+  everyKind: boolean
 ): Promise<Offered[]> => {
   const offered: Offered[] = [];
-  for (const candidate of await candidatesOf(env, id, binding)) {
+  for (const candidate of await candidatesOf(env, id, binding, everyKind)) {
     // One an approval couldn't take as written (a path no operation could
     // have) is never offered.
     if (!workflowBindingTargetSchema.safeParse(candidate.target).success) {
@@ -250,7 +266,8 @@ const offeredFor = async (
 const unapprovedOf = async (
   env: Env,
   id: string,
-  version: number
+  version: number,
+  everyKind: boolean
 ): Promise<PendingWorkflowBindings["bindings"]> => {
   const versions = await bindingsOf(env, id, version);
   const unapproved: PendingWorkflowBindings["bindings"] = [];
@@ -267,33 +284,35 @@ const unapprovedOf = async (
       kind: binding.kind,
       contractId: binding.contractId,
       // oxlint-disable-next-line no-await-in-loop -- one binding at a time
-      offered: await offeredFor(env, id, binding),
+      offered: await offeredFor(env, id, binding, everyKind),
     });
   }
   return unapproved;
 };
 
 /**
- * Of workflow `row`'s version `live` (the one that runs) and `goLive` (the
- * one asked to go live), those with catalog bindings no approval serves.
+ * Of workflow `workflow`'s `versions`, those with catalog bindings no
+ * approval serves, each version once, in the order given: `live` the one
+ * a start runs now. Every kind is offered targets when `everyKind`.
  */
 const waitingOf = async (
   env: Env,
-  row: { id: string; name: string; live: number | null; goLive: number | null }
+  workflow: { id: string; name: string },
+  versions: readonly { version: number | null; live: boolean }[],
+  everyKind: boolean
 ): Promise<PendingWorkflowBindings[]> => {
-  const versions = [
-    ...(row.live === null ? [] : [{ version: row.live, live: true }]),
-    ...(row.goLive === null || row.goLive === row.live
-      ? []
-      : [{ version: row.goLive, live: false }]),
-  ];
   const pending: PendingWorkflowBindings[] = [];
+  const seen = new Set<number>();
   for (const { version, live } of versions) {
-    // oxlint-disable-next-line no-await-in-loop -- one workflow version at a time, two at most
-    const bindings = await unapprovedOf(env, row.id, version);
+    if (version === null || seen.has(version)) {
+      continue;
+    }
+    seen.add(version);
+    // oxlint-disable-next-line no-await-in-loop -- one workflow version at a time, three at most
+    const bindings = await unapprovedOf(env, workflow.id, version, everyKind);
     if (bindings.length > 0) {
       pending.push({
-        workflow: { id: row.id, name: row.name },
+        workflow: { id: workflow.id, name: workflow.name },
         version,
         live,
         bindings,
@@ -338,18 +357,29 @@ export const pendingWorkflowBindings = async (
     .limit(pendingWorkflowsMax);
   const pending: PendingWorkflowBindings[] = [];
   for (const row of rows) {
-    // oxlint-disable-next-line no-await-in-loop -- one workflow at a time, bounded
-    pending.push(...(await waitingOf(env, row)));
+    pending.push(
+      // oxlint-disable-next-line no-await-in-loop -- one workflow at a time, bounded
+      ...(await waitingOf(
+        env,
+        row,
+        [
+          { version: row.live, live: true },
+          { version: row.goLive, live: false },
+        ],
+        false
+      ))
+    );
   }
   return pending;
 };
 
 /**
  * Workflow `id`'s versions whose catalog bindings no approval serves, for
- * `by`, one of the organization's own admins, to approve on its page: the
- * version a start runs now (the live one, or before any went live the one
- * published last, as a start from its page takes it), and the one asked
- * to go live.
+ * `by`, one of the organization's own admins, to approve on its page, each
+ * kind offered targets: the version a start runs now (the live one, or
+ * before any went live the one published last, as a start from its page
+ * takes it), the one asked to go live, and the one published last, which a
+ * test run starts.
  */
 export const workflowPendingBindings = async (
   env: Env,
@@ -366,10 +396,14 @@ export const workflowPendingBindings = async (
     .from(workflowResourceLifecycles)
     .where(eq(workflowResourceLifecycles.workflowResourceId, workflow.id))
     .get();
-  return await waitingOf(env, {
-    id: workflow.id,
-    name: workflow.name,
-    live: lifecycle?.live ?? workflow.currentVersion,
-    goLive: lifecycle?.goLive ?? null,
-  });
+  return await waitingOf(
+    env,
+    workflow,
+    [
+      { version: lifecycle?.live ?? workflow.currentVersion, live: true },
+      { version: lifecycle?.goLive ?? null, live: false },
+      { version: workflow.currentVersion, live: false },
+    ],
+    true
+  );
 };

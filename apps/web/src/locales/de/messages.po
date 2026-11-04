@@ -2646,6 +2646,10 @@ msgstr "{who} genehmigen"
 msgid "Approve and go live"
 msgstr "Genehmigen und live schalten"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Approve it on the workflow's page"
+msgstr "Auf der Seite des Workflows freigeben"
+
 #: src/workflows/workflow-status.tsx
 msgid "Approve the change"
 msgstr "Änderung genehmigen"
@@ -14913,8 +14917,8 @@ msgid "Version {version} of {name} is live, but nothing starts it until an admin
 msgstr "Version {version} von {name} ist live, aber nichts startet sie, bis ein Admin freigibt, worauf sie zugreift: jedes Modell, jede Verbindung, jeden Speicher und jede Sammlung, die sie aufruft."
 
 #: src/workflows/files-and-apps.tsx
-msgid "Version {version}, asked to go live"
-msgstr "Version {version}, zum Live-Schalten angefragt"
+msgid "Version {version}, not live yet"
+msgstr "Version {version}, noch nicht live"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, which runs now"

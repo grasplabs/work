@@ -1,3 +1,4 @@
+import { decisionDecidersMax } from "@grasp-os/shared/workflow-resources";
 import type {
   PendingWorkflowBindings,
   WorkflowBindingTarget,
@@ -9,6 +10,7 @@ import {
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -28,9 +30,11 @@ import { useCoreAction } from "../use-core-action.ts";
 // that version: where core offers targets that would serve it, the choice
 // of one; for a decision, the people and teams who answer it, which core
 // can't pick; otherwise why nothing can be approved yet. The inbox and the
-// workflow's own page list them alike. Core checks every approval again:
-// that the person is one of the organization's admins, and that the target
-// serves.
+// workflow's own page list them alike, but the inbox has no offers for the
+// kinds slow to read (a connector, a store operation, a template), so it
+// leads to the workflow's page for those. Core checks every approval
+// again: that the person is one of the organization's admins, and that the
+// target serves.
 
 /** One binding that waits. */
 export type PendingBinding = PendingWorkflowBindings["bindings"][number];
@@ -156,7 +160,7 @@ const DecidersChoice = ({
       <div className="flex flex-wrap items-end gap-2">
         <PeopleTeamsPicker
           candidates={candidates}
-          disabled={busy || reading}
+          disabled={busy || reading || deciders.length >= decisionDecidersMax}
           holding={holding}
           label={<Trans>Add who answers</Trans>}
           onOpen={() => {
@@ -185,19 +189,37 @@ const DecidersChoice = ({
   );
 };
 
-/** How one binding is approved: its deciders, a target offered, or why not yet. */
+/**
+ * How one binding is approved: its deciders, a target offered, or why not
+ * yet. With `elsewhere`, a binding offered nothing leads to the workflow's
+ * page, where every kind is offered its targets.
+ */
 const BindingChoice = ({
   binding: { alias, kind, offered },
   busy,
   onApprove,
+  elsewhere,
 }: {
   binding: PendingBinding;
   busy: boolean;
   onApprove: Approve;
+  elsewhere: string | undefined;
 }) => {
   const [first, ...rest] = offered;
   if (kind === "decision") {
     return <DecidersChoice alias={alias} busy={busy} onApprove={onApprove} />;
+  }
+  if (first === undefined && elsewhere !== undefined) {
+    return (
+      <Link
+        className="underline-offset-4 hover:underline"
+        params={{ workflow: elsewhere }}
+        search={{ tab: "files" }}
+        to="/workflows/$workflow"
+      >
+        <Trans>Approve it on the workflow&apos;s page</Trans>
+      </Link>
+    );
   }
   if (first === undefined) {
     return (
@@ -224,10 +246,12 @@ const BindingRow = ({
   binding,
   busy,
   onApprove,
+  elsewhere,
 }: {
   binding: PendingBinding;
   busy: boolean;
   onApprove: Approve;
+  elsewhere: string | undefined;
 }) => {
   const { t } = useLingui();
   const { alias, kind, contractId } = binding;
@@ -239,20 +263,31 @@ const BindingRow = ({
           {t`${kind}: ${contractId}`}
         </span>
       </span>
-      <BindingChoice binding={binding} busy={busy} onApprove={onApprove} />
+      <BindingChoice
+        binding={binding}
+        busy={busy}
+        elsewhere={elsewhere}
+        onApprove={onApprove}
+      />
     </li>
   );
 };
 
-/** The bindings of one version that wait, each approved through `onApprove`. */
+/**
+ * The bindings of one version that wait, each approved through
+ * `onApprove`; `elsewhere` the workflow whose page approves those offered
+ * nothing here (the inbox's).
+ */
 export const PendingBindingList = ({
   bindings,
   busy,
   onApprove,
+  elsewhere,
 }: {
   bindings: readonly PendingBinding[];
   busy: boolean;
   onApprove: Approve;
+  elsewhere?: string;
 }) => {
   const { t } = useLingui();
   return (
@@ -261,6 +296,7 @@ export const PendingBindingList = ({
         <BindingRow
           binding={binding}
           busy={busy}
+          elsewhere={elsewhere}
           key={binding.alias}
           onApprove={onApprove}
         />

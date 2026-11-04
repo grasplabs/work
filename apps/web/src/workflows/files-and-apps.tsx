@@ -249,7 +249,7 @@ const Waiting = ({
             {live ? (
               <Trans>Version {version}, which runs now</Trans>
             ) : (
-              <Trans>Version {version}, asked to go live</Trans>
+              <Trans>Version {version}, not live yet</Trans>
             )}
           </h3>
           <PendingBindingList

@@ -58,7 +58,7 @@ describe("the runs log", () => {
           model={undefined}
           more={false}
           runs={[
-            runOf("run-waiting", { status: "waiting", decision: "decision-7" }),
+            runOf("run-waiting", { decision: "decision-7" }),
             runOf("run-going", {}),
           ]}
         />
