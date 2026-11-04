@@ -574,8 +574,6 @@ type ValueDescriptorLike = OperationManifest["args"];
 /** What the host derives from a manifest once. */
 interface Compiled {
   readonly hash: Promise<string>;
-  /** Each function's receipt contract, once computed (`contractIdOf`). */
-  readonly contracts: Map<string, Promise<string>>;
   readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   /** Each streaming action's progress snapshot. */
@@ -624,7 +622,6 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   }
   const compiled: Compiled = {
     hash: schemaHash(manifest.schema),
-    contracts: new Map(),
     args,
     returns,
     streams,
@@ -870,43 +867,6 @@ const checkedProgress = (
     });
   }
   return json;
-};
-
-/**
- * The receipt contract of `operation`: its path and a fingerprint of its
- * argument and return descriptors, which a compatible revision of the App
- * keeps, so a retry across such an upgrade gets the outcome it had (spec
- * 9.5: the receipt identity holds the contract ID and version, and host
- * contract IDs survive compatible revisions, 7.1).
- */
-/**
- * The contract ID a mutation's receipt is scoped by: its path and a hash
- * of its argument and return descriptors, so a retry across an upgrade
- * that kept them gets the outcome it had.
- */
-const operationContractId = async (
-  operation: Pick<OperationManifest, "path" | "args" | "returns">
-): Promise<string> => {
-  const hash = await sha256Hex(
-    canonicalJson(
-      // Descriptors are JSON data, as the manifest holds them.
-      jsonOf({ args: operation.args, returns: operation.returns }) ?? null
-    )
-  );
-  return `${operation.path}@${hash.slice(0, 32)}`;
-};
-
-const contractIdOf = async (
-  compiled: Compiled,
-  operation: OperationManifest
-): Promise<string> => {
-  const known = compiled.contracts.get(operation.path);
-  if (known !== undefined) {
-    return await known;
-  }
-  const made = operationContractId(operation);
-  compiled.contracts.set(operation.path, made);
-  return await made;
 };
 
 /** Domain failures App code threw, as the host rebuilt them: code and details. */
@@ -3324,9 +3284,12 @@ const runMutation = async (
           principal: invocation.principal,
           resource: invocation.consumer.resourceId,
           binding: null,
-          // The contract, not the App's version: a retry across an upgrade
-          // that kept the function's contract gets the outcome it had.
-          contractId: await contractIdOf(compiled, operation),
+          // The function's path alone, not its contract or the App's
+          // version: a page's call runs in whatever release is current,
+          // so a retry after a publish, even one that changed the
+          // function's arguments, finds the receipt and runs nothing
+          // again. Other input under the key is refused by its hash.
+          contractId: operation.path,
           contractVersion: 1,
           operationKind: "mutation",
         },
@@ -3620,7 +3583,9 @@ const runAction = async (
     canonicalJson({
       principal: invocation.principal,
       resource: invocation.consumer.resourceId,
-      contract: await contractIdOf(compiled, operation),
+      // Its path, as a mutation's receipt is scoped: the same call
+      // retried after a publish derives the same keys.
+      contract: operation.path,
       inputHash: await sha256Hex(canonicalJson(args)),
       key: [...key],
     })
