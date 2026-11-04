@@ -7,13 +7,13 @@
   "sideEffects": false,
   "exports": {
     "./check": "./src/check.ts",
+    "./data-schema": "./src/data-schema.ts",
     "./format": "./src/format.ts",
     "./generate": "./src/generate.ts",
     "./schema": "./src/schema.ts"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
-    "@grasp-os/open-workflow": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*"
   },

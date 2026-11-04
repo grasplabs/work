@@ -20,7 +20,8 @@
   "dependencies": {
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
-    "@grasp-os/workflow-expressions": "workspace:*"
+    "@grasp-os/workflow-expressions": "workspace:*",
+    "@grasp-os/workflow-schema": "workspace:*"
   },
   "devDependencies": {
     "@cfworker/json-schema": "catalog:",

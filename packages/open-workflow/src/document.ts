@@ -1,9 +1,9 @@
 import { resolveEvaluate } from "@grasp-os/workflow-expressions/source";
+import { compileDataSchema } from "@grasp-os/workflow-schema/data-schema";
 
 import { bindingKinds, resolveContract } from "./catalog.ts";
 import type { BindingKind } from "./catalog.ts";
 import type { Checker, Site } from "./checker.ts";
-import { compileDataSchema } from "./data-schema.ts";
 import { pointerJoin } from "./diagnostics.ts";
 import {
   checkErrorDefinition,
