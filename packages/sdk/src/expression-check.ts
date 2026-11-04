@@ -1,6 +1,7 @@
 import { parseExpression } from "@babel/parser";
 import type { Expression, Node } from "@babel/types";
 import { messageOf } from "@grasp-os/shared/errors";
+import globals from "globals";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -477,26 +478,26 @@ const syntaxError = (source: string, error: unknown): ExpressionError => {
 const plainName = /^[A-Za-z_$][\w$]*$/u;
 
 /**
- * Global names of the hosts JavaScript runs on that this isolate may not
- * have (`isGlobal` asks it for the rest), and `arguments`, which an arrow
- * reads from the function around it.
+ * Every global name of the hosts JavaScript runs on, from one fixed list
+ * (the `globals` package: the language's own, browsers', workers',
+ * service workers', Node's, CommonJS's, Deno's and Bun's), never the
+ * running isolate's `globalThis`, so the SDK and the compiler, in
+ * isolates with different globals, refuse the same roots. And
+ * `arguments`, which an arrow reads from the function around it.
  */
-const hostGlobals = new Set([
+const globalNames = new Set([
   "arguments",
-  "global",
-  "window",
-  "self",
-  "document",
-  "process",
-  "require",
-  "module",
-  "exports",
-  "Deno",
-  "Bun",
+  ...[
+    globals.builtin,
+    globals.browser,
+    globals.worker,
+    globals.serviceworker,
+    globals.node,
+    globals.commonjs,
+    globals.denoBuiltin,
+    globals.bunBuiltin,
+  ].flatMap((names) => Object.keys(names)),
 ]);
-
-const isGlobal = (name: string): boolean =>
-  hostGlobals.has(name) || Reflect.has(globalThis, name);
 
 /** Whether `name` binds as a parameter: no reserved word, by Babel. */
 const isBindable = (name: string): boolean => {
@@ -515,47 +516,55 @@ const isBindable = (name: string): boolean => {
   }
 };
 
+const defaultRoots = new Set<string>(expressionRoots);
+
 /**
- * The roots an expression may read, as a caller names them: the default
- * ones, or those of where it runs (`item` inside a `forEach`, `error` in
- * a catch). Each is a plain identifier the generated code binds as a
- * parameter, never a global's name: even shadowed, an expression that
+ * The roots an expression may read: `expressionRoots`, always in scope,
+ * and the further ones of where it runs (`item` inside a `forEach`,
+ * `error` in a catch). Each further one is a plain identifier the
+ * generated code binds as a parameter, not one of the default roots
+ * again, and never a global's name: even shadowed, an expression that
  * reads `globalThis` would read differently wherever the binding isn't.
  * A wrong root is the caller's mistake, not the expression's, so it
  * throws.
  */
-export const checkRoots = (names: readonly string[]): ReadonlySet<string> => {
-  for (const name of names) {
+export const checkRoots = (
+  further: readonly string[] = []
+): ReadonlySet<string> => {
+  for (const name of further) {
     if (!(plainName.test(name) && isBindable(name))) {
       throw new Error(
         `"${name}" can't be an expression's root: a root is a plain identifier.`
       );
     }
-    if (isGlobal(name)) {
+    if (globalNames.has(name)) {
       throw new Error(
         `"${name}" can't be an expression's root: it is a global's name.`
       );
     }
+    if (defaultRoots.has(name)) {
+      throw new Error(`"${name}" is already one of an expression's roots.`);
+    }
   }
-  return new Set(names);
+  return new Set([...expressionRoots, ...further]);
 };
 
 /** How an expression is checked. */
 export interface CheckOptions {
-  /** The values it may read by name; `expressionRoots` by default. */
+  /** Roots beside `expressionRoots`, which are always in scope. */
   readonly roots?: readonly string[];
 }
 
 /**
  * Checks a workflow expression against the subset: every problem found,
  * each with its code, position and fix, or the source to generate from.
- * Throws when a root in `options` is not a plain, non-global identifier.
+ * Throws when a root in `options` is not one `checkRoots` takes.
  */
 export const checkExpression = (
   source: string,
   options: CheckOptions = {}
 ): CheckedExpression => {
-  const roots = checkRoots(options.roots ?? expressionRoots);
+  const roots = checkRoots(options.roots);
   let parsed: Expression;
   try {
     // As a module, as the generated code is one: strict, no HTML comments.

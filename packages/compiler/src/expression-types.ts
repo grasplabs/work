@@ -9,7 +9,6 @@ import {
   checkExpression,
   checkRoots,
   expressionCode,
-  expressionRoots,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError } from "@grasp-os/sdk/expression-check";
 
@@ -99,14 +98,9 @@ export const checkExpressionTypes = (
   kitTypes: Record<string, string>
 ): ExpressionTypeCheck => {
   const extra = Object.entries(scope.roots ?? {});
-  const defaults = new Set<string>(expressionRoots);
-  for (const [name] of extra) {
-    if (defaults.has(name)) {
-      throw new Error(`"${name}" is already one of an expression's roots.`);
-    }
-  }
-  const roots = [...expressionRoots, ...extra.map(([name]) => name)];
-  // Before any name reaches the code: plain identifiers, no global's.
+  const roots = extra.map(([name]) => name);
+  // Before any name reaches the code: plain identifiers, no global's, no
+  // default root again.
   checkRoots(roots);
   const extraParameters = extra
     .map(([name, type]) => `, ${name}: ${typeCode(type)}`)

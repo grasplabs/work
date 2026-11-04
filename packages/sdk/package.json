@@ -45,6 +45,7 @@
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",
     "capnweb": "catalog:",
+    "globals": "catalog:",
     "react-refresh": "catalog:",
     "zod": "catalog:"
   },

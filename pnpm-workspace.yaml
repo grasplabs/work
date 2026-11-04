@@ -113,6 +113,9 @@ catalog:
   "@babel/parser": 7.29.9
   "@babel/standalone": 7.29.9
   "@babel/types": 7.29.8
+  # The global names a workflow expression's root may never take
+  # (@grasp-os/sdk/expression-check): one fixed list wherever it's checked.
+  globals: 17.14.0
   "@base-ui/react": 1.8.0
   "@fontsource-variable/geist": 5.2.8
   "@fontsource-variable/newsreader": 5.3.0

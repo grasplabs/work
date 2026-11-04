@@ -373,24 +373,33 @@ describe("splicing into the generated code", () => {
 });
 
 describe("the roots an expression reads", () => {
-  it("are the caller's where it names them, such as a loop's item", () => {
-    const roots = ["input", "steps", "params", "run", "item"];
+  it("are the default ones and those the caller adds, such as a loop's item", () => {
     expect({
-      item: checkExpression("item.total > params.limit", { roots }).ok,
+      item: checkExpression("item.total > params.limit", { roots: ["item"] })
+        .ok,
+      // Added to the default ones, which stay in scope.
+      error: checkExpression("error.message ?? run.id", { roots: ["error"] })
+        .ok,
       // Only those named: without `item`, it is a global.
       byDefault: verdict("item.total"),
-      // The roots named replace the default ones.
-      replaced: checkExpression("input.a", { roots: ["error"] }),
-    }).toMatchObject({
+    }).toStrictEqual({
       item: true,
+      error: true,
       byDefault: "expression.global",
-      replaced: { ok: false, errors: [{ code: "expression.global" }] },
     });
   });
 
   it("are never a global's name, or anything but a plain identifier", () => {
     const refused = [
+      // The default ones again.
+      "input",
+      "run",
+      // Globals, of this isolate or only of others (`window`, `document`,
+      // `process`, `require`, `Deno`): one fixed list wherever it runs.
       "globalThis",
+      "document",
+      "require",
+      "Deno",
       "Function",
       "eval",
       "fetch",
@@ -414,7 +423,7 @@ describe("the roots an expression reads", () => {
     expect(
       refused.filter((root) => {
         try {
-          checkExpression("1", { roots: ["input", root] });
+          checkExpression("1", { roots: ["item", root] });
           return true;
         } catch {
           return false;
