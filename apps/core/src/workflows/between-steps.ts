@@ -1,3 +1,4 @@
+import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { RpcTarget } from "cloudflare:workers";
@@ -202,10 +203,28 @@ export class BoundedRunHost<Attempt extends object>
   async do(
     name: unknown,
     options: unknown,
-    fn: (attempt: Attempt) => Promise<unknown>
+    fn: (attempt: Attempt) => Promise<unknown>,
+    retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     return await this.#clock.around(
-      async () => await this.#host.do(name, options, fn)
+      async () => await this.#host.do(name, options, fn, retry)
+    );
+  }
+
+  async caught(
+    name: unknown,
+    options: unknown,
+    fn: (attempt: Attempt, error: Json) => Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    const { caught } = this.#host;
+    if (caught === undefined) {
+      return {
+        ok: false,
+        error: { name: "Error", message: "This run has no catches." },
+      };
+    }
+    return await this.#clock.around(
+      async () => await caught.call(this.#host, name, options, fn)
     );
   }
 

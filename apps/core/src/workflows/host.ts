@@ -553,6 +553,9 @@ const doOptionsSchema = z.object({
   input: z.json().optional(),
 });
 
+/** A time, in ms since the epoch, as a sleep until it takes it. */
+const timestampSchema = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
+
 /** What a decision wait recorded when it was first reached. */
 const reachedSchema = z.object({ at: z.number(), answered: z.boolean() });
 
@@ -682,17 +685,24 @@ const defaultRetryLimit = maxStepRetries;
  * retries afresh: the ceiling is per round, and every round is still held
  * to its lineage's active time.
  */
-const stepConfig = ({
-  retries,
-  timeout,
-}: z.output<typeof doOptionsSchema>): WorkflowStepConfig => ({
-  retries: {
-    limit: retries?.limit ?? defaultRetryLimit,
-    delay: retries?.delay ?? defaultRetryDelayMs,
-    backoff: retries?.backoff ?? "exponential",
-  },
-  timeout: timeout ?? maxAttemptTimeoutMs,
-});
+const stepConfig = (
+  { retries: declared, timeout }: z.output<typeof doOptionsSchema>,
+  /** The kind's own, in place of the step's (`RunKind.limitsOf`). */
+  limits: StepLimits = {}
+): WorkflowStepConfig & { retries: StepRetries } => {
+  const retries = limits.retries ?? declared;
+  return {
+    retries: {
+      limit: retries?.limit ?? defaultRetryLimit,
+      delay: retries?.delay ?? defaultRetryDelayMs,
+      backoff: retries?.backoff ?? "exponential",
+    },
+    timeout: Math.min(
+      timeout ?? maxAttemptTimeoutMs,
+      limits.timeout ?? maxAttemptTimeoutMs
+    ),
+  };
+};
 
 /**
  * How a wait or an attempt that ran out of time ends in the engine: a
@@ -726,8 +736,11 @@ export const maxWaits = 15;
  */
 const maxUnknownWaits = 60;
 
-/** What a round of a step's wait waits for (`#waitBefore`). */
-type WaitKind = "busy" | "held" | "unknown" | "key";
+/**
+ * What a round of a step's wait waits for (`#waitBefore`), or, for a
+ * catch's retry of it, decides and sleeps before (`#retried`).
+ */
+type WaitKind = "busy" | "held" | "unknown" | "key" | "retry";
 
 /**
  * The prefix of the steps of round `round` of the wait of the step keyed
@@ -1042,8 +1055,11 @@ export const modelCallLimitOf = (env: Env): number =>
  * (`uncountedWaitStep`),
  * and a step run again after one has no place of its own: it is the step
  * that already took its place, which its attempts are told
- * (`placeOfRunAgain`), so the policy's steps hold every round of it. Counted over every replay, so each step
- * keeps its place.
+ * (`placeOfRunAgain`), so the policy's steps hold every round of it. A
+ * catch's retry of a step (`#retried`) is the run's own, as its workflow
+ * chose it: three steps a round (its decision, its sleep and the step's
+ * run again), each a place of its own. Counted over every replay, so each
+ * step keeps its place.
  */
 export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   let own = 0;
@@ -1171,6 +1187,16 @@ export const forIsolate = (error: unknown): StepError => {
     ...(isExpectedError(seen) ? { code: seen.code } : {}),
   };
 };
+
+/**
+ * What a step failed with as the engine journaled it (`forIsolate`), a
+ * step's timeout included, however the engine named it: so a sealed run
+ * reads a failure the same fresh and replayed.
+ */
+const journaledFailure = (error: unknown): StepError =>
+  error instanceof Error && error.name === "TimeoutError"
+    ? { name: "TimeoutError", message: "The step ran out of time." }
+    : forIsolate(error);
 
 /** How `run` ended, as plain data. */
 export const settle = async <T>(run: () => Promise<T>): Promise<Settled<T>> => {
@@ -1316,11 +1342,17 @@ export interface RunKind {
   /** The run as its waits for its AI provider name it (ai-waits.ts). */
   readonly aiWaitRun: AiWaitRun;
   /**
-   * Why step `step` may not run as `use` (a `do`, a sleep or a decision's
-   * wait), or nothing when it may. The name is the isolate's to say, so a
-   * refusal is tampering (`RunHost.#refuseStep`).
+   * Why step `step` may not run as `use` (a `do`, a sleep, a decision's
+   * wait, a sleep until a deadline, a catch), or nothing when it may; for
+   * a sleep, `time` is its length, and for a sleep until, its deadline.
+   * The name is the isolate's to say, so a refusal is tampering
+   * (`RunHost.#refuseStep`).
    */
-  stepRefusal: (step: string, use: StepUse) => Error | undefined;
+  stepRefusal: (
+    step: string,
+    use: HostStepUse,
+    time?: number
+  ) => Error | undefined;
   /**
    * Refuses once the person the run acts for has left: checked before
    * every step, and wherever its kind's calls check it.
@@ -1346,7 +1378,116 @@ export interface RunKind {
    * call goes out once (sealed-run.ts). None of an App's.
    */
   attemptFailed?: (attempt: StepAttempt, error: StepError) => void;
+  /**
+   * Step `step`'s limits in place of what its code declared: a sealed
+   * run's engine retries, and the longest an attempt may take, its task's
+   * timeout or its catch's retry policy's attempt duration
+   * (sealed-run.ts). None of an App's.
+   */
+  limitsOf?: (step: string) => StepLimits;
+  /**
+   * What `attempt` settled with, as the host takes it, from what its
+   * code reported (`result`): a sealed run's checks of what its step
+   * records, and of the failures only its code reports (sealed-run.ts).
+   * An App's run takes what its code reported.
+   */
+  attemptSettled?: (
+    attempt: StepAttempt,
+    result: Settled<unknown>,
+    /** Whether the Loader cut it off past its CPU time: `result` is core's. */
+    cut?: boolean
+  ) => Promise<Settled<unknown>>;
+  /**
+   * The error `attempt`, of a catch step (`RunHost.caught`), offers its
+   * code to decide on, if its catch may take the failure pending; none
+   * when it may not, and its code isn't asked.
+   */
+  caughtOffer?: (attempt: StepAttempt) => Json | undefined;
+  /**
+   * Hears how step `step`, one it let start (`stepRefusal`), ended, fresh
+   * or replayed, as every activation reaches it, in order: what it
+   * recorded, or what it failed with in the end, past its retries, as the
+   * engine journaled it.
+   */
+  stepEnded?: (
+    step: string,
+    outcome: Settled<unknown>,
+    /**
+     * For a failure, the catch its last retry decision said takes it (the
+     * `try` task's ID; null for none), if one decided.
+     */
+    takenBy?: string | null
+  ) => void;
+  /**
+   * The retry the host may run of step `step` after its round `round`
+   * failed with `error`, under a catch's retry policy (sealed-run.ts);
+   * none when it may not. None of an App's.
+   */
+  retryOffer?: (
+    step: string,
+    error: StepError,
+    round: number
+  ) => RetryOffer | undefined;
 }
+
+/** A step's engine retries, as a step's config has them. */
+export interface StepRetries {
+  limit: number;
+  delay: number;
+  backoff: "constant" | "linear" | "exponential";
+}
+
+/** A kind's own limits of a step (`RunKind.limitsOf`). */
+export interface StepLimits {
+  /** Its engine retries, whatever its code declared. */
+  retries?: StepRetries;
+  /** The longest an attempt may take, below what its code declared. */
+  timeout?: number;
+}
+
+/**
+ * How the host is asked to run a step: as an App's run is
+ * (`StepUse`), or, only by a sealed run, as a sleep until the deadline
+ * its step recorded (`sleepUntil`) or a `try` task's catch (`caught`).
+ */
+export type HostStepUse = StepUse | "sleepUntil" | "caught";
+
+/** What a retry's decision step records (`RunHost.#retried`). */
+export interface RetryDecision {
+  /** The catch it said takes the failure (a `try` task's ID; null for none). */
+  by?: string | null;
+  /** Whether the step runs again. */
+  retry: boolean;
+  /** After how long. */
+  delayMs: number;
+  /** When its first round failed, which every later decision reads. */
+  firstFailedAt: number;
+}
+
+/**
+ * A retry the host may run of a failed step (`RunKind.retryOffer`): the
+ * error its code's retry function decides on, and what the host decides
+ * of what it chose, by the policy's limits (throwing a refusal of a
+ * choice the build's code never makes).
+ */
+export interface RetryOffer {
+  readonly error: Json;
+  /**
+   * The decision when the build leaves its code nothing to decide (a
+   * catch and a policy with no conditions): the host takes it without
+   * asking, so no code can withhold it.
+   */
+  readonly alone?: (firstFailedAt: number) => RetryDecision;
+  /** `choice` is `undefined` when its code failed to choose. */
+  decided: (choice: unknown, firstFailedAt: number) => RetryDecision;
+}
+
+const retryDecisionSchema = z.strictObject({
+  by: z.string().nullable().optional(),
+  retry: z.boolean(),
+  delayMs: z.int().min(0),
+  firstFailedAt: z.number(),
+});
 
 /**
  * The host's checks of a run's attempts, for its kind's calls (`RunKind`):
@@ -1767,11 +1908,13 @@ export class RunHost extends RpcTarget {
    */
   async #waitBefore(
     step: string,
+    /** What its rounds are named after: the step's name, or a retry's. */
+    base: string,
     marker: Exclude<CoreMarker, { kind: "key" }>,
     { round, sleepMs }: WaitRound,
     unknown: { since?: number }
   ): Promise<string> {
-    const key = await waitKeyOf(step);
+    const key = await waitKeyOf(base);
     if (marker.kind === "held") {
       // A hold on an unknown outcome waits in steps of its own kind,
       // outside the run's step allowance (`uncountedWaitStep`).
@@ -1836,10 +1979,73 @@ export class RunHost extends RpcTarget {
   async do(
     name: unknown,
     options: unknown,
-    fn: (attempt: AttemptHost) => Promise<unknown>
+    fn: (attempt: AttemptHost) => Promise<unknown>,
+    /**
+     * A sealed run's choice of a retry after a failure, its code's
+     * (`RunKind.retryOffer`, `#retried`); an App's run has none.
+     */
+    retry?: unknown
+  ): Promise<Settled<unknown>> {
+    return await this.#doStep(
+      name,
+      options,
+      "do",
+      async (host) => await fn(host),
+      typeof retry === "function"
+        ? async (error: Json): Promise<unknown> =>
+            // SAFETY: the isolate's function, over RPC, answering
+            // `Settled` as every one of its functions does (code.ts).
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            await (retry as (error: Json) => Promise<unknown>)(error)
+        : undefined
+    );
+  }
+
+  /**
+   * Runs a `try` task's catch step of a sealed run: its code is handed the
+   * error its catch may take (`RunKind.caughtOffer`), and decides whether
+   * it does; it isn't asked when the catch may take nothing, and the step
+   * records that it took none. What the step records is the kind's to
+   * check (`RunKind.attemptSettled`), and what it answers, fresh or
+   * replayed, is what it recorded.
+   */
+  async caught(
+    name: unknown,
+    options: unknown,
+    fn: (attempt: AttemptHost, error: Json) => Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    return await this.#doStep(
+      name,
+      options,
+      "caught",
+      async (host, attempt) => {
+        const offered = this.#kind.caughtOffer?.(attempt);
+        return offered === undefined
+          ? { ok: true, value: false }
+          : await fn(host, offered);
+      }
+    );
+  }
+
+  /**
+   * `do`'s work, and a catch's (`caught`), run as `use`: `call` is the
+   * attempt's function in the isolate. A failure a catch's retry policy
+   * may try again runs the step again in its place (`#retried`), each
+   * round under steps of its own, its call under the same key.
+   */
+  async #doStep(
+    name: unknown,
+    options: unknown,
+    use: "do" | "caught",
+    call: (host: AttemptHost, attempt: StepAttempt) => Promise<unknown>,
+    retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     let failed: StepError | undefined;
+    // The catch its last retry decision said takes the failure, if any.
+    let takenBy: string | null | undefined;
     let attempted = false;
+    // Whether its kind let it start: only such a step's end is its to hear.
+    let started = false;
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
@@ -1850,10 +2056,12 @@ export class RunHost extends RpcTarget {
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
-      await this.#requireStep(step, "do");
+      await this.#requireStep(step, use);
+      started = true;
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
+      const config = stepConfig(parsed, this.#kind.limitsOf?.(step));
       await this.#kind.requirePerson();
       // The attempts of this `do` this execution made, for an engine that
       // doesn't say which attempt it runs.
@@ -1868,29 +2076,11 @@ export class RunHost extends RpcTarget {
         // Who this attempt is, as the engine claimed it: its number, its
         // step's key and its lease, which an activation that is over no
         // longer has. Its code acts only through the host minted for it.
-        const told = attemptContextSchema.parse(context);
-        const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
-        if (lease === undefined) {
-          throw new Error(`Step "${step}"'s attempt holds no lease`);
-        }
-        const attempt: StepAttempt = {
-          leaseId: crypto.randomUUID(),
-          number: told.attempt,
-          ...(told.stepOrdinal === undefined
-            ? {}
-            : { ordinal: told.stepOrdinal }),
-          key: told.idempotencyKey,
-          generation: lease.generation,
-          deadline: lease.deadline,
-          over: false,
+        const attempt = this.#attemptOf(
           step,
-          held: false,
-          unknown: false,
-          heldKeys: [],
-          functionCalls: 0,
-          recorded: false,
-          last: isLastAttempt(context, tries, parsed.retries?.limit),
-        };
+          context,
+          isLastAttempt(context, tries, config.retries.limit)
+        );
         // Admitted before its code runs, or failed with the refusal: a
         // limit reached fails the step; a lineage whose time attempts
         // under way hold ends the step as busy, and the run waits
@@ -1920,7 +2110,7 @@ export class RunHost extends RpcTarget {
           result = await this.#callAttempt(
             attempt,
             admission,
-            fn,
+            async (host) => await call(host, attempt),
             stepDone.promise
           );
         } finally {
@@ -2003,13 +2193,6 @@ export class RunHost extends RpcTarget {
         }
         return result.value;
       };
-      let value = await this.#step.do(step, stepConfig(parsed), attemptStep);
-      // Held, or its lineage busy: wait until the person decided, or the
-      // seconds the lineage said, then run the step again under the same
-      // key, in a step of its own each time, so every execution replays the
-      // same steps.
-      // When the step was first held on its current unknown outcome.
-      const unknown: { since?: number } = {};
       const keyWaitStarted = async (
         since: number,
         aiWait: AiWait
@@ -2023,77 +2206,133 @@ export class RunHost extends RpcTarget {
         );
         await this.#hooks.waiting({ reason: "ai_provider", ...aiWait });
       };
-      let round = 0;
-      for (
-        let marker = markerOf(value);
-        marker !== undefined;
-        marker = markerOf(value)
-      ) {
-        round += 1;
-        if (marker.kind !== "key" && keyWait.since !== undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- once per wait
+      // The step run under `base` (its own name, or a retry's), then run
+      // again while it is held, or its lineage busy: wait until the person
+      // decided, or the seconds the lineage said, then run the step again
+      // under the same key, in a step of its own each time, its names
+      // `base`'s, so every execution replays the same steps.
+      const rounds = async (base: string): Promise<unknown> => {
+        tries = 0;
+        load = loadWaitStart;
+        failed = undefined;
+        let value = await this.#step.do(base, config, attemptStep);
+        // When the step was first held on its current unknown outcome.
+        const unknown: { since?: number } = {};
+        let round = 0;
+        for (
+          let marker = markerOf(value);
+          marker !== undefined;
+          marker = markerOf(value)
+        ) {
+          round += 1;
+          if (marker.kind !== "key" && keyWait.since !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- once per wait
+            await this.#keyWaitEnded(step, keyWait);
+            keyWait = keyWaitStart();
+          }
+          // Read off the markers alone, journaled as the step's results,
+          // so every replay counts the same.
+          load = loadWaitAfter(load, marker);
+          if (marker.kind === "busy" && load.sleepMs <= 0) {
+            failed = queueTimedOut(step, marker.maxWaitMs);
+            throw toStepError(failed);
+          }
+          if (marker.kind === "key") {
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            const prefix = waitStep(await waitKeyOf(base), "key", round);
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            const ended = await keyRound(
+              this.#step,
+              this.#env,
+              prefix,
+              marker,
+              keyWait,
+              keyWaitStarted
+            );
+            if (ended === "timed_out") {
+              // oxlint-disable-next-line no-await-in-loop -- once
+              await this.#keyWaitEnded(step, keyWait);
+              keyWait = keyWaitStart();
+              failed = keyTimedOut(step, marker.trouble);
+              throw toStepError(failed);
+            }
+            tries = 0;
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            value = await this.#step.do(`${prefix}:run`, config, attemptStep);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          const prefix = await this.#waitBefore(
+            step,
+            base,
+            marker,
+            { round, sleepMs: load.sleepMs },
+            unknown
+          );
+          tries = 0;
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          value = await this.#step.do(`${prefix}:run`, config, attemptStep);
+        }
+        if (keyWait.since !== undefined) {
           await this.#keyWaitEnded(step, keyWait);
           keyWait = keyWaitStart();
         }
-        // Read off the markers alone, journaled as the step's results, so
-        // every replay counts the same.
-        load = loadWaitAfter(load, marker);
-        if (marker.kind === "busy" && load.sleepMs <= 0) {
-          failed = queueTimedOut(step, marker.maxWaitMs);
-          throw toStepError(failed);
-        }
-        if (marker.kind === "key") {
+        return value;
+      };
+      // When its first round failed, as a catch's retry recorded it.
+      let firstFailedAt: number | undefined;
+      let value: unknown;
+      for (let round = 1; ; round += 1) {
+        const base =
+          round === 1
+            ? step
+            : // oxlint-disable-next-line no-await-in-loop -- one round at a time
+              `${waitStep(await waitKeyOf(step), "retry", round)}:run`;
+        try {
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          const prefix = waitStep(await waitKeyOf(step), "key", round);
-          // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          const ended = await keyRound(
-            this.#step,
-            this.#env,
-            prefix,
-            marker,
-            keyWait,
-            keyWaitStarted
-          );
-          if (ended === "timed_out") {
-            // oxlint-disable-next-line no-await-in-loop -- once
-            await this.#keyWaitEnded(step, keyWait);
-            keyWait = keyWaitStart();
-            failed = keyTimedOut(step, marker.trouble);
-            throw toStepError(failed);
+          value = await rounds(base);
+          break;
+        } catch (error) {
+          if (this.#kind.retryOffer === undefined) {
+            throw error;
           }
-          tries = 0;
+          // As the engine journaled it, so a replay decides the same.
+          const roundError = journaledFailure(error);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          value = await this.#step.do(
-            `${prefix}:run`,
-            stepConfig(parsed),
-            attemptStep
-          );
-          continue;
+          const retried = await this.#retried(step, roundError, round, {
+            retry,
+            firstFailedAt,
+            stepDone: stepDone.promise,
+          });
+          // This round's own decision, none if it had none.
+          takenBy = retried?.by;
+          if (retried?.retry !== true) {
+            throw error;
+          }
+          // It runs again: it waits for its AI provider no more.
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          await this.#keyWaitEndedQuietly(step, keyWait);
+          keyWait = keyWaitStart();
+          ({ firstFailedAt } = retried);
         }
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const prefix = await this.#waitBefore(
-          step,
-          marker,
-          { round, sleepMs: load.sleepMs },
-          unknown
-        );
-        tries = 0;
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        value = await this.#step.do(
-          `${prefix}:run`,
-          stepConfig(parsed),
-          attemptStep
-        );
       }
-      if (keyWait.since !== undefined) {
-        await this.#keyWaitEnded(step, keyWait);
-        keyWait = keyWaitStart();
-      }
+      this.#kind.stepEnded?.(step, { ok: true, value });
       return { ok: true, value };
     } catch (error) {
       // The step ran again after its wait and threw: it waits no more.
       await this.#keyWaitEndedQuietly(step, keyWait);
-      const reported = failed ?? forIsolate(error);
+      // A kind that hears how its steps end (`stepEnded`) hears, and its
+      // code is answered, what the step failed with as the engine
+      // journaled it, fresh or replayed alike: never `failed`, which an
+      // attempt the engine gave up on may still set.
+      const journaled =
+        this.#kind.stepEnded === undefined
+          ? undefined
+          : journaledFailure(error);
+      const reported = journaled ?? failed ?? forIsolate(error);
+      if (started && journaled !== undefined) {
+        this.#kind.stepEnded?.(step, { ok: false, error: journaled }, takenBy);
+      }
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
         await this.#audited(step, "failed", {
@@ -2104,6 +2343,189 @@ export class RunHost extends RpcTarget {
       return { ok: false, error: reported };
     } finally {
       stepDone.resolve(null);
+    }
+  }
+
+  /**
+   * The attempt of step `step` the engine claimed (`context`): its
+   * number, its step's key and its lease, which an activation that is
+   * over no longer has, and whether it is the step's `last`.
+   */
+  #attemptOf(step: string, context: unknown, last: boolean): StepAttempt {
+    const told = attemptContextSchema.parse(context);
+    const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
+    if (lease === undefined) {
+      throw new Error(`Step "${step}"'s attempt holds no lease`);
+    }
+    return {
+      leaseId: crypto.randomUUID(),
+      number: told.attempt,
+      ...(told.stepOrdinal === undefined ? {} : { ordinal: told.stepOrdinal }),
+      key: told.idempotencyKey,
+      generation: lease.generation,
+      deadline: lease.deadline,
+      over: false,
+      step,
+      held: false,
+      unknown: false,
+      heldKeys: [],
+      functionCalls: 0,
+      recorded: false,
+      last,
+    };
+  }
+
+  /**
+   * Whether step `step`, whose round `round` failed with `error`, runs
+   * again in its place: only as its kind offers
+   * (`RunKind.retryOffer`: a sealed run's step in the list of a `try`
+   * whose catch retries, while its policy has rounds left and the
+   * failure may be tried again), and its code's `retry` chooses, the
+   * kind holding that choice to the policy. Decided in a step of its own
+   * that records it (`#decideRetry`), then a durable sleep of the backoff
+   * it decided, each named after the round it leads to. Answers when the
+   * first round failed, which every later decision reads; `undefined`
+   * when it doesn't run again, and the step fails as its round did,
+   * whatever a decision itself failed with. Fresh or replayed alike.
+   */
+  async #retried(
+    step: string,
+    error: StepError,
+    round: number,
+    {
+      retry,
+      firstFailedAt,
+      stepDone,
+    }: {
+      retry: ((error: Json) => Promise<unknown>) | undefined;
+      firstFailedAt: number | undefined;
+      stepDone: Promise<unknown>;
+    }
+  ): Promise<RetryDecision | undefined> {
+    const offer = this.#kind.retryOffer?.(step, error, round);
+    if (offer === undefined) {
+      return undefined;
+    }
+    // Taken alone where the build leaves nothing to decide; else asked of
+    // its code, if it gave a way to ask.
+    const { alone } = offer;
+    let decide: ((context: unknown) => Promise<RetryDecision>) | undefined;
+    if (alone !== undefined) {
+      decide = async () =>
+        await Promise.resolve(alone(firstFailedAt ?? Date.now()));
+    } else if (retry !== undefined) {
+      decide = async (context) =>
+        await this.#decideRetry(step, context, offer, {
+          retry,
+          firstFailedAt,
+          stepDone,
+        });
+    }
+    if (decide === undefined) {
+      // Its policy asks its code, which gave no way to ask: code past the
+      // SDK, skipping what its policy says.
+      const refusal = workflowErrors.create("workflow.invalid");
+      refusal.message = `Step "${step}" gives no retry for its policy to ask.`;
+      await settle(
+        async () => await this.#refuseTampering(refusal, { step, call: null })
+      );
+      return undefined;
+    }
+    const prefix = waitStep(await waitKeyOf(step), "retry", round + 1);
+    let decided: RetryDecision;
+    try {
+      decided = retryDecisionSchema.parse(
+        await this.#step.do(`${prefix}:decide`, stepConfig({}), decide)
+      );
+    } catch {
+      // The round's failure goes on unchanged, whatever its decision
+      // failed with: a refusal of it was recorded as tampering already,
+      // which ends the run (`#refuseTampering`).
+      return undefined;
+    }
+    if (!decided.retry) {
+      return decided;
+    }
+    if (decided.delayMs > 0) {
+      await this.#step.sleep(`${prefix}:wait`, decided.delayMs);
+    }
+    await this.#kind.requirePerson();
+    return decided;
+  }
+
+  /**
+   * The decision step of a retry of step `step`, as the engine claimed its
+   * attempt (`context`): the error `offer` names handed to the isolate's
+   * `retry`, outside any step's attempt (so nothing it calls is made), and
+   * its choice held to the policy by the kind (`RetryOffer.decided`): a
+   * choice the build's code never makes is tampering. A failure of its
+   * own (an expression that failed) retries nothing. Not admitted as an
+   * attempt: it calls nothing, and its rounds are (a refusal for load
+   * here would skip the policy, where a round waits it out); a step has
+   * at most four. Recorded, so a replay sleeps as long and decides the
+   * same.
+   */
+  async #decideRetry(
+    step: string,
+    context: unknown,
+    offer: RetryOffer,
+    {
+      retry,
+      firstFailedAt,
+      stepDone,
+    }: {
+      retry: (error: Json) => Promise<unknown>;
+      firstFailedAt: number | undefined;
+      stepDone: Promise<unknown>;
+    }
+  ): Promise<RetryDecision> {
+    const firstAt = firstFailedAt ?? Date.now();
+    const attempt = this.#attemptOf(step, context, false);
+    if (this.#tampered !== undefined) {
+      throw toStepError(forIsolate(this.#tampered));
+    }
+    try {
+      const call = this.#isolateStopped
+        ? Promise.reject(cpuLimitKill())
+        : retry(offer.error);
+      this.#hooks.attemptCall?.(call, stepDone);
+      let chosen: Settled<unknown>;
+      try {
+        chosen = fromIsolate(await call);
+      } catch (error) {
+        if (!isCpuLimitKill(error)) {
+          // Rejected rather than reported: the engine decides again,
+          // journaling words of core's, never the isolate's.
+          throw new Error("The retry's decision failed.", { cause: error });
+        }
+        this.#isolateStopped = true;
+        throw toStepError(forIsolate(error));
+      }
+      if (!this.#holds(attempt)) {
+        throw attemptTimedOut();
+      }
+      try {
+        // A choice its code failed to make is the kind's to judge too.
+        return offer.decided(chosen.ok ? chosen.value : undefined, firstAt);
+      } catch (error) {
+        // Tampering: the decision fails for good, and with it the step.
+        const refused = await settle(
+          async () =>
+            await this.#refuseTampering(
+              error instanceof Error
+                ? error
+                : workflowErrors.create("workflow.invalid"),
+              { step, call: null }
+            )
+        );
+        throw toStepError(
+          refused.ok
+            ? forIsolate(workflowErrors.create("workflow.invalid"))
+            : refused.error
+        );
+      }
+    } finally {
+      attempt.over = true;
     }
   }
 
@@ -2128,26 +2550,82 @@ export class RunHost extends RpcTarget {
       ? Promise.reject(cpuLimitKill())
       : fn(this.#kind.attemptHost(attempt, admission));
     this.#hooks.attemptCall?.(call, stepDone);
+    let reported: Settled<unknown>;
     try {
-      return fromIsolate(await call);
+      reported = fromIsolate(await call);
     } catch (error) {
-      if (!isCpuLimitKill(error)) {
+      const cut = isCpuLimitKill(error);
+      if (cut) {
+        this.#isolateStopped = true;
+      }
+      // Cut off, or its function rejected rather than reported: a kind
+      // that checks what its attempts settle with checks this too, so
+      // nothing gets past it; any other's step fails, or its engine
+      // tries it again, as it did.
+      if (this.#kind.attemptSettled === undefined) {
+        if (cut) {
+          return { ok: false, error: forIsolate(error) };
+        }
         throw error;
       }
-      this.#isolateStopped = true;
-      return { ok: false, error: forIsolate(error) };
+      return await this.#kind.attemptSettled(
+        attempt,
+        { ok: false, error: forIsolate(error) },
+        cut
+      );
     }
+    return (await this.#kind.attemptSettled?.(attempt, reported)) ?? reported;
   }
 
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
-    return await settle(async () => {
+    let step = "";
+    let started = false;
+    const slept = await settle(async () => {
       this.#requireUntampered();
-      const step = checked(stepNameSchema, name);
-      await this.#requireStep(step, "sleep");
+      step = checked(stepNameSchema, name);
+      await this.#requireStep(
+        step,
+        "sleep",
+        typeof duration === "number" ? duration : undefined
+      );
+      started = true;
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
       return null;
     });
+    if (started) {
+      this.#kind.stepEnded?.(step, slept);
+    }
+    return slept;
+  }
+
+  /**
+   * Sleeps durably until `until`, in ms since the epoch: at once once
+   * past. Only a sealed run's sleeping task sleeps so, until exactly the
+   * deadline its step recorded (`RunKind.stepRefusal`); an App's run has
+   * no such step.
+   */
+  async sleepUntil(name: unknown, until: unknown): Promise<Settled<null>> {
+    let step = "";
+    let started = false;
+    const slept = await settle(async () => {
+      this.#requireUntampered();
+      step = checked(stepNameSchema, name);
+      await this.#requireStep(
+        step,
+        "sleepUntil",
+        typeof until === "number" ? until : undefined
+      );
+      started = true;
+      const at = checked(timestampSchema, until);
+      await this.#kind.requirePerson();
+      await this.#step.sleepUntil(step, at);
+      return null;
+    });
+    if (started) {
+      this.#kind.stepEnded?.(step, slept);
+    }
+    return slept;
   }
 
   /**
@@ -2364,8 +2842,12 @@ export class RunHost extends RpcTarget {
    * No code runs, and no wait is journaled, under a name of the isolate's
    * own making. Caught or not, it ends the run (`#refuseTampering`).
    */
-  async #requireStep(step: string, use: StepUse): Promise<void> {
-    const error = this.#kind.stepRefusal(step, use);
+  async #requireStep(
+    step: string,
+    use: HostStepUse,
+    time?: number
+  ): Promise<void> {
+    const error = this.#kind.stepRefusal(step, use, time);
     if (error !== undefined) {
       await this.#refuseStep(step, error);
     }

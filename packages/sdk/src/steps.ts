@@ -10,7 +10,7 @@ import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { paramValueSchemas } from "./params.ts";
-import type { DecisionRequest } from "./workflow.ts";
+import type { CaughtError, DecisionRequest, RetryChoice } from "./workflow.ts";
 
 export type { StepKind } from "@grasp-os/shared/workflows";
 
@@ -217,6 +217,26 @@ export const stepOptionSchemas = {
 };
 
 export type StepMethod = keyof typeof stepOptionSchemas;
+
+/**
+ * What the steps only generated workflows run take (`step.sleepUntil`,
+ * `step.caught`, and `do`'s `retry`): never a step or option the
+ * describer reads, so an App's workflow that uses one is refused where it
+ * is written.
+ */
+export const generatedStepOptionSchemas = {
+  sleepUntil: z.strictObject({
+    ...common,
+    until: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+  }),
+  caught: z.strictObject(common),
+  /** A `do` step's `retry` option, which only generated code passes. */
+  retry: z
+    .custom<(error: CaughtError) => Promise<RetryChoice | null>>(
+      (value) => typeof value === "function"
+    )
+    .optional(),
+};
 
 /** The kind of step each `step` method runs. */
 export const stepKinds: Record<StepMethod, StepKind> = {

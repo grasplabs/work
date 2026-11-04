@@ -9,8 +9,19 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
+import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
+import { namedError } from "@grasp-os/workerflow/errors";
 import { env } from "cloudflare:workers";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
@@ -46,6 +57,7 @@ import {
 } from "../src/workflows/sealed-run.ts";
 import type {
   HostedSealedRun,
+  SealedRunKind,
   SealedRunMemory,
 } from "../src/workflows/sealed-run.ts";
 import { allEvents } from "./audit-events.ts";
@@ -124,6 +136,10 @@ const objectSchema = (properties: Record<string, unknown>) => ({
     additionalProperties: false,
   },
 });
+
+/** Where the standard error types are, as a catch's filter names them. */
+const standardErrors =
+  "https://open-workflow-specification.org/spec/1.0.0/errors/";
 
 /** What mail.send takes, `{ to, subject }`, and answers, `{ messageId }`. */
 const mailInput = v.object({ to: v.string(), subject: v.string() });
@@ -273,6 +289,120 @@ const sealedWorkflow = async () => {
           },
         },
         { finish: { set: { status: "done" } } },
+        {
+          pause: {
+            call: "grasp.sleepUntil",
+            with: {
+              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 3000 }",
+            },
+          },
+        },
+        {
+          guarded: {
+            try: [
+              {
+                fetch: {
+                  call: "grasp.connector",
+                  timeout: { after: { seconds: 20 } },
+                  with: {
+                    binding: "mail",
+                    operation: "mail.send",
+                    arguments: { to: "${ $workflow.input.who }", subject: "x" },
+                  },
+                },
+              },
+            ],
+            catch: {
+              errors: { with: { type: `${standardErrors}runtime` } },
+              retry: {
+                delay: { seconds: 1 },
+                limit: { attempt: { count: 3, duration: { seconds: 10 } } },
+              },
+            },
+          },
+        },
+        {
+          outer: {
+            try: [
+              {
+                inner: {
+                  try: [
+                    {
+                      stop: {
+                        raise: {
+                          error: {
+                            type: "urn:grasp:error:stop",
+                            status: 422,
+                            title: "Stopped.",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                  catch: { errors: { with: { status: 409 } } },
+                },
+              },
+            ],
+            catch: { errors: { with: { status: 422 } } },
+          },
+        },
+        {
+          wrapped: {
+            try: [
+              {
+                shield: {
+                  try: [
+                    {
+                      boom: {
+                        raise: {
+                          error: { type: "urn:grasp:error:boom", status: 418 },
+                        },
+                      },
+                    },
+                  ],
+                  catch: { errors: { with: { status: 418 } } },
+                },
+              },
+            ],
+            catch: { errors: { with: { status: 418 } } },
+          },
+        },
+        {
+          layered: {
+            try: [
+              {
+                probe: {
+                  try: [
+                    {
+                      ping: {
+                        call: "grasp.connector",
+                        with: {
+                          binding: "mail",
+                          operation: "mail.send",
+                          arguments: {
+                            to: "${ $workflow.input.who }",
+                            subject: "y",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                  catch: {
+                    errors: { with: { status: 500 } },
+                    when: '${ $workflow.input.who == "Ada" }',
+                  },
+                },
+              },
+            ],
+            catch: {
+              errors: { with: { status: 500 } },
+              retry: {
+                delay: { seconds: 1 },
+                limit: { attempt: { count: 3 } },
+              },
+            },
+          },
+        },
       ],
     }),
     basedOn: null,
@@ -343,6 +473,17 @@ ${body}
 const send = (body: string): string =>
   `return await step.do("send", { key: "task", description: "Its task" }, async () => { ${body} });`;
 
+/**
+ * `send`'s call, failing its step, and what its code saw of the failure:
+ * its code and message, kept past the step for the run to end with.
+ */
+const seenOfCall = `
+let seen = null;
+try {
+  ${send('try { return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch (error) { seen = { code: error.code, message: error.message }; throw error; }')}
+} catch {}
+return seen;`;
+
 /** What `greet` and `again` ask their model, as the build sealed it. */
 const greeting =
   '{ instructions: "Greet them.", input: { who: input.who, tags: ["vip", input.who] } }';
@@ -405,18 +546,31 @@ type Tries = Map<string, number>;
  * while its error may be retried and its retries last, and whose waits
  * for an event end at once.
  */
-const retryingEngine = (tries: Tries = new Map()): Engine => {
+const retryingEngine = (
+  tries: Tries = new Map(),
+  /** Each step's attempt timeout, as the host configured it, by its key. */
+  timeouts = new Map<string, number | WorkflowDuration | undefined>(),
+  /** Whether the engine gives up on attempt `attempt` as it times out. */
+  timesOut: (attempt: number) => boolean = () => false
+): Engine => {
   const leases = new Set<string>();
   const step: RunStep = {
     do: async (name, config, fn) => {
       const key = `key:${name}`;
+      timeouts.set(key, config.timeout);
       const limit = config.retries?.limit ?? 0;
       for (let attempt = 1; ; attempt += 1) {
         leases.add(`${attempt}:${key}`);
         tries.set(key, attempt);
         try {
           // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
-          return await fn({ attempt, idempotencyKey: key });
+          const value = await fn({ attempt, idempotencyKey: key });
+          if (timesOut(attempt)) {
+            const timedOut = new Error("Execution timed out");
+            timedOut.name = "WorkflowTimeoutError";
+            throw timedOut;
+          }
+          return value;
         } catch (error) {
           if (
             attempt > limit ||
@@ -444,6 +598,74 @@ const retryingEngine = (tries: Tries = new Map()): Engine => {
       leases.has(`${attempt}:${key}`)
         ? { generation: 1000, deadline: Date.now() + 60_000 }
         : undefined,
+  };
+};
+
+/** What an engine journaled of a step: its result, or the error it failed with. */
+type Journaled =
+  | { ok: true; value: unknown }
+  | { ok: false; name: string; message: string; code?: string };
+
+/**
+ * An engine that journals each step's outcome in `journal`, and replays a
+ * step it journaled without running it again, as the engine does in a
+ * later activation: its result, or its error as the engine keeps it (its
+ * name, message and code). The steps whose functions ran go in `ran`.
+ */
+const journalingEngine = (
+  journal: Map<string, Journaled>,
+  ran: string[]
+): Engine => {
+  const { step, leaseOf } = retryingEngine();
+  const replayed = async (
+    name: string,
+    run: () => Promise<unknown>
+  ): Promise<unknown> => {
+    const kept = journal.get(name);
+    if (kept?.ok === true) {
+      return kept.value;
+    }
+    if (kept !== undefined) {
+      throw namedError(kept.name, kept.message, kept.code);
+    }
+    try {
+      const value = await run();
+      journal.set(name, { ok: true, value });
+      return value;
+    } catch (error) {
+      const code: unknown =
+        error instanceof Error ? Reflect.get(error, "code") : undefined;
+      journal.set(name, {
+        ok: false,
+        name: error instanceof Error ? error.name : "Error",
+        message: error instanceof Error ? error.message : String(error),
+        ...(typeof code === "string" ? { code } : {}),
+      });
+      throw error;
+    }
+  };
+  return {
+    leaseOf,
+    step: {
+      ...step,
+      do: async (name, config, fn) =>
+        await replayed(name, async () => {
+          ran.push(name);
+          return await step.do(name, config, fn);
+        }),
+      sleep: async (name, duration) => {
+        await replayed(name, async () => {
+          await step.sleep(name, duration);
+          return null;
+        });
+      },
+      sleepUntil: async (name, until) => {
+        await replayed(name, async () => {
+          await step.sleepUntil(name, until);
+          return null;
+        });
+      },
+    },
   };
 };
 
@@ -490,10 +712,14 @@ const ranAs = async (
     maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
   const { step, leaseOf } = engine;
   const tampered: string[] = [];
+  let kind: SealedRunKind | undefined;
   const host = new RunHost(
     serving,
     step,
-    sealedRun(serving, run, memoryOfTest()),
+    (controls) => {
+      kind = sealedRun(serving, run, memoryOfTest())(controls);
+      return kind;
+    },
     {
       stepFailed: () => {
         // The run's end says what failed.
@@ -530,6 +756,8 @@ const ranAs = async (
     ended: settled.ok ? settled.value : settled.error.code,
     ...(settled.ok ? {} : { why: settled.error.message }),
     tampered,
+    // A failure no catch took, as the run's code ended well past it.
+    ...(settled.ok && kind?.failureUntaken === true ? { untaken: true } : {}),
   };
 };
 
@@ -815,22 +1043,17 @@ describe("a sealed build's run on the run host", () => {
       moduleOf(greet(greeting))
     );
     const afterAnswered = provider.requests.length;
-    // The call went out, then its attempt failed for a reason trying
-    // again may fix: the engine tries the step again, and the call doesn't
-    // go out again; the next attempt fails as that one did, for good.
+    // The call went out, then the engine gave up on its attempt as it ran
+    // out of time: the engine tries the step again, and the call doesn't
+    // go out again; the next attempt fails as left open, for good.
     replies.push(hello, hello);
     const tries: Tries = new Map();
     const retried = await ranAs(
       await waitingRun(sealed),
-      moduleOf(`
-return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => {
-  await env.summary.call("grasp.model", ${greeting});
-  const failed = new Error("The answer didn't come through");
-  failed.code = "model.failed";
-  throw failed;
-});
-`),
-      { engine: retryingEngine(tries) }
+      moduleOf(
+        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.summary.call("grasp.model", ${greeting}));`
+      ),
+      { engine: retryingEngine(tries, new Map(), (attempt) => attempt === 1) }
     );
     const afterRetried = provider.requests.length;
     // Refused for the key, billing nothing: the step waits for a working
@@ -854,7 +1077,7 @@ return await step.do("greet", { key: "task", description: "Its task", retries: {
     }).toStrictEqual({
       answered: { ended: { line: "Hello Ada" }, tampered: [] },
       afterAnswered: 1,
-      retried: failedWith("model.failed"),
+      retried: failedWith("operation.deadline_exceeded"),
       sentByRetried: 1,
       attemptsOfRetried: 2,
       unbilled: { ended: { line: "Hello Ada" }, tampered: [] },
@@ -907,14 +1130,7 @@ ${greet(greeting, "again")}
     const echoing = await sealedWorkflow();
     await echoingMail(echoing.mail.id, `ref-${echoing.secret}`);
     const runId = await waitingRun(echoing);
-    const ran = await ranAs(
-      runId,
-      moduleOf(
-        send(
-          'try { return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch (error) { return { code: error.code, message: error.message }; }'
-        )
-      )
-    );
+    const ran = await ranAs(runId, moduleOf(seenOfCall));
     expect({
       ran,
       seen: JSON.stringify(ran).includes(echoing.secret),
@@ -925,6 +1141,7 @@ ${greet(greeting, "again")}
           message: anyText,
         },
         tampered: [],
+        untaken: true,
       },
       seen: false,
     });
@@ -940,19 +1157,16 @@ ${greet(greeting, "again")}
         { type: "text", text: `Refused: ${failing.secret} isn't allowed` },
       ],
     });
-    const ran = await ranAs(
-      await waitingRun(failing),
-      moduleOf(
-        send(
-          'try { return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch (error) { return { code: error.code, message: error.message }; }'
-        )
-      )
-    );
+    const ran = await ranAs(await waitingRun(failing), moduleOf(seenOfCall));
     expect({
       ran,
       seen: JSON.stringify(ran).includes(failing.secret),
     }).toStrictEqual({
-      ran: { ended: { code: anyText, message: anyText }, tampered: [] },
+      ran: {
+        ended: { code: anyText, message: anyText },
+        tampered: [],
+        untaken: true,
+      },
       seen: false,
     });
   });
@@ -1072,6 +1286,535 @@ return { before, after: await late };
     );
     await expect(sealedRunOf(serving, runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
+    });
+  });
+});
+
+/** Task `id`'s own step, recording `record`, with `options` besides. */
+const taskStep = (id: string, record: string, options = ""): string =>
+  `await step.do(${JSON.stringify(id)}, { key: "task", description: "Its task"${options} }, async () => (${record}))`;
+
+/** Try `id`'s catch step, deciding by `takes`. */
+const catchStep = (id: string, takes: string): string =>
+  `await step.caught(${JSON.stringify(id)}, { key: "catch", description: "Its catch" }, ${takes})`;
+
+/** The error `stop` raises, as a catch takes it. */
+const stopped = {
+  type: "urn:grasp:error:stop",
+  status: 422,
+  instance: "/do/7/outer/try/0/inner/try/0/stop",
+  title: "Stopped.",
+};
+
+/** `pause`'s enter step, recording the deadline `until`, as `until`. */
+const enterPause = (until: string): string =>
+  `const { until } = await step.do("pause", { key: "enter", description: "Its start" }, async () => ({ output: null, until: ${until} }));`;
+
+/** `pause`'s sleep, until `until`. */
+const sleepPause = (until: string): string =>
+  `await step.sleepUntil("pause", { key: "task", description: "Its sleep", until: ${until} });`;
+
+/** A retry choice naming `by`'s catch, retrying. */
+const retryingBy = (by: string): string =>
+  `, retry: async () => ({ by: ${JSON.stringify(by)}, retry: true })`;
+
+/** The engine's steps, by key, that a retry of `fetch` ran of `part`. */
+const retrySteps = (tries: Tries, part: "decide" | "run"): number =>
+  [...tries.keys()].filter(
+    (key) =>
+      key.startsWith("key:$grasp:wait:") &&
+      key.includes(`:retry:`) &&
+      key.endsWith(`:${part}`)
+  ).length;
+
+// The ways a catch, a raise, a retry or a sleep can fail a sealed run's
+// security, each refused or held by the host: a catch taking what its
+// sealed filter or the host's mapping doesn't let it, or what it wasn't
+// offered; code relabelling the host's failure of its call; a run going
+// on past a failure no catch took; a raise run as anything but its sealed
+// error; a retry past its policy's rounds, or chosen by a catch that
+// can't take the failure; a sleep of another length, or until another
+// deadline than the one recorded; an attempt longer than its policy lets.
+describe("a sealed run's catches, raises, retries and sleeps on the run host", () => {
+  let sealed: Sealed;
+
+  beforeAll(async () => {
+    sealed = await sealedWorkflow();
+  });
+
+  // Each test's waiting runs end with it: a person's runs of one
+  // workflow under way are bounded.
+  afterEach(endLiveResourceRuns);
+
+  it("fails a raise with its sealed error, which only a catch whose filter it has takes", async () => {
+    const caught = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+const asked = [];
+try {
+  try {
+    ${taskStep("stop", "{ output: null }")};
+  } catch (thrown) {
+    const inner = ${catchStep("inner", 'async () => { asked.push("inner"); return true; }')};
+    if (inner === undefined) throw thrown;
+    return { inner };
+  }
+} catch (thrown) {
+  const outer = ${catchStep("outer", "async (error) => { asked.push(error); return true; }")};
+  if (outer === undefined) throw thrown;
+  return { outer, asked };
+}`)
+    );
+    const uncaught = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`return ${taskStep("stop", "{ output: null }")};`)
+    );
+    const skipped = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`return ${taskStep("stop", "{ skipped: true }")};`)
+    );
+    // Its code throws rather than records: its sealed error all the same.
+    const thrown = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("stop", '(() => { throw new Error("not raised"); })()')};`
+      )
+    );
+    // Its code rejects as the Loader's CPU kill would: its sealed error.
+    const cutOff = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("stop", '(() => { throw { get name() { throw new Error("Worker exceeded CPU time limit."); } }; })()')};`
+      )
+    );
+    // A catch further in with no conditions takes it: one further out,
+    // asked in its place, is offered nothing.
+    const passedOver = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("boom", "{ output: null }")};
+} catch (thrown) {
+  return { caught: (${catchStep("wrapped", "async () => true")}) ?? null };
+}`)
+    );
+    expect({
+      caught,
+      uncaught,
+      skipped,
+      thrown,
+      cutOff,
+      passedOver,
+    }).toStrictEqual({
+      caught: {
+        ended: { outer: stopped, asked: [stopped] },
+        tampered: [],
+      },
+      uncaught: failedWith("workflow.raised"),
+      skipped: { ended: { skipped: true }, tampered: [] },
+      thrown: failedWith("workflow.raised"),
+      cutOff: failedWith("workflow.raised"),
+      passedOver: { ended: { caught: null }, tampered: [], untaken: true },
+    });
+  });
+
+  it("refuses a run that goes on past a failure no catch took, and a catch that takes what it wasn't offered", async () => {
+    const swallowed = `try { ${taskStep("stop", "{ output: null }")}; } catch {}`;
+    const nextStep = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`${swallowed} return ${taskStep("finish", "{ output: null }")};`)
+    );
+    const ended = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`${swallowed} return "done";`)
+    );
+    const forged = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `try { ${taskStep("stop", "{ output: null }")}; } catch { return ${catchStep("outer", 'async () => "yes"')}; }`
+      )
+    );
+    const asDo = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return await step.do("outer", { key: "catch", description: "Its catch" }, async () => true);`
+      )
+    );
+    expect({ nextStep, ended, forged, asDo }).toStrictEqual({
+      nextStep: refusedAs(
+        "A run goes on past a failure only once a catch took it."
+      ),
+      ended: { ended: "done", tampered: [], untaken: true },
+      forged: refusedAs("A catch takes only the error it was offered."),
+      asDo: refusedAs(`Step "outer:catch" isn't one the build seals.`),
+    });
+  });
+
+  it("fails an attempt with the host's failure of its call, whatever its code makes of it, and takes a failure only its code reports as the task's own", async () => {
+    const revoking = await sealedWorkflow();
+    const swallowing = await waitingRun(revoking);
+    const rejecting = await waitingRun(revoking);
+    await revokeWorkflowBinding(
+      serving,
+      revoking.admin,
+      revoking.workflow.id,
+      revoking.approval.id
+    );
+    const swallowed = await ranAs(
+      swallowing,
+      moduleOf(`
+try {
+  return ${taskStep("fetch", '(async () => { try { await env.mail.call("mail.send", { to: input.who, subject: "x" }); } catch {} return { output: "sent" }; })()')};
+} catch (thrown) {
+  const error = ${catchStep("guarded", "async () => true")};
+  return { code: thrown.code, caught: error !== undefined };
+}`)
+    );
+    // Its step's function rejects rather than reporting, as code that
+    // throws what can't be described makes it, and as the Loader's CPU
+    // kill would (a task in no try, which nothing retries).
+    const rejected = await ranAs(
+      rejecting,
+      moduleOf(`
+try {
+  return ${taskStep("send", '(async () => { try { await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch {} throw { get name() { throw new Error("Worker exceeded CPU time limit."); } }; })()')};
+} catch (thrown) {
+  return { code: thrown.code };
+}`)
+    );
+    // Its call took effect, then its code failed: no catch takes that.
+    const afterEffect = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("fetch", '(async () => { await env.mail.call("mail.send", { to: input.who, subject: "x" }); throw new Error("after"); })()')};
+} catch (thrown) {
+  return { code: thrown.code, caught: (${catchStep("guarded", "async () => true")}) ?? null };
+}`)
+    );
+    // Its call took effect, then its lineage had no host call left for a
+    // next one: it failed after its effect all the same.
+    let hostCalls = 0;
+    const spentAfter = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("fetch", '(async () => { await env.mail.call("mail.send", { to: input.who, subject: "x" }); await env.mail.call("mail.send", { to: input.who, subject: "x" }).catch(() => null); return { output: "sent" }; })()')};
+} catch (thrown) {
+  return { code: thrown.code, caught: (${catchStep("guarded", "async () => true")}) ?? null };
+}`),
+      {
+        admitAttempt: () => async () => ({
+          ...(await admittedFreely()),
+          hostCall: async () => {
+            hostCalls += 1;
+            if (hostCalls > 1) {
+              throw workflowErrors.create("workflow.lineage_limit");
+            }
+            await Promise.resolve();
+          },
+        }),
+      }
+    );
+    const relabelled = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("fetch", '(() => { const error = new Error("Execution timed out, CPU time limit"); error.code = "connect.outcome_unknown"; throw error; })()')};
+} catch (thrown) {
+  return { code: thrown.code ?? null, caught: ${catchStep("guarded", "async () => true")} };
+}`)
+    );
+    expect({
+      swallowed,
+      rejected,
+      afterEffect,
+      spentAfter,
+      relabelled,
+    }).toStrictEqual({
+      swallowed: {
+        ended: { code: "workflow.call_denied", caught: true },
+        tampered: [],
+      },
+      rejected: {
+        ended: { code: "workflow.call_denied" },
+        tampered: [],
+        untaken: true,
+      },
+      afterEffect: {
+        ended: { code: "workflow.failed_after_effect", caught: null },
+        tampered: [],
+        untaken: true,
+      },
+      spentAfter: {
+        ended: { code: "workflow.failed_after_effect", caught: null },
+        tampered: [],
+        untaken: true,
+      },
+      relabelled: {
+        ended: {
+          code: "internal.unexpected",
+          caught: {
+            type: `${standardErrors}runtime`,
+            status: 500,
+            instance: "/do/6/guarded/try/0/fetch",
+            title: "Something went wrong.",
+          },
+        },
+        tampered: [],
+      },
+    });
+  });
+
+  it("runs a step again under its catch's retry policy, held to its rounds and its attempts' duration", async () => {
+    const tries: Tries = new Map();
+    const timeouts = new Map<string, number | WorkflowDuration | undefined>();
+    const third = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+let rounds = 0;
+return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Error("not yet"); return { output: rounds }; })()', retryingBy("guarded"))};`),
+      { engine: retryingEngine(tries, timeouts) }
+    );
+    const thirdSteps = {
+      decided: retrySteps(tries, "decide"),
+      ran: retrySteps(tries, "run"),
+      timeout: timeouts.get("key:fetch:task"),
+    };
+    // Its policy has no conditions: it retries with no retry function.
+    const withheld = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+let rounds = 0;
+return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Error("not yet"); return { output: rounds }; })()')};`),
+      { engine: retryingEngine() }
+    );
+    const always = new Map<string, number>();
+    const never = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("fetch", '(() => { throw new Error("never"); })()', retryingBy("guarded"))};`
+      ),
+      { engine: retryingEngine(always) }
+    );
+    expect({
+      third,
+      withheld,
+      thirdSteps,
+      never,
+      neverRan: retrySteps(always, "run"),
+    }).toStrictEqual({
+      third: { ended: { output: 3 }, tampered: [] },
+      withheld: { ended: { output: 3 }, tampered: [] },
+      thirdSteps: { decided: 2, ran: 2, timeout: 10_000 },
+      // Its policy's three rounds, then the failure goes on.
+      never: failedWith("internal.unexpected"),
+      neverRan: 2,
+    });
+  });
+
+  it("retries nothing a retry may not fix, and what a policy with no conditions retries whatever its code chooses", async () => {
+    const asked = new Map<string, number>();
+    const notTransient = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("fetch", '(() => { const error = new Error("bad"); error.code = "expression.failed"; throw error; })()', retryingBy("guarded"))};`
+      ),
+      { engine: retryingEngine(asked) }
+    );
+    const wrongCatch = new Map<string, number>();
+    const forged = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("fetch", '(() => { throw new Error("again"); })()', retryingBy("outer"))};`
+      ),
+      { engine: retryingEngine(wrongCatch) }
+    );
+    // Its retry's code fails where its policy has nothing to decide.
+    const failing = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("fetch", '(() => { throw new Error("again"); })()', ', retry: async () => { throw new Error("no choice"); }')};`
+      ),
+      { engine: retryingEngine() }
+    );
+    expect({
+      notTransient,
+      notTransientDecided: retrySteps(asked, "decide"),
+      failing,
+      forged,
+      forgedRan: retrySteps(wrongCatch, "run"),
+    }).toStrictEqual({
+      notTransient: failedWith("expression.failed"),
+      notTransientDecided: 0,
+      // The policy's rounds, its code never asked.
+      failing: failedWith("internal.unexpected"),
+      forged: failedWith("internal.unexpected"),
+      forgedRan: 2,
+    });
+  });
+
+  it("decides a replay as it decided the run: its retries, its sleep's deadline and its catch, from the engine's journal", async () => {
+    const module = moduleOf(`
+let rounds = 0;
+const fetched = ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Error("not yet"); return { output: rounds }; })()', retryingBy("guarded"))};
+${enterPause("Date.now() + 1000")}
+${sleepPause("until")}
+try {
+  try {
+    ${taskStep("stop", "{ output: null }")};
+  } catch (thrown) {
+    if (${catchStep("inner", "async () => true")} === undefined) throw thrown;
+  }
+} catch (thrown) {
+  const caught = ${catchStep("outer", "async () => true")};
+  if (caught === undefined) throw thrown;
+  return { fetched, caught, rounds };
+}`);
+    const runId = await waitingRun(sealed);
+    const journal = new Map<string, Journaled>();
+    const first: string[] = [];
+    const ran = await ranAs(runId, module, {
+      engine: journalingEngine(journal, first),
+    });
+    const again: string[] = [];
+    const replayed = await ranAs(runId, module, {
+      engine: journalingEngine(journal, again),
+    });
+    const outcome = { fetched: { output: 3 }, caught: stopped };
+    expect({
+      ran,
+      decided: first.filter((name) => name.endsWith(":decide")).length,
+      replayed,
+      ranAgain: again,
+    }).toStrictEqual({
+      ran: { ended: { ...outcome, rounds: 3 }, tampered: [] },
+      decided: 2,
+      // Nothing runs again, and nothing is refused: every step, its
+      // deadline and its catch, is the journal's.
+      replayed: { ended: { ...outcome, rounds: 0 }, tampered: [] },
+      ranAgain: [],
+    });
+  });
+
+  it("refuses a step started while another runs, past the SDK", async () => {
+    const ran = await ranAs(
+      await waitingRun(sealed),
+      // The engine itself, as code past the SDK has it: no \`workflow\`.
+      `export default { run: async (engine) => {
+  let release = () => undefined;
+  const held = new Promise((resolve) => { release = resolve; });
+  const first = engine.do("fetch:task", {}, async () => { await held; return { output: 1 }; });
+  try {
+    await engine.do("finish:task", {}, async () => ({ output: 2 }));
+    return "both";
+  } catch (error) {
+    return error.code;
+  } finally {
+    release();
+    await first.catch(() => null);
+  }
+} };`
+    );
+    expect(ran).toStrictEqual({
+      ended: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+    });
+  });
+
+  it("lets only the catch its retry's decision named take the failure, and refuses a step that withholds a decision its policy asks for", async () => {
+    // Task `ping` fails; the catch of `probe` around it has a condition,
+    // and the one of `layered` around that has none, and retries.
+    const ping = (retry: string): string =>
+      taskStep("ping", '(() => { throw new Error("down"); })()', retry);
+    // Its inner catch's condition doesn't hold for the error it sees.
+    const catches = `
+  if ((${catchStep("probe", "async () => false")}) !== undefined) return "probe";
+  return (${catchStep("layered", "async () => true")}) === undefined ? "none" : "layered";`;
+    const tries = new Map<string, number>();
+    // A workflow of its own: its person's runs of one are bounded.
+    const layering = await sealedWorkflow();
+    const run = async (retry: string, engine = retryingEngine()) =>
+      await ranAs(
+        await waitingRun(layering),
+        moduleOf(`try { ${ping(retry)}; } catch { ${catches} }`),
+        { engine }
+      );
+    const withheld = await run("");
+    // It said the inner catch takes it, then that it doesn't: the outer
+    // is offered nothing.
+    const probeThenLayered = await run(
+      ', retry: async () => ({ by: "probe", retry: false })'
+    );
+    // It declined the outer catch's retry, which has no conditions.
+    const declined = await run(
+      ', retry: async () => ({ by: "layered", retry: false })'
+    );
+    // Its policy's last round has no decision: what an earlier round's
+    // named holds no more, and its condition decides afresh.
+    const lastRound = await ranAs(
+      await waitingRun(layering),
+      moduleOf(`try { ${ping(', retry: async () => ({ by: "layered", retry: true })')}; } catch {
+  return (${catchStep("probe", "async () => true")}) === undefined ? "none" : "probe";
+}`),
+      { engine: retryingEngine(tries) }
+    );
+    expect({
+      withheld,
+      probeThenLayered,
+      declined,
+      roundsRun: retrySteps(tries, "run"),
+      lastRound,
+    }).toStrictEqual({
+      withheld: refusedAs(
+        `Step "ping:task" gives no retry for its policy to ask.`
+      ),
+      probeThenLayered: { ended: "none", tampered: [], untaken: true },
+      declined: refusedAs(`Task "layered"'s catch retries the failure.`),
+      roundsRun: 2,
+      lastRound: { ended: "probe", tampered: [] },
+    });
+  });
+
+  it("sleeps only as long as sealed, or until exactly the deadline its task recorded", async () => {
+    // A workflow of its own: its person's runs of one are bounded.
+    const sleeping = await sealedWorkflow();
+    const run = async (body: string) =>
+      await ranAs(await waitingRun(sleeping), moduleOf(body));
+    expect({
+      sealedLength: await run(
+        'await step.sleep("linger", { key: "task", description: "Its wait", duration: "1 hour" }); return "slept";'
+      ),
+      otherLength: await run(
+        'await step.sleep("linger", { key: "task", description: "Its wait", duration: "1 minute" }); return "slept";'
+      ),
+      recorded: await run(
+        `${enterPause("Date.now() + 1000")} ${sleepPause("until")} return "woke";`
+      ),
+      otherDeadline: await run(
+        `${enterPause("Date.now() + 1000")} ${sleepPause("until - 1")} return "woke";`
+      ),
+      unrecorded: await run(`${sleepPause("Date.now()")} return "woke";`),
+      asDo: await run(`return ${taskStep("pause", "{ output: null }")};`),
+      notADuration: await ranAs(
+        await waitingRun(sleeping),
+        `export default { run: async (engine) => { try { await engine.sleep("pause:task", "x"); return "slept"; } catch (error) { return error.code; } } };`
+      ),
+      tooFar: await run(
+        `${enterPause("Date.now() + 2 * 365 * 86400000")} return "entered";`
+      ),
+    }).toStrictEqual({
+      sealedLength: { ended: "slept", tampered: [] },
+      otherLength: refusedAs(`Step "linger:task" isn't one the build seals.`),
+      recorded: { ended: "woke", tampered: [] },
+      otherDeadline: refusedAs(`Step "pause:task" isn't one the build seals.`),
+      unrecorded: refusedAs(`Step "pause:task" isn't one the build seals.`),
+      asDo: refusedAs(`Step "pause:task" isn't one the build seals.`),
+      notADuration: {
+        ended: "workflow.invalid",
+        tampered: ["workflow.invalid"],
+      },
+      tooFar: failedWith("workflow.call_invalid"),
     });
   });
 });
