@@ -24,6 +24,11 @@ import {
 } from "./card.ts";
 import type { Judged, RealCard, ScoreCard } from "./card.ts";
 import type { Transcript } from "./cases.ts";
+import {
+  contradictionsIn,
+  surfacedLine,
+  surfacedOf,
+} from "./contradictions.ts";
 import { contextOf, interviewOf, inTurns, spentLine } from "./core.ts";
 import type { Core } from "./core.ts";
 import { hardTurns, judge, judgeTruth } from "./judge.ts";
@@ -261,6 +266,14 @@ export const score = async (
   const reals = scored.flatMap((each) => each.real ?? []);
   const hard = reals.flatMap((each) => each.hard);
   const untrue = reals.flatMap((each) => each.untrue);
+  // Where people of the key disagree: both versions in his notes, across the interviews.
+  const surfaced = surfacedOf(
+    contradictionsIn(key),
+    scored.map(({ person, judged: found }) => ({
+      employee: person.employee,
+      judged: found,
+    }))
+  );
   const together = [
     `All together: heard ${total.heard.count} of ${total.heard.of}, written ${total.written.count} of ${total.written.of}, supported ${total.supported.count} of ${total.supported.of} (${total.supported.repeats} repeats, ${total.supported.notSaid.length} not said).`,
     ...(reals.length > 0
@@ -268,6 +281,7 @@ export const score = async (
           `With people as they are: the right line after ${hard.filter((each) => each.right).length} of ${hard.length} hard turns; ${untrue.filter((each) => each.verdict === "fact").length} of ${untrue.length} things that were not so are in his notes as facts; ${reals.filter((each) => each.left).length} of ${reals.length} went away before the read-back.`,
         ]
       : []),
+    surfacedLine(surfaced),
   ].join("\n");
   const interviewer =
     scored.find((each) => each.person.played)?.person.played?.interviewer ??
@@ -305,6 +319,7 @@ export const score = async (
     key: key.id,
     at: result.at,
     scored,
+    surfaced,
   });
   // Of a hidden key only the sums are shown.
   if (hidden) {
