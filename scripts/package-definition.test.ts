@@ -371,20 +371,24 @@ const installIn = async (
   return { status, output };
 };
 
-/** The TypeScript the platform checks App code with: the compiler's. */
-const platformTypescript = z
-  .object({ version: z.string() })
-  .parse(
-    JSON.parse(
-      readFileSync(
-        path.join(
-          ROOT,
-          "packages/compiler/node_modules/typescript/package.json"
-        ),
-        "utf-8"
+/** The version of `name` installed at `dir` (from the repo's root). */
+const installedVersion = (dir: string, name: string): string =>
+  z
+    .object({ version: z.string() })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          path.join(ROOT, dir, "node_modules", name, "package.json"),
+          "utf-8"
+        )
       )
-    )
-  ).version;
+    ).version;
+
+/** The checker the platform type-checks App code with: the compiler's tsrs. */
+const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
+
+/** The repo's TypeScript, 7: the project's, never 6. */
+const repoTypescript = installedVersion(".", "typescript");
 
 const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
 
@@ -542,7 +546,7 @@ describe(
       });
     });
 
-    it("type-checks as the platform does: what it accepts passes, with the platform's TypeScript, and what it refuses fails", async () => {
+    it("type-checks as the platform does: what it accepts passes, with the platform's checker, and what it refuses fails", async () => {
       const { out } = scratch();
       await packaged(definitionOf(), out);
       const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
@@ -602,7 +606,10 @@ describe(
 
       expect({
         install: install.status,
-        typescript: project.devDependencies.typescript,
+        checker: {
+          tsrs: project.devDependencies["@tsrs/wasm"],
+          typescript: project.devDependencies.typescript,
+        },
         accepted,
         failedCheck,
         failedBuild: {
@@ -614,7 +621,7 @@ describe(
         },
       }).toStrictEqual({
         install: 0,
-        typescript: platformTypescript,
+        checker: { tsrs: platformChecker, typescript: repoTypescript },
         accepted: { status: 0, problems: {} },
         failedCheck: {
           status: 1,

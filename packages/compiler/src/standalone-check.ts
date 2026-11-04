@@ -7,25 +7,53 @@
  *
  * Each kind of code is checked on its own, with its own tsconfig, as the
  * root tsconfig.json lists them: the compiler's own options for it
- * (type-check.ts), with the TypeScript the platform runs. Like the
- * platform, it reports only the App's own files, never the packages they
- * import, and holds them to what the platform does besides the options:
+ * (type-check.ts), with the checker the platform runs, tsrs
+ * (`@tsrs/wasm`, the Rust port of TypeScript 7's), over the files as the
+ * platform lays them out: the kind's App files, and the project's
+ * packages where no App file's own lookup reaches them, each module its
+ * kind may import mapped by name. Like the platform, it reports only the
+ * App's own files, never the packages they import, and holds them to what
+ * the platform does besides the options:
  *
  * - code whose types are checked (server code, workflows, compute
  *   modules) steers nothing: no triple-slash directive, no suppression
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
- *   global` or `declare module` (imports.ts, `typeChecked`);
- * - no App file references a type package or a lib, or a path that isn't
+ *   global` or `declare module` (imports.ts, `typeChecked`), found by
+ *   TypeScript 7's own scanner;
+ * - no App file holds a triple-slash directive but a reference path to
  *   one of the App's files (imports.ts `referenceError`);
  * - an App file resolves by name only the modules its kind may import
  *   (`TypeTarget.allowed`, which each tsconfig's `grasp.allowed` lists).
  *
- * Run with Node, which strips its types: `node grasp/check.ts`.
+ * Run with Node, which strips its types: `node grasp/check.ts`. It checks
+ * in a worker thread of its own, with the deep stack tsrs's checker needs.
  */
-import { readFileSync } from "node:fs";
+import type { Dirent } from "node:fs";
+import {
+  globSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
+import { isMainThread, parentPort, Worker } from "node:worker_threads";
 
-import ts from "typescript";
+import {
+  EXIT_CRASHED,
+  makeRequest,
+  NotFoundError,
+  parseReply,
+  runTsc,
+} from "@tsrs/wasm/core";
+import type { Diagnostic, FileStat, HostFileSystem } from "@tsrs/wasm/core";
+import { SyntaxKind } from "typescript/unstable/ast";
+import {
+  createScanner,
+  getLeadingCommentRanges,
+  tokenIsIdentifierOrKeyword,
+} from "typescript/unstable/ast/scanner";
+import type { Scanner } from "typescript/unstable/ast/scanner";
 
 import { directiveIn } from "./steering.ts";
 
@@ -78,10 +106,15 @@ const fieldOf = (value: unknown, key: string): unknown =>
     ? Reflect.get(value, key)
     : undefined;
 
+const strings = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((each) => typeof each === "string")
+    ? value
+    : undefined;
+
 /** A tsconfig's `grasp`: its kind of code, and what it may import. */
 const graspOf = (
   value: unknown
-): { kind: Kind; allowed: ReadonlySet<string> | undefined } | undefined => {
+): { kind: Kind; allowed: readonly string[] | undefined } | undefined => {
   const kind = fieldOf(value, "kind");
   const allowed = fieldOf(value, "allowed");
   const known =
@@ -94,10 +127,8 @@ const graspOf = (
   if (allowed === undefined) {
     return { kind: known, allowed: undefined };
   }
-  return Array.isArray(allowed) &&
-    allowed.every((name) => typeof name === "string")
-    ? { kind: known, allowed: new Set<string>(allowed) }
-    : undefined;
+  const names = strings(allowed);
+  return names === undefined ? undefined : { kind: known, allowed: names };
 };
 
 const root = path.dirname(import.meta.dirname);
@@ -106,294 +137,612 @@ const root = path.dirname(import.meta.dirname);
 const relativeTo = (dir: string, file: string): string =>
   path.relative(dir, file).split(path.sep).join("/");
 
-const isWithin = (dir: string, file: string): boolean => {
-  const relative = path.relative(dir, file);
-  return (
-    relative !== "" &&
-    relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative) &&
-    !relative.split(path.sep).includes("node_modules")
+/** Where a check's project packages are, for a kind that resolves any of them. */
+const kitRoot = "/node_modules/";
+
+/**
+ * Where they are for a kind that resolves only some: out of reach of
+ * every App file's own lookup, as the platform lays them out
+ * (type-check.ts `hiddenKitRoot`).
+ */
+const hiddenKitRoot = "/.kit/node_modules/";
+
+/** An App file a check reads: TypeScript, declarations included. */
+const checkedFile = /\.tsx?$/u;
+
+/**
+ * The files a check reads, by their path in it: the kind's App files at
+ * `/<path>` (from its tsconfig's directory), files the check writes, and
+ * the project's packages under `kit`, read from `node_modules`. Nothing
+ * else of the project is there: a file beside the App's that the kind
+ * leaves out doesn't exist on the platform either.
+ */
+interface Layout {
+  readonly app: ReadonlyMap<string, string>;
+  readonly written: ReadonlyMap<string, string>;
+  readonly kit: string;
+}
+
+const directoryStat: FileStat = { kind: "d", size: 0, mtimeNs: 0n };
+
+/** A path the check's layout doesn't hold, as tsrs takes one. */
+const missing = (file: string): never => {
+  throw new NotFoundError(file);
+};
+
+/** A directory entry's kind, as tsrs reads it: a link is followed by a stat. */
+const entryKind = (entry: Dirent): "l" | "d" | "f" => {
+  if (entry.isSymbolicLink()) {
+    return "l";
+  }
+  return entry.isDirectory() ? "d" : "f";
+};
+
+/** What the check's `layout` holds, as tsrs reads files: from disk, only where the layout has them. */
+const layoutFileSystem = (layout: Layout): HostFileSystem => {
+  const packages = path.join(root, "node_modules");
+  const own = [...layout.app.keys(), ...layout.written.keys()];
+  /** Every directory that holds a file of the App's, or the check's own, and the kit's way down. */
+  const directories = new Set(["/"]);
+  for (const file of [...own, layout.kit]) {
+    for (
+      let end = file.lastIndexOf("/");
+      end > 0;
+      end = file.lastIndexOf("/", end - 1)
+    ) {
+      directories.add(file.slice(0, end));
+    }
+  }
+  const onDisk = (file: string): string | undefined => {
+    if (file.startsWith(layout.kit)) {
+      return path.join(packages, file.slice(layout.kit.length));
+    }
+    return layout.app.get(file);
+  };
+  return {
+    readFile: (file) => {
+      const text = layout.written.get(file);
+      if (text !== undefined) {
+        return new TextEncoder().encode(text);
+      }
+      const real = onDisk(file) ?? missing(file);
+      try {
+        return readFileSync(real);
+      } catch {
+        return missing(file);
+      }
+    },
+    stat: (file) => {
+      const text = layout.written.get(file);
+      if (text !== undefined) {
+        return { kind: "f", size: text.length, mtimeNs: 0n };
+      }
+      if (directories.has(file.replace(/\/+$/u, "") || "/")) {
+        return directoryStat;
+      }
+      const real = onDisk(file) ?? missing(file);
+      try {
+        const found = statSync(real, { bigint: true });
+        return {
+          kind: found.isDirectory() ? "d" : "f",
+          size: found.size,
+          mtimeNs: found.mtimeNs,
+        };
+      } catch {
+        return missing(file);
+      }
+    },
+    readDir: (dir) => {
+      const at = dir.replace(/\/+$/u, "") || "/";
+      if (`${at}/`.startsWith(layout.kit)) {
+        const real = onDisk(`${at}/`) ?? missing(dir);
+        try {
+          return readdirSync(real, { withFileTypes: true }).map((entry) => [
+            entryKind(entry),
+            entry.name,
+          ]);
+        } catch {
+          return missing(dir);
+        }
+      }
+      const prefix = at === "/" ? "/" : `${at}/`;
+      const entries = new Map<string, "f" | "d">();
+      for (const file of [...own, layout.kit]) {
+        if (file.startsWith(prefix)) {
+          const [name = "", ...rest] = file.slice(prefix.length).split("/");
+          if (name !== "") {
+            entries.set(name, rest.length > 0 ? "d" : "f");
+          }
+        }
+      }
+      return [...entries].map(([name, kind]) => [kind, name]);
+    },
+    realpath: (file) => file,
+    writeFile: () => {
+      // Nothing is emitted.
+    },
+    remove: () => {
+      // Nothing is emitted.
+    },
+    chtimes: () => {
+      // Nothing is emitted.
+    },
+  };
+};
+
+/** One run of tsc over `layout`: its exit, its diagnostics, and what it said. */
+const runOver = (
+  tsrs: WebAssembly.Module,
+  layout: Layout,
+  args: readonly string[]
+): {
+  exitCode: number;
+  diagnostics: Diagnostic[];
+  stdout: string;
+  stderr: string;
+} => {
+  const decoder = new TextDecoder();
+  let stdout = "";
+  let stderr = "";
+  const { exitCode, reply } = runTsc(
+    tsrs,
+    makeRequest(["-p", "/tsconfig.json", ...args], { cwd: "/", json: true }),
+    layoutFileSystem(layout),
+    {
+      env: {},
+      stdout: (chunk) => {
+        stdout += decoder.decode(chunk, { stream: true });
+      },
+      stderr: (chunk) => {
+        stderr += decoder.decode(chunk, { stream: true });
+      },
+    }
   );
+  let diagnostics: Diagnostic[] = [];
+  try {
+    diagnostics = parseReply(reply);
+  } catch {
+    // Unreadable: no diagnostics, so a failure below says it ran wrong.
+  }
+  return { exitCode, diagnostics, stdout, stderr };
+};
+
+/** What tsc's trace says a module name resolved to: `======== Module name 'x' was successfully resolved to '/y'. ========`. */
+const resolvedTrace =
+  /^======== Module name '(?<name>[^']+)' was successfully resolved to '(?<file>[^']+)'/u;
+
+/**
+ * Where each of `allowed` resolves among the project's packages, as tsc
+ * resolves it from an App file and reports it in its trace: what the
+ * check maps them to (`paths`) once the packages are out of the App's
+ * reach, as the platform's are (type-check.ts `KitTypes.resolved`).
+ */
+const resolvedNames = (
+  tsrs: WebAssembly.Module,
+  options: Readonly<Record<string, unknown>>,
+  allowed: readonly string[]
+): Map<string, string> => {
+  const probe = "/probe.ts";
+  const { stdout } = runOver(
+    tsrs,
+    {
+      app: new Map(),
+      written: new Map([
+        [
+          probe,
+          allowed
+            .map((name) => `import type * as _ from ${JSON.stringify(name)};`)
+            .join("\n"),
+        ],
+        [
+          "/tsconfig.json",
+          JSON.stringify({
+            compilerOptions: { ...options, paths: {}, noEmit: true },
+            files: [`.${probe}`],
+          }),
+        ],
+      ]),
+      kit: kitRoot,
+    },
+    ["--traceResolution"]
+  );
+  const resolved = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const groups = resolvedTrace.exec(line)?.groups;
+    if (
+      groups?.name !== undefined &&
+      groups.file?.startsWith(kitRoot) === true
+    ) {
+      resolved.set(groups.name, groups.file);
+    }
+  }
+  return resolved;
+};
+
+/** 1-based line and column of `position` in `text`. */
+const lineAndColumn = (
+  text: string,
+  position: number
+): { line: number; column: number } => {
+  const before = text.slice(0, position).split(/\r\n?|[\n\u2028\u2029]/u);
+  return { line: before.length, column: (before.at(-1)?.length ?? 0) + 1 };
 };
 
 const problemAt = (
-  file: ts.SourceFile,
+  file: string,
+  text: string,
   position: number,
   code: string,
   message: string
-): Problem => {
-  const { line, character } = file.getLineAndCharacterOfPosition(position);
-  return {
-    file: file.fileName,
-    line: line + 1,
-    column: character + 1,
-    code,
-    message,
-  };
+): Problem => ({ file, ...lineAndColumn(text, position), code, message });
+
+/** Keywords after which a `/` starts a regular expression, never a division. */
+const beforeExpression: ReadonlySet<SyntaxKind> = new Set([
+  SyntaxKind.ReturnKeyword,
+  SyntaxKind.TypeOfKeyword,
+  SyntaxKind.InstanceOfKeyword,
+  SyntaxKind.InKeyword,
+  SyntaxKind.OfKeyword,
+  SyntaxKind.NewKeyword,
+  SyntaxKind.DeleteKeyword,
+  SyntaxKind.VoidKeyword,
+  SyntaxKind.ThrowKeyword,
+  SyntaxKind.CaseKeyword,
+  SyntaxKind.DoKeyword,
+  SyntaxKind.ElseKeyword,
+  SyntaxKind.YieldKeyword,
+  SyntaxKind.AwaitKeyword,
+]);
+
+/** Tokens a value can end on, after which a `/` divides. */
+const endsValue = (token: SyntaxKind): boolean =>
+  (tokenIsIdentifierOrKeyword(token) && !beforeExpression.has(token)) ||
+  token === SyntaxKind.NumericLiteral ||
+  token === SyntaxKind.BigIntLiteral ||
+  token === SyntaxKind.StringLiteral ||
+  token === SyntaxKind.NoSubstitutionTemplateLiteral ||
+  token === SyntaxKind.TemplateTail ||
+  token === SyntaxKind.CloseParenToken ||
+  token === SyntaxKind.CloseBracketToken ||
+  token === SyntaxKind.CloseBraceToken ||
+  token === SyntaxKind.PlusPlusToken ||
+  token === SyntaxKind.MinusMinusToken;
+
+/**
+ * `token` as the scanner reads it in its context, which a scanner alone
+ * doesn't know: a `/` after what can't end a value starts a regular
+ * expression, and the `}` that closes a template's `${` goes on with the
+ * template. `braces` follows what each open `{` is.
+ */
+const inContext = (
+  scanner: Scanner,
+  token: SyntaxKind,
+  previous: SyntaxKind,
+  braces: ("block" | "template")[]
+): SyntaxKind => {
+  let read = token;
+  if (
+    (token === SyntaxKind.SlashToken ||
+      token === SyntaxKind.SlashEqualsToken) &&
+    !endsValue(previous)
+  ) {
+    read = scanner.reScanSlashToken();
+  } else if (token === SyntaxKind.CloseBraceToken) {
+    read =
+      braces.pop() === "template" ? scanner.reScanTemplateToken(false) : token;
+  }
+  if (read === SyntaxKind.OpenBraceToken) {
+    braces.push("block");
+  } else if (
+    read === SyntaxKind.TemplateHead ||
+    read === SyntaxKind.TemplateMiddle
+  ) {
+    braces.push("template");
+  }
+  return read;
 };
 
-/** Every comment in `file`: each token's leading and trailing trivia. */
-const commentsOf = (file: ts.SourceFile): ts.CommentRange[] => {
-  const text = file.getFullText();
-  const found = new Map<number, ts.CommentRange>();
-  const visit = (node: ts.Node): void => {
-    for (const range of [
-      ...(ts.getLeadingCommentRanges(text, node.getFullStart()) ?? []),
-      ...(ts.getTrailingCommentRanges(text, node.getEnd()) ?? []),
-    ]) {
-      found.set(range.pos, range);
-    }
-    for (const child of node.getChildren(file)) {
-      // A JSDoc comment is a comment, already found: what it holds isn't.
-      if (
-        child.kind < ts.SyntaxKind.FirstJSDocNode ||
-        child.kind > ts.SyntaxKind.LastJSDocNode
-      ) {
-        visit(child);
-      }
-    }
-  };
-  visit(file);
-  return [...found.values()].toSorted((a, b) => a.pos - b.pos);
+/** Tokens that are no part of the code: whitespace and comments. */
+const trivia: ReadonlySet<SyntaxKind> = new Set([
+  SyntaxKind.WhitespaceTrivia,
+  SyntaxKind.NewLineTrivia,
+  SyntaxKind.SingleLineCommentTrivia,
+  SyntaxKind.MultiLineCommentTrivia,
+]);
+
+/**
+ * Why the scanner's `token`, after the two tokens `before` it, steers
+ * the check, or undefined when it doesn't: a comment TypeScript obeys as
+ * a directive (steering.ts, as the platform reads them), an ambient
+ * module's name (`module "x"`), or `declare global`.
+ */
+const steeringSaid = (
+  scanner: Scanner,
+  token: SyntaxKind,
+  [beforePrevious, previous]: readonly SyntaxKind[]
+): string | undefined => {
+  if (
+    token === SyntaxKind.SingleLineCommentTrivia ||
+    token === SyntaxKind.MultiLineCommentTrivia
+  ) {
+    const line = token === SyntaxKind.SingleLineCommentTrivia;
+    const directive = directiveIn(
+      line ? "line" : "block",
+      scanner.getTokenText().slice(2, line ? undefined : -2)
+    );
+    return directive === undefined
+      ? undefined
+      : `${directive} is never in this code: its type check is the platform's, as it is.`;
+  }
+  if (
+    token === SyntaxKind.StringLiteral &&
+    previous === SyntaxKind.ModuleKeyword &&
+    beforePrevious !== SyntaxKind.DotToken &&
+    beforePrevious !== SyntaxKind.QuestionDotToken
+  ) {
+    return `declare module ${scanner.getTokenText()} is never in this code: it would declare, or shadow, a module the SDK doesn't give it.`;
+  }
+  if (
+    token === SyntaxKind.GlobalKeyword &&
+    previous === SyntaxKind.DeclareKeyword
+  ) {
+    return "declare global is never in this code: it would declare globals its isolate doesn't have, for every file.";
+  }
+  return undefined;
 };
 
 /**
- * What in `file` would steer the check rather than be checked by it: a
- * comment TypeScript obeys as a directive (steering.ts, as the platform
- * reads them), and an ambient module or global declaration.
+ * What in `text` (a `.ts` file: no JSX) would steer the check rather than
+ * be checked by it, found by TypeScript 7's scanner as it tokenizes the
+ * file: a comment TypeScript obeys as a directive (steering.ts, as the
+ * platform reads them), and an ambient module or global declaration.
  */
-const steeringIn = (file: ts.SourceFile): Problem[] => {
-  const text = file.getFullText();
-  const directives = commentsOf(file).flatMap(({ kind, pos, end }) => {
-    const line = kind === ts.SyntaxKind.SingleLineCommentTrivia;
-    const directive = directiveIn(
-      line ? "line" : "block",
-      text.slice(pos + 2, line ? end : end - 2)
+const steeringIn = (file: string, text: string): Problem[] => {
+  const found: Problem[] = [];
+  const scanner = createScanner(false, undefined, text);
+  // What each open `{` is: a block's, or a template's `${`.
+  const braces: ("block" | "template")[] = [];
+  // The last two tokens that aren't trivia.
+  const before: SyntaxKind[] = [SyntaxKind.Unknown, SyntaxKind.Unknown];
+  for (
+    let scanned = scanner.scan();
+    scanned !== SyntaxKind.EndOfFile;
+    scanned = scanner.scan()
+  ) {
+    const token = inContext(
+      scanner,
+      scanned,
+      before[1] ?? SyntaxKind.Unknown,
+      braces
     );
-    return directive === undefined
+    const at = scanner.getTokenStart();
+    const said = steeringSaid(scanner, token, before);
+    if (said !== undefined) {
+      found.push(problemAt(file, text, at, "steering", said));
+    }
+    if (!trivia.has(token)) {
+      before.shift();
+      before.push(token);
+    }
+  }
+  return found;
+};
+
+/**
+ * The one triple-slash directive an App file may hold: a lowercase
+ * `/// <reference path="…" />` (imports.ts `ownReference`).
+ */
+const ownReference =
+  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
+
+/**
+ * What `file`'s triple-slash directives, which TypeScript reads at its
+ * top, reach beyond the App's files (`app`, by their path in the check):
+ * only a reference path to one of them, nothing else (imports.ts
+ * `referenceError`).
+ */
+const referencesIn = (
+  file: string,
+  inCheck: string,
+  text: string,
+  app: ReadonlyMap<string, string>
+): Problem[] =>
+  (getLeadingCommentRanges(text, 0) ?? []).flatMap(({ pos, end }) => {
+    const comment = text.slice(pos, end);
+    if (!comment.startsWith("///")) {
+      return [];
+    }
+    const groups = ownReference.exec(comment)?.groups;
+    if (groups === undefined) {
+      return [
+        problemAt(
+          file,
+          text,
+          pos,
+          "imports",
+          `${comment.trim()} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`
+        ),
+      ];
+    }
+    const name = groups.double ?? groups.single ?? "";
+    const named = path.posix.resolve(path.posix.dirname(inCheck), name);
+    return app.has(named)
       ? []
       : [
           problemAt(
             file,
+            text,
             pos,
-            "steering",
-            `${directive} is never in this code: its type check is the platform's, as it is.`
+            "imports",
+            `"${name}" is not one of the App's files: a reference path names only those.`
           ),
         ];
   });
-  const ambient: Problem[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isModuleDeclaration(node)) {
-      if (ts.isStringLiteral(node.name)) {
-        ambient.push(
-          problemAt(
-            file,
-            node.getStart(file),
-            "steering",
-            `declare module "${node.name.text}" is never in this code: it would declare, or shadow, a module the SDK doesn't give it.`
-          )
-        );
-      } else if (node.name.text === "global") {
-        ambient.push(
-          problemAt(
-            file,
-            node.getStart(file),
-            "steering",
-            "declare global is never in this code: it would declare globals its isolate doesn't have, for every file."
-          )
-        );
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return [...directives, ...ambient];
-};
 
-/**
- * What `file`'s triple-slash directives reach beyond the App's files
- * (`app`): a reference path only to one of them, no type package and no
- * lib (imports.ts `referenceError`).
- */
-const referencesIn = (
-  file: ts.SourceFile,
-  app: ReadonlySet<string>
-): Problem[] => [
-  ...file.referencedFiles
-    .filter(
-      ({ fileName }) =>
-        !app.has(path.resolve(path.dirname(file.fileName), fileName))
-    )
-    .map(({ fileName, pos }) =>
-      problemAt(
-        file,
-        pos,
-        "imports",
-        `"${fileName}" is not one of the App's files: a reference path names only those.`
-      )
+/** A diagnostic's message and its chain, as TypeScript flattens them, one level of indent each. */
+const flattened = (diagnostic: Diagnostic, indent = 0): string =>
+  [
+    indent === 0 ? "" : `\n${"  ".repeat(indent)}`,
+    diagnostic.text,
+    ...(diagnostic.messageChain ?? []).map((next) =>
+      flattened(next, indent + 1)
     ),
-  ...file.typeReferenceDirectives.map(({ fileName, pos }) =>
-    problemAt(
-      file,
-      pos,
-      "imports",
-      `"${fileName}": App files reference no type packages; import what the kit has instead.`
-    )
-  ),
-  ...file.libReferenceDirectives.map(({ fileName, pos }) =>
-    problemAt(
-      file,
-      pos,
-      "imports",
-      `"${fileName}": App files reference no libs; their target's lib is the one they run with.`
-    )
-  ),
-];
+  ].join("");
 
-const fromDiagnostic = (diagnostic: ts.Diagnostic): Problem | undefined => {
-  if (diagnostic.category !== ts.DiagnosticCategory.Error) {
-    return undefined;
-  }
-  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-  const { file, start } = diagnostic;
-  if (file === undefined || start === undefined) {
-    return {
-      file: file?.fileName,
-      line: undefined,
-      column: undefined,
-      code: `TS${diagnostic.code}`,
-      message,
-    };
-  }
-  return problemAt(file, start, `TS${diagnostic.code}`, message);
+/** The files a tsconfig's `include` and `exclude` name, from `dir`, outside `node_modules`. */
+const filesOf = (dir: string, config: unknown): string[] => {
+  const excluded = new Set(
+    globSync(strings(fieldOf(config, "exclude")) ?? [], { cwd: dir })
+  );
+  return globSync(strings(fieldOf(config, "include")) ?? [], { cwd: dir })
+    .filter((file) => checkedFile.test(file) && !excluded.has(file))
+    .map((file) => file.split(path.sep).join("/"))
+    .filter((file) => !file.split("/").includes("node_modules"))
+    .toSorted();
 };
 
 /** A tsconfig finding no files: a kind the App has none of. */
-const noInputs = 18_003;
+const configProblem = (config: string): Problem[] => [
+  {
+    file: config,
+    line: undefined,
+    column: undefined,
+    code: "config",
+    message: "This isn't a tsconfig the project's check reads.",
+  },
+];
 
 /** Checks one kind of code by its tsconfig, `config` from the root. */
-const checkKind = (config: string): Problem[] => {
+const checkKind = (tsrs: WebAssembly.Module, config: string): Problem[] => {
   const configPath = path.resolve(root, config);
-  const read = ts.readConfigFile(configPath, (file) =>
-    readFileSync(file, "utf-8")
-  );
   const dir = path.dirname(configPath);
-  const grasp = graspOf(fieldOf(read.config, "grasp"));
-  if (read.error !== undefined || grasp === undefined) {
+  let read: unknown;
+  try {
+    read = JSON.parse(readFileSync(configPath, "utf-8"));
+  } catch {
+    return configProblem(config);
+  }
+  const grasp = graspOf(fieldOf(read, "grasp"));
+  const given = fieldOf(read, "compilerOptions");
+  if (grasp === undefined || typeof given !== "object" || given === null) {
+    return configProblem(config);
+  }
+  const options: Readonly<Record<string, unknown>> = Object.fromEntries(
+    Object.entries(given)
+  );
+  const files = filesOf(dir, read);
+  if (files.length === 0) {
+    return [];
+  }
+  const { kind, allowed } = grasp;
+  const shown = (file: string): string =>
+    relativeTo(root, path.join(dir, file));
+  const texts = new Map(
+    files.map((file) => [file, readFileSync(path.join(dir, file), "utf-8")])
+  );
+  // Code that steers the check never reaches it on the platform: its build
+  // refuses it first, so a `/// <reference lib="dom" />` in one file can't
+  // give every other file the DOM here either.
+  const steering = files
+    .filter((file) => kind.steered(file) && !file.endsWith(".tsx"))
+    .flatMap((file) => steeringIn(shown(file), texts.get(file) ?? ""));
+  if (steering.length > 0) {
+    return steering;
+  }
+  const app = new Map(files.map((file) => [`/${file}`, path.join(dir, file)]));
+  const references = files.flatMap((file) =>
+    referencesIn(shown(file), `/${file}`, texts.get(file) ?? "", app)
+  );
+  const kit = allowed === undefined ? kitRoot : hiddenKitRoot;
+  const paths: Record<string, unknown> = {};
+  if (allowed !== undefined) {
+    for (const [name, file] of resolvedNames(tsrs, options, allowed)) {
+      paths[name] = [`.${hiddenKitRoot}${file.slice(kitRoot.length)}`];
+    }
+  }
+  Object.assign(paths, fieldOf(options, "paths") ?? {});
+  const { exitCode, diagnostics, stderr } = runOver(
+    tsrs,
+    {
+      app,
+      written: new Map([
+        [
+          "/tsconfig.json",
+          JSON.stringify({
+            compilerOptions: {
+              ...options,
+              paths,
+              skipLibCheck: !files.some((file) => file.endsWith(".d.ts")),
+            },
+            files: files.map((file) => `./${file}`),
+          }),
+        ],
+      ]),
+      kit,
+    },
+    []
+  );
+  const said = stderr.trim().split("\n")[0] ?? "";
+  if (
+    exitCode === EXIT_CRASHED ||
+    exitCode > 2 ||
+    (exitCode !== 0 && !diagnostics.some(({ category }) => category === 1))
+  ) {
     return [
       {
         file: config,
         line: undefined,
         column: undefined,
-        code: "config",
-        message: "This isn't a tsconfig the project's check reads.",
+        code: "check",
+        message: `The type check couldn't run (tsc exited with ${exitCode})${said === "" ? "" : `: ${said}`}.`,
       },
     ];
   }
-  const parsed = ts.parseJsonConfigFileContent(
-    read.config,
-    ts.sys,
-    dir,
-    undefined,
-    configPath
-  );
-  const errors = parsed.errors.filter(({ code }) => code !== noInputs);
-  if (errors.length > 0 || parsed.fileNames.length === 0) {
-    return errors.flatMap((diagnostic) => fromDiagnostic(diagnostic) ?? []);
-  }
-  const { kind, allowed } = grasp;
-  // Code that steers the check never reaches it on the platform: its build
-  // refuses it first, so a `/// <reference lib="dom" />` in one file can't
-  // give every other file the DOM here either.
-  const steering = parsed.fileNames
-    .filter((file) => kind.steered(relativeTo(dir, file)))
-    .flatMap((file) =>
-      steeringIn(
-        ts.createSourceFile(
-          file,
-          readFileSync(file, "utf-8"),
-          ts.ScriptTarget.Latest,
-          true
-        )
-      )
-    );
-  if (steering.length > 0) {
-    return steering;
-  }
-  const app = new Set(parsed.fileNames.map((file) => path.resolve(file)));
-  const mapped = new Set(Object.keys(parsed.options.paths ?? {}));
-  const host = ts.createCompilerHost(parsed.options);
-  const cache = ts.createModuleResolutionCache(
-    dir,
-    (file) => host.getCanonicalFileName(file),
-    parsed.options
-  );
-  // As the platform resolves an App file's imports (type-check.ts
-  // `resolvesWithin`): an App file by a relative path or a mapping, a
-  // module by name only when its kind may import it. The packages' own
-  // imports resolve as TypeScript does.
-  host.resolveModuleNameLiterals = (
-    literals,
-    containingFile,
-    redirectedReference,
-    options
-  ) =>
-    literals.map(({ text }) => {
-      const { resolvedModule } = ts.resolveModuleName(
-        text,
-        containingFile,
-        options,
-        host,
-        cache,
-        redirectedReference
-      );
-      if (resolvedModule === undefined || !isWithin(dir, containingFile)) {
-        return { resolvedModule };
-      }
-      const resolved = path.resolve(resolvedModule.resolvedFileName);
-      // A file beside the App's that this check leaves out (a workflow's
-      // `.d.ts`, a server file a screen names) isn't one the platform
-      // gives this kind of code: it doesn't exist there.
-      if (isWithin(dir, resolved) && !app.has(resolved)) {
-        return { resolvedModule: undefined };
-      }
-      if (allowed === undefined) {
-        return { resolvedModule };
-      }
-      const within = app.has(resolved)
-        ? text.startsWith("./") || text.startsWith("../") || mapped.has(text)
-        : allowed.has(text);
-      return { resolvedModule: within ? resolvedModule : undefined };
-    });
-  const program = ts.createProgram(parsed.fileNames, parsed.options, host);
-  const checked = program
-    .getSourceFiles()
-    .filter((file) => app.has(path.resolve(file.fileName)))
-    .filter((file) => kind.reports(relativeTo(dir, file.fileName)));
-  const found = [
-    ...program.getOptionsDiagnostics(),
-    ...program.getGlobalDiagnostics(),
-    ...checked.flatMap((file) =>
-      kind.lenient(relativeTo(dir, file.fileName))
-        ? []
-        : [
-            ...program.getSyntacticDiagnostics(file),
-            ...program.getSemanticDiagnostics(file),
-          ]
-    ),
-  ].flatMap((diagnostic) => fromDiagnostic(diagnostic) ?? []);
-  return [...found, ...checked.flatMap((file) => referencesIn(file, app))];
+  const found = diagnostics.flatMap((diagnostic): Problem[] => {
+    const { fileName } = diagnostic;
+    if (diagnostic.category !== 1 || fileName?.startsWith(kit) === true) {
+      return [];
+    }
+    const message = flattened(diagnostic).replaceAll(kit, kitRoot);
+    const code = `TS${diagnostic.code}`;
+    const file = fileName === undefined ? undefined : fileName.slice(1);
+    if (file === undefined || !texts.has(file)) {
+      return [
+        { file: config, line: undefined, column: undefined, code, message },
+      ];
+    }
+    if (!kind.reports(file) || kind.lenient(file)) {
+      return [];
+    }
+    return [
+      diagnostic.startPosition === undefined
+        ? problemAt(
+            shown(file),
+            texts.get(file) ?? "",
+            diagnostic.pos,
+            code,
+            message
+          )
+        : {
+            file: shown(file),
+            line: diagnostic.startPosition.line + 1,
+            column: diagnostic.startPosition.character + 1,
+            code,
+            message,
+          },
+    ];
+  });
+  return [...found, ...references];
 };
 
 /** The tsconfigs the root tsconfig.json lists, one a kind of code. */
 const configs = (): string[] => {
-  const read = ts.readConfigFile(path.join(root, "tsconfig.json"), (file) =>
-    readFileSync(file, "utf-8")
+  const read: unknown = JSON.parse(
+    readFileSync(path.join(root, "tsconfig.json"), "utf-8")
   );
-  const references = fieldOf(read.config, "references");
-  if (read.error !== undefined || !Array.isArray(references)) {
-    throw new Error("tsconfig.json lists no tsconfigs to check.");
+  const references = fieldOf(read, "references");
+  if (!Array.isArray(references)) {
+    throw new TypeError("tsconfig.json lists no tsconfigs to check.");
   }
   return references.map((reference: unknown) => {
     const configPath = fieldOf(reference, "path");
@@ -404,14 +753,46 @@ const configs = (): string[] => {
   });
 };
 
-const problems = configs().flatMap((config) => checkKind(config));
-for (const { file, line, column, code, message } of problems) {
-  const where =
-    file === undefined
-      ? ""
-      : `${relativeTo(root, path.resolve(root, file))}${line === undefined ? "" : `(${line},${column})`}: `;
-  process.stderr.write(`${where}error ${code}: ${message}\n`);
-}
-if (problems.length > 0) {
-  process.exitCode = 1;
+/** Every kind's problems, printed as tsc prints them. */
+const checkAll = (): void => {
+  // Made as Node makes a module; the Workers types the platform's code is
+  // checked with type the class as one only the runtime makes.
+  const tsrs: unknown = Reflect.construct(WebAssembly.Module, [
+    readFileSync(
+      realpathSync(path.join(root, "node_modules/@tsrs/wasm/tsrs.wasm"))
+    ),
+  ]);
+  if (!(tsrs instanceof WebAssembly.Module)) {
+    throw new TypeError("tsrs's WebAssembly didn't compile.");
+  }
+  const problems = configs().flatMap((config) => checkKind(tsrs, config));
+  for (const { file, line, column, code, message } of problems) {
+    const where =
+      file === undefined
+        ? ""
+        : `${relativeTo(root, path.resolve(root, file))}${line === undefined ? "" : `(${line},${column})`}: `;
+    process.stderr.write(`${where}error ${code}: ${message}\n`);
+  }
+  // A worker thread's port, not a window's: it takes no origin.
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- see above
+  parentPort?.postMessage(problems.length > 0 ? 1 : 0);
+};
+
+if (isMainThread) {
+  // The checker recurses deeply, and each WebAssembly frame takes the
+  // engine's own stack: a worker gets one as deep as tsrs's own runs do.
+  const worker = new Worker(import.meta.filename, {
+    resourceLimits: { stackSizeMb: 256 },
+  });
+  worker.on("message", (code: unknown) => {
+    process.exitCode = typeof code === "number" ? code : 1;
+  });
+  worker.on("error", (error: unknown) => {
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`
+    );
+    process.exitCode = 1;
+  });
+} else {
+  checkAll();
 }

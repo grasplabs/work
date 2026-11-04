@@ -109,7 +109,15 @@ const vendored = [
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = ["react", "react-dom"] as const;
+/**
+ * Its own development tools, each pinned as the catalog pins it: the
+ * checker the platform type-checks App code with (`@tsrs/wasm`, the
+ * compiler's), which its check runs (`grasp/check.ts`), and the
+ * TypeScript an editor reads it with, the repo's, whose scanner that
+ * check reads comments with.
+ */
 const projectDevDependencies = [
+  "@tsrs/wasm",
   "typescript",
   "@types/react",
   "@types/react-dom",
@@ -282,29 +290,6 @@ const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
     return refuse(`${name}: the catalog pins no exact version of it.`);
   }
   return version;
-};
-
-/**
- * The TypeScript the platform type-checks App code with: the compiler's
- * own, as its package names it from the catalog (`catalog:typescript6`),
- * exactly. TypeScript 7, the repo's toolchain, has no JavaScript API.
- */
-const platformTypescript = (repo: string, catalogText: string): string => {
-  const spec = z
-    .object({ dependencies: z.object({ typescript: z.string() }) })
-    .parse(
-      JSON.parse(
-        readFileSync(path.join(repo, "packages/compiler/package.json"), "utf-8")
-      )
-    ).dependencies.typescript;
-  const named = /^catalog:(?<name>.*)$/u.exec(spec)?.groups?.name;
-  if (named === undefined) {
-    return refuse("The compiler names TypeScript by no catalog.");
-  }
-  return pinned(
-    readCatalog(catalogText, named === "" ? undefined : named),
-    "typescript"
-  );
 };
 
 const packageJsonSchema = z.looseObject({
@@ -947,13 +932,16 @@ export const planProject = async (
       vendoring
     );
   }
-  const typescriptVersion = platformTypescript(input.repo, catalogText);
   for (const name of [...projectDependencies, ...projectDevDependencies]) {
     notices.push({
       name,
-      version:
-        name === "typescript" ? typescriptVersion : pinned(catalog, name),
-      licence: installedLicence(input.repo, "sdk", name),
+      version: pinned(catalog, name),
+      // The checker is the compiler's; the rest the SDK's, or the repo's.
+      licence: installedLicence(
+        input.repo,
+        name === "@tsrs/wasm" ? "compiler" : "sdk",
+        name
+      ),
       from: "the project",
     });
   }
@@ -970,10 +958,7 @@ export const planProject = async (
       ...pins.direct,
       ...pinnedAll(projectDependencies),
     },
-    devDependencies: {
-      ...pinnedAll(projectDevDependencies),
-      typescript: typescriptVersion,
-    },
+    devDependencies: pinnedAll(projectDevDependencies),
     peerDependencies: {},
   };
   importers["."] = root;
