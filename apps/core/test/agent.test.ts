@@ -233,6 +233,16 @@ const refusalsIn = async (chatId: string, reason: string) => {
     }));
 };
 
+/** What a turn logs of its prompt cache as it ends. */
+const turnCacheSchema = z.object({
+  event: z.literal("chat.turn_cache"),
+  chatId: z.string(),
+  requests: z.number(),
+  inputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  share: z.unknown(),
+});
+
 /** The one warning a call from an ended run logs. */
 const runEndedSchema = z.object({
   event: z.literal("agent.run_ended"),
@@ -1217,6 +1227,72 @@ describe("chat agent turns", () => {
       codeOf(stub.ask(chat.id, { text: "Hi.", model: "openai/gpt-5.4" }))
     ).resolves.toBe("model.not_allowed");
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
+  });
+
+  it("keys a chat's requests to its prompt cache, and records what each request and turn read from it", async () => {
+    const logged = vi.spyOn(console, "info");
+    const openai = "openai/gpt-5.4";
+    const { stub, chat, personId, provider } = await newChatOn(
+      [model, openai],
+      { ...says("Hi."), cache: { read: 900, write: 100 } },
+      says("Hi again.")
+    );
+    await stub.ask(chat.id, { text: "Hi.", model });
+    await stub.ask(chat.id, { text: "Hi again.", model: openai });
+
+    // OpenAI's responses carry the chat as their cache key. (Anthropic's
+    // cache markers are pi's default either way; its session headers stop
+    // at connect.)
+    const responses = provider.requests.at(-1);
+    expect({
+      responses:
+        responses && new URL(responses.url).pathname.endsWith("/responses"),
+      key: z
+        .looseObject({ prompt_cache_key: z.string() })
+        .parse(responses?.body).prompt_cache_key,
+    }).toStrictEqual({ responses: true, key: chat.id });
+    const calls = await modelCallsBy(personId, 2);
+    expect(
+      calls.map(({ model: used, detail }) => ({
+        inputTokens: used?.inputTokens,
+        cacheReadTokens: detail.cacheReadTokens,
+        cacheWriteTokens: detail.cacheWriteTokens,
+      }))
+    ).toStrictEqual([
+      // The cache's tokens are among the prompt's.
+      { inputTokens: 1200, cacheReadTokens: 900, cacheWriteTokens: 100 },
+      { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+
+    // A turn cancelled before the provider counted anything adds no
+    // request to the turn's record, so it records none.
+    const cancelled = await newChat({ hang: true });
+    const reply = cancelled.ask("Take your time.");
+    await vi.waitFor(
+      () => {
+        expect(cancelled.provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    await cancelled.stub.cancel(cancelled.chat.id, cancelled.personId);
+    await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
+    const turnsOf = (chatId: string) =>
+      logged.mock.calls
+        .map(([entry]: unknown[]) => turnCacheSchema.safeParse(entry))
+        .flatMap((parsed) =>
+          parsed.success && parsed.data.chatId === chatId ? [parsed.data] : []
+        )
+        .map(({ event: _event, chatId: _chat, ...turn }) => turn);
+    expect({
+      cached: turnsOf(chat.id),
+      cancelled: turnsOf(cancelled.chat.id),
+    }).toStrictEqual({
+      cached: [
+        { requests: 1, inputTokens: 1200, cacheReadTokens: 900, share: 0.75 },
+        { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
+      ],
+      cancelled: [],
+    });
   });
 
   it("stops acting for a person who has left", async () => {

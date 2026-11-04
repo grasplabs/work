@@ -114,7 +114,11 @@ import {
 } from "./model-transport-connect.ts";
 import type { ConnectTarget } from "./model-transport-connect.ts";
 import { failureOfResponse, streamRoute } from "./model-transport.ts";
-import type { TransportFailure, TransportRoute } from "./model-transport.ts";
+import type {
+  RequestCache,
+  TransportFailure,
+  TransportRoute,
+} from "./model-transport.ts";
 import {
   charactersOf,
   hearingPricesOf,
@@ -598,7 +602,7 @@ const parseOutput = <Output>(
 };
 
 /** Tokens the prompt took, cached or not. */
-const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
+export const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
   input + cacheRead + cacheWrite;
 
 const costOf = ({ cost }: Usage): number =>
@@ -1376,7 +1380,11 @@ const notedFailure = (
 const open = async (
   route: Route,
   context: TranscriptContext,
-  { signal, endsAt }: { signal: AbortSignal; endsAt: number }
+  {
+    signal,
+    endsAt,
+    cache,
+  }: { signal: AbortSignal; endsAt: number; cache?: RequestCache }
 ) => {
   const { endpoint, call } = route;
   const response: GatewayResponse = {
@@ -1523,6 +1531,7 @@ const open = async (
     // Without a level pi turns reasoning off.
     reasoning: thinkingOf(model, call.effort),
     signal,
+    cache,
     onResponse: ({ status, headers }) => {
       response.status = status;
       response.logId = endpoint.logIdOf(headers);
@@ -1682,7 +1691,11 @@ type Outcome =
 
 /** What one request used, and cost in US dollars. */
 interface Used {
+  /** The prompt's tokens, the cache's among them. */
   inputTokens: number;
+  /** Of `inputTokens`, those read from and written to the provider's cache. */
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   cost: number;
   /** Whether any of it is an estimate, not the provider's count. */
@@ -1709,6 +1722,8 @@ const usedBy = (
   const { answer, status } = sent;
   const counted = {
     inputTokens: inputTokens(answer.usage),
+    cacheReadTokens: answer.usage.cacheRead,
+    cacheWriteTokens: answer.usage.cacheWrite,
     outputTokens: answer.usage.output,
     cost: pricedCost(price, answer.usage),
   };
@@ -1724,6 +1739,8 @@ const usedBy = (
   const { usage } = answer;
   const { cost: rates } = ref.catalog;
   return {
+    ...counted,
+    // The estimate is of the prompt's own tokens, never the cache's.
     inputTokens: counted.inputTokens + input,
     outputTokens: counted.outputTokens + output,
     // At the pinned prices, in the tier the count and the estimate reach
@@ -1926,6 +1943,10 @@ const auditEntry = (
       purpose: call.purpose,
       outcome: recorded.outcome,
       attempt: recorded.attempt,
+      // Of `inputTokens`, what the provider's prompt cache served and
+      // took: the request's cache share is `cacheReadTokens / inputTokens`.
+      cacheReadTokens: recorded.cacheReadTokens,
+      cacheWriteTokens: recorded.cacheWriteTokens,
       status: recorded.status ?? null,
       errorType: recorded.errorType ?? null,
       // Whether its tokens and cost are partly an estimate (`usedBy`).
@@ -1963,6 +1984,8 @@ const auditEntry = (
  */
 const largestRecord: Recorded = {
   inputTokens: Number.MAX_SAFE_INTEGER,
+  cacheReadTokens: Number.MAX_SAFE_INTEGER,
+  cacheWriteTokens: Number.MAX_SAFE_INTEGER,
   outputTokens: Number.MAX_SAFE_INTEGER,
   cost: Number.MAX_VALUE,
   estimated: true,
@@ -3077,7 +3100,8 @@ const relay = async (
   model: Model<Api>,
   context: TranscriptContext,
   out: AssistantMessageEventStream,
-  caller: AbortSignal | undefined
+  caller: AbortSignal | undefined,
+  cache: RequestCache
 ): Promise<void> => {
   if (caller?.aborted === true) {
     // Cancelled before it was sent: nothing to record.
@@ -3113,7 +3137,11 @@ const relay = async (
         env,
         current,
         // oxlint-disable-next-line no-await-in-loop
-        await open(current, context, limit),
+        await open(current, context, {
+          signal: limit.signal,
+          endsAt: limit.endsAt,
+          cache,
+        }),
         out,
         limit
       );
@@ -3133,10 +3161,11 @@ const relayOrFail = async (
   model: Model<Api>,
   context: TranscriptContext,
   out: AssistantMessageEventStream,
-  caller: AbortSignal | undefined
+  caller: AbortSignal | undefined,
+  cache: RequestCache
 ): Promise<void> => {
   try {
-    await relay(env, session, model, context, out, caller);
+    await relay(env, session, model, context, out, caller, cache);
   } catch (error) {
     log.error("model.stream_failed", errorFields(error));
     // Ignored if the loop already has the request's last event.
@@ -3978,7 +4007,12 @@ const agentModel = async (
         provenance: [...new Set([...session.provenance, ...provenance()])],
       };
       // The loop reads the answer from `out` as it streams in.
-      void relayOrFail(env, request, model, context, out, options?.signal);
+      // The loop's prompt cache options reach the provider as pi sets them:
+      // a fallback model's request keeps them too.
+      void relayOrFail(env, request, model, context, out, options?.signal, {
+        sessionId: options?.sessionId,
+        retention: options?.cacheRetention,
+      });
       return out;
     },
   };
