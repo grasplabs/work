@@ -51,6 +51,7 @@ import { z } from "zod";
 import { localStaff } from "../../apps/core/test/sign-in-config.ts";
 import { cookieHeader, origin, sessionOf } from "../seed/local.ts";
 import type { Session } from "../seed/local.ts";
+import { bridgeOrigin } from "./bridge.ts";
 
 /** Why the local core refused or failed something the lab asked. */
 export class CoreCallError extends Error {
@@ -161,17 +162,6 @@ const labCall = async (
   return await response.json();
 };
 
-/**
- * Signs in as the stack's staff member and asks how core reaches its
- * models. Refuses to go on unless core runs on this machine with the fake
- * IdP (scripts/seed/local.ts), so nothing but a local stack is ever used.
- */
-export const openCore = async (): Promise<Core> => {
-  const session = await sessionOf(localStaff, { providerId: "grasp-staff" });
-  const via = labViaSchema.parse(await labCall(session, { action: "via" }));
-  return { session, via };
-};
-
 /** Everyone's interview link, by roster ID. */
 export const linksOf = async (core: Core): Promise<Map<string, string>> => {
   const { links } = labLinksSchema.parse(
@@ -209,6 +199,81 @@ export const ask = async <T>(core: Core, call: Ask<T>): Promise<T> =>
     spent.calls += 1;
     return call.schema.parse(answer.output);
   });
+
+const bridgeStatsSchema = z.looseObject({ calls: z.int() });
+
+/** How many calls the lab's bridge answered so far; none when it isn't running. */
+const bridgeCalls = async (): Promise<number | undefined> => {
+  try {
+    const response = await fetch(new URL("/stats", bridgeOrigin));
+    const stats = bridgeStatsSchema.parse(await response.json());
+    return stats.calls;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Where core's models answer, found by one small call through core's
+ * gateway and whether the bridge counted it. On the subscription unless
+ * `api` is asked for; the lab stops rather than spend on the API by
+ * mistake, or label a run with the wrong one.
+ */
+const throughOf = async (
+  core: Core,
+  api: boolean
+): Promise<"api" | "subscription"> => {
+  const before = await bridgeCalls();
+  if (!api && before === undefined) {
+    throw new CoreCallError(
+      `The lab's bridge isn't running at ${bridgeOrigin}. Start the stack with \`vp run lab:dev\`, which starts it too; or run on the API with --api, which spends money.`,
+      503
+    );
+  }
+  await ask(core, {
+    role: "quick",
+    system: "You check that a line works. Say that it does.",
+    input: "Does this line work?",
+    schema: z.object({ works: z.boolean() }),
+    maxTokens: 64,
+  });
+  const after = await bridgeCalls();
+  const reachedBridge =
+    before !== undefined && after !== undefined && after > before;
+  if (api && reachedBridge) {
+    throw new CoreCallError(
+      "--api was asked for, but core's models answer through the lab's bridge. Start the stack with `vp run dev` for the API.",
+      409
+    );
+  }
+  if (!api && !reachedBridge) {
+    throw new CoreCallError(
+      "Core's models don't answer through the lab's bridge, so this would spend on the API. Start the stack with `vp run lab:dev` instead of `vp run dev`, and give the organization an Anthropic key in Settings that is not a real one.",
+      409
+    );
+  }
+  return api ? "api" : "subscription";
+};
+
+/**
+ * Signs in as the stack's staff member and asks how core reaches its
+ * models. Refuses to go on unless core runs on this machine with the fake
+ * IdP (scripts/seed/local.ts), so nothing but a local stack is ever used.
+ */
+export const openCore = async (
+  options: { api?: boolean } = {}
+): Promise<Core> => {
+  const session = await sessionOf(localStaff, { providerId: "grasp-staff" });
+  const via = labViaSchema.parse(await labCall(session, { action: "via" }));
+  const core: Core = { session, via };
+  try {
+    const through = await throughOf(core, options.api ?? false);
+    return { session, via: { ...via, through } };
+  } catch (error) {
+    session.close();
+    throw error;
+  }
+};
 
 /** A link's secret: what comes after the `#`. */
 export const secretOf = (link: string): string => link.split("#")[1] ?? "";

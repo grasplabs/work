@@ -107,6 +107,44 @@ export const surfacedOf = (
   return { count: asked.length - open.length, of: asked.length, open };
 };
 
+/**
+ * The same, interview by interview, as a number each interview can keep
+ * (`contradictions` in a whole run): of the contradictions both sides of
+ * which were interviewed, in how many is this person's own side, their
+ * belief or the truth as they know it, in Stephen's notes. Over a company
+ * it comes to the share of sides written down; both of a contradiction's
+ * sides written is what `surfacedOf` counts.
+ */
+export const sidesOf = (
+  contradictions: readonly Contradiction[],
+  interviews: readonly JudgedOf[]
+): Map<string, { count: number; of: number }> => {
+  const sides = new Map<string, { count: number; of: number }>();
+  for (const contradiction of contradictions) {
+    const involved = interviews.filter(
+      ({ employee }) =>
+        contradiction.believers[employee] !== undefined ||
+        contradiction.knowers.includes(employee)
+    );
+    const bothSides =
+      involved.some(
+        ({ employee }) => contradiction.believers[employee] !== undefined
+      ) &&
+      involved.some(({ employee }) => contradiction.knowers.includes(employee));
+    if (!bothSides) {
+      continue;
+    }
+    for (const each of involved) {
+      const side = sides.get(each.employee) ?? { count: 0, of: 0 };
+      sides.set(each.employee, {
+        count: side.count + (wroteDown(each, contradiction.fact) ? 1 : 0),
+        of: side.of + 1,
+      });
+    }
+  }
+  return sides;
+};
+
 /** The score line in words, for the report. */
 export const surfacedLine = ({ count, of }: Surfaced): string =>
   of === 0
