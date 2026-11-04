@@ -10,6 +10,7 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { projectCandidateRun } from "./candidate-runs.ts";
+import type { StepError } from "./code.ts";
 import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
@@ -24,6 +25,7 @@ import type {
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import type { SentCalls } from "./sealed-run.ts";
 
 /**
  * Where a run keeps the attempts of its steps tried once (resource-host.ts,
@@ -95,6 +97,18 @@ const keptFailureSchema = z.object({
   message: z.string(),
   code: z.string().optional(),
 });
+
+/** A failure as `keptFailureSchema` keeps it, read back; none if unreadable. */
+const keptFailureOf = (failure: string): StepError | undefined => {
+  const kept = keptFailureSchema.safeParse(JSON.parse(failure)).data;
+  return kept === undefined
+    ? undefined
+    : {
+        name: kept.name,
+        message: kept.message,
+        ...(kept.code === undefined ? {} : { code: kept.code }),
+      };
+};
 
 /**
  * The settled scopes of the run's items and branches (resource-host.ts,
@@ -189,17 +203,92 @@ export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
   },
   failureOf: (key, attempt) => {
     const failure = triedOnceRow(sql, key, attempt)?.failure ?? null;
-    const kept =
-      failure === null
-        ? undefined
-        : keptFailureSchema.safeParse(JSON.parse(failure)).data;
-    return kept === undefined
-      ? undefined
-      : {
-          name: kept.name,
-          message: kept.message,
-          ...(kept.code === undefined ? {} : { code: kept.code }),
-        };
+    return failure === null ? undefined : keptFailureOf(failure);
+  },
+});
+
+/**
+ * Where a sealed build's run keeps the attempts of its steps that sent a
+ * call tried once, and what each failed with (sealed-run.ts, `SentCalls`):
+ * a table of its object's SQLite beside the engine's journal, dropped with
+ * it as `triedOnceTable` is. Only the host writes it, never the run's
+ * code. Marked before the call goes out: the object's output gate holds
+ * the call until the write is durable, so an activation that dies after
+ * the call left, and every one after it, finds the mark.
+ */
+const sentCallsTable = "grasp_sent_calls";
+
+/** One row of `sentCallsTable`, if the table and the row are there. */
+const sentCallRow = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number
+): { sent: number; failure: string | null } | undefined => {
+  const there =
+    sql
+      .exec(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        sentCallsTable
+      )
+      .toArray().length > 0;
+  if (!there) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ sent: number; failure: string | null }>(
+      `SELECT sent, failure FROM ${sentCallsTable} WHERE key = ? AND attempt = ?`,
+      key,
+      attempt
+    )
+    .toArray();
+  return row;
+};
+
+/** Writes an attempt's row of `sentCallsTable`, while the run is there. */
+const writeSentCall = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number,
+  values: { sent: 0 | 1 } | { failure: string }
+): void => {
+  if (!runIsThere(sql)) {
+    return;
+  }
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS ${sentCallsTable} (key TEXT NOT NULL, attempt INTEGER NOT NULL, sent INTEGER NOT NULL DEFAULT 0, failure TEXT, PRIMARY KEY (key, attempt))`
+  );
+  if ("sent" in values) {
+    sql.exec(
+      `INSERT INTO ${sentCallsTable} (key, attempt, sent) VALUES (?, ?, ?) ON CONFLICT (key, attempt) DO UPDATE SET sent = excluded.sent`,
+      key,
+      attempt,
+      values.sent
+    );
+    return;
+  }
+  sql.exec(
+    `INSERT INTO ${sentCallsTable} (key, attempt, failure) VALUES (?, ?, ?) ON CONFLICT (key, attempt) DO UPDATE SET failure = excluded.failure`,
+    key,
+    attempt,
+    values.failure
+  );
+};
+
+/** A sealed run's sent calls, kept with it (`sentCallsTable`). */
+export const sentCallsIn = (sql: SqlStorage): SentCalls => ({
+  markSent: (key, attempt) => {
+    writeSentCall(sql, key, attempt, { sent: 1 });
+  },
+  unmarkSent: (key, attempt) => {
+    writeSentCall(sql, key, attempt, { sent: 0 });
+  },
+  sent: (key, attempt) => sentCallRow(sql, key, attempt)?.sent === 1,
+  keepFailure: (key, attempt, error) => {
+    writeSentCall(sql, key, attempt, { failure: JSON.stringify(error) });
+  },
+  failureOf: (key, attempt) => {
+    const failure = sentCallRow(sql, key, attempt)?.failure ?? null;
+    return failure === null ? undefined : keptFailureOf(failure);
   },
 });
 
@@ -381,6 +470,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           triedOnce: triedOnceIn(this.ctx.storage.sql),
           fences: fencesIn(this.ctx.storage.sql),
           modelCalls: modelCallsIn(this.ctx.storage.sql),
+          sentCalls: sentCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
           ...(this.#activation === undefined

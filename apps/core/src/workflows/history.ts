@@ -71,7 +71,11 @@ import type { RunRow } from "./runs.ts";
 // more attempts of the step that was held, numbered on from its own, and
 // the waits between them as `blocked` waits of it (`outcome_unknown` for
 // an unknown outcome's, which its person resolves), while its held end is
-// no completion. Core's other steps (named `$…`: the parameters, a
+// no completion. A sealed run's step its catch's retry policy runs again
+// (`$grasp:wait:<key>:retry:<round>:…`) is told so too: each round's run
+// more attempts of the step, a round's failure the retry follows as
+// `retrying`, and the backoff before it as a `timer` wait of the step; a
+// round's own held rounds are the step's as well. Core's other steps (named `$…`: the parameters, a
 // decision's bookkeeping, a held effect's checks) are left out. A
 // decision's wait is a wait of kind `decision` with the decision's ID;
 // what the decision itself became (answered, timed out) is the decision's
@@ -90,18 +94,49 @@ const maxMessage = 1000;
 /** What a step's failure reads as for those who don't see its message. */
 const stepFailedText = workflowErrors.create("workflow.step_failed").message;
 
-/** A held step's run again, a wait between them, or a check of it. */
-const heldStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?<kind>held|unknown):(?<round>[1-9]\d*):(?<rest>.+)$/u;
+/**
+ * One of core's steps of a round of a step (host.ts, `waitStep`): a held
+ * step's run again, a wait between them or a check of it; or a retry's
+ * decision, backoff or run again.
+ */
+const roundStep =
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?<kind>held|unknown|retry):(?<round>[1-9]\d*):(?<rest>.+)$/u;
 
-/** A step whose side effect was held, and its runs since. */
-interface HeldStep {
+/** A step of a round, as `roundStep` reads its name. */
+interface RoundName {
+  /** The key of the step it is a round of (`waitKeyOf`). */
+  key: string;
+  kind: "held" | "unknown" | "retry";
+  round: number;
+  rest: string;
+}
+
+const roundOf = (name: string): RoundName | undefined => {
+  const parts = roundStep.exec(name)?.groups;
+  if (
+    parts?.key === undefined ||
+    parts.round === undefined ||
+    parts.rest === undefined
+  ) {
+    return undefined;
+  }
+  const kind =
+    parts.kind === "retry" || parts.kind === "unknown" ? parts.kind : "held";
+  return { key: parts.key, kind, round: Number(parts.round), rest: parts.rest };
+};
+
+/** A step run again in rounds of core's, and those runs. */
+interface RoundedStep {
   ordinal: number;
   name: string;
-  /** Its own attempts, the last of which ended as held. */
+  /** Its key (`waitKeyOf`), which its own held rounds go by. */
+  key: string;
+  /** Its own attempts. */
   attempts: number;
-  /** Each round of runs again so far: how many attempts its run took. */
-  rounds: Map<number, number>;
+  /** Each run again of it, by its ordinal: how many attempts it took. */
+  runs: Map<number, number>;
+  /** The ordinals of its retries' backoffs and runs: each follows a failed round. */
+  retries: number[];
 }
 
 /** How a page tells a run's steps. */
@@ -113,10 +148,18 @@ interface Context {
    * name it doesn't (`reviewedTaskOf` for an App's run).
    */
   taskOf: (engineStep: string) => string | null;
-  /** The run's held steps, by the key core's steps name them by. */
-  heldByKey: ReadonlyMap<string, HeldStep>;
-  /** The same, by the held step's ordinal. */
-  heldByOrdinal: ReadonlyMap<number, HeldStep>;
+  /**
+   * The run's steps run again, by the key core's steps of their rounds
+   * name them by: their own, and each retry's run's (whose held rounds
+   * are the step's too).
+   */
+  roundedByKey: ReadonlyMap<string, RoundedStep>;
+  /** The same, by the step's own ordinal. */
+  roundedByOrdinal: ReadonlyMap<number, RoundedStep>;
+  /** Each held round there is (`<key>:<round>`), of an unknown outcome too. */
+  heldRounds: ReadonlySet<string>;
+  /** The key of each retry's run, by its ordinal (`waitKeyOf`). */
+  retryKeys: ReadonlyMap<number, string>;
 }
 
 const errorShown = (
@@ -222,6 +265,8 @@ interface AsStep extends Told {
   offset: number;
   /** Its completion ended as held, so it is no completion. */
   held: boolean;
+  /** A retry runs it again after its failure, so it is no failure. */
+  retried: boolean;
 }
 
 /** The entry an event of a `do` step gives, if any. */
@@ -236,6 +281,9 @@ const stepOf = (
     stepId: as.stepId,
   };
   const attempt = as.offset + Math.max(1, record.attempt ?? 1);
+  if (record.type === "step_errored" && as.retried) {
+    return { ...common, state: "retrying", attempt };
+  }
   if (record.type === "step_errored") {
     return {
       ...common,
@@ -307,6 +355,17 @@ const waitOf = (
   };
 };
 
+/**
+ * Whether a retry of `rounded` runs after its run at `ordinal`: told from
+ * the retry's backoff or its run. While its decision is still being made
+ * (or after one with no backoff, until its run starts), the round reads
+ * as failed, as a held step's completion reads until its hold is
+ * journaled; the decision's own record can't tell, as it records no
+ * retry it declined differently.
+ */
+const retriedAfter = (rounded: RoundedStep, ordinal: number): boolean =>
+  rounded.retries.some((retry) => retry > ordinal);
+
 /** The entry an event of one of core's own steps gives, if any. */
 const coreStepOf = (
   record: ReadableHistoryRecord,
@@ -326,29 +385,44 @@ const coreStepOf = (
       waitKind: "decision",
     });
   }
-  const parts = heldStep.exec(step.name)?.groups;
-  const held =
-    parts?.key === undefined ? undefined : context.heldByKey.get(parts.key);
-  if (parts === undefined || held === undefined) {
+  const round = roundOf(step.name);
+  const rounded =
+    round === undefined ? undefined : context.roundedByKey.get(round.key);
+  if (round === undefined || rounded === undefined) {
     return undefined;
   }
-  const round = Number(parts.round);
   const told = {
-    stepId: `step-${held.ordinal}`,
-    taskId: context.taskOf(held.name),
+    stepId: `step-${rounded.ordinal}`,
+    taskId: context.taskOf(rounded.name),
   };
-  if (parts.rest === "run" && step.kind === "do") {
-    let offset = held.attempts;
-    for (const [earlier, attempts] of held.rounds) {
-      if (earlier < round) {
+  if (round.rest === "run" && step.kind === "do") {
+    let offset = rounded.attempts;
+    for (const [earlier, attempts] of rounded.runs) {
+      if (earlier < step.ordinal) {
         offset += attempts;
       }
     }
+    // A retry's run is held in rounds of its own key, a held round's in
+    // the next round of its step's.
+    const held =
+      round.kind === "retry"
+        ? context.heldRounds.has(`${context.retryKeys.get(step.ordinal)}:1`)
+        : context.heldRounds.has(`${round.key}:${round.round + 1}`);
     return stepOf(
       record,
-      { ...told, offset, held: held.rounds.has(round + 1) },
+      { ...told, offset, held, retried: retriedAfter(rounded, step.ordinal) },
       context
     );
+  }
+  if (round.kind === "retry") {
+    // Its backoff: a wait of the step's time. Its decision tells nothing.
+    return round.rest === "wait" && step.kind === "sleep"
+      ? waitOf(record, {
+          taskId: told.taskId,
+          waitId: told.stepId,
+          waitKind: "timer",
+        })
+      : undefined;
   }
   // Its waits for the person: event waits their decision wakes, with
   // checks between (host.ts, `#waitWhileHeld`), and an unknown outcome's
@@ -357,7 +431,7 @@ const coreStepOf = (
     return waitOf(record, {
       taskId: told.taskId,
       waitId: told.stepId,
-      waitKind: parts.kind === "unknown" ? "outcome_unknown" : "blocked",
+      waitKind: round.kind === "unknown" ? "outcome_unknown" : "blocked",
     });
   }
   return undefined;
@@ -394,10 +468,16 @@ const entryOf = (
     taskId: context.taskOf(step.name),
   };
   if (step.kind === "do") {
-    const held = context.heldByOrdinal.get(step.ordinal);
+    const rounded = context.roundedByOrdinal.get(step.ordinal);
     return stepOf(
       record,
-      { ...told, offset: 0, held: held?.rounds.has(1) === true },
+      {
+        ...told,
+        offset: 0,
+        held:
+          rounded !== undefined && context.heldRounds.has(`${rounded.key}:1`),
+        retried: rounded !== undefined && retriedAfter(rounded, step.ordinal),
+      },
       context
     );
   }
@@ -421,62 +501,101 @@ const coreWaits: StepIdentitiesQuery = { kind: null, prefix: waitStepPrefix };
 /** Every `do` step, to find which a held step's runs again are of. */
 const doSteps: StepIdentitiesQuery = { kind: "do", prefix: null };
 
-/** The rounds of runs again core's wait steps `waits` tell of, by key. */
-const roundsIn = (
-  waits: readonly StepIdentity[]
-): Map<string, Map<number, number>> => {
-  const rounds = new Map<string, Map<number, number>>();
-  for (const wait of waits) {
-    const parts = heldStep.exec(wait.name)?.groups;
-    if (parts?.key !== undefined) {
-      const ofKey = rounds.get(parts.key) ?? new Map<number, number>();
-      const round = Number(parts.round);
-      const attempts =
-        parts.rest === "run" && wait.kind === "do" ? wait.attempt : 0;
-      ofKey.set(round, Math.max(ofKey.get(round) ?? 0, attempts));
-      rounds.set(parts.key, ofKey);
-    }
-  }
-  return rounds;
+/** How a read's records are told: `Context`'s own parts but the person's. */
+type Rounds = Omit<Context, keyof HistoryTelling>;
+
+/** No step run again. */
+const noRounds: Rounds = {
+  roundedByKey: new Map(),
+  roundedByOrdinal: new Map(),
+  heldRounds: new Set(),
+  retryKeys: new Map(),
 };
 
+/** Whether core's wait steps `waits` hold any round of a step's. */
+const anyRounds = (waits: readonly StepIdentity[]): boolean =>
+  waits.some((wait) => roundOf(wait.name) !== undefined);
+
 /**
- * The steps of `steps` whose side effect was held, by the key core named
- * their runs again by (`waitKeyOf`), with their rounds (`rounds`).
+ * The steps of `steps` run again in rounds core's wait steps `waits` tell
+ * of, by the key core named their rounds by (`waitKeyOf`): a step's own,
+ * and each of its retries' runs', whose held rounds are its too.
  */
-const heldOf = async (
-  steps: readonly StepIdentity[],
-  rounds: ReadonlyMap<string, Map<number, number>>
-): Promise<Map<string, HeldStep>> => {
-  const held = new Map<string, HeldStep>();
+const roundsOf = async (
+  waits: readonly StepIdentity[],
+  steps: readonly StepIdentity[]
+): Promise<Rounds> => {
+  const rounds = waits.flatMap((wait) => {
+    const round = roundOf(wait.name);
+    return round === undefined ? [] : [{ ...round, wait }];
+  });
+  const keys = new Set(rounds.map(({ key }) => key));
+  const roundedByKey = new Map<string, RoundedStep>();
+  const roundedByOrdinal = new Map<number, RoundedStep>();
   for (const step of steps) {
     if (!step.name.startsWith("$")) {
       // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
       const key = await waitKeyOf(step.name);
-      const ofKey = rounds.get(key);
-      if (ofKey !== undefined) {
-        held.set(key, {
+      if (keys.has(key)) {
+        const rounded: RoundedStep = {
           ordinal: step.ordinal,
           name: step.name,
+          key,
           attempts: step.attempt,
-          rounds: ofKey,
-        });
+          runs: new Map(),
+          retries: [],
+        };
+        roundedByKey.set(key, rounded);
+        roundedByOrdinal.set(step.ordinal, rounded);
       }
     }
   }
-  return held;
+  // A retry's run goes by its step's key; a held round's by the key of
+  // what it held, a retry's run's included, so retries come first.
+  const retryKeys = new Map<number, string>();
+  const ordered = rounds.toSorted(
+    (a, b) => Number(b.kind === "retry") - Number(a.kind === "retry")
+  );
+  for (const { key, kind, rest, wait } of ordered) {
+    const rounded = roundedByKey.get(key);
+    // A retry's backoff starts it: its round's failure is retried from
+    // then, though its run comes only once the backoff is over.
+    if (rounded !== undefined && kind === "retry" && rest === "wait") {
+      rounded.retries.push(wait.ordinal);
+    }
+    if (rounded !== undefined && rest === "run" && wait.kind === "do") {
+      rounded.runs.set(wait.ordinal, wait.attempt);
+      if (kind === "retry") {
+        rounded.retries.push(wait.ordinal);
+        // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
+        const own = await waitKeyOf(wait.name);
+        retryKeys.set(wait.ordinal, own);
+        roundedByKey.set(own, rounded);
+      }
+    }
+  }
+  return {
+    roundedByKey,
+    roundedByOrdinal,
+    heldRounds: new Set(
+      rounds.flatMap(({ key, kind, round }) =>
+        kind === "retry" ? [] : [`${key}:${round}`]
+      )
+    ),
+    retryKeys,
+  };
 };
 
 /**
- * One read of the run's history after `after`, with the held steps it is
- * told against, both of one moment: the engine reads the page and the
+ * One read of the run's history after `after`, with the steps run again it
+ * is told against, both of one moment: the engine reads the page and the
  * steps asked for in one synchronous turn (`history`). A step held
  * between two separate reads would otherwise show its held end as a
  * completion. Core's wait steps come with every read; every `do` step
- * only for a run whose waits show a step was held, read again then with
- * its page, so the two still stand together.
+ * only for a run whose waits show a step was run again, read again then
+ * with its page, so the two still stand together.
  */
-const readWithHeld = async (
+const readWithRounds = async (
   stub: RunStub,
   after: number,
   limit: number
@@ -484,7 +603,8 @@ const readWithHeld = async (
   | {
       records: readonly HistoryRecord[];
       more: boolean;
-      held: Map<string, HeldStep>;
+      waits: readonly StepIdentity[];
+      steps: readonly StepIdentity[];
     }
   | undefined
 > => {
@@ -492,8 +612,8 @@ const readWithHeld = async (
   if (page === undefined) {
     return undefined;
   }
-  if (roundsIn(page.steps[0] ?? []).size === 0) {
-    return { records: page.records, more: page.more, held: new Map() };
+  if (!anyRounds(page.steps[0] ?? [])) {
+    return { records: page.records, more: page.more, waits: [], steps: [] };
   }
   const withSteps = await stub.history({
     after,
@@ -504,11 +624,30 @@ const readWithHeld = async (
     return undefined;
   }
   const [waits = [], steps = []] = withSteps.steps;
-  return {
-    records: withSteps.records,
-    more: withSteps.more,
-    held: await heldOf(steps, roundsIn(waits)),
+  return { records: withSteps.records, more: withSteps.more, waits, steps };
+};
+
+/**
+ * How one read's records are told as `telling` says, against the steps
+ * run again its core wait steps (`waits`) and its `do` steps (`steps`),
+ * both of the read's own moment, tell of: each record's entry, or none
+ * for what a page leaves out.
+ */
+export const historyTeller = async (
+  {
+    waits,
+    steps,
+  }: {
+    waits: readonly StepIdentity[];
+    steps: readonly StepIdentity[];
+  },
+  telling: HistoryTelling
+): Promise<(record: HistoryRecord) => RunHistoryEntry | undefined> => {
+  const context: Context = {
+    ...telling,
+    ...(anyRounds(waits) ? await roundsOf(waits, steps) : noRounds),
   };
+  return (record) => entryOf(record, context);
 };
 
 /**
@@ -575,19 +714,14 @@ export const historyEntries = async (
     read += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the one before
-    const page = await readWithHeld(stub, after, limit);
+    const page = await readWithRounds(stub, after, limit);
     if (page === undefined) {
       // The engine has no record of it: still starting, or never started.
       return done;
     }
-    // Each read is told against the held steps of its own moment.
-    const context: Context = {
-      ...telling,
-      heldByKey: page.held,
-      heldByOrdinal: new Map(
-        [...page.held.values()].map((step) => [step.ordinal, step])
-      ),
-    };
+    // Each read is told against the steps run again of its own moment.
+    // oxlint-disable-next-line no-await-in-loop -- each read is told as it is read
+    const tell = await historyTeller(page, telling);
     const { records, more: followed } = page;
     more = followed;
     for (const record of records) {
@@ -596,7 +730,7 @@ export const historyEntries = async (
         break;
       }
       after = record.eventId;
-      const entry = entryOf(record, context);
+      const entry = tell(record);
       if (entry !== undefined) {
         items.push(entry);
       }
