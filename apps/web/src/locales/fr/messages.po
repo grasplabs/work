@@ -1468,6 +1468,10 @@ msgstr "2 Inventaire"
 msgid "A bearer token"
 msgstr "Un jeton bearer"
 
+#: src/workflows/binding-approvals.tsx
+msgid "A Brain collection it may read"
+msgstr "Une collection Brain qu’il peut lire"
+
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
 msgstr "Un builder a demandé que cette version de {name} soit mise en production : approuvée, c’est la version qu’utilise l’entreprise. Renvoyez-la pour garder la version qui tourne maintenant."
@@ -1590,10 +1594,6 @@ msgstr "Un invité a écrit un message"
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "Une valeur JSON"
-
-#: src/workflows/binding-approvals.tsx
-msgid "A Knowledge collection it may read"
-msgstr "Une collection Knowledge qu’il peut lire"
 
 #: src/dashboard/signals.tsx
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."

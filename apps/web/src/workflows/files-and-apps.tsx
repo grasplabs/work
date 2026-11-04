@@ -1,7 +1,7 @@
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
-  WorkflowBindingApproval,
+  ListedWorkflowBindingApproval,
   WorkflowBindingTarget,
   WorkflowFile,
   WorkflowKnowledge,
@@ -296,7 +296,7 @@ const Approved = ({
   workflow: string;
   version: number;
   declared: WorkflowResourceVersion["bindings"];
-  approvals: readonly WorkflowBindingApproval[];
+  approvals: readonly ListedWorkflowBindingApproval[];
   names: Names;
   teams: ReadonlyMap<string, string>;
   revokes: boolean;
@@ -375,7 +375,7 @@ const Approved = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex min-w-0 flex-col gap-1">
                   <span>
-                    {targetWords(approval.target, "", {
+                    {targetWords(approval.target, approval.label, {
                       people: names.people,
                       teams,
                     })}
@@ -459,7 +459,7 @@ const readApps = async (
 interface RunningBindings {
   version: number;
   declared: WorkflowResourceVersion["bindings"];
-  approvals: WorkflowBindingApproval[];
+  approvals: ListedWorkflowBindingApproval[];
 }
 
 /**
@@ -472,7 +472,7 @@ const runningBindingsOf = (
   versions: Loaded<WorkflowResourceVersion[]>,
   lifecycle: Loaded<WorkflowLifecycle>,
   currentVersion: number | null,
-  approvals: Loaded<WorkflowBindingApproval[]> | undefined
+  approvals: Loaded<ListedWorkflowBindingApproval[]> | undefined
 ): Loaded<RunningBindings | null> | undefined => {
   if (versions.state !== "ready") {
     return versions;
@@ -518,7 +518,7 @@ export const FilesAndApps = ({
   const core = useCore();
   const [pending, setPending] = useState<Loaded<PendingWorkflowBindings[]>>();
   const [approvals, setApprovals] =
-    useState<Loaded<WorkflowBindingApproval[]>>();
+    useState<Loaded<ListedWorkflowBindingApproval[]>>();
   const [teams, setTeams] = useState<ReadonlyMap<string, string>>(new Map());
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();

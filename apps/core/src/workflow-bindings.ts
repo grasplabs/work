@@ -20,14 +20,13 @@ import type {
   WorkflowBindingApproval,
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
-import type { Acting } from "./auth/identity.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
   permissions,
@@ -125,7 +124,7 @@ import { envelopedSchemaText } from "./workflows/connector-schemas.ts";
 //   workflow's policy generation, so a start decided before is refused;
 //   one that changed nothing refuses nothing.
 
-const approvalOf = (
+export const approvalOf = (
   row: typeof workflowBindingApprovals.$inferSelect
 ): WorkflowBindingApproval => ({
   id: row.id,
@@ -963,26 +962,6 @@ export const revokeWorkflowBinding = async (
     unprojected(db, parsed.data, revoked),
     nextGeneration(db, workflow.id, revoked),
   ]);
-};
-
-/** Workflow `id`'s active approvals, by alias, for anyone with a role. */
-export const listWorkflowBindings = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<WorkflowBindingApproval[]> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(workflowBindingApprovals)
-    .where(
-      and(
-        eq(workflowBindingApprovals.workflowResourceId, workflow.id),
-        eq(workflowBindingApprovals.status, "active")
-      )
-    )
-    .orderBy(asc(workflowBindingApprovals.alias));
-  return rows.map(approvalOf);
 };
 
 /**

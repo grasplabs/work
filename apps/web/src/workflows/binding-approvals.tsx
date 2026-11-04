@@ -101,7 +101,7 @@ export const targetWords = (
       return i18n._(msg`Answered by ${deciders}`);
     }
     case "knowledge": {
-      return i18n._(msg`A Knowledge collection it may read`);
+      return i18n._(msg`A Brain collection it may read`);
     }
     case "event": {
       return i18n._(msg`The events its contract admits`);

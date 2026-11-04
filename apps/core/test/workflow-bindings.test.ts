@@ -40,6 +40,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import {
+  listWorkflowBindings,
   pendingWorkflowBindings,
   workflowPendingBindings,
 } from "../src/workflow-binding-requests.ts";
@@ -1196,13 +1197,24 @@ describe("bindings waiting on an admin", () => {
     )
       .bind(workflow.id)
       .first<{ count: number }>();
+    const after = await offeredOf();
+    // Granted again and approved: listed by the collection's name, as offered.
+    const regranted = await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "collection", collectionId: handbook.id },
+      actions: ["read"],
+      binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await approve({ kind: "knowledge", permissionId: regranted });
+    const listed = await listWorkflowBindings(env, admin, workflow.id);
 
     expect({
       before,
       othersGrant,
       revokedSinceOffered,
       approvals: approvals?.count,
-      after: await offeredOf(),
+      after,
+      listed: listed.map(({ alias, label }) => ({ alias, label })),
     }).toStrictEqual({
       before: [
         [{ target: { kind: "knowledge", permissionId }, label: "Handbook" }],
@@ -1211,6 +1223,7 @@ describe("bindings waiting on an admin", () => {
       revokedSinceOffered: "workflow.binding_invalid",
       approvals: 0,
       after: [[]],
+      listed: [{ alias: "docs", label: "Handbook" }],
     });
   });
 
@@ -1327,8 +1340,11 @@ describe("bindings waiting on an admin", () => {
       target: offered.target,
       reviewed: { version: 1 },
     });
+    const listed = await listWorkflowBindings(env, admin, workflow.id);
 
     expect({
+      // Named as it was offered.
+      listed: listed.map(({ alias, label }) => ({ alias, label })),
       inbox: inbox
         .filter((each) => each.workflow.id === workflow.id)
         .flatMap(({ bindings }) => bindings.map(({ offered: each }) => each)),
@@ -1365,6 +1381,7 @@ describe("bindings waiting on an admin", () => {
       refused: "workflow.binding_unapproved",
       after: [],
       started: "ok",
+      listed: [{ alias: "mail", label: `${binding}: graph.mail@1` }],
     });
   });
 

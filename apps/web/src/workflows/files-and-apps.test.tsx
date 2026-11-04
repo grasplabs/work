@@ -2,7 +2,7 @@
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
-  WorkflowBindingApproval,
+  ListedWorkflowBindingApproval,
   WorkflowBindingTarget,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
@@ -114,8 +114,9 @@ const lifecycle: WorkflowLifecycle = {
 };
 
 /** An admin's active approval of `crm` for version 2, as core lists it. */
-const crmApproval = (id: string): WorkflowBindingApproval => ({
+const crmApproval = (id: string): ListedWorkflowBindingApproval => ({
   id,
+  label: "HUBSPOT: composio.hubspot@1",
   alias: "crm",
   kind: "connector",
   contractId: "crm-contacts",
@@ -131,8 +132,9 @@ const crmApproval = (id: string): WorkflowBindingApproval => ({
 const decisionApproval = (
   version: number,
   deciders: string[]
-): WorkflowBindingApproval => ({
+): ListedWorkflowBindingApproval => ({
   id: `approval-decision-${version}`,
+  label: "",
   alias: "approval",
   kind: "decision",
   contractId: "invoice-approval",
@@ -150,7 +152,7 @@ const decisionApproval = (
  * connections catalog answers only once `answerFirstCatalog` lets it, as a
  * cold catalog can take seconds.
  */
-const fakeCore = (initial: WorkflowBindingApproval[] = []) => {
+const fakeCore = (initial: ListedWorkflowBindingApproval[] = []) => {
   const approved: { id: string; input: { alias: string } }[] = [];
   const revoked: { id: string; approval: string }[] = [];
   const active = [...initial];
@@ -428,7 +430,7 @@ describe("a workflow's Files and apps tab", () => {
         crm: [
           "crm",
           "connector: crm-contacts",
-          "composio.hubspot@1",
+          "HUBSPOT: composio.hubspot@1",
           `Approved by Grace Hopper on ${formatDateTime("2026-11-04T09:00:00.000Z")}`,
           "Revoke",
         ],
@@ -469,7 +471,7 @@ describe("a workflow's Files and apps tab", () => {
       crm: [
         "crm",
         "connector: crm-contacts",
-        "composio.hubspot@1",
+        "HUBSPOT: composio.hubspot@1",
         `Approved by Grace Hopper on ${formatDateTime("2026-11-04T09:00:00.000Z")}`,
       ],
       revoke: 0,
