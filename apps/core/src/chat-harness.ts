@@ -934,18 +934,35 @@ export class ChatHarness {
         api: { stream: admitted.stream, streamSimple: admitted.stream },
       })
     );
+    /** The lines the turn's runs sent the Workspace, one after another. */
+    let logged: Promise<void> = Promise.resolve();
     const turn: CodeTurn = {
       apis: apisFor(request.shared, request.readsBrain),
       scope,
       runs: {
         open: async (opening) =>
           await host().openCodeRun(scope.chatId, opening),
-        close: async (runId, status) =>
-          await host().endTurnRun(scope, runId, status),
+        // A run's lines reach the Workspace in order, all before its end:
+        // what the Workspace notices of them is ordered with the run.
+        close: async (runId, status) => {
+          try {
+            await logged;
+          } catch {
+            // A line that failed to arrive is lost with its call.
+          }
+          return await host().endTurnRun(scope, runId, status);
+        },
         output: (runId, callId, line) => {
-          this.#ctx.waitUntil(
-            host().codeRunOutput(scope.chatId, runId, callId, line)
-          );
+          const before = logged;
+          logged = (async () => {
+            try {
+              await before;
+            } catch {
+              // Each line on its own.
+            }
+            await host().codeRunOutput(scope.chatId, runId, callId, line);
+          })();
+          this.#ctx.waitUntil(logged);
         },
       },
       loader: quietLoader(env.LOADER),

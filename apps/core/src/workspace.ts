@@ -694,6 +694,10 @@ interface RunOutput {
   /** When the last read of revocations began; 0 before the first. */
   checkedAt: number;
   checking: boolean;
+  /** The read of revocations under way, to join (`#checkNow`). */
+  check: Promise<void> | undefined;
+  /** The run is closing: a read now only looks for revocations. */
+  closing: boolean;
   timer: ReturnType<typeof setTimeout> | undefined;
   /** The run ended: no more lines, what is shown stays until its result. */
   ended: boolean;
@@ -2163,6 +2167,17 @@ export class Workspace extends DurableObject<Env> {
     runId: string,
     status: CodeRunStatus
   ): Promise<CodeRunStatus> {
+    // What the run logged before it ended is checked before it closes, as
+    // its lines come before its end (chat-harness.ts): a revocation is
+    // noticed where the run's own order puts it, however the calls raced.
+    const output = this.#outputs.get(scope.chatId);
+    if (
+      output?.runId === runId &&
+      (output.timer !== undefined || output.check !== undefined)
+    ) {
+      output.closing = true;
+      await this.#checkNow(scope.chatId, output);
+    }
     const admission = this.admitFromCodeRun(scope.chatId, runId);
     const ended = this.closeCodeRun(scope.chatId, runId, status);
     if (admission.call !== "open" || ended === "revoked") {
@@ -2368,6 +2383,8 @@ export class Workspace extends DurableObject<Env> {
             text: "",
             checkedAt: 0,
             checking: false,
+            check: undefined,
+            closing: false,
             timer: undefined,
             ended: false,
             cutAt: undefined,
@@ -2402,9 +2419,25 @@ export class Workspace extends DurableObject<Env> {
     }
     const wait = Math.max(0, output.checkedAt + outputCheckMs - Date.now());
     output.timer = setTimeout(() => {
-      output.timer = undefined;
-      void this.#checkOutput(chatId, output);
+      void this.#checkNow(chatId, output);
     }, wait);
+  }
+
+  /**
+   * Reads revocations for the run's output now, its timer cleared, or
+   * joins the read under way.
+   */
+  async #checkNow(chatId: ChatId, output: RunOutput): Promise<void> {
+    clearTimeout(output.timer);
+    output.timer = undefined;
+    output.check ??= (async () => {
+      try {
+        await this.#checkOutput(chatId, output);
+      } finally {
+        output.check = undefined;
+      }
+    })();
+    await output.check;
   }
 
   /**
@@ -2464,6 +2497,10 @@ export class Workspace extends DurableObject<Env> {
           }
         );
       }
+      return;
+    }
+    // A run closing shows its lines with its result, never just before.
+    if (output.closing) {
       return;
     }
     output.shown = arrived;

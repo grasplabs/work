@@ -1615,13 +1615,15 @@ describe("chat agent code run leases", () => {
         records.map(({ status }) => status)
       )
     ).resolves.toStrictEqual(["revoked"]);
+    // Noticed at the line it logged, which comes before its end and is
+    // checked before the run closes: once, there.
     await vi.waitFor(
       async () => {
         await expect(
           refusalsIn(chat.id, "agent.run_revoked")
         ).resolves.toStrictEqual([
           {
-            method: "executeCode",
+            method: "output",
             outcome: "refused",
             reason: "agent.run_revoked",
           },
