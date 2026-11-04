@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { checkExpression } from "@grasp-os/sdk/expression-check";
+import {
+  allowedMethods,
+  checkExpression,
+} from "@grasp-os/sdk/expression-check";
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -172,6 +175,95 @@ describe("type-checking a workflow's expressions", () => {
     ).toStrictEqual({
       ignored: [{ code: "TS2551", line: 2, column: 7 }],
       emoji: [{ code: "TS2551", line: 1, column: 14 }],
+    });
+  });
+
+  it("reads a data field named like a method, but no method without a call", () => {
+    const { expressions } = checkExpressionTypes(
+      {
+        ...scope,
+        input: "{ at: string; map: { join: number }; list: string[] }",
+      },
+      {
+        field: { source: "input.at.trim() + input.map.join" },
+        called: { source: "input.list.map((item) => item.at(0)).join(', ')" },
+        method: { source: "input.list.map" },
+        optional: { source: "[input.list?.join, input.at['trim']]" },
+        inCallback: { source: "input.list.map((item) => item.trim)" },
+      },
+      kitTypes
+    );
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, line, column }) => ({ code, line, column })),
+        ])
+      )
+    ).toStrictEqual({
+      field: [],
+      called: [],
+      method: [{ code: "expression.method", line: 1, column: 12 }],
+      optional: [
+        { code: "expression.method", line: 1, column: 14 },
+        { code: "expression.method", line: 1, column: 29 },
+      ],
+      inCallback: [{ code: "expression.method", line: 1, column: 31 }],
+    });
+  });
+
+  it("refuses a read that may be a method, by a union or on `any`", () => {
+    const { expressions } = checkExpressionTypes(
+      {
+        ...scope,
+        input: "{ un: string[] | { map: number }; loose: any; list: string[] }",
+      },
+      {
+        union: { source: "input.un.map" },
+        loose: { source: "input.loose.map" },
+        looseField: { source: "input.loose.total" },
+        notAllowed: { source: "input.list.push" },
+      },
+      kitTypes
+    );
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, column, message, fix }) => ({
+            code,
+            column,
+            message,
+            fix,
+          })),
+        ])
+      )
+    ).toStrictEqual({
+      union: [
+        {
+          code: "expression.method",
+          column: 10,
+          message: "`map` is a method, read without a call: it has no value.",
+          fix: "Call it, as `map(…)`.",
+        },
+      ],
+      loose: [
+        {
+          code: "expression.method",
+          column: 13,
+          message: "`map` is a method, read without a call: it has no value.",
+          fix: "Call it, as `map(…)`.",
+        },
+      ],
+      looseField: [],
+      notAllowed: [
+        {
+          code: "expression.method",
+          column: 12,
+          message: "`push` is not one of the methods an expression can call.",
+          fix: `Call one of: ${[...allowedMethods].join(", ")}.`,
+        },
+      ],
     });
   });
 

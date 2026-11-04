@@ -16,6 +16,9 @@ export {
   sourcePosition,
 } from "./expression-lowering.ts";
 export type { TypeForm } from "./expression-lowering.ts";
+// The methods an expression can call, for the type check's own refusal
+// of a method read without a call (`checkExpressionTypes`).
+export { allowedMethods } from "./expression-runtime.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -339,21 +342,10 @@ class Checker {
       case "MemberExpression":
       case "OptionalMemberExpression": {
         this.visit(node.object, scope);
+        // A field named like a method (`at`, `map`) is data, and `$read`
+        // reads it. A method read without a call has a function type,
+        // which the type check refuses (`checkExpressionTypes`).
         this.key(node.property, node.computed);
-        // A method read but not called: its type is a function, its value
-        // `undefined` (`readMember` gives no function). A data field of
-        // that name is read in brackets.
-        if (
-          !node.computed &&
-          node.property.type === "Identifier" &&
-          allowedMethods.has(node.property.name)
-        ) {
-          this.fail(
-            node.property,
-            "expression.method",
-            `\`${node.property.name}\` is a method: call it, or read a field of that name as ["${node.property.name}"].`
-          );
-        }
         break;
       }
       case "CallExpression":
@@ -531,6 +523,9 @@ export interface CheckOptions {
  * Checks a workflow expression against the subset: every problem found,
  * each with its code, position and fix, or the source to generate from.
  * Throws when a root in `options` is not one `checkRoots` takes.
+ * Syntax alone can't tell a method read without a call from a data
+ * field of that name, so production must also run the compiler's
+ * `checkExpressionTypes`, which refuses it by its type.
  */
 export const checkExpression = (
   source: string,

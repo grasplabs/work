@@ -6,11 +6,13 @@
  * author wrote it.
  */
 import {
+  allowedMethods,
   checkExpression,
   checkRoots,
   sourcePosition,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError, TypeForm } from "@grasp-os/sdk/expression-check";
+import ts from "typescript";
 
 import { serverTarget, typeProgram } from "./type-check.ts";
 
@@ -85,6 +87,89 @@ const fromSubset = ({
   line,
   column,
 });
+
+/**
+ * Whether reading `node` without a call reads a method: its type, or
+ * any member of its union, has call signatures. On an object typed
+ * `any` nothing is known, so a read of an allowed method's name is
+ * taken for one.
+ */
+const readsMethod = (
+  checker: ts.TypeChecker,
+  node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  name: string
+): boolean => {
+  if (
+    allowedMethods.has(name) &&
+    checker.getTypeAtLocation(node.expression).flags === ts.TypeFlags.Any
+  ) {
+    return true;
+  }
+  const type = checker.getTypeAtLocation(node).getNonNullableType();
+  return (type.isUnion() ? type.types : [type]).some(
+    (member) => member.getCallSignatures().length > 0
+  );
+};
+
+/**
+ * Where the module reads a method without calling it, by its 1-based
+ * line and column: a member read that isn't a call's callee and whose
+ * type is a function (`readsMethod`). Its value would be `undefined`
+ * (`$read` gives no function), while a field of data named like a
+ * method (`at`, `map`) has a data type and is read.
+ */
+const methodReads = (
+  program: ts.Program
+): { line: number; column: number; name: string }[] => {
+  const file = program.getSourceFile(`/${modulePath}`);
+  if (file === undefined) {
+    return [];
+  }
+  const checker = program.getTypeChecker();
+  const found: { line: number; column: number; name: string }[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      !(ts.isCallExpression(node.parent) && node.parent.expression === node)
+    ) {
+      const named = ts.isPropertyAccessExpression(node)
+        ? node.name
+        : node.argumentExpression;
+      const name =
+        ts.isStringLiteralLike(named) || ts.isIdentifier(named)
+          ? named.text
+          : named.getText(file);
+      if (readsMethod(checker, node, name)) {
+        const at = file.getLineAndCharacterOfPosition(named.getStart(file));
+        found.push({ line: at.line + 1, column: at.character + 1, name });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+};
+
+/**
+ * The refusal of a method read without a call: only an allowed method
+ * is worth calling, and any other gets the SDK's own refusal of a
+ * method an expression doesn't call.
+ */
+const methodReadError = (
+  method: string
+): Pick<ExpressionTypeError, "code" | "message" | "fix"> =>
+  allowedMethods.has(method)
+    ? {
+        code: "expression.method",
+        message: `\`${method}\` is a method, read without a call: it has no value.`,
+        fix: `Call it, as \`${method}(…)\`.`,
+      }
+    : {
+        code: "expression.method",
+        message: `\`${method}\` is not one of the methods an expression can call.`,
+        fix: `Call one of: ${[...allowedMethods].join(", ")}.`,
+      };
 
 /**
  * Checks each expression against the subset first, then the ones that
@@ -166,12 +251,13 @@ export const checkExpressionTypes = (
   if (placed.length === 0) {
     return { expressions: errors, scope: scopeErrors };
   }
-  const { global, files } = typeProgram(
+  const checking = typeProgram(
     { [modulePath]: code },
     kitTypes,
     // A worker's lib, no DOM, and no module to import.
     serverTarget({}, new Set())
-  ).diagnose();
+  );
+  const { global, files } = checking.diagnose();
   const found = [...global, ...(files.get(modulePath)?.found ?? [])];
   for (const diagnostic of found) {
     if (diagnostic.severity !== "error") {
@@ -204,6 +290,18 @@ export const checkExpressionTypes = (
         ),
       });
     }
+  }
+  for (const { line, column, name: method } of methodReads(checking.program)) {
+    const at = placed.find(
+      (expression) => line >= expression.first && line <= expression.last
+    );
+    if (at === undefined) {
+      continue;
+    }
+    errors[at.name]?.push({
+      ...methodReadError(method),
+      ...sourcePosition(at.form, at.source, line - at.first + 1, column),
+    });
   }
   return { expressions: errors, scope: scopeErrors };
 };

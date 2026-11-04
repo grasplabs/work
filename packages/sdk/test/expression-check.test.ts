@@ -284,23 +284,12 @@ describe("calling code", () => {
     ]);
   });
 
-  it("never reads an allowed method as a value, which would be `undefined`", () => {
-    expect({
-      refused: [
-        "input.list.map",
-        "input.list?.join",
-        "input.n.toFixed",
-        "{ indexOf: input.list.indexOf, length: 1e15 }",
-      ].map(verdict),
-      // A data field of a method's name, read in brackets.
-      field: verdict("input['split']"),
-      // Called, it's fine.
-      called: verdict("input.list.join(', ')"),
-    }).toStrictEqual({
-      refused: Array.from({ length: 4 }, () => "expression.method"),
-      field: "ok",
-      called: "ok",
-    });
+  it("reads a data field named like a method, as `$read` reads own data", () => {
+    expect(
+      ["input.at", "input.list.map", "input?.join", "{ at: input.at }"].map(
+        verdict
+      )
+    ).toStrictEqual(["ok", "ok", "ok", "ok"]);
   });
 
   it("spreads nothing into a call", () => {
