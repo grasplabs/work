@@ -5,8 +5,10 @@ import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
+import { tallyFiles } from "./tally-app.ts";
 
 // A chat builds an App in a studio: the chat alone until its agent writes
 // a draft, then the chat on the left and the draft's preview on the
@@ -122,70 +124,6 @@ const writeDraft = async (
     throw new Error(`The draft wasn't written: ${await written.text()}`);
   }
 };
-
-/**
- * A tally of spec 8's layout: a table, a query and a mutation, and a
- * screen on the React SDK that reads the count live through the host's
- * references (`#grasp`). `label` says whose count it is: the App's, or
- * the draft's preview.
- */
-const tallyFiles = (label: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  tally: defineTable({ added: v.boolean() }),
-});
-`,
-  "operations/tally.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
-
-export const count = query({
-  args: {},
-  returns: v.string(),
-  handler: async (ctx) => \`\${String((await ctx.db.query("tally").take(100)).length)} ${label}\`,
-});
-
-export const add = mutation({
-  args: {},
-  returns: v.null(),
-  handler: async (ctx) => {
-    await ctx.db.insert("tally", { added: true });
-    return null;
-  },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, count } from "./operations/tally.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Tally",
-  schema,
-  access: { tables: { tally: { read: "appMembers", write: "appMembers" } } },
-  operations: { tally: { add, count } },
-  internalOperations: {},
-  screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
-  uses: [],
-});
-`,
-  "screens/tally.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
-
-export default function Tally() {
-  const count = useQuery(api.tally.count, {});
-  const add = useMutation(api.tally.add);
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button onClick={() => { void add({}); }} variant="outline">
-        Add one
-      </Button>
-      <output>{count ?? "Loading"}</output>
-    </main>
-  );
-}
-`,
-});
 
 /**
  * The App's own tally screen, released and current, once it shows its
@@ -357,6 +295,80 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // The App's own data is as it was: none of the preview's three.
     const after = await openTally(page, app.id);
     await expect(after.getByRole("status")).toHaveText("1 in the App");
+  } finally {
+    core[Symbol.dispose]();
+  }
+});
+
+/** Longer than a live screen's wait for its build (`screenLimits.openMs`). */
+const behindAnotherLoadMs = 25_000;
+
+test("an App's own chat writes its screen, and its workspace previews it", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    const app = await api.apps.create({ name });
+    const page = await pageOf(builder);
+    // Core loads a chat's preview one update at a time, the next waiting
+    // for the one ahead; on staging that wait and the load took longer
+    // than a live screen's whole wait for its build. Here the preview's
+    // first load reaches core that late: the page still waits for it.
+    let heldFrom: number | undefined;
+    await page.routeWebSocket("**/rpc", (socket) => {
+      const toCore = socket.connectToServer();
+      // Held in order: a connection's messages name what came before.
+      let holding: string[] | undefined;
+      socket.onMessage((message) => {
+        const text = String(message);
+        if (holding !== undefined) {
+          holding.push(text);
+          return;
+        }
+        if (!text.includes('["chats","preview"]')) {
+          toCore.send(text);
+          return;
+        }
+        const held = [text];
+        holding = held;
+        heldFrom ??= Date.now();
+        setTimeout(
+          () => {
+            holding = undefined;
+            for (const each of held) {
+              toCore.send(each);
+            }
+          },
+          Math.max(0, heldFrom + behindAnotherLoadMs - Date.now())
+        );
+      });
+    });
+    await page.goto(`/apps/${app.id}/edit`);
+    await expect(page.getByText("Nothing built yet")).toBeVisible();
+
+    const { opener } = modelScripts.buildsTally;
+    const chat = page.getByRole("region", { name: "Chat" });
+    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+    await ask.fill(opener);
+    await ask.press("Enter");
+    await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // The screen the agent wrote runs in the preview, on a store of its own.
+    const preview = page.getByRole("region", { name: `Preview of ${name}` });
+    await expect(
+      page.getByText("Unpublished changes", { exact: true })
+    ).toBeVisible();
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
+      timeout: behindAnotherLoadMs + 30_000,
+    });
+    expect(heldFrom).toBeDefined();
+    await frame.getByRole("button", { name: "Add one" }).click();
+    await expect(frame.getByRole("status")).toHaveText("1 in the preview");
   } finally {
     core[Symbol.dispose]();
   }

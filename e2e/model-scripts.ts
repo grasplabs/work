@@ -8,13 +8,32 @@
 import { z } from "zod";
 
 import type { Answer } from "../apps/core/test/provider-streams.ts";
+import { tallyFiles } from "./tally-app.ts";
+
+/**
+ * A reply of the agent's, or what it replies given the request's text: the
+ * App an App's own chat builds is named only in the chat's instructions.
+ */
+type Reply = Answer | ((request: string) => Answer);
 
 export interface ModelScript {
   /** What the person's first message in the chat says, as they type it. */
   opener: string;
   /** The agent's replies, a turn of its each. */
-  replies: readonly Answer[];
+  replies: readonly Reply[];
 }
+
+/** The App an App's own chat builds, as its instructions name it (core's agent.ts). */
+const ownApp = /This chat is the App (?<app>[\w-]+)'s own chat/u;
+
+/** The App an App's own chat builds, read from its request's text. */
+const ownAppOf = (request: string): string => {
+  const app = ownApp.exec(request)?.groups?.app;
+  if (app === undefined) {
+    throw new Error("The request is not of an App's own chat");
+  }
+  return app;
+};
 
 /** The agent says `text`, and is done. */
 const says = (text: string): Answer => ({
@@ -41,6 +60,31 @@ export const modelScripts = {
       says(
         "Purchase-to-Pay, then. Where does a supplier's invoice come in, and who looks at it first?"
       ),
+    ],
+  },
+  /**
+   * An App's own chat builds it: the agent writes a tally into the chat's
+   * draft of the App, then says it is done.
+   */
+  buildsTally: {
+    opener: "Build a tally that counts what is added.",
+    replies: [
+      (request) => ({
+        text: "Writing the tally.",
+        toolCalls: [
+          {
+            id: "write-tally",
+            name: "writeFile",
+            arguments: {
+              app: ownAppOf(request),
+              files: tallyFiles("in the preview"),
+            },
+          },
+        ],
+        inputTokens: 200,
+        outputTokens: 40,
+      }),
+      says("The tally is in the preview."),
     ],
   },
 } as const satisfies Record<string, ModelScript>;
@@ -90,5 +134,6 @@ export const scriptedAnswer = (body: unknown): Answer | undefined => {
     opened.includes(opener)
   );
   const turn = messages.filter(({ role }) => role === "assistant").length;
-  return script?.replies[turn];
+  const reply = script?.replies[turn];
+  return typeof reply === "function" ? reply(JSON.stringify(body)) : reply;
 };

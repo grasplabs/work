@@ -1359,8 +1359,28 @@ describe("opening a preview a newer load replaced", () => {
     ).resolves.toStrictEqual({ result: { answered: "loaded" }, asked: 3 });
   });
 
-  it("gives up once the page's wait for a build is spent", async () => {
-    const tries = Math.ceil(screenLimits.openMs / supersededRetryMs);
+  it("waits behind the load ahead of it longer than a live screen waits for its build", async () => {
+    // On staging an update waited up to 18 s for the one ahead, then took
+    // about 10 s itself: past a live screen's whole wait.
+    const behind = Math.ceil(
+      (screenLimits.openMs + 10_000) / supersededRetryMs
+    );
+    await expect(
+      opened([
+        ...Array.from(
+          { length: behind },
+          () => "app.preview_superseded" as const
+        ),
+        "loaded",
+      ])
+    ).resolves.toStrictEqual({
+      result: { answered: "loaded" },
+      asked: behind + 1,
+    });
+  });
+
+  it("gives up once the page's wait for a preview is spent", async () => {
+    const tries = Math.ceil(screenLimits.previewOpenMs / supersededRetryMs);
     await expect(opened(["app.preview_superseded"])).resolves.toStrictEqual({
       result: { code: "app.preview_superseded" },
       asked: tries,
