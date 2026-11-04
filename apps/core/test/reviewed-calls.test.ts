@@ -680,7 +680,7 @@ queueMicrotask(() => {
     });
   });
 
-  it("refuse a placeholder's key in what a call sends, which only a sealed build's run fills in", async () => {
+  it("refuse a sensitive parameter's placeholder in what a call sends, which only a sealed build's run fills in, and pass other $grasp: keys as data", async () => {
     const { host, appCalls, tampered } = await hostHeldTo({
       steps: { send: ["APP", "CRM"] },
       kinds: { send: "exact" },
@@ -691,23 +691,34 @@ queueMicrotask(() => {
     const placeholder = { "$grasp:param": "token" };
     let connection: Settled<unknown> = { ok: true, value: null };
     let called: Settled<unknown> = { ok: true, value: null };
+    let data: Settled<unknown> = { ok: true, value: null };
     await host.do("send", {}, async (attempt) => {
+      // As a connection binding's stub sends it: its options last, unset.
       connection = await attempt.callConnection("CRM", [
         "mail.send",
         { to: "Ada", subject: placeholder },
+        undefined,
       ]);
       called = await attempt.callFunction(hit, { name: [placeholder] });
+      data = await attempt.callConnection("CRM", [
+        "mail.send",
+        { to: "Ada", subject: { "$grasp:param": "token", more: true } },
+        undefined,
+      ]);
       return { ok: true, value: null };
     });
 
     expect({
       connection: codeOf(connection),
       called: codeOf(called),
+      data: codeOf(data) === "workflow.invalid",
       appCalls,
       tampered,
     }).toStrictEqual({
       connection: "workflow.invalid",
       called: "workflow.invalid",
+      // Not a placeholder: past that check, to the call's own.
+      data: false,
       appCalls: [],
       tampered: [],
     });

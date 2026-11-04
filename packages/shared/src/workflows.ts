@@ -454,36 +454,45 @@ export const triggerDeclarationsSchema = z
 export const coreStepPrefix = "$grasp:";
 
 /**
- * What the keys of the platform's placeholders in a call's arguments start
- * with: a run of a sealed build puts one where its run host fills in a
- * value the isolate never sees (core's workflows/sealed-run.ts), and an
- * App's run may send none (core's workflows/app-run.ts).
- */
-export const placeholderPrefix = "$grasp:";
-
-/**
  * The key of a sensitive parameter's placeholder, `{"$grasp:param": name}`
- * (the SDK's `sensitiveParam`): a connector call's run host puts in the
- * value the run's start froze for `name`.
+ * (the SDK's `sensitiveParam`): where a sealed build seals that parameter
+ * as a connector call's argument, its run host puts in the value the run's
+ * start froze (core's workflows/sealed-run.ts). An App's run may send
+ * none (core's workflows/app-run.ts).
  */
-export const sensitiveParamKey = `${placeholderPrefix}param`;
+export const sensitiveParamKey = "$grasp:param";
 
 /**
- * Whether `value` holds a key that starts with `placeholderPrefix`
- * anywhere, at any depth.
+ * The parameter `value` is the placeholder of: only an object whose one
+ * key is `sensitiveParamKey`, naming it as text. Any other value, one with
+ * other `$grasp:` keys included, is data.
  */
+export const placeholderOf = (value: unknown): string | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const keys = Object.keys(value);
+  const name: unknown = Reflect.get(value, sensitiveParamKey);
+  return keys.length === 1 &&
+    keys[0] === sensitiveParamKey &&
+    typeof name === "string"
+    ? name
+    : undefined;
+};
+
+/** Whether `value` holds a placeholder (`placeholderOf`) at any depth. */
 export const holdsPlaceholder = (value: unknown): boolean => {
   const seen = new Set<unknown>();
   const pending: unknown[] = [value];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+  while (pending.length > 0) {
+    const node = pending.pop();
     if (typeof node === "object" && node !== null && !seen.has(node)) {
-      seen.add(node);
-      for (const [key, item] of Object.entries(node)) {
-        if (key.startsWith(placeholderPrefix)) {
-          return true;
-        }
-        pending.push(item);
+      if (placeholderOf(node) !== undefined) {
+        return true;
       }
+      seen.add(node);
+      const items: unknown[] = Object.values(node);
+      pending.push(...items);
     }
   }
   return false;

@@ -3,18 +3,17 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
-  holdsPlaceholder,
   paramsStep,
-  sensitiveParamKey,
+  placeholderOf,
   stepIdempotencyKey,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { StepUse } from "@grasp-os/shared/workflows";
+import { namedError } from "@grasp-os/workerflow/errors";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -30,9 +29,14 @@ import type {
 import { AttemptHost, attemptCallLabels } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
-import type { Settled } from "./code.ts";
+import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
-import { modelCallLimitOf, settle, unbilledAiWaitOf } from "./host.ts";
+import {
+  forIsolate,
+  modelCallLimitOf,
+  settle,
+  unbilledAiWaitOf,
+} from "./host.ts";
 import type {
   HostControls,
   HostHooks,
@@ -50,7 +54,7 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 import { decisionRunOf } from "./resource-decisions.ts";
 import { boundedJson } from "./resource-host.ts";
-import type { ActionModelCalls } from "./resource-host.ts";
+import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { receiptOf, runOf, workflowOwnerOf } from "./resource-runs.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
@@ -72,8 +76,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (`sealedRunOf`): the build its start's receipt pins, every artifact
 //   checked against the manifest and the manifest against the pin
 //   (workflow-builds.ts, `loadWorkflowBuild`), and the build's identity
-//   checked against the hash its row pins, before its isolate can be
-//   loaded with exactly the build's modules (`sealedRunModules`). A
+//   against the manifest's, which is the hash its row pins, before its
+//   isolate can be loaded with exactly that build's modules
+//   (`sealedRunModules`, which takes only the run `sealedRunOf` made). A
 //   tampered build never runs (`workflow.version_corrupt`).
 // - A step the build doesn't have. Each engine step's name is one of the
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
@@ -91,7 +96,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   literal of the sealed template must be the call's exactly; an object
 //   must have exactly the template's keys, and an array exactly its
 //   length (`matched`). An expression's hole (`slot`) takes any JSON
-//   within a step's size, but no placeholder. Every refusal fails the run.
+//   within a step's size: the host fills in no slot, so a placeholder
+//   there is data. Every refusal fails the run.
 // - A sensitive value reaching the isolate, or leaving where it mustn't.
 //   The isolate gets only the parameters that aren't sensitive
 //   (`sealedRunStart`). Where the build seals a sensitive parameter as a
@@ -101,7 +107,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   froze: never anywhere else, in no other kind of call. The value goes to
 //   connect alone, and an answer that echoes it is refused
 //   (resource-calls.ts, `BuiltCall.sensitive`), so it never reaches the
-//   step's record. The audit log keeps the arguments as the isolate sent
+//   step's record. An error reaches the isolate as its code and fixed
+//   message only (host.ts, `forIsolate`): connect words each of its own by
+//   code, never with what the tool said, and its details stay in core. The audit log keeps the arguments as the isolate sent
 //   them, placeholders and not values, as a digest: it names things and
 //   never carries their content (@grasp-os/shared/audit).
 // - Authority that changed since the start. Every call is decided again as
@@ -111,7 +119,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   active member before every step.
 // - An effect repeated. A store operation's, a model's and an action's
 //   call goes out at most once per step, whatever its attempts
-//   (`TriedOnce`); a connector's is keyed in connect under its step's key,
+//   (`TriedOnceMarks`, marked as it goes out, after every check of its
+//   own; a later attempt fails as the one that sent it did, and one that
+//   provably billed nothing may be sent again); a connector's is keyed in connect under its step's key,
 //   and a call connect holds for the person ends its step as held, which
 //   runs again once they decided.
 // - A run past what it may spend. Its model calls, its actions' included,
@@ -138,25 +148,13 @@ export interface HostedSealedRun extends HostedRun {
   readonly maxModelCalls: number;
 }
 
-/**
- * Which steps of a run made their call tried once (a store operation's, a
- * model's, an action's), by step name, kept with the run across its
- * activations: such a call goes out at most once per step.
- */
-export interface TriedOnce {
-  /** Marks step `step`'s call as made: false when it was already. */
-  claim: (step: string) => boolean;
-  /**
-   * Takes that mark back: the call provably billed nothing, so its step's
-   * next run may make it again.
-   */
-  release: (step: string) => void;
-}
-
 /** What a sealed run's kind keeps with the run, across its activations. */
 export interface SealedRunMemory {
-  /** Its steps whose call was tried once (`TriedOnce`). */
-  triedOnce: TriedOnce;
+  /**
+   * Which attempts of its steps whose call is tried once never sent it,
+   * and what one that did failed with (resource-host.ts, `TriedOnceMarks`).
+   */
+  triedOnce: TriedOnceMarks;
   /** The model calls it made, its actions' included. */
   modelCalls: ActionModelCalls;
   /** The run's own sandbox session on-prem, once open: its actions' parent. */
@@ -282,6 +280,32 @@ const triedOnceCalls: ReadonlySet<SealedCall["name"]> = new Set([
   "grasp.action",
 ]);
 
+/**
+ * What a tried-once call's attempt failed with when an earlier attempt
+ * sent it and kept nothing it failed with: left open (its activation died,
+ * the engine timed it out), as the engine's timeout would fail the step.
+ */
+const leftOpen: StepError = {
+  name: "TimeoutError",
+  message: "The step ran out of time.",
+};
+
+/**
+ * `failure`, what the attempt that sent a tried-once call failed with, as
+ * every later attempt of its step fails: never retried, its message and
+ * code kept, a timeout's code `operation.deadline_exceeded` (as the old
+ * host's `lastRetry`, resource-host.ts).
+ */
+const triedBefore = (failure: StepError): Error =>
+  namedError(
+    "NonRetryableError",
+    failure.message,
+    failure.code ??
+      (failure.name === "TimeoutError"
+        ? "operation.deadline_exceeded"
+        : "internal.unexpected")
+  );
+
 /** A refusal of what the build's code never sends: the run fails with it. */
 const tampering = (message: string): Error => {
   const error = workflowErrors.create("workflow.invalid");
@@ -298,20 +322,11 @@ const isRecord = (
 ): value is Readonly<Record<string, Json | undefined>> =>
   typeof value === "object" && value !== null && !isList(value);
 
-/** Whether `value` is exactly a sensitive parameter's placeholder. */
-const placeholderName = (value: Json): string | undefined => {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const keys = Object.keys(value);
-  const name = value[sensitiveParamKey];
-  return keys.length === 1 && typeof name === "string" ? name : undefined;
-};
-
 /**
  * `sent`, the arguments the isolate sent, matched against `template` at
  * `path`: each literal exactly, an object's keys exactly, an array's
- * length exactly, a slot any JSON but a placeholder, and a sensitive
+ * length exactly, a slot any JSON (the host fills in no slot, so what
+ * looks like a placeholder there is data), and a sensitive
  * parameter's place only that parameter's placeholder, its value put in
  * by `fill` (none where no sensitive parameter may be) and kept in
  * `sensitive`. Throws `tampering` for anything else.
@@ -330,15 +345,10 @@ const matched = (
     return template.literal;
   }
   if ("slot" in template) {
-    if (holdsPlaceholder(sent)) {
-      throw tampering(
-        `${path} holds a placeholder the build has no place for.`
-      );
-    }
     return sent;
   }
   if ("param" in template) {
-    const name = placeholderName(sent);
+    const name = placeholderOf(sent);
     if (name !== template.param) {
       throw tampering(
         `${path} takes only the placeholder of the sensitive parameter "${template.param}".`
@@ -472,6 +482,10 @@ class SealedRun implements RunKind {
   readonly stepCompleted = nothingToRecord;
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
+    // Its code starts: until it sends its call, a later attempt may too.
+    if (this.#triesOnce(attempt)) {
+      this.#memory.triedOnce.markUnstarted(attempt.key, attempt.number);
+    }
     // Every call but a binding's is one the build's code never makes.
     const refused = async (label: string): Promise<Settled<never>> =>
       await settle(async () => {
@@ -501,6 +515,31 @@ class SealedRun implements RunKind {
       async (call) => await this.#host.leaseRefusal(attempt, call),
       async (call) => await this.#host.hostCallRefusal(attempt, admission, call)
     );
+  }
+
+  /** Whether `attempt`'s step makes a call tried once. */
+  #triesOnce(attempt: StepAttempt): boolean {
+    const { task, kind } = this.#steps.get(attempt.step) ?? {};
+    return (
+      kind === "task" &&
+      task?.kind === "call" &&
+      triedOnceCalls.has(task.call.name)
+    );
+  }
+
+  /**
+   * Refuses `attempt` of a step whose call is tried once when an earlier
+   * attempt of it may have sent it: every one not marked as never having
+   * sent it (`TriedOnceMarks.unstarted`), an attempt cut off before its
+   * code ran included. It fails as the one that sent it did.
+   */
+  #requireNoneSent(attempt: StepAttempt): void {
+    const marks = this.#memory.triedOnce;
+    for (let earlier = 1; earlier < attempt.number; earlier += 1) {
+      if (!marks.unstarted(attempt.key, earlier)) {
+        throw triedBefore(marks.failureOf(attempt.key, earlier) ?? leftOpen);
+      }
+    }
   }
 
   /** Throws unless `attempt` still holds its lease, nothing awaited. */
@@ -579,6 +618,11 @@ class SealedRun implements RunKind {
           "connection"
         );
       }
+      // Before its audit: a call refused as tried leaves no evidence of one
+      // that went out.
+      if (triedOnceCalls.has(template.call.name)) {
+        this.#requireNoneSent(attempt);
+      }
       await this.#auditCall(attempt, template, args.value);
       return await this.#made(
         attempt,
@@ -632,24 +676,61 @@ class SealedRun implements RunKind {
     value: Json,
     sensitive: Json[]
   ): Promise<Json> {
-    const { calling, build } = this.run;
+    const marks = this.#memory.triedOnce;
+    const once = triedOnceCalls.has(call.name);
     const effect: Effect = {
       key: stepIdempotencyKey(this.run.runId, attempt.step),
       deadline: attempt.deadline,
       requireHolds: () => {
         this.#requireHolds(attempt);
       },
+      // Marked as it goes out, every check of its own passed: from then on
+      // no later attempt of the step sends it again.
+      ...(once
+        ? {
+            sending: () => {
+              marks.markStarted(attempt.key, attempt.number);
+            },
+          }
+        : {}),
     };
-    if (
-      triedOnceCalls.has(call.name) &&
-      !this.#memory.triedOnce.claim(attempt.step)
-    ) {
-      throw workflowResourceErrors.create("workflow.call_invalid", {
-        issues: [
-          "call: An earlier attempt of its step made it, and it is made once.",
-        ],
-      });
+    try {
+      return await this.#sent(
+        attempt,
+        admission,
+        task,
+        call,
+        value,
+        sensitive,
+        effect
+      );
+    } catch (error) {
+      if (once && !marks.unstarted(attempt.key, attempt.number)) {
+        if (
+          call.name === "grasp.model" &&
+          unbilledAiWaitOf(error) !== undefined
+        ) {
+          // Provably billed nothing: the step's next run may ask again.
+          marks.markUnstarted(attempt.key, attempt.number);
+        } else {
+          marks.keepFailure(attempt.key, attempt.number, forIsolate(error));
+        }
+      }
+      throw error;
     }
+  }
+
+  /** `#made`'s work: the call, as a resource run's is made. */
+  async #sent(
+    attempt: StepAttempt,
+    admission: AttemptAdmission,
+    task: SealedTask,
+    call: BoundCall,
+    value: Json,
+    sensitive: Json[],
+    effect: Effect
+  ): Promise<Json> {
+    const { calling, build } = this.run;
     switch (call.name) {
       case "grasp.connector": {
         const built: BuiltCall = {
@@ -696,12 +777,8 @@ class SealedRun implements RunKind {
             effect
           );
         } catch (error) {
-          // Provably billed nothing: the step waits for its provider, and
-          // its next run may ask again.
+          // Provably billed nothing: the step waits for its provider.
           attempt.aiTrouble = unbilledAiWaitOf(error);
-          if (attempt.aiTrouble !== undefined) {
-            this.#memory.triedOnce.release(attempt.step);
-          }
           throw error;
         }
       }
@@ -718,6 +795,8 @@ class SealedRun implements RunKind {
       }
       case "grasp.action": {
         await this.#packagesAdmitted();
+        this.#requireHolds(attempt);
+        effect.sending?.();
         return await this.#action(
           attempt,
           admission,
@@ -870,8 +949,8 @@ export const sealedRun =
 /**
  * Run `runId` as its activation runs it, from its row and its start's
  * receipt: its sealed build loaded against the manifest the receipt pins,
- * and checked against the build hash the row pins, before any of its code
- * can run (`workflow.version_corrupt`). A run that has ended runs nothing
+ * every artifact and the build's identity checked against it, before any
+ * of its code can run (`workflow.version_corrupt`). A run that has ended runs nothing
  * (`workflow.run_ended`).
  */
 export const sealedRunOf = async (
@@ -888,20 +967,15 @@ export const sealedRunOf = async (
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
   }
+  // The receipt pins the manifest, and the row the build hash the start
+  // read from that same manifest, both immutable: so the build's identity,
+  // checked against the manifest's, is the row's too.
   const build = await loadWorkflowBuild(
     env,
     row.workflowResourceId,
     row.version,
     row.manifestHash
   );
-  if (build.hash !== row.buildHash) {
-    log.error("workflow.build_corrupt", {
-      workflow: row.workflowResourceId,
-      version: row.version,
-      what: "run's build",
-    });
-    throw workflowResourceErrors.create("workflow.version_corrupt");
-  }
   const calling = await callingRunOf(env, row.workflowResourceId, runId);
   if (calling === undefined) {
     throw workflowResourceErrors.create("workflow.run_ended");
@@ -928,12 +1002,13 @@ export const sealedRunOf = async (
 };
 
 /**
- * The modules a sealed run's isolate loads: the build's SDK and generated
- * module (`build`), and the main module that runs it (code.ts, `runMain`).
+ * The modules a sealed run's isolate loads: its verified build's SDK and
+ * generated module (`sealedRunOf`), and the main module that runs it
+ * (code.ts, `runMain`).
  */
-export const sealedRunModules = (
-  build: Pick<LoadedBuild, "sdk" | "modules">
-): Record<string, string> => ({
+export const sealedRunModules = ({
+  build,
+}: HostedSealedRun): Record<string, string> => ({
   ...build.sdk,
   ...build.modules,
   ...runModules({

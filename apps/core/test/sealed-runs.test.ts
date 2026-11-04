@@ -33,8 +33,9 @@ import {
   loadRunIsolate,
   runModule,
 } from "../src/workflows/code.ts";
+import type { StepError } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
-import type { HostHooks } from "../src/workflows/host.ts";
+import type { HostHooks, RunStep } from "../src/workflows/host.ts";
 import {
   sealedAdmission,
   sealedRun,
@@ -42,12 +43,16 @@ import {
   sealedRunOf,
   sealedRunStart,
 } from "../src/workflows/sealed-run.ts";
-import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
+import type {
+  HostedSealedRun,
+  SealedRunMemory,
+} from "../src/workflows/sealed-run.ts";
 import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
-import { connectModels } from "./model-provider.ts";
+import { answeringProvider, connectModels } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
@@ -66,16 +71,20 @@ import { testBinding } from "./test-env.ts";
 // - a call that differs from its sealed template: another binding or
 //   operation, a changed literal, an extra or a missing key, a list of
 //   another length;
-// - a sensitive parameter's placeholder outside its place, of a
-//   parameter the build didn't seal there, or in a call that isn't a
-//   connector's; a connector's answer echoing the secret;
+// - a sensitive parameter's placeholder of a parameter the build didn't
+//   seal there; one in an expression's place, or in a call that isn't a
+//   connector's, filled in (it must stay data); a connector's answer or
+//   error carrying the secret back;
+// - a model call sent twice by its step's attempts, or past the run's
+//   ceiling;
 // - authority that changed since the start: an approval revoked, the
 //   person gone;
 // - a call outside its step, or two calls in one attempt;
 // - a build whose bytes aren't the ones its hash names.
 //
-// And the call the isolate filled in as sealed goes out, its sensitive
-// value put in by the host, audited with the arguments it sent.
+// And the calls the isolate filled in as sealed go out: a connector's, its
+// sensitive value put in by the host, audited with the arguments it sent,
+// and a model's.
 
 /** The model the organization chose, the one the model binding names. */
 const allowedModel = "mistral/mistral-large-latest";
@@ -248,6 +257,20 @@ const sealedWorkflow = async () => {
             },
           },
         },
+        {
+          again: {
+            call: "grasp.model",
+            with: {
+              binding: "summary",
+              instructions: "Greet them.",
+              input: {
+                who: "${ $workflow.input.who }",
+                tags: ["vip", "${ $workflow.input.who }"],
+              },
+              outputSchema: objectSchema({ line: { type: "string" } }),
+            },
+          },
+        },
         { finish: { set: { status: "done" } } },
       ],
     }),
@@ -319,9 +342,20 @@ ${body}
 const send = (body: string): string =>
   `return await step.do("send", { key: "task", description: "Its task" }, async () => { ${body} });`;
 
-/** The engine step of `greet`'s own step, asking its model with `args`. */
-const greet = (args: string): string =>
-  `return await step.do("greet", { key: "task", description: "Its task" }, async () => await env.summary.call("grasp.model", ${args}));`;
+/** What `greet` and `again` ask their model, as the build sealed it. */
+const greeting =
+  '{ instructions: "Greet them.", input: { who: input.who, tags: ["vip", input.who] } }';
+
+/** The engine step of `task`'s own step, asking its model with `args`. */
+const greet = (args: string, task = "greet"): string =>
+  `return await step.do(${JSON.stringify(task)}, { key: "task", description: "Its task" }, async () => await env.summary.call("grasp.model", ${args}));`;
+
+/** A provider answer greeting Ada, as the model's output schema takes it. */
+const hello = {
+  text: '{"line":"Hello Ada"}',
+  inputTokens: 100,
+  outputTokens: 20,
+};
 
 const settledSchema = z.union([
   z.object({ ok: z.literal(true), value: z.unknown() }),
@@ -333,24 +367,92 @@ const settledSchema = z.union([
 
 /** Memory of a run's tried-once calls and model calls, this test's own. */
 const memoryOfTest = (): SealedRunMemory => {
-  const made = new Set<string>();
+  const unstarted = new Set<string>();
+  const failures = new Map<string, StepError>();
   const models: string[] = [];
   return {
     triedOnce: {
-      claim: (step) => {
-        const fresh = !made.has(step);
-        made.add(step);
-        return fresh;
+      markUnstarted: (key, attempt) => {
+        unstarted.add(`${attempt}:${key}`);
       },
-      release: (step) => {
-        made.delete(step);
+      markStarted: (key, attempt) => {
+        unstarted.delete(`${attempt}:${key}`);
       },
+      unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
+      keepFailure: (key, attempt, error) => {
+        failures.set(`${attempt}:${key}`, error);
+      },
+      failureOf: (key, attempt) => failures.get(`${attempt}:${key}`),
     },
     modelCalls: {
       count: () => models.length,
       keep: (key) => {
         models.push(key);
       },
+    },
+  };
+};
+
+/** An engine of the test's own, as `engineOfTest`'s. */
+type Engine = Pick<ReturnType<typeof engineOfTest>, "step" | "leaseOf">;
+
+/**
+ * An engine that tries each step's function again, as the engine does,
+ * while its error may be retried and its retries last, and whose waits
+ * for an event end at once.
+ */
+const retryingEngine = (): Engine => {
+  const leases = new Set<string>();
+  const step: RunStep = {
+    do: async (name, config, fn) => {
+      const key = `key:${name}`;
+      const limit = config.retries?.limit ?? 0;
+      for (let attempt = 1; ; attempt += 1) {
+        leases.add(`${attempt}:${key}`);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+          return await fn({ attempt, idempotencyKey: key });
+        } catch (error) {
+          if (
+            attempt > limit ||
+            (error instanceof Error && error.name === "NonRetryableError")
+          ) {
+            throw error;
+          }
+        } finally {
+          leases.delete(`${attempt}:${key}`);
+        }
+      }
+    },
+    sleep: async () => {
+      await Promise.resolve();
+    },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
+    waitForEvent: async () => await Promise.resolve({ payload: null }),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
+  };
+  return {
+    step,
+    leaseOf: (key, attempt) =>
+      leases.has(`${attempt}:${key}`)
+        ? { generation: 1000, deadline: Date.now() + 60_000 }
+        : undefined,
+  };
+};
+
+/**
+ * `engineOfTest`, its attempts a newer activation's than the run's own,
+ * which a real admission would otherwise take for one it superseded.
+ */
+const newerEngine = (): Engine => {
+  const { step, leaseOf } = engineOfTest();
+  return {
+    step,
+    leaseOf: (key, attempt) => {
+      const lease = leaseOf(key, attempt);
+      return lease === undefined ? undefined : { ...lease, generation: 1000 };
     },
   };
 };
@@ -364,18 +466,24 @@ const memoryOfTest = (): SealedRunMemory => {
 const ranAs = async (
   runId: string,
   source: string,
-  admitAttempt?: (
-    run: Awaited<ReturnType<typeof sealedRunOf>>
-  ) => NonNullable<HostHooks["admitAttempt"]>
+  {
+    admitAttempt,
+    engine = newerEngine(),
+    maxModelCalls,
+  }: {
+    /** How its attempts are admitted, from the run; at once if not given. */
+    admitAttempt?: (
+      run: HostedSealedRun
+    ) => NonNullable<HostHooks["admitAttempt"]>;
+    engine?: Engine;
+    /** Its model calls' ceiling, in place of the host's. */
+    maxModelCalls?: number;
+  } = {}
 ) => {
-  const run = await sealedRunOf(serving, runId);
-  const { step, leaseOf } = engineOfTest();
-  // Its attempts as a newer activation's than the run's own, which a real
-  // admission would otherwise take for one it superseded.
-  const newer: HostHooks["leaseOf"] = (key, attempt) => {
-    const lease = leaseOf(key, attempt);
-    return lease === undefined ? undefined : { ...lease, generation: 1000 };
-  };
+  const loaded = await sealedRunOf(serving, runId);
+  const run =
+    maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
+  const { step, leaseOf } = engine;
   const tampered: string[] = [];
   const host = new RunHost(
     serving,
@@ -385,7 +493,7 @@ const ranAs = async (
       stepFailed: () => {
         // The run's end says what failed.
       },
-      leaseOf: newer,
+      leaseOf,
       tampered: (error) => {
         tampered.push(error.code ?? error.message);
       },
@@ -401,8 +509,8 @@ const ranAs = async (
     modules: async () =>
       await Promise.resolve(
         sealedRunModules({
-          sdk: run.build.sdk,
-          modules: { [generatedModule]: source },
+          ...run,
+          build: { ...run.build, modules: { [generatedModule]: source } },
         })
       ),
     attemptMethods,
@@ -451,23 +559,24 @@ const refusalsOf = async (runId: string) => {
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
 
-/** Makes mail server `id` answer mail.send with `messageId` `echo`. */
-const echoingMail = async (id: string, echo: string): Promise<void> => {
+/** Makes mail server `id` answer mail.send with the MCP tool result `result`. */
+const toolAnswers = async (id: string, result: unknown): Promise<void> => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
     throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
   }
-  const answered = { messageId: echo };
   await providers.fetch(mailControlUrl(id.slice("connection-".length)), {
     method: "POST",
-    body: JSON.stringify({
-      answers: {
-        "mail.send": {
-          content: [{ type: "text", text: JSON.stringify(answered) }],
-          structuredContent: answered,
-        },
-      },
-    }),
+    body: JSON.stringify({ answers: { "mail.send": result } }),
+  });
+};
+
+/** Makes mail server `id` answer mail.send with `messageId` `echo`. */
+const echoingMail = async (id: string, echo: string): Promise<void> => {
+  const answered = { messageId: echo };
+  await toolAnswers(id, {
+    content: [{ type: "text", text: JSON.stringify(answered) }],
+    structuredContent: answered,
   });
 };
 
@@ -510,7 +619,7 @@ describe("a sealed build's run on the run host", () => {
           'const answer = await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); return { sent: typeof answer.messageId };'
         )
       ),
-      (run) => sealedAdmission(serving, run)
+      { admitAttempt: (run) => sealedAdmission(serving, run) }
     );
     const admitted = await env.DB.prepare(
       "SELECT resource FROM run_lineage_attempts WHERE run_id = ? AND step_key = 'key:send:task'"
@@ -641,52 +750,116 @@ describe("a sealed build's run on the run host", () => {
     });
   });
 
-  it("refuses a sensitive parameter's placeholder outside its place, of another parameter, or in a call that isn't a connector's", async () => {
-    const runs = [
-      await waitingRun(sealed),
-      await waitingRun(sealed),
-      await waitingRun(sealed),
-    ];
-    const outsideItsPlace = await ranAs(
-      runs[0] ?? "",
-      moduleOf(
-        send(
-          'return await env.mail.call("mail.send", { to: sensitiveParam("token"), subject: sensitiveParam("token") });'
-        )
-      )
-    );
+  it("fills in a sensitive parameter only in its own place: another's placeholder is refused, and one in an expression's place, or in a call that isn't a connector's, is data", async () => {
+    const provider = await answeringProvider(() => hello, {
+      models: [allowedModel],
+    });
     const unsealedName = await ranAs(
-      runs[1] ?? "",
+      await waitingRun(sealed),
       moduleOf(
         send(
           'return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("other") });'
         )
       )
     );
-    const notAConnector = await ranAs(
-      runs[2] ?? "",
+    const inASlot = await ranAs(
+      await waitingRun(sealed),
       moduleOf(
-        'return await step.do("greet", { key: "task", description: "Its task" }, async () => await env.summary.call("grasp.model", { instructions: "Greet them.", input: { who: sensitiveParam("token"), tags: ["vip", input.who] } }));'
+        send(
+          'return await env.mail.call("mail.send", { to: sensitiveParam("token"), subject: sensitiveParam("token") });'
+        )
       )
     );
+    const notAConnector = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        greet(
+          '{ instructions: "Greet them.", input: { who: sensitiveParam("token"), tags: ["vip", input.who] } }'
+        )
+      )
+    );
+    const asked = JSON.stringify(provider.requests.map(({ body }) => body));
     expect({
-      outsideItsPlace,
       unsealedName,
+      inASlot,
       notAConnector,
-      checked: await Promise.all(runs.map(checkedCalls)),
+      askedWithPlaceholder: asked.includes("$grasp:param"),
+      askedWithSecret: asked.includes(sealed.secret),
     }).toStrictEqual({
-      outsideItsPlace: refusedAs(
-        "arguments.to holds a placeholder the build has no place for."
-      ),
       unsealedName: refusedAs(
         'arguments.subject takes only the placeholder of the sensitive parameter "token".'
       ),
-      notAConnector: refusedAs(
-        "arguments.input.who holds a placeholder the build has no place for."
-      ),
-      // None of them went out.
-      checked: [[], [], []],
+      // Its contract takes text there: the placeholder went nowhere.
+      inASlot: failedWith("workflow.call_invalid"),
+      notAConnector: { ended: { line: "Hello Ada" }, tampered: [] },
+      askedWithPlaceholder: true,
+      askedWithSecret: false,
     });
+  });
+
+  it("makes a model call once: a later attempt of its step fails as the one that sent it, unless it provably billed nothing", async () => {
+    const replies: ProviderReply[] = [hello];
+    const provider = await answeringProvider(() => replies.shift(), {
+      models: [allowedModel],
+    });
+    const answered = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(greet(greeting))
+    );
+    const afterAnswered = provider.requests.length;
+    // The call went out, then its attempt timed out: the engine tries the
+    // step again, and the call doesn't go out again.
+    replies.push(hello, hello);
+    const retried = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => {
+  await env.summary.call("grasp.model", ${greeting});
+  const slow = new Error("Too slow");
+  slow.name = "TimeoutError";
+  throw slow;
+});
+`),
+      { engine: retryingEngine() }
+    );
+    const afterRetried = provider.requests.length;
+    // Refused for the key, billing nothing: the step waits for a working
+    // one, then asks again.
+    replies.length = 0;
+    replies.push({ status: 401, errorType: "authentication_error" }, hello);
+    const unbilled = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(greet(greeting)),
+      { engine: retryingEngine() }
+    );
+    expect({
+      answered,
+      afterAnswered,
+      retried,
+      sentByRetried: afterRetried - afterAnswered,
+      unbilled,
+      sentByUnbilled: provider.requests.length - afterRetried,
+    }).toStrictEqual({
+      answered: { ended: { line: "Hello Ada" }, tampered: [] },
+      afterAnswered: 1,
+      retried: failedWith("operation.deadline_exceeded"),
+      sentByRetried: 1,
+      unbilled: { ended: { line: "Hello Ada" }, tampered: [] },
+      sentByUnbilled: 2,
+    });
+  });
+
+  it("stops at the run's model-call ceiling", async () => {
+    await answeringProvider(() => hello, { models: [allowedModel] });
+    const ran = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+${greet(greeting).replace("return await", "await")}
+${greet(greeting, "again")}
+`),
+      { maxModelCalls: 1 }
+    );
+    expect(ran).toStrictEqual(failedWith("workflow.model_call_limit"));
   });
 
   it("refuses an answer that echoes the sensitive value, which never reaches the isolate", async () => {
@@ -716,17 +889,49 @@ describe("a sealed build's run on the run host", () => {
     });
   });
 
+  it("never hands the isolate a connector's error quoting the sensitive value", async () => {
+    // Connect words each of its errors by code, never with what the tool
+    // said, and the isolate gets an error's code and message alone.
+    const failing = await sealedWorkflow();
+    await toolAnswers(failing.mail.id, {
+      isError: true,
+      content: [
+        { type: "text", text: `Refused: ${failing.secret} isn't allowed` },
+      ],
+    });
+    const ran = await ranAs(
+      await waitingRun(failing),
+      moduleOf(
+        send(
+          'try { return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); } catch (error) { return { code: error.code, message: error.message }; }'
+        )
+      )
+    );
+    expect({
+      ran,
+      seen: JSON.stringify(ran).includes(failing.secret),
+    }).toStrictEqual({
+      ran: { ended: { code: anyText, message: anyText }, tampered: [] },
+      seen: false,
+    });
+  });
+
   it("refuses a call outside its step, and a second call in one attempt", async () => {
     const outsideRun = await waitingRun(sealed);
+    // Its late call is made once its step has completed: chained, inside
+    // the step, on what the module lets go only after the step returned.
     const outside = await ranAs(
       outsideRun,
       moduleOf(`
-const before = await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }).then(() => "sent", (error) => error.code);
+const before = await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }).then(() => "sent", () => "refused");
+let letGo;
 let late;
 await step.do("send", { key: "task", description: "Its task" }, async () => {
-  late = new Promise((resolve) => setTimeout(resolve, 0)).then(() => env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") })).then(() => "sent", (error) => error.code ?? error.message);
+  const gate = new Promise((resolve) => { letGo = resolve; });
+  late = gate.then(() => env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") })).then(() => "sent", () => "refused");
   return null;
 });
+letGo();
 return { before, after: await late };
 `)
     );
@@ -746,15 +951,7 @@ return { before, after: await late };
       twice,
       checkedOfTwice: twiceChecked.length,
     }).toStrictEqual({
-      outside: {
-        ended: {
-          // Before any step there is no attempt to call through; after its
-          // step, the runtime let go of the attempt's host.
-          before: "workflow.outside_step",
-          after: "RPC stub used after being disposed.",
-        },
-        tampered: [],
-      },
+      outside: { ended: { before: "refused", after: "refused" }, tampered: [] },
       checkedOfOutside: [],
       twice: refusedAs('Step "send:task" makes its call once.'),
       // The first went out; the second was refused before it was audited.

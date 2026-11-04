@@ -29,7 +29,6 @@ import {
   inboundEmailIndexSchema,
   holdsPlaceholder,
   modelReviewed,
-  placeholderPrefix,
   reviewerChosenAtRun,
   stepIdempotencyKey,
   stepReviewed,
@@ -261,15 +260,17 @@ const requireUnrefused = (attempt: StepAttempt): void => {
 };
 
 /**
- * Refuses what an App's run sends that holds a placeholder's key
- * (`placeholderPrefix`): its code may call the SDK's `sensitiveParam`, but
- * only a sealed build's run host gives a placeholder a value, so here it
- * would reach a binding as it is.
+ * Refuses what an App's run sends that holds a sensitive parameter's
+ * placeholder (`holdsPlaceholder`: exactly `{"$grasp:param": name}`): its
+ * code may call the SDK's `sensitiveParam`, but only a sealed build's run
+ * host fills one in, so here it would reach a binding as it is. Other
+ * `$grasp:` keys are data, which outsiders may write.
  */
 const requireNoPlaceholder = (value: unknown): void => {
   if (holdsPlaceholder(value)) {
     const error = workflowErrors.create("workflow.invalid");
-    error.message = `An App's run sends no "${placeholderPrefix}" keys: they are placeholders only a sealed build's run fills in.`;
+    error.message =
+      "An App's run sends no sensitive parameter's placeholder: only a sealed build's run fills one in.";
     throw error;
   }
 };

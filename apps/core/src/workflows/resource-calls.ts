@@ -147,6 +147,12 @@ export interface Effect {
    * would outlive the action that can't wait for it.
    */
   readonly fromAction?: boolean;
+  /**
+   * Hears that the call goes out now: every check of its own passed, its
+   * started receipt kept, nothing awaited after (a model's: as its request
+   * is sent). Where a call tried once marks that it went (sealed-run.ts).
+   */
+  readonly sending?: () => void;
 }
 
 /** A task's call, its arguments built by the host (resource-host.ts). */
@@ -813,7 +819,10 @@ const callModel = async (
           throw error;
         }
       },
-      beforeSend: effect.requireHolds,
+      beforeSend: () => {
+        effect.requireHolds();
+        effect.sending?.();
+      },
       // One request per call, so the run's limit of model calls
       // (`maxModelCalls`, resource-host.ts) bounds its requests: an answer
       // that doesn't fit the task's schema fails the call, never asks again,
@@ -1123,6 +1132,10 @@ export const makeCall = async (
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
+    // A model call goes out as its request is sent (`callModel`).
+    if (call.name !== "grasp.model") {
+      effect.sending?.();
+    }
     switch (call.name) {
       case "grasp.connector": {
         const answer = await callConnector(
