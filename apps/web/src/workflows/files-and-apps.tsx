@@ -349,8 +349,20 @@ export const FilesAndApps = ({
 
   // One rule for every part: read each time the tab opens, and again when
   // the current version moves (its bindings, so its apps, move with it).
+  const rereads = useRef(0);
   useEffect(() => {
     const left = new AbortController();
+    // A read started now, whose answer an approval's own read supersedes.
+    const started = rereads.current;
+    const latest = async <T,>(
+      part: (session: Session) => Promise<T>,
+      set: (loaded: Loaded<T>) => void
+    ): Promise<void> => {
+      const loaded = await loadFromCore(core, part, left.signal);
+      if (!left.signal.aborted && started === rereads.current) {
+        set(loaded);
+      }
+    };
     const read = async <T,>(
       part: (session: Session) => Promise<T>,
       set: (loaded: Loaded<T>) => void
@@ -369,13 +381,13 @@ export const FilesAndApps = ({
       setFiles
     );
     if (versionsRead) {
-      void read(
+      void latest(
         async (session) => await appsOfVersion(session, currentVersion),
         setApps
       );
     }
     if (approves) {
-      void read(
+      void latest(
         async (session) =>
           await session.workflowResources.pendingBindingsOf(workflow),
         setPending
@@ -388,9 +400,8 @@ export const FilesAndApps = ({
 
   // Once a binding is approved: what still waits, read again and shown as
   // soon as it lands, and the apps its approvals connect, apart. Only the
-  // latest of each read is shown, as one started before a later approval
-  // would miss it.
-  const rereads = useRef(0);
+  // latest of each read is shown, the tab's first reads among them, as one
+  // started before a later approval would miss it.
   const approved = async (): Promise<void> => {
     rereads.current += 1;
     const reread = rereads.current;

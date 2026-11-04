@@ -2,6 +2,7 @@
 import type {
   PendingWorkflowBindings,
   WorkflowBindingTarget,
+  WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -53,14 +54,61 @@ const waiting: PendingWorkflowBindings["bindings"] = [
   },
 ];
 
-/** Core as the tab reaches it, keeping each approval asked of it. */
+/** Version 2, which declares `crm` as a connector binding. */
+const versionTwo: WorkflowResourceVersion = {
+  resourceId: workflow,
+  version: 2,
+  definitionVersion: "1.0.0",
+  profile: "grasp-open-workflow/1",
+  definitionHash: "definition",
+  contractHash: "contract",
+  manifestHash: "manifest",
+  bindings: [
+    {
+      alias: "crm",
+      kind: "connector",
+      resourceId: null,
+      resourceVersion: null,
+      contractId: "crm-contacts",
+      fingerprint: "fingerprint",
+    },
+  ],
+  actions: [],
+  modelSteeredWrites: [],
+  build: { executable: true, hash: "build" },
+  author: "user-ada",
+  createdAt: "2026-11-04T09:00:00.000Z",
+};
+
+/**
+ * Core as the tab reaches it, keeping each approval asked of it; its first
+ * read of the connections catalog answers only once `answerFirstCatalog`
+ * lets it, as a cold catalog can take seconds.
+ */
 const fakeCore = () => {
   const approved: { id: string; input: { alias: string } }[] = [];
   const asked: string[] = [];
+  const firstCatalog = Promise.withResolvers<boolean>();
+  let catalogReads = 0;
   const workflowResources = {
     knowledge: async () => await Promise.resolve([]),
     files: async () => await Promise.resolve([]),
-    bindings: async () => await Promise.resolve([]),
+    // As core answers them now: each approval asked so far, for version 2.
+    bindings: async () =>
+      await Promise.resolve(
+        approved.map(({ input }) => ({
+          id: `approval-${input.alias}`,
+          alias: input.alias,
+          kind: "connector",
+          contractId: "crm-contacts",
+          fingerprint: "fingerprint",
+          target: crmTarget,
+          reviewedVersion: 2,
+          status: "active",
+          approvedBy: "user-admin",
+          approvedAt: "2026-11-04T09:00:00.000Z",
+        }))
+      ),
     pendingBindingsOf: async (
       id: string
     ): Promise<PendingWorkflowBindings[]> => {
@@ -88,7 +136,13 @@ const fakeCore = () => {
   const session = {
     workflowResources,
     connections: {
-      catalog: async () => await Promise.resolve({ entries: [] }),
+      catalog: async () => {
+        catalogReads += 1;
+        if (catalogReads === 1) {
+          await firstCatalog.promise;
+        }
+        return { entries: [] };
+      },
       list: async () => await Promise.resolve([]),
     },
     workflows: {
@@ -103,7 +157,14 @@ const fakeCore = () => {
         ]),
     },
   };
-  return { session, approved, asked };
+  return {
+    session,
+    approved,
+    asked,
+    answerFirstCatalog: () => {
+      firstCatalog.resolve(true);
+    },
+  };
 };
 
 /** Lets every pending promise and render settle. */
@@ -132,7 +193,7 @@ const shown = async (
       <FilesAndApps
         approves={approves}
         currentVersion={2}
-        versions={{ state: "ready", data: [] }}
+        versions={{ state: "ready", data: [versionTwo] }}
         workflow={workflow}
       />
     ),
@@ -194,7 +255,8 @@ describe("a workflow's Files and apps tab", () => {
   });
 
   it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits", async () => {
-    const { session, approved } = fakeCore();
+    const { session, approved, answerFirstCatalog } = fakeCore();
+    answerFirstCatalog();
     await shown(session, true);
     const unpicked = button("Approve approval")?.disabled;
 
@@ -234,8 +296,23 @@ describe("a workflow's Files and apps tab", () => {
     });
   });
 
+  it("keeps a connector approved once the tab's first, slower read of its apps lands after the approval", async () => {
+    const { session, answerFirstCatalog } = fakeCore();
+    await shown(session, true);
+    await press(button("Approve crm"));
+    const afterApproval = document.body.textContent.includes("Not connected");
+    answerFirstCatalog();
+    await settled();
+
+    expect({
+      afterApproval,
+      afterFirstRead: document.body.textContent.includes("Not connected"),
+    }).toStrictEqual({ afterApproval: false, afterFirstRead: false });
+  });
+
   it("never asks core what waits for someone who doesn't approve", async () => {
-    const { session, asked } = fakeCore();
+    const { session, asked, answerFirstCatalog } = fakeCore();
+    answerFirstCatalog();
     await shown(session, false);
 
     expect({

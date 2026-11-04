@@ -192,16 +192,24 @@ const servedOperations = async (
   const storeId = await grantedStore(env, consumer, paths);
   const server =
     storeId === undefined ? undefined : await workflowStoreServer(env, storeId);
+  // A workflow calls its own store as itself, never through a binding.
+  if (server === undefined || server.workflowId === id) {
+    return [];
+  }
   return paths.flatMap((path) => {
-    const served = server?.store.operations.get(path)?.manifest;
-    return served === undefined ? [] : [{ path, operation: served }];
+    const served = server.store.operations.get(path)?.manifest;
+    return served === undefined || server.store.fingerprints[path] === undefined
+      ? []
+      : [{ path, operation: served }];
   });
 };
 
 /**
  * The paths the workflow's own store permissions list whose operation
  * takes and returns exactly what operation contract `key` says, each as
- * the kind its store serves it.
+ * the kind its store serves it: checked here as `requireTargetServes`
+ * checks one, from one read of each store, so they aren't checked one by
+ * one again (an approval checks its own afresh).
  */
 const operationTargets = async (
   env: Env,
@@ -327,6 +335,11 @@ const offeredFor = async (
     // One an approval couldn't take as written (a path no operation could
     // have) is never offered.
     if (!workflowBindingTargetSchema.safeParse(candidate.target).success) {
+      continue;
+    }
+    // Checked as it was read, its store read once (`operationTargets`).
+    if (candidate.target.kind === "storeOperation") {
+      offered.push(candidate);
       continue;
     }
     try {

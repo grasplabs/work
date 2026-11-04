@@ -24,6 +24,7 @@ import {
   DecisionConfirmDialog,
 } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { decisionSource } from "../decision-source.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -297,28 +298,6 @@ const OnItsOwn = ({ children }: { children: ReactNode }) => (
   </main>
 );
 
-/**
- * The crumb of the workflow whose run asks: its App's workflow, or an
- * independent workflow's own page; only its name when it has neither.
- */
-const sourceOf = (decision: DecisionView): Crumb => {
-  if (decision.app !== undefined) {
-    return {
-      label: decision.workflow,
-      to: "/workflows/$app/$workflow",
-      params: { app: decision.app.id, workflow: decision.workflow },
-    };
-  }
-  if (decision.workflowResource !== undefined) {
-    return {
-      label: decision.workflowResource.name,
-      to: "/workflows/$workflow",
-      params: { workflow: decision.workflowResource.id },
-    };
-  }
-  return { label: decision.workflow };
-};
-
 /** The decision in the app's frame, under the crumbs to its workflow. */
 const DecisionInFrame = ({
   identity,
@@ -422,7 +401,7 @@ const Decision = () => {
   }
   const { decision } = page;
   // From the App's workflow, or the independent workflow's own page.
-  const source = sourceOf(decision);
+  const source = decisionSource(decision);
   return (
     <DecisionInFrame
       crumbs={[workflows, source, { label: t`Decision` }]}
