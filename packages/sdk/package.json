@@ -20,6 +20,7 @@
     "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
     "./open-workflow": "./src/open-workflow.ts",
+    "./expression-check": "./src/expression-check.ts",
     "./compute": "./src/compute.ts",
     "./action": "./src/action.ts",
     "./brain": "./src/brain.ts",
