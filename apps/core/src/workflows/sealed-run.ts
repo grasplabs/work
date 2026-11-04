@@ -3,6 +3,7 @@ import {
   generatorVersion,
 } from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
+import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
@@ -206,7 +207,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   asks its people, and a wait takes the answer. The enter step's record
 //   is held to the build's templates as a call's arguments are (`matched`):
 //   every literal exact, a slot any JSON, never a sensitive parameter; its
-//   recipients each named once, as deciders (`person:`, `team:` or
+//   recipients each named as deciders (`person:`, `team:` or
 //   `role:`), the first of them its code's `from`. The
 //   host opens the decision from that record alone, on the binding the
 //   build seals (resource-decisions.ts, `openRunDecision`): each recipient
@@ -1352,14 +1353,15 @@ class SealedRun implements SealedRunKind {
     }
     try {
       const { recipients } = record.data;
+      recipientsOf(recipients);
       // As deciders already, so its code's `from` (`step.decision`, a
-      // person value) can be the first of them exactly.
-      if (
-        canonicalJson(recipientsOf(recipients)) !== canonicalJson(recipients)
-      ) {
-        throw callInvalid(
-          "recipients: Name each once, as person:, team: or role:."
-        );
+      // person value) can be the first of them exactly. One named twice
+      // is asked once (`recipientsOf`), the first still first.
+      const named: readonly Json[] = Array.isArray(recipients)
+        ? recipients
+        : [];
+      if (!named.every((each) => decidersSchema.safeParse(each).success)) {
+        throw callInvalid("recipients: Name each as person:, team: or role:.");
       }
       promptOf(record.data.prompt);
     } catch (error) {
