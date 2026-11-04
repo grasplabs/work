@@ -2494,8 +2494,9 @@ export class RunHost extends RpcTarget {
         chosen = fromIsolate(await call);
       } catch (error) {
         if (!isCpuLimitKill(error)) {
-          // Rejected rather than reported: the engine decides again.
-          throw error;
+          // Rejected rather than reported: the engine decides again,
+          // journaling words of core's, never the isolate's.
+          throw new Error("The retry's decision failed.", { cause: error });
         }
         this.#isolateStopped = true;
         throw toStepError(forIsolate(error));

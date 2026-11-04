@@ -1054,7 +1054,11 @@ class SealedRun implements SealedRunKind {
   ): Promise<Settled<unknown>> {
     const made = this.#hostFailures.get(attempt);
     if (made !== undefined) {
-      return { ok: false, error: made };
+      // Past a call that took effect, a later refusal fails it after it.
+      return {
+        ok: false,
+        error: this.#effected.has(attempt) ? failedAfterEffect : made,
+      };
     }
     if (!result.ok) {
       return {
@@ -1228,15 +1232,13 @@ class SealedRun implements SealedRunKind {
       return undefined;
     }
     const [first] = takers;
-    const policy = first?.catch.retry;
-    // The first to take it has no conditions, nor has its policy (or it
-    // has none left): nothing for the code to decide.
+    // The first to take it has no conditions, nor has its policy (an
+    // offer means it has one, with rounds left): nothing for the code to
+    // decide.
     const fixed =
       first !== undefined &&
       unconditional(first.catch) &&
-      (policy === undefined ||
-        round >= policy.attempts ||
-        unconditional(policy));
+      unconditional(first.catch.retry);
     return {
       error: { ...failure.error },
       decided: (choice, firstFailedAt) =>

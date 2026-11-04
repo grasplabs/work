@@ -9,10 +9,19 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { env } from "cloudflare:workers";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
@@ -1333,7 +1342,9 @@ describe("a sealed run's catches, raises, retries and sleeps on the run host", (
     sealed = await sealedWorkflow();
   });
 
-  afterAll(endLiveResourceRuns);
+  // Each test's waiting runs end with it: a person's runs of one
+  // workflow under way are bounded.
+  afterEach(endLiveResourceRuns);
 
   it("fails a raise with its sealed error, which only a catch whose filter it has takes", async () => {
     const caught = await ranAs(
@@ -1481,6 +1492,30 @@ try {
   return { code: thrown.code, caught: (${catchStep("guarded", "async () => true")}) ?? null };
 }`)
     );
+    // Its call took effect, then its lineage had no host call left for a
+    // next one: it failed after its effect all the same.
+    let hostCalls = 0;
+    const spentAfter = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("fetch", '(async () => { await env.mail.call("mail.send", { to: input.who, subject: "x" }); await env.mail.call("mail.send", { to: input.who, subject: "x" }).catch(() => null); return { output: "sent" }; })()')};
+} catch (thrown) {
+  return { code: thrown.code, caught: (${catchStep("guarded", "async () => true")}) ?? null };
+}`),
+      {
+        admitAttempt: () => async () => ({
+          ...(await admittedFreely()),
+          hostCall: async () => {
+            hostCalls += 1;
+            if (hostCalls > 1) {
+              throw workflowErrors.create("workflow.lineage_limit");
+            }
+            await Promise.resolve();
+          },
+        }),
+      }
+    );
     const relabelled = await ranAs(
       await waitingRun(sealed),
       moduleOf(`
@@ -1490,7 +1525,13 @@ try {
   return { code: thrown.code ?? null, caught: ${catchStep("guarded", "async () => true")} };
 }`)
     );
-    expect({ swallowed, rejected, afterEffect, relabelled }).toStrictEqual({
+    expect({
+      swallowed,
+      rejected,
+      afterEffect,
+      spentAfter,
+      relabelled,
+    }).toStrictEqual({
       swallowed: {
         ended: { code: "workflow.call_denied", caught: true },
         tampered: [],
@@ -1501,6 +1542,11 @@ try {
         untaken: true,
       },
       afterEffect: {
+        ended: { code: "workflow.failed_after_effect", caught: null },
+        tampered: [],
+        untaken: true,
+      },
+      spentAfter: {
         ended: { code: "workflow.failed_after_effect", caught: null },
         tampered: [],
         untaken: true,
