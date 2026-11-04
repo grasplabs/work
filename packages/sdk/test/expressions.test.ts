@@ -164,6 +164,50 @@ describe(evaluate, () => {
     });
   });
 
+  it("refuses an expression or options whose reads throw, without passing on what they threw", async () => {
+    const thrown = new Error("read me");
+    const throwing = (): never => {
+      throw thrown;
+    };
+    const scope = definitionScope({});
+    const caught = async (
+      expression: Expression<"taskDefinition">,
+      options?: EvaluateOptions
+    ): Promise<unknown> =>
+      await evaluate(expression, scope, options).catch(
+        (error: unknown) => error
+      );
+    const source = await caught(
+      unchecked({
+        ...task("."),
+        get source(): string {
+          return throwing();
+        },
+      })
+    );
+    const result = await caught(
+      task("."),
+      unchecked({
+        get result(): string {
+          return throwing();
+        },
+      })
+    );
+    const proxied = await caught(
+      unchecked(new Proxy(task("."), { get: throwing }))
+    );
+    expect({
+      source: expressionErrors.codeOf(source),
+      result: expressionErrors.codeOf(result),
+      proxied: expressionErrors.codeOf(proxied),
+    }).toStrictEqual({
+      source: "expression.invalid",
+      result: "expression.invalid",
+      proxied: "expression.invalid",
+    });
+    expect([source, result, proxied]).not.toContain(thrown);
+  });
+
   it("never carries the values it ran on in its error", async () => {
     const secret = "salary-81234";
     const thrown: unknown = await evaluate(

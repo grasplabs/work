@@ -1,5 +1,8 @@
 import type { Json } from "@grasp-os/shared/json";
-import { expressionError } from "@grasp-os/workflow-expressions/errors";
+import {
+  expressionError,
+  expressionErrors,
+} from "@grasp-os/workflow-expressions/errors";
 import {
   compileExpression,
   evaluateExpression,
@@ -76,6 +79,9 @@ const resultContracts = {
   json: { kind: "json" },
 } as const;
 
+const isResult = (value: unknown): value is ExpressionResult =>
+  typeof value === "string" && Object.hasOwn(resultContracts, value);
+
 /** Options of one evaluation. */
 export interface EvaluateOptions {
   /** What its result must be; one JSON value if unset. */
@@ -83,6 +89,49 @@ export interface EvaluateOptions {
   /** The step's budget its fuel comes out of; none if unset. */
   readonly budget?: ExpressionBudget;
 }
+
+/**
+ * Reads `expression` and `options` into plain data. They are caller data,
+ * like the scope the evaluator reads behind its own guard: anything their
+ * reads throw that isn't an expression error (a getter or proxy that
+ * throws) fails as `expression.invalid`, and what it threw is never passed
+ * on.
+ */
+const readArguments = <S extends ExpressionStage>(
+  expression: Expression<S>,
+  options: EvaluateOptions | undefined
+): {
+  source: string;
+  stage: S;
+  pointer: string;
+  scope: readonly string[];
+  loopVariables: readonly string[];
+  result: unknown;
+  budget: ExpressionBudget | undefined;
+} => {
+  try {
+    const { source, stage, pointer, scope, loopVariables } = expression;
+    const { result = "json", budget } = options ?? {};
+    return {
+      source,
+      stage,
+      pointer,
+      scope,
+      loopVariables: loopVariables ?? [],
+      result,
+      budget,
+    };
+  } catch (error) {
+    if (expressionErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    throw expressionError(
+      "expression.invalid",
+      { pointer: "" },
+      { remedy: "Pass the expression and its options as plain data." }
+    );
+  }
+};
 
 /**
  * Evaluates `expression` on `scope`, within the evaluator's limits: its one
@@ -96,25 +145,19 @@ export interface EvaluateOptions {
 export const evaluate = async <S extends ExpressionStage>(
   expression: Expression<S>,
   scope: ExpressionScope<S>,
-  { result = "json", budget }: EvaluateOptions = {}
+  options?: EvaluateOptions
 ): Promise<Json> => {
+  const { source, result, budget, ...compileOptions } = readArguments(
+    expression,
+    options
+  );
   // The source is checked against the profile on every evaluation, but
   // not compiled by jq apart: that would spend fuel depending on whether
   // this isolate compiled it before. A jq syntax error fails as the
   // evaluation's own `expression.invalid`.
-  const compiled = await compileExpression(
-    expression.source,
-    {
-      stage: expression.stage,
-      scope: expression.scope,
-      pointer: expression.pointer,
-      loopVariables: expression.loopVariables ?? [],
-    },
-    true
-  );
-  const { site } = compiled;
-  if (!Object.hasOwn(resultContracts, result)) {
-    throw expressionError("expression.invalid", site, {
+  const compiled = await compileExpression(source, compileOptions, true);
+  if (!isResult(result)) {
+    throw expressionError("expression.invalid", compiled.site, {
       remedy: "Ask for a boolean, a duration or JSON.",
     });
   }
