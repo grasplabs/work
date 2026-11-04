@@ -1,0 +1,25 @@
+{
+  "name": "@grasp-os/workflow-schema",
+  "private": true,
+  "description": "grasp-workflow/1: the JSON form of a workflow on @grasp-os/sdk/workflow, its JSON Schema, its checks, and its translation to TypeScript and the sealed table the run host holds it to",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./check": "./src/check.ts",
+    "./format": "./src/format.ts",
+    "./generate": "./src/generate.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@grasp-os/open-workflow": "workspace:*",
+    "@grasp-os/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@babel/parser": "catalog:",
+    "@babel/types": "catalog:",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

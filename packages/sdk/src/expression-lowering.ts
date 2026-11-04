@@ -36,18 +36,17 @@ const nonNull = <T>(value: T | null): T => {
 };
 
 /**
- * The names the generated code calls its guards by. The workflow module
- * imports them so (`runtimeImport`); no root or callback parameter can
- * take them, as neither starts with `$`.
+ * The names the generated code calls its guards by: a generated module
+ * imports `readMember`, `callMethod`, `optionalChain` and `jsonValue`
+ * from `@grasp-os/sdk/workflow` under them. No root or callback parameter
+ * can take them, as neither starts with `$`.
  */
 export const runtimeNames = {
   read: "$read",
   call: "$call",
   optional: "$opt",
+  json: "$json",
 } as const;
-
-/** How a generated workflow module imports the guards its expressions call. */
-export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional} } from "@grasp-os/sdk/workflow";`;
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
@@ -73,14 +72,44 @@ const keyOf = (node: Node): string | number => {
  * comparison is in parentheses (`isComparison`); and every object key is
  * a computed string, so `__proto__` is an own field, never the prototype.
  */
+/**
+ * A read of one of the roots: `steps.extract.output.total` is root
+ * `steps` and path `["extract", "output", "total"]`, up to its first
+ * call or computed step. What a caller holds an expression's reads to
+ * where it stands (a step that ran before it, say).
+ */
+export interface ExpressionRead {
+  readonly root: string;
+  readonly path: readonly (string | number)[];
+}
+
 class Lowering {
   /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
   private next = 0;
+
+  readonly reads: ExpressionRead[] = [];
+
+  private readonly roots: ReadonlySet<string>;
+
+  /** The callback parameters in scope, which a root's name may shadow. */
+  private readonly bound: string[] = [];
+
+  constructor(roots: ReadonlySet<string>) {
+    this.roots = roots;
+  }
+
+  /** Records a read of `name` with `path`, if `name` is a root there. */
+  private read(name: string, path: readonly (string | number)[]): void {
+    if (this.roots.has(name) && !this.bound.includes(name)) {
+      this.reads.push({ root: name, path });
+    }
+  }
 
   expression(node: Node): t.Expression {
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- the checker allows no other
     switch (node.type) {
       case "Identifier": {
+        this.read(node.name, []);
         return t.identifier(node.name);
       }
       case "StringLiteral": {
@@ -212,7 +241,18 @@ class Lowering {
         break;
       }
     }
-    return this.links(this.expression(base), links, 0);
+    if (base.type !== "Identifier") {
+      return this.links(this.expression(base), links, 0);
+    }
+    const path: (string | number)[] = [];
+    for (const link of links) {
+      if (link.kind !== "member") {
+        break;
+      }
+      path.push(link.key);
+    }
+    this.read(base.name, path);
+    return this.links(t.identifier(base.name), links, 0);
   }
 
   /**
@@ -262,24 +302,38 @@ class Lowering {
     if (node.type !== "ArrowFunctionExpression") {
       return this.expression(node);
     }
+    const params = node.params.map((param) => {
+      if (param.type !== "Identifier") {
+        throw new Error("A checked callback has only plain parameters.");
+      }
+      return param.name;
+    });
+    this.bound.push(...params);
+    const body = this.expression(node.body);
+    this.bound.splice(this.bound.length - params.length);
     return t.arrowFunctionExpression(
-      node.params.map((param) => {
-        if (param.type !== "Identifier") {
-          throw new Error("A checked callback has only plain parameters.");
-        }
-        return t.identifier(param.name);
-      }),
-      this.expression(node.body)
+      params.map((name) => t.identifier(name)),
+      body
     );
   }
 }
 
 /**
  * The code a checked expression runs as (`Lowering`): one parenthesized
- * expression, with no comment, printed from its syntax tree.
+ * expression, with no comment, printed from its syntax tree; and the
+ * reads of `roots` it makes.
  */
-export const lowerExpression = (checked: Node): string =>
-  `(${generate(new Lowering().expression(checked), { comments: false }).code})`;
+export const lowerExpression = (
+  checked: Node,
+  roots: ReadonlySet<string>
+): { code: string; reads: ExpressionRead[] } => {
+  const lowering = new Lowering(roots);
+  const lowered = lowering.expression(checked);
+  return {
+    code: `(${generate(lowered, { comments: false }).code})`,
+    reads: lowering.reads,
+  };
+};
 
 /**
  * An expression as TypeScript type-checks it: its source with every

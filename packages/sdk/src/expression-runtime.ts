@@ -17,12 +17,16 @@
  *   there; others take none.
  * - `optionalChain`, every `?.` link, runs the rest of the chain only for
  *   a value that isn't nullish.
+ * - `jsonValue`, an expression's whole value, makes it the JSON a step
+ *   takes and a run records.
  *
  * The run host's contract: an expression's roots (input, step outputs,
  * params, the run) are JSON values, as it stores and replays them. So
  * they hold no getters or functions of their own, and the only functions
  * an expression holds are the arrows it writes as callbacks.
  */
+
+import type { Json } from "@grasp-os/shared/json";
 
 // Captured as this module loads, and called only with `Reflect.apply` and
 // an explicit receiver (`callMethod`), so unbound by design.
@@ -90,7 +94,10 @@ export const allowedMethods: ReadonlySet<string> = new Set([
  * Throws where JavaScript would (`null` or `undefined`), and for a getter
  * or a function.
  */
-export const readMember = (object: unknown, key: string | number): unknown => {
+export const readMember = (
+  object: unknown,
+  key: string | number
+): Json | undefined => {
   const name = String(key);
   if (object === null || object === undefined) {
     throw new TypeError(`Cannot read "${name}" of ${String(object)}.`);
@@ -106,7 +113,10 @@ export const readMember = (object: unknown, key: string | number): unknown => {
   if (!("value" in descriptor) || typeof value === "function") {
     throw new TypeError(`Cannot read "${name}": not a data field.`);
   }
-  return value;
+  // SAFETY: an own data field, no function, of a run's JSON values (the
+  // run host's contract) or of what the expression built from them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return value as Json | undefined;
 };
 
 /** The built-ins an expression may call on `receiver`, by its kind. */
@@ -135,7 +145,7 @@ export const callMethod = (
   receiver: unknown,
   name: string,
   args: readonly unknown[]
-): unknown => {
+): Json | undefined => {
   const method = methodsOf(receiver).get(name);
   if (method === undefined) {
     throw new TypeError(`\`${name}\` can't be called on this value.`);
@@ -146,11 +156,56 @@ export const callMethod = (
   if (!fits) {
     throw new TypeError(`\`${name}\` was given the wrong arguments.`);
   }
-  return Reflect.apply(method, receiver, args);
+  const result: unknown = Reflect.apply(method, receiver, args);
+  // SAFETY: an allowed built-in's result on JSON values and what the
+  // expression's own callbacks answered, which are built from them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return result as Json | undefined;
 };
 
 /** `value?.…` of an expression: the rest of the chain, unless `value` is nullish. */
 export const optionalChain = (
-  value: unknown,
-  rest: (value: unknown) => unknown
-): unknown => (value === null || value === undefined ? undefined : rest(value));
+  value: Json | undefined,
+  rest: (value: Json) => Json | undefined
+): Json | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  return rest(value);
+};
+
+/**
+ * What an expression evaluates to: JSON, with `undefined` wherever it
+ * read a missing field, in a list or object it wrote among them.
+ */
+export type ExpressionValue =
+  | Json
+  | undefined
+  | readonly ExpressionValue[]
+  | { readonly [key: string]: ExpressionValue };
+
+/**
+ * An expression's whole value as JSON, as `JSON.stringify` writes it:
+ * `undefined`, which JSON has no value for, is `null` on its own and in a
+ * list, and an object's member set to it is left out. It takes any value
+ * an expression evaluates to, so generated code runs every expression,
+ * whatever its shape, through this one call.
+ */
+export const jsonValue = (value: ExpressionValue): Json => {
+  if (value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item: ExpressionValue) => jsonValue(item));
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  const members: [string, Json][] = [];
+  for (const [key, member] of Object.entries(value)) {
+    if (member !== undefined) {
+      members.push([key, jsonValue(member)]);
+    }
+  }
+  return Object.fromEntries(members);
+};

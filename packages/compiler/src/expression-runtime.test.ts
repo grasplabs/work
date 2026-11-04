@@ -2,7 +2,7 @@
 /**
  * Workflow expressions as they run: the code `checkExpression` generates,
  * evaluated with the guards `@grasp-os/sdk/workflow` gives it, as a
- * generated workflow module imports them (`runtimeImport`). Here, in
+ * generated workflow module imports them (`runtimeNames`). Here, in
  * Node, because workerd doesn't compile code from strings; what runs is
  * the same JavaScript.
  *
@@ -13,7 +13,12 @@
  * them at run time, whatever the data's field names are.
  */
 import { checkExpression } from "@grasp-os/sdk/expression-check";
-import { callMethod, optionalChain, readMember } from "@grasp-os/sdk/workflow";
+import {
+  callMethod,
+  jsonValue,
+  optionalChain,
+  readMember,
+} from "@grasp-os/sdk/workflow";
 import { describe, expect, it } from "vite-plus/test";
 
 const roots = ["input", "steps", "params", "run"] as const;
@@ -250,6 +255,27 @@ describe("an optional chain", () => {
       grouped: { threw: "TypeError" },
       chained: { value: undefined },
       called: { value: undefined },
+    });
+  });
+});
+
+describe("an expression's whole value", () => {
+  it("is the JSON `JSON.stringify` writes of it, whatever its shape", () => {
+    const values = {
+      missing: undefined,
+      text: "Ada",
+      list: [undefined, 1, [undefined]],
+      object: { from: undefined, to: "Ada", nested: { at: undefined } },
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(values).map(([name, value]) => [name, jsonValue(value)])
+      )
+    ).toStrictEqual({
+      missing: null,
+      text: "Ada",
+      list: parsed(JSON.stringify(values.list)),
+      object: parsed(JSON.stringify(values.object)),
     });
   });
 });
