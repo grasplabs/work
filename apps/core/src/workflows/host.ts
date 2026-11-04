@@ -1174,12 +1174,7 @@ export const cpuLimitKill = (cause?: unknown): Error =>
  * the log.
  */
 export const forIsolate = (error: unknown): StepError => {
-  // A step's timeout as the engine journals it, too: so a failure reads
-  // the same fresh and replayed.
-  if (
-    isTimeout(error) ||
-    (error instanceof Error && error.name === "TimeoutError")
-  ) {
+  if (isTimeout(error)) {
     return { name: "TimeoutError", message: "The step ran out of time." };
   }
   if (isCpuLimitKill(error)) {
@@ -1192,6 +1187,16 @@ export const forIsolate = (error: unknown): StepError => {
     ...(isExpectedError(seen) ? { code: seen.code } : {}),
   };
 };
+
+/**
+ * What a step failed with as the engine journaled it (`forIsolate`), a
+ * step's timeout included, however the engine named it: so a sealed run
+ * reads a failure the same fresh and replayed.
+ */
+const journaledFailure = (error: unknown): StepError =>
+  error instanceof Error && error.name === "TimeoutError"
+    ? { name: "TimeoutError", message: "The step ran out of time." }
+    : forIsolate(error);
 
 /** How `run` ended, as plain data. */
 export const settle = async <T>(run: () => Promise<T>): Promise<Settled<T>> => {
@@ -2292,16 +2297,15 @@ export class RunHost extends RpcTarget {
             throw error;
           }
           // As the engine journaled it, so a replay decides the same.
-          const roundError = forIsolate(error);
+          const roundError = journaledFailure(error);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           const retried = await this.#retried(step, roundError, round, {
             retry,
             firstFailedAt,
             stepDone: stepDone.promise,
           });
-          if (retried !== undefined) {
-            takenBy = retried.by;
-          }
+          // This round's own decision, none if it had none.
+          takenBy = retried?.by;
           if (retried?.retry !== true) {
             throw error;
           }
@@ -2322,7 +2326,9 @@ export class RunHost extends RpcTarget {
       // journaled it, fresh or replayed alike: never `failed`, which an
       // attempt the engine gave up on may still set.
       const journaled =
-        this.#kind.stepEnded === undefined ? undefined : forIsolate(error);
+        this.#kind.stepEnded === undefined
+          ? undefined
+          : journaledFailure(error);
       const reported = journaled ?? failed ?? forIsolate(error);
       if (started && journaled !== undefined) {
         this.#kind.stepEnded?.(step, { ok: false, error: journaled }, takenBy);

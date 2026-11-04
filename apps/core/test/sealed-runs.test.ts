@@ -1681,8 +1681,9 @@ try {
     // and the one of `layered` around that has none, and retries.
     const ping = (retry: string): string =>
       taskStep("ping", '(() => { throw new Error("down"); })()', retry);
+    // Its inner catch's condition doesn't hold for the error it sees.
     const catches = `
-  if ((${catchStep("probe", "async () => true")}) !== undefined) return "probe";
+  if ((${catchStep("probe", "async () => false")}) !== undefined) return "probe";
   return (${catchStep("layered", "async () => true")}) === undefined ? "none" : "layered";`;
     const tries = new Map<string, number>();
     // A workflow of its own: its person's runs of one are bounded.
@@ -1694,26 +1695,38 @@ try {
         { engine }
       );
     const withheld = await run("");
-    // It said the condition held, then that it didn't.
+    // It said the inner catch takes it, then that it doesn't: the outer
+    // is offered nothing.
     const probeThenLayered = await run(
       ', retry: async () => ({ by: "probe", retry: false })'
     );
-    const layeredThenProbe = await run(
-      ', retry: async () => ({ by: "layered", retry: true })',
-      retryingEngine(tries)
+    // It declined the outer catch's retry, which has no conditions.
+    const declined = await run(
+      ', retry: async () => ({ by: "layered", retry: false })'
+    );
+    // Its policy's last round has no decision: what an earlier round's
+    // named holds no more, and its condition decides afresh.
+    const lastRound = await ranAs(
+      await waitingRun(layering),
+      moduleOf(`try { ${ping(', retry: async () => ({ by: "layered", retry: true })')}; } catch {
+  return (${catchStep("probe", "async () => true")}) === undefined ? "none" : "probe";
+}`),
+      { engine: retryingEngine(tries) }
     );
     expect({
       withheld,
       probeThenLayered,
-      layeredThenProbe,
+      declined,
       roundsRun: retrySteps(tries, "run"),
+      lastRound,
     }).toStrictEqual({
       withheld: refusedAs(
         `Step "ping:task" gives no retry for its policy to ask.`
       ),
-      probeThenLayered: { ended: "probe", tampered: [] },
-      layeredThenProbe: { ended: "layered", tampered: [] },
+      probeThenLayered: { ended: "none", tampered: [], untaken: true },
+      declined: refusedAs(`Task "layered"'s catch retries the failure.`),
       roundsRun: 2,
+      lastRound: { ended: "probe", tampered: [] },
     });
   });
 

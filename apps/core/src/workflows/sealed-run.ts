@@ -1197,8 +1197,11 @@ class SealedRun implements SealedRunKind {
 
   /**
    * The retry the host may run of step `step` after round `round` failed
-   * with `error`: of a task in the list of a try whose catch retries with
-   * rounds left, after a failure that may be tried again (`retryable`).
+   * with `error`: one that may be tried again (`retryable`), of a task in
+   * the list of a try whose catch may take it (its filter has it, and it
+   * is no further out than the innermost with no conditions) and retries
+   * with rounds left. Decided alone, without asking the code, when the
+   * first catch to take it has no conditions, nor has its policy.
    */
   retryOffer(
     step: string,
@@ -1210,31 +1213,42 @@ class SealedRun implements SealedRunKind {
     if (task === undefined || sealed?.kind === "catch") {
       return undefined;
     }
-    const tries = triesAround(this.run.build, task);
-    const roundsLeft = tries.some(
-      (around) => round < (around.catch.retry?.attempts ?? 0)
-    );
     const failure = failureOf(error, task, false);
-    if (!roundsLeft || !failure.catchable || !retryable(failure, task)) {
+    if (!failure.catchable || !retryable(failure, task)) {
       return undefined;
     }
+    const tries = triesAround(this.run.build, task);
     const forced = forcedOf(tries, failure.error);
-    const firstTaking = tries.findIndex((around) =>
-      matchesFilter(failure.error, around.catch.errors)
+    // The catches that may take it: their filters have it, and none past
+    // the innermost with no conditions, which takes it whatever the code.
+    const takers = (forced === -1 ? tries : tries.slice(0, forced + 1)).filter(
+      (around) => matchesFilter(failure.error, around.catch.errors)
     );
-    const alone = forced === firstTaking ? tries[forced] : undefined;
+    if (!takers.some((around) => round < (around.catch.retry?.attempts ?? 0))) {
+      return undefined;
+    }
+    const [first] = takers;
+    const policy = first?.catch.retry;
+    // The first to take it has no conditions, nor has its policy (or it
+    // has none left): nothing for the code to decide.
+    const fixed =
+      first !== undefined &&
+      unconditional(first.catch) &&
+      (policy === undefined ||
+        round >= policy.attempts ||
+        unconditional(policy));
     return {
       error: { ...failure.error },
       decided: (choice, firstFailedAt) =>
         retryDecided(tries, failure.error, round, choice, firstFailedAt),
-      ...(alone !== undefined && forcedRetry(alone, round)
+      ...(fixed
         ? {
             alone: (firstFailedAt: number) =>
               retryDecided(
                 tries,
                 failure.error,
                 round,
-                { by: alone.id, retry: true },
+                { by: first.id, retry: forcedRetry(first, round) },
                 firstFailedAt
               ),
           }
