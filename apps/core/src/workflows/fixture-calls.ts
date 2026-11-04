@@ -32,9 +32,10 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 // The model and store calls of a run an App's test started (fixture-runs.ts,
 // `workflowTest`): the run's host builds each as it builds a real one, holds
 // it to the run's limits, then hands it here in place of `makeCall`
-// (resource-host.ts, `#made`). A test's run never reaches a real model, a
-// real store, the organization's data or its budget. Threat model, and how
-// each is closed (workflow-test-calls.test.ts tries each):
+// (resource-host.ts, `#made`; sealed-run.ts, `#madeOrServed`). A test's
+// run never reaches a real model, a real store, the organization's data or
+// its budget. Threat model, and how each is closed
+// (workflow-test-calls.test.ts tries each):
 //
 // - A test's model call reaches a model, or spends budget: it is answered
 //   with the answer its fixture gives the binding
@@ -54,8 +55,9 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 //   No binding, approval, grant or permission is read, so nothing else can
 //   name a store.
 // - Any other call leaves the run's code: the host refuses a connector's,
-//   Knowledge's, a template's, a file's and an action's before it is built
-//   (resource-host.ts), and `makeCall` refuses every call of a test's run
+//   Knowledge's, a template's, a file's, an action's and an event's before
+//   it is built or audited (resource-host.ts; sealed-run.ts, `#call`, by
+//   `fixtureCalls`), and `makeCall` refuses every call of a test's run
 //   again (`fixture`), so none reaches connect, a model or a store even if
 //   the host's gate were wrong.
 // - An answer or call the real host wouldn't pass, so a test passes what a
@@ -231,8 +233,12 @@ const fixtureOperation = async (
   // which the suite waiting for this run may leave none of.
   const suite = fixtureRunSessionOf(run.runId);
   const parentSession = suite?.parent();
-  const operate = async () =>
-    await callOperation(
+  const operate = async () => {
+    // Every check of its own passed: marked as it goes out, as a real
+    // store call is (resource-calls.ts), on a run host that tries it once.
+    effect.requireHolds();
+    effect.sending?.();
+    return await callOperation(
       hostedRelease(env, release),
       {
         principal: run.principal,
@@ -267,6 +273,7 @@ const fixtureOperation = async (
         ...(parentSession === undefined ? {} : { parentSession }),
       }
     );
+  };
   const result =
     suite === undefined || parentSession === undefined
       ? await operate()
@@ -276,6 +283,19 @@ const fixtureOperation = async (
   }
   return requireShape(contract.output, result.value, "output");
 };
+
+/**
+ * The named calls a run an App's test started makes: its own
+ * calculations, its decisions (fixture-decisions.ts), and the model and
+ * store calls its test serves (`fixtureCall`). Every other is refused
+ * before it is built, on either host of the run.
+ */
+export const fixtureCalls: ReadonlySet<string> = new Set([
+  "grasp.compute",
+  "grasp.decision",
+  "grasp.model",
+  "grasp.operation",
+]);
 
 /**
  * What model or operation call `call` of test run `run`'s task answers
@@ -314,6 +334,9 @@ export const fixtureCall = async (
     if (answer === undefined) {
       throw unfixtured();
     }
+    // Answered: marked as it is, as a real model call is as it goes out.
+    effect.requireHolds();
+    effect.sending?.();
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
   }
   if (call.name === "grasp.operation") {

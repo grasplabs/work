@@ -27,7 +27,8 @@ import type { PinnedResourceRun } from "./engine.ts";
 import type { RunStep } from "./host.ts";
 import { quotaLimits } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
-import type { ResourceRunMemory } from "./resource-runs.ts";
+import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
+import { generatedForRunHost } from "./sealed-run.ts";
 
 // Runs an App's tests start (spec 28.2, `workflowTest`): a test principal
 // starts a workflow the release under test binds, and the run is real:
@@ -50,13 +51,14 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 //   version's contract, as a start's.
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
-//   leaves its own sealed modules (resource-host.ts, `fixture`):
-//   connections, Knowledge, templates, files and actions. It holds no
-//   binding, approval or grant, and none is read or written. Its decisions
-//   ask its fixture's principals alone (fixture-decisions.ts); its model
-//   calls are answered by its fixture, and its store calls run on its
-//   test's own fixture store, never a real model or store
-//   (fixture-calls.ts).
+//   leaves its own sealed modules (resource-host.ts, `fixture`; on the run
+//   host, sealed-run.ts, `fixtureCalls`): connections, Knowledge,
+//   templates, files, actions and events. It holds no binding, approval or
+//   grant, and none is read or written. Its decisions ask its fixture's
+//   principals alone (fixture-decisions.ts; on the run host too,
+//   `openFixtureDecision`); its model calls are answered by its fixture,
+//   and its store calls run on its test's own fixture store, never a real
+//   model or store (fixture-calls.ts).
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the slots (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
@@ -251,19 +253,16 @@ export const startFixtureRun = async (
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 /**
- * Runs one activation of the test's run `runId`, as `pin` names it: its
- * record, checked against the pin and the sealed build, then the build's
- * module against a host that reaches nothing outside it
- * (resource-runs.ts, `runActivation`). A run whose record is gone (its
- * test ended) runs nothing.
+ * What an activation of the test's run `runId` runs, as `pin` names it:
+ * its record, checked against the pin and the sealed build, with a
+ * calling context that reaches nothing outside it. A run whose record is
+ * gone (its test ended) runs nothing.
  */
-export const runFixtureWorkflow = async (
+export const fixtureActivation = async (
   env: Env,
   pin: PinnedResourceRun,
-  runId: string,
-  engineStep: RunStep,
-  memory: ResourceRunMemory
-): Promise<unknown> => {
+  runId: string
+): Promise<HostedActivation> => {
   const db = drizzle(env.DB);
   const row = await db
     .select()
@@ -312,7 +311,7 @@ export const runFixtureWorkflow = async (
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
   const limits = quotaLimits(env);
-  return await runActivation(env, engineStep, memory, {
+  return {
     run: {
       runId,
       workflowId: pin.workflow,
@@ -348,8 +347,27 @@ export const runFixtureWorkflow = async (
     output: JSON.stringify(contract.output),
     owner: testRunOwnerOf(row.appId),
     admission: "fixture",
-  });
+  };
 };
+
+/**
+ * Runs one activation of the test's run `runId` (`fixtureActivation`)
+ * against a host that reaches nothing outside it (resource-runs.ts,
+ * `runActivation`).
+ */
+export const runFixtureWorkflow = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string,
+  engineStep: RunStep,
+  memory: ResourceRunMemory
+): Promise<unknown> =>
+  await runActivation(
+    env,
+    engineStep,
+    memory,
+    await fixtureActivation(env, pin, runId)
+  );
 
 /**
  * How a test's run ended, as `t.runs.untilTerminal` answers it: a failure
@@ -431,7 +449,10 @@ const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
 /**
  * How many times test run `runId`'s task `task` completed its step: each
- * time the engine recorded it so, once however often it was replayed.
+ * time the engine recorded it so, once however often it was replayed. The
+ * step is named as its build names it: `<task>:task` on the run host
+ * (sealed-run.ts), `task:<task>` on resource-host.ts. None once the run's
+ * record is gone.
  */
 export const fixtureTaskCompletions = async (
   env: Env,
@@ -442,9 +463,28 @@ export const fixtureTaskCompletions = async (
   if (!parsed.success) {
     throw operationErrors.create("contract.invalid_args");
   }
-  return (
-    (await runEngine(env).succeededSteps(runId, `task:${parsed.data}`)) ?? 0
+  const row = await drizzle(env.DB)
+    .select({
+      workflow: appTestRuns.workflowResourceId,
+      version: appTestRuns.version,
+      manifest: appTestRuns.manifestHash,
+    })
+    .from(appTestRuns)
+    .where(eq(appTestRuns.runId, runId))
+    .get();
+  if (row === undefined) {
+    return 0;
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    row.workflow,
+    row.version,
+    row.manifest
   );
+  const step = generatedForRunHost(build)
+    ? `${parsed.data}:task`
+    : `task:${parsed.data}`;
+  return (await runEngine(env).succeededSteps(runId, step)) ?? 0;
 };
 
 /** Most left-behind test runs one sweep removes. */

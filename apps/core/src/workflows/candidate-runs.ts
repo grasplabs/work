@@ -68,7 +68,7 @@ import {
   keptFailureOf,
   runActivation,
 } from "./resource-runs.ts";
-import type { ResourceRunMemory } from "./resource-runs.ts";
+import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
 
 // Test runs of a workflow's draft checkpoint, never published (GRA-815,
@@ -544,6 +544,19 @@ const loadedCandidateRun = async (
   };
 };
 
+/**
+ * What an activation of test run `runId` runs (`loadedCandidateRun`), as
+ * the root of its own lineage, as an independent run is.
+ */
+export const candidateActivation = async (
+  env: Env,
+  pin: PinnedCandidateRun,
+  runId: string
+): Promise<HostedActivation> => ({
+  ...(await loadedCandidateRun(env, pin, runId)),
+  admission: { run: runId, root: runId },
+});
+
 /** Runs test run `runId`'s activation (the dispatcher's, for its pin). */
 export const runCandidateWorkflow = async (
   env: Env,
@@ -551,16 +564,13 @@ export const runCandidateWorkflow = async (
   runId: string,
   engineStep: RunStep,
   memory: ResourceRunMemory
-): Promise<unknown> => {
-  const { run, output, owner } = await loadedCandidateRun(env, pin, runId);
-  return await runActivation(env, engineStep, memory, {
-    run,
-    output,
-    owner,
-    // The root of its own lineage, as an independent run is.
-    admission: { run: runId, root: runId },
-  });
-};
+): Promise<unknown> =>
+  await runActivation(
+    env,
+    engineStep,
+    memory,
+    await candidateActivation(env, pin, runId)
+  );
 
 /**
  * Keeps test run `id`'s row in step with where the engine says it is
