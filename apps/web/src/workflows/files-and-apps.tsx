@@ -216,24 +216,26 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
 
 /**
  * The versions of workflow `workflow` whose bindings wait, each binding
- * approved for its version; `onApproved` once one is.
+ * approved for its version; `onApproved` with the binding once one is.
+ * What was approved is said by the tab, not here: approving the last one
+ * leaves nothing waiting, and this part goes with it.
  */
 const Waiting = ({
   workflow,
   pending,
+  onApproving,
   onApproved,
 }: {
   workflow: string;
   pending: readonly PendingWorkflowBindings[];
-  onApproved: () => void;
+  onApproving: () => void;
+  onApproved: (alias: string) => void;
 }) => {
-  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [said, setSaid] = useState<string>();
   const approve =
     (version: number) =>
     async (alias: string, target: WorkflowBindingTarget): Promise<void> => {
-      setSaid(undefined);
+      onApproving();
       const approved = await run(async (session) => {
         await session.workflowResources.approveBinding(workflow, {
           alias,
@@ -243,8 +245,7 @@ const Waiting = ({
         return true;
       });
       if (approved === true) {
-        setSaid(t`Approved: ${alias}.`);
-        onApproved();
+        onApproved(alias);
       }
     };
   return (
@@ -272,7 +273,6 @@ const Waiting = ({
         </div>
       ))}
       <ErrorText>{failure}</ErrorText>
-      {said === undefined ? null : <output>{said}</output>}
     </div>
   );
 };
@@ -515,11 +515,14 @@ export const FilesAndApps = ({
   names: Names;
   approves: boolean;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
   const [pending, setPending] = useState<Loaded<PendingWorkflowBindings[]>>();
   const [approvals, setApprovals] =
     useState<Loaded<ListedWorkflowBindingApproval[]>>();
   const [teams, setTeams] = useState<ReadonlyMap<string, string>>(new Map());
+  // What was approved last, said even once nothing waits any more.
+  const [said, setSaid] = useState<string>();
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
   const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
@@ -664,8 +667,12 @@ export const FilesAndApps = ({
           <Part loaded={pending}>
             {(data) => (
               <Waiting
-                onApproved={() => {
+                onApproved={(alias) => {
+                  setSaid(t`Approved: ${alias}.`);
                   void changed();
+                }}
+                onApproving={() => {
+                  setSaid(undefined);
                 }}
                 pending={data}
                 workflow={workflow}
@@ -674,6 +681,7 @@ export const FilesAndApps = ({
           </Part>
         </Section>
       )}
+      {said === undefined ? null : <output>{said}</output>}
       {runningBindings?.state === "ready" &&
       runningBindings.data === null ? null : (
         <Section id="workflow-bindings" title={<Trans>Its bindings</Trans>}>

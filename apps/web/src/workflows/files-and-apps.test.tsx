@@ -350,7 +350,7 @@ describe("a workflow's Files and apps tab", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits", async () => {
+  it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits, saying what they approved last", async () => {
     const { session, approved, answerFirstCatalog } = fakeCore();
     answerFirstCatalog();
     await shown(session, true);
@@ -365,6 +365,7 @@ describe("a workflow's Files and apps tab", () => {
       unpicked,
       approved,
       waits: document.body.textContent.includes("Waiting for your approval"),
+      said: document.querySelector("output")?.textContent,
     }).toStrictEqual({
       unpicked: true,
       approved: [
@@ -389,6 +390,7 @@ describe("a workflow's Files and apps tab", () => {
         },
       ],
       waits: false,
+      said: "Approved: crm.",
     });
   });
 

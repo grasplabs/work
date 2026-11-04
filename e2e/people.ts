@@ -374,6 +374,8 @@ const cast = {
     approver: "user",
   },
   chatPreview: { builder: "builder" },
+  appBuilt: { builder: "builder", user: "user" },
+  workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
   languages: { member: "user" },
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },

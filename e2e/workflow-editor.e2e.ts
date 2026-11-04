@@ -542,10 +542,11 @@ test("a builder starts a new workflow on an empty Flow with Grasp's chat beside 
     asks.getByRole("radio", { name: "Something else" })
   ).toBeVisible();
 
-  // The chat's agent saves a first step that passes as it works, as
-  // `env.workflowBuild.edit` does: the stack's model is scripted and writes
-  // no code (its tools are core's tests), so the builder's own session
-  // saves it, before the answer the page then follows.
+  // A first step that passes is saved as the chat's agent would save it
+  // (`env.workflowBuild.edit`): this script only answers (a script that
+  // saves through the agent's tools is workflow-drawn-decides.e2e.ts), so
+  // the builder's own session saves it, before the answer the page then
+  // follows.
   const { core, api } = apiOf(builder);
   try {
     await api.workflowResources.editDraft(workflow, {
