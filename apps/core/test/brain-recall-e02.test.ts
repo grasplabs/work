@@ -104,10 +104,12 @@ const expecting = brainRecallCases.filter(({ marker }) => marker !== undefined);
 
 describe("experiment E02, hybrid recall against full-text search", () => {
   // Run once before the tests, so a run that fails or times out fails the
-  // file once, not each test after a wait of its own, and no test ends
-  // while the run goes on: once a test ended, its IdP stopped answering,
-  // and the run's next sign-in went to Microsoft itself. The IdP answers
-  // the run as `mockIdp` has it answer each test. Storage lasts the whole file. An
+  // file once, not each test after a wait of its own. Run within a test,
+  // the run went on after the test ended and its IdP stopped answering:
+  // its next sign-in went to Microsoft itself. The IdP answers the run as
+  // `mockIdp` has it answer each test, and a run past its time stops
+  // before its next ask rather than go on under the next file (one stuck
+  // inside a request still waits there). Storage lasts the whole file. An
   // update is asked for once (`lagLimitMs: 0`): workerd writes the index
   // with the document, so an arm that misses it misses it for good, and
   // asking again for seconds measured nothing.
@@ -115,12 +117,14 @@ describe("experiment E02, hybrid recall against full-text search", () => {
     // Put back before the next file (start-each-file.ts), and spied again
     // before each test.
     vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
+    const deadline = AbortSignal.timeout(runTimeoutMs);
     const company = await setUpBrainCompany(idp);
     await answeringProvider(lexicalRanking);
     report = await runBrainRecallComparison(company, {
       repeats,
       measured: false,
       lagLimitMs: 0,
+      signal: deadline,
       identity: {
         model: "stub: lexical overlap",
         profile: "workerd (Vitest pool), stub reranker",
