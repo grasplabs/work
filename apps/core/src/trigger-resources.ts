@@ -23,7 +23,11 @@ import type {
   TriggerSummary,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
+import {
+  maxFailedStarts,
+  nextScheduledRun,
+  workflowErrors,
+} from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -420,9 +424,9 @@ export const createTriggerResource = async (
   const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
       // Only while `by` is under the cap, counted in this statement, and
-      // a chosen address is still free (email-addresses.ts): otherwise
-      // NULL, which fails the batch. Another trigger taking it at once
-      // fails it on the address's unique index.
+      // a chosen address is still free, an App's or a trigger's
+      // (email-addresses.ts): otherwise NULL, which fails the batch. The
+      // address's unique index is a backstop.
       id: sql`(SELECT ${id} WHERE (SELECT COUNT(*) FROM trigger_resources
         WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap}
         ${chosen === undefined ? sql`` : sql`AND NOT ${addressTaken([chosen])}`})`,
@@ -484,14 +488,15 @@ export const createTriggerResource = async (
   try {
     await batch;
   } catch (error) {
-    if (
-      chosen !== undefined &&
-      (isUniqueViolation(error) || notNullFailed(error, "trigger_resources.id"))
-    ) {
-      // Taken meanwhile answers as taken; under the cap otherwise.
-      await requireFreeAddresses(env, [chosen]);
+    // A new row's only unique column that can collide is its address.
+    if (chosen !== undefined && isUniqueViolation(error)) {
+      throw workflowErrors.create("workflow.email_taken", { address: chosen });
     }
     if (notNullFailed(error, "trigger_resources.id")) {
+      if (chosen !== undefined) {
+        // Taken meanwhile answers as taken; over the cap otherwise.
+        await requireFreeAddresses(env, [chosen]);
+      }
       throw workflowResourceErrors.create("workflow.trigger_limit");
     }
     if (

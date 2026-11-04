@@ -1405,38 +1405,61 @@ describe(
       });
     });
 
-    it("refuse a name an App took after the trigger checked it was free, before its batch landed", async () => {
-      const name = `raced-${unique()}`;
+    it("refuse a name an App or another trigger took after the trigger checked it was free, before its batch landed", async () => {
       const builder = await signedInApi(idp, "builder");
       const workflow = await publishedWorkflow(builder);
       const app = await appWith(builder, intake(`was-${unique()}`));
-      // The App takes the name just before the trigger's batch lands.
-      const racing = racingDb(
-        async () =>
-          await env.DB.prepare(
-            "UPDATE workflow_triggers SET address = ? WHERE app_id = ?"
+      const byApp = `raced-${unique()}`;
+      const byTrigger = `raced-${unique()}`;
+      // Someone takes the name just before the trigger's batch lands.
+      const racedBy = async (name: string, take: () => Promise<unknown>) =>
+        await outcome(
+          createTriggerResource(
+            {
+              ...env,
+              DB: racingDb(take, /insert into "trigger_resources"/iu),
+            },
+            await builder.api.whoami(),
+            {
+              kind: "email",
+              workflowId: workflow,
+              version: 1,
+              config: { input: mapping, address: name },
+            }
           )
-            .bind(name, app)
-            .run(),
-        /insert into "trigger_resources"/iu
-      );
+        );
 
-      const refused = await outcome(
-        createTriggerResource(
-          { ...env, DB: racing },
-          await builder.api.whoami(),
-          {
-            kind: "email",
-            workflowId: workflow,
-            version: 1,
-            config: { input: mapping, address: name },
-          }
-        )
-      );
+      const refused = {
+        app: await racedBy(
+          byApp,
+          async () =>
+            await env.DB.prepare(
+              "UPDATE workflow_triggers SET address = ? WHERE app_id = ?"
+            )
+              .bind(byApp, app)
+              .run()
+        ),
+        trigger: await racedBy(
+          byTrigger,
+          async () =>
+            await env.DB.prepare(
+              "INSERT INTO trigger_resources (id, owner_id, kind, current_version, enabled, created_at, email_address) VALUES (?, ?, 'email', 1, 1, ?, ?)"
+            )
+              .bind(crypto.randomUUID(), builder.userId, Date.now(), byTrigger)
+              .run()
+        ),
+      };
 
-      expect({ refused, holders: await holdersOf(name) }).toStrictEqual({
-        refused: "workflow.email_taken",
-        holders: 0,
+      expect({
+        refused,
+        holders: [await holdersOf(byApp), await holdersOf(byTrigger)],
+      }).toStrictEqual({
+        refused: {
+          app: "workflow.email_taken",
+          trigger: "workflow.email_taken",
+        },
+        // The App's, and the one trigger that got there first.
+        holders: [0, 1],
       });
     });
 
