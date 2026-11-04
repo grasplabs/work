@@ -1,4 +1,4 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { isRetryableCode } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -133,7 +133,7 @@ const importPattern = /from "(?<module>[^"]+)"/gu;
 
 /** A version's executable identity; empty for one that isn't executable. */
 const identityOf = (version: WorkflowResourceVersion): string =>
-  version.build.executable ? version.build.hash : "";
+  version.build.hash;
 
 /** U+2028 and U+2029, which end a line in source but not in a string. */
 const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
@@ -241,7 +241,7 @@ describe("JSON workflow builds", () => {
     const source = files[generatedPath] ?? "";
     expect({
       // It type-checked and compiled: nothing in it broke out of a literal.
-      executable: version.build.executable,
+      executable: version.build.hash !== undefined,
       literals: hostile.every((text) => source.includes(JSON.stringify(text))),
       // Every key is a computed property: a key such as `toString` can't
       // mean anything but a key.
@@ -289,66 +289,6 @@ describe("JSON workflow builds", () => {
     expect(identityOf(changed)).not.toBe(identityOf(first));
     // Each is still its own version, its manifest its own.
     expect(relabelled.manifestHash).not.toBe(first.manifestHash);
-  });
-
-  it("publishes what the generator doesn't lower without a build, naming each construct", async () => {
-    const by = await builder();
-    const { workflow, version } = await published(by, (name) =>
-      definitionOf(
-        name,
-        [
-          {
-            // A nested list's timeout would bound more than one attempt.
-            check: {
-              do: [{ inner: { set: { status: "checking" } } }],
-              timeout: { after: { seconds: 5 } },
-              then: "finish",
-            },
-          },
-          {
-            // A reusable retry policy's conditions had no error in scope.
-            guard: {
-              try: [{ attempt: { set: { status: "trying" } } }],
-              catch: { retry: "transient" },
-            },
-          },
-          { finish: { set: { status: "done" } } },
-        ],
-        {
-          more: {
-            timeout: { after: { minutes: 5 } },
-            use: {
-              retries: {
-                transient: {
-                  when: "${ true }",
-                  limit: { attempt: { count: 2 } },
-                },
-              },
-            },
-          },
-        }
-      )
-    );
-    expect(version.build.executable).toBeFalsy();
-    expect(
-      version.build.executable ? [] : version.build.unsupported
-    ).toStrictEqual([
-      { pointer: "/timeout", taskId: null, feature: "timeout" },
-      {
-        pointer: "/do/0/check/timeout",
-        taskId: "check",
-        feature: "timeout:do",
-      },
-      {
-        pointer: "/do/1/guard/catch/retry",
-        taskId: "guard",
-        feature: "use.retries:when",
-      },
-    ]);
-    // Nothing generated, nothing sealed: the export is the definition alone.
-    const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(Object.keys(files)).toStrictEqual(["workflow.json"]);
-    await expect(sealedArtifacts(workflow.id, 1)).resolves.toStrictEqual([]);
   });
 
   it("refuses a build whose sealed bytes changed in storage", async () => {
@@ -463,28 +403,6 @@ describe("JSON workflow builds", () => {
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
     expect(files[generatedPath]).toContain('flow.set("finish"');
-  });
-
-  it("doesn't lower a task with more expressions than core evaluates in one", async () => {
-    const by = await builder();
-    const wide = Object.fromEntries(
-      Array.from({ length: 65 }, (_, index) => [
-        `field${index}`,
-        "${ $params.greeting }",
-      ])
-    );
-    const { version } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done", ...wide } } }])
-    );
-    expect(
-      version.build.executable ? [] : version.build.unsupported
-    ).toStrictEqual([
-      {
-        pointer: "/do/0/finish/set",
-        taskId: "finish",
-        feature: "set:expressions",
-      },
-    ]);
   });
 
   it("lowers nothing at a pointer too long to seal, and names where", async () => {
@@ -672,7 +590,10 @@ describe("JSON workflow builds", () => {
     );
     // The same module, built again: nothing of the stop was kept.
     const saved = await publishWorkflowVersion(env, by, workflow.id, request);
-    expect({ stopped, executable: saved.build.executable }).toStrictEqual({
+    expect({
+      stopped,
+      executable: saved.build.hash !== undefined,
+    }).toStrictEqual({
       stopped: "workflow.build_slow",
       executable: true,
     });

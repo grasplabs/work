@@ -1024,7 +1024,7 @@ describe("a JSON workflow's own actions", () => {
         await undo?.();
       }
       return {
-        executable: asBuilder?.build.executable,
+        executable: asBuilder?.build.hash !== undefined,
         published: published.modelSteeredWrites,
         builder: asBuilder?.modelSteeredWrites,
         reader: asReader?.modelSteeredWrites,

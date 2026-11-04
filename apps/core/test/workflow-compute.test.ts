@@ -194,7 +194,7 @@ const ran = async (by: Acting, id: string) => {
 
 /** A version's executable identity; empty for one that isn't executable. */
 const hashOf = (version: WorkflowResourceVersion | undefined): string =>
-  version?.build.executable === true ? version.build.hash : "";
+  version?.build.hash ?? "";
 
 /**
  * Ways module code could intercept what the clock wrappers hand on, each
@@ -308,7 +308,7 @@ describe("a JSON workflow's compute modules", () => {
   it("runs a calculation of its own modules, sealed and exported with the version", async () => {
     const by = await builder();
     const { workflow, version } = await published(by, totalModules);
-    expect(version?.build.executable).toBeTruthy();
+    expect(version?.build.hash !== undefined).toBeTruthy();
     await expect(ran(by, workflow.id)).resolves.toStrictEqual({
       status: "completed",
       output: { status: "6" },
@@ -559,7 +559,7 @@ describe("a JSON workflow's compute modules", () => {
     const [latest] = await workflowVersions(env, by, workflow.id);
     expect({
       started: started.modules,
-      version: [latest?.version, latest?.build.executable],
+      version: [latest?.version, latest?.build.hash !== undefined],
       problems: draft.problems,
       checkpoint: draft.checkpoint?.revision,
       modules: draft.modules,
@@ -745,8 +745,8 @@ describe("a JSON workflow's compute modules", () => {
       ...totalModules,
       "code/sum.ts": `${sumModule}// changed\n`,
     });
-    expect(first.version?.build.executable).toBeTruthy();
-    expect(second.version?.build.executable).toBeTruthy();
+    expect(first.version?.build.hash !== undefined).toBeTruthy();
+    expect(second.version?.build.hash !== undefined).toBeTruthy();
     expect(hashOf(first.version)).not.toBe(hashOf(second.version));
     // The same definition and semantic version with other modules is
     // refused; with the same modules, the saved version answers.
@@ -940,7 +940,10 @@ export const keys = compute({ input: v.record(v.number()), output: v.array(v.str
       )
     );
     const saved = await publishWorkflowVersion(env, by, workflow.id, request);
-    expect({ crashed, executable: saved.build.executable }).toStrictEqual({
+    expect({
+      crashed,
+      executable: saved.build.hash !== undefined,
+    }).toStrictEqual({
       crashed: "workflow.build_slow",
       executable: true,
     });

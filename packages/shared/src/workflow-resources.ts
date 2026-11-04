@@ -254,8 +254,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
   "workflow.test_unfixtured":
     "This test's run made a model or store call its fixture gives nothing for. A test's run never calls a real model or store: in the fixture's workflows, give each model binding it calls an answer, and each operation binding an operation of the App.",
-  "workflow.candidate_unexecutable":
-    "This checkpoint uses something a run can't do yet, so it can't be test-run.",
   "workflow.candidate_unavailable":
     "This test run doesn't exist, or isn't one you can see.",
   "workflow.candidate_limit":
@@ -871,27 +869,14 @@ export interface WorkflowBinders {
 export const openWorkflowProtocol = 8;
 
 /**
- * Something of a definition the code generator doesn't lower yet: its
- * place, the task it is in, and what it is (a task kind such as
- * `call:grasp.model`, or a property such as `then`).
- */
-export interface UnsupportedConstruct {
-  pointer: string;
-  taskId: string | null;
-  feature: string;
-}
-
-/**
  * What a version runs: code generated from its definition, compiled and
  * sealed with it, named by `hash`, its executable identity (the same
- * definition, generator, compiler and SDK always make the same hash); or,
- * for a definition that uses what the generator doesn't lower yet,
- * nothing, and what those constructs are. Such a version is published and
- * can be started, but no run executes it.
+ * definition, generator, compiler and SDK always make the same hash).
+ * Every definition that passes generates, so every version has one.
  */
-export type WorkflowVersionBuild =
-  | { executable: true; hash: string }
-  | { executable: false; unsupported: UnsupportedConstruct[] };
+export interface WorkflowVersionBuild {
+  hash: string;
+}
 
 /** One published version of a workflow. */
 export interface WorkflowResourceVersion {
@@ -919,10 +904,11 @@ export interface WorkflowResourceVersion {
 }
 
 /**
- * A version's portable source, for its builders: the definition exactly as
- * published and the SDK TypeScript generated from it, by path (nothing
- * generated for a version that isn't executable). Edited generated code
- * can't come back: a version is only ever published from a definition.
+ * A version's portable source, for its builders: the SDK TypeScript
+ * generated from its definition and its own modules, by path. The
+ * definition itself stays with the version, for review: what leaves is
+ * the code. Edited generated code can't come back: a version is only ever
+ * published from a definition.
  */
 export interface WorkflowVersionSource {
   files: Record<string, string>;

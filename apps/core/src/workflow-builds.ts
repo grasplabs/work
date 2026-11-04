@@ -127,34 +127,18 @@ export const generatedModule = appModuleName(openWorkflowEntry);
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
-/** Most constructs a non-executable build names (generate.ts's cap). */
-const maxUnsupported = 20;
-
-/** A version's build, as its manifest seals it. */
-export const sealedBuildSchema = z.discriminatedUnion("executable", [
-  z.strictObject({
-    executable: z.literal(true),
-    generator: z.string().min(1).max(64),
-    protocol: z.int().positive(),
-    compilerVersion: z.string().min(1).max(128),
-    /** The executable identity: see `identityOf`. */
-    hash: sha256Schema,
-    artifacts: z.array(releaseArtifactSchema).min(1).max(256),
-  }),
-  z.strictObject({
-    executable: z.literal(false),
-    unsupported: z
-      .array(
-        z.strictObject({
-          pointer: z.string().max(sealedBuildLimits.pointerLength),
-          taskId: z.string().max(64).nullable(),
-          feature: z.string().max(128),
-        })
-      )
-      .min(1)
-      .max(maxUnsupported),
-  }),
-]);
+/**
+ * A version's build, as its manifest seals it: every definition that
+ * passes generates (`generateWorkflow`), so every version has one.
+ */
+export const sealedBuildSchema = z.strictObject({
+  generator: z.string().min(1).max(64),
+  protocol: z.int().positive(),
+  compilerVersion: z.string().min(1).max(128),
+  /** The executable identity: see `identityOf`. */
+  hash: sha256Schema,
+  artifacts: z.array(releaseArtifactSchema).min(1).max(256),
+});
 
 export type SealedBuild = z.infer<typeof sealedBuildSchema>;
 
@@ -564,16 +548,12 @@ export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
 /**
  * The tasks `compiled` seals (`tasks.json`), read from its own bytes before
- * anything is stored: none for a build that isn't executable, which never
- * runs a task. For a review of the version a publication answers.
+ * anything is stored. For a review of the version a publication answers.
  */
 export const compiledTasksOf = (
   compiled: CompiledBuild
 ): readonly SealedTask[] => {
   const { build } = compiled;
-  if (!build.executable) {
-    return [];
-  }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
   const bytes =
     entry === undefined ? undefined : compiled.bytes.get(entry.sha256);
@@ -616,7 +596,7 @@ const encoder = new TextEncoder();
 /** A version's build as compiled for publication: its seal and its bytes. */
 export interface CompiledBuild {
   readonly build: SealedBuild;
-  /** Each artifact's bytes, by its SHA-256; none for a build that isn't executable. */
+  /** Each artifact's bytes, by its SHA-256. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
 }
 
@@ -639,7 +619,10 @@ export const compileWorkflow = async (
   whose: string,
   compiled?: CompiledModules
 ): Promise<CompiledBuild> => {
-  const generated = generateWorkflow(checked, whose);
+  // Named alike for every workflow: the code carries nothing of this
+  // deployment (an export packages it), and one document is one program,
+  // one build identity, whichever workflow publishes it.
+  const generated = generateWorkflow(checked, "workflow");
   // A build that runs past the build wait, or whose isolate gave up (its
   // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
   // a crash, its deadline, never cached, screens.ts), is the platform's to
@@ -764,7 +747,7 @@ export const compileWorkflow = async (
     artifacts,
   };
   return {
-    build: { executable: true, ...identity, hash: await identityOf(identity) },
+    build: { ...identity, hash: await identityOf(identity) },
     bytes,
   };
 };
@@ -780,9 +763,6 @@ export const storeBuild = async (
   key: { id: string; version: number },
   compiled: CompiledBuild
 ): Promise<void> => {
-  if (!compiled.build.executable) {
-    return;
-  }
   await reserveArtifacts(
     env,
     { app: key.id, version: key.version },
@@ -855,12 +835,8 @@ export const adoptReservations = (
  */
 export const releaseBuild = async (
   env: Env,
-  key: { id: string; version: number },
-  compiled: CompiledBuild
+  key: { id: string; version: number }
 ): Promise<void> => {
-  if (!compiled.build.executable) {
-    return;
-  }
   const reserved = sdkReleaseArtifacts;
   await releaseReservations(
     env,
@@ -869,13 +845,9 @@ export const releaseBuild = async (
 };
 
 /** What a version's answer says of its build (`WorkflowVersionBuild`). */
-export const buildSummary = (build: SealedBuild): WorkflowVersionBuild =>
-  build.executable
-    ? { executable: true, hash: build.hash }
-    : {
-        executable: false,
-        unsupported: build.unsupported.map((construct) => ({ ...construct })),
-      };
+export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
+  hash: build.hash,
+});
 
 /** Where a version's manifest holds its build. */
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
@@ -1094,8 +1066,7 @@ const reviewedTasksMax = 1024;
  * read from its `tasks.json` alone, hash-checked against the manifest
  * (`manifest`, which the caller has checked against `manifestHash`),
  * never by loading the whole build, so a listing of many versions reads
- * one small file for each, and none twice. None for a build that isn't
- * executable, which runs none.
+ * one small file for each, and none twice.
  */
 export const reviewedTasksOf = async (
   env: Env,
@@ -1114,9 +1085,6 @@ export const reviewedTasksOf = async (
     build = buildOf(manifest);
   } catch {
     throw corrupt(id, version, "build");
-  }
-  if (!build.executable) {
-    return [];
   }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
   const text = entry === undefined ? undefined : await artifactText(env, entry);
@@ -1170,9 +1138,7 @@ const buildArtifactReadMs = 100;
  * or less where tests set `WORKFLOW_BUILD_READ_MS`.
  */
 const buildReadMs = (env: Env, build: SealedBuild): number => {
-  // One that isn't executable reads nothing: it is refused before.
-  const artifacts = build.executable ? build.artifacts.length : 0;
-  const bound = buildReadBaseMs + artifacts * buildArtifactReadMs;
+  const bound = buildReadBaseMs + build.artifacts.length * buildArtifactReadMs;
   const set = Number(env.WORKFLOW_BUILD_READ_MS);
   return Number.isInteger(set) && set > 0 && set < bound ? set : bound;
 };
@@ -1183,9 +1149,6 @@ const verifiedBuild = async (
   version: number,
   build: SealedBuild
 ): Promise<Omit<LoadedBuild, "packages">> => {
-  if (!build.executable) {
-    throw corrupt(id, version, "not executable");
-  }
   if (build.protocol !== openWorkflowProtocol) {
     throw workflowResourceErrors.create("workflow.protocol_unsupported");
   }
@@ -1344,8 +1307,7 @@ const loadSealedBuild = async (
  * The executable build of version `version` of workflow `id`, verified:
  * its manifest against its hash and, with `pinned`, the manifest hash a
  * start froze; then every artifact against its entry, and the build's
- * identity against them (`workflow.version_corrupt` otherwise, and for a
- * version that isn't executable, which nothing should load).
+ * identity against them (`workflow.version_corrupt` otherwise).
  */
 export const loadWorkflowBuild = async (
   env: Env,

@@ -1337,17 +1337,14 @@ const steeringReview = async (
 /**
  * The tasks version `row`'s build seals, for its review (GRA-727): read
  * only when its manifest pins a model binding, the only binding a model
- * task can name; none for a build that isn't executable, which runs none.
+ * task can name.
  */
 const versionTasksOf = async (
   env: Env,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: readonly PinnedContract[]
 ): Promise<readonly SealedTask[]> => {
-  if (
-    !bindings.some(({ kind }) => kind === "model") ||
-    !sealedBuildOf(row.workflowResourceId, row.version, row.manifest).executable
-  ) {
+  if (!bindings.some(({ kind }) => kind === "model")) {
     return [];
   }
   return await reviewedTasksOf(
@@ -1801,7 +1798,7 @@ const writeVersion = async (
     // Not written: what this publication reserved goes back, and only
     // that: another's, and a saved version's, stay.
     try {
-      await releaseBuild(env, { id: owner, version }, compiled);
+      await releaseBuild(env, { id: owner, version });
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
@@ -2222,11 +2219,11 @@ export const workflowDefinition = async (
 
 /**
  * The portable source of version `version` of workflow `id`, for its
- * builders: its definition exactly as published (`workflowDefinition`'s
- * checks) and, for an executable version, the SDK TypeScript generated
- * from it, read back from its sealed build with every hash checked. It
- * goes one way: a version is only ever published from a definition, so
- * edited generated code never comes back as one.
+ * builders (`workflowDefinition`'s checks): the SDK TypeScript generated
+ * from its definition and its own modules, read back from its sealed
+ * build with every hash checked. The definition stays with the version,
+ * for review. It goes one way: a version is only ever published from a
+ * definition, so edited generated code never comes back as one.
  */
 export const workflowSource = async (
   env: Env,
@@ -2234,34 +2231,14 @@ export const workflowSource = async (
   id: unknown,
   version: unknown
 ): Promise<WorkflowVersionSource> => {
-  const definition = await workflowDefinition(env, by, id, version);
+  await workflowDefinition(env, by, id, version);
   // Both checked by `workflowDefinition`: a workflow `by` builds, and a
   // version it published.
-  const workflowId = String(id);
-  const number = Number(version);
-  const row = await drizzle(env.DB)
-    .select({ manifest: workflowResourceVersions.manifest })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, workflowId),
-        eq(workflowResourceVersions.version, number)
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  const files: Record<string, string> = { "workflow.json": definition };
-  if (sealedBuildOf(workflowId, number, row.manifest).executable) {
-    const build = await loadWorkflowBuild(env, workflowId, number);
-    files[openWorkflowEntry] = build.source;
-    // Its own modules, as published, read back from the seal.
-    for (const [path, source] of Object.entries(build.compute.sources)) {
-      files[path] = source;
-    }
-  }
-  return { files };
+  const build = await loadWorkflowBuild(env, String(id), Number(version));
+  // Its own modules, as published, read back from the seal.
+  return {
+    files: { [openWorkflowEntry]: build.source, ...build.compute.sources },
+  };
 };
 
 /** A binding of a version, as a definition export follows it. */
@@ -2277,11 +2254,10 @@ export type ExportedBinding =
 /**
  * A workflow version as a definition export reads it (definition-export.ts),
  * or why it can't: `missing` for a workflow or version that isn't there,
- * `forbidden` for one `by` doesn't build, `not_executable` for one with no
- * build to run.
+ * `forbidden` for one `by` doesn't build.
  */
 export type ExportedWorkflowVersion =
-  | { readonly status: "missing" | "forbidden" | "not_executable" }
+  | { readonly status: "missing" | "forbidden" }
   | {
       readonly status: "found";
       readonly name: string;
@@ -2419,10 +2395,6 @@ export const exportedWorkflowVersion = async (
   ) {
     throw corrupt(workflow.id, version);
   }
-  const build = sealedBuildOf(workflow.id, version, row.manifest);
-  if (!build.executable) {
-    return { status: "not_executable" };
-  }
   const loaded = await loadWorkflowBuild(
     env,
     workflow.id,
@@ -2463,7 +2435,7 @@ export const exportedWorkflowVersion = async (
     profile: row.profile,
     manifestHash: row.manifestHash,
     definitionHash: row.definitionHash,
-    buildHash: build.hash,
+    buildHash: loaded.hash,
     definition: row.definition,
     files: { [openWorkflowEntry]: loaded.source, ...loaded.compute.sources },
     bindings,
@@ -2474,7 +2446,7 @@ export const exportedWorkflowVersion = async (
 /**
  * The modules version `version` of workflow `id` sealed, by path, read
  * back from its build with every hash checked: none for a version without
- * modules, or one whose build doesn't run, which seals none. For the
+ * modules. For the
  * workflow's builders, whose role the caller has checked.
  */
 export const sealedModules = async (
@@ -2482,22 +2454,6 @@ export const sealedModules = async (
   workflowId: string,
   version: number
 ): Promise<Record<string, string>> => {
-  const row = await drizzle(env.DB)
-    .select({ manifest: workflowResourceVersions.manifest })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, workflowId),
-        eq(workflowResourceVersions.version, version)
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  if (!sealedBuildOf(workflowId, version, row.manifest).executable) {
-    return {};
-  }
   const build = await loadWorkflowBuild(env, workflowId, version);
   return { ...build.compute.sources };
 };

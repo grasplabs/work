@@ -60,19 +60,9 @@ export const appBindingKinds = [
  *
  * - `unbound`: the App's alias was bound to no workflow when it sealed;
  * - `missing`: the workflow, or the version pinned, is gone;
- * - `forbidden`: whoever exported doesn't build the workflow;
- * - `not_executable`: the version pinned has no build to run;
- * - `sensitive_constraint`: the version's sensitive parameter pins its
- *   value in its schema, or nearly (`const`, `enum`, `pattern`, bounds
- *   that leave one value or length), which would give it away.
+ * - `forbidden`: whoever exported doesn't build the workflow.
  */
-export const unresolvedReasons = [
-  "unbound",
-  "missing",
-  "forbidden",
-  "not_executable",
-  "sensitive_constraint",
-] as const;
+export const unresolvedReasons = ["unbound", "missing", "forbidden"] as const;
 export type UnresolvedReason = (typeof unresolvedReasons)[number];
 
 export const definitionPackageSchema = z.strictObject({
@@ -149,31 +139,23 @@ export const definitionPackageSchema = z.strictObject({
     workflowKeySchema,
     z.strictObject({
       provenance: z.strictObject({
+        /** The version's manifest hash. */
+        manifestHash: sha256Schema,
         /**
-         * The version's manifest hash, null when anything was withheld:
-         * it hashes what was published, which would let a holder test
-         * guesses at what was withheld.
+         * The SHA-256 of its grasp-workflow/1 definition as published,
+         * which stays with the version: the code was generated from it.
          */
-        manifestHash: sha256Schema.nullable(),
-        /** The SHA-256 of `workflow.json` as exported. */
         definitionHash: sha256Schema,
-        /** The build's identity, null when anything was withheld, as above. */
-        buildHash: sha256Schema.nullable(),
+        /** The build's identity. */
+        buildHash: sha256Schema,
         profile: z.string().min(1).max(128),
       }),
       /**
-       * `workflow.json` (its sensitive parameters' defaults withheld), the
-       * TypeScript generated from it and its own modules, as published.
+       * The TypeScript generated from its definition and its own modules,
+       * as published. A sensitive parameter has no value in either: the
+       * format keeps none in the document.
        */
       files: filesSchema,
-      /** The parameters whose defaults `workflow.json` no longer carries. */
-      withheldDefaults: z.array(z.string().min(1).max(128)),
-      /**
-       * The sensitive parameters whose bounds (minimum, maximum, length,
-       * items) `workflow.json` no longer carries: the destination's own
-       * to set again.
-       */
-      withheldConstraints: z.array(z.string().min(1).max(128)),
       /** Each workflow it binds, by alias: that version's key, if packaged. */
       workflows: z.record(aliasSchema, workflowKeySchema.nullable()),
       /** Each catalog contract it binds, by alias: its kind. */

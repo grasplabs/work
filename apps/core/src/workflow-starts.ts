@@ -252,11 +252,8 @@ export interface StartAuthorization {
    * restricted for good.
    */
   restricted: boolean;
-  /**
-   * The executable identity of the version's build, which the start's run
-   * is admitted for; null for a version without one: no run is admitted.
-   */
-  buildHash: string | null;
+  /** The executable identity of the version's build, which the start's run is admitted for. */
+  buildHash: string;
   /** For the audit log: who started it. */
   actor: AuditActor;
   /**
@@ -497,8 +494,8 @@ export const pinned = async (
   configRevision: number;
   manifestHash: string;
   inputDescriptor: string;
-  /** The executable identity of its build; null when it has none. */
-  buildHash: string | null;
+  /** The executable identity of its build. */
+  buildHash: string;
   /** The approved graph its modules import (GRA-665); null for none. */
   graphHash: string | null;
 }> => {
@@ -550,7 +547,7 @@ export const pinned = async (
     configRevision: row.configRevision,
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
-    buildHash: build.executable ? build.hash : null,
+    buildHash: build.hash,
     graphHash,
   };
 };
@@ -1398,7 +1395,7 @@ export const decideWorkflowStart = async (
     env,
     descriptorFromText(inputDescriptor),
     text,
-    { runId, workflowId: id, runs: buildHash !== null },
+    { runId, workflowId: id, runs: true },
     files
   );
   return {
@@ -1443,9 +1440,7 @@ export const decideWorkflowStart = async (
  * starts make core spend at once.
  */
 const underRunLimit = (authorization: StartAuthorization): SQL =>
-  authorization.buildHash === null
-    ? sql`1`
-    : sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
+  sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
         WHERE live.workflow_resource_id = ${authorization.workflowId}
           AND live.principal_id = ${authorization.principal}
           AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
@@ -1464,14 +1459,10 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
  */
 const triggeredAccountFor = (
   db: DrizzleD1Database,
-  { lineage, buildHash, workflowId }: StartAuthorization,
+  { lineage, workflowId }: StartAuthorization,
   run: { run: string; createdAt: number; admitted: SQL }
 ) => {
-  if (
-    lineage === undefined ||
-    lineage.parentRunId !== null ||
-    buildHash === null
-  ) {
+  if (lineage === undefined || lineage.parentRunId !== null) {
     return { claim: [], aged: [] };
   }
   const { claim, aged } = triggeredAccountClaimed(db, {
@@ -1573,23 +1564,19 @@ export const admitWorkflowStart = async (
       ...account.claim,
       // Its run, pinned to the version's build, with the receipt or not at
       // all (resource-runs.ts): the engine is sent it once this commits.
-      ...(authorization.buildHash === null
-        ? []
-        : [
-            runAdmitted(db, {
-              receipt: id,
-              workflowId: authorization.workflowId,
-              version: authorization.version,
-              manifestHash: authorization.manifestHash,
-              buildHash: authorization.buildHash,
-              principal: authorization.principal,
-              restricted: authorization.restricted,
-              createdAt: createdAt.getTime(),
-              ...(authorization.lineage === undefined
-                ? {}
-                : { lineage: authorization.lineage }),
-            }),
-          ]),
+      runAdmitted(db, {
+        receipt: id,
+        workflowId: authorization.workflowId,
+        version: authorization.version,
+        manifestHash: authorization.manifestHash,
+        buildHash: authorization.buildHash,
+        principal: authorization.principal,
+        restricted: authorization.restricted,
+        createdAt: createdAt.getTime(),
+        ...(authorization.lineage === undefined
+          ? {}
+          : { lineage: authorization.lineage }),
+      }),
       ...account.aged,
       // The files its start handed its run: theirs once it is admitted.
       ...alsoAdmitted,

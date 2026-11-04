@@ -526,7 +526,7 @@ describe("spec 13.9's approval example", () => {
   it("publishes as written, executable, against the build its run loads", async () => {
     const { version } = await approvalWorkflow();
     expect({
-      executable: version?.build.executable,
+      executable: version?.build.hash !== undefined,
     }).toStrictEqual({ executable: true });
   });
 
