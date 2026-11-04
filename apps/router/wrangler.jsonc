@@ -15,7 +15,12 @@
   "routes": [{ "pattern": "*.ongrasp.app/*", "zone_name": "ongrasp.app" }],
   // No platform line per invocation, and query strings stay out of logs and
   // traces: the router sees every client's full URLs, OAuth callbacks'
-  // code and state included (threat model R17, RT2).
+  // code and state included (threat model R17, RT2). Accepted exception:
+  // traces keep the whole path, so a screen module's or a package
+  // artifact's token, a segment of its path, stays in them. Workers redact
+  // only the query string, and the token can't move there (core's
+  // wrangler.jsonc says why). A token reads one scope's modules of one
+  // client for at most about 12 hours.
   // Which stage this Worker serves (@grasp-os/shared/names): production
   // here, staging in `env.staging`, which repeats every binding under its
   // staging name, as wrangler inherits none of them.

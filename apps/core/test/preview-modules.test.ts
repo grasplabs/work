@@ -1,8 +1,9 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { revokeRelease } from "../src/release-retention.ts";
+import { frameAccess, stageFrame } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { deskDraft, deskFiles } from "./preview-drafts.ts";
@@ -196,6 +197,95 @@ describe(
         sameModule: true,
         healed: { status: 200, code: original },
       });
+    });
+
+    it("refuses a frame opened hours ago its next update's modules, which a frame opened again reads", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app, chatId, revision, write } = await deskDraft(builder);
+      // Opened 13 hours ago: past the end of the six-hour window after the
+      // one it opened in, so every module token it holds has expired.
+      vi.useFakeTimers({
+        toFake: ["Date"],
+        now: Date.now() - 13 * 60 * 60 * 1000,
+      });
+      let frame: LoadedFrame;
+      try {
+        frame = await framed(
+          await builder.api.chats.preview(chatId, app, "desk")
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+      const next = await write(
+        { "screens/desk.tsx": deskFiles("Later")["screens/desk.tsx"] ?? "" },
+        revision
+      );
+      const updated = await builder.api.chats.previewUpdate(
+        chatId,
+        app,
+        "desk",
+        next
+      );
+      const hash = updated.refresh.entry;
+      // What the page does on the frame's `reset`: opens it again.
+      const reopened = await framed(
+        await builder.api.chats.preview(chatId, app, "desk")
+      );
+      expect({
+        expired: await asked({ ...modulePartsOf(frame.screen.entry), hash }),
+        reopened: await asked({
+          ...modulePartsOf(reopened.screen.entry),
+          hash,
+        }),
+      }).toStrictEqual({ expired: 403, reopened: 200 });
+    });
+
+    it("stages again what it kept under a key since rotated, rather than refuse it as corrupt", async () => {
+      const artifact = "e".repeat(64);
+      const code = {
+        entry: "app~desk",
+        runtime: "app~desk",
+        modules: { "app~desk": "export default 1;\n" },
+        addresses: { "app~desk": "f".repeat(64) },
+        kit: {},
+        css: "",
+      };
+      // Staged under the secret before a rotation, then again after it.
+      await stageFrame(
+        { ...env, BETTER_AUTH_SECRET: `${env.BETTER_AUTH_SECRET}-before` },
+        artifact,
+        code
+      );
+      await stageFrame(env, artifact, code);
+      const frame = await loadFrame({
+        artifact,
+        frameToken: await frameAccess(env, artifact),
+      });
+      expect(frame?.modules["app~desk"]).toBe(code.modules["app~desk"]);
+    });
+
+    it("leaves a module's token out of the request log", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app, chatId } = await deskDraft(builder);
+      const frame = await framed(
+        await builder.api.chats.preview(chatId, app, "desk")
+      );
+      const { token } = modulePartsOf(frame.screen.entry);
+      const info = vi.spyOn(console, "info").mockReturnValue();
+      let lines: string[] = [];
+      try {
+        await routed(pathOf(frame.screen.entry));
+        // Not shaped as an address: its token could be any segment.
+        await routed(`/screen-modules/${token}/x.js`);
+        lines = info.mock.calls.map((call) => JSON.stringify(call));
+      } finally {
+        info.mockRestore();
+      }
+      const logged = lines.filter((line) => line.includes("/screen-modules"));
+      expect({
+        logged: logged.length,
+        withToken: logged.filter((line) => line.includes(token)),
+      }).toStrictEqual({ logged: 2, withToken: [] });
     });
   }
 );

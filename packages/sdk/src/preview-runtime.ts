@@ -19,7 +19,11 @@ import type { RpcStub } from "capnweb";
  * error.
  */
 import { commit, discard, refresh } from "./preview-refresh.ts";
-import { previewReceiver } from "./preview-updates.ts";
+import {
+  ModuleNotLoadedError,
+  notLoaded,
+  previewReceiver,
+} from "./preview-updates.ts";
 import type {
   PreviewLoad,
   ScreenBridge,
@@ -121,8 +125,16 @@ export const runScreen = async (
     following = true;
     const receive = previewReceiver({
       evaluate: async (load) => {
-        const evaluated: unknown = await import(addressOf(screen, load));
-        return evaluated;
+        try {
+          const evaluated: unknown = await import(addressOf(screen, load));
+          return evaluated;
+        } catch (error) {
+          throw notLoaded(error, new URL("./", screen).href)
+            ? new ModuleNotLoadedError("The screen's module didn't load.", {
+                cause: error,
+              })
+            : error;
+        }
       },
       commit,
       discard,

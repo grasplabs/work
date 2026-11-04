@@ -431,17 +431,32 @@ interface StagedModule {
   bytes: Uint8Array;
 }
 
-/** Whether `object`, staged before `now`, is to be staged anew. */
-const isStale = (object: R2Object | null, now: Date): boolean =>
-  object === null ||
-  now.getTime() - object.uploaded.getTime() >= frameRefreshMs;
-
 /**
- * Keeps `modules` where frames load them, each with core's MAC (checked
- * on serve, as above): only those not kept yet, or kept long enough ago
- * that the sweep would soon take them. Two stagings at once both write
- * the same bytes.
+ * Puts `body` at `key` with `mac`, core's MAC over it, unless it is kept
+ * there already: under that very MAC (one made with a key since rotated
+ * is put anew, or it would be refused as corrupt on every serve), and
+ * recently enough that the sweep won't take it soon. Two stagings at once
+ * both write the same bytes.
  */
+const keep = async (
+  env: Env,
+  key: string,
+  body: Uint8Array | string,
+  mac: string,
+  now: Date
+): Promise<void> => {
+  const kept = await env.FILES.head(key);
+  if (
+    kept !== null &&
+    kept.customMetadata?.mac === mac &&
+    now.getTime() - kept.uploaded.getTime() < frameRefreshMs
+  ) {
+    return;
+  }
+  await env.FILES.put(key, body, { customMetadata: { mac } });
+};
+
+/** Keeps `modules` where frames load them, each with core's MAC (`keep`). */
 export const stageModules = async (
   env: Env,
   modules: readonly StagedModule[],
@@ -452,16 +467,12 @@ export const stageModules = async (
   }
   await Promise.all(
     modules.map(async ({ scope, hash, bytes }) => {
-      const key = moduleKey(scope, hash);
-      if (!isStale(await env.FILES.head(key), now)) {
-        return;
-      }
       const mac = await stagedMac(
         env,
         modulePurpose,
         await moduleSubject(scope, hash, bytes)
       );
-      await env.FILES.put(key, bytes, { customMetadata: { mac } });
+      await keep(env, moduleKey(scope, hash), bytes, mac, now);
     })
   );
 };
@@ -497,7 +508,8 @@ const allStaged = async (
  * (its artifact, or its preview's, `previewFrame`) at their addresses,
  * the kit's under `kitScope` at theirs (`stageModules`), and the build's
  * manifest under its artifact, with core's MAC (checked on serve, as
- * above). The modules go first, so a manifest is never there without
+ * above), each only when not kept so already (`keep`). The modules go
+ * first, so a manifest is never there without
  * them; the sweep may still take one (it can't delete only if
  * unchanged), which the frame's document notices, and the next open puts
  * back. Two opens at once both write it, the same bytes. A chat's
@@ -524,9 +536,6 @@ export const stageFrame = async (
   );
   const app = appModules(code, scope);
   await stageModules(env, [...kit, ...app], now);
-  if (!isStale(await env.FILES.head(frameKey(artifact)), now)) {
-    return;
-  }
   const manifest: FrameManifest = {
     entry: code.entry,
     runtime: code.runtime,
@@ -548,11 +557,13 @@ export const stageFrame = async (
   if (encoder.encode(text).byteLength > frameObjectMaxBytes) {
     throw oversizedBuild();
   }
-  await env.FILES.put(frameKey(artifact), text, {
-    customMetadata: {
-      mac: await stagedMac(env, manifestPurpose, [artifact, text]),
-    },
-  });
+  await keep(
+    env,
+    frameKey(artifact),
+    text,
+    await stagedMac(env, manifestPurpose, [artifact, text]),
+    now
+  );
 };
 
 /** Where the sweep left off: which prefix, and R2's cursor in it. */
@@ -641,6 +652,21 @@ const refused = (
       "cache-control": cache,
     },
   });
+
+/**
+ * `pathname` as core's request log keeps it: a module's token left out. A
+ * path under the modules' that isn't shaped as an address is logged
+ * without anything after it, as a token could be in any of its segments.
+ */
+export const withoutModuleToken = (pathname: string): string => {
+  if (!pathname.startsWith(`${screenModulePath}/`)) {
+    return pathname;
+  }
+  const { scope, hash } = modulePath.exec(pathname)?.groups ?? {};
+  return scope === undefined || hash === undefined
+    ? `${screenModulePath}/-`
+    : `${screenModulePath}/${scope}/-/${hash}.js`;
+};
 
 /**
  * A module, as a frame imports it, or null when the path isn't one: only

@@ -70,7 +70,7 @@ catalog:
   esbuild-wasm: 0.28.2
   # The import specifiers of an App's compiled screen modules, which the
   # compiler points at each module's content-hashed address: Vite's lexer.
-  es-module-lexer: 2.3.2
+  es-module-lexer: 3.0.4
   # jq 1.8.2 compiled to WebAssembly (MIT): the expression language of JSON
   # workflows. scripts/jq-wasm meters and pins its bytes.
   jq-wasm: 3.0.0-jq-1.8.2

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { previewReceiver } from "../src/preview-updates.ts";
+import {
+  ModuleNotLoadedError,
+  notLoaded,
+  previewReceiver,
+} from "../src/preview-updates.ts";
 import type { PreviewFrame } from "../src/preview-updates.ts";
 import type { PreviewLoad } from "../src/screen-runtime.ts";
 
@@ -150,5 +154,57 @@ describe("a preview's frame taking its draft's updates", () => {
     const { frame } = fakeFrame();
     const receive = previewReceiver({ ...frame, refresh: () => false });
     await expect(receive(load("one"))).resolves.toBe("reset");
+  });
+
+  it("asks for a fresh start, reporting nothing of the draft, when the module doesn't load", async () => {
+    const { frame, seen } = fakeFrame();
+    const receive = previewReceiver({
+      ...frame,
+      // As after hours open: core refuses the frame's expired token.
+      evaluate: async () => {
+        await Promise.resolve();
+        throw new ModuleNotLoadedError("The screen's module didn't load.");
+      },
+    });
+    await receive(load("one"));
+    const answer = await receive(load("two"));
+    expect({ answer, seen }).toStrictEqual({
+      answer: "reset",
+      seen: { screen: "opened", css: ".opened{}", imported: [], reported: [] },
+    });
+  });
+
+  it("tells a module that didn't load, in each engine's words, from the screen's own code throwing", () => {
+    const directory = `https://acme.grasp.test/screen-modules/${"d".repeat(64)}/1.x/`;
+    const imported = `${directory}${"e".repeat(64)}.js`;
+    expect({
+      chromium: notLoaded(
+        new TypeError(
+          `Failed to fetch dynamically imported module: ${imported}`
+        ),
+        directory
+      ),
+      firefox: notLoaded(
+        new TypeError(`error loading dynamically imported module: ${imported}`),
+        directory
+      ),
+      webkit: notLoaded(
+        new TypeError("Importing a module script failed."),
+        directory
+      ),
+      ownTypeError: notLoaded(
+        new TypeError("Cannot read properties of undefined (reading 'x')"),
+        directory
+      ),
+      ownSyntax: notLoaded(new SyntaxError("Unexpected token"), directory),
+      thrownValue: notLoaded(imported, directory),
+    }).toStrictEqual({
+      chromium: true,
+      firefox: true,
+      webkit: true,
+      ownTypeError: false,
+      ownSyntax: false,
+      thrownValue: false,
+    });
   });
 });

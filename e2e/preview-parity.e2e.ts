@@ -22,35 +22,47 @@ import { apiOf, peopleIn } from "./people.ts";
  */
 const installedMs = 30_000;
 
-/** Each built-in App, its page, and the heading the page shows once it runs. */
+/**
+ * Each built-in App, its page, the heading it shows, and the empty state
+ * it shows once its reads answered: for an admin with none of its data,
+ * the page's list empty and the access it checks granted (the line that
+ * asks them to make the first one shows only then). The intake's saved
+ * sources show nothing while empty, answered or not.
+ */
 const pages = [
-  { blueprint: "intake", screen: "intake", heading: "Intake" },
-  { blueprint: "board-page", screen: "board", heading: "Board page" },
-  { blueprint: "workflow-map", screen: "map", heading: "Workflow map" },
+  {
+    blueprint: "intake",
+    screen: "intake",
+    heading: "Intake",
+    settled: "No drafts wait for review.",
+  },
+  {
+    blueprint: "board-page",
+    screen: "board",
+    heading: "Board page",
+    settled: "No snapshots yet. Take the first one.",
+  },
+  {
+    blueprint: "workflow-map",
+    screen: "map",
+    heading: "Workflow map",
+    settled: "No workflows yet. Draw the first one.",
+  },
 ] as const;
 
-/** The markup a frame's page shows. */
-const markupOf = async (frame: FrameLocator): Promise<string> =>
-  await frame.locator("body").evaluate((body) => body.innerHTML);
-
-/** The markup a frame's page shows once it stopped changing: its reads answered. */
-const settledMarkupOf = async (frame: FrameLocator): Promise<string> => {
-  let last = "";
-  await expect
-    .poll(
-      async () => {
-        const now = await markupOf(frame);
-        const settled = now === last;
-        last = now;
-        return settled;
-      },
-      { intervals: [500], timeout: 20_000 }
-    )
-    .toBe(true);
-  return last;
+/** The markup a frame's page shows once it shows `settled`. */
+const settledMarkupOf = async (
+  frame: FrameLocator,
+  settled: string
+): Promise<string> => {
+  // The first open builds it, which takes a while on a loaded machine.
+  await expect(frame.getByText(settled, { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  return await frame.locator("body").evaluate((body) => body.innerHTML);
 };
 
-for (const { blueprint, screen, heading } of pages) {
+for (const { blueprint, screen, heading, settled } of pages) {
   test(`renders the ${blueprint} page the same in a preview and published`, async ({
     pageOf,
   }) => {
@@ -82,12 +94,10 @@ for (const { blueprint, screen, heading } of pages) {
 
     const page = await pageOf(admin);
     await page.goto(`/apps/${app}/full?screen=${screen}`);
-    const published = page.frameLocator(`iframe[title="${screen} app"]`);
-    // The first open builds it, which takes a while on a loaded machine.
-    await expect(published.getByRole("heading", { name: heading })).toBeVisible(
-      { timeout: 30_000 }
+    const live = await settledMarkupOf(
+      page.frameLocator(`iframe[title="${screen} app"]`),
+      settled
     );
-    const live = await settledMarkupOf(published);
 
     // A draft that renders as the version does: a file no page imports.
     await writeDraft(admin.userId, chat, app, 1, {
@@ -97,10 +107,7 @@ for (const { blueprint, screen, heading } of pages) {
     const preview = page
       .getByRole("region", { name: `Preview of ${name}` })
       .frameLocator("iframe");
-    await expect(preview.getByRole("heading", { name: heading })).toBeVisible({
-      timeout: 30_000,
-    });
 
-    expect(await settledMarkupOf(preview)).toBe(live);
+    expect(await settledMarkupOf(preview, settled)).toBe(live);
   });
 }

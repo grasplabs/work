@@ -42,10 +42,11 @@ interface Site {
 /** The imports of `code` that name one of `names`, in order. */
 const sitesIn = (code: string, names: ReadonlySet<string>): Site[] => {
   const [imports] = parse(code);
-  // `d`, where an `import()` starts, is -1 for a static import.
-  return imports.flatMap(({ n: name, s: start, e: end, d: dynamic }) =>
-    name !== undefined && names.has(name)
-      ? [{ start, end, quoted: dynamic > -1, name }]
+  // An `import()`'s span is its argument, quotes and all; a static
+  // import's, the specifier's text alone.
+  return imports.flatMap(({ specifier, start, end, type }) =>
+    typeof specifier === "string" && names.has(specifier)
+      ? [{ start, end, quoted: type === "dynamic", name: specifier }]
       : []
   );
 };

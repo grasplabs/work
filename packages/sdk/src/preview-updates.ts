@@ -24,6 +24,10 @@
  *   module is at an address of its own.
  * - Refresh can't go on (an error it can't recover from): the page is
  *   told to start the frame afresh.
+ * - The module doesn't load at all, as when the frame's module token has
+ *   expired after hours open (`ModuleNotLoadedError`): nothing of the draft
+ *   is at fault, so nothing is reported, and the page is told to start the
+ *   frame afresh, with a fresh token.
  */
 import type {
   PreviewApplied,
@@ -58,6 +62,27 @@ export interface PreviewFrame {
   /** Tells the page what went wrong. */
   report: (value: unknown) => void;
 }
+
+/**
+ * What `PreviewFrame.evaluate` throws when the module didn't load: core
+ * refused or lost it, or the network failed, before any of the draft's
+ * code ran (`notLoaded`).
+ */
+export class ModuleNotLoadedError extends Error {
+  override name = "ModuleNotLoadedError";
+}
+
+/**
+ * Whether `error`, from importing a module of `directory`, says the module
+ * graph didn't load rather than that its code threw: the TypeError each
+ * engine's loader rejects with, which Chromium and Firefox write with the
+ * address imported, and WebKit as one fixed sentence. Code of the screen
+ * that throws rejects with what it threw.
+ */
+export const notLoaded = (error: unknown, directory: string): boolean =>
+  error instanceof TypeError &&
+  (error.message.includes(directory) ||
+    error.message === "Importing a module script failed.");
 
 /** What a module's address looks like: core's hash of it. */
 const addressPattern = /^[0-9a-f]{64}$/u;
@@ -117,6 +142,9 @@ export const previewReceiver =
     } catch (error) {
       frame.discard();
       frame.setCss(css);
+      if (error instanceof ModuleNotLoadedError) {
+        return "reset";
+      }
       frame.report(error);
       return "failed";
     }
