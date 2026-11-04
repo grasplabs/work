@@ -26,7 +26,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { roleLabel } from "../labels.ts";
-import { PersonOption } from "./person-picker.tsx";
+import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // Giving people and teams a role in something (an App, a project): one
@@ -147,12 +147,7 @@ export const SharePicker = ({
           <span className="text-muted-foreground text-sm">{roleHeading}</span>
           <RoleSelect label={roleName} onChange={setRole} role={role} />
         </div>
-        {/* Names match as typed, as in the owner picker. */}
-        <Command
-          filter={(value: string, search: string) =>
-            value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
-          }
-        >
+        <Command filter={matchTyped}>
           <CommandInput placeholder={t`Search people and teams`} />
           <CommandList>
             {people === undefined || teams === undefined ? (
@@ -184,8 +179,8 @@ export const SharePicker = ({
                         onSelect={() => {
                           pick({ type: "team", id: team.id });
                         }}
-                        // A team's ID keeps it apart from a person of the same name.
-                        value={`${team.name} ${team.id}`}
+                        keywords={[team.name]}
+                        value={`team:${team.id}`}
                       >
                         <UsersIcon className="text-muted-foreground" />
                         <span className="flex-1 truncate">{team.name}</span>
@@ -203,7 +198,8 @@ export const SharePicker = ({
                           onSelect={() => {
                             pick({ type: "project", id: each.id });
                           }}
-                          value={`${project} ${each.id}`}
+                          keywords={[project]}
+                          value={`project:${each.id}`}
                         >
                           <FolderIcon className="text-muted-foreground" />
                           <span className="flex-1 truncate">

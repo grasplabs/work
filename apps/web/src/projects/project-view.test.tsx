@@ -249,6 +249,12 @@ const type = async (input: Element | null, value: string) => {
   });
 };
 
+/** The names the open list of people and teams shows. */
+const shownNames = () =>
+  [...document.querySelectorAll("[cmdk-item]")].map(
+    (each) => each.querySelector("span.truncate")?.textContent
+  );
+
 /** Who is offered as `name` in the open list of people and teams. */
 const offered = (name: string) =>
   [...document.querySelectorAll("[cmdk-item]")].find(
@@ -369,9 +375,11 @@ describe("A project's page", () => {
 
     const before = [...asked];
     await press(button("Add someone"));
-    const names = [...document.querySelectorAll("[cmdk-item]")].map(
-      (each) => each.querySelector("span.truncate")?.textContent
-    );
+    const names = shownNames();
+    // Every ID holds an "s" ("user-…", "team-…"): only names are searched.
+    await type(document.querySelector("[cmdk-input]"), "s");
+    const found = shownNames();
+    await type(document.querySelector("[cmdk-input]"), "");
     await press(offered("Bo"));
     await press(button("Add someone"));
     await press(offered("Cy"));
@@ -379,11 +387,13 @@ describe("A project's page", () => {
     expect({
       before,
       names,
+      found,
       asked,
       refused: document.body.textContent?.includes("Cy can't be added."),
     }).toStrictEqual({
       before: [],
       names: ["Bo", "Cy", "Sales"],
+      found: ["Sales"],
       asked: [["shareCandidates"], ["addMember", "person", "user-bo", "user"]],
       refused: true,
     });
