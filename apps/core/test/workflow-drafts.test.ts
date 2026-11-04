@@ -273,7 +273,7 @@ describe("a workflow's draft", () => {
       ),
       leaked: JSON.stringify(invalid.problems).includes(secret),
     }).toStrictEqual({
-      invalid: ["schema.invalid /steps/0/unknown"],
+      invalid: ["workflow.unknown_property /steps/0/unknown"],
       invalidCheckpoint: 1,
       incomplete: ["schema.invalid"],
       incompleteCheckpoint: 1,
