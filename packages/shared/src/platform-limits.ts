@@ -198,10 +198,6 @@ export const platformLimits = {
   codeModeOutputBytes: 64 * kib,
 
   // Previews.
-  /** Updates of one preview session in flight. */
-  previewUpdatesInFlight: 1,
-  /** Replaceable latest checkpoints of one preview session pending. */
-  previewUpdatesPending: 1,
   /** Accepted revisions before a preview's modules are reset. */
   previewResetRevisions: 64,
   /** App JS and CSS loaded in all before a preview's modules are reset. */

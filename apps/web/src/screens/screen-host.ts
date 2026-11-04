@@ -185,8 +185,6 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.build_failed": "broken",
   "screen.not_sealed": "broken",
   "screen.build_slow": "timed-out",
-  // Asked again until the page's wait for a build was spent (`openPreview`).
-  "app.preview_superseded": "timed-out",
   "screen.unreviewed": "unreviewed",
   "screen.revoked": "revoked",
   "auth.principal_changed": "principal-changed",
@@ -1667,36 +1665,6 @@ export const runScreen = (
   );
 };
 
-/** How long a preview whose load a newer one replaced waits before asking again. */
-export const supersededRetryMs = 250;
-
-/**
- * `open`, asked again while core says a newer load of the same preview
- * replaced it (another tab, or this one before its draft changed again):
- * core loads one at a time with the newest waiting, so asking again joins
- * the line, until the page's wait for a preview (`previewOpenMs`) is spent.
- */
-export const openPreview = async <T>(
-  open: () => Promise<T>,
-  pause: (ms: number) => Promise<void> = pauseFor,
-  now: () => number = Date.now
-): Promise<T> => {
-  const endsAt = now() + screenLimits.previewOpenMs;
-  for (;;) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one load at a time
-      return await open();
-    } catch (error) {
-      const replaced = appErrors.codeOf(error) === "app.preview_superseded";
-      if (!replaced || now() + supersededRetryMs >= endsAt) {
-        throw error;
-      }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one load at a time
-    await pause(supersededRetryMs);
-  }
-};
-
 /**
  * The newest revision of a chat's draft as the page hears of it, for the
  * preview open now to take (`runPreview`): `latest`, and who hears of
@@ -1750,16 +1718,7 @@ export const runPreview = (
     frame,
     {
       open: async (session) =>
-        await openPreview(
-          async () =>
-            await session.chats.preview(
-              chatId,
-              app,
-              screen,
-              version,
-              appVersion
-            )
-        ),
+        await session.chats.preview(chatId, app, screen, version, appVersion),
       openMs: screenLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to

@@ -207,7 +207,6 @@ import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
-import { PreviewUpdates } from "./preview-updates.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -878,7 +877,6 @@ export class Workspace extends DurableObject<Env> {
 
   /** What those previews ran into (preview-reports.ts). */
   readonly #previewReports = new PreviewReports();
-  readonly #previewUpdates = new PreviewUpdates();
 
   /**
    * Bumped whenever a chat's agent writes or drops a draft, so its
@@ -4345,46 +4343,6 @@ export class Workspace extends DurableObject<Env> {
     const { id, draft } = this.#draftToPreview(chatId, personId, appId);
     this.#previewReports.opened(id, appId);
     return draft;
-  }
-
-  /**
-   * A place for an update of `personId`'s own chat's preview of App
-   * `appId` (preview-updates.ts): its token once it may load, or null when
-   * a newer update replaced it while it waited.
-   */
-  async takePreviewUpdate(
-    chatId: unknown,
-    personId: string,
-    appId: string
-  ): Promise<string | null> {
-    const { id } = this.#ownChat(chatId, personId);
-    return await this.#previewUpdates.take(`${id}:${appId}`);
-  }
-
-  /**
-   * Update `token` of `personId`'s own chat's preview of App `appId` is
-   * loading: one that waited keeps its place for the whole lease. False
-   * when its place is gone, as it was too late to confirm.
-   */
-  confirmPreviewUpdate(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    token: string
-  ): boolean {
-    const { id } = this.#ownChat(chatId, personId);
-    return this.#previewUpdates.confirm(`${id}:${appId}`, token);
-  }
-
-  /** Ends update `token` of `personId`'s own chat's preview of App `appId`. */
-  settlePreviewUpdate(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    token: string
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    this.#previewUpdates.settle(`${id}:${appId}`, token);
   }
 
   /** `personId`'s own chat's draft of App `appId`: `app.no_draft` while it changes nothing. */

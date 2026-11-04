@@ -300,10 +300,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
   }
 });
 
-/** Longer than a live screen's wait for its build (`screenLimits.openMs`). */
-const behindAnotherLoadMs = 25_000;
-
-test("an App's own chat writes its screen, and its workspace previews it", async ({
+test("an App's own chat writes its screen, and its workspace previews it, taking each write in place", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -312,42 +309,6 @@ test("an App's own chat writes its screen, and its workspace previews it", async
   try {
     const app = await api.apps.create({ name });
     const page = await pageOf(builder);
-    // Core loads a chat's preview one update at a time, the next waiting
-    // for the one ahead; on staging that wait and the load took longer
-    // than a live screen's whole wait for its build. Here the preview's
-    // first load reaches core that late: the page still waits for it.
-    let heldAsks = 0;
-    await page.routeWebSocket("**/rpc", (socket) => {
-      const toCore = socket.connectToServer();
-      // Each preview's connection is held from its own first ask, in
-      // order: a connection's messages name what came before.
-      let heldFrom: number | undefined;
-      let holding: string[] | undefined;
-      socket.onMessage((message) => {
-        const text = String(message);
-        if (holding !== undefined) {
-          holding.push(text);
-          return;
-        }
-        if (!text.includes('["chats","preview"]')) {
-          toCore.send(text);
-          return;
-        }
-        const queued = [text];
-        holding = queued;
-        heldFrom ??= Date.now();
-        heldAsks += 1;
-        setTimeout(
-          () => {
-            holding = undefined;
-            for (const each of queued) {
-              toCore.send(each);
-            }
-          },
-          Math.max(0, heldFrom + behindAnotherLoadMs - Date.now())
-        );
-      });
-    });
     await page.goto(`/apps/${app.id}/edit`);
     await expect(page.getByText("Nothing built yet")).toBeVisible();
 
@@ -367,9 +328,8 @@ test("an App's own chat writes its screen, and its workspace previews it", async
     ).toBeVisible();
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
-      timeout: behindAnotherLoadMs + 30_000,
+      timeout: 30_000,
     });
-    expect(heldAsks).toBeGreaterThan(0);
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
 
