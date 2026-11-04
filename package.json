@@ -33,7 +33,9 @@
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
     "composio:review": "node scripts/composio-review.ts",
-    "lab": "node scripts/lab/run.ts"
+    "lab": "node scripts/lab/run.ts",
+    "lab:bridge": "node scripts/lab/bridge.ts",
+    "lab:dev": "node scripts/lab/dev.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",

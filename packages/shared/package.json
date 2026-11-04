@@ -104,6 +104,7 @@
     "./lab": "./src/lab.ts",
     "./lab-compare": "./src/lab-compare.ts",
     "./lab-runs": "./src/lab-runs.ts",
+    "./lab-score": "./src/lab-score.ts",
     "./log": "./src/log.ts",
     "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",

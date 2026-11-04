@@ -11,10 +11,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { compare, noiseOf, shown } from "@grasp-os/shared/lab-compare";
+import { compare, meansOf, noiseOf, shown } from "@grasp-os/shared/lab-compare";
 import type { CaseScore } from "@grasp-os/shared/lab-compare";
-import { markOf } from "@grasp-os/shared/lab-runs";
-import type { Bench, Result } from "@grasp-os/shared/lab-runs";
+import { markOf, scoresSchema } from "@grasp-os/shared/lab-runs";
+import type { Bench, Result, StephenVersion } from "@grasp-os/shared/lab-runs";
+import { standingOf } from "@grasp-os/shared/lab-score";
+import type {
+  LimitStanding,
+  PartStanding,
+  ScoredRun,
+} from "@grasp-os/shared/lab-score";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import {
@@ -56,7 +62,13 @@ import {
   turnOn,
 } from "./core.ts";
 import type { Core } from "./core.ts";
-import { keepJson, keepText, openFolder } from "./kept.ts";
+import {
+  allKept,
+  keepJson,
+  keepText,
+  openFolder,
+  scoresFolder,
+} from "./kept.ts";
 import type { CaseSet } from "./kept.ts";
 import { keyOf } from "./keys/index.ts";
 import type { AnswerKey } from "./keys/types.ts";
@@ -85,6 +97,8 @@ export interface RoundArgs {
   label: string | undefined;
   only: readonly string[] | null;
   hidden: boolean;
+  /** On the API, which spends money, instead of the subscription: once, at the end of a climb. */
+  api: boolean;
   interviewer: Interviewer;
   practice: string | undefined;
   check: boolean;
@@ -107,8 +121,11 @@ export const standOn = (core: Core, log: (line: string) => void): Stand => ({
 });
 
 /** Runs `work` on the local core, and closes the session after. */
-const onCore = async <T>(work: (core: Core) => Promise<T>): Promise<T> => {
-  const core = await openCore();
+const onCore = async <T>(
+  args: Pick<RoundArgs, "api">,
+  work: (core: Core) => Promise<T>
+): Promise<T> => {
+  const core = await openCore({ api: args.api });
   try {
     return await work(core);
   } finally {
@@ -224,7 +241,7 @@ export const runBenches = async (args: RoundArgs): Promise<void> => {
   const benches = benchesNamed(args.rest[0]);
   const set = setOfArgs(args);
   const label = args.label ?? "run";
-  await onCore(async (core) => {
+  await onCore(args, async (core) => {
     const stand = standOn(core, args.log);
     for (const bench of benches) {
       const at = new Date().toISOString();
@@ -298,6 +315,11 @@ const mindsOf = (before: Result, after: Result): string[] => [
     ? []
     : [
         "Mind: the two runs reached other models. What they differ by is also that.",
+      ]),
+  ...((before.via.through ?? "api") === (after.via.through ?? "api")
+    ? []
+    : [
+        "Mind: one run is on the API and the other on the subscription, which adds a little text of Claude Code's own. What they differ by is also that.",
       ]),
   ...(before.stephen.interviewer === after.stephen.interviewer
     ? []
@@ -385,6 +407,93 @@ export const listResults = (args: RoundArgs): void => {
   }
 };
 
+/** The runs the score is worked out from: of this Stephen, on this set, reached this way. */
+export const standingRuns = (
+  args: Pick<RoundArgs, "hidden" | "api" | "interviewer">,
+  now: StephenVersion
+): ScoredRun[] => {
+  const through = args.api ? "api" : "subscription";
+  const fits = (run: Pick<Result, "bench" | "stephen" | "via">): boolean =>
+    run.stephen.interviewer === args.interviewer &&
+    markOf(run) === markOf({ bench: run.bench, stephen: now }) &&
+    (run.via.through ?? "api") === through;
+  // Of the hidden set only its scores are read: its means, never a case.
+  return args.hidden
+    ? allKept(scoresFolder, scoresSchema)
+        .filter(fits)
+        .map((run) => ({ bench: run.bench, means: run.means }))
+    : results()
+        .filter((run) => run.set === "open" && fits(run))
+        .map((run) => ({ bench: run.bench, means: meansOf(run.cases) }));
+};
+
+/** What the standing says beside a part. */
+const partNote = (part: PartStanding): string => {
+  if (part.value === null) {
+    return "not measured";
+  }
+  return part.aboveFloor ? "" : "under the floor";
+};
+
+/** What the standing says beside a limit. */
+const limitNote = (limit: LimitStanding): string => {
+  if (limit.value === null) {
+    return "not measured";
+  }
+  return limit.holds ? "" : "broken";
+};
+
+const tenthsOf = (value: number | null): string =>
+  value === null ? "–" : value.toFixed(1);
+
+/**
+ * `standing`: the Stephen Score of the Stephen of this checkout, from the
+ * runs kept of him (lab-score.ts): each part out of 10, the average, the
+ * lowest against the floor, the limits, and whether the goal is reached.
+ * `--hidden` for the hidden set, `--api` for runs on the API.
+ */
+export const showStanding = async (args: RoundArgs): Promise<void> => {
+  const now = await stephenVersion(args.interviewer, "en");
+  const standing = standingOf(standingRuns(args, now));
+  const { goal } = standing;
+  args.log(
+    `The Stephen Score of ${args.interviewer === "claire" ? "Claire" : "Stephen"} ${now.talks} (drawing ${now.draws}), ${args.hidden ? "hidden" : "open"} set, on the ${args.api ? "API" : "subscription"}. Goal: ${goal.target.toFixed(1)}, no part under ${goal.floor.toFixed(1)}.\n`
+  );
+  args.log(
+    table([
+      ["Part", "Weight", "Score", "Runs", ""],
+      ...standing.parts.map((part) => [
+        part.label,
+        `${Math.round(part.weight * 100)}%`,
+        tenthsOf(part.value),
+        String(part.runs),
+        partNote(part),
+      ]),
+    ])
+  );
+  args.log(
+    `\nScore: ${tenthsOf(standing.score)}   Lowest: ${standing.lowest === null ? "–" : `${standing.lowest.label} ${tenthsOf(standing.lowest.value)}`}\n`
+  );
+  args.log(
+    table([
+      ["Limit", "Measured", "Allowed", ""],
+      ...standing.limits.map((limit) => [
+        limit.label,
+        limit.value === null ? "–" : `${Math.round(limit.value * 100)}%`,
+        limit.most === undefined
+          ? `at least ${Math.round((limit.least ?? 0) * 100)}%`
+          : `at most ${Math.round(limit.most * 100)}%`,
+        limitNote(limit),
+      ]),
+    ])
+  );
+  args.log(
+    standing.reached
+      ? "\nThe goal is reached."
+      : `\nThe goal is not reached yet.${standing.missing.length > 0 ? ` Not measured: ${standing.missing.join(", ")}.` : ""}`
+  );
+};
+
 /**
  * `mine`: cuts moments from the conversations a model played, for the
  * next-question bench, and gives every cut moment a second look; with
@@ -392,7 +501,7 @@ export const listResults = (args: RoundArgs): void => {
  */
 export const mine = async (args: RoundArgs): Promise<void> => {
   const set = setOfArgs(args);
-  await onCore(async (core) => {
+  await onCore(args, async (core) => {
     const { asker } = standOn(core, args.log);
     const cut = args.check
       ? null
@@ -425,7 +534,7 @@ export const write = async (args: RoundArgs): Promise<void> => {
   if (unknown.length > 0) {
     throw new RoundStopError(`No such kind of moment: ${unknown.join(", ")}.`);
   }
-  await onCore(async (core) => {
+  await onCore(args, async (core) => {
     const { asker } = standOn(core, args.log);
     const { plain, not } = await writeMoments(
       asker,

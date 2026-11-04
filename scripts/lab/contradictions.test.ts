@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Judged } from "./card.ts";
 import {
   contradictionsIn,
+  sidesOf,
   surfacedLine,
   surfacedOf,
 } from "./contradictions.ts";
@@ -88,5 +89,22 @@ describe("contradictions surfaced", () => {
     ]);
     expect(surfaced).toStrictEqual({ count: 0, of: 0, open: [] });
     expect(surfacedLine(surfaced)).toContain("none");
+  });
+
+  it("gives each interview its own side to keep: of the contradictions both sides of which were heard, how often this person's version is in his notes", () => {
+    const sides = sidesOf(planted, [
+      { employee: "P2", judged: judgedWith({ S18: true }) },
+      { employee: "P9", judged: judgedWith({ S18: false }) },
+      { employee: knower, judged: judgedWith({ S18: true }) },
+    ]);
+    expect(Object.fromEntries(sides)).toStrictEqual({
+      P2: { count: 1, of: 1 },
+      P9: { count: 0, of: 1 },
+      [knower]: { count: 1, of: 1 },
+    });
+    expect(
+      sidesOf(planted, [{ employee: "P2", judged: judgedWith({ S18: true }) }])
+        .size
+    ).toBe(0);
   });
 });
