@@ -3,8 +3,8 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { reviewedTaskOf, workflowErrors } from "@grasp-os/shared/workflows";
-import type { RunSummary, WorkflowCalls } from "@grasp-os/shared/workflows";
+import { workflowErrors } from "@grasp-os/shared/workflows";
+import type { RunSummary } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
@@ -60,7 +60,6 @@ const rowSchema = z.object({
   details_removed_at: z.number().nullable(),
   summary_revision: z.number(),
   waits: z.string(),
-  workflow_calls: z.string().nullable(),
   pending: z.enum(["pause", "resume", "cancel"]).nullable(),
   queued: z.string().nullable(),
   ai_wait: z.string().nullable(),
@@ -100,37 +99,6 @@ const sharedQueueOf = (text: string | null): RunSummary["queued"] =>
 const waitsSchema = z.array(
   z.object({ name: z.string(), expiresAt: z.number() })
 );
-
-/** What a version's row keeps of each workflow's review. */
-const keptCallsSchema = z.record(
-  z.string(),
-  z.object({
-    steps: z.record(z.string(), z.array(z.string())).nullable(),
-    kinds: z.record(z.string(), z.enum(["exact", "ai", "decision", "wait"])),
-    // Only for naming its steps, which neither changes: a row without them
-    // names its steps all the same.
-    models: z.record(z.string(), z.array(z.string())).default({}),
-    keyed: z.array(z.string()).default([]),
-    all: z.array(z.string()),
-  })
-);
-
-/**
- * What the review of the run's version shows of workflow `workflow`, from
- * the row's text; none when it keeps none.
- */
-const calls = (
-  text: string | null,
-  workflow: string
-): WorkflowCalls | undefined => {
-  if (text === null) {
-    return undefined;
-  }
-  const kept = keptCallsSchema.safeParse(JSON.parse(text)).data;
-  return kept !== undefined && Object.hasOwn(kept, workflow)
-    ? kept[workflow]
-    : undefined;
-};
 
 /**
  * The run's status as the summary shows it: `queued` while it is starting,
@@ -311,8 +279,6 @@ export const runSummary = async (
        (SELECT json_group_array(json_object('name', d.step, 'expiresAt', d.expires_at))
           FROM workflow_decisions d
           WHERE d.run_id = r.id AND d.status = 'open') AS waits,
-       (SELECT v.workflow_calls FROM app_versions v
-          WHERE v.app_id = r.app_id AND v.version = r.version) AS workflow_calls,
        (SELECT c.kind FROM workflow_run_controls c
           WHERE c.run_id = r.id AND c.state = 'admitted'
           ORDER BY CASE c.kind WHEN 'cancel' THEN 0 ELSE 1 END
@@ -385,15 +351,11 @@ export const runSummary = async (
       : {}),
     ...(error === undefined ? {} : { error }),
     waits: live
-      ? waitsSchema.parse(JSON.parse(row.waits)).map(({ name, expiresAt }) => ({
+      ? waitsSchema.parse(JSON.parse(row.waits)).map(({ expiresAt }) => ({
           kind: "decision" as const,
-          // The decision's name as the version's review shows it, without
-          // the key a keyed one's step adds (from the App's data); empty
-          // for a name the review doesn't show, which can be made of what
-          // the run read.
-          name:
-            reviewedTaskOf(calls(row.workflow_calls, row.workflow_id), name) ??
-            "",
+          // No review of the version names its steps: a name could be
+          // made of what the run read, so none is shown.
+          name: "",
           expiresAt,
         }))
       : [],

@@ -70,32 +70,6 @@ const confirmations = `import { workflows } from "@server/_generated/api";
 export const confirmed = workflows.archiveNotes.events.confirmed;
 `;
 
-/**
- * A workflow of the App's own that calls its server's functions, typed by
- * its operations (`appFunctions<Tree>(env)`). It holds what the platform's
- * check accepts though a stricter one wouldn't: an index read as present
- * (no `noUncheckedIndexedAccess`) and a type imported without `type` (no
- * `verbatimModuleSyntax`).
- */
-const tally = `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
-import { FunctionResult } from "@grasp-os/sdk/workflow";
-
-import type * as notes from "../server/notes.ts";
-
-interface Notes {
-  notes: typeof notes;
-}
-
-const firstWordLength = (text: string): number => text.split(" ")[0].length;
-
-export default workflow("tally", { input: z.object({}), params: {} }, async (step, { env }) =>
-  await step.do("tally", { description: "Count the notes" }, async () => {
-    const answered: FunctionResult<number> = await appFunctions<Notes>(env).action("notes.tally", {});
-    return answered.ok ? answered.value + firstWordLength("a note") : 0;
-  })
-);
-`;
-
 /** A screen, which has the DOM as its frame does. */
 const notesScreen = `export default function Notes() {
   return <p>{window.location.pathname}</p>;
@@ -111,7 +85,6 @@ const notesFiles = (): Record<string, string> => ({
     ])
   ),
   "server/confirmations.ts": confirmations,
-  "workflows/tally.ts": tally,
   "screens/notes.tsx": notesScreen,
 });
 
@@ -697,8 +670,6 @@ describe(
           "app/server/notes.ts",
           "app/tsconfig.screens.json",
           "app/tsconfig.server.json",
-          "app/tsconfig.workflows.json",
-          "app/workflows/tally.ts",
         ],
         workflow: [
           "workflows/greet/1.0.0/.grasp/workflow.ts",
@@ -745,7 +716,7 @@ describe(
       // What the platform accepts, read as its parser reads it: a regular
       // expression holding `//` after a `)`, and a `///` comment of prose.
       const valid: Record<string, string> = {
-        "app/workflows/lib/pattern.ts":
+        "workflows/greet/1.0.0/code/pattern.ts":
           "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
         "app/screens/prose.tsx":
           "/// The notes screen.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
@@ -770,26 +741,21 @@ describe(
       };
 
       // What the platform's check refuses, each in a file of its own: a
-      // type error in a screen and in a compute module; a workflow and
-      // server code reaching the DOM, which their isolate lacks; and a
-      // workflow importing what its kind may not.
+      // type error in a screen and in a compute module; server code and a
+      // compute module reaching the DOM, which their isolate lacks; and a
+      // compute module importing what its kind may not.
       const mistyped: Record<string, string> = {
         "app/screens/typo.tsx": 'export const count: number = "none";\n',
-        // A declaration among the workflows, which their check leaves out,
-        // as the platform's does: a workflow can't import it.
-        "app/workflows/lib/types.d.ts": "export type Value = number;\n",
-        "app/workflows/lib/typed.ts":
-          'import type { Value } from "./types";\n\nexport const one: Value = 1;\n',
         "workflows/greet/1.0.0/code/typo.ts":
           "export const half = (value: number): string => value / 2;\n",
-        "app/workflows/lib/window.ts":
+        "workflows/greet/1.0.0/code/window.ts":
           "export const here = (): string => window.location.href;\n",
         "app/server/document.ts":
           "export const title = (): string => document.title;\n",
-        "app/workflows/lib/kit.ts":
+        "workflows/greet/1.0.0/code/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
-        // A package the SDK imports, which a workflow itself may not.
-        "app/workflows/lib/zod.ts":
+        // A package the SDK imports, which a compute module itself may not.
+        "workflows/greet/1.0.0/code/zod.ts":
           'import { z } from "zod";\n\nexport const name = z.string();\n',
         // A directive below the top of a screen, which TypeScript ignores
         // but the platform refuses wherever it stands.
@@ -797,13 +763,11 @@ describe(
           'export const late = 1;\n/// <reference types="node" />\n',
       };
       // And what its build refuses before any check: every way a file
-      // could steer the check, in a workflow, server code and a compute
-      // module alike.
+      // could steer the check, in server code and a compute module alike.
       const steering: Record<string, string> = {
         // Globals a screen declares, which the platform refuses in every
         // kind of App code; and server code the parser refuses, or that
-        // names a missing file, refused once, though the workflows' check
-        // reads it too.
+        // names a missing file, each refused once.
         "app/screens/globals.tsx":
           "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
         "app/server/unparsed.ts": "export const = ;\n",
@@ -811,15 +775,15 @@ describe(
           '/// <reference path="./missing.ts" />\nexport const one = 1;\n',
         // A suppression after a division by a non-null value, never a
         // regular expression.
-        "app/workflows/lib/non-null.ts":
+        "workflows/greet/1.0.0/code/non-null.ts":
           "const x: number | undefined = 1;\nexport const y = x! / 2; // @ts-ignore\nexport const b: string = 1;\n",
         "app/server/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
         "workflows/greet/1.0.0/code/dom.ts":
           '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
         ...Object.fromEntries(
-          steeringCases("@grasp-os/sdk/workflow").map(([, source], index) => [
-            `app/workflows/lib/steering-${index}.ts`,
+          steeringCases("@grasp-os/sdk/compute").map(([, source], index) => [
+            `workflows/greet/1.0.0/code/steering-${index}.ts`,
             source,
           ])
         ),
@@ -877,13 +841,12 @@ describe(
           status: 1,
           problems: {
             "app/server/document.ts": ["TS2584"],
-            "app/workflows/lib/kit.ts": ["TS2307"],
-            "app/workflows/lib/zod.ts": ["TS2307"],
-            "app/workflows/lib/window.ts": ["TS2304"],
             "app/screens/late.tsx": ["imports"],
             "app/screens/typo.tsx": ["TS2322"],
-            "app/workflows/lib/typed.ts": ["TS2307"],
+            "workflows/greet/1.0.0/code/kit.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
+            "workflows/greet/1.0.0/code/window.ts": ["TS2304"],
+            "workflows/greet/1.0.0/code/zod.ts": ["TS2307"],
           },
         },
         failedBuild: {

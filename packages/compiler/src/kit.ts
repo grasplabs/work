@@ -62,8 +62,8 @@ export const ownEntry = <T>(
 /**
  * Where a release's compiler is among core's static assets, and its files:
  * the compiler's code, what it knows of the kit (`Kit`), the kit's
- * modules (`KitModules`) and the workflow SDK's modules, which App
- * workflows import (`KitModules` too). The path has the compiler's version
+ * modules (`KitModules`) and the SDK's modules the isolates core runs
+ * load (`KitModules` too). The path has the compiler's version
  * in it, so a cache never serves another release's.
  */
 export const compilerAssets = {
@@ -73,7 +73,7 @@ export const compilerAssets = {
   kitModules: "kit-modules.json",
   /** The preview kit's modules (`KitModules`), which only previews load. */
   kitPreviewModules: "kit-preview-modules.json",
-  /** The SDK modules an App's workflows import (`sdkImports`). */
+  /** The SDK modules a workflow's or an App test's isolate loads (`sdkImports`). */
   workflowSdkModules: "sdk-workflow-modules.json",
   /** The SDK modules an App's server isolate loads (`serverSdkImports`). */
   serverSdkModules: "sdk-server-modules.json",

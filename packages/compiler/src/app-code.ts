@@ -37,14 +37,11 @@
  * where a screen tries.
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
-import { bindingNameSchema } from "@grasp-os/shared/permissions";
-import { z } from "zod";
 
 import {
   generatedServerFolder,
   hasAppPathSegments,
   hostGeneratedFolder,
-  workflowFiles,
 } from "./inputs.ts";
 import type { CodeFolder } from "./inputs.ts";
 import { kitModuleName, appModuleName } from "./kit.ts";
@@ -265,99 +262,6 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   return isTestFile(path) ? "test" : undefined;
 };
 
-/**
- * The App's server code a workflow's types may name: its schema, values,
- * registration, server modules and the migrations its registration
- * imports, with the host's generated modules, never its tests. A
- * workflow's `appFunctions<Tree>(env)` is typed by the App's server
- * modules (`import type * as notes from "../server/notes.ts"`), so they
- * join its type check; they never join its build.
- */
-export const workflowTypeContext = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) => {
-      const kind = appCodeKind(path);
-      return kind !== undefined && kind !== "test";
-    })
-  );
-
-/**
- * Where core gives a workflow build the binding names the App has, as
- * data: each name its permissions hold, with the kind of binding it is
- * (`workflowBindingsSchema`). A JSON file, never code: the declaration
- * the type check gets from it is the compiler's (`workflowEnvDeclaration`).
- */
-export const workflowBindingsPath = ".grasp/workflow-bindings.json";
-
-/** Where the declaration of an App's workflow bindings joins its type check. */
-export const workflowEnvPath = ".grasp/workflow-env.ts";
-
-/** The SDK's type for each kind of binding a run gets from a permission. */
-const bindingTypes = {
-  connection: "ConnectionBinding",
-  collection: "CollectionBinding",
-  brain: "WorkflowBrainBinding",
-} as const;
-
-/**
- * The binding names an App's permissions hold, by name: a connection's,
- * a collection's or the Brain's. Names are a permission's, so
- * the platform's own (`APP` among them) are never one.
- */
-export const workflowBindingsSchema = z.record(
-  bindingNameSchema,
-  z.enum(["connection", "collection", "brain"])
-);
-
-/** What `workflowBindingsSchema` reads. */
-export type WorkflowBindingKinds = z.infer<typeof workflowBindingsSchema>;
-
-/**
- * The declaration of an App's workflow bindings, from `bindings`:
- * `WorkflowBindings` (`@grasp-os/sdk/workflow`) with the App's own `APP`
- * and each binding as the SDK's type of its kind: a workflow's `env`
- * types these names as what they are, and any other as answering
- * `unknown` (`RunEnv`). Written by the compiler from validated names,
- * never from App text.
- */
-export const workflowEnvDeclaration = (
-  bindings: WorkflowBindingKinds
-): string => {
-  const entries = Object.entries(bindings)
-    .toSorted(([one], [other]) => one.localeCompare(other))
-    .map(([name, kind]) => `    readonly ${name}: ${bindingTypes[kind]};\n`)
-    .join("");
-  return `import type {
-  CollectionBinding,
-  ConnectionBinding,
-  OwnAppBinding,
-  WorkflowBrainBinding,
-} from "@grasp-os/sdk/workflow";
-
-declare module "@grasp-os/sdk/workflow" {
-  interface WorkflowBindings {
-    readonly APP: OwnAppBinding;
-${entries}  }
-}
-`;
-};
-
-/**
- * The files a workflow build reads: the App's workflows and their tests,
- * and the server code their types may name (`workflowTypeContext`).
- */
-export const workflowBuildFiles = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> => ({
-  ...workflowTypeContext(files),
-  ...workflowFiles(files),
-  ...(Object.hasOwn(files, workflowBindingsPath)
-    ? { [workflowBindingsPath]: files[workflowBindingsPath] ?? "" }
-    : {}),
-});
-
 /** Whether `files` are an App of spec 8's layout: a registration and a schema. */
 export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
   Object.hasOwn(files, "app.ts") && Object.hasOwn(files, "schema.ts");
@@ -538,8 +442,8 @@ const platformOnly: ReadonlySet<string> = new Set([
 /**
  * The modules only the platform's bootstrap imports (spec 10.7.1): the
  * session client a host makes, the host's own SDK and the frame's
- * runtime. No App code imports them, screens, server, tests or
- * workflows, not even for their types: a type names what the module
+ * runtime. No App code imports them, screens, server or tests, not
+ * even for their types: a type names what the module
  * gives, and App code is never given it.
  */
 const bootstrapOnly: ReadonlySet<string> = new Set([
@@ -618,6 +522,6 @@ export const typeImportError = (
     return screenImportError(file, specifier);
   }
   return bootstrapOnly.has(specifier)
-    ? `"${specifier}" is the platform's bootstrap, which only the code that makes and mounts the client imports (spec 10.7.1): never an App's server code, tests or workflows, not even for its types.`
+    ? `"${specifier}" is the platform's bootstrap, which only the code that makes and mounts the client imports (spec 10.7.1): never an App's server code or tests, not even for its types.`
     : undefined;
 };

@@ -4,7 +4,7 @@
 // suppressions, in every spelling and after every kind of line break; and
 // ambient declarations, of globals or of a module of the SDK the code
 // imports (`sdkModule`). Each must be refused before the type check reads
-// it, in App workflows and compute modules alike.
+// it, in compute modules and server code alike.
 
 /** The steering cases, each a name and a file's source. */
 export const steeringCases = (
