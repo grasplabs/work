@@ -67,7 +67,7 @@ import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { ShareWorkflow } from "../workflows/share-workflow.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { definitionTitle } from "../workflows/step-body.ts";
-import { TestRun } from "../workflows/test-run.tsx";
+import { TracedRun } from "../workflows/traced-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
 import { VersionSource } from "../workflows/version-source.tsx";
@@ -533,7 +533,7 @@ const checkpointOf = (
 
 /**
  * For its builders, who read its draft: its Flow, the draft drawn, with a
- * test run of its current version under it; and Definition, the JSON
+ * real run of its current version to start and follow under it; and Definition, the JSON
  * behind it. `onDraft` takes what a save on either left; `onTab` shows
  * another tab.
  */
@@ -575,7 +575,7 @@ const DraftTabs = ({
             <NotLoadedState page={draft} />
           )}
           {currentVersion === null ? null : (
-            <TestRun version={currentVersion} workflow={workflow} />
+            <TracedRun version={currentVersion} workflow={workflow} />
           )}
         </div>
       </TabsContent>

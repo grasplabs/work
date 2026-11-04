@@ -4,8 +4,15 @@ import type {
 } from "@grasp-os/shared/connect";
 import { connectorEventActions } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
-import { workflowWebhookHeaders } from "@grasp-os/shared/workflow-triggers";
+import {
+  triggerStartBinding,
+  workflowWebhookHeaders,
+} from "@grasp-os/shared/workflow-triggers";
 import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 import {
   AlertDialog,
@@ -60,7 +67,9 @@ import { useCore } from "../use-core.ts";
 // whose starts kept failing stopped, and says so, with Turn on again for
 // its owner. Core decides every change again (trigger-resources.ts) and
 // what it refuses is said where it was asked; nothing starts until an
-// admin grants the trigger `start` on the workflow.
+// admin grants the trigger `start` on the workflow, which core asks for as
+// the trigger is created. Each trigger says while it waits for that, and
+// once refused offers to ask again.
 //
 // A webhook trigger (GRA-1478) takes signed POSTs at a URL of its own:
 // the URL shows with a way to copy it to whoever sees the trigger, and
@@ -384,6 +393,63 @@ const WebhookDetails = ({
   );
 };
 
+/**
+ * Whether an admin let `trigger` start its workflow, which it asked for as
+ * it was created: nothing once they did; that it waits while they
+ * haven't decided; and, once refused or taken back (or never asked), that
+ * it starts nothing, with a way to ask again for whoever manages it.
+ */
+const TriggerStart = ({
+  trigger,
+  manages,
+  busy,
+  onAsk,
+}: {
+  trigger: WorkflowTrigger;
+  manages: boolean;
+  busy: boolean;
+  onAsk: () => void;
+}) => {
+  if (trigger.start === "active") {
+    return null;
+  }
+  if (trigger.start === "requested") {
+    return (
+      <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+        <Badge variant="attention">
+          <Trans>Waiting for an admin</Trans>
+        </Badge>
+        <Trans>
+          It starts nothing until an admin allows it to start this workflow.
+        </Trans>
+      </span>
+    );
+  }
+  return (
+    <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+      <Badge variant="destructive">
+        <Trans>Not allowed</Trans>
+      </Badge>
+      {trigger.start === "revoked" ? (
+        <Trans>
+          An admin refused or took back its start: it starts nothing.
+        </Trans>
+      ) : (
+        <Trans>No admin was asked to let it start: it starts nothing.</Trans>
+      )}
+      {manages ? (
+        <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
+          {trigger.start === "revoked" ? (
+            <Trans>Request again</Trans>
+          ) : (
+            <Trans>Ask an admin</Trans>
+          )}
+        </Button>
+      ) : null}
+    </span>
+  );
+};
+
 /** One trigger: what starts it, its version, where it stands, and what the reader may change. */
 const TriggerRow = ({
   trigger,
@@ -424,6 +490,27 @@ const TriggerRow = ({
     await onChanged();
   };
 
+  // Under the name it asked with as it was created: a refused or revoked
+  // one no longer holds it.
+  const askToStart = async (): Promise<void> => {
+    await run(
+      async (session) =>
+        await session.permissions.request({
+          subject: {
+            type: "trigger",
+            triggerId: triggerIdSchema.parse(trigger.id),
+          },
+          object: {
+            type: "workflow",
+            workflowId: workflowResourceIdSchema.parse(trigger.workflowId),
+          },
+          actions: ["start"],
+          binding: triggerStartBinding,
+        })
+    );
+    await onChanged();
+  };
+
   return (
     <li className="flex flex-col gap-2 px-4 py-3">
       <div className="flex items-start gap-3">
@@ -446,6 +533,14 @@ const TriggerRow = ({
           ) : null}
         </span>
       </div>
+      <TriggerStart
+        busy={busy}
+        manages={manages}
+        onAsk={() => {
+          void askToStart();
+        }}
+        trigger={trigger}
+      />
       {trigger.webhook === null ? null : (
         <WebhookDetails
           busy={busy}
@@ -1085,8 +1180,9 @@ export const TriggersTabContent = ({
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6 pb-8">
         <p className="text-muted-foreground">
           <Trans>
-            A trigger starts a run on its own, as whoever made it. It starts
-            nothing until an admin allows it to start this workflow.
+            A trigger starts a run on its own, as whoever made it. Adding one
+            asks an admin to allow it to start this workflow: it starts nothing
+            until they do.
           </Trans>
         </p>
         <TriggersRead

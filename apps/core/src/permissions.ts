@@ -14,7 +14,12 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId, StoreId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  PermissionId,
+  StoreId,
+  TriggerId,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   bindingNameSchema,
@@ -44,6 +49,7 @@ import {
   roleErrors,
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
 import {
   and,
   asc,
@@ -1051,21 +1057,24 @@ export const declarableOf = async (
   );
 };
 
-/** Requested rows of `app` for `requested`, and their audit entries. */
+/**
+ * Requested rows of `subject` for `requested`, and their audit entries
+ * (with `extra` in their detail), for the batch that creates `subject`.
+ */
 const requestsOf = (
   by: Acting,
-  app: AppId,
+  subject: PermissionSubject,
   requested: readonly {
     object: PermissionObject;
     actions: readonly string[];
     binding: string;
   }[],
-  blueprint: string
+  extra: Record<string, AuditDetailValue> = {}
 ): { rows: Row[]; entries: AuditEntry[] } => {
   const requestedAt = new Date();
   const rows = requested.map(({ object, actions, binding }): Row => ({
     id: crypto.randomUUID(),
-    ...subjectColumns({ type: "app", appId: app }),
+    ...subjectColumns(subject),
     ...objectColumns(object),
     actions: JSON.stringify(actions),
     binding,
@@ -1084,9 +1093,7 @@ const requestsOf = (
   return {
     rows,
     entries: rows.map((row) =>
-      changeEntry(by, "permission.requested", toPermission(row), {
-        blueprint,
-      })
+      changeEntry(by, "permission.requested", toPermission(row), extra)
     ),
   };
 };
@@ -1114,7 +1121,7 @@ export const declaredRequests = (
       permission
     )
   );
-  return requestsOf(by, app, checked, blueprint);
+  return requestsOf(by, { type: "app", appId: app }, checked, { blueprint });
 };
 
 /**
@@ -1133,7 +1140,7 @@ export const workflowStartRequests = (
 ): { rows: Row[]; entries: AuditEntry[] } =>
   requestsOf(
     by,
-    app,
+    { type: "app", appId: app },
     started.map(({ workflowId, binding }) =>
       permissionErrors.parse("permission.invalid", permissionRequestSchema, {
         subject: { type: "app", appId: app },
@@ -1142,8 +1149,29 @@ export const workflowStartRequests = (
         binding,
       })
     ),
-    blueprint
+    { blueprint }
   );
+
+/**
+ * The request for trigger `trigger`, made by `by` as they create it
+ * (trigger-resources.ts), to start workflow `workflowId`, the one it pins:
+ * the row and its audit entry, for the batch that creates the trigger, so
+ * no trigger is left without a way to be allowed. Like any request, it
+ * allows nothing until an admin grants it.
+ */
+export const triggerStartRequest = (
+  by: Acting,
+  trigger: TriggerId,
+  workflowId: string
+): { rows: Row[]; entries: AuditEntry[] } =>
+  requestsOf(by, { type: "trigger", triggerId: trigger }, [
+    permissionErrors.parse("permission.invalid", permissionRequestSchema, {
+      subject: { type: "trigger", triggerId: trigger },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding: triggerStartBinding,
+    }),
+  ]);
 
 /**
  * Tells the chat's agent how its request for `permission` was decided,

@@ -12,11 +12,13 @@ import { useCore } from "../use-core.ts";
 import { followedTrace } from "./followed-trace.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
-// A test run of a workflow's current version, started with input the
-// builder types, and laid over that version's diagram as the run's own
-// journal says it went: the trace core reads from the engine, read again
-// until the run ends. The version is the one published, pinned by the
-// run: editing the draft meanwhile changes nothing of it.
+// A run of a workflow's current version, started with input the builder
+// types, and laid over that version's diagram as the run's own journal
+// says it went: the trace core reads from the engine, read again until the
+// run ends. It is a real start (`workflowResources.start`), no test: it
+// notifies people and calls connections as any run does, and says so. The
+// version is the one published, pinned by the run: editing the draft
+// meanwhile changes nothing of it.
 
 /** How often a run still going is read again. */
 const followMs = 1500;
@@ -30,7 +32,7 @@ const ended = (trace: WorkflowRunTrace): boolean =>
 const settled = (trace: WorkflowRunTrace): boolean =>
   ended(trace) || trace.detailsRemoved;
 
-export const TestRun = ({
+export const TracedRun = ({
   workflow,
   version,
 }: {
@@ -136,16 +138,22 @@ export const TestRun = ({
     (trace?.tasks ?? []).map(({ task, state }) => [task, state])
   );
   return (
-    <section aria-labelledby="test-run" className="flex flex-col gap-3">
-      <h2 className="font-medium" id="test-run">
+    <section aria-labelledby="traced-run" className="flex flex-col gap-3">
+      <h2 className="font-medium" id="traced-run">
         <Trans>Run version {version}</Trans>
       </h2>
+      <p className="text-muted-foreground">
+        <Trans>
+          This is a real run, not a test: it notifies people and uses
+          connections as any run of this version does.
+        </Trans>
+      </p>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="test-run-input">
+        <Label htmlFor="traced-run-input">
           <Trans>Input</Trans>
         </Label>
         <Textarea
-          id="test-run-input"
+          id="traced-run-input"
           onChange={(event) => {
             setInput(event.target.value);
           }}

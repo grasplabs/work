@@ -135,6 +135,8 @@ describe("an independent workflow's triggers over /rpc", () => {
         address: null,
         webhook: null,
         stopped: false,
+        // It asks an admin for its start as it is created.
+        start: "requested",
       },
       nextAtIsAhead: true,
       listed: [trigger],

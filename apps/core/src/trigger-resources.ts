@@ -6,6 +6,7 @@ import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { permissionStatusSchema } from "@grasp-os/shared/permissions";
 import { isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
@@ -34,12 +35,14 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  permissions,
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
+import { triggerStartRequest } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
@@ -69,7 +72,7 @@ import {
 //   version, audited, of the same workflow only.
 // - Creating a trigger grants it something. Nothing: its creator must
 //   build the workflow, and its starts still need a permission an admin
-//   grants, naming the workflow it pins.
+//   grants, naming the workflow it pins. Creating it only asks for that.
 // - A trigger nobody may stop: the workflow's builders, and admins, may
 //   disable or delete any trigger that starts it; only its owner moves or
 //   re-enables it. Only an enabled trigger holding an active `start`
@@ -342,7 +345,8 @@ const requirePublished = async (
  * Creates a trigger of `input.kind` that starts exactly version
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
  * build the workflow. It may start nothing until an admin grants it
- * `start` on the workflow. A person has at most the quota limits'
+ * `start` on the workflow, which it asks for as it is created, in the same
+ * batch (`triggerStartRequest`). A person has at most the quota limits'
  * `triggerResourcesPerPerson` live triggers (`workflow.trigger_limit`),
  * counted in the insert; the workflow must be live as it lands.
  */
@@ -373,6 +377,7 @@ export const createTriggerResource = async (
   const cap = quotaLimits(env).triggerResourcesPerPerson;
   const now = new Date();
   const db = drizzle(env.DB);
+  const asked = triggerStartRequest(by, id, workflow.id);
   const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
       // Only while `by` is under the cap, counted in this statement:
@@ -426,6 +431,10 @@ export const createTriggerResource = async (
         configHash,
       })
     ),
+    // Asked for as it lands, so the trigger never waits on a request
+    // nobody made: an admin sees it with the others.
+    ...asked.rows.map((row) => db.insert(permissions).values(row)),
+    ...asked.entries.map((each) => outboxed(db, each)),
   ]);
   try {
     await batch;
@@ -878,6 +887,7 @@ interface TriggerRow {
   inputMapping: string | null;
   nextAt: Date | null;
   failedStarts: number | null;
+  start: string | null;
 }
 
 /** A system trigger's configuration, if its version keeps one. */
@@ -966,7 +976,24 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
     row.kind === "schedule" &&
     row.nextAt === null &&
     (row.failedStarts ?? 0) >= maxFailedStarts,
+  start: permissionStatusSchema.nullable().parse(row.start),
 });
+
+/**
+ * Where a trigger's `start` on the workflow its current version pins
+ * stands, as SQL for its listing: of its permissions for it, an active
+ * one first, then a requested one, then a revoked one; NULL if none.
+ */
+const startStatusSql = sql<string | null>`(SELECT ${permissions.status}
+  FROM ${permissions}
+  WHERE ${permissions.subjectType} = 'trigger'
+    AND ${permissions.subjectId} = ${triggerResources.id}
+    AND ${permissions.objectType} = 'workflow'
+    AND ${permissions.objectId} = ${triggerResourceVersions.workflowResourceId}
+    AND EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'start')
+  ORDER BY CASE ${permissions.status}
+    WHEN 'active' THEN 0 WHEN 'requested' THEN 1 ELSE 2 END
+  LIMIT 1)`;
 
 /** The live triggers `where` finds, at their current versions, oldest first. */
 const triggersWhere = async (
@@ -997,6 +1024,7 @@ const triggersWhere = async (
       inputMapping: triggerResourceVersions.inputMapping,
       nextAt: triggerSchedules.nextAt,
       failedStarts: triggerSchedules.failedStarts,
+      start: startStatusSql,
     })
     .from(triggerResources)
     .innerJoin(

@@ -5,6 +5,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import { jsonPointerPattern } from "./json.ts";
 import type { Json } from "./json.ts";
+import type { PermissionStatus } from "./permissions.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
 // the session's `workflowResources.triggers` serves them: each a resource
@@ -214,7 +215,20 @@ export interface WorkflowTrigger {
    * enables it again, which starts its schedule afresh.
    */
   stopped: boolean;
+  /**
+   * Where its `start` on its workflow stands, which it asks an admin for
+   * as it is created: `active` once granted, `requested` while it waits,
+   * `revoked` once refused or taken back (ask again with a new request,
+   * `PermissionsApi.request`, under `triggerStartBinding`); null if never asked.
+   */
+  start: PermissionStatus | null;
 }
+
+/**
+ * The binding name a trigger's `start` on its workflow is asked for under,
+ * as it is created and whenever it is asked for again.
+ */
+export const triggerStartBinding = "START";
 
 /**
  * An independent workflow's triggers over `/rpc`

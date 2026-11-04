@@ -1791,8 +1791,8 @@ msgid "A topic"
 msgstr "A topic"
 
 #: src/workflows/workflow-triggers-tab.tsx
-msgid "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
-msgstr "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
+msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow: it starts nothing until they do."
+msgstr "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow: it starts nothing until they do."
 
 #: src/workflows/version-source.tsx
 msgid "A version's definition and source"
@@ -2353,6 +2353,10 @@ msgstr "An admin connects this for everyone."
 msgid "An admin hasn't set up company memory yet."
 msgstr "An admin hasn't set up company memory yet."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An admin refused or took back its start: it starts nothing."
+msgstr "An admin refused or took back its start: it starts nothing."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
 msgstr "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
@@ -2824,6 +2828,7 @@ msgid "Ask again"
 msgstr "Ask again"
 
 #: src/engines/app-access-requests.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Ask an admin"
 msgstr "Ask an admin"
 
@@ -6624,7 +6629,7 @@ msgid "Independent workflow"
 msgstr "Independent workflow"
 
 #: src/chat/thread.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Input"
 msgstr "Input"
 
@@ -6885,6 +6890,10 @@ msgstr "It starts as proposed: Grasp uses it, and you can correct or retire it h
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "It starts no more runs. Runs it already started go on. This can't be undone."
 msgstr "It starts no more runs. Runs it already started go on. This can't be undone."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It starts nothing until an admin allows it to start this workflow."
+msgstr "It starts nothing until an admin allows it to start this workflow."
 
 #: src/knowledge/new-document.tsx
 msgid "It starts with its name as a heading; write the rest in the editor."
@@ -8227,6 +8236,10 @@ msgstr "No"
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "No {onlySignIn}? A staff list works too."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No admin was asked to let it start: it starts nothing."
+msgstr "No admin was asked to let it start: it starts nothing."
+
 #: src/settings/ai-providers.tsx
 msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
 msgstr "No AI provider is connected yet, so Grasp's AI features can't answer."
@@ -8711,6 +8724,7 @@ msgid "None."
 msgstr "None."
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Not allowed"
 msgstr "Not allowed"
 
@@ -10850,6 +10864,10 @@ msgstr "Replaced a request for packages"
 msgid "Report"
 msgstr "Report"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Request again"
+msgstr "Request again"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Request an app"
 msgstr "Request an app"
@@ -11270,7 +11288,7 @@ msgstr "Run not found"
 msgid "Run of {workflow}"
 msgstr "Run of {workflow}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Run version {version}"
 msgstr "Run version {version}"
 
@@ -12380,7 +12398,7 @@ msgid "Start {name}?"
 msgstr "Start {name}?"
 
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Start a run"
 msgstr "Start a run"
 
@@ -12454,7 +12472,7 @@ msgstr "Starting"
 
 #: src/workflows/item-test.tsx
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Starting…"
 msgstr "Starting…"
 
@@ -13341,7 +13359,7 @@ msgstr "The default, {each}"
 msgid "The definition of version {shownVersion}"
 msgstr "The definition of version {shownVersion}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 #: src/workflows/traces.tsx
 msgid "The details of this run were removed when its retention ended."
 msgstr "The details of this run were removed when its retention ended."
@@ -13406,7 +13424,7 @@ msgid "The input fields aren't JSON."
 msgstr "The input fields aren't JSON."
 
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "The input isn't JSON."
 msgstr "The input isn't JSON."
@@ -13613,23 +13631,23 @@ msgstr "The rest is correct"
 msgid "The roles above say what each may do."
 msgstr "The roles above say what each may do."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run completed."
 msgstr "The run completed."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run failed."
 msgstr "The run failed."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is going."
 msgstr "The run is going."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is paused."
 msgstr "The run is paused."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is starting."
 msgstr "The run is starting."
 
@@ -13645,7 +13663,7 @@ msgstr "The run started. It is listed with the workflow's runs."
 msgid "The run started. Open it."
 msgstr "The run started. Open it."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run was stopped."
 msgstr "The run was stopped."
 
@@ -14028,6 +14046,10 @@ msgstr "This interview is open on another device"
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "This interview went on in another window. You now see that one."
+
+#: src/workflows/traced-run.tsx
+msgid "This is a real run, not a test: it notifies people and uses connections as any run of this version does."
+msgstr "This is a real run, not a test: it notifies people and uses connections as any run of this version does."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This is right"
@@ -14846,7 +14868,7 @@ msgstr "Version {pendingVersion} is ready to publish"
 msgid "Version {version}"
 msgstr "Version {version}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 
@@ -15004,6 +15026,7 @@ msgid "Waiting for a share of this person's runs; tries again by {time}"
 msgstr "Waiting for a share of this person's runs; tries again by {time}"
 
 #: src/engines/app-webhooks.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Waiting for an admin"
 msgstr "Waiting for an admin"
 
@@ -15445,7 +15468,7 @@ msgstr "What the client shares, and our own desk research. Adds policies, proced
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "What the run of version {traceVersion} did"
 msgstr "What the run of version {traceVersion} did"
 
