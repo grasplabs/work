@@ -1766,7 +1766,11 @@ export const evaluateAppQuery = async (
  * any call: what it returned, or why it failed, and whether the operation
  * host was reached at all (a refusal before it ran nothing of the App's). A streaming action
  * (spec 10.7.6) gets `progress`, where its snapshots go, and only one
- * does; `cancelled` stops either. Never throws.
+ * does; `cancelled` stops either. It runs in `version`, the release the
+ * invocation recorded, and only while that is still the App's current
+ * one (`version.mismatch` otherwise): what runs is always what the record
+ * names, so revoking that release stops its result being handed over.
+ * Never throws.
  */
 export const invokeAppAction = async (
   env: Env,
@@ -1775,10 +1779,13 @@ export const invokeAppAction = async (
   app: string,
   call: FunctionRequest,
   {
+    version,
     progress,
     cancelled,
     deadline,
   }: {
+    /** The release the invocation recorded as the one it runs. */
+    readonly version: number;
     readonly progress?: ProgressSink;
     readonly cancelled: AbortSignal;
     readonly deadline: number;
@@ -1804,7 +1811,10 @@ export const invokeAppAction = async (
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
-    const release = await loadRelease(env, found.id, found.currentVersion);
+    if (found.currentVersion !== version) {
+      throw versionErrors.create("version.mismatch");
+    }
+    const release = await loadRelease(env, found.id, version);
     const path = publicOperationOf(release, call.reference);
     resolved = path;
     const invocation = await invocationFor(env, release, {

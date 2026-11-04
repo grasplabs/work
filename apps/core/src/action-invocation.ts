@@ -652,7 +652,9 @@ export class ActionInvocation extends DurableObject<Env> {
         : actionInvocationWallMs);
     // The release it runs under: the App's current one, as every page's
     // call (app-functions.ts, `publicOperationOf`); read before anything
-    // is held, so a refusal holds nothing.
+    // is held, so a refusal holds nothing. The run gets this version, never
+    // a later read of the current one: the record names what ran, so
+    // revoking it stops the result.
     let version: number;
     try {
       version = await currentVersionOf(this.env, spec.app);
@@ -740,6 +742,7 @@ export class ActionInvocation extends DurableObject<Env> {
           spec.app,
           spec.call,
           {
+            version,
             ...(spec.streaming
               ? {
                   progress: {

@@ -22,6 +22,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { accessOf, invocationName } from "../src/action-invocation.ts";
+import { invokeAppAction } from "../src/app-functions.ts";
 import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -1403,6 +1404,45 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     const second = await published(opened);
     const again = await client.stream(apiOf(second).counts, {}, keyed);
     expect({ first, again }).toStrictEqual({ first: 0, again: 0 });
+  });
+
+  it("runs an action only in the version its invocation recorded, refused once another is current", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const by = {
+      userId: opened.builderId,
+      role: "builder" as const,
+      teams: [],
+    };
+    const app = appIdSchema.parse(opened.app);
+    // As the invocation object runs it, after recording `version`: a
+    // publish in between never runs code its record doesn't name, so
+    // revoking what ran stops its result.
+    const runIn = async (version: number) => {
+      const { result } = await invokeAppAction(
+        env,
+        by,
+        app,
+        requestFor(api.echo, { word: "recorded" }, `in-${version}`),
+        {
+          version,
+          cancelled: new AbortController().signal,
+          deadline: Date.now() + 30_000,
+        }
+      );
+      return result.ok ? result.value : result.error.code;
+    };
+    const current = await runIn(1);
+    await published(opened);
+    expect({
+      current,
+      passed: await runIn(1),
+      now: await runIn(2),
+    }).toStrictEqual({
+      current: "recorded",
+      passed: "version.mismatch",
+      now: "recorded",
+    });
   });
 
   it("refuses a receipt of a release revoked since", async () => {
