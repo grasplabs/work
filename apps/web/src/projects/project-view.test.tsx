@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import type {
   FileItem,
+  NewProjectMember,
   Project,
   ProjectCursor,
   ProjectItemCandidate,
   ProjectItemsPage,
   ProjectItemRef,
+  ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
@@ -107,7 +109,32 @@ const fakeProjects = (
       return { id: "wf-made" };
     },
   };
+  const apps = {
+    create: async ({ name }: { name: string }): Promise<{ id: string }> => {
+      await Promise.resolve();
+      asked.push(["create", name]);
+      return { id: "app-made" };
+    },
+  };
   const projects = {
+    shareCandidates: async (): Promise<ProjectShareCandidates> => {
+      await Promise.resolve();
+      asked.push(["shareCandidates"]);
+      return {
+        people: [
+          { id: "user-bo", name: "Bo" },
+          { id: "user-cy", name: "Cy" },
+        ],
+        teams: [{ id: "team-sales", name: "Sales" }],
+      };
+    },
+    addMember: async (_id: string, member: NewProjectMember): Promise<void> => {
+      await Promise.resolve();
+      if (member.id === "user-cy") {
+        throw new Error("Cy can't be added.");
+      }
+      asked.push(["addMember", member.type, member.id, member.role]);
+    },
     itemCandidates: async (): Promise<ProjectItemCandidate[]> => {
       await Promise.resolve();
       return candidates;
@@ -134,7 +161,7 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { projects, workflowResources }, asked };
+  return { session: { apps, projects, workflowResources }, asked };
 };
 
 let root: Root | undefined;
@@ -222,6 +249,12 @@ const type = async (input: Element | null, value: string) => {
   });
 };
 
+/** Who is offered as `name` in the open list of people and teams. */
+const offered = (name: string) =>
+  [...document.querySelectorAll("[cmdk-item]")].find(
+    (each) => each.querySelector("span.truncate")?.textContent === name
+  );
+
 const choose = async (select: HTMLSelectElement, value: string) => {
   await act(async () => {
     // Through the element's own setter, as a person's choice reaches React.
@@ -305,6 +338,54 @@ describe("A project's page", () => {
       checked: "false",
       offer: true,
       asked: [["file", "wf-quotes", false]],
+    });
+  });
+
+  it("makes an App in the project once, though filing it failed the first time, and opens it to build", async () => {
+    const { session, asked } = fakeProjects(undefined, 1);
+    const router = await shown(session, project("builder"));
+
+    await press(button("New"));
+    await press(button("App"));
+    await type(
+      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
+      "Desk "
+    );
+    await press(button("Make"));
+    await press(button("Make"));
+
+    expect({ asked, at: router.state.location.pathname }).toStrictEqual({
+      asked: [
+        ["create", "Desk"],
+        ["file", "app-made", true],
+      ],
+      at: "/apps/app-made/edit",
+    });
+  });
+
+  it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, project("builder"));
+
+    const before = [...asked];
+    await press(button("Add someone"));
+    const names = [...document.querySelectorAll("[cmdk-item]")].map(
+      (each) => each.querySelector("span.truncate")?.textContent
+    );
+    await press(offered("Bo"));
+    await press(button("Add someone"));
+    await press(offered("Cy"));
+
+    expect({
+      before,
+      names,
+      asked,
+      refused: document.body.textContent?.includes("Cy can't be added."),
+    }).toStrictEqual({
+      before: [],
+      names: ["Bo", "Cy", "Sales"],
+      asked: [["shareCandidates"], ["addMember", "person", "user-bo", "user"]],
+      refused: true,
     });
   });
 

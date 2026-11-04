@@ -52,7 +52,7 @@ export const useNewWorkflow = () => {
     then?: (session: Session, id: string) => Promise<void>
   ): Promise<void> => {
     const id = await run(async (session) => {
-      const workflow = await once(typed, async () => {
+      const workflow = await once(typed.trim(), async () => {
         const created = await session.workflowResources.create(
           workflowNameOf(typed)
         );

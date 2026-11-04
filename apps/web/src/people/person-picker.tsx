@@ -57,7 +57,8 @@ export const PersonOption = ({
   <CommandItem
     data-checked={checked}
     onSelect={onSelect}
-    value={`${person.name} ${person.email ?? ""}`}
+    // Their ID keeps two people of the same name apart.
+    value={`${person.name} ${person.email ?? ""} ${person.id}`}
   >
     <PersonAvatar name={person.name} />
     <span className="flex-1 truncate">{person.name}</span>
