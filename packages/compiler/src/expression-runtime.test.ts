@@ -118,6 +118,14 @@ describe("a built-in method, read as a value", () => {
     ).toStrictEqual(Array.from({ length: 6 }));
   });
 
+  it("is not a data field of that name, which reads as data", () => {
+    expect(
+      run("[input.at, input.map.join]", {
+        input: parsed('{ "at": "x", "map": { "join": 1 } }'),
+      })
+    ).toStrictEqual(["x", 1]);
+  });
+
   it("can't be filed under an allowed name and called with any `this`", () => {
     const steps = stepOutput();
     expect({

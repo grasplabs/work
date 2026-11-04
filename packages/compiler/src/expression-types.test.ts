@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { checkExpression } from "@grasp-os/sdk/expression-check";
+import {
+  allowedMethods,
+  checkExpression,
+} from "@grasp-os/sdk/expression-check";
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -206,6 +209,61 @@ describe("type-checking a workflow's expressions", () => {
         { code: "expression.method", line: 1, column: 29 },
       ],
       inCallback: [{ code: "expression.method", line: 1, column: 31 }],
+    });
+  });
+
+  it("refuses a read that may be a method, by a union or on `any`", () => {
+    const { expressions } = checkExpressionTypes(
+      {
+        ...scope,
+        input: "{ un: string[] | { map: number }; loose: any; list: string[] }",
+      },
+      {
+        union: { source: "input.un.map" },
+        loose: { source: "input.loose.map" },
+        looseField: { source: "input.loose.total" },
+        notAllowed: { source: "input.list.push" },
+      },
+      kitTypes
+    );
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, column, message, fix }) => ({
+            code,
+            column,
+            message,
+            fix,
+          })),
+        ])
+      )
+    ).toStrictEqual({
+      union: [
+        {
+          code: "expression.method",
+          column: 10,
+          message: "`map` is a method, read without a call: it has no value.",
+          fix: "Call it, as `map(…)`.",
+        },
+      ],
+      loose: [
+        {
+          code: "expression.method",
+          column: 13,
+          message: "`map` is a method, read without a call: it has no value.",
+          fix: "Call it, as `map(…)`.",
+        },
+      ],
+      looseField: [],
+      notAllowed: [
+        {
+          code: "expression.method",
+          column: 12,
+          message: "`push` is not one of the methods an expression can call.",
+          fix: `Call one of: ${[...allowedMethods].join(", ")}.`,
+        },
+      ],
     });
   });
 

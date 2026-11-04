@@ -16,6 +16,9 @@ export {
   sourcePosition,
 } from "./expression-lowering.ts";
 export type { TypeForm } from "./expression-lowering.ts";
+// The methods an expression can call, for the type check's own refusal
+// of a method read without a call (`checkExpressionTypes`).
+export { allowedMethods } from "./expression-runtime.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -520,6 +523,9 @@ export interface CheckOptions {
  * Checks a workflow expression against the subset: every problem found,
  * each with its code, position and fix, or the source to generate from.
  * Throws when a root in `options` is not one `checkRoots` takes.
+ * Syntax alone can't tell a method read without a call from a data
+ * field of that name, so production must also run the compiler's
+ * `checkExpressionTypes`, which refuses it by its type.
  */
 export const checkExpression = (
   source: string,
