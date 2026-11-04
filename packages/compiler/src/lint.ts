@@ -1,7 +1,8 @@
 /**
  * Lints App files with @shadcn/lint's rules, as the repo lints its own
  * code, through ESLint's `Linter` (which needs no file system of its own)
- * and the typescript-eslint parser, on the type check's TypeScript 6.
+ * and the typescript-eslint parser, on TypeScript 6, the last with a
+ * JavaScript API: the lint's parser alone, never the type check's (tsrs).
  *
  * The rules read the project from disk: `components.json`, the theme and
  * the kit's component sources, for their variants. Each lint writes them

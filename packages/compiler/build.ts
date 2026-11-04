@@ -744,8 +744,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
  * share, with the packages they reach inlined. A check parses only the
  * chunks the modules it imports reach, never the sources of everything
  * those name: any import of the SDK used to bring all of
- * `@grasp-os/shared` with it, and the parsed sources stay in the isolate
- * for its life (`kitCache` in src/type-check.ts).
+ * `@grasp-os/shared` with it.
  */
 
 /** Whether `file` is one of the platform's own packages' sources. */
