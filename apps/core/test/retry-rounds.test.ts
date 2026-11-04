@@ -270,6 +270,78 @@ describe("a step its catch's retry policy runs again", () => {
     });
   });
 
+  it("tells a retry's run held for its person as the step's, its attempts numbered on through a second retry", async () => {
+    const base = "fetch:task";
+    const key = await waitKeyOf(base);
+    const second = waitStep(key, "retry", 2);
+    const third = waitStep(key, "retry", 3);
+    const heldIn = waitStep(await waitKeyOf(`${second}:run`), "held", 1);
+    const own = stepOf(1, base);
+    const run2 = stepOf(3, `${second}:run`);
+    const heldWait = {
+      ...stepOf(4, `${heldIn}:0`),
+      kind: "waitForEvent" as const,
+    };
+    const heldRun = stepOf(5, `${heldIn}:run`);
+    const run3 = stepOf(7, `${third}:run`);
+    const failed = { attempt: 1, final: true, error: roundError };
+    const records = [
+      recordOf("attempt_started", own, { attempt: 1 }),
+      recordOf("step_errored", own, failed),
+      recordOf("attempt_started", run2, { attempt: 1 }),
+      // Held: its completion is the hold's start, not the step's end.
+      recordOf("attempt_completed", run2, { attempt: 1 }),
+      recordOf("wait_started", heldWait),
+      recordOf("wait_completed", heldWait),
+      recordOf("attempt_started", heldRun, { attempt: 1 }),
+      recordOf("step_errored", heldRun, failed),
+      recordOf("attempt_started", run3, { attempt: 1 }),
+      recordOf("attempt_completed", run3, { attempt: 1 }),
+    ];
+    const tell = await historyTeller(
+      {
+        waits: [
+          identityOf(2, `${second}:decide`, "do", 1),
+          identityOf(3, run2.name, "do", 1),
+          { ...identityOf(4, heldWait.name, "sleep", 0), kind: "waitForEvent" },
+          identityOf(5, heldRun.name, "do", 1),
+          identityOf(6, `${third}:decide`, "do", 1),
+          identityOf(7, run3.name, "do", 1),
+        ],
+        steps: [
+          identityOf(1, base, "do", 1),
+          identityOf(3, run2.name, "do", 1),
+          identityOf(5, heldRun.name, "do", 1),
+          identityOf(7, run3.name, "do", 1),
+        ],
+      },
+      { sees: false, taskOf: (name) => (name === base ? "fetch" : null) }
+    );
+    const shown = records.flatMap((record) => {
+      const entry = tell(record);
+      if (entry === undefined) {
+        return [];
+      }
+      const state = "state" in entry ? entry.state : entry.kind;
+      return [
+        "attempt" in entry
+          ? `${state}:${entry.attempt}`
+          : `${state}:${"waitKind" in entry ? entry.waitKind : ""}`,
+      ];
+    });
+    expect(shown).toStrictEqual([
+      "started:1",
+      "retrying:1",
+      "started:2",
+      "opened:blocked",
+      "closed:blocked",
+      "started:3",
+      "retrying:3",
+      "started:4",
+      "completed:4",
+    ]);
+  });
+
   it("is traced as rounds of its task's step, waiting while it backs off", async () => {
     // The trace reads today's generator's step names (`task:<id>`); a
     // retry's rounds under core's prefix go by the step's key alike.
