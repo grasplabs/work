@@ -33,8 +33,10 @@ export interface Kit {
    */
   previewModuleImports: Record<string, string[]>;
   /**
-   * What the type check reads, by absolute path: TypeScript's libraries
-   * and the kit's packages with their declarations, as `/node_modules/…`.
+   * What the type check reads, by absolute path: TypeScript's libraries,
+   * the platform's own packages as type chunks (one declaration file per
+   * module App code may import, build.ts `typeChunks`) and the libraries
+   * they name with their declarations, as `/node_modules/…`.
    */
   types: Record<string, string>;
   /**
@@ -87,9 +89,9 @@ export const compilerAssets = {
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
   /**
-   * The SDK's and the UI kit's sources as the type check reads them
-   * (`Kit.types`), by `referencePath`: what a chat's agent reads to write
-   * App code that checks (`referenceFiles`).
+   * The SDK's and the UI kit's sources, of which the type check's chunks
+   * are made (`Kit.types`), by `referencePath`: what a chat's agent reads
+   * to write App code that checks (`referenceFiles`).
    */
   reference: "reference.json",
   /**
@@ -99,17 +101,18 @@ export const compilerAssets = {
   jqWasm: "jq.wasm",
 } as const;
 
-/** The packages of the kit's types the agent's reference holds. */
+/** The packages of the kit's sources the agent's reference holds. */
 const referencePackages = [
   "/node_modules/@grasp-os/sdk/src/",
   "/node_modules/@grasp-os/ui/src/",
 ];
 
 /**
- * The kit's types of the SDK and the UI kit, by their path in the agent's
- * reference: `@grasp-os/sdk/src/app.ts` for
- * `/node_modules/@grasp-os/sdk/src/app.ts`. The very text App code is
- * type-checked against, so the reference can't drift from the check.
+ * The SDK's and the UI kit's sources among the kit's (build.ts
+ * `collectTypes`), by their path in the agent's reference:
+ * `@grasp-os/sdk/src/app.ts` for `/node_modules/@grasp-os/sdk/src/app.ts`.
+ * The very text the check's type chunks are made of, in the same build,
+ * so the reference can't drift from the check.
  */
 export const referenceOf = (
   types: Readonly<Record<string, string>>
