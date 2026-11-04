@@ -13,8 +13,8 @@ ${body}
 `,
 });
 
-const warned = (body: string) =>
-  lintServerCode(module(body)).map(({ line, severity, message }) => ({
+const warned = (body: string, files: Record<string, string> = module(body)) =>
+  lintServerCode(files).map(({ line, severity, message }) => ({
     line,
     severity,
     read: message.slice(0, message.indexOf(" answers")),
@@ -50,5 +50,51 @@ export const keep = mutation({
   handler: (_ctx, args) => new Date(args.at).toISOString() + String(startedAt),
 });`)
     ).toStrictEqual([]);
+  });
+
+  test("are warned of in a mutation however its builder is imported: renamed, as a namespace, or from a folder below", () => {
+    const handler = `{
+  args: {},
+  handler: async () => Date.now(),
+}`;
+    expect({
+      renamed: warned("", {
+        "server/tasks.ts": `import { internalMutation as stage, mutation as write } from "@server/_generated/server";
+
+export const add = write(${handler});
+export const later = stage(${handler});
+`,
+      }),
+      namespace: warned("", {
+        "server/tasks.ts": `import * as server from "@server/_generated/server";
+
+export const add = server.mutation(${handler});
+`,
+      }),
+      below: warned("", {
+        "server/admin/users.ts": `import { mutation as write } from "../_generated/server";
+
+export const ban = write(${handler});
+`,
+      }),
+      // A builder of another module's, or the App's own function named
+      // like one, is no mutation the host runs.
+      elsewhere: warned("", {
+        "server/tasks.ts": `import { mutation } from "./helpers.ts";
+
+const internalMutation = (declared: unknown) => declared;
+export const add = mutation(${handler});
+export const later = internalMutation(${handler});
+`,
+      }),
+    }).toStrictEqual({
+      renamed: [
+        { line: 5, severity: "warning", read: "Date.now()" },
+        { line: 9, severity: "warning", read: "Date.now()" },
+      ],
+      namespace: [{ line: 5, severity: "warning", read: "Date.now()" }],
+      below: [{ line: 5, severity: "warning", read: "Date.now()" }],
+      elsewhere: [],
+    });
   });
 });

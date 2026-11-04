@@ -23,6 +23,23 @@ const mutationBuilders: ReadonlySet<string> = new Set([
   "internalMutation",
 ]);
 
+/**
+ * The module server code imports its builders from: `@server/_generated/server`,
+ * or `_generated/server` relative to a module under `server/`.
+ */
+const builderModule =
+  /^(?:@server|\.\.?(?:\/\.\.)*)\/_generated\/server(?:\.ts)?$/u;
+
+/**
+ * The mutation builders a module imports from `builderModule`, by the
+ * names it calls them: each named import's local name (`mutation as
+ * write` is `write`) and each namespace's (`server.mutation`).
+ */
+interface Builders {
+  readonly named: Set<string>;
+  readonly namespaces: Set<string>;
+}
+
 /** `value[key]`, for an AST node read without its types. */
 const get = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null
@@ -47,8 +64,22 @@ const isMember = (node: unknown, object: string, property: string): boolean =>
   nameOf(get(node, "object")) === object &&
   nameOf(node) === property;
 
+/** Whether `callee` calls one of the module's mutation builders. */
+const isMutationBuilder = (callee: unknown, builders: Builders): boolean => {
+  if (get(callee, "type") === "Identifier") {
+    return builders.named.has(String(get(callee, "name")));
+  }
+  const object = get(callee, "object");
+  return (
+    get(callee, "type") === "MemberExpression" &&
+    get(object, "type") === "Identifier" &&
+    builders.namespaces.has(String(get(object, "name"))) &&
+    mutationBuilders.has(String(nameOf(callee)))
+  );
+};
+
 /** Whether `node` is inside a mutation's `handler`. */
-const inMutationHandler = (node: unknown): boolean => {
+const inMutationHandler = (node: unknown, builders: Builders): boolean => {
   for (let at = node; at !== undefined && at !== null; at = get(at, "parent")) {
     const declared = get(at, "parent");
     const call = get(declared, "parent");
@@ -57,7 +88,7 @@ const inMutationHandler = (node: unknown): boolean => {
       nameOf(get(at, "key")) === "handler" &&
       get(declared, "type") === "ObjectExpression" &&
       get(call, "type") === "CallExpression" &&
-      mutationBuilders.has(String(nameOf(get(call, "callee"))))
+      isMutationBuilder(get(call, "callee"), builders)
     ) {
       return true;
     }
@@ -98,13 +129,39 @@ const deterministicMutations: Rule.RuleModule = {
     },
   },
   create: (context) => {
+    const builders: Builders = { named: new Set(), namespaces: new Set() };
     const check = (node: Rule.Node): void => {
       const what = unstableRead(node);
-      if (what !== undefined && inMutationHandler(node)) {
+      if (what !== undefined && inMutationHandler(node, builders)) {
         context.report({ node, messageId: "unstable", data: { what } });
       }
     };
-    return { CallExpression: check, NewExpression: check };
+    return {
+      // Every import, read before any call is checked: imports are
+      // hoisted, so one written after a call still names its builder.
+      Program: (program) => {
+        for (const node of program.body) {
+          if (
+            node.type !== "ImportDeclaration" ||
+            !builderModule.test(String(node.source.value))
+          ) {
+            continue;
+          }
+          for (const specifier of node.specifiers) {
+            if (specifier.type === "ImportNamespaceSpecifier") {
+              builders.namespaces.add(specifier.local.name);
+            } else if (
+              specifier.type === "ImportSpecifier" &&
+              mutationBuilders.has(String(nameOf(specifier.imported)))
+            ) {
+              builders.named.add(specifier.local.name);
+            }
+          }
+        }
+      },
+      CallExpression: check,
+      NewExpression: check,
+    };
   },
 };
 
