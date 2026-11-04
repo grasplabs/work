@@ -92,6 +92,7 @@ export const compilerAssets = {
    * App code that checks (`referenceFiles`).
    */
   reference: "reference.json",
+  /**
    * jq's WebAssembly, which the workflow SDK's `evaluate` runs: a module
    * of every workflow isolate (`jqWasmModule`).
    */
