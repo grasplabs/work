@@ -1,5 +1,5 @@
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -43,35 +43,34 @@ const person = async (role: Role, staff = false): Promise<Acting> => {
 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A definition of workflow `name` that passes, ending in `status`. */
-const definitionOf = (
-  name: string,
-  { status = "done", tasks }: { status?: string; tasks?: unknown[] } = {}
-): string =>
+/** A definition that passes, ending in `status`, with `steps` (none by default). */
+const definitionOf = ({
+  status = "done",
+  steps = [],
+}: { status?: string; steps?: unknown[] } = {}): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks ?? [{ finish: { set: { status } } }],
+    steps,
   });
+
+/** A step that waits a moment, `id`. */
+const waitStep = (id: string, more: Record<string, unknown> = {}) => ({
+  id,
+  type: "wait",
+  for: "1 second",
+  ...more,
+});
 
 /** How many revisions of workflow `id`'s draft are stored. */
 const storedRevisions = async (id: string): Promise<number[]> => {
@@ -114,10 +113,7 @@ describe("a workflow's draft", () => {
     });
     expect(version).toMatchObject({ version: 1 });
     // Once published, a later edit builds on that version.
-    const next = definitionOf(workflow.name, { status: "later" }).replace(
-      '"1.0.0"',
-      '"1.1.0"'
-    );
+    const next = definitionOf({ status: "later" });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: next,
@@ -143,7 +139,7 @@ describe("a workflow's draft", () => {
   it("is the current version's definition before anyone edits it", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const definition = definitionOf(workflow.name);
+    const definition = definitionOf();
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition,
       basedOn: null,
@@ -164,8 +160,8 @@ describe("a workflow's draft", () => {
       id: bo.userId,
       role: "builder",
     });
-    const first = definitionOf(workflow.name, { status: "ada" });
-    const second = definitionOf(workflow.name, { status: "bo" });
+    const first = definitionOf({ status: "ada" });
+    const second = definitionOf({ status: "bo" });
     const outcomes = await Promise.all([
       outcome(
         editWorkflowDraft(env, ada, workflow.id, {
@@ -244,7 +240,7 @@ describe("a workflow's draft", () => {
   it("keeps text that doesn't pass with its problems, never as a checkpoint or a version", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const good = definitionOf(workflow.name);
+    const good = definitionOf({ steps: [waitStep("finish")] });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: good,
@@ -253,8 +249,8 @@ describe("a workflow's draft", () => {
     const secret = `secret-${unique()}`;
     const invalid = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
-      source: definitionOf(workflow.name, {
-        tasks: [{ finish: { set: { status: secret }, unknown: true } }],
+      source: definitionOf({
+        steps: [waitStep("finish", { unknown: secret })],
       }),
       modules: {},
     });
@@ -265,7 +261,7 @@ describe("a workflow's draft", () => {
     });
     expect({
       invalid: invalid.problems.map(
-        ({ code, pointer, taskId }) => `${code} ${pointer} ${taskId}`
+        ({ code, pointer }) => `${code} ${pointer}`
       ),
       invalidCheckpoint: invalid.checkpoint?.revision,
       incomplete: incomplete.problems.map(({ code }) => code),
@@ -277,11 +273,11 @@ describe("a workflow's draft", () => {
       ),
       leaked: JSON.stringify(invalid.problems).includes(secret),
     }).toStrictEqual({
-      invalid: ["profile.unknown_property /do/0/finish/unknown finish"],
+      invalid: ["schema.invalid /steps/0/unknown"],
       invalidCheckpoint: 1,
-      incomplete: ["json.invalid"],
+      incomplete: ["schema.invalid"],
       incompleteCheckpoint: 1,
-      diagram: ["finish set"],
+      diagram: ["finish wait"],
       leaked: false,
     });
     // Only the latest revision, once it passed, publishes: an earlier one
@@ -310,8 +306,8 @@ describe("a workflow's draft", () => {
   it("answers an edit with the revision it wrote and its checkpoint then, though another lands right after it", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const passing = definitionOf(workflow.name, { status: "first" });
-    const theirs = definitionOf(workflow.name, { status: "theirs" });
+    const passing = definitionOf({ status: "first" });
+    const theirs = definitionOf({ status: "theirs" });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: passing,
@@ -369,7 +365,7 @@ describe("a workflow's draft", () => {
   it("reads its text and its checkpoint as one saved state, though an edit that passes lands between two reads", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const passing = definitionOf(workflow.name, { status: "first" });
+    const passing = definitionOf({ status: "first" });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: passing,
@@ -471,17 +467,8 @@ describe("a workflow's draft", () => {
       ])
     );
     const source = JSON.stringify({
-      ...JSON.parse(definitionOf(workflow.name)),
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties,
-            additionalProperties: false,
-          },
-        },
-      },
+      ...JSON.parse(definitionOf()),
+      input: { type: "object", properties, additionalProperties: false },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -492,7 +479,7 @@ describe("a workflow's draft", () => {
       problems: saved.problems.map(({ code, pointer }) => `${code} ${pointer}`),
       checkpoint: saved.checkpoint,
     }).toStrictEqual({
-      problems: ["contract.too_large /input/schema"],
+      problems: ["contract.too_large /input"],
       checkpoint: null,
     });
   });
@@ -515,12 +502,11 @@ describe("a workflow's draft", () => {
   it("keeps text whose problems would outgrow its row, with a short problem in their place", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    // A key the profile doesn't know, every character of which a JSON
-    // Pointer escapes as two: its problem alone is larger than the text.
-    const source = definitionOf(workflow.name, {
-      tasks: [
-        { finish: { set: { status: "done" }, ["/".repeat(750_000)]: 1 } },
-      ],
+    // A parameter whose name every character of which a JSON Pointer
+    // escapes as two: its problem alone is larger than the text.
+    const source = JSON.stringify({
+      ...JSON.parse(definitionOf()),
+      params: { ["/".repeat(750_000)]: { kind: "text", label: "Name" } },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -541,19 +527,6 @@ describe("a workflow's draft", () => {
     });
   });
 
-  it("refuses text that names another workflow, at its document", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
-      source: definitionOf(`other-${unique()}`),
-      modules: {},
-    });
-    expect(
-      saved.problems.map(({ code, pointer }) => `${code} ${pointer}`)
-    ).toStrictEqual(["workflow.identity_mismatch /document"]);
-  });
-
   it("is read and edited only by the workflow's builders, never by Grasp staff", async () => {
     const ada = await person("builder");
     const user = await person("builder");
@@ -566,7 +539,7 @@ describe("a workflow's draft", () => {
     });
     const edit = {
       expectedRevision: 0,
-      source: definitionOf(workflow.name),
+      source: definitionOf(),
       modules: {},
     };
     expect({
@@ -590,7 +563,7 @@ describe("a workflow's draft", () => {
   it("keeps only its latest revision and its latest checkpoint, audits each edit, and goes with its workflow", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const good = definitionOf(workflow.name);
+    const good = definitionOf();
     for (const [revision, source] of [good, good, "{", "{ not yet"].entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one edit after the other
       await editWorkflowDraft(env, ada, workflow.id, {
@@ -615,20 +588,27 @@ describe("a workflow's draft", () => {
   });
 });
 
-// One step edited on the canvas (workflow-steps.ts, `editWorkflowStep`):
-// saved as the draft's next revision and checked like any edit, from the
-// draft before any edit too; only a task, or a list of tasks, as the
-// diagram names them, never anything else of the definition or a
-// prototype; a revision someone replaced refused.
+// One step edited on the canvas or by the agent (workflow-steps.ts,
+// `editWorkflowStep`): saved as the draft's next revision and checked like
+// any edit, from the draft before any edit too; only a step, or a list of
+// steps, as the diagram names them, never anything else of the definition
+// or a prototype, and never a step's ID; a revision someone replaced
+// refused.
 describe("a step edited on the canvas", () => {
-  it("inserts and changes a step as the draft's next revision, nested ones too, and audits which", async () => {
+  it("inserts and changes a step as the draft's next revision, nested ones too, keeping its ID, and audits which", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf(workflow.name, {
-        tasks: [
-          { group: { do: [{ inner: { set: { status: "inner" } } }] } },
-          { finish: { set: { status: "done" } } },
+      definition: definitionOf({
+        steps: [
+          {
+            id: "group",
+            type: "if",
+            condition: { $expr: "input.who === 'ada'" },
+            // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+            then: [waitStep("inner")],
+          },
+          waitStep("finish"),
         ],
       }),
       basedOn: null,
@@ -637,18 +617,29 @@ describe("a step edited on the canvas", () => {
       expectedRevision: 0,
       edit: {
         kind: "insert",
-        list: "/do",
+        list: "/steps",
         index: 0,
         id: "greet",
-        body: { set: { status: "greeted" } },
+        step: { type: "wait", for: "2 seconds" },
+      },
+    });
+    const otherwise = await editWorkflowStep(env, ada, workflow.id, {
+      expectedRevision: 1,
+      edit: {
+        kind: "insert",
+        list: "/steps/1/else",
+        index: 0,
+        id: "elsewhere",
+        step: { type: "wait", for: "3 seconds" },
       },
     });
     const changed = await editWorkflowStep(env, ada, workflow.id, {
-      expectedRevision: 1,
+      expectedRevision: 2,
       edit: {
         kind: "change",
-        pointer: "/do/1/group/do/0/inner",
-        body: { set: { status: "changed" } },
+        pointer: "/steps/1/then/0",
+        // A rename is a title: the ID it names is ignored.
+        step: { id: "renamed", type: "wait", for: "4 seconds", title: "Pause" },
       },
     });
     const source: unknown = JSON.parse(changed.source);
@@ -666,14 +657,17 @@ describe("a step edited on the canvas", () => {
         problems: inserted.problems,
         steps: inserted.checkpoint?.diagram.tasks.map(({ id }) => id),
       },
+      otherwise: otherwise.checkpoint?.diagram.tasks[1]?.scopes.map(
+        ({ kind, tasks }) => `${kind} ${tasks.map(({ id }) => id).join(",")}`
+      ),
       changed: {
         revision: changed.revision,
         problems: changed.problems,
         checkpoint: changed.checkpoint?.revision,
       },
       steps:
-        typeof source === "object" && source !== null && "do" in source
-          ? source.do
+        typeof source === "object" && source !== null && "steps" in source
+          ? source.steps
           : undefined,
       audited,
     }).toStrictEqual({
@@ -682,11 +676,21 @@ describe("a step edited on the canvas", () => {
         problems: [],
         steps: ["greet", "group", "finish"],
       },
-      changed: { revision: 2, problems: [], checkpoint: 2 },
+      otherwise: ["then inner", "else elsewhere"],
+      changed: { revision: 3, problems: [], checkpoint: 3 },
       steps: [
-        { greet: { set: { status: "greeted" } } },
-        { group: { do: [{ inner: { set: { status: "changed" } } }] } },
-        { finish: { set: { status: "done" } } },
+        { id: "greet", type: "wait", for: "2 seconds" },
+        {
+          id: "group",
+          type: "if",
+          condition: { $expr: "input.who === 'ada'" },
+          // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+          then: [
+            { id: "inner", type: "wait", for: "4 seconds", title: "Pause" },
+          ],
+          else: [{ id: "elsewhere", type: "wait", for: "3 seconds" }],
+        },
+        { id: "finish", type: "wait", for: "1 second" },
       ],
       audited: [
         {
@@ -695,34 +699,42 @@ describe("a step edited on the canvas", () => {
           problems: 0,
           modules: 0,
           step: "insert",
-          stepPointer: "/do/0",
+          stepPointer: "/steps/0",
         },
         {
           revision: 2,
           checked: true,
           problems: 0,
           modules: 0,
+          step: "insert",
+          stepPointer: "/steps/1/else/0",
+        },
+        {
+          revision: 3,
+          checked: true,
+          problems: 0,
+          modules: 0,
           step: "change",
-          stepPointer: "/do/1/group/do/0/inner",
+          stepPointer: "/steps/1/then/0",
         },
       ],
     });
   });
 
-  it("keeps a step the profile refuses with its problems, never as a checkpoint", async () => {
+  it("keeps a step the format refuses with its problems, never as a checkpoint", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
-      source: definitionOf(workflow.name),
+      source: definitionOf({ steps: [waitStep("finish")] }),
       modules: {},
     });
     const refused = await editWorkflowStep(env, ada, workflow.id, {
       expectedRevision: 1,
       edit: {
         kind: "change",
-        pointer: "/do/0/finish",
-        body: { nonsense: true },
+        pointer: "/steps/0",
+        step: { type: "nonsense" },
       },
     });
 
@@ -744,15 +756,15 @@ describe("a step edited on the canvas", () => {
     });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
-      source: definitionOf(workflow.name),
+      source: definitionOf({ steps: [waitStep("finish")] }),
       modules: {},
     });
-    const body = { set: { status: "x" } };
+    const step = { type: "wait", for: "5 seconds" };
     const change = async (pointer: string, expectedRevision = 1) => {
       const refused = await outcome(
         editWorkflowStep(env, ada, workflow.id, {
           expectedRevision,
-          edit: { kind: "change", pointer, body },
+          edit: { kind: "change", pointer, step },
         })
       );
       return refused;
@@ -761,31 +773,32 @@ describe("a step edited on the canvas", () => {
       const refused = await outcome(
         editWorkflowStep(env, ada, workflow.id, {
           expectedRevision: 1,
-          edit: { kind: "insert", list, index, id: "added", body },
+          edit: { kind: "insert", list, index, id: "added", step },
         })
       );
       return refused;
     };
     const refusals = {
-      notATask: await change("/input/schema"),
-      wrongId: await change("/do/0/start"),
-      pastTheEnd: await change("/do/1/finish"),
-      leadingZero: await change("/do/00/finish"),
-      prototype: await change("/__proto__/0/finish"),
-      notAList: await insert("/document"),
-      notATaskList: await insert("/input/schema/document/required"),
-      beyondTheList: await insert("/do", 2),
-      stale: await change("/do/0/finish", 0),
+      notAStep: await change("/input/properties"),
+      theList: await change("/steps"),
+      pastTheEnd: await change("/steps/1"),
+      leadingZero: await change("/steps/00"),
+      prototype: await change("/__proto__/0"),
+      notAList: await insert("/input"),
+      notAStepList: await insert("/input/required"),
+      listItsTypeHasNot: await insert("/steps/0/then"),
+      beyondTheList: await insert("/steps", 2),
+      stale: await change("/steps/0", 0),
       user: await outcome(
         editWorkflowStep(env, reader, workflow.id, {
           expectedRevision: 1,
-          edit: { kind: "change", pointer: "/do/0/finish", body },
+          edit: { kind: "change", pointer: "/steps/0", step },
         })
       ),
       invalid: await outcome(
         editWorkflowStep(env, ada, workflow.id, {
           expectedRevision: 1,
-          edit: { kind: "rename", pointer: "/do/0/finish" },
+          edit: { kind: "rename", pointer: "/steps/0" },
         })
       ),
     };
@@ -794,7 +807,7 @@ describe("a step edited on the canvas", () => {
       source: "{ not yet",
       modules: {},
     });
-    const notJson = await change("/do/0/finish", 2);
+    const notJson = await change("/steps/0", 2);
 
     expect({
       refusals,
@@ -802,13 +815,14 @@ describe("a step edited on the canvas", () => {
       kept: await storedRevisions(workflow.id),
     }).toStrictEqual({
       refusals: {
-        notATask: "workflow.step_not_found",
-        wrongId: "workflow.step_not_found",
+        notAStep: "workflow.step_not_found",
+        theList: "workflow.step_not_found",
         pastTheEnd: "workflow.step_not_found",
         leadingZero: "workflow.step_not_found",
         prototype: "workflow.step_not_found",
         notAList: "workflow.step_not_found",
-        notATaskList: "workflow.step_not_found",
+        notAStepList: "workflow.step_not_found",
+        listItsTypeHasNot: "workflow.step_not_found",
         beyondTheList: "workflow.step_not_found",
         stale: "workflow.draft_conflict",
         user: "role.forbidden",

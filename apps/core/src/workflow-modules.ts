@@ -4,7 +4,6 @@ import {
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
-import type { ContractLookup } from "@grasp-os/open-workflow/catalog";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
@@ -23,6 +22,7 @@ import {
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionAction } from "@grasp-os/shared/workflow-resources";
+import type { ContractLookup } from "@grasp-os/workflow-schema/catalog";
 import { z } from "zod";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";

@@ -324,29 +324,39 @@ export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
 export const localContractPattern = `^local:(${workflowModulePattern.source.slice(1, -1)})#([A-Za-z_$][A-Za-z0-9_$]*)$`;
 
 /**
- * The lists of steps a step holds, each by the path it is under: an `if`'s
- * `then` and `else`, a `try`'s `try` and its catch's `catch/do`. The one
- * list of them, for every tool that walks or edits a document's steps.
+ * The lists of steps a step of each type may hold, each by the path it is
+ * under: an `if`'s `then` and `else`, a `try`'s `try` and its catch's
+ * `catch/do`. The one list of them, for every tool that walks or edits a
+ * document's steps.
  */
-export const stepListsOf = (
-  step: Step
-): readonly { readonly path: string; readonly steps: readonly Step[] }[] => {
+export const stepListPaths: Readonly<Record<StepType, readonly string[]>> = {
+  do: [],
+  agent: [],
+  wait: [],
+  if: ["then", "else"],
+  try: ["try", "catch/do"],
+  raise: [],
+};
+
+/** The steps `step` holds under list path `path`, if it holds that list. */
+const stepListAt = (step: Step, path: string): readonly Step[] | undefined => {
   if (step.type === "if") {
-    return [
-      { path: "then", steps: step.then },
-      ...(step.else === undefined ? [] : [{ path: "else", steps: step.else }]),
-    ];
+    return path === "then" ? step.then : step.else;
   }
   if (step.type === "try") {
-    return [
-      { path: "try", steps: step.try },
-      ...(step.catch.do === undefined
-        ? []
-        : [{ path: "catch/do", steps: step.catch.do }]),
-    ];
+    return path === "try" ? step.try : step.catch.do;
   }
-  return [];
+  return undefined;
 };
+
+/** The lists of steps `step` holds, each by its path (`stepListPaths`). */
+export const stepListsOf = (
+  step: Step
+): readonly { readonly path: string; readonly steps: readonly Step[] }[] =>
+  stepListPaths[step.type].flatMap((path) => {
+    const steps = stepListAt(step, path);
+    return steps === undefined ? [] : [{ path, steps }];
+  });
 
 /** Every step of `steps`, in order, nested ones included, with its pointer. */
 export const eachStep = (

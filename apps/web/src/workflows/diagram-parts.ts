@@ -30,9 +30,9 @@ export const within = (task: DiagramTask): DiagramTask[] => [
   ...task.scopes.flatMap((scope) => scope.tasks.flatMap(within)),
 ];
 
-/** Whether a task asks a person for a decision (`grasp.decision`). */
+/** Whether a step asks a person for a decision. */
 export const asksPerson = (task: DiagramTask): boolean =>
-  task.kind === "call" && (task.detail?.startsWith("grasp.decision") ?? false);
+  task.kind === "decision";
 
 /**
  * The workflow's named parts, in order: each begins at a top-level task

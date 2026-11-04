@@ -10,7 +10,6 @@
     "./data-schema": "./src/data-schema.ts",
     "./catalog": "./src/catalog.ts",
     "./diagnostics": "./src/diagnostics.ts",
-    "./diagram": "./src/diagram.ts",
     "./generate": "./src/generate.ts",
     "./limits": "./src/limits.ts",
     "./provenance": "./src/provenance.ts",

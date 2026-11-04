@@ -958,14 +958,17 @@ export interface WorkflowMember {
  * read (0 before the first edit), which must still be the latest.
  */
 /**
- * A JSON Pointer to a task in a draft, as the diagram names it
- * (`DiagramTask.pointer`), or to a list of tasks (one ending in `do`,
- * `try` or `branches`).
+ * A JSON Pointer to a step in a draft, as the diagram names it
+ * (`DiagramTask.pointer`, `/steps/0/then/1`), or to a list of steps: the
+ * workflow's own (`/steps`) or one a step holds (`/steps/0/else`).
  */
 const stepPointerSchema = z.string().startsWith("/").max(4096);
 
-/** A task's body: its single key's value, as the profile reads it. */
-const stepBodySchema = z.record(z.string(), z.json());
+/**
+ * A step's fields besides its `id`, as grasp-workflow/1 has them: `type`,
+ * `title` and the rest. Checked with the draft, as any edit.
+ */
+const stepFieldsSchema = z.record(z.string(), z.json());
 
 /** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
 export const workflowRunTraceOptionsSchema = z
@@ -973,11 +976,12 @@ export const workflowRunTraceOptionsSchema = z
   .default({ doors: true });
 
 /**
- * One step of a draft edited from the canvas (`editStep`), as the next
- * revision over `expectedRevision`: `change` replaces the body of the task
- * at `pointer`, keeping its ID; `insert` puts task `id` with `body` at
- * `index` of the task list at `list`. The draft is saved checked, as any
- * edit, problems and all.
+ * One step of a draft edited on the canvas or by the agent (`editStep`),
+ * as the next revision over `expectedRevision`: `change` replaces the
+ * fields of the step at `pointer`, keeping its ID (a rename is a new
+ * `title`); `insert` puts step `id` with `step`'s fields at `index` of the
+ * list of steps at `list`. The draft is saved checked, as any edit,
+ * problems and all.
  */
 export const workflowStepEditSchema = z.strictObject({
   expectedRevision: z.int().min(0),
@@ -985,14 +989,14 @@ export const workflowStepEditSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("change"),
       pointer: stepPointerSchema,
-      body: stepBodySchema,
+      step: stepFieldsSchema,
     }),
     z.strictObject({
       kind: z.literal("insert"),
       list: stepPointerSchema,
       index: z.int().min(0),
       id: z.string().min(1).max(128),
-      body: stepBodySchema,
+      step: stepFieldsSchema,
     }),
   ]),
 });

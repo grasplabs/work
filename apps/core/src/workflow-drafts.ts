@@ -1,12 +1,8 @@
-import { pointerJoin } from "@grasp-os/open-workflow/diagnostics";
-import { workflowDiagram } from "@grasp-os/open-workflow/diagram";
-import { profileName } from "@grasp-os/open-workflow/limits";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   workflowDraftEditSchema,
   workflowDraftPublishSchema,
   workflowStepEditSchema,
-  workflowNamespace,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type {
@@ -14,6 +10,7 @@ import type {
   WorkflowDraft,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -27,7 +24,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { withDoors } from "./workflow-doors.ts";
+import { workflowDiagram } from "./workflow-diagram.ts";
 import {
   compileModules,
   contractsFromManifest,
@@ -36,7 +33,6 @@ import {
 import type { ModuleContracts } from "./workflow-modules.ts";
 import {
   definitionProblems,
-  firstFreeVersion,
   publishWorkflowVersion,
   requireWorkflowRole,
   sealedModules,
@@ -46,10 +42,10 @@ import { applyStepEdit } from "./workflow-steps.ts";
 
 // The draft of an independent workflow's next definition, as its builders
 // and their agent edit it (platform specification 13.10 and 22.7). The
-// draft is text and nothing runs it: only a published version runs, and
-// only the latest draft that passed the profile, its checkpoint, can be
-// published (`publishWorkflowDraft`). The editor's diagram is drawn from
-// that checkpoint's JSON, never from anything else.
+// draft is grasp-workflow/1 text and nothing runs it: only a published
+// version runs, and only the latest draft that passed, its checkpoint, can
+// be published (`publishWorkflowDraft`). The editor's diagram is drawn
+// from that checkpoint's JSON, never from anything else.
 //
 // Threat model, and how each is closed:
 //
@@ -59,8 +55,8 @@ import { applyStepEdit } from "./workflow-steps.ts";
 //   concurrent edits is refused (`workflow.draft_conflict`) and the first
 //   stays, never merged or overwritten.
 // - Incomplete or invalid text running. An edit is checked as publication
-//   checks a definition (`definitionProblems`: the profile against the
-//   host's catalog, and this workflow's identity), and its problems are
+//   checks a definition (`definitionProblems`: the format, then its
+//   bindings against the host's catalog), and its problems are
 //   stored with it. Text that doesn't pass never becomes a checkpoint, and
 //   publishing anything but the latest revision, once it passed, is
 //   refused (`workflow.draft_unchecked`). Publication checks it again.
@@ -68,7 +64,7 @@ import { applyStepEdit } from "./workflow-steps.ts";
 //   only the workflow's builders read or edit its draft, as only they read
 //   its published definitions. Grasp staff don't edit it.
 // - Growth. A draft keeps only its latest revision and its latest
-//   checkpoint, each at most the profile's 1 MiB with its problems at
+//   checkpoint, each at most the format's 1 MiB with its problems at
 //   most 256 KiB, and an edit is bounded as a definition is.
 //
 // A revision carries the workflow's own modules too (GRA-706 has the
@@ -125,49 +121,14 @@ const boundedProblems = (
 };
 
 /**
- * The draft of a workflow nobody has published yet: one that passes, at
- * `version`, one no earlier holder of its name published
- * (`firstFreeVersion`).
+ * The draft of a workflow nobody has published yet: one that passes, with
+ * no steps. Publication gives it its version.
  */
-const starterDefinition = (name: string, version: string): string =>
-  `${JSON.stringify(
-    {
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name,
-        version,
-        title: name,
-        metadata: {
-          grasp: { profile: profileName, params: {}, bindings: {} },
-        },
-      },
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
-        },
-      },
-      output: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { done: { type: "boolean" } },
-            required: ["done"],
-            additionalProperties: false,
-          },
-        },
-      },
-      do: [{ finish: { set: { done: true } } }],
-    },
-    null,
-    2
-  )}\n`;
+const starterDefinition = `${JSON.stringify(
+  { $schema: workflowSchemaUrl, steps: [] },
+  null,
+  2
+)}\n`;
 
 const problemsSchema = z.array(
   z.object({
@@ -179,7 +140,7 @@ const problemsSchema = z.array(
   })
 );
 
-/** Problems as stored: what the profile said when the edit was saved. */
+/** Problems as stored: what the checks said when the edit was saved. */
 const storedProblems = (text: string): WorkflowDefinitionProblem[] =>
   problemsSchema.parse(JSON.parse(text));
 
@@ -187,7 +148,7 @@ type DraftRow = typeof workflowResourceDrafts.$inferSelect;
 
 /**
  * A checkpoint as the editor shows it: its revision and text, and its
- * diagram, drawn from that very text, which passed the profile.
+ * diagram, drawn from that very text, which passed.
  */
 const checkpointOf = (
   revision: number,
@@ -195,7 +156,7 @@ const checkpointOf = (
 ): NonNullable<WorkflowDraft["checkpoint"]> => ({
   revision,
   source,
-  diagram: workflowDiagram(z.json().parse(JSON.parse(source))),
+  diagram: workflowDiagram(source),
 });
 
 /** Module rows, by path. */
@@ -311,12 +272,7 @@ const draftReadOf = async (
   if (latest === undefined) {
     return {
       revision: 0,
-      source:
-        published ??
-        starterDefinition(
-          workflow.name,
-          await firstFreeVersion(env, workflow.name)
-        ),
+      source: published ?? starterDefinition,
       modules:
         workflow.currentVersion === null
           ? {}
@@ -342,37 +298,9 @@ const draftReadOf = async (
 };
 
 /**
- * `draft`, its checkpoint's diagram with the doors its tasks lead
- * through, as `by` may see them (workflow-doors.ts).
- */
-const withCheckpointDoors = async (
-  env: Env,
-  by: Acting,
-  draft: WorkflowDraft
-): Promise<WorkflowDraft> => {
-  const { checkpoint } = draft;
-  if (checkpoint === null) {
-    return draft;
-  }
-  return {
-    ...draft,
-    checkpoint: {
-      ...checkpoint,
-      diagram: await withDoors(
-        env,
-        by,
-        checkpoint.diagram,
-        JSON.parse(checkpoint.source)
-      ),
-    },
-  };
-};
-
-/**
- * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`),
- * its doors resolved for them. Before anyone edits it, it is the current
- * version's definition, which passed when it was published, or a
- * starting definition for this workflow.
+ * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`).
+ * Before anyone edits it, it is the current version's definition, which
+ * passed when it was published, or a starting definition with no steps.
  */
 export const workflowDraft = async (
   env: Env,
@@ -380,11 +308,7 @@ export const workflowDraft = async (
   id: unknown
 ): Promise<WorkflowDraft> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  return await withCheckpointDoors(
-    env,
-    by,
-    await draftReadOf(env, by, workflow)
-  );
+  return await draftReadOf(env, by, workflow);
 };
 
 /** What a build of a draft's modules reported, as it refuses them. */
@@ -422,7 +346,10 @@ const moduleProblems = (error: unknown): WorkflowDefinitionProblem[] => {
       file === null
         ? message
         : `${file}${line === null ? "" : `:${line}`}: ${message}`,
-    pointer: file === null ? "/modules" : pointerJoin("/modules", file),
+    pointer:
+      file === null
+        ? "/modules"
+        : `/modules/${file.replaceAll("~", "~0").replaceAll("/", "~1")}`,
     remedy: "Fix the module where the build says, then check again.",
   }));
 };
@@ -483,7 +410,7 @@ const checkModules = async (
 /**
  * Saves an edit of workflow `id`'s draft for `by`, who must build it and
  * isn't Grasp staff (`workflowDraftEditSchema`): checked against the
- * profile as a publication would be, stored with its problems, and a
+ * format as a publication would be, stored with its problems, and a
  * checkpoint when it has none. Refused as `workflow.draft_conflict` once
  * another edit took the revision it read. Answers the draft as saved.
  */
@@ -627,10 +554,7 @@ export const editWorkflowDraft = async (
     }
     throw error;
   }
-  // Its doors are resolved again only for a new checkpoint: an edit that
-  // didn't pass leaves the checkpoint the editor was at, whose doors it
-  // holds (`WorkflowDraft`), as `expectedRevision` was its latest.
-  const answer = await draftReadOf(env, by, workflow, {
+  return await draftReadOf(env, by, workflow, {
     latest: {
       workflowResourceId: workflow.id,
       revision,
@@ -643,11 +567,6 @@ export const editWorkflowDraft = async (
     modules,
     ...(checkpoint === undefined ? {} : { checkpoint }),
   });
-  // With no checkpoint of its own the draft's is the current version's,
-  // which may have moved since: resolved again too.
-  return checkpoint !== undefined && checkpoint.revision !== revision
-    ? answer
-    : await withCheckpointDoors(env, by, answer);
 };
 
 /**
@@ -656,13 +575,16 @@ export const editWorkflowDraft = async (
  * draft as it is at the revision they read, the draft before any edit
  * included, and saved as its next revision with its modules as they are,
  * exactly as `editWorkflowDraft` saves an edit. A revision another edit
- * replaced is `workflow.draft_conflict`.
+ * replaced is `workflow.draft_conflict`. The canvas and the agent's
+ * `editStep` both edit a step through this.
  */
 export const editWorkflowStep = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, right before it commits (`editWorkflowDraft`). */
+  admit?: () => Promise<void>
 ): Promise<WorkflowDraft> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
@@ -671,7 +593,6 @@ export const editWorkflowStep = async (
     workflowStepEditSchema,
     input
   );
-  // Its text and modules only: no doors to resolve.
   const draft = await draftReadOf(env, by, workflow);
   if (draft.revision !== expectedRevision) {
     throw workflowResourceErrors.create("workflow.draft_conflict");
@@ -685,7 +606,7 @@ export const editWorkflowStep = async (
       source: applyStepEdit(draft.source, edit),
       modules: draft.modules,
     },
-    undefined,
+    admit,
     {
       kind: edit.kind,
       pointer:
