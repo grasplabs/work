@@ -5724,6 +5724,10 @@ msgstr "Corrigé le {date} · {up} utile depuis"
 msgid "Fixed: “{label}”, asked {times} times since"
 msgstr "Corrigé : « {label} », demandé {times} fois depuis"
 
+#: src/screens/screen-frame.tsx
+msgid "Fixing a problem…"
+msgstr "Correction d’un problème…"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Flow"

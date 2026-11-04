@@ -4128,9 +4128,11 @@ export class Workspace extends DurableObject<Env> {
       return true;
     });
     if (saved) {
-      // The preview of the revision before is over: its database goes now;
-      // its problems are not the new revision's (preview-reports.ts).
-      this.#sealedPreviews.drop(chatId, appId);
+      // The preview of the revision before is over once its server code
+      // changed: its database goes now. A write of screens alone runs on
+      // as it was, store and all (sealed-previews.ts). Its problems are
+      // not the new revision's either way (preview-reports.ts).
+      this.#sealedPreviews.revised(chatId, appId, this.draft(chatId, appId));
       this.#draftsChanged(chatId);
     }
     return saved;

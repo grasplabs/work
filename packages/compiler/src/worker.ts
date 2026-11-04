@@ -577,6 +577,13 @@ const bundle: Bundle = async (options) => {
  * the preview kit's, and each screen's App modules are put together into
  * one entry too (`ScreenBuild.entries`). Every gate is the same.
  *
+ * Without `checks`, for a preview's frame only (`preview-frame`), the
+ * type check and the lint don't run: they hold up nothing the frame
+ * needs, and the agent hears them from its own check of the draft
+ * (`preview-screens`, which has them). Neither is a boundary: what a
+ * file may import is held at its compile, which runs either way, and the
+ * frame's sandbox and policy hold whatever the code does.
+ *
  * With `reuse`, what earlier builds kept (increments.ts): a module's
  * transform, and a file's type check, each only where its key says it
  * stands for what this build would make. What it makes now it hands back
@@ -586,8 +593,9 @@ export const buildScreensIncrementally = async (
   files: Record<string, string>,
   {
     preview = false,
+    checks = true,
     reuse = noIncrements(),
-  }: { preview?: boolean; reuse?: Handed } = {}
+  }: { preview?: boolean; checks?: boolean; reuse?: Handed } = {}
 ): Promise<IncrementalBuild<ScreenBuild>> => {
   const fresh = noIncrements();
   const metrics: BuildMetrics = {
@@ -707,10 +715,11 @@ export const buildScreensIncrementally = async (
   }
   // The type check and the lint run whatever the compile found, so one
   // build names everything there is to fix; only what says a compile
-  // error again is left out (`together`).
+  // error again is left out (`together`). A preview's frame skips both
+  // (`checks`): its compile errors still fail it.
   const diagnostics = together(
     errors,
-    await checkScreens(files, reuse, fresh, metrics),
+    checks ? await checkScreens(files, reuse, fresh, metrics) : [],
     unparsed,
     untyped
   );
@@ -760,9 +769,12 @@ export const buildScreensIncrementally = async (
 /** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
 export const buildScreens = async (
   files: Record<string, string>,
-  { preview = false }: { preview?: boolean } = {}
+  {
+    preview = false,
+    checks = true,
+  }: { preview?: boolean; checks?: boolean } = {}
 ): Promise<ScreenBuild> => {
-  const { built } = await buildScreensIncrementally(files, { preview });
+  const { built } = await buildScreensIncrementally(files, { preview, checks });
   return built;
 };
 
@@ -1380,6 +1392,7 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
 export type CompileTarget =
   | "screens"
   | "preview-screens"
+  | "preview-frame"
   | "app"
   | "app-tests"
   | "workflows"
@@ -1390,6 +1403,7 @@ export type CompileTarget =
 export interface TargetBuilds {
   screens: ScreenBuild;
   "preview-screens": ScreenBuild;
+  "preview-frame": ScreenBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
   workflows: WorkflowBuild;
@@ -1412,6 +1426,11 @@ const targetBuilds: {
   // for React Fast Refresh, on the preview kit.
   "preview-screens": async (files) =>
     await buildScreens(files, { preview: true }),
+  // What a preview's frame runs, and each of its updates: built as
+  // `preview-screens` is, without the type check and lint that would
+  // hold it up (`buildScreensIncrementally`).
+  "preview-frame": async (files) =>
+    await buildScreens(files, { preview: true, checks: false }),
   app: checkAppCode,
   "app-tests": buildAppTests,
   workflows: buildWorkflows,
@@ -1460,10 +1479,11 @@ const knownTarget = <Target extends string>(
   return target as Target;
 };
 
-/** The targets built reusing earlier builds' parts, and whether each is a preview's. */
+/** The targets built reusing earlier builds' parts, and how each builds. */
 const incrementalTargets = {
-  screens: false,
-  "preview-screens": true,
+  screens: { preview: false, checks: true },
+  "preview-screens": { preview: true, checks: true },
+  "preview-frame": { preview: true, checks: false },
 } as const;
 
 /** What `buildIncrementally` builds. */
@@ -1523,7 +1543,7 @@ export default class AppCompiler extends WorkerEntrypoint {
     assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(incrementalTargets, target, "buildIncrementally");
     return await buildScreensIncrementally(files, {
-      preview: incrementalTargets[known],
+      ...incrementalTargets[known],
       reuse: incrementsOf(reuse),
     });
   }

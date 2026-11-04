@@ -4,6 +4,27 @@
  * (model-scripts.ts).
  */
 
+/** The tally's screen, its button saying `button`. */
+export const tallyScreen = (
+  button: string
+): string => `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { api } from "#grasp";
+
+export default function Tally() {
+  const count = useQuery(api.tally.count, {});
+  const add = useMutation(api.tally.add);
+  return (
+    <main className="flex flex-col gap-4 p-6">
+      <Button onClick={() => { void add({}); }} variant="outline">
+        ${button}
+      </Button>
+      <output>{count ?? "Loading"}</output>
+    </main>
+  );
+}
+`;
+
 /**
  * A tally of spec 8's layout: a table, a query and a mutation, and a
  * screen on the React SDK that reads the count live through the host's
@@ -49,21 +70,5 @@ export default app({
   uses: [],
 });
 `,
-  "screens/tally.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
-
-export default function Tally() {
-  const count = useQuery(api.tally.count, {});
-  const add = useMutation(api.tally.add);
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button onClick={() => { void add({}); }} variant="outline">
-        Add one
-      </Button>
-      <output>{count ?? "Loading"}</output>
-    </main>
-  );
-}
-`,
+  "screens/tally.tsx": tallyScreen("Add one"),
 });

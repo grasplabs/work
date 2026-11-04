@@ -5,6 +5,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
+import { isDraftFault } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
@@ -43,6 +44,8 @@ import {
   StageTimeoutError,
 } from "./frame-stages.ts";
 import type { ExpectedStart } from "./frame-stages.ts";
+import { PreviewUpdates } from "./preview-updates.ts";
+import type { PreviewHealth } from "./preview-updates.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 import { frameGesture, openFilePort } from "./screen-files.ts";
@@ -122,6 +125,12 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 export type ScreenState =
   | { status: "loading" }
   | { status: "running" }
+  /**
+   * A chat's preview whose draft ran into a problem (it doesn't build,
+   * or its screen failed): it shows the last version that worked while
+   * the agent fixes it.
+   */
+  | { status: "fixing" }
   | { status: "updated" }
   | { status: "signed-out" }
   | { status: "failed"; reason: FailureReason };
@@ -857,24 +866,164 @@ const handedClosed = async (
 };
 
 /**
+ * What a preview's frame is told beyond its calls while it takes its
+ * draft's writes (`runPreview`): the frame reported a problem, or a call
+ * failed through the draft's own fault; and the frame's receiver of the
+ * draft's updates, once it hands it over.
+ */
+export interface PreviewFollow {
+  problem: () => void;
+  followUpdates: NonNullable<FrameTarget["followUpdates"]>;
+}
+
+/** Whether `answer`, a preview call's, failed through the draft's own fault. */
+const failedByDraft = (answer: unknown): boolean => {
+  let parsed: unknown = answer;
+  if (typeof answer === "string") {
+    try {
+      parsed = JSON.parse(answer);
+    } catch {
+      return false;
+    }
+  }
+  const error = refusalOf(parsed);
+  const code: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "code")
+      : undefined;
+  return typeof code === "string" && isDraftFault(code);
+};
+
+/** Whether a query's push is core's refusal of a revision the draft moved past. */
+const outdatedPush = (push: unknown): boolean => {
+  const error = refusalOf(push);
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    Reflect.get(error, "code") === "app.preview_outdated"
+  );
+};
+
+/** A live query the frame follows in a preview, followed again at each revision. */
+interface PreviewWatch {
+  readonly request: string;
+  /** The page's own hold on the frame's callback, across subscriptions. */
+  readonly toFrame: RpcStub<SnapshotCallback>;
+  /** Its current subscription, once asked for. */
+  subscription?: Promise<{ release: () => Promise<void> }>;
+  /** Which of its subscriptions is current: the last one asked for. */
+  generation: number;
+  /** Its current subscription was refused as of a revision moved past. */
+  outdated: boolean;
+  ended: boolean;
+}
+
+/** Releases `subscription`, gone already or not. */
+const releaseWatch = async (
+  subscription: Promise<{ release: () => Promise<void> }>
+): Promise<void> => {
+  try {
+    const held = await subscription;
+    await held.release();
+  } catch {
+    // Gone with its connection, which let go of it in core too.
+  }
+};
+
+/**
  * A preview of the chat's draft: what its screen reports to the chat's agent; it starts no
  * workflow run, finds none, and follows none. A draft of spec 8's layout
  * runs on its draft release (core's sealed-previews.ts): its function
  * calls and live queries go there, on a store of the preview's own.
+ *
+ * Its calls name the revision the frame shows; once the frame takes a
+ * newer one (`moved`), its live queries are followed again at that one,
+ * the old ones let go only once the new ones are asked for, so the
+ * screen's data never goes. A push refusing a revision the draft moved
+ * past never reaches the frame: its query is followed again once the
+ * frame moves on.
  */
 export const previewTarget = (
   link: FrameLink,
   chatId: string,
-  bundle: PreviewBundle
-): FrameTarget => {
-  const { app, revision, screen } = bundle;
+  bundle: PreviewBundle,
+  follow?: PreviewFollow
+): FrameTarget & { moved: (revision: number) => void } => {
+  const { app, screen } = bundle;
+  let { revision } = bundle;
+  const watches = new Set<PreviewWatch>();
+  /** Ends `watch` for good: the frame hears its query is no longer followed. */
+  const endWatch = (watch: PreviewWatch): void => {
+    if (!watch.ended) {
+      watch.ended = true;
+      watches.delete(watch);
+      watch.toFrame[Symbol.dispose]();
+    }
+  };
+  /**
+   * Follows `watch`'s query at the revision the frame shows, as its
+   * current subscription. Core letting go of it ends the watch, as core
+   * letting go of the frame's own callback would (the frame follows it
+   * again then), unless another subscription took its place or core
+   * only refused a revision the frame is moving past.
+   */
+  const subscribe = async (
+    watch: PreviewWatch
+  ): Promise<{ release: () => Promise<void> }> => {
+    watch.generation += 1;
+    watch.outdated = false;
+    const { generation } = watch;
+    const current = (): boolean => watch.generation === generation;
+    const relay = Object.assign(
+      async (push: unknown): Promise<unknown> => {
+        if (outdatedPush(push)) {
+          watch.outdated ||= current();
+          return null;
+        }
+        return current() ? await watch.toFrame(push) : null;
+      },
+      {
+        [Symbol.dispose]: () => {
+          if (current() && !watch.outdated) {
+            endWatch(watch);
+          }
+        },
+      }
+    );
+    return await on(
+      link,
+      async ({ chats }) =>
+        await chats.previewWatchQuery(
+          chatId,
+          app,
+          revision,
+          watch.request,
+          forCore(relay)
+        )
+    );
+  };
   return {
-    callFunction: async (request) =>
-      await on(
+    moved: (next) => {
+      revision = next;
+      for (const watch of watches) {
+        const before = watch.subscription;
+        watch.subscription = subscribe(watch);
+        if (before !== undefined) {
+          void releaseWatch(before);
+        }
+      }
+    },
+    callFunction: async (request) => {
+      const answer = await on(
         link,
         async ({ chats }) =>
           await chats.previewFunction(chatId, app, revision, request)
-      ),
+      );
+      if (failedByDraft(answer)) {
+        follow?.problem();
+      }
+      return answer;
+    },
     // A streaming action runs in the draft's preview too, on its draft
     // release and store (core's sealed-previews.ts), relayed over the
     // page's connection while the person may still have it.
@@ -934,10 +1083,16 @@ export const previewTarget = (
           await chats.previewCancelStream(chatId, app, revision, request)
       ),
     report: async (problem) => {
+      // The screen's own failures, never a library's warnings, are
+      // problems to fix.
+      if (problem.kind !== "warning") {
+        follow?.problem();
+      }
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);
       });
     },
+    ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
     startRun: refusedInPreview,
     runs: async () => await Promise.resolve([]),
     run: refusedInPreview,
@@ -950,18 +1105,36 @@ export const previewTarget = (
           await Promise.resolve();
         },
       }),
-    watchQuery: async (request, onSnapshot) =>
-      await on(
-        link,
-        async ({ chats }) =>
-          await chats.previewWatchQuery(
-            chatId,
-            app,
-            revision,
-            request,
-            forCore(onSnapshot)
-          )
-      ),
+    watchQuery: async (request, onSnapshot) => {
+      if (!(onSnapshot instanceof RpcStub)) {
+        throw screenErrors.create("screen.invalid");
+      }
+      const watch: PreviewWatch = {
+        request,
+        // SAFETY: the frame's stub is only called; a stub of anything
+        // else fails in the frame, not here, as the bridge's callbacks do.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        toFrame: onSnapshot.dup() as RpcStub<SnapshotCallback>,
+        generation: 0,
+        outdated: false,
+        ended: false,
+      };
+      const subscription = subscribe(watch);
+      watch.subscription = subscription;
+      try {
+        await subscription;
+      } catch (error) {
+        endWatch(watch);
+        throw error;
+      }
+      watches.add(watch);
+      return {
+        release: async () => {
+          endWatch(watch);
+          await releaseWatch(watch.subscription ?? subscription);
+        },
+      };
+    },
     // A preview reads no real data, so it keeps no drafts of it.
     drafts: async () => await Promise.resolve({}),
     saveDraft: () => {
@@ -1525,9 +1698,22 @@ export const openPreview = async <T>(
 };
 
 /**
+ * The newest revision of a chat's draft as the page hears of it, for the
+ * preview open now to take (`runPreview`): `latest`, and who hears of
+ * each newer one, while a preview takes them.
+ */
+export interface DraftRevisions {
+  latest: number | undefined;
+  listener: ((revision: number) => void) | undefined;
+}
+
+/**
  * Runs `screen` (the draft's first when none is named) of the chat's
  * draft of `app` in `frame`, as a preview (`runFrame`): of its draft's
- * `version`, or of the App's `appVersion`, read-only.
+ * `version`, or of the App's `appVersion`, read-only. The draft as it is
+ * now takes each newer revision `revisions` names in the frame it has
+ * open (preview-updates.ts); one that can't come in that way starts the
+ * frame afresh, as a new version of an App does (`updated`).
  */
 export const runPreview = (
   frame: HTMLIFrameElement,
@@ -1545,9 +1731,22 @@ export const runPreview = (
     appVersion?: number;
   },
   onState: (state: ScreenState) => void,
-  onOpened: (appName: string) => void
-): (() => void) =>
-  runFrame(
+  onOpened: (appName: string) => void,
+  revisions?: DraftRevisions
+): (() => void) => {
+  // Shown over `running` while it lasts: the frame shows the last version
+  // that worked.
+  let health: PreviewHealth = "working";
+  let running = false;
+  const stateOf = (state: ScreenState): void => {
+    running = state.status === "running" || state.status === "fixing";
+    onState(
+      state.status === "running" && health === "fixing"
+        ? { status: "fixing" }
+        : state
+    );
+  };
+  return runFrame(
     frame,
     {
       open: async (session) =>
@@ -1568,10 +1767,53 @@ export const runPreview = (
       // stops releases them (GRA-623).
       join: ownLink,
       // A preview reads no real data.
-      connect: (link, bundle) => ({
-        target: previewTarget(link, chatId, bundle),
-      }),
+      connect: (link, bundle, _refused, cleanups) => {
+        const opened = bundle.refresh;
+        if (opened === undefined || revisions === undefined) {
+          return { target: previewTarget(link, chatId, bundle) };
+        }
+        const moves: { to?: (revision: number) => void } = {};
+        const updates = new PreviewUpdates(bundle.app, opened, {
+          fetch: async () =>
+            await on(
+              link,
+              async ({ chats }) =>
+                await chats.previewUpdate(chatId, bundle.app, bundle.screen)
+            ),
+          health: (next) => {
+            health = next;
+            if (running) {
+              onState({ status: next === "fixing" ? "fixing" : "running" });
+            }
+          },
+          reset: () => {
+            onState({ status: "updated" });
+          },
+          moved: (next) => {
+            moves.to?.(next);
+          },
+        });
+        const target = previewTarget(link, chatId, bundle, {
+          problem: () => {
+            updates.problem();
+          },
+          followUpdates: (toFrame) => {
+            updates.follow(toFrame);
+          },
+        });
+        moves.to = target.moved;
+        revisions.listener = (next) => {
+          updates.revise(next);
+        };
+        updates.revise(revisions.latest ?? opened.revision);
+        cleanups.push(() => {
+          revisions.listener = undefined;
+          updates.close();
+        });
+        return { target };
+      },
     },
-    onState,
+    stateOf,
     onOpened
   );
+};

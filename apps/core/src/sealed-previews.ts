@@ -91,7 +91,8 @@ import type { Draft } from "./workspace.ts";
 //   does), and each invocation is handed the preview's own store, a
 //   fixture store that core's inventory never lists (`openFixtureStore`),
 //   so no release binds it and `openStore` never opens it. It starts
-//   empty, with the draft's schema, for the draft's revision alone.
+//   empty, with the draft's schema, for the draft's server code alone: a
+//   write of its screens alone keeps it, and what it holds (`serverOf`).
 // - The draft reads or writes its person's real preferences: the draft's
 //   `preferences.get` and `update` are answered by core as on a version
 //   (app-preferences.ts), but only from the preview's own store, named by
@@ -119,13 +120,15 @@ import type { Draft } from "./workspace.ts";
 //   build the App before every call (chats-rpc.ts), and each protected
 //   step of a call (its start, every commit) checks again that they are a
 //   member who builds the App (`authorize`).
-// - The preview outlives its draft: a new revision, a dropped or
-//   proposed draft, or a deleted chat drops it (`drop`). A call for
-//   another revision is `app.preview_outdated`, a call already running
-//   commits nothing more (each protected step checks its preview is still
-//   the one running), and its store is discarded.
+// - The preview outlives its draft: a revision with other server code, a
+//   dropped or proposed draft, or a deleted chat drops it (`drop`). A
+//   call for another revision is `app.preview_outdated` (chats-rpc.ts), a
+//   call already running commits nothing more (each protected step checks
+//   its preview is still the one running), and its store is discarded. A
+//   revision that changed only screens (`serverOf`) runs the same sealed
+//   code on the same store: what was sealed is still what runs.
 // - One preview's data reaches another's: a store per chat, App and
-//   revision, created empty, shared with nothing.
+//   server code, created empty, shared with nothing.
 // - A store is lost: each is recorded here before its object is first
 //   touched, and forgotten only once it is discarded; what a failure left
 //   is discarded at the next preview this object starts.
@@ -420,7 +423,10 @@ export const sweepPreviewStores = async (
 
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
+  /** The revision it started at, which its store is kept under. */
   readonly revision: number;
+  /** Its server code (`serverOf`): what it runs while that stays the same. */
+  readonly server: string;
   /** The version the draft would become: the identity it is sealed with. */
   readonly version: number;
   /** The draft release, sealed and stored, then loaded back and verified. */
@@ -515,6 +521,34 @@ export interface PreviewCallOptions {
 
 /** The version a draft's release is sealed as: the one it would become. */
 const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
+
+/**
+ * The folders of a draft whose files only its screens build from: the
+ * screens' build reads them, and its seal compiles and inspects nothing
+ * of them, so a write of them alone leaves its release as it was.
+ */
+const screenFolders = ["screens/", "components/"];
+
+/**
+ * What of `draft` its draft release is sealed from, as text to compare:
+ * the version it changes and every change outside `screenFolders`. Two
+ * revisions with the same server code run on one release and one store,
+ * so a write of a screen reaches its preview without a seal, and keeps
+ * what the preview's store holds.
+ */
+const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
+  canonicalJson({
+    base,
+    changes: Object.fromEntries(
+      Object.entries(changes).filter(
+        ([path]) => !screenFolders.some((folder) => path.startsWith(folder))
+      )
+    ),
+  });
+
+/** Whether `running` runs the server code of `draft`. */
+const runsServerOf = (running: Running, draft: Draft): boolean =>
+  running.revision === draft.revision || running.server === serverOf(draft);
 
 /**
  * The `#grasp` references the screens of `files`, an App as `version` of
@@ -1076,7 +1110,9 @@ export class SealedPreviews {
     const preview = {
       workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
       chatId,
-      revision: running.revision,
+      // The draft's revision now: one preview runs on across writes of
+      // its screens, and its lines are for the check of the newest.
+      revision: this.#revisionOf(chatId, app) ?? running.revision,
     };
     return hostedRelease(this.#env, release, (fn) =>
       exports.AppTail({
@@ -1320,30 +1356,35 @@ export class SealedPreviews {
     }
   }
 
-  /** The preview of `draft` running now, if one runs its revision. */
+  /** The preview of `draft` running now, if one runs its server code. */
   #runningAt(chatId: ChatId, app: AppId, draft: Draft): Running | undefined {
     const known = this.#running.get(nameOf(chatId, app));
-    return known?.revision === draft.revision ? known : undefined;
+    return known !== undefined && runsServerOf(known, draft)
+      ? known
+      : undefined;
   }
 
   /**
    * The preview of `draft`: the one running, while it runs the draft's
-   * revision; otherwise a new one, the one before dropped first.
+   * server code (a write of its screens alone changes none of it);
+   * otherwise a new one, the one before dropped first.
    */
   #runningFor(chatId: ChatId, app: AppId, draft: Draft): Running {
     const name = nameOf(chatId, app);
     const known = this.#running.get(name);
-    if (known?.revision === draft.revision) {
+    if (known !== undefined && runsServerOf(known, draft)) {
       return known;
     }
     if (known !== undefined) {
       this.drop(chatId, app);
     }
     const version = sealedAs(draft);
+    const server = serverOf(draft);
     const running: Running = {
       revision: draft.revision,
+      server,
       version,
-      release: this.#sealed(chatId, app, draft, version),
+      release: this.#sealed(chatId, app, draft, version, server),
       streams: new Map(),
     };
     // Not left unhandled while nothing awaits it: each call that does
@@ -1363,14 +1404,15 @@ export class SealedPreviews {
     chatId: ChatId,
     app: AppId,
     draft: Draft,
-    version: number
+    version: number,
+    server: string
   ): Promise<Release> {
     const kept = this.#keptRelease(chatId, app);
     if (kept?.revision !== draft.revision || kept.version !== version) {
       const files = await draftFiles(this.#env, app, draft);
       const sealed = await sealDraftRelease(this.#env, { app, version }, files);
       // Replaced while it was sealed: nothing of it is kept.
-      if (this.#running.get(nameOf(chatId, app))?.revision !== draft.revision) {
+      if (this.#running.get(nameOf(chatId, app))?.server !== server) {
         throw appErrors.create("app.preview_outdated");
       }
       this.#ctx.storage.transactionSync(() => {
@@ -1662,6 +1704,18 @@ export class SealedPreviews {
     }
     this.#forgetStore(chatId, app, running, store.id);
     return refusedResult(appErrors.create("app.preview_outdated"));
+  }
+
+  /**
+   * The chat's draft of `app` is at `draft` now: its preview stops
+   * (`drop`) unless it runs the draft's server code still, which a write
+   * of its screens alone leaves as it was (`serverOf`).
+   */
+  revised(chatId: ChatId, app: string, draft: Draft): void {
+    const known = this.#running.get(nameOf(chatId, app));
+    if (known === undefined || !runsServerOf(known, draft)) {
+      this.drop(chatId, app);
+    }
   }
 
   /**

@@ -16,8 +16,11 @@ import type {
   ChatUpdate,
   FixRunResult,
   PreviewBundle,
+  PreviewRefresh,
+  PreviewUpdate,
 } from "@grasp-os/shared/chat";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   authErrors,
   internalErrors,
@@ -82,6 +85,7 @@ import {
   withinAnswer,
 } from "./screens-rpc.ts";
 import { screenCode } from "./screens.ts";
+import type { BuiltScreen } from "./screens.ts";
 import {
   draftVersionReferences,
   readOnlyReferences,
@@ -268,6 +272,30 @@ const settledOf = async (promise: Promise<unknown>): Promise<void> => {
   } catch {
     // Its own caller hears how it failed.
   }
+};
+
+const encoder = new TextEncoder();
+
+/**
+ * The refresh of `screen` at `revision` that `built`, a preview's build,
+ * holds: its entry with the size and SHA-256 its frame checks before it
+ * evaluates it (@grasp-os/sdk's preview-runtime.ts).
+ */
+const refreshOf = async (
+  revision: number,
+  screen: string,
+  { code: frame, refresh }: Pick<BuiltScreen, "code" | "refresh">
+): Promise<PreviewRefresh> => {
+  const code = refresh?.code ?? "";
+  return {
+    revision,
+    screen,
+    code,
+    bytes: encoder.encode(code).byteLength,
+    sha256: await sha256Hex(code),
+    css: frame.css,
+    kit: refresh?.kit ?? [],
+  };
 };
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
@@ -695,58 +723,115 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       // As its recheck (`buildsNow`): an archived App has no preview.
       const { id, name } = await editableApp(this.#env, by, app);
-      // One update of the preview loads at a time, and one waits, the
-      // newest (preview-updates.ts).
-      const chats = this.#chatsOf(by.userId);
-      const token = await chats.takePreviewUpdate(
-        chatIdOf(chatId),
-        by.userId,
-        id
+      return await this.#inPreviewPlace(
+        by,
+        chatId,
+        id,
+        async (signal) =>
+          await this.#loadPreview(
+            by,
+            chatId,
+            id,
+            name,
+            { screen, version, appVersion },
+            signal
+          )
       );
-      if (token === null) {
-        throw appErrors.create("app.preview_superseded");
-      }
-      // Given back once the load itself has stopped, however long after
-      // its caller heard it was too slow: no two build at once.
-      let stopped: Promise<unknown> = Promise.resolve();
-      try {
-        // A caller gone while it waited never says so: its place is free
-        // again soon (preview-updates.ts).
-        const confirmed = await chats.confirmPreviewUpdate(
-          chatIdOf(chatId),
-          by.userId,
-          id,
-          token
-        );
-        if (!confirmed) {
-          throw appErrors.create("app.preview_superseded");
-        }
-        // Ends before its place does (preview-updates.ts): a load that
-        // stalls stops at its next step.
-        const limit = timeLimit(previewLoadMsOf(this.#env));
-        const loading = this.#loadPreview(
+    });
+  }
+
+  /**
+   * Screen `screen` of the chat's draft of `app` now, as one module for
+   * its open preview to swap in (`PreviewRefresh`): only while the person
+   * builds the App, as for `preview`, and in the same line of loads
+   * (preview-updates.ts). Nothing is staged for a frame, nothing is
+   * sealed when the draft's server code is as it was (sealed-previews.ts),
+   * and its build skips the type check and lint, so a write reaches the
+   * screen at once; the agent's check of the draft has them.
+   */
+  async previewUpdate(
+    chatId: string,
+    app: string,
+    screen: string
+  ): Promise<PreviewUpdate> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await editableApp(this.#env, by, app);
+      return await this.#inPreviewPlace(by, chatId, id, async (signal) => {
+        const { files, references, revision } = await this.#previewed(
           by,
           chatId,
           id,
-          name,
-          { screen, version, appVersion },
-          limit.signal
+          {}
         );
-        stopped = settledOf(loading);
-        try {
-          return await Promise.race([loading, whenAborted(limit.signal)]);
-        } catch (error) {
-          if (limit.signal.aborted) {
-            throw screenErrors.create("screen.build_slow");
-          }
-          throw error;
-        } finally {
-          limit.clear();
+        signal.throwIfAborted();
+        const built = await this.#previewBuild(files, references, id, screen);
+        signal.throwIfAborted();
+        if (built.refresh === undefined) {
+          // A preview's build always has its entries: the build is at fault.
+          throw new Error("The preview's build has no entry to refresh.");
         }
-      } finally {
-        void this.#settleOnceStopped(stopped, by, chatId, id, token);
-      }
+        return {
+          app: id,
+          refresh: await refreshOf(revision, built.screen, built),
+        };
+      });
     });
+  }
+
+  /**
+   * Runs `load` of `chatId`'s preview of App `id` in its place in the
+   * line (preview-updates.ts): one load at a time, and one waits, the
+   * newest; `app.preview_superseded` when a newer one took its place.
+   * `load` is stopped by its signal before its place ends, and the place
+   * is given back only once it has stopped, however long after its caller
+   * heard it was too slow (`screen.build_slow`).
+   */
+  async #inPreviewPlace<T>(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    load: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
+    const chats = this.#chatsOf(by.userId);
+    const token = await chats.takePreviewUpdate(
+      chatIdOf(chatId),
+      by.userId,
+      id
+    );
+    if (token === null) {
+      throw appErrors.create("app.preview_superseded");
+    }
+    let stopped: Promise<unknown> = Promise.resolve();
+    try {
+      // A caller gone while it waited never says so: its place is free
+      // again soon (preview-updates.ts).
+      const confirmed = await chats.confirmPreviewUpdate(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        token
+      );
+      if (!confirmed) {
+        throw appErrors.create("app.preview_superseded");
+      }
+      // Ends before its place does (preview-updates.ts): a load that
+      // stalls stops at its next step.
+      const limit = timeLimit(previewLoadMsOf(this.#env));
+      const loading = load(limit.signal);
+      stopped = settledOf(loading);
+      try {
+        return await Promise.race([loading, whenAborted(limit.signal)]);
+      } catch (error) {
+        if (limit.signal.aborted) {
+          throw screenErrors.create("screen.build_slow");
+        }
+        throw error;
+      } finally {
+        limit.clear();
+      }
+    } finally {
+      void this.#settleOnceStopped(stopped, by, chatId, id, token);
+    }
   }
 
   /**
@@ -855,26 +940,21 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     if (screens.length === 0) {
       throw screenErrors.create("screen.not_found");
     }
-    // An App of spec 8's layout: its screens import the references its
-    // draft release generates, the very release their calls run on.
-    const withReferences = await withReferencesText(
-      Object.fromEntries(files),
-      async () => (await references()) ?? undefined
-    );
-    signal.throwIfAborted();
-    const built = await screenCode(
-      this.#env,
-      withReferences,
-      screen ?? screens[0],
-      null,
+    const built = await this.#previewBuild(
+      files,
+      references,
       id,
-      "preview"
+      screen ?? screens[0]
     );
     // A preview reads no real data; its frame still runs exactly this
-    // build and nothing else.
+    // build and nothing else, until the page hands it an update.
     signal.throwIfAborted();
-    await stageFrame(this.#env, built.artifact, built.code);
+    await stageFrame(this.#env, built.artifact, built.code, { preview: true });
     signal.throwIfAborted();
+    // Only the draft as it is now takes updates: a version opened
+    // read-only stays as it was.
+    const updates =
+      revision !== readOnlyRevision && built.refresh !== undefined;
     return {
       app: id,
       name,
@@ -883,7 +963,37 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       screen: built.screen,
       artifact: built.artifact,
       frameToken: await frameAccess(this.#env, built.artifact),
+      ...(updates
+        ? { refresh: await refreshOf(revision, built.screen, built) }
+        : {}),
     };
+  }
+
+  /**
+   * Screen `screen` of a preview's `files`, built for its frame: with the
+   * references its draft release generates when it is of spec 8's layout,
+   * the very release its calls run on, and without the type check and
+   * lint, which the agent's check of the draft has (screens.ts).
+   */
+  async #previewBuild(
+    files: Map<string, string>,
+    references: () => Promise<string | null>,
+    id: AppId,
+    screen: string | undefined
+  ): Promise<BuiltScreen> {
+    const withReferences = await withReferencesText(
+      Object.fromEntries(files),
+      async () => (await references()) ?? undefined
+    );
+    return await screenCode(
+      this.#env,
+      withReferences,
+      screen,
+      null,
+      id,
+      "preview",
+      { checks: false }
+    );
   }
 
   /**

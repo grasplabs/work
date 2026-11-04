@@ -1,3 +1,5 @@
+import type { RpcStub } from "capnweb";
+
 /**
  * What runs a chat's preview of a draft in its frame (spec 22.7): the
  * screen runtime (screen-runtime.ts) with React Fast Refresh. The preview
@@ -10,9 +12,19 @@
  * React, statically, and the screen runtime, which imports React DOM,
  * once this has run: by its flat name, which the frame's import map
  * resolves (the compiler puts it in every preview's closure).
+ *
+ * Once the screen has rendered, it hands the page its receiver of the
+ * draft's updates (preview-updates.ts), and tells the page when the
+ * screen rendered nothing at all: a problem the agent hears of, as of an
+ * error.
  */
-import { commit } from "./preview-refresh.ts";
-import type { ScreenStart } from "./screen-runtime.ts";
+import { commit, discard, refresh } from "./preview-refresh.ts";
+import { previewReceiver } from "./preview-updates.ts";
+import type {
+  ScreenBridge,
+  ScreenHooks,
+  ScreenStart,
+} from "./screen-runtime.ts";
 
 /** The screen runtime's module, by its flat name in the kit. */
 const screenRuntimeModule = "@grasp-os~sdk~screen-runtime.js";
@@ -25,20 +37,56 @@ interface ScreenRuntime {
     start: ScreenStart,
     filePort: MessagePort,
     linkPort: MessagePort,
-    onLoaded?: () => void
+    hooks?: ScreenHooks
   ) => Promise<void>;
+  reportProblem: (kind: "error" | "rejection", value: unknown) => void;
 }
 
 const isScreenRuntime = (module: unknown): module is ScreenRuntime =>
   typeof module === "object" &&
   module !== null &&
   "runScreen" in module &&
-  typeof module.runScreen === "function";
+  typeof module.runScreen === "function" &&
+  "reportProblem" in module &&
+  typeof module.reportProblem === "function";
+
+/** Waits for the next task: what a swap rendered has run its effects. */
+const nextTask = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<null>();
+  setTimeout(() => {
+    resolve(null);
+  }, 0);
+  await promise;
+};
+
+/** The SHA-256 of `bytes`, in hex. */
+const sha256 = async (bytes: Uint8Array): Promise<string> =>
+  [
+    ...new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
+    ),
+  ]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+/**
+ * The style element the frame's document put the screen's CSS in, which
+ * an update's CSS replaces: the document's only one.
+ */
+const screenStyle = (): HTMLStyleElement => {
+  const found = document.head.querySelector("style");
+  if (found !== null) {
+    return found;
+  }
+  const made = document.createElement("style");
+  document.head.append(made);
+  return made;
+};
 
 /**
  * Runs the preview's screen as `runScreen` runs a screen, registering its
  * components with Refresh once its modules have evaluated, before it
- * first renders.
+ * first renders, and taking the draft's updates once it has rendered.
  */
 export const runScreen = async (
   port: MessagePort,
@@ -51,5 +99,55 @@ export const runScreen = async (
   if (!isScreenRuntime(screens)) {
     throw new Error("The preview kit has no screen runtime.");
   }
-  await screens.runScreen(port, screen, start, filePort, linkPort, commit);
+  let failures = 0;
+  let following = false;
+  const rendersNothing = (root: HTMLElement): void => {
+    if (root.childNodes.length === 0) {
+      screens.reportProblem(
+        "error",
+        new Error("The screen rendered nothing: it returned no content.")
+      );
+    }
+  };
+  const follow = (page: RpcStub<ScreenBridge>, root: HTMLElement): void => {
+    rendersNothing(root);
+    // Its boundary remounts what it shows after an error (as Refresh
+    // does): the page has the receiver already.
+    if (following) {
+      return;
+    }
+    following = true;
+    const receive = previewReceiver({
+      evaluate: async (url) => {
+        const evaluated: unknown = await import(url);
+        return evaluated;
+      },
+      commit,
+      discard,
+      refresh,
+      renderFailures: () => failures,
+      settle: nextTask,
+      setCss: (css) => {
+        screenStyle().textContent = css;
+      },
+      report: (value) => {
+        screens.reportProblem("error", value);
+      },
+      sha256,
+    });
+    void page.refresh(async (part) => {
+      const answer = await receive(part);
+      if (answer === "applied") {
+        rendersNothing(root);
+      }
+      return answer;
+    });
+  };
+  await screens.runScreen(port, screen, start, filePort, linkPort, {
+    loaded: commit,
+    renderFailed: () => {
+      failures += 1;
+    },
+    mounted: follow,
+  });
 };

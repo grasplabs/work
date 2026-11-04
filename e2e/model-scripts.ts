@@ -13,7 +13,7 @@ import { z } from "zod";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { contactsApp } from "./contacts-app.ts";
 import { invoiceApproval } from "./invoice-approval.ts";
-import { tallyFiles } from "./tally-app.ts";
+import { tallyFiles, tallyScreen } from "./tally-app.ts";
 
 /** An agent's turn: its answer, or its answer to what the chat said so far. */
 export type ScriptedReply = Answer | ((said: string) => Answer);
@@ -120,6 +120,26 @@ export const modelScripts = {
         outputTokens: 40,
       }),
       says("The tally is in the preview."),
+      // Asked again: a write of its screen alone, which the open preview
+      // takes in place.
+      (said) => ({
+        text: "Renaming the button.",
+        toolCalls: [
+          {
+            id: "rename-button",
+            name: "writeFile",
+            arguments: {
+              app: readIn(said, ownApp),
+              files: {
+                "screens/tally.tsx": tallyScreen("Add another"),
+              },
+            },
+          },
+        ],
+        inputTokens: 200,
+        outputTokens: 40,
+      }),
+      says("The button is renamed."),
     ],
   },
   /**

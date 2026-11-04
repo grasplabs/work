@@ -1394,3 +1394,133 @@ describe("opening a preview a newer load replaced", () => {
     });
   });
 });
+
+/**
+ * A preview's target over a core that records what it was asked: each
+ * call's revision, each report, and each live query it follows, with the
+ * page's relay of it, which core pushes to.
+ */
+const previewOver = (answer: unknown) => {
+  const calls: number[] = [];
+  const reports: string[] = [];
+  const watches: { revision: number; released: boolean }[] = [];
+  const asked = { calls, reports, watches };
+  const relays: ((push: unknown) => Promise<unknown>)[] = [];
+  const chats = {
+    previewFunction: async (_chat: string, _app: string, revision: number) => {
+      asked.calls.push(revision);
+      return await Promise.resolve(answer);
+    },
+    previewReport: async (
+      _chat: string,
+      _app: string,
+      _revision: number,
+      _screen: string,
+      problem: { kind: string }
+    ) => {
+      asked.reports.push(problem.kind);
+      await Promise.resolve();
+    },
+    previewWatchQuery: async (
+      _chat: string,
+      _app: string,
+      revision: number,
+      _request: string,
+      relay: (push: unknown) => Promise<unknown>
+    ) => {
+      const watch = { revision, released: false };
+      asked.watches.push(watch);
+      relays.push(relay);
+      return await Promise.resolve({
+        release: async () => {
+          watch.released = true;
+          await Promise.resolve();
+        },
+      });
+    },
+  };
+  const link = {
+    session: async () => await Promise.resolve({ chats }),
+    person: async () => await Promise.resolve("ada"),
+  };
+  let problems = 0;
+  // SAFETY: a preview's calls, reports and live queries reach only these
+  // of `chats`, which the stand-in has.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+  const asLink = link as unknown as FrameLink;
+  const target = previewTarget(
+    asLink,
+    "chat",
+    { ...bundle, revision: 1, screens: ["home"] },
+    {
+      problem: () => {
+        problems += 1;
+      },
+      followUpdates: () => {
+        // The frame's receiver isn't handed over here.
+      },
+    }
+  );
+  return { target, asked, relays, problems: () => problems };
+};
+
+describe("a preview's frame as its draft changes", () => {
+  it("counts a problem the screen reported as one being fixed, but not a library's warning", async () => {
+    const { target, asked, problems } = previewOver({ result: { ok: true } });
+    await target.report({ kind: "warning", message: "React says" });
+    await target.report({ kind: "error", message: "boom" });
+    await target.report({ kind: "rejection", message: "nope" });
+    expect({ reports: asked.reports, problems: problems() }).toStrictEqual({
+      reports: ["warning", "error", "rejection"],
+      problems: 2,
+    });
+  });
+
+  it("counts a call the draft's own code failed as a problem, and not a refusal that isn't its fault", async () => {
+    const failed = previewOver(
+      JSON.stringify({
+        result: { ok: false, error: { code: "contract.invalid_output" } },
+      })
+    );
+    await failed.target.callFunction("{}");
+    const outdated = previewOver(
+      JSON.stringify({
+        result: { ok: false, error: { code: "app.preview_outdated" } },
+      })
+    );
+    await outdated.target.callFunction("{}");
+    expect([failed.problems(), outdated.problems()]).toStrictEqual([1, 0]);
+  });
+
+  it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {
+    const { target, asked, relays } = previewOver({ result: { ok: true } });
+    const pushes: unknown[] = [];
+    const frameCallback = new RpcStub(async (push: unknown) => {
+      pushes.push(push);
+      await Promise.resolve();
+    });
+    await target.watchQuery("{}", frameCallback);
+    await target.callFunction("{}");
+    // Core refuses the revision the frame is moving past: the frame never
+    // hears it.
+    await relays[0]?.({
+      revision: 3,
+      result: { ok: false, error: { code: "app.preview_outdated" } },
+    });
+    target.moved(2);
+    await target.callFunction("{}");
+    await vi.waitFor(() => {
+      expect(asked.watches).toStrictEqual([
+        { revision: 1, released: true },
+        { revision: 2, released: false },
+      ]);
+    });
+    await relays[1]?.({ revision: 4, result: { ok: true, value: [] } });
+    // A push of the one let go of reaches nothing.
+    await relays[0]?.({ revision: 5, result: { ok: true, value: ["old"] } });
+    expect({ calls: asked.calls, pushes }).toStrictEqual({
+      calls: [1, 2],
+      pushes: [{ revision: 4, result: { ok: true, value: [] } }],
+    });
+  });
+});

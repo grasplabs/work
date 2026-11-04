@@ -372,6 +372,38 @@ test("an App's own chat writes its screen, and its workspace previews it", async
     expect(heldAsks).toBeGreaterThan(0);
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
+
+    // The agent writes the screen again: the frame it has open takes the
+    // write in place, its document never loaded again, and its store
+    // keeps what was added.
+    const screenFrame = page
+      .frames()
+      .find((each) => each.url().includes("/screen-frame"));
+    expect(screenFrame).toBeDefined();
+    await screenFrame?.evaluate(() => {
+      Reflect.set(globalThis, "stillThisDocument", true);
+    });
+    await ask.fill("Rename the button.");
+    const asked = Date.now();
+    await ask.press("Enter");
+    await expect(chat.getByText("Renaming the button.")).toBeVisible({
+      timeout: 30_000,
+    });
+    const written = Date.now();
+    await expect(
+      frame.getByRole("button", { name: "Add another" })
+    ).toBeVisible({ timeout: 10_000 });
+    const shown = Date.now();
+    console.info(
+      `preview took the write ${shown - written} ms after the chat showed it (${shown - asked} ms after asking)`
+    );
+    const sameDocument: unknown = await screenFrame?.evaluate((): unknown =>
+      Reflect.get(globalThis, "stillThisDocument")
+    );
+    expect({
+      count: await frame.getByRole("status").textContent(),
+      sameDocument,
+    }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
   } finally {
     core[Symbol.dispose]();
   }

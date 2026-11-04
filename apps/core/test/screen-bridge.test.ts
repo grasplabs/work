@@ -606,7 +606,9 @@ describe("screens", { timeout: 60_000 }, () => {
       "production"
     );
     const listedBefore = await env.FILES.list({ prefix: "screen-modules/" });
-    await stageFrame(env, artifact, code, new Date(Date.now() + 16 * day));
+    await stageFrame(env, artifact, code, {
+      now: new Date(Date.now() + 16 * day),
+    });
     await deleteExpired(
       env,
       listedBefore.objects,

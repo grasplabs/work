@@ -5724,6 +5724,10 @@ msgstr "Opgelost op {date} · sindsdien {up} nuttig"
 msgid "Fixed: “{label}”, asked {times} times since"
 msgstr "Opgelost: “{label}”, sindsdien {times} keer gevraagd"
 
+#: src/screens/screen-frame.tsx
+msgid "Fixing a problem…"
+msgstr "Een probleem wordt opgelost…"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Flow"

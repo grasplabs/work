@@ -213,6 +213,8 @@ const frameManifestSchema = z
     imports: z.record(z.string(), z.string().regex(moduleHashPattern)),
     /** Each module's Subresource Integrity, by its hash. */
     integrity: z.record(z.string(), z.string().startsWith("sha384-")),
+    /** A chat's preview's frame, whose policy takes its updates (`previewScripts`). */
+    preview: z.boolean(),
   })
   .refine(({ imports, integrity }) =>
     Object.values(imports).every((hash) => Object.hasOwn(integrity, hash))
@@ -366,13 +368,14 @@ const allStaged = async (env: Env, hashes: string[]): Promise<boolean> => {
  * takes a module of a build in use for long: its modules are never older
  * than its manifest, and one the sweep took anyway (it can't delete only
  * if unchanged) is put back here, and noticed by the frame's document.
- * Two opens at once both write it, the same bytes.
+ * Two opens at once both write it, the same bytes. A chat's preview's
+ * build is staged as one (`preview`), which only its policy says.
  */
 export const stageFrame = async (
   env: Env,
   artifact: string,
   { entry, runtime, modules, kit, css }: FrameCode,
-  now = new Date()
+  { preview = false, now = new Date() }: { preview?: boolean; now?: Date } = {}
 ): Promise<void> => {
   const named = await Promise.all(
     Object.entries({ ...kit, ...modules }).map(async ([name, source]) => {
@@ -410,6 +413,7 @@ export const stageFrame = async (
         )
       )
     ),
+    preview,
   };
   const text = JSON.stringify(manifest);
   if (encoder.encode(text).byteLength > frameObjectMaxBytes) {
@@ -940,6 +944,36 @@ parent.postMessage({ type: "${screenFrameReady}", load, supported: enforced }, "
 const scriptJson = (value: unknown): string =>
   JSON.stringify(value).replaceAll("<", "\\u003c");
 
+// A chat's preview takes each write of its draft in the frame it has open
+// (spec 19.2.1): the page hands the frame the screen as one new module,
+// which the frame evaluates as a `data:` module and swaps in with React
+// Fast Refresh, keeping what the screen holds (@grasp-os/sdk's
+// preview-runtime.ts). A frame's policy is fixed when its document loads,
+// so no new module address could be named in it: a preview's frame, and
+// only one staged as a preview's (`preview`, under core's MAC), allows
+// `data:` modules too (the decision on GRA-409). The ways it could fail,
+// and what closes each:
+//
+// - The production frame's policy loosens: it is built from the same
+//   list without `previewScripts`, byte for byte as before, and a
+//   preview's build has an artifact of its own profile, never one a
+//   production frame is staged under (screens.ts).
+// - The frame runs a module of another App, or of another revision: the
+//   update reaches the frame only over its own bridge, never as a window
+//   message, from the page, which asked core for it for the one App and
+//   chat the frame was opened for (core refuses anyone who doesn't build
+//   that App, chats-rpc.ts), and drops an answer that names another App.
+//   Each update names its revision; the page sends only one past the
+//   last it applied, and the frame takes only those.
+// - The frame runs other bytes than core built: it checks each update's
+//   size and SHA-256 against what core answered before evaluating it.
+// - Draft code loads code of its own as a `data:` module: it already runs
+//   unreviewed draft code there, with fixture data, no resources, no
+//   network (`connect-src 'none'`) and an opaque origin, and `data:` adds
+//   no reach beyond the frame. Still no `blob:`, no eval and no inline
+//   script but the document's own.
+const previewScripts = ["data:"];
+
 /** A CSP hash source for an inline script with exactly `text`. */
 const hashSource = async (text: string): Promise<string> => {
   const digest = new Uint8Array(
@@ -1033,6 +1067,7 @@ export const screenFrameResponse = async (
     await hashSource(bootstrap),
     await hashSource(importMap),
     ...new Set(Object.values(manifest.imports).map((hash) => addressOf(hash))),
+    ...(manifest.preview ? previewScripts : []),
   ];
   // The page's language, one it speaks or English: never text of the
   // page's own in the document.

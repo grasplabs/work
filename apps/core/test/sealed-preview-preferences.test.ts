@@ -366,10 +366,11 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     });
     // Another chat's preview of the same App has its own.
     const elsewhere = await preferenceCall(builder, secondAt, "get", {});
-    // The draft changes: its preview, and the store holding its
-    // preferences, go; the next revision starts from the defaults.
+    // The draft's server code changes: its preview, and the store holding
+    // its preferences, go; the next revision starts from the defaults. (A
+    // write of its screens alone keeps them: preview-hot-updates.test.ts.)
     const next = await first.write(
-      { "screens/desk.tsx": deskFiles("Again")["screens/desk.tsx"] ?? "" },
+      { "schema.ts": `${deskFiles()["schema.ts"] ?? ""}// Again\n` },
       first.revision
     );
     const outdated = await failure(

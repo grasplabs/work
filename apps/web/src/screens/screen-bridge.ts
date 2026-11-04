@@ -1,4 +1,9 @@
-import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
+import type {
+  PreviewApplied,
+  PreviewPart,
+  ScreenBridge,
+  Theme,
+} from "@grasp-os/sdk/screen-runtime";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -90,6 +95,14 @@ export interface FrameTarget {
    * target confirms once before the page leaves it while it does.
    */
   leaveGuard: (guarded: boolean) => void;
+  /**
+   * A chat's preview's alone: takes the frame's receiver of its draft's
+   * updates (preview-updates.ts), which only the target calls. A live
+   * screen's target has none, and nothing is ever sent to its frame.
+   */
+  followUpdates?: (
+    toFrame: (part: PreviewPart) => Promise<PreviewApplied>
+  ) => void;
 }
 
 /** The page's theme, as the `dark` class on its root says (theme.js). */
@@ -111,6 +124,25 @@ const isFrameCallback = (value: unknown): value is RpcStub<FrameCallback> =>
  */
 const isThemeCallback = (value: unknown): value is RpcStub<ThemeCallback> =>
   value instanceof RpcStub;
+
+type PartReceiver = (part: PreviewPart) => Promise<unknown>;
+
+/** A stub the frame passed for its receiver of a preview's updates. */
+const isPartReceiver = (value: unknown): value is RpcStub<PartReceiver> =>
+  value instanceof RpcStub;
+
+/** What a frame may answer a part of an update with. */
+const previewAnswers: ReadonlySet<unknown> = new Set<PreviewApplied>([
+  "more",
+  "applied",
+  "failed",
+  "reset",
+  "refused",
+]);
+
+/** Whether `value` is one of `previewAnswers`. */
+const isPreviewAnswer = (value: unknown): value is PreviewApplied =>
+  previewAnswers.has(value);
 
 /** Sends the page's theme to the frame, until the frame is gone. */
 const sendTheme = async (
@@ -161,6 +193,7 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   /** The newest leave guard held back past its budget, and its retry. */
   #heldGuard: { guarded: boolean; stop: () => void } | undefined;
   #themed = false;
+  #refreshed = false;
 
   constructor(target: FrameTarget, cleanups: (() => void)[]) {
     super();
@@ -498,6 +531,28 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     this.#cleanups.push(() => {
       observer.disconnect();
       toFrame[Symbol.dispose]();
+    });
+  }
+
+  /**
+   * Once per frame, and only to a target that takes updates (a chat's
+   * preview's): the frame's receiver of them. What it answers is the
+   * frame's word, read as one of the answers it may give, never more:
+   * the page decides what the frame is handed (preview-updates.ts).
+   */
+  refresh(onPart: unknown): void {
+    const follow = this.#target.followUpdates;
+    if (this.#refreshed || follow === undefined || !isPartReceiver(onPart)) {
+      return;
+    }
+    this.#refreshed = true;
+    const toFrame = onPart.dup();
+    this.#cleanups.push(() => {
+      toFrame[Symbol.dispose]();
+    });
+    follow(async (part) => {
+      const answer: unknown = await toFrame(part);
+      return isPreviewAnswer(answer) ? answer : "refused";
     });
   }
 

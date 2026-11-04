@@ -175,6 +175,13 @@ export interface BuildOptions {
   readonly profile?: BuildProfile;
   /** Given up on: no compile starts, and it throws its reason. */
   readonly signal?: AbortSignal;
+  /**
+   * False for a preview's frame alone: its screens are built without the
+   * type check and lint (the compiler's `preview-frame`), which would
+   * hold up what the person sees and gate nothing it runs. The agent's
+   * check of the draft builds them with both.
+   */
+  readonly checks?: boolean;
 }
 
 /**
@@ -206,11 +213,16 @@ type BuildKind = keyof typeof compilerCalls;
  */
 const compilerCallOf = (
   kind: BuildKind,
-  profile: BuildProfile
-): (typeof compilerCalls)[BuildKind] | readonly ["build", "preview-screens"] =>
-  kind === "screen" && profile === "preview"
-    ? ["build", "preview-screens"]
-    : compilerCalls[kind];
+  profile: BuildProfile,
+  checks = true
+):
+  | (typeof compilerCalls)[BuildKind]
+  | readonly ["build", "preview-screens" | "preview-frame"] => {
+  if (kind !== "screen" || profile !== "preview") {
+    return compilerCalls[kind];
+  }
+  return checks ? ["build", "preview-screens"] : ["build", "preview-frame"];
+};
 
 /**
  * Whether the compiler's answer is shaped as a build: its code is core's
@@ -327,10 +339,11 @@ const compiledIncrementally = async (
   runner: PlatformRunner,
   files: AppFiles,
   profile: BuildProfile,
+  checks: boolean,
   leaseMs: number
 ): Promise<{ built: unknown; cache: boolean }> => {
   const preview = profile === "preview";
-  const [, target] = compilerCallOf("screen", profile);
+  const [, target] = compilerCallOf("screen", profile, checks);
   const started = Date.now();
   const reuse = await readIncrements(env, files, preview, buildRefreshMs);
   const read = Date.now();
@@ -575,7 +588,7 @@ const cachedBuild = async <Build>(
   select: (files: AppFiles) => AppFiles,
   /** Whose build it is: the App's, or an independent workflow's, ID. */
   whose: string,
-  { profile = "production", signal }: BuildOptions = {}
+  { profile = "production", signal, checks = true }: BuildOptions = {}
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
   const tooMuch = limitsOf(kind)(files);
@@ -593,7 +606,7 @@ const cachedBuild = async <Build>(
   // compiler call a kind makes (`compilerCalls`) builds again, rather than
   // serving what the old call built for as long as it is kept. Under its
   // profile too: a preview's build is never served as production's.
-  const [callMethod, callTarget] = compilerCallOf(kind, profile);
+  const [callMethod, callTarget] = compilerCallOf(kind, profile, checks);
   const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${profile}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
@@ -620,6 +633,7 @@ const cachedBuild = async <Build>(
                   runner,
                   files,
                   profile,
+                  checks,
                   leaseMs
                 )
               : await compiled(runner, kind, files, profile);
@@ -864,6 +878,12 @@ export interface BuiltScreen {
   code: FrameCode;
   /** `code`'s hash under its profile (`screenArtifact`): what an admin approves. */
   artifact: string;
+  /**
+   * A preview's: the screen's App modules as one module, which its open
+   * frame evaluates for React Fast Refresh, and the kit modules it
+   * imports (the compiler's preview entry).
+   */
+  refresh?: { code: string; kit: string[] };
 }
 
 /**
@@ -918,7 +938,8 @@ export const versionScreens = async (
   /** Whose screens they are: the App's ID. */
   app: string,
   /** `preview` for a chat's draft. */
-  profile: BuildProfile
+  profile: BuildProfile,
+  { checks = true }: Pick<BuildOptions, "checks"> = {}
 ): Promise<VersionScreens> => {
   if (!Object.keys(files).some((path) => screenPath.test(path))) {
     return async () => {
@@ -930,7 +951,7 @@ export const versionScreens = async (
     env,
     async () =>
       await Promise.all([
-        buildScreens(env, files, app, { profile }),
+        buildScreens(env, files, app, { profile, checks }),
         // A preview runs on the preview kit (spec 19.2.1), which its
         // build's closures name.
         profile === "preview"
@@ -973,10 +994,14 @@ export const versionScreens = async (
     // what the frame's document runs and nothing else (screen-frame.ts),
     // and what the page expects the frame to say back once the screen has
     // mounted (screen-host.ts).
+    const refresh = build.entries?.[entry];
     return {
       screen: name,
       code,
       artifact: await screenArtifact(profile, code),
+      ...(refresh === undefined
+        ? {}
+        : { refresh: { code: refresh, kit: closure.kitModules } }),
     };
   };
 };
@@ -996,12 +1021,20 @@ export const screenCode = async (
   /** Whose screen it is: the App's ID. */
   app: string,
   /** `preview` for a chat's draft. */
-  profile: BuildProfile
+  profile: BuildProfile,
+  options: Pick<BuildOptions, "checks"> = {}
 ): Promise<BuiltScreen> => {
   const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
   if (!Object.hasOwn(files, `screens/${name}.tsx`)) {
     throw screenErrors.create("screen.not_found");
   }
-  const built = await versionScreens(env, files, version, app, profile);
+  const built = await versionScreens(
+    env,
+    files,
+    version,
+    app,
+    profile,
+    options
+  );
   return await built(name);
 };

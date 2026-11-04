@@ -26,7 +26,9 @@ import type { ShownVersion } from "./draft-versions.tsx";
  * The preview of a draft: its first screen, or one it changes the person
  * picks; of the draft's earlier `version` when they opened one, read-only,
  * at that version's first screen (the screens to pick are the latest's).
- * Loaded afresh at each of the draft's writes, as its key says.
+ * Each of the draft's writes comes into the frame it has open, keeping
+ * what the screen holds; another screen or version starts it afresh, as
+ * its key says.
  */
 export const DraftPreview = ({
   chatId,
@@ -68,7 +70,8 @@ export const DraftPreview = ({
       <PreviewFrame
         app={draft.app}
         chatId={chatId}
-        key={`${draft.app}:${draft.revision}:${screen ?? ""}:${version ?? ""}`}
+        key={`${draft.app}:${screen ?? ""}:${version ?? ""}`}
+        revision={draft.revision}
         {...(screen === undefined ? {} : { screen })}
         {...(version === undefined ? {} : { version })}
       />

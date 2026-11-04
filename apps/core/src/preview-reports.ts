@@ -1,6 +1,6 @@
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
-import { categoryOf } from "@grasp-os/shared/operations";
+import { isDraftFault } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { ServerLog } from "@grasp-os/shared/screens";
 
@@ -72,19 +72,8 @@ const functionOf = (request: unknown): string => {
   }
 };
 
-/**
- * The refusals of a draft of spec 8's layout that a change of its code
- * fixes: code that doesn't seal (sealed-previews.ts). Never one of what was
- * kept (`version.manifest_corrupt`, `version.artifact_corrupt`), which no
- * change of the draft fixes.
- */
-export const draftSealFailures: ReadonlySet<string> = new Set([
-  "version.unsealable",
-  "version.build_failed",
-  "version.inspection_failed",
-  "version.invalid_manifest",
-  "version.unstable_manifest",
-]);
+/** The refusals of a draft that a change of its code fixes (sealed-previews.ts). */
+export { draftSealFailures } from "@grasp-os/shared/operations";
 
 /**
  * What a preview's call of a function of a draft of spec 8's layout
@@ -113,12 +102,7 @@ export const functionProblem = (
       message: thrown.slice(0, maxMessage),
     };
   }
-  const category = categoryOf(result.error.code);
-  if (
-    category !== "source" &&
-    category !== "contract" &&
-    !draftSealFailures.has(result.error.code)
-  ) {
+  if (!isDraftFault(result.error.code)) {
     return undefined;
   }
   return {
