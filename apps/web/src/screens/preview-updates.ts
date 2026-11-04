@@ -125,6 +125,8 @@ export class PreviewUpdates {
   #closed = false;
   /** The revision the frame is trying now, while it is handed one. */
   #trying: number | undefined;
+  /** The revision the chat named that an ask was last made again for. */
+  #reasked: number | undefined;
   #health: PreviewHealth = "working";
   /** The update the frame shows: the last that rendered. */
   #applied: PreviewRefresh;
@@ -240,9 +242,16 @@ export class PreviewUpdates {
       }
       // A newer ask (another tab's) took its place in core's line: this
       // frame still needs the draft, so it asks again, behind that one,
-      // rather than show an older write until the next. Anything else
-      // (core out of reach) is asked again at the chat's next write.
-      if (appErrors.codeOf(error) === "app.preview_superseded") {
+      // rather than show an older write until the next. Once for each
+      // revision the chat named: frames that keep taking each other's
+      // place would otherwise ask on and on while one build runs, and
+      // the newest ask always gets its build. Anything else (core out of
+      // reach) is asked again at the chat's next write.
+      if (
+        appErrors.codeOf(error) === "app.preview_superseded" &&
+        this.#reasked !== this.#wanted
+      ) {
+        this.#reasked = this.#wanted;
         this.#asked = this.#shown;
       }
       return undefined;
