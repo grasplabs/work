@@ -651,14 +651,8 @@ export const retryDecided = (
   const forced = forcedOf(tries, error);
   if (choice === undefined) {
     // Its code failed to choose (an expression of a `when` that failed):
-    // no retry, unless a catch and its policy with no conditions had
-    // nothing for it to decide.
-    const firstTaking = tries.findIndex((around) =>
-      matchesFilter(error, around.catch.errors)
-    );
-    if (firstTaking === forced && forcedRetry(tries[forced], round)) {
-      throw tampering("A retry with no conditions has nothing to fail on.");
-    }
+    // no retry, and no catch it named. (Where the build leaves it nothing
+    // to decide, the host decides alone: `RetryOffer.alone`.)
     return stop;
   }
   const chosen = retryChoiceSchema.safeParse(choice);
@@ -674,7 +668,7 @@ export const retryDecided = (
         `Task "${tries[forced]?.id ?? ""}"'s catch takes the failure.`
       );
     }
-    return stop;
+    return { ...stop, by: null };
   }
   if (
     around === undefined ||
@@ -687,9 +681,12 @@ export const retryDecided = (
     throw tampering(`Task "${around.id}"'s catch retries the failure.`);
   }
   const policy = around.catch.retry;
-  return chosen.data.retry && policy !== undefined && round < policy.attempts
-    ? scheduled(policy, round, firstFailedAt)
-    : stop;
+  return {
+    ...(chosen.data.retry && policy !== undefined && round < policy.attempts
+      ? scheduled(policy, round, firstFailedAt)
+      : stop),
+    by: around.id,
+  };
 };
 
 /**
@@ -857,6 +854,11 @@ class SealedRun implements SealedRunKind {
    * step runs.
    */
   #pending: Failure | undefined;
+  /**
+   * The catch the pending failure's step's last retry decision said takes
+   * it (null for none), if one decided: no other catch is offered it.
+   */
+  #pendingBy: string | null | undefined;
   /** Each sleeping task's deadline, as its enter step recorded it. */
   readonly #deadlines = new Map<string, number>();
   /**
@@ -1029,7 +1031,9 @@ class SealedRun implements SealedRunKind {
         matchesFilter(error, inner.catch.errors) &&
         unconditional(inner.catch)
     );
-    if (takenFurtherIn) {
+    // Its retry's decision said which catch takes it: no other.
+    const decided = this.#pendingBy;
+    if (takenFurtherIn || (decided !== undefined && decided !== task.id)) {
       return undefined;
     }
     this.#offers.set(attempt, pending.error);
@@ -1159,13 +1163,18 @@ class SealedRun implements SealedRunKind {
    * for its sleep; a failure, past its retries, is pending, as a catch
    * would see it (a catch step's own, or one of no task's, none may take).
    */
-  stepEnded(step: string, outcome: Settled<unknown>): void {
+  stepEnded(
+    step: string,
+    outcome: Settled<unknown>,
+    takenBy?: string | null
+  ): void {
     if (this.#running === step) {
       this.#running = undefined;
     }
     const sealed = this.#steps.get(step);
     const task = sealed?.task;
     if (!outcome.ok) {
+      this.#pendingBy = takenBy;
       this.#pending =
         task === undefined || sealed?.kind === "catch"
           ? notCaught()

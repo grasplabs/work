@@ -1404,7 +1404,15 @@ export interface RunKind {
    * recorded, or what it failed with in the end, past its retries, as the
    * engine journaled it.
    */
-  stepEnded?: (step: string, outcome: Settled<unknown>) => void;
+  stepEnded?: (
+    step: string,
+    outcome: Settled<unknown>,
+    /**
+     * For a failure, the catch its last retry decision said takes it (the
+     * `try` task's ID; null for none), if one decided.
+     */
+    takenBy?: string | null
+  ) => void;
   /**
    * The retry the host may run of step `step` after its round `round`
    * failed with `error`, under a catch's retry policy (sealed-run.ts);
@@ -1441,6 +1449,8 @@ export type HostStepUse = StepUse | "sleepUntil" | "caught";
 
 /** What a retry's decision step records (`RunHost.#retried`). */
 export interface RetryDecision {
+  /** The catch it said takes the failure (a `try` task's ID; null for none). */
+  by?: string | null;
   /** Whether the step runs again. */
   retry: boolean;
   /** After how long. */
@@ -1468,6 +1478,7 @@ export interface RetryOffer {
 }
 
 const retryDecisionSchema = z.strictObject({
+  by: z.string().nullable().optional(),
   retry: z.boolean(),
   delayMs: z.int().min(0),
   firstFailedAt: z.number(),
@@ -2025,6 +2036,8 @@ export class RunHost extends RpcTarget {
     retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     let failed: StepError | undefined;
+    // The catch its last retry decision said takes the failure, if any.
+    let takenBy: string | null | undefined;
     let attempted = false;
     // Whether its kind let it start: only such a step's end is its to hear.
     let started = false;
@@ -2286,14 +2299,17 @@ export class RunHost extends RpcTarget {
             firstFailedAt,
             stepDone: stepDone.promise,
           });
-          if (retried === undefined) {
+          if (retried !== undefined) {
+            takenBy = retried.by;
+          }
+          if (retried?.retry !== true) {
             throw error;
           }
           // It runs again: it waits for its AI provider no more.
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           await this.#keyWaitEndedQuietly(step, keyWait);
           keyWait = keyWaitStart();
-          firstFailedAt = retried;
+          ({ firstFailedAt } = retried);
         }
       }
       this.#kind.stepEnded?.(step, { ok: true, value });
@@ -2309,7 +2325,7 @@ export class RunHost extends RpcTarget {
         this.#kind.stepEnded === undefined ? undefined : forIsolate(error);
       const reported = journaled ?? failed ?? forIsolate(error);
       if (started && journaled !== undefined) {
-        this.#kind.stepEnded?.(step, { ok: false, error: journaled });
+        this.#kind.stepEnded?.(step, { ok: false, error: journaled }, takenBy);
       }
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
@@ -2379,7 +2395,7 @@ export class RunHost extends RpcTarget {
       firstFailedAt: number | undefined;
       stepDone: Promise<unknown>;
     }
-  ): Promise<number | undefined> {
+  ): Promise<RetryDecision | undefined> {
     const offer = this.#kind.retryOffer?.(step, error, round);
     if (offer === undefined) {
       return undefined;
@@ -2400,6 +2416,13 @@ export class RunHost extends RpcTarget {
         });
     }
     if (decide === undefined) {
+      // Its policy asks its code, which gave no way to ask: code past the
+      // SDK, skipping what its policy says.
+      const refusal = workflowErrors.create("workflow.invalid");
+      refusal.message = `Step "${step}" gives no retry for its policy to ask.`;
+      await settle(
+        async () => await this.#refuseTampering(refusal, { step, call: null })
+      );
       return undefined;
     }
     const prefix = waitStep(await waitKeyOf(step), "retry", round + 1);
@@ -2415,13 +2438,13 @@ export class RunHost extends RpcTarget {
       return undefined;
     }
     if (!decided.retry) {
-      return undefined;
+      return decided;
     }
     if (decided.delayMs > 0) {
       await this.#step.sleep(`${prefix}:wait`, decided.delayMs);
     }
     await this.#kind.requirePerson();
-    return decided.firstFailedAt;
+    return decided;
   }
 
   /**

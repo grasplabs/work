@@ -358,6 +358,42 @@ const sealedWorkflow = async () => {
             catch: { errors: { with: { status: 418 } } },
           },
         },
+        {
+          layered: {
+            try: [
+              {
+                probe: {
+                  try: [
+                    {
+                      ping: {
+                        call: "grasp.connector",
+                        with: {
+                          binding: "mail",
+                          operation: "mail.send",
+                          arguments: {
+                            to: "${ $workflow.input.who }",
+                            subject: "y",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                  catch: {
+                    errors: { with: { status: 500 } },
+                    when: '${ $workflow.input.who == "Ada" }',
+                  },
+                },
+              },
+            ],
+            catch: {
+              errors: { with: { status: 500 } },
+              retry: {
+                delay: { seconds: 1 },
+                limit: { attempt: { count: 3 } },
+              },
+            },
+          },
+        },
       ],
     }),
     basedOn: null,
@@ -1637,6 +1673,47 @@ try {
     expect(ran).toStrictEqual({
       ended: "workflow.invalid",
       tampered: ["workflow.invalid"],
+    });
+  });
+
+  it("lets only the catch its retry's decision named take the failure, and refuses a step that withholds a decision its policy asks for", async () => {
+    // Task `ping` fails; the catch of `probe` around it has a condition,
+    // and the one of `layered` around that has none, and retries.
+    const ping = (retry: string): string =>
+      taskStep("ping", '(() => { throw new Error("down"); })()', retry);
+    const catches = `
+  if ((${catchStep("probe", "async () => true")}) !== undefined) return "probe";
+  return (${catchStep("layered", "async () => true")}) === undefined ? "none" : "layered";`;
+    const tries = new Map<string, number>();
+    // A workflow of its own: its person's runs of one are bounded.
+    const layering = await sealedWorkflow();
+    const run = async (retry: string, engine = retryingEngine()) =>
+      await ranAs(
+        await waitingRun(layering),
+        moduleOf(`try { ${ping(retry)}; } catch { ${catches} }`),
+        { engine }
+      );
+    const withheld = await run("");
+    // It said the condition held, then that it didn't.
+    const probeThenLayered = await run(
+      ', retry: async () => ({ by: "probe", retry: false })'
+    );
+    const layeredThenProbe = await run(
+      ', retry: async () => ({ by: "layered", retry: true })',
+      retryingEngine(tries)
+    );
+    expect({
+      withheld,
+      probeThenLayered,
+      layeredThenProbe,
+      roundsRun: retrySteps(tries, "run"),
+    }).toStrictEqual({
+      withheld: refusedAs(
+        `Step "ping:task" gives no retry for its policy to ask.`
+      ),
+      probeThenLayered: { ended: "probe", tampered: [] },
+      layeredThenProbe: { ended: "layered", tampered: [] },
+      roundsRun: 2,
     });
   });
 

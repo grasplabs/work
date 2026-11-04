@@ -142,8 +142,6 @@ describe("a sealed run's retry decision", () => {
           decide(by("outer"), [tryOf("inner", retrying("constant")), outer])
         ),
         unshaped: refused(() => decide({ by: "inner" })),
-        // Nothing for its code to decide, and it failed.
-        failedOutside: refused(() => decide(undefined, [outer])),
       },
     }).toStrictEqual({
       innerOrOuter: [true, true],
@@ -157,7 +155,6 @@ describe("a sealed run's retry decision", () => {
         outerNotRetrying: true,
         pastIt: true,
         unshaped: true,
-        failedOutside: true,
       },
     });
   });
