@@ -61,7 +61,7 @@ import {
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
-import { fixtureCall } from "./fixture-calls.ts";
+import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
 import type { FixtureDecisionRun } from "./fixture-decisions.ts";
 import {
   fixtureDecisionLookMs,
@@ -423,18 +423,6 @@ export class Run extends WorkerEntrypoint {
   }
 }
 `;
-
-/**
- * The named calls a run an App's test started makes (`fixture`): its own
- * calculations, its decisions (fixture-decisions.ts), and the model and
- * store calls its test serves (fixture-calls.ts). Every other is refused.
- */
-const fixtureCalls: ReadonlySet<string> = new Set([
-  "grasp.compute",
-  "grasp.decision",
-  "grasp.model",
-  "grasp.operation",
-]);
 
 /** The run a host serves, as the dispatcher loaded it. */
 export interface HostedResourceRun {

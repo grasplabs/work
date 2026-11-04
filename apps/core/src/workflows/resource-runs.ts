@@ -1096,8 +1096,12 @@ export interface SealedActivation {
   readonly output: string;
   /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
   readonly owner: string;
-  /** Its lineage, which admits each attempt (quotas.ts). */
-  readonly admission: { readonly run: string; readonly root: string };
+  /**
+   * Its lineage, which admits each attempt (quotas.ts); or, for a run an
+   * App's test started, the test's own admission, which counts nothing of
+   * the organization's (`HostedActivation.admission`).
+   */
+  readonly admission: HostedActivation["admission"];
 }
 
 /**
@@ -1162,7 +1166,9 @@ export const sealedActivation = async (
         await Promise.resolve();
       },
       admitAttempt: async (attempt) =>
-        await admitAttempt(env, { ...admission, resource: owner }, attempt),
+        admission === "fixture"
+          ? await Promise.resolve(unadmitted)
+          : await admitAttempt(env, { ...admission, resource: owner }, attempt),
     }
   );
   const code = loadRunIsolate(
@@ -1209,12 +1215,34 @@ export const sealedActivation = async (
 };
 
 /**
+ * `activation` as the run host runs it (`sealedActivation`), whatever
+ * started it: an independent workflow's run, a test run of a draft's
+ * checkpoint (its calls answered from its start's fixtures, its waits held
+ * short: `calling.candidate`, `maxSleepMs`), or a run an App's test started
+ * (its calls served by its test: `calling.fixture`).
+ */
+export const sealedActivationOf = ({
+  run,
+  output,
+  owner,
+  admission,
+}: HostedActivation): SealedActivation => ({
+  run: sealedRunFrom(run),
+  output,
+  owner,
+  admission,
+});
+
+/**
  * Runs one activation of `activation.run` (an independent workflow's run,
  * a run an App's test started, fixture-runs.ts, or a test run of its draft's
  * checkpoint, candidate-runs.ts): the build's generated module in an
  * isolate of its own against a host of the run: the run host, for a
  * build generated for it (`sealedActivation`), else resource-host.ts until
- * GRA-1366 removes it.
+ * GRA-1366 removes it. Which one is the build's own, sealed generator's
+ * to say (sealed-run.ts, `generatedForRunHost`): one stack moving onto
+ * one engine, never a fallback, as a build of each generator runs only on
+ * the engine it was generated for.
  * Answers the run's output, once it matches its version's output schema.
  */
 export const runActivation = async (
@@ -1223,21 +1251,12 @@ export const runActivation = async (
   memory: ResourceRunMemory,
   activation: HostedActivation
 ): Promise<unknown> => {
-  const { run, output, owner, admission } = activation;
-  if (!generatedForRunHost(run.build)) {
+  if (!generatedForRunHost(activation.run.build)) {
     return await resourceHostActivation(env, engineStep, memory, activation);
   }
-  if (admission === "fixture") {
-    // The run host serves none of a test's fixture calls and decisions yet.
-    throw new Error(`Run ${run.runId} is an App test's: not on the run host`);
-  }
-  const sealed = sealedRunFrom(run);
-  return await sealedActivation(
-    env,
-    engineStep,
-    memory,
-    { run: sealed, output, owner, admission },
-    () => sealedRunModules(sealed)
+  const sealed = sealedActivationOf(activation);
+  return await sealedActivation(env, engineStep, memory, sealed, () =>
+    sealedRunModules(sealed.run)
   );
 };
 

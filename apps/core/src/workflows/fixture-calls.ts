@@ -278,6 +278,19 @@ const fixtureOperation = async (
 };
 
 /**
+ * The named calls a run an App's test started makes: its own
+ * calculations, its decisions (fixture-decisions.ts), and the model and
+ * store calls its test serves (`fixtureCall`). Every other is refused
+ * before it is built, on either host of the run.
+ */
+export const fixtureCalls: ReadonlySet<string> = new Set([
+  "grasp.compute",
+  "grasp.decision",
+  "grasp.model",
+  "grasp.operation",
+]);
+
+/**
  * What model or operation call `call` of test run `run`'s task answers
  * (see the header): a model's answer from its fixture, an operation run on
  * its test's own store. Every other call is refused (`resource.unavailable`).

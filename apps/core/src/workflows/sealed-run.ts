@@ -9,6 +9,7 @@ import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -40,6 +41,8 @@ import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
 import { eventTypeKey } from "./event-envelopes.ts";
+import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
+import type { FixtureDecisionRun } from "./fixture-decisions.ts";
 import { forIsolate, isCoreMarker, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
   DecisionWait,
@@ -1221,11 +1224,16 @@ class SealedRun implements SealedRunKind {
     this.aiWaitRun = { kind: "resource", runId: run.runId };
   }
 
-  /** The person the run acts for must still be an active member. */
+  /**
+   * The person the run acts for must still be an active member: a test's
+   * run acts for its fixture's principal, whose role nothing changes.
+   */
   async requirePerson(): Promise<void> {
-    if (
-      (await memberRole(this.#env.DB, this.run.calling.principal)) === undefined
-    ) {
+    const { calling } = this.run;
+    if (calling.fixture === true) {
+      return;
+    }
+    if ((await memberRole(this.#env.DB, calling.principal)) === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
   }
@@ -2414,6 +2422,12 @@ class SealedRun implements SealedRunKind {
     effect: Effect
   ): Promise<Json> {
     const { calling, build } = this.run;
+    // A test's run reaches only its own sealed modules and the model and
+    // store calls its test serves (fixture-calls.ts): never a connection,
+    // an action or an event.
+    if (calling.fixture === true && !fixtureCalls.has(call.name)) {
+      throw operationErrors.create("resource.unavailable");
+    }
     switch (call.name) {
       case "grasp.connector": {
         const built: BuiltCall = {
@@ -2433,10 +2447,8 @@ class SealedRun implements SealedRunKind {
         }
       }
       case "grasp.operation": {
-        return await makeCall(
-          this.#env,
-          calling,
-          task.id,
+        return await this.#madeOrServed(
+          task,
           { name: call.name, binding: call.binding, arguments: value },
           effect
         );
@@ -2447,10 +2459,8 @@ class SealedRun implements SealedRunKind {
           `${effect.key}:${attempt.number}:${attempt.generation}`
         );
         try {
-          return await makeCall(
-            this.#env,
-            calling,
-            task.id,
+          return await this.#madeOrServed(
+            task,
             {
               name: call.name,
               binding: call.binding,
@@ -2518,6 +2528,30 @@ class SealedRun implements SealedRunKind {
         return call satisfies never;
       }
     }
+  }
+
+  /**
+   * A store or model call, made as a resource run's is; for a run an App's
+   * test started, served by its test instead (fixture-calls.ts): a model's
+   * answer from its fixture, a store's on its test's own store.
+   */
+  async #madeOrServed(
+    task: SealedTask,
+    built: BuiltCall,
+    effect: Effect
+  ): Promise<Json> {
+    const { calling, runId, workflowId, version, createdAt } = this.run;
+    if (calling.fixture !== true) {
+      return await makeCall(this.#env, calling, task.id, built, effect);
+    }
+    const run: FixtureDecisionRun = {
+      runId,
+      workflowId,
+      version,
+      principal: calling.principal,
+      createdAt,
+    };
+    return await fixtureCall(this.#env, run, built, effect);
   }
 
   /**
@@ -2706,9 +2740,24 @@ export const sealedRunModules = ({
 };
 
 /**
+ * The aliases `build`'s calls go through: each sealed task's binding. A
+ * run's frozen bindings are these; a test run binds none, its calls
+ * answered from its start's fixtures or served by its test.
+ */
+const callAliasesOf = (build: LoadedBuild): string[] => [
+  ...new Set(
+    build.tasks.flatMap((task) =>
+      task.kind === "call" && "binding" in task.call ? [task.call.binding] : []
+    )
+  ),
+];
+
+/**
  * What a sealed run's main module starts with: its input, only the
- * parameters the build lists as not sensitive, and its frozen catalog
- * bindings by alias, each a binding whose `call` goes to the host.
+ * parameters the build lists as not sensitive, and the aliases its calls
+ * go through (`callAliasesOf`), each a binding whose `call` goes to the
+ * host, which checks it against the sealed template and the run's
+ * authority.
  */
 export const sealedRunStart = (run: HostedSealedRun) => ({
   runId: run.runId,
@@ -2718,7 +2767,7 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
     )
   ),
   input: run.input,
-  connections: [...run.calling.bindings.keys()],
+  connections: callAliasesOf(run.build),
   collections: [],
   brains: [],
 });
