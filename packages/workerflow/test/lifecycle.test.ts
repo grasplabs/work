@@ -739,6 +739,50 @@ describe("steps a deploy changed under a run", () => {
       ],
     });
   });
+
+  it("end a run rolling back, running none of its rollbacks again", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({
+      id,
+      params: { flaky: "charge", undoDelay: "1 hour" },
+    });
+    await suspendedOn("redeployed", id, "go");
+    const run = await instance("redeployed", id);
+    await run.terminate({ rollback: true });
+    // Charge's rollback failed once and waits an hour for its retry.
+    await until("the rollback to wait for its retry", async () => {
+      const journal = await journalOf("redeployed", id);
+      return journal.run.status === "rollingBack" &&
+        journal.steps.some(
+          (step) => step.type === "rollback" && step.state === "retrying"
+        ) &&
+        journal.activations.every((row) => row.ended !== null)
+        ? true
+        : undefined;
+    });
+    // A deploy renames the step after the wait; the retry's alarm comes.
+    redeployedSteps.names = ["dispatch"];
+    await deliverAlarm("redeployed", id);
+
+    const status = await until("the run to end", async () => {
+      const current = await run.status();
+      return current.status === "terminated" ? current : undefined;
+    });
+
+    expect(status).toMatchObject({
+      status: "terminated",
+      rollback: {
+        status: "errored",
+        error: { name: "WorkflowReplayMismatchError" },
+      },
+    });
+    // The rollback's first attempt, and no retry from the new code.
+    expect(effectsOf(id).map(({ label }) => label)).toStrictEqual([
+      "charge",
+      "undo-charge",
+    ]);
+  });
 });
 
 describe("restart", () => {

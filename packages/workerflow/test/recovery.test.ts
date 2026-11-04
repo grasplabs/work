@@ -20,6 +20,7 @@ import {
   workflow,
 } from "./helpers.ts";
 import { effectsOf, eventOf, hold, warningsDuring } from "./outside.ts";
+import { redeployedSteps } from "./worker.ts";
 
 const exec = async (
   definition: string,
@@ -543,6 +544,58 @@ describe("storage that fails around an activation", () => {
     expect(after).toStrictEqual(before);
     expect(watchdog).toBeGreaterThanOrEqual(delivering + defaultLeaseMs);
     expect(status).toStrictEqual({ status: "complete", output: 1 });
+  });
+
+  it("journals an activation that can't take its definition's fingerprint as faulted, and leaves the run to the watchdog", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    const first = hold(id, "redeployed", 1);
+    await workflow("redeployed").create({ id });
+    await first.held;
+    // A deploy lands before any step is journaled, and the fingerprint the
+    // next activation takes can't be written.
+    redeployedSteps.names = ["dispatch"];
+    await exec(
+      "redeployed",
+      id,
+      "CREATE TRIGGER fail_fingerprint BEFORE UPDATE OF fingerprint ON run BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+    );
+
+    const delivering = Date.now();
+    let outcome = "";
+    const warnings = await warningsDuring(async () => {
+      outcome = await outcomeOf(deliverAlarm("redeployed", id));
+    });
+    const faulted = await journalOf("redeployed", id);
+    const watchdog = await alarmOf("redeployed", id);
+    await exec("redeployed", id, "DROP TRIGGER fail_fingerprint");
+    // The watchdog comes.
+    await deliverAlarm("redeployed", id);
+    first.release();
+    await suspendedOn("redeployed", id, "go");
+    const run = await workflow("redeployed").get(id);
+    await run.sendEvent({ type: "go", payload: null });
+    const status = await ended("redeployed", id);
+
+    expect({
+      outcome,
+      events: warnings.map((warning) => eventOf(warning)),
+      watchdog: watchdog !== null && watchdog >= delivering + defaultLeaseMs,
+    }).toStrictEqual({
+      outcome: "returned",
+      events: ["workflow_activation_faulted"],
+      watchdog: true,
+    });
+    expect(faulted).toMatchObject({
+      run: { generation: 2 },
+      activations: [
+        { generation: 1, ended: null },
+        { generation: 2, ended: "faulted" },
+      ],
+    });
+    // The watchdog's activation took the new steps and ran them.
+    expect(status).toMatchObject({ status: "complete" });
+    expect(effectsOf(id, "dispatch")).toHaveLength(1);
   });
 
   it("leaves the run to a watchdog when it can't be read, and runs on once it can", async () => {

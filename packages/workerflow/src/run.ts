@@ -1925,7 +1925,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
     if (definition !== undefined) {
       // Outside the try: a failed journal write is the engine's fault,
-      // not the host's.
+      // not the host's, and ends the activation as faulted (`alarm`).
       return this.#matching(run, definition);
     }
     const version =
@@ -1939,6 +1939,22 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         `There is no workflow definition ${JSON.stringify(identity.definition)}${version}`
       ),
     };
+  }
+
+  /**
+   * Journals activation `generation` as faulted, if storage lets it;
+   * otherwise its row stays open, as after a crash.
+   */
+  #endFaulted(generation: number): void {
+    try {
+      this.#store.sql.exec(
+        "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
+        Date.now(),
+        generation
+      );
+    } catch {
+      // Its row stays open, as after a crash.
+    }
   }
 
   /**
@@ -2203,15 +2219,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // this activation died: none of the definition runs. Journaled as
       // faulted if storage lets it; the host's retry of this alarm is the
       // run's way back.
-      try {
-        storage.sql.exec(
-          "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
-          Date.now(),
-          generation
-        );
-      } catch {
-        // Its row stays open, as after a crash.
-      }
+      this.#endFaulted(generation);
       throw error;
     }
 
@@ -2230,7 +2238,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       () => this.clock(),
       compensating
     );
-    const resolved = this.#resolve(run);
+    let resolved: WorkflowDefinition | Settlement | { halt: Error };
+    try {
+      resolved = this.#resolve(run);
+    } catch (error) {
+      // Taking the definition's fingerprint failed (#matching): a fault,
+      // as any journal write's. The watchdog set above brings the run
+      // back; throwing would hand that to the host's finite retries.
+      warnRecovered("workflow_activation_faulted", error);
+      this.#endFaulted(generation);
+      return;
+    }
     if (!("run" in resolved)) {
       await endUnresolved(activation, resolved, compensating);
       return;
