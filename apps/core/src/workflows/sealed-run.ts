@@ -115,11 +115,34 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (`generatedForRunHost`): until GRA-1514, every stored build's.
 // - A step the build doesn't have. Each engine step's name is one of the
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
-//   in no items or branches, `workflow:input` and `workflow:output` where
-//   the workflow has them, and the SDK's `$params`. Any other name, or a
-//   step run otherwise than it runs (a task's step as a `do`, a sleeping
-//   task's own as its sleep, a try's catch as a catch), or beside another
-//   step, is refused, and fails the run.
+//   in no loop, `<task>:<step>@<i>/<j>…` inside items (`stepNameOf`), a
+//   decision task's parts as the SDK's `#ask`, `#asked` and `#answer`
+//   after either, `workflow:input` and `workflow:output` where the workflow has them,
+//   and the SDK's `$params`. Any other name, one in another encoding of
+//   the same key included, or a step run otherwise than it runs (a task's
+//   step as a `do`, a sleeping task's own as its sleep, a try's catch as a
+//   catch), beside another step, or again, is refused, and fails the run.
+//   A `fork`, a loop of items at once, and every task in one have no steps
+//   in the table yet.
+// - A loop's item it never had, or out of its order. A task inside loops
+//   whose items run one after another names its item's index in each loop
+//   its build seals around it, and nothing else: its loops are its task's.
+//   Each index must be of an item the loop's enter step recorded (at most
+//   the platform's 1,000 a collection, `workflow.collection_invalid`
+//   past them), in a loop the run is still in, and of the item running
+//   now; only the innermost may move on, to a later item only, by its
+//   item step where its loop seals one (its `while`) and never by a catch.
+//   An item passed over ran no step, its work all skipped: flow decided in
+//   the isolate, as an `if` is, every call still held to its template.
+//   A loop the run left (a step outside its items ran) runs no item more,
+//   and no step starts twice, so its enter step can't open it again: so
+//   items run in increasing order, none repeated, and a run's
+//   steps stay bounded by its tasks and its recorded items (and the run's
+//   own step ceiling). Stopping early is flow too. Each item's
+//   steps have names, effects' keys, deadlines and retries of their own,
+//   and a failure pending in an item holds every step but a catch back,
+//   taken only by a try around its task: one in its own item (the item
+//   running now) or around the loop, whose catch leaves the loop.
 // - A call outside its task's step, or more than one. A call goes through
 //   the host of the attempt whose code makes it (attempt-host.ts), only
 //   while that attempt holds its lease and is the step running now, and
@@ -329,10 +352,23 @@ interface SealedStep {
   readonly kind: string;
 }
 
+/** A `for` task. */
+type ForTask = Extract<SealedTask, { kind: "for" }>;
+
 /**
- * The steps `build` seals, by engine name: the SDK runs step `name` with
- * key `key` as `name:key`. A task in a `for` or `fork` runs in none of
- * its items or branches here, so its steps are in no table.
+ * Whether `task` is a loop whose items run one after another
+ * (`concurrency` 1): the only items a sealed run runs. Items at once and a
+ * `fork`'s branches don't run here yet.
+ */
+const isSequentialLoop = (task: SealedTask | undefined): task is ForTask =>
+  task?.kind === "for" && task.loop.concurrency === 1;
+
+/**
+ * The steps `build` seals, by `<task>:<kind>`, the item indices of their
+ * engine names left out (`stepNameOf`): the workflow's own, every task's
+ * outside any loop, and every task's inside loops whose items run one
+ * after another. A `fork`, a loop of items at once, and every task inside
+ * one have no steps here, so they never run.
  */
 const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
   const table = new Map<string, SealedStep>();
@@ -342,8 +378,13 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
   if (build.workflow.output) {
     table.set("workflow:output", { kind: "output" });
   }
+  const tasks = new Map(build.tasks.map((task) => [task.id, task]));
   for (const task of build.tasks) {
-    if (task.scope.length === 0) {
+    const runs =
+      task.kind !== "fork" &&
+      (task.kind !== "for" || isSequentialLoop(task)) &&
+      task.scope.every((id) => isSequentialLoop(tasks.get(id)));
+    if (runs) {
       for (const kind of task.steps) {
         table.set(`${task.id}:${kind}`, { task, kind });
       }
@@ -358,6 +399,92 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
   }
   return table;
 };
+
+/**
+ * A step's key, as generated code gives it: its kind, and inside loop
+ * items `@` and the index of its item in each loop around it, outermost
+ * first (`item@2/5`). The loops are its task's sealed `scope`, so the key
+ * names only the indices.
+ */
+const stepKeyPattern =
+  /^(?<kind>[a-z]+)(?:@(?<path>(?:0|[1-9]\d{0,3})(?:\/(?:0|[1-9]\d{0,3}))*))?$/u;
+
+/**
+ * An engine step name, read: its name, its kind, its item indices, and
+ * the SDK's part of a decision's step (`#ask`), if any.
+ */
+interface StepName {
+  readonly id: string;
+  readonly kind: string;
+  readonly path: readonly number[];
+  readonly part?: string;
+}
+
+/** A part of a step, as the SDK names it after its key (`#ask`). */
+const stepPartPattern = /^[\w-]+$/u;
+
+/**
+ * Engine step `step` (`name:key`, its key URI-encoded, then `#part` for a
+ * decision's parts, as the SDK names it) read as `stepKeyPattern` has
+ * it; nothing for one that isn't in exactly that form, an encoding of the
+ * same key otherwise included.
+ */
+const stepNameOf = (step: string): StepName | undefined => {
+  const colon = step.indexOf(":");
+  if (colon <= 0) {
+    return undefined;
+  }
+  const id = step.slice(0, colon);
+  // An encoded key holds no `#`: the first is the part's.
+  const [encoded = "", part, ...more] = step.slice(colon + 1).split("#");
+  if (more.length > 0 || (part !== undefined && !stepPartPattern.test(part))) {
+    return undefined;
+  }
+  let key: string;
+  try {
+    key = decodeURIComponent(encoded);
+  } catch {
+    return undefined;
+  }
+  const groups = stepKeyPattern.exec(key)?.groups;
+  if (groups?.kind === undefined || encodeURIComponent(key) !== encoded) {
+    return undefined;
+  }
+  return {
+    id,
+    kind: groups.kind,
+    path: groups.path === undefined ? [] : groups.path.split("/").map(Number),
+    ...(part === undefined ? {} : { part }),
+  };
+};
+
+/** A step of the sealed table, as run in the items `path` names. */
+interface ResolvedStep extends SealedStep {
+  /** Its item's index in each loop around it, outermost first. */
+  readonly path: readonly number[];
+  /** The loops `path` indexes: an item step's own loop last. */
+  readonly loops: readonly string[];
+}
+
+/**
+ * Where task `id` runs in items `path` of its loops: `id`, then
+ * `@<indices>` inside items. One place per run of a task.
+ */
+const placeOf = (id: string, path: readonly number[]): string =>
+  path.length === 0 ? id : `${id}@${path.join("/")}`;
+
+/** A loop whose items the run may still reach, by the place of its task. */
+interface OpenLoop {
+  /** How many items its enter step recorded. */
+  readonly count: number;
+  /** The item running now: -1 before its first. */
+  current: number;
+}
+
+/** What a loop's enter step records, when not skipped. */
+const itemsRecordSchema = z.object({
+  items: z.array(z.json()).max(platformLimits.workflowCollectionItems),
+});
 
 /** The sealed calls a task's step makes through a binding. */
 type BoundCall = Extract<
@@ -810,6 +937,15 @@ const deadlineUnfit = (value: unknown): StepError | undefined => {
 };
 
 /**
+ * What a loop's enter step whose record is `value` fails with, if it
+ * records no items, or more than a run fans out over (1,000).
+ */
+const itemsUnfit = (value: unknown): StepError | undefined =>
+  itemsRecordSchema.safeParse(value).success
+    ? undefined
+    : forIsolate(workflowResourceErrors.create("workflow.collection_invalid"));
+
+/**
  * Whether `value` is one the host records of a step: JSON within a step's
  * result, and no marker of core's (host.ts, `#doStep`).
  */
@@ -964,7 +1100,10 @@ class SealedRun implements SealedRunKind {
    * it (null for none), if one decided: no other catch is offered it.
    */
   #pendingBy: string | null | undefined;
-  /** Each sleeping task's deadline, as its enter step recorded it. */
+  /**
+   * Each sleeping task's deadline, as its enter step recorded it, by the
+   * place it runs in (`placeOf`): each item of a loop has its own.
+   */
   readonly #deadlines = new Map<string, number>();
   /** What each decision task asks, as its enter step recorded it. */
   readonly #asks = new Map<string, DecisionAsks>();
@@ -975,6 +1114,20 @@ class SealedRun implements SealedRunKind {
     StepAttempt,
     { decision: string; deadline: number }
   >();
+  /** The `for` tasks whose items run here, by ID (`isSequentialLoop`). */
+  readonly #loopTasks: ReadonlyMap<string, ForTask>;
+  /**
+   * The loops whose items the run may still reach, by the place of their
+   * task, as this activation reaches their enter steps: those around the
+   * step that ran last, and one just entered. Any other is over: none of
+   * its items runs again (`#loopRefusal`).
+   */
+  readonly #loops = new Map<string, OpenLoop>();
+  /**
+   * The steps this activation let start: none starts twice, so no loop
+   * is entered again to run its items over.
+   */
+  readonly #started = new Set<string>();
   /**
    * The step running now, from when the host let it start until it ended
    * (`stepEnded`): the build's code runs its steps one at a time, so none
@@ -996,6 +1149,11 @@ class SealedRun implements SealedRunKind {
     this.#host = host;
     this.#memory = memory;
     this.#steps = stepTableOf(run.build);
+    this.#loopTasks = new Map(
+      run.build.tasks.flatMap((task) =>
+        isSequentialLoop(task) ? [[task.id, task] as const] : []
+      )
+    );
     this.run = run;
     this.audit = {
       actor: { type: "system" },
@@ -1031,9 +1189,11 @@ class SealedRun implements SealedRunKind {
    * Refuses a step the sealed table doesn't have, or not as it runs: a
    * task's step as a `do`, but a sleeping task's own as its sleep (of
    * exactly its sealed length, or until exactly its recorded deadline)
-   * and a try's catch as a catch. While a failure no catch took is
-   * pending, any step but a catch; while another step runs, any step. A
-   * step it lets start runs until it ends (`stepEnded`).
+   * and a try's catch as a catch; in an item its loops don't have, or out
+   * of their order (`#loopRefusal`). While a failure no catch took is
+   * pending, any step but a catch; while another step runs, any step; a
+   * step that started already, again. A step it lets start runs until it
+   * ends (`stepEnded`).
    */
   stepRefusal(
     step: string,
@@ -1050,22 +1210,118 @@ class SealedRun implements SealedRunKind {
         "A run goes on past a failure only once a catch took it."
       );
     }
-    const runs =
-      step === paramsStep ? use === "do" : this.#runsAs(step, use, time);
-    if (!runs) {
-      return tampering(`Step "${step}" isn't one the build seals.`);
+    if (this.#started.has(step)) {
+      return tampering(`Step "${step}" runs once.`);
     }
+    if (step === paramsStep) {
+      if (use !== "do") {
+        return tampering(`Step "${step}" isn't one the build seals.`);
+      }
+    } else {
+      const sealed = this.#stepOf(step);
+      if (sealed === undefined || !this.#runsAs(sealed, use, time)) {
+        return tampering(`Step "${step}" isn't one the build seals.`);
+      }
+      const refusal = this.#loopRefusal(sealed, use);
+      if (refusal !== undefined) {
+        return tampering(refusal);
+      }
+      this.#enterItems(sealed);
+    }
+    this.#started.add(step);
     this.#running = step;
     return undefined;
   }
 
-  /** `stepRefusal`'s check of a step of the sealed table, `step`. */
-  #runsAs(step: string, use: HostStepUse, time: number | undefined): boolean {
-    const sealed = this.#steps.get(step);
-    if (sealed === undefined) {
-      return false;
+  /**
+   * Engine step `step` as the sealed table has it, in the items its name
+   * says: its task's sealed loops, one index for each (an item step's own
+   * loop last). Nothing for any other name.
+   */
+  #stepOf(step: string): ResolvedStep | undefined {
+    const name = stepNameOf(step);
+    const sealed =
+      name === undefined
+        ? undefined
+        : this.#steps.get(
+            `${name.id}:${name.kind}${name.part === undefined ? "" : `#${name.part}`}`
+          );
+    if (name === undefined || sealed === undefined) {
+      return undefined;
     }
-    const { task, kind } = sealed;
+    const scope = sealed.task?.scope ?? [];
+    const loops =
+      sealed.kind === "item" && sealed.task !== undefined
+        ? [...scope, sealed.task.id]
+        : scope;
+    return loops.length === name.path.length
+      ? { ...sealed, path: name.path, loops }
+      : undefined;
+  }
+
+  /**
+   * Why `step` may not run in the items its path names, run as `use`; or
+   * nothing. Each item must be one its loop's enter step recorded, in a
+   * loop the run is still in (`#loops`), and the one running now; only at
+   * the innermost level may the step start a later item of that loop than
+   * the one running: its item step when the loop seals one, otherwise any
+   * step but a catch. An item between them ran no step (its work all
+   * skipped, or the code's choice, as an `if` is). So items run in
+   * increasing order, none again, none after the run left their loop, and
+   * an item step starts its item, once.
+   */
+  #loopRefusal(step: ResolvedStep, use: HostStepUse): string | undefined {
+    const { path, loops, kind } = step;
+    for (const [depth, index] of path.entries()) {
+      const id = loops[depth] ?? "";
+      const loop = this.#loops.get(placeOf(id, path.slice(0, depth)));
+      if (loop === undefined || index >= loop.count) {
+        return `Loop "${id}" has no item ${index} here.`;
+      }
+      const innermost = depth === path.length - 1;
+      const startsItem = innermost && kind === "item";
+      const next =
+        innermost &&
+        index > loop.current &&
+        use !== "caught" &&
+        (startsItem ||
+          this.#loopTasks.get(id)?.steps.includes("item") === false);
+      if (index === loop.current ? startsItem : !next) {
+        return `Item ${index} of loop "${id}" doesn't run now: its items run in increasing order, each once.`;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Notes that `step`, which `#loopRefusal` let run, runs in the items
+   * its path names: an item it names past the one running starts; any
+   * loop it runs in none of the items of is over.
+   */
+  #enterItems({ path, loops }: ResolvedStep): void {
+    const around = new Set<string>();
+    for (const [depth, index] of path.entries()) {
+      const place = placeOf(loops[depth] ?? "", path.slice(0, depth));
+      around.add(place);
+      const loop = this.#loops.get(place);
+      if (loop !== undefined) {
+        loop.current = index;
+      }
+    }
+    for (const place of this.#loops.keys()) {
+      if (!around.has(place)) {
+        this.#loops.delete(place);
+      }
+    }
+  }
+
+  /** `stepRefusal`'s check of a step of the sealed table, `sealed`. */
+  #runsAs(
+    sealed: ResolvedStep,
+    use: HostStepUse,
+    time: number | undefined
+  ): boolean {
+    const { task, kind, path } = sealed;
     const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
     if (use === "do") {
       return kind !== "catch" && kind !== "answer" && !sleeps;
@@ -1076,12 +1332,20 @@ class SealedRun implements SealedRunKind {
     if (use === "caught") {
       return kind === "catch" && task?.kind === "try";
     }
-    return sleeps && task !== undefined && this.#sleepsAs(task, use, time);
+    return (
+      sleeps &&
+      task !== undefined &&
+      this.#sleepsAs(task, placeOf(task.id, path), use, time)
+    );
   }
 
-  /** `#runsAs`'s check of sleeping task `task`'s own step's sleep. */
+  /**
+   * `#runsAs`'s check of sleeping task `task`'s own step's sleep, where it
+   * runs at `place` (`placeOf`).
+   */
   #sleepsAs(
     task: SealedTask,
+    place: string,
     use: HostStepUse,
     time: number | undefined
   ): boolean {
@@ -1094,7 +1358,7 @@ class SealedRun implements SealedRunKind {
     return (
       use === "sleepUntil" &&
       sleepsUntil(task) &&
-      time === this.#deadlines.get(task.id)
+      time === this.#deadlines.get(place)
     );
   }
 
@@ -1105,7 +1369,7 @@ class SealedRun implements SealedRunKind {
    * around it.
    */
   limitsOf(step: string): StepLimits {
-    const task = this.#steps.get(step)?.task;
+    const task = this.#stepOf(step)?.task;
     if (task === undefined) {
       return { retries: sealedRetries };
     }
@@ -1133,7 +1397,7 @@ class SealedRun implements SealedRunKind {
    * its try's list, with every property of its `errors.with`).
    */
   caughtOffer(attempt: StepAttempt): Json | undefined {
-    const task = this.#steps.get(attempt.step)?.task;
+    const task = this.#stepOf(attempt.step)?.task;
     const pending = this.#pending;
     if (
       task?.kind !== "try" ||
@@ -1210,7 +1474,7 @@ class SealedRun implements SealedRunKind {
       return failedAfterEffect;
     }
     const reported = cut ? error : isolateFailure(error);
-    const { task, kind } = this.#steps.get(attempt.step) ?? {};
+    const { task, kind } = this.#stepOf(attempt.step) ?? {};
     return kind === "task" &&
       task?.kind === "raise" &&
       expressionErrors.codeOf(reported) === undefined
@@ -1267,7 +1531,7 @@ class SealedRun implements SealedRunKind {
     if (this.#effected.has(attempt) && !recordable(value)) {
       return { ok: false, error: failedAfterEffect };
     }
-    const { task, kind } = this.#steps.get(attempt.step) ?? {};
+    const { task, kind } = this.#stepOf(attempt.step) ?? {};
     if (kind === "catch") {
       return await this.#caughtChecked(attempt, task, value);
     }
@@ -1283,10 +1547,14 @@ class SealedRun implements SealedRunKind {
     if (kind === "task" && task?.kind === "raise" && !skipped) {
       return { ok: false, error: raisedBy(task) };
     }
-    const unfit =
-      kind === "enter" && task !== undefined && sleepsUntil(task) && !skipped
-        ? deadlineUnfit(value)
-        : undefined;
+    let unfit: StepError | undefined;
+    if (kind === "enter" && task !== undefined && !skipped) {
+      if (sleepsUntil(task)) {
+        unfit = deadlineUnfit(value);
+      } else if (task.kind === "for") {
+        unfit = itemsUnfit(value);
+      }
+    }
     return unfit === undefined
       ? { ok: true, value }
       : { ok: false, error: unfit };
@@ -1377,7 +1645,8 @@ class SealedRun implements SealedRunKind {
   /**
    * Notes how step `step` ended, fresh or replayed: a catch that took the
    * failure pending ends it; a deadline's enter step's deadline is kept
-   * for its sleep; a failure, past its retries, is pending, as a catch
+   * for its sleep; a loop's enter step's items open its loop (`#loops`);
+   * a failure, past its retries, is pending, as a catch
    * would see it (a catch step's own, or one of no task's, none may take).
    */
   stepEnded(
@@ -1388,7 +1657,7 @@ class SealedRun implements SealedRunKind {
     if (this.#running === step) {
       this.#running = undefined;
     }
-    const sealed = this.#steps.get(step);
+    const sealed = this.#stepOf(step);
     const task = sealed?.task;
     if (!outcome.ok) {
       this.#pendingBy = takenBy;
@@ -1404,32 +1673,52 @@ class SealedRun implements SealedRunKind {
       }
       return;
     }
-    if (isDecisionTask(task)) {
-      this.#decisionEnded(task, sealed?.kind, outcome.value);
+    if (sealed?.kind === undefined || task === undefined) {
       return;
     }
-    if (sealed?.kind === "enter" && task !== undefined && sleepsUntil(task)) {
-      const until = deadlineRecordSchema.safeParse(outcome.value).data?.until;
+    const place = placeOf(task.id, sealed.path);
+    if (isDecisionTask(task)) {
+      this.#decisionEnded(place, sealed.kind, outcome.value);
+      return;
+    }
+    if (sealed.kind === "enter") {
+      this.#entered(task, place, outcome.value);
+    }
+  }
+
+  /**
+   * Keeps what task `task`'s enter step at `place` recorded, `value`: a
+   * deadline's, for its sleep; a loop's items, which open its loop.
+   */
+  #entered(task: SealedTask, place: string, value: unknown): void {
+    if (sleepsUntil(task)) {
+      const until = deadlineRecordSchema.safeParse(value).data?.until;
       if (until !== undefined) {
-        this.#deadlines.set(task.id, until);
+        this.#deadlines.set(place, until);
+      }
+    } else if (task.kind === "for") {
+      const items = itemsRecordSchema.safeParse(value).data?.items;
+      if (items !== undefined) {
+        this.#loops.set(place, { count: items.length, current: -1 });
       }
     }
   }
 
   /**
-   * Keeps what decision task `task`'s step of kind `kind` recorded,
-   * `value`, as checked when it ran (`#recordChecked`): what its enter
-   * step asks, and the decision its task step opened.
+   * Keeps what the step of kind `kind` of the decision task at `place`
+   * (`placeOf`: each item of a loop has its own) recorded, `value`, as
+   * checked when it ran (`#recordChecked`): what its enter step asks, and
+   * the decision its task step opened.
    */
   #decisionEnded(
-    task: DecisionTask,
+    place: string,
     kind: string | undefined,
     value: unknown
   ): void {
     if (kind === "enter") {
       const record = decisionRecordSchema.safeParse(value);
       if (record.success) {
-        this.#asks.set(task.id, {
+        this.#asks.set(place, {
           recipients: recipientsOf(record.data.recipients),
           prompt: promptOf(record.data.prompt),
           input: record.data.input,
@@ -1438,7 +1727,7 @@ class SealedRun implements SealedRunKind {
     } else if (kind === "task") {
       const opened = openedSchema.safeParse(value);
       if (opened.success) {
-        this.#opened.set(task.id, opened.data.decision);
+        this.#opened.set(place, opened.data.decision);
       }
     }
   }
@@ -1449,8 +1738,11 @@ class SealedRun implements SealedRunKind {
    * decision's deadline, closing it then, whatever its code asked.
    */
   decisionWait(step: string, wait: DecisionWait): DecisionWait | Error {
-    const task = this.#steps.get(step)?.task;
-    const opened = task === undefined ? undefined : this.#opened.get(task.id);
+    const sealed = this.#stepOf(step);
+    const opened =
+      sealed?.task === undefined
+        ? undefined
+        : this.#opened.get(placeOf(sealed.task.id, sealed.path));
     if (opened === undefined || wait.decision !== opened) {
       return tampering(
         `Step "${step}" waits only for the decision its task opened.`
@@ -1469,7 +1761,7 @@ class SealedRun implements SealedRunKind {
     step: string,
     outcome: DecisionOutcome
   ): Promise<DecisionOutcome> {
-    const task = this.#steps.get(step)?.task;
+    const task = this.#stepOf(step)?.task;
     if (!isDecisionTask(task)) {
       throw new Error(`Step "${step}" is no decision task's`);
     }
@@ -1506,7 +1798,7 @@ class SealedRun implements SealedRunKind {
     error: StepError,
     round: number
   ): RetryOffer | undefined {
-    const sealed = this.#steps.get(step);
+    const sealed = this.#stepOf(step);
     const task = sealed?.task;
     if (task === undefined || sealed?.kind === "catch") {
       return undefined;
@@ -1640,10 +1932,10 @@ class SealedRun implements SealedRunKind {
   async #decisionStep(
     attempt: StepAttempt,
     kind: string
-  ): Promise<DecisionTask> {
+  ): Promise<{ task: DecisionTask; place: string }> {
     const refuse = async (message: string): Promise<never> =>
       await this.#host.refuseIn(attempt, tampering(message), "decision");
-    const sealed = this.#steps.get(attempt.step);
+    const sealed = this.#stepOf(attempt.step);
     const task = sealed?.task;
     if (!isDecisionTask(task) || sealed?.kind !== kind) {
       return await refuse(
@@ -1657,7 +1949,7 @@ class SealedRun implements SealedRunKind {
       return await refuse(`Step "${attempt.step}" makes its call once.`);
     }
     this.#called.add(attempt);
-    return task;
+    return { task, place: placeOf(task.id, sealed.path) };
   }
 
   /**
@@ -1675,8 +1967,8 @@ class SealedRun implements SealedRunKind {
     return await settle(async () => {
       this.#host.requireUntampered();
       await this.#host.requireCurrent(attempt, "decision");
-      const task = await this.#decisionStep(attempt, "task");
-      const asks = this.#asks.get(task.id);
+      const { task, place } = await this.#decisionStep(attempt, "task");
+      const asks = this.#asks.get(place);
       const opening = openingSchema.safeParse(request);
       if (
         asks === undefined ||
@@ -1747,8 +2039,8 @@ class SealedRun implements SealedRunKind {
     return await settle(async () => {
       this.#host.requireUntampered();
       await this.#host.requireCurrent(attempt, "decision");
-      const task = await this.#decisionStep(attempt, "ask");
-      const opened = this.#opened.get(task.id);
+      const { task, place } = await this.#decisionStep(attempt, "ask");
+      const opened = this.#opened.get(place);
       if (opened === undefined || decision !== opened || reminder !== false) {
         return await this.#host.refuseIn(
           attempt,
@@ -1823,7 +2115,7 @@ class SealedRun implements SealedRunKind {
       await this.#host.requireCurrent(attempt, "connection");
       const refuse = async (message: string): Promise<never> =>
         await this.#host.refuseIn(attempt, tampering(message), "connection");
-      const { task, kind } = this.#steps.get(attempt.step) ?? {};
+      const { task, kind } = this.#stepOf(attempt.step) ?? {};
       const template =
         task?.kind === "call" && kind === "task"
           ? callTemplateOf(task.call)
