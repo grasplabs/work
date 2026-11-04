@@ -1005,6 +1005,8 @@ interface Connected {
 /** What a frame runs, and what its bridge reaches. */
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
+  /** How long `open` may take before the start gives up (`timed-out`). */
+  openMs: number;
   /**
    * Joins the connection the frame goes over: the tab's (`tabLink`), or
    * one of its own, closed with the frame (`ownLink`).
@@ -1132,7 +1134,7 @@ const runFrame = <Bundle extends FrameCode>(
     const bundle = await inTime(
       "opened",
       link.retrying(source.open),
-      screenLimits.openMs
+      source.openMs
     );
     // Stopped meanwhile: nothing more is started, as nothing would stop it.
     if (stopped.signal.aborted) {
@@ -1280,6 +1282,7 @@ export const appScreen = (
   confirmLink: ConfirmLink,
   opening: ScreenOpening
 ): Omit<FrameSource<ScreenBundle>, "join"> => ({
+  openMs: screenLimits.openMs,
   open: async (session) => {
     try {
       return await session.screens.open(
@@ -1498,14 +1501,14 @@ export const supersededRetryMs = 250;
  * `open`, asked again while core says a newer load of the same preview
  * replaced it (another tab, or this one before its draft changed again):
  * core loads one at a time with the newest waiting, so asking again joins
- * the line, until the page's wait for the build (`openMs`) is spent.
+ * the line, until the page's wait for a preview (`previewOpenMs`) is spent.
  */
 export const openPreview = async <T>(
   open: () => Promise<T>,
   pause: (ms: number) => Promise<void> = pauseFor,
   now: () => number = Date.now
 ): Promise<T> => {
-  const endsAt = now() + screenLimits.openMs;
+  const endsAt = now() + screenLimits.previewOpenMs;
   for (;;) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one load at a time
@@ -1558,6 +1561,7 @@ export const runPreview = (
               appVersion
             )
         ),
+      openMs: screenLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
       // let go of them, so only closing the connection when the preview

@@ -150,16 +150,14 @@ const parseModules = async (
 export const platformCodeReadMs = 10_000;
 
 /**
- * Platform code read once per isolate: the compiler's, the package
- * builder's and the module sets every App imports, by assets binding and
- * then by what it is and its release's version. It is the release's, so
- * a build doesn't read 15 to 28 MB of it from the assets again, and many
- * builds at once don't each hold their own copy in core's 128 MB isolate. Only a read that worked is kept.
- * Reads running now are shared by the same keys: builds that start
- * together share one, for as long as a read may take (`sharedRun`), so
- * one whose request was cancelled holds no other build.
+ * A read of platform code from the assets, shared by the builds that ask
+ * for it while it runs, by assets binding and then by what is read and
+ * its release's version, so builds that start together hold one copy,
+ * for as long as a read may take (`sharedRun`): one whose request was
+ * cancelled holds no other. With `keep`, what was read stays for the
+ * isolate's life (only a read that worked); without, it goes once read.
  */
-const memoiser = <T>() => {
+const reader = <T>(keep: boolean) => {
   const done = new WeakMap<Fetcher, Map<string, T>>();
   const running = new WeakMap<Fetcher, Map<string, SharedRun<T>>>();
   return async (
@@ -168,7 +166,6 @@ const memoiser = <T>() => {
     read: () => Promise<T>
   ): Promise<T> => {
     const reads = done.get(assets) ?? new Map<string, T>();
-    done.set(assets, reads);
     const kept = reads.get(key);
     if (kept !== undefined) {
       return kept;
@@ -176,29 +173,45 @@ const memoiser = <T>() => {
     const reading = running.get(assets) ?? new Map<string, SharedRun<T>>();
     running.set(assets, reading);
     const code = await sharedRun(reading, key, platformCodeReadMs, read);
-    reads.set(key, code);
+    if (keep) {
+      reads.set(key, code);
+      done.set(assets, reads);
+    }
     return code;
   };
 };
 
-/** Loader isolates' code, read once per isolate (`memoiser`). */
-const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
+/**
+ * Loader isolates' code, never kept (`reader`): the compiler's source is
+ * 22 MB as a string, its kit 11 MB of types, and esbuild's WebAssembly 14
+ * MB, while core's isolate has 128 MB for everything it does, the chat's
+ * agent and the connections of the people on it included. Kept for good
+ * in every isolate that ever built, they left too little for the rest,
+ * and core ran out of memory (staging, November 2026). Only the Loader
+ * needs them, to start an isolate: the compiler's stays warm under its
+ * release's name (`startAppCompiler`), and the Loader asks for its code
+ * only when it isn't, so a warm build reads none of it.
+ */
+const workerCodeRead = reader<WorkerLoaderWorkerCode>(false);
 
-/** esbuild's WebAssembly, read once per isolate (`memoiser`). */
-const memoisedWasm = memoiser<ArrayBuffer>();
+/** esbuild's WebAssembly, never kept (`workerCodeRead`). */
+const wasmRead = reader<ArrayBuffer>(false);
 
 /**
  * esbuild's WebAssembly, as the compiler (for a preview's entries) and the
- * package builder both load it: read once per isolate for both, as it is
- * the largest file either reads.
+ * package builder both load it: one read shared by both while it runs,
+ * as it is the largest file either reads.
  */
 const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
-  await memoisedWasm(
+  await wasmRead(
     assets,
     compilerAssets.esbuildWasm,
     async () =>
       await readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm")
   );
+
+/** jq's WebAssembly, kept (`reader`): 1 MB, loaded by every workflow isolate. */
+const jqWasmRead = reader<ArrayBuffer>(true);
 
 /**
  * jq's WebAssembly (the workflow SDK's `evaluate`), as every workflow
@@ -206,29 +219,27 @@ const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
  * per isolate.
  */
 export const jqWasm = async (assets: Fetcher): Promise<ArrayBuffer> =>
-  await memoisedWasm(
+  await jqWasmRead(
     assets,
     compilerAssets.jqWasm,
     async () => await readCompilerBytes(assets, compilerAssets.jqWasm, "wasm")
   );
 
-/** The module sets every App imports, read once per isolate (`memoiser`). */
-const memoisedModules = memoiser<KitModules>();
+/**
+ * The module sets every App imports, kept (`reader`): every screen build
+ * picks its closure from them, and they are a few MB each.
+ */
+const modulesRead = reader<KitModules>(true);
 
 /**
  * A set of modules from the static assets: each is read once per isolate,
- * as every App imports the same set (`memoiser`); a failed read isn't
- * kept.
+ * as every App imports the same set (`reader`); a failed read isn't kept.
  */
 const readModules = async (
   assets: Fetcher,
   file: string
 ): Promise<KitModules> =>
-  await memoisedModules(
-    assets,
-    file,
-    async () => await parseModules(assets, file)
-  );
+  await modulesRead(assets, file, async () => await parseModules(assets, file));
 
 /** The kit's modules, which every App's modules import: one set per release. */
 export const kitModules = async (assets: Fetcher): Promise<KitModules> =>
@@ -258,8 +269,8 @@ export const workflowSdkModules = async (
 export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.serverSdkModules);
 
-/** The agent's reference, read once per isolate (`memoiser`). */
-const memoisedReference = memoiser<Readonly<Record<string, string>>>();
+/** The agent's reference, read once per isolate (`reader`): 2 MB, read at each of its tools' calls. */
+const referenceRead = reader<Readonly<Record<string, string>>>(true);
 
 /**
  * The SDK's and the UI kit's sources, as App code is type-checked against
@@ -269,7 +280,7 @@ const memoisedReference = memoiser<Readonly<Record<string, string>>>();
 export const referenceFiles = async (
   assets: Fetcher
 ): Promise<Readonly<Record<string, string>>> =>
-  await memoisedReference(assets, compilerAssets.reference, async () => {
+  await referenceRead(assets, compilerAssets.reference, async () => {
     const parsed: unknown = JSON.parse(
       await readCompilerFile(assets, compilerAssets.reference, "json")
     );
@@ -306,7 +317,7 @@ export const isolateSettings = {
 const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
-  await memoisedWorker(assets, `compiler:${version}`, async () => {
+  await workerCodeRead(assets, `compiler:${version}`, async () => {
     const [source, kitJson, wasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
@@ -372,17 +383,21 @@ export interface PlatformCode {
   cpuMs: number;
 }
 
-/** The sandbox host's platform code, read once per isolate (`memoiser`). */
-const memoisedCode = memoiser<PlatformCode>();
+/**
+ * The sandbox host's platform code, read once per isolate (`reader`):
+ * on-prem, where core runs on plain workerd with no Loader to keep the
+ * compiler warm, so every build hands it over.
+ */
+const platformCodeRead = reader<PlatformCode>(true);
 
 /**
  * The App compiler's code, read from core's static assets once per
- * isolate (`memoisedCode`): the sandbox host runs one call per process,
+ * isolate (`platformCodeRead`): the sandbox host runs one call per process,
  * so nothing there stays warm. The kit goes as its JSON text, which core
  * never parses.
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
-  await memoisedCode(assets, `compiler:${version}`, async () => {
+  await platformCodeRead(assets, `compiler:${version}`, async () => {
     const [source, kit, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
@@ -424,7 +439,7 @@ export const startPackageBuilder = async (
   loader: WorkerLoader,
   assets: Fetcher
 ): Promise<Service<PackageBuilder>> => {
-  const code = await memoisedWorker(
+  const code = await workerCodeRead(
     assets,
     `package-builder:${version}`,
     async () => {
@@ -454,7 +469,7 @@ export const startPackageBuilder = async (
 export const packageBuilderCode = async (
   assets: Fetcher
 ): Promise<PlatformCode> =>
-  await memoisedCode(assets, `package-builder:${version}`, async () => {
+  await platformCodeRead(assets, `package-builder:${version}`, async () => {
     const [source, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
       esbuildWasmOf(assets),

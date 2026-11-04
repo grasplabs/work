@@ -4,6 +4,7 @@ import {
   loadAppCompiler,
   packageBuilderCode,
   packageBuilderSettings,
+  startAppCompiler,
   startPackageBuilder,
 } from "@grasp-os/compiler";
 import type { PlatformCode, Diagnostic } from "@grasp-os/compiler";
@@ -209,6 +210,12 @@ const refusalOf = async (
         : String(error)
   );
 
+/** Whether `compiler` checks an empty draft's screens: it ran. */
+const checked = async (compiler: unknown): Promise<string> => {
+  const answer = await callStub(compiler, "check", ["screens", {}]);
+  return Array.isArray(answer) ? "checked" : JSON.stringify(answer);
+};
+
 describe(
   "the platform's isolates that read App code and packages",
   { timeout: 60_000 },
@@ -236,43 +243,56 @@ describe(
       });
     });
 
-    it("read their code from the assets once per isolate, however many builds load them", async () => {
-      // Core's static assets, noting each file read: a fresh binding, so
-      // nothing read before this test is kept for it.
+    it("read the compiler's code only to start its isolate, and keep none of it: once for builds that start together, never for a build on the warm one", async () => {
+      // Core keeps none of it (compiler.js is 22 MB as a string, kit.json
+      // 11 MB, esbuild.wasm 14 MB, in a 128 MB isolate): only the Loader
+      // needs it, to start the compiler's isolate. Core's static assets,
+      // noting each file read: a fresh binding, so no read before this
+      // test is shared with it.
       const read: string[] = [];
       const assets: Fetcher = {
         fetch: async (...args: Parameters<Fetcher["fetch"]>) => {
-          read.push(new URL(new Request(...args).url).pathname);
+          const path = new URL(new Request(...args).url).pathname;
+          read.push(path.slice(path.lastIndexOf("/") + 1));
           return await env.ASSETS.fetch(...args);
         },
         connect: env.ASSETS.connect.bind(env.ASSETS),
       };
-      const loads = await Promise.all(
-        Array.from({ length: 3 }, async () => ({
-          compiler: await loadAppCompiler(env.LOADER, assets),
-          builder: await startPackageBuilder(env.LOADER, assets),
-        }))
-      );
-      // Each builder loaded from the code kept: it still runs.
-      const inspected = await Promise.all(
-        loads.map(
-          async ({ builder }) =>
-            await callStub(builder, "inspect", [{ limits: {}, packages: [] }])
+      // Three builds start fresh isolates together: one read of each file.
+      const fresh = await Promise.all(
+        Array.from(
+          { length: 3 },
+          async () => await loadAppCompiler(env.LOADER, assets)
         )
       );
+      // Each answers a check: its isolate started from the code read.
+      const checks = await Promise.all(
+        fresh.map(async (compiler) => await checked(compiler))
+      );
+      const together = read.toSorted();
+      // The warm one: started once, then found loaded by its name, so the
+      // second build reads nothing.
+      await checked(startAppCompiler(env.LOADER, assets));
+      const started = read.length;
+      const warm = await checked(startAppCompiler(env.LOADER, assets));
+      const warmRead = read.slice(started);
+      // Nothing was kept: a fresh isolate after them reads it all again.
+      const before = read.length;
+      const anew = await checked(await loadAppCompiler(env.LOADER, assets));
       expect({
-        files: read
-          .map((file) => file.slice(file.lastIndexOf("/") + 1))
-          .toSorted(),
-        inspected,
+        together,
+        checks,
+        warm,
+        warmRead,
+        anew,
+        anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        files: [
-          "compiler.js",
-          "esbuild.wasm",
-          "kit.json",
-          "package-builder.js",
-        ],
-        inspected: [[], [], []],
+        together: ["compiler.js", "esbuild.wasm", "kit.json"],
+        checks: ["checked", "checked", "checked"],
+        warm: "checked",
+        warmRead: [],
+        anew: "checked",
+        anewRead: ["compiler.js", "esbuild.wasm", "kit.json"],
       });
     });
 

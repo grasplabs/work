@@ -23,8 +23,9 @@ import type { ScreenMounted, ScreenReady } from "@grasp-os/shared/screens";
 
 /**
  * Which stage of a screen's start: `opened` (core handed over the build,
- * `screenLimits.openMs`), then the frame's two (`screenLimits.stageMs`
- * each).
+ * within its source's `openMs`: `screenLimits.openMs` for an App's screen,
+ * `previewOpenMs` for a draft's preview), then the frame's two
+ * (`screenLimits.stageMs` each).
  */
 export type Stage = "opened" | "ready" | "mounted";
 
