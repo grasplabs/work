@@ -82,23 +82,27 @@ export const stamp = action({
   args: {
     title: noteFields.title,
     pauseMs: v.number().integer().min(0).max(5000).default(0),
-    // Once saved, it answers only after a read of its note is refused, as
-    // once its release is revoked: the caller's signal, not a time to race.
-    untilRefused: v.boolean().default(false),
+    // Once saved, it answers only once a read of its note is refused
+    // because its release was revoked: the caller's signal, not a time to
+    // race. Its reads are bounded by an invocation's nested calls (64, half
+    // a second apart, so over 30 s), and any other refusal fails it.
+    untilRevoked: v.boolean().default(false),
   },
   returns: v.object({ id: v.id("notes"), token: v.string() }),
   uses: [create, get],
   handler: async (ctx, args) => {
     await pause(args.pauseMs);
     const id = await ctx.runMutation(create, { title: args.title, body: "" });
-    if (args.untilRefused) {
+    if (args.untilRevoked) {
       try {
         for (;;) {
           await ctx.runQuery(get, { id });
-          await pause(20);
+          await pause(500);
         }
-      } catch {
-        // Refused: it answers now.
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "version.revoked")) {
+          throw error;
+        }
       }
     }
     return { id, token: crypto.randomUUID() };
@@ -221,7 +225,7 @@ export const apiOf = (release: Release) => ({
   >(release, "notes.remove"),
   echo: referenceTo<{ word?: string }, string, "action">(release, "notes.echo"),
   stamp: referenceTo<
-    { title: string; pauseMs?: number; untilRefused?: boolean },
+    { title: string; pauseMs?: number; untilRevoked?: boolean },
     { id: Id<"notes">; token: string },
     "action"
   >(release, "notes.stamp"),

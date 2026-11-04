@@ -527,10 +527,10 @@ describe("the session client", { timeout: 120_000 }, () => {
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
     const keyed = { idempotencyKey: "made-under-v1" };
-    // It saves at once, then answers only once its reads are refused:
-    // after its release is revoked below.
+    // It saves at once, then answers only once a read is refused because
+    // its release is revoked, below.
     const running = failureOf(
-      client.action(api.stamp, { title: "Ran", untilRefused: true }, keyed)
+      client.action(api.stamp, { title: "Ran", untilRevoked: true }, keyed)
     );
     await expect
       .poll(async () => await titles(client, api))
