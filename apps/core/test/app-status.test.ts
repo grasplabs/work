@@ -118,7 +118,7 @@ const { boundApp } = jsonWorkflowAppsOf(idp);
  * independent workflow bound that holds an hour, and the App's grant to
  * start it.
  */
-const holdingApp = async () => await boundApp({ hold: "PT1H" });
+const holdingApp = async () => await boundApp({ hold: "1 hour" });
 
 type Holding = Awaited<ReturnType<typeof holdingApp>>;
 
@@ -139,7 +139,7 @@ const startedFrom = async (
 /** A run of the App's workflow, started from its screen, asleep in its hold. */
 const holdingRun = async (holding: Holding): Promise<string> => {
   const runId = await startedFrom(holding, holding.builder);
-  await sleeping(runId, "task:hold");
+  await sleeping(runId, "hold:task");
   return runId;
 };
 

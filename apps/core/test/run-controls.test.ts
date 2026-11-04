@@ -149,16 +149,16 @@ const holdDeadline = async (run: string): Promise<number | undefined> =>
 
 /** A run of the workflow, asleep in its hold of an hour. */
 const holding = async () => {
-  const bound = await boundApp({ hold: "PT1H" });
+  const bound = await boundApp({ hold: "1 hour" });
   const screen = await screenAsking(bound.builder, bound.app, bound.reference);
   const runId = await screen.start();
-  await sleeping(runId, "task:hold");
+  await sleeping(runId, "hold:task");
   return { ...bound, screen, runId };
 };
 
 /** A run of the workflow whose start the engine never took: still starting. */
 const neverStarted = async () => {
-  const bound = await boundApp({ hold: "PT1H" });
+  const bound = await boundApp({ hold: "1 hour" });
   const screen = await screenAsking(bound.builder, bound.app, bound.reference);
   const runId = await whileEngineRefuses(
     () => true,
@@ -210,7 +210,7 @@ describe(
       };
       // The repair sends the start again, then the pause once it started.
       await repairResourceStarts(env, pastFirstRepair());
-      await sleeping(runId, "task:hold");
+      await sleeping(runId, "hold:task");
       await repairResourceTerminations(env, pastFirstRepair());
       await until(async () => (await liveStatus(runId)) === "paused");
       await until(async () => await allApplied(runId));

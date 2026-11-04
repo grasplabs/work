@@ -328,7 +328,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
 
   it("wait out a lineage whose active time an attempt under way holds, then run the step", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT3S"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("3 seconds"));
     // The run another attempt in the lineage is of, as a child's would be.
     const other = await liveLineage(builder);
 

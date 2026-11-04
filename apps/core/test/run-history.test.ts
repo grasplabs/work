@@ -56,8 +56,8 @@ describe("a JSON workflow run's history", () => {
 
   it("tells a wait as waiting while the run sleeps, and as reached, with its end, once it slept", async () => {
     const builder = await signedIn("builder");
-    const sleeping = await publishedWorkflow(builder, greetingTasks("PT1H"));
-    const slept = await publishedWorkflow(builder, greetingTasks("PT1S"));
+    const sleeping = await publishedWorkflow(builder, greetingTasks("1 hour"));
+    const slept = await publishedWorkflow(builder, greetingTasks("1 second"));
     const sleepingRun = await startedBy(builder, sleeping.id);
     const sleptRun = await startedBy(builder, slept.id);
     await runOnce(

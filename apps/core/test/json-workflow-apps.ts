@@ -14,8 +14,8 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 import { z } from "zod";
@@ -38,7 +38,7 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // an App's own workflow (workflow-apps.ts) in a test:
 //
 //   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
-//   const { builder, app, workflow, reference } = await boundApp({ hold: "PT1H" });
+//   const { builder, app, workflow, reference } = await boundApp({ hold: "1 hour" });
 //   const lease = await screenOf(builder, app);
 //   const { runId } = startedOf(await called(builder, app, lease, startCommand(reference)));
 //   await called(builder, app, lease, controlCommand(reference, "pause", runId));
@@ -47,7 +47,7 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // or, for a run a person starts without an App:
 //
 //   const builder = await signedIn("builder");
-//   const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+//   const { id } = await publishedWorkflow(builder, greetingTasks("1 hour"));
 //   const runId = await startedBy(builder, id);
 //   const run = await endedRun(builder, id, runId);
 //
@@ -60,61 +60,66 @@ export const settles = { timeout: 30_000, interval: 50 };
 
 /** A JSON object schema of `properties`, each required, and nothing else. */
 export const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** The contract every workflow here keeps: input `{ who }`, output `{ status }`. */
-const greetingContract = {
-  input: { schema: objectSchema({ who: { type: "string" } }) },
-  output: { schema: objectSchema({ status: { type: "string" } }) },
-};
+/** What a greeting ends with: `{ status: "Hello, <who>" }`. */
+const greeting = { $expr: '"Hello, " + input.who' };
 
-/** The tasks of a workflow that waits `hold` (an ISO duration), if any, then greets. */
-export const greetingTasks = (hold?: string): unknown[] => [
-  ...(hold === undefined ? [] : [{ hold: { wait: hold } }]),
-  { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+/**
+ * A step `id` that runs and ends at once: a raise its `if` skips for
+ * anyone with a name, so a run's history has a step of it.
+ */
+export const passing = (id: string, title?: string) => ({
+  id,
+  ...(title === undefined ? {} : { title }),
+  type: "raise",
+  if: { $expr: 'input.who === ""' },
+  error: { type: "urn:grasp:error:nameless", status: 422 },
+});
+
+/**
+ * The steps of a workflow that waits `hold` (`"1 hour"`), if any, then
+ * greets (`greet`), titled `title` if given.
+ */
+export const greetingTasks = (hold?: string, title?: string): unknown[] => [
+  ...(hold === undefined ? [] : [{ id: "hold", type: "wait", for: hold }]),
+  passing("greet", title),
 ];
 
 /**
- * A definition of `name` running `tasks`, input `{ who }` and output
- * `{ status }`, with the catalog `bindings` it declares (a decision's, a
- * model's), at `semver`.
+ * A grasp-workflow/1 definition running `steps`, input `{ who }` and
+ * output `{ status }` (`status`, a greeting unless said), with the
+ * catalog `bindings` it declares (a model's, say).
  */
 export const definitionOf = (
-  name: string,
-  tasks: unknown[],
+  steps: unknown[],
   {
-    bindings = {},
-    semver = "1.0.0",
-  }: { bindings?: Record<string, unknown>; semver?: string } = {}
+    bindings,
+    status = greeting,
+  }: { bindings?: Record<string, unknown>; status?: unknown } = {}
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: semver,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    ...greetingContract,
-    do: tasks,
+    ...(bindings === undefined ? {} : { bindings }),
+    steps,
   });
 
-/** A greeting workflow's definition: it waits `hold`, if any, then greets. */
-export const greetingOf = (
-  name: string,
-  hold?: string,
-  semver = "1.0.0"
-): string => definitionOf(name, greetingTasks(hold), { semver });
+/**
+ * A greeting workflow's definition: it waits `hold`, if any, then greets.
+ * `label` titles its greeting, so one version's document differs from
+ * another's.
+ */
+export const greetingOf = (hold?: string, label?: string): string =>
+  definitionOf(greetingTasks(hold, label));
 
 /**
  * A workflow of `by`'s, created and published as version 1 through their
@@ -128,9 +133,7 @@ export const publishedWorkflow = async (
   const workflow = await by.api.workflowResources.create(`flow-${unique()}`);
   await by.api.workflowResources.publish(workflow.id, {
     definition:
-      typeof tasks === "function"
-        ? tasks(workflow.name)
-        : definitionOf(workflow.name, tasks),
+      typeof tasks === "function" ? tasks(workflow.name) : definitionOf(tasks),
     basedOn: null,
   });
   return { id: workflow.id, name: workflow.name };
@@ -257,8 +260,8 @@ export const decidingWorkflow = async (
       v.union(v.null(), v.object({ comment: v.string() })).descriptor
     ),
   });
-  const workflow = await publishedWorkflow(builder, (name) =>
-    definitionOf(name, around(decisionTasks(recipient, timeout, remindAfter)), {
+  const workflow = await publishedWorkflow(builder, () =>
+    definitionOf(around(decisionTasks(recipient, timeout, remindAfter)), {
       bindings: { approval: { kind: "decision", contract } },
     })
   );
@@ -502,7 +505,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
       sharing?.workflow ??
       (await publishedWorkflow(
         builder,
-        definition ?? ((name) => greetingOf(name, hold))
+        definition ?? (() => greetingOf(hold))
       ));
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     await builder.api.workflowResources.bindToApp(workflow.id, {
@@ -642,11 +645,10 @@ export const following = async (
  * to `end` once done. An ended run's attempts are fenced (quotas.ts).
  */
 export const liveLineage = async (by: Person) => {
-  const { id } = await publishedWorkflow(by, greetingTasks("PT1H"));
+  const { id } = await publishedWorkflow(by, greetingTasks("1 hour"));
   const run = await startedBy(by, id);
   await vi.waitFor(async () => {
-    const trace = await by.api.workflowResources.runTrace(id, run);
-    if (trace.steps.length === 0) {
+    if ((await liveStatus(run)) !== "waiting") {
       throw new Error("The engine hasn't journaled the wait yet");
     }
   }, settles);
@@ -672,29 +674,25 @@ export const liveLineage = async (by: Person) => {
  */
 export const askedModel = "mistral/mistral-large-latest";
 
-/** A task that asks the model binding `reader` for a line to greet `who` with. */
+/** A step that asks the model binding `reader` for a line to greet `who` with. */
 export const askTask = {
-  ask: {
-    call: "grasp.model",
-    with: {
-      binding: "reader",
-      instructions: "Greet them.",
-      input: { who: "${ $workflow.input.who }" },
-      outputSchema: objectSchema({ line: { type: "string" } }),
-    },
-    export: { as: "${ {line: .line} }" },
-  },
+  id: "ask",
+  type: "agent",
+  binding: "reader",
+  instructions: "Greet them.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
 };
 
-/** The tasks of a workflow that asks its model for a line, then ends with it. */
-export const askingTasks = (): unknown[] => [
-  askTask,
-  { greet: { set: { status: "${ $context.line }" } } },
-];
+/** What a workflow that asks its model ends with: the line it answered. */
+export const askedLine = { $expr: "steps.ask.output.line" };
+
+/** The steps of a workflow that asks its model for a line, then ends with it. */
+export const askingTasks = (): unknown[] => [askTask];
 
 /**
  * A workflow of `builder`'s, published as version 1, running `tasks`
- * (`askingTasks` unless said) with a model binding `reader`, which
+ * (`askingTasks` unless said, ending with `status`) with a model binding `reader`, which
  * `admin` approves to `model` (`askedModel` unless said): catalog
  * contract, definition and approval each through their session.
  */
@@ -702,16 +700,18 @@ export const askingWorkflow = async (
   admin: Person,
   builder: Person,
   tasks: unknown[] = askingTasks(),
-  model: string = askedModel
+  model: string = askedModel,
+  status: unknown = askedLine
 ): Promise<{ id: string; name: string; contract: string }> => {
   const contract = `reader-${unique()}`;
   await admin.api.workflowResources.publishContract({
     key: contract,
     kind: "model",
   });
-  const workflow = await publishedWorkflow(builder, (name) =>
-    definitionOf(name, tasks, {
+  const workflow = await publishedWorkflow(builder, () =>
+    definitionOf(tasks, {
       bindings: { reader: { kind: "model", contract } },
+      status,
     })
   );
   await admin.api.workflowResources.approveBinding(workflow.id, {

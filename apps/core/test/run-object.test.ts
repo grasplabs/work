@@ -85,9 +85,9 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
 
   it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 hour"));
     const run = await startedBy(builder, id);
-    await sleeping(run, "task:hold");
+    await sleeping(run, "hold:task");
 
     const kept = await runInDurableObject(runObject(run), (_object, state) => {
       const marks = triedOnceIn(state.storage.sql);
@@ -148,14 +148,14 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
 
   it("finishes a screen's cancel the engine refused to stop, once asked again or at the next repair, audited once", async () => {
     const { builder, app, workflow, reference } = await boundApp({
-      hold: "PT1H",
+      hold: "1 hour",
     });
     const lease = await screenOf(builder, app);
     const runIn = async () => {
       const { runId } = startedOf(
         await called(builder, app, lease, startCommand(reference))
       );
-      await sleeping(runId, "task:hold");
+      await sleeping(runId, "hold:task");
       return runId;
     };
     const cancelled = async (runId: string) =>

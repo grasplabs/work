@@ -1,5 +1,4 @@
 import type { WaitingFeed, WaitingKind } from "@grasp-os/shared/waiting";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
@@ -9,6 +8,7 @@ import {
   decidingWorkflow,
   decisionOf,
   endLiveResourceRuns,
+  greetingOf,
   jsonWorkflowAppsOf,
   startedBy,
 } from "./json-workflow-apps.ts";
@@ -32,35 +32,6 @@ const slow = { timeout: 60_000 };
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
-
-/** A JSON schema of an object with `properties`, each required. */
-const objectOf = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A greeting workflow's definition at `version`, as the lifecycle tests publish one. */
-const greetingOf = (name: string, version: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectOf({ who: { type: "string" } }) },
-    output: { schema: objectOf({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
 
 /** The feed's items of `kind`, for `person`. */
 const itemsOf = async <Kind extends WaitingKind>(
@@ -332,7 +303,7 @@ describe("what waits", slow, () => {
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
       await workflows.publish(workflow.id, {
-        definition: greetingOf(workflow.name, `${version}.0.0`),
+        definition: greetingOf(undefined, `Version ${version}`),
         basedOn,
       });
     }

@@ -34,12 +34,12 @@ describe("an independent JSON workflow's run", { timeout: 60_000 }, () => {
 
   it("fails at its next step once the person it acts for has left", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("P1D"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 day"));
     const runId = await startedBy(builder, id);
-    await sleeping(runId, "task:hold");
+    await sleeping(runId, "hold:task");
     // Gone while the run waits: its next step doesn't run.
     const rejoin = await leave(builder.userId);
-    await woken(runId, "task:hold");
+    await woken(runId, "hold:task");
     await finished(runId);
     await rejoin();
     const run = await endedRun(builder, id, runId);

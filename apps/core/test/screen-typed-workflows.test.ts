@@ -379,7 +379,7 @@ describe(
     });
 
     it("publishes what a run waits on with its status: its task's sleep while it runs, nothing once it has ended", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -631,7 +631,7 @@ describe(
     });
 
     it("cancels a run with a receipt answered again under its key", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -691,7 +691,7 @@ describe(
     });
 
     it("pauses and resumes a run, each receipt answered again under its key and audited under the App's screen for the person", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -818,7 +818,7 @@ describe(
     });
 
     it("keeps a stalled pause applying until a snapshot settles it, refuses a resume meanwhile, and lets a cancel supersede it", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -930,7 +930,7 @@ describe(
     });
 
     it("joins a pause still applying when asked again under another key, applying the one receipt", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1004,7 +1004,7 @@ describe(
     });
 
     it("answers a retry of a pause that joined another that pause's receipt, never undoing a resume admitted since", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1090,7 +1090,7 @@ describe(
     });
 
     it("supersedes a stalled pause a newer control overtook, never sending it", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1143,7 +1143,7 @@ describe(
     });
 
     it("lets a cancel that lost its write to a pause admitted at once win all the same", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1246,7 +1246,7 @@ describe(
     });
 
     it("never applies a resume at once over a pause that reached the engine while the resume was being decided", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1362,7 +1362,7 @@ describe(
     });
 
     it("writes one receipt and one audit event for two overlapping requests under one key of a pause the run is already past", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1459,7 +1459,7 @@ describe(
     });
 
     it("applies a stalled pause at the next repair, the run's snapshot moving on from applying to paused", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1540,7 +1540,7 @@ describe(
 
     it("shows a run only to the person the App started it for: another member of the App, an admin and a made-up ID see none", async () => {
       const { builder, admin, app, reference } = await boundApp({
-        hold: "PT1H",
+        hold: "1 hour",
       });
       const colleague = await signedIn("builder");
       await env.DB.prepare(
@@ -1596,7 +1596,7 @@ describe(
     });
 
     it("refuses a reference of another contract or release, input the declaration doesn't take, a watch sent as a call and a command sent as a watch, starting nothing", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const wire = wireOf(reference);
       const commandWatched = await following(builder, app, lease, {
@@ -1645,7 +1645,7 @@ describe(
 
     it("offers nothing once the App's start grant is revoked, and refuses its starts and cancels then", async () => {
       const { builder, admin, app, grant, reference } = await boundApp({
-        hold: "PT1H",
+        hold: "1 hour",
       });
       const lease = await screenOf(builder, app);
       const read = readWorkflowReference(reference);
@@ -1688,7 +1688,7 @@ describe(
     });
 
     it("starts and shows nothing of another version the alias was bound to since the seal", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const read = readWorkflowReference(reference);
@@ -1698,7 +1698,7 @@ describe(
       // Version 2, bound with no seal: the release's references were made
       // for version 1.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf(fixture.workflowName, undefined, "2.0.0"),
+        definition: greetingOf(undefined, "Version 2"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -1735,7 +1735,7 @@ describe(
     });
 
     it("tells a screen already following a run as the App's start grant is revoked and given again", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, admin, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -1767,7 +1767,7 @@ describe(
     });
 
     it("never shows a run as cancellable under a revision read after the grant was revoked", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, admin, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -1837,7 +1837,7 @@ describe(
     });
 
     it("gives a second subscription to a run the revision the first already has", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const handle = await workflowChannel(
         screenClient(builder, app, lease)
@@ -1864,7 +1864,7 @@ describe(
     });
 
     it("refuses a run's watch and offers no start once the alias is rebound, then shows both again once rebound back, with nothing else changing", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -1891,7 +1891,7 @@ describe(
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf(fixture.workflowName, "PT1H", "2.0.0"),
+        definition: greetingOf("1 hour", "Version 2"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -1979,7 +1979,7 @@ describe(
     });
 
     it("shows nothing of a screen's run but why while its alias is bound elsewhere, and the run again once bound back", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -1999,7 +1999,7 @@ describe(
       const before = shown();
       // Bound away: the next read, which another run's end causes, refuses.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf(fixture.workflowName, "PT1H", "2.0.0"),
+        definition: greetingOf("1 hour", "Version 2"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -2167,7 +2167,7 @@ describe(
     });
 
     it("shows App B nothing of App A's run of the same workflow, and refuses its cancel", async () => {
-      const appA = await boundApp({ hold: "PT1H" });
+      const appA = await boundApp({ hold: "1 hour" });
       const appB = await boundApp({ sharing: appA.sharing });
       const { builder } = appA;
       const leaseA = await screenOf(builder, appA.app);
@@ -2207,7 +2207,7 @@ describe(
 
     it("refuses an App's workflows to its own server code's callers and to a portable host", async () => {
       const { builder, admin, app, reference } = await boundApp({
-        hold: "PT1H",
+        hold: "1 hour",
       });
       const { generation } = await admin.api.dataPolicy.read(app);
       await admin.api.dataPolicy.classify(app, "ordinary", generation);
@@ -2278,7 +2278,7 @@ describe(
     });
 
     it("fences a screen whose release was revoked at its run's next change", async () => {
-      const fixture = await boundApp({ hold: "PT1H" });
+      const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const { lease, version } = await builder.api.screens.open(app, "desk");
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2318,7 +2318,7 @@ describe(
     });
 
     it("applies a cancel whose stop never went out at the next repair, settling its receipt", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2386,7 +2386,7 @@ describe(
 
     it("cancels a run the engine refuses to terminate at once: it runs nothing more, and ends cancelled with its receipt applied, with no repair", async () => {
       // Its wait is over well before a minute's repair would come.
-      const { builder, app, reference } = await boundApp({ hold: "PT2S" });
+      const { builder, app, reference } = await boundApp({ hold: "2 seconds" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2394,7 +2394,7 @@ describe(
       const stop = channel.followRun(read, handle.runId, () => {
         // Read below.
       });
-      await sleeping(handle.runId, "task:hold");
+      await sleeping(handle.runId, "hold:task");
       const events = await auditedDuring(async () => {
         const answered = await whileEngineRefuses(
           (method) => method === "terminate",
@@ -2494,7 +2494,7 @@ describe(
     });
 
     it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
-      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await screenOf(builder, app);
       const start = JSON.stringify({
         workflow: wireOf(reference),
@@ -2587,13 +2587,13 @@ describe(
       }) => Promise<unknown>
     ) => {
       const { builder, app, reference, workflow } = await boundApp({
-        hold: "PT1H",
+        hold: "1 hour",
       });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
       const handle = await channel.start(read, { who: "Ada" });
-      await sleeping(handle.runId, "task:hold");
+      await sleeping(handle.runId, "hold:task");
       const holds = gate();
       rollingBackRun(handle.runId, {
         ...compensated,
@@ -2604,7 +2604,7 @@ describe(
       const stop = channel.followRun(read, handle.runId, () => {
         // Read below.
       });
-      await woken(handle.runId, "task:hold");
+      await woken(handle.runId, "hold:task");
       await end?.(handle.runId);
       await vi.waitFor(() => {
         expect(channel.peekRun(read, handle.runId).value?.status).toBe(
@@ -2697,13 +2697,13 @@ describe(
 
     it("ends a cancelled run whose compensation failed as workflow.compensation_failed, though a stop comes before its end is told", async () => {
       const { builder, app, reference, workflow } = await boundApp({
-        hold: "PT1H",
+        hold: "1 hour",
       });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
       const { runId } = await channel.start(read, { who: "Ada" });
-      await sleeping(runId, "task:hold");
+      await sleeping(runId, "hold:task");
       const holds = gate();
       rollingBackRun(runId, {
         ends: "sleeps",
@@ -2711,7 +2711,7 @@ describe(
         holds,
         held: { name: "task:hold", ms: 3_600_000 },
       });
-      await woken(runId, "task:hold");
+      await woken(runId, "hold:task");
       await sleeping(runId, "after-charge");
       const release = heldEnd(runId);
       await runInstance(runId).terminate({ rollback: true });

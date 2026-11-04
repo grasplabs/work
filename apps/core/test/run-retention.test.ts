@@ -345,9 +345,9 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
 
   it("never touches a run that hasn't ended, paused or not, and one a sweep passed goes on to keep all it did", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 hour"));
     const runId = await startedBy(builder, id, { who: transcript });
-    await sleeping(runId, "task:hold");
+    await sleeping(runId, "hold:task");
     const started = await receiptOf(runId);
 
     // While it sleeps, long after it started.
@@ -364,7 +364,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     await runQuarterHourTasks({}, daysOn(400));
     const whilePaused = await receiptOf(runId);
     // Resumed, it finishes as if no sweep had come by.
-    await woken(runId, "task:hold");
+    await woken(runId, "hold:task");
     const ended = await endedRun(builder, id, runId);
 
     expect({

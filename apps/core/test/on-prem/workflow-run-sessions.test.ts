@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -85,31 +84,22 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
     ]);
     const key = `extractor-${unique()}`;
     await admin.api.workflowResources.publishContract({ key, kind: "model" });
-    const { id } = await publishedWorkflow(builder, (name) =>
+    const { id } = await publishedWorkflow(builder, () =>
       definitionOf(
-        name,
         [
           {
-            extract: {
-              call: "grasp.model",
-              with: {
-                binding: "extractor",
-                instructions: "Read the total in cents.",
-                input: { text: "Total 12.34 EUR" },
-                outputSchema: objectSchema({ total: { type: "integer" } }),
-              },
-              export: { as: "${ {total: .total} }" },
-            },
-          },
-          {
-            answer: {
-              set: {
-                status: '${ "Total " + ($context.total * 2 | tostring) }',
-              },
-            },
+            id: "extract",
+            type: "agent",
+            binding: "extractor",
+            instructions: "Read the total in cents.",
+            input: { text: "Total 12.34 EUR" },
+            output: objectSchema({ total: { type: "integer" } }),
           },
         ],
-        { bindings: { extractor: { kind: "model", contract: key } } }
+        {
+          bindings: { extractor: { kind: "model", contract: key } },
+          status: { $expr: '"Total " + steps.extract.output.total * 2' },
+        }
       )
     );
     // The organization's model, and the workflow's binding to it, approved:
@@ -133,14 +123,14 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
 
   it("lets go of a run's session while it waits, so the workflow's next run loads, and resumes it in a new one", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("P1D"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 day"));
     const first = await startedBy(builder, id);
-    await sleeping(first, "task:hold");
+    await sleeping(first, "hold:task");
     // The workflow's runs hold one session at a time: a second run loads
     // only once the first's, waiting, was let go of.
     const second = await startedBy(builder, id, { who: "Grace" });
-    await sleeping(second, "task:hold");
-    await woken(first, "task:hold");
+    await sleeping(second, "hold:task");
+    await woken(first, "hold:task");
     const run = await endedRun(builder, id, first);
     expect({ status: run.status, output: run.output }).toStrictEqual({
       status: "completed",
