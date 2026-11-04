@@ -4,8 +4,10 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
+import { queryMaxScannedBytes } from "@grasp-os/shared/store-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
@@ -42,7 +44,11 @@ export default defineSchema({
   salaries: defineTable({ person: v.string(), amount: v.number() })
     .index("by_person", ["person"])
     .sensitive(),
-  notes: defineTable({ text: v.string(), salary: v.id("salaries").optional() }),
+  notes: defineTable({
+    text: v.string(),
+    salary: v.id("salaries").optional(),
+    payslips: v.array(v.id("salaries")).optional(),
+  }),
 });
 `,
   "operations/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
@@ -80,6 +86,39 @@ export const notes = query({
       ? await ctx.db.query("notes").with("salary").take(100)
       : await ctx.db.query("notes").take(100);
     return found.length;
+  },
+});
+
+/** As many salaries as asked, each of as many letters: their IDs. */
+export const stuff = mutation({
+  args: { count: v.number(), size: v.number() },
+  returns: v.array(v.id("salaries")),
+  handler: async (ctx, args) => {
+    const ids = [];
+    for (let at = 0; at < args.count; at += 1) {
+      ids.push(await ctx.db.insert("salaries", { person: "x".repeat(args.size), amount: at }));
+    }
+    return ids;
+  },
+});
+
+/** A note naming the payslips given. */
+export const bundle = mutation({
+  args: { payslips: v.array(v.id("salaries")) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", { text: "Bundle", payslips: args.payslips }),
+});
+
+/** The notes with their payslips, or the code that read failed with, caught. */
+export const bundles = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    try {
+      return String((await ctx.db.query("notes").with("payslips").take(100)).length);
+    } catch (error) {
+      return String(Reflect.get(Object(error), "code"));
+    }
   },
 });
 
@@ -127,7 +166,7 @@ export const byPerson = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { byPerson, highest, leak, note, notes, pay, probe, salaries } from "./operations/pay.ts";
+import { bundle, bundles, byPerson, highest, leak, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -139,7 +178,7 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { pay: { byPerson, highest, leak, note, notes, pay, probe, salaries } },
+  operations: { pay: { bundle, bundles, byPerson, highest, leak, note, notes, pay, probe, salaries, stuff } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -218,6 +257,15 @@ const readsOf = async (
     Object.fromEntries(keys.map((key) => [key, detail[key]]))
   );
 };
+
+/**
+ * Payslips enough that their bytes pass a read's scan bound
+ * (`queryMaxScannedBytes`), made a mutation's staged bytes at a time.
+ */
+const payslipLetters = 120_000;
+const payslipsPerBatch = 5;
+const payslipBatches =
+  Math.ceil(queryMaxScannedBytes / payslipLetters / payslipsPerBatch) + 1;
 
 /** Pays `count` people. */
 const payroll = async (payrollFixture: Payroll, count: number) => {
@@ -453,26 +501,45 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
   it("can't be kept off the record by App code failing, or catching what a read failed with", async () => {
     const fixture = await payrollApp();
     await payroll(fixture, 2);
+    // Another App's note naming more payslips than one read may scan the
+    // bytes of.
+    const bulky = await payrollApp();
+    const payslips: string[] = [];
+    for (let batch = 0; batch < payslipBatches; batch += 1) {
+      // One batch after the other, each a mutation's worth of bytes.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const stuffed = await call(bulky, "pay.stuff", {
+        count: payslipsPerBatch,
+        size: payslipLetters,
+      });
+      payslips.push(...z.array(z.string()).parse(valueOf(stuffed)));
+    }
+    await call(bulky, "pay.bundle", { payslips });
     const after = await logHead();
 
     const leaked = await call(fixture, "pay.leak");
     const probed = await call(fixture, "pay.probe");
-    const recorded = await readsOf(fixture.app, after, [
-      "function",
-      "reads",
-      "rows",
-    ]);
+    const bundled = await call(bulky, "pay.bundles");
+    const recorded = [
+      ...(await readsOf(fixture.app, after, ["function", "reads", "rows"])),
+      ...(await readsOf(bulky.app, after, ["function", "reads", "rows"])),
+    ];
 
     expect({
       leaked: valueOf(leaked),
       probed: valueOf(probed),
+      bundled: valueOf(bundled),
       recorded: recorded.toSorted((one, other) =>
         String(one.function).localeCompare(String(other.function))
       ),
     }).toStrictEqual({
       leaked: "leak.failed",
       probed: "data.not_unique",
+      bundled: "data.scan_limit",
       recorded: [
+        // The payslips' statement ran, and failed past the bytes bound
+        // before it answered one.
+        { function: "pay.bundles", reads: 1, rows: 0 },
         { function: "pay.leak", reads: 1, rows: 2 },
         // `unique` read two records to know there were more than one.
         { function: "pay.probe", reads: 1, rows: 2 },

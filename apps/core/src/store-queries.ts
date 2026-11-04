@@ -1182,6 +1182,9 @@ const recordsById = (
     JSON.stringify([...ids]),
     ...scoped.params
   );
+  // Read once its statement ran, whatever it answers or however it fails
+  // (`data.scan_limit` past the bytes bound, below).
+  sql.answered(target.name, 0);
   for (const row of rows) {
     scannedBytes(scan, row.bytes);
     found.set(row.record_id, documentOf(target, row, row.value_json));
