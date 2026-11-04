@@ -7107,8 +7107,8 @@ msgid "Its new fields' defaults are being filled in. Releases that need it can b
 msgstr "Se están rellenando los valores predeterminados de sus nuevos campos. Las versiones que lo necesitan podrán hacerse actuales cuando termine."
 
 #: src/workflows/files-and-apps.tsx
-msgid "Its next start is refused until an admin approves {alias} again. Runs already started keep what they started with."
-msgstr "Su próximo inicio se rechaza hasta que un administrador vuelva a aprobar {alias}. Las ejecuciones ya iniciadas conservan aquello con lo que empezaron."
+msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
+msgstr "Su próximo inicio se rechaza hasta que un administrador vuelva a aprobar {alias}, y las ejecuciones ya iniciadas fallan en su próxima llamada a través de él."
 
 #: src/engines/store-change-errors.ts
 msgid "its output doesn't fit the table"

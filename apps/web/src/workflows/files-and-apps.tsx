@@ -47,8 +47,8 @@ import type { WorkflowApps } from "./workflow-apps.ts";
 // that waits for their approval, approved here, as a start refused for it
 // says; each catalog binding of the version a start runs now, with what an
 // admin approved it to reach, who and when, which the organization's
-// admins revoke here (the binding then waits again, and its starts are
-// refused); the apps it works in, each with whether it is connected; the
+// admins revoke here (the binding then waits again, its starts are refused
+// and runs already started fail at their next call through it); the apps it works in, each with whether it is connected; the
 // Knowledge it reads, with the names its bindings give it; and the files
 // its runs wrote, what they are and never what they hold.
 // Each part is read on its own, each time the tab opens, and says on its
@@ -278,8 +278,8 @@ const Waiting = ({
 
 /**
  * Each catalog binding of version `version`, `declared`, with the approval
- * of `approvals` that serves it, if any: what it reaches, who approved it
- * and when, and, when `revokes`, Revoke; `onChanged` once one is revoked.
+ * of `approvals` that serves it, if any: what it reaches (a decision's
+ * deciders by `names` and `teams`), who approved it and when, and, when `revokes`, Revoke; `onChanged` once one is revoked.
  */
 const Approved = ({
   workflow,
@@ -287,6 +287,7 @@ const Approved = ({
   declared,
   approvals,
   names,
+  teams,
   revokes,
   onChanged,
 }: {
@@ -295,6 +296,7 @@ const Approved = ({
   declared: WorkflowResourceVersion["bindings"];
   approvals: readonly WorkflowBindingApproval[];
   names: Names;
+  teams: ReadonlyMap<string, string>;
   revokes: boolean;
   onChanged: () => void;
 }) => {
@@ -370,7 +372,12 @@ const Approved = ({
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex min-w-0 flex-col gap-1">
-                  <span>{targetWords(approval.target, "", names.people)}</span>
+                  <span>
+                    {targetWords(approval.target, "", {
+                      people: names.people,
+                      teams,
+                    })}
+                  </span>
                   <span className="text-muted-foreground">
                     <Trans>
                       Approved by {approver} on {at}
@@ -382,7 +389,7 @@ const Approved = ({
                     busy={busy}
                     button={t`Revoke`}
                     confirm={t`Revoke`}
-                    description={t`Its next start is refused until an admin approves ${alias} again. Runs already started keep what they started with.`}
+                    description={t`Its next start is refused until an admin approves ${alias} again, and runs already started fail at their next call through it.`}
                     label={t`Revoke ${alias}`}
                     onConfirm={() => {
                       void revoke(alias, approval.id);
@@ -510,6 +517,7 @@ export const FilesAndApps = ({
   const [pending, setPending] = useState<Loaded<PendingWorkflowBindings[]>>();
   const [approvals, setApprovals] =
     useState<Loaded<WorkflowBindingApproval[]>>();
+  const [teams, setTeams] = useState<ReadonlyMap<string, string>>(new Map());
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
   const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
@@ -579,6 +587,16 @@ export const FilesAndApps = ({
     void latest(
       async (session) => await session.workflowResources.bindings(workflow),
       setApprovals
+    );
+    // The teams a decision's deciders may name, for its builders and the
+    // organization's admins: anyone else, or a read that fails, sees IDs.
+    void read(
+      async (session) => await session.workflows.teams(),
+      (loaded) => {
+        if (loaded.state === "ready") {
+          setTeams(new Map(loaded.data.map(({ id, name }) => [id, name])));
+        }
+      }
     );
     if (approves) {
       void latest(
@@ -664,6 +682,7 @@ export const FilesAndApps = ({
                   approvals={data.approvals}
                   declared={data.declared}
                   names={names}
+                  teams={teams}
                   onChanged={() => {
                     void changed();
                   }}

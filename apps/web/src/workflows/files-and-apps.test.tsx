@@ -127,18 +127,33 @@ const crmApproval = (id: string): WorkflowBindingApproval => ({
   approvedAt: "2026-11-04T09:00:00.000Z",
 });
 
+/** An admin's active approval of `approval` for `version`, answered by `deciders`. */
+const decisionApproval = (
+  version: number,
+  deciders: string[]
+): WorkflowBindingApproval => ({
+  id: `approval-decision-${version}`,
+  alias: "approval",
+  kind: "decision",
+  contractId: "invoice-approval",
+  fingerprint: "fingerprint-approval",
+  target: { kind: "decision", deciders },
+  reviewedVersion: version,
+  status: "active",
+  approvedBy: "user-grace",
+  approvedAt: "2026-11-04T09:00:00.000Z",
+});
+
 /**
- * Core as the tab reaches it, keeping each approval and revocation asked
- * of it, `crm` approved from the start when `crmApproved`; its first read
- * of the connections catalog answers only once `answerFirstCatalog` lets
- * it, as a cold catalog can take seconds.
+ * Core as the tab reaches it, holding the active approvals `initial` and
+ * keeping each approval and revocation asked of it; its first read of the
+ * connections catalog answers only once `answerFirstCatalog` lets it, as a
+ * cold catalog can take seconds.
  */
-const fakeCore = (crmApproved = false) => {
+const fakeCore = (initial: WorkflowBindingApproval[] = []) => {
   const approved: { id: string; input: { alias: string } }[] = [];
   const revoked: { id: string; approval: string }[] = [];
-  const active: WorkflowBindingApproval[] = crmApproved
-    ? [crmApproval("approval-crm-first")]
-    : [];
+  const active = [...initial];
   const asked: string[] = [];
   const firstCatalog = Promise.withResolvers<boolean>();
   let catalogReads = 0;
@@ -152,7 +167,11 @@ const fakeCore = (crmApproved = false) => {
     ): Promise<PendingWorkflowBindings[]> => {
       await Promise.resolve();
       asked.push("pendingBindingsOf");
-      const done = new Set(active.map(({ alias }) => alias));
+      const done = new Set(
+        active
+          .filter(({ reviewedVersion }) => reviewedVersion === 2)
+          .map(({ alias }) => alias)
+      );
       const left = waiting.filter(({ alias }) => !done.has(alias));
       return left.length === 0
         ? []
@@ -386,7 +405,11 @@ describe("a workflow's Files and apps tab", () => {
   });
 
   it("lists each binding of the version that runs now with what an admin approved and who, and lets an admin revoke one once they confirm, after which it waits again", async () => {
-    const { session, revoked, answerFirstCatalog } = fakeCore(true);
+    // `approval` approved for version 1 only, which no longer runs.
+    const { session, revoked, answerFirstCatalog } = fakeCore([
+      crmApproval("approval-crm-first"),
+      decisionApproval(1, ["role:admin"]),
+    ]);
     answerFirstCatalog();
     await shown(session, true);
     const before = { crm: listed("crm"), approval: listed("approval") };
@@ -425,15 +448,24 @@ describe("a workflow's Files and apps tab", () => {
     });
   });
 
-  it("shows anyone else what is approved, but never a way to revoke it", async () => {
-    const { session, answerFirstCatalog } = fakeCore(true);
+  it("shows anyone else what is approved, a decision's deciders by name, but never a way to revoke it", async () => {
+    const { session, answerFirstCatalog } = fakeCore([
+      crmApproval("approval-crm-first"),
+      decisionApproval(2, [
+        "person:user-grace",
+        "team:team-finance",
+        "role:admin",
+      ]),
+    ]);
     answerFirstCatalog();
     await shown(session, false);
 
     expect({
+      approval: listed("approval")?.[2],
       crm: listed("crm"),
       revoke: buttons("Revoke crm").length,
     }).toStrictEqual({
+      approval: "Answered by Grace Hopper, Finance, and Admin",
       crm: [
         "crm",
         "connector: crm-contacts",

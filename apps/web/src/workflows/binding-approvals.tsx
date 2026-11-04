@@ -19,6 +19,7 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { roleLabel } from "../labels.ts";
 import {
   PeopleTeamsPicker,
   readPeopleAndTeams,
@@ -46,15 +47,35 @@ export type PendingBinding = PendingWorkflowBindings["bindings"][number];
 
 type Offered = PendingBinding["offered"][number];
 
+/** The names of people and teams, by ID, where they are known. */
+export interface KnownNames {
+  people: ReadonlyMap<string, string>;
+  teams: ReadonlyMap<string, string>;
+}
+
+const noNames: KnownNames = { people: new Map(), teams: new Map() };
+
+/** A decision's decider (`person:`, `team:` or `role:` and an ID), in words. */
+const deciderWords = (decider: string, known: KnownNames): string => {
+  const [type, id = ""] = decider.split(":");
+  if (type === "person") {
+    return known.people.get(id) ?? id;
+  }
+  if (type === "team") {
+    return known.teams.get(id) ?? id;
+  }
+  return roleLabel(id);
+};
+
 /**
  * What `target` reaches, in words: `label` where core named it (an offer's),
- * else what the target itself names; `people` names a decision's deciders
- * where they are known.
+ * else what the target itself names, a decision's deciders by the names
+ * `known` holds.
  */
 export const targetWords = (
   target: WorkflowBindingTarget,
   label = "",
-  people: ReadonlyMap<string, string> = new Map()
+  known: KnownNames = noNames
 ): string => {
   if (label !== "") {
     return label;
@@ -75,10 +96,7 @@ export const targetWords = (
     }
     case "decision": {
       const deciders = formatList(
-        target.deciders.map((decider) => {
-          const [type, id = ""] = decider.split(":");
-          return type === "person" ? (people.get(id) ?? id) : id;
-        })
+        target.deciders.map((decider) => deciderWords(decider, known))
       );
       return i18n._(msg`Answered by ${deciders}`);
     }
