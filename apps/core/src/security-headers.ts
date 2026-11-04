@@ -139,7 +139,8 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  * already read through that App's functions, which reach only the
  * connections and resources an admin granted the App
  * (screen-delivery.ts). What this policy adds is that the code which runs
- * is the build core leased, and nothing it writes leaves the frame.
+ * is the build core leased, and that nothing it writes leaves the frame
+ * but through its App (a declared link opens as app-link-route.ts says).
  */
 export const screenFramePolicy = (scripts: readonly string[]): string =>
   policy({

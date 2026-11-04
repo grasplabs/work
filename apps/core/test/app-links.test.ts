@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { ordinaryData } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -138,11 +139,22 @@ const screenOf = async (
  * A builder's App declaring links, current and published (a draft is its
  * builders' alone), open in their screen.
  */
-const openedApp = async (files = linkedFiles()) => {
+const openedApp = async (
+  files = linkedFiles(),
+  {
+    ordinary = true,
+  }: {
+    /** Whether an admin classified the App's data `ordinary`. */
+    ordinary?: boolean;
+  } = {}
+) => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const version = await released(builder, id, files);
   await builder.api.apps.publish(id);
+  if (ordinary) {
+    await ordinaryData(id);
+  }
   return {
     app: id,
     version,
@@ -457,6 +469,32 @@ describe("an App's external links", { timeout: 120_000 }, () => {
         screen.channel.open("help", "https://help.example.com/", "activation")
       )
     ).resolves.not.toBe("opened");
+  });
+
+  it("opens links of an App whose data isn't ordinary only once the person confirmed each, the whole URL shown", async () => {
+    const { app, screen } = await openedApp(linkedFiles(), { ordinary: false });
+    const url = "https://help.example.com/?q=what-the-page-read";
+
+    const checked = await screen.channel.check("help", url);
+    const clicked = await outcomeOf(
+      screen.channel.open("help", url, "activation")
+    );
+    const confirmed = await screen.channel.open("help", url, "confirmation");
+    const recorded = await linksOpened(app);
+
+    expect({
+      checked,
+      clicked,
+      confirmed: confirmed.url,
+      recorded: recorded.map(({ detail }) => detail),
+    }).toStrictEqual({
+      checked: { url, origin: "https://help.example.com", confirm: true },
+      clicked: "link.confirmation_required",
+      confirmed: url,
+      recorded: [
+        expect.objectContaining({ intent: "confirmation", restricted: false }),
+      ],
+    });
   });
 
   it("opens a restricted App's links only once the person confirmed each", async () => {

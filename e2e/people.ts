@@ -616,6 +616,26 @@ export const revokeNewestRelease = async (app: string): Promise<void> => {
 };
 
 /**
+ * Classifies the App's data as `ordinary`, as the configured admin: its
+ * pages' links then open on a click, without the person confirming each.
+ */
+export const ordinaryData = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { generation } = await api.dataPolicy.read(app);
+    await api.dataPolicy.classify(app, "ordinary", generation);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
  * Writes `files` to the App (null deletes one), commits them and makes
  * that version current.
  */

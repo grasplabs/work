@@ -1668,7 +1668,7 @@ msgstr "Een pagina is wat mensen van deze app openen. Vraag Grasp in de chat van
 
 #: src/activity/audit-words.ts
 msgid "A page was refused the App's data"
-msgstr "Een pagina werden de gegevens van de app geweigerd"
+msgstr "Aan een pagina zijn de gegevens van de app geweigerd"
 
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"

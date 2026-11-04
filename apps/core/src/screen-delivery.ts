@@ -36,8 +36,11 @@ import { appHost } from "./durable-objects.ts";
 // nested document to find it, or a network, in (screen-frame.ts,
 // security-headers.ts). Nor can it post it to another window: the page
 // keeps no handle on a site that opened it (its opener policy), and a
-// message from any window but the page never reaches a screen, so
-// another App's frame beside it hears nothing. Every call it makes is
+// message from any window but the page or the frame itself never reaches
+// a screen, so another App's frame beside it hears nothing. The one way
+// out its App declares, a link to its own listed sites, opens only once
+// the person confirmed it with the whole URL shown, unless an admin
+// classified the App's data `ordinary` (app-link-route.ts). Every call it makes is
 // the person's and recorded as such.
 //
 // What the gate still refuses, read on every call and every push:

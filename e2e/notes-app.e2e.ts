@@ -13,6 +13,7 @@ import {
 import {
   apiOf,
   endSession,
+  ordinaryData,
   peopleIn,
   release,
   revokeNewestRelease,
@@ -849,6 +850,9 @@ test("a screen opens its declared help site on a click, with no opener or referr
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, linksFiles());
+  // An admin judged its data fine to go out in a link: a click opens one
+  // at once (core's app-link-route.ts; otherwise each link is confirmed).
+  await ordinaryData(app);
   const page = await pageOf(builder);
   // The help site, as the browser reaches it: what each visit sent.
   const visits: { url: string; referer: string | undefined }[] = [];
