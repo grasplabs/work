@@ -6,6 +6,7 @@
  * theirs is kept beside each answer, for the score card. Ported from the
  * prototype (grasplabs/prototype, packages/grasp: lab/play.ts).
  */
+import { factRevision } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -488,5 +489,18 @@ export const playInterview = async (
     facts: progress.facts.map((fact) => ({ ...fact, agreed: true })),
   };
   await save();
+  // They approve what was read back, as their page does: each fact at the revision they saw.
+  const standing = progress.facts.filter(({ out }) => out !== true);
+  if (standing.length > 0) {
+    await link.approve(
+      key,
+      await Promise.all(
+        standing.map(async (fact) => ({
+          id: fact.id,
+          revision: await factRevision(fact),
+        }))
+      )
+    );
+  }
   return { ...played, minutes: minutes(), ...withEvents };
 };

@@ -4,7 +4,11 @@
  * scripted. What it must get right is what the page does: keep every
  * change, read back a part at a time, and count only what was agreed to.
  */
-import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import { factRevision } from "@grasp-os/shared/interview-links";
+import type {
+  ApprovedFact,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
 import type {
   InterviewTurnRequest,
   StephenTurn,
@@ -43,6 +47,7 @@ const scriptedLink = (turns: StephenTurn[]) => {
   const asked: Asked[] = [];
   /** What the link was asked, in order: `participate:<key>`, `save` and `turn`. */
   const calls: string[] = [];
+  const approved: ApprovedFact[] = [];
   const link: Link = {
     open: async () =>
       await Promise.resolve({
@@ -55,6 +60,11 @@ const scriptedLink = (turns: StephenTurn[]) => {
       }),
     participate: async (key) => {
       calls.push(`participate:${key}`);
+      await Promise.resolve();
+    },
+    approve: async (key, facts) => {
+      calls.push(`approve:${key}:${facts.map(({ id }) => id).join(",")}`);
+      approved.push(...facts);
       await Promise.resolve();
     },
     save: async (_key, version, progress) => {
@@ -72,7 +82,7 @@ const scriptedLink = (turns: StephenTurn[]) => {
       return await Promise.resolve(next);
     },
   };
-  return { link, saved, asked, calls };
+  return { link, saved, asked, calls, approved };
 };
 
 /** Someone who says `answers` in order, and `readBack` to each part read back. */
@@ -135,6 +145,36 @@ describe("an interview played on a link", () => {
     await playInterview(link, scriptedPlayer([], ["Yes."]), { locale: "en" });
 
     expect(calls[0]).toBe("participate:device-key");
+  });
+
+  it("approves every fact still standing at the end, each at the revision it was read back at", async () => {
+    const { link, calls, approved, saved } = scriptedLink([
+      stephen({
+        say: "I'll read back what I wrote down.",
+        facts: [step("You open the invoice mail.")],
+        wants: "readback",
+      }),
+    ]);
+    await playInterview(
+      link,
+      scriptedPlayer(
+        [{ say: "I open the invoice mail.", said: ["S1"] }],
+        ["Yes."]
+      ),
+      { locale: "en" }
+    );
+    const facts = saved.at(-1)?.facts.filter(({ out }) => out !== true) ?? [];
+
+    expect(calls.at(-1)).toMatch(/^approve:device-key:/u);
+    expect(approved).toStrictEqual(
+      await Promise.all(
+        facts.map(async (fact) => ({
+          id: fact.id,
+          revision: await factRevision(fact),
+        }))
+      )
+    );
+    expect(approved.length).toBeGreaterThan(0);
   });
 
   it("says nothing and keeps nothing when taking part is refused", async () => {
