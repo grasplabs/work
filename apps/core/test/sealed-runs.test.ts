@@ -53,6 +53,7 @@ import {
 import type { StepError } from "../src/workflows/code.ts";
 import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import {
   sealedAdmission,
   sealedRun,
@@ -702,6 +703,7 @@ const ranAs = async (
     admitAttempt,
     engine = newerEngine(),
     maxModelCalls,
+    calling,
   }: {
     /** How its attempts are admitted, from the run; at once if not given. */
     admitAttempt?: (
@@ -710,11 +712,16 @@ const ranAs = async (
     engine?: Engine;
     /** Its model calls' ceiling, in place of the host's. */
     maxModelCalls?: number;
+    /** What its calls go by, from what its start froze. */
+    calling?: (frozen: CallingRun) => CallingRun;
   } = {}
 ) => {
   const loaded = await sealedRunOf(serving, runId);
-  const run =
-    maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
+  const run = {
+    ...loaded,
+    ...(maxModelCalls === undefined ? {} : { maxModelCalls }),
+    ...(calling === undefined ? {} : { calling: calling(loaded.calling) }),
+  };
   const { step, leaseOf } = engine;
   const tampered: string[] = [];
   let kind: SealedRunKind | undefined;
@@ -2216,13 +2223,15 @@ describe("a sealed run's decisions on the run host", () => {
   it("waits until the decision's deadline, whatever its code asks, and takes no answer after it", async () => {
     const { reviewer } = reviewed;
     const forReviewer = `person:${reviewer.userId}`;
-    // Code past the SDK asking to stop waiting at once: the host waits on.
+    // Code past the SDK asking to stop waiting at once, and describing it
+    // otherwise than recorded (the SDK passes it trimmed): the host asks
+    // the recorded prompt, and waits on.
     const cutShort = await reviewRun(reviewed, forReviewer);
     const waitedOn = await ranAs(
       cutShort,
       `export default { run: async (engine, input) => {
   await engine.do("review:enter", {}, async () => ({ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }));
-  const { decision } = await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve the invoice", timeout: 1000 }));
+  const { decision } = await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve it", timeout: 1000 }));
   return await engine.waitForDecision("review:task#answer", { decision, timeout: 0, last: false });
 } };`,
       {
@@ -2238,7 +2247,9 @@ describe("a sealed run's decisions on the run host", () => {
       { engine: decidingEngine(lapsed, deadlinePasses) }
     );
     const [closed] = await decisionsOf(lapsed);
+    const [described] = await decisionsOf(cutShort);
     expect({
+      described: described?.description,
       waitedOn,
       timedOut,
       status: closed?.status,
@@ -2246,6 +2257,7 @@ describe("a sealed run's decisions on the run host", () => {
         await answered(reviewer, closed?.id ?? "", { approved: true });
       }),
     }).toStrictEqual({
+      described: "Approve the invoice",
       waitedOn: {
         ended: {
           answered: true,
@@ -2337,6 +2349,32 @@ describe("a sealed run's decisions on the run host", () => {
       askRevoked: failedWith("workflow.call_denied"),
       asked: 0,
     });
+  });
+
+  it("opens no decision, and tells nobody, for a test's run: a draft's or one an App's test started", async () => {
+    const { reviewer } = reviewed;
+    const run = async (calling: (frozen: CallingRun) => CallingRun) => {
+      const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+      const ran = await ranAs(
+        runId,
+        reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
+        { calling }
+      );
+      return {
+        ran,
+        decisions: await decisionsOf(runId),
+        asked: await asksAudited(runId),
+      };
+    };
+    const opensNone = {
+      ran: failedWith("workflow.call_invalid"),
+      decisions: [],
+      asked: 0,
+    };
+    expect({
+      fixture: await run((frozen) => ({ ...frozen, fixture: true })),
+      candidate: await run((frozen) => ({ ...frozen, candidate: new Map() })),
+    }).toStrictEqual({ fixture: opensNone, candidate: opensNone });
   });
 
   it("replays a decision as it ran: the same decision, asked once, and its recorded outcome", async () => {

@@ -37,7 +37,8 @@ import { contractOf, requireShape } from "./resource-calls.ts";
 // The decisions a run of an independent workflow waits for: its
 // `grasp.decision` calls (platform specification 13.6), each on the
 // existing decision service (src/decisions/), through the decision binding
-// its start froze (GRA-941). The run host (resource-host.ts) opens one in
+// its start froze (GRA-941). A sealed run on the run host takes them the
+// same way (sealed-run.ts). The JSON host (resource-host.ts) opens one in
 // its task's enter step, waits for it durably, holding no isolate, and
 // takes its outcome in the task's call step. Threat model, and how each is
 // closed:

@@ -213,12 +213,14 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   build seals (resource-decisions.ts, `openRunDecision`): each recipient
 //   one the binding's frozen deciders cover now, never the run's own
 //   person, who can't answer it as a member of a team or role either; its
-//   authority decided again; its deadline the sealed timeout's (else what
-//   is left of the run's age), whatever its code asks. Its task step must
+//   authority decided again; its prompt the recorded one and its deadline
+//   the sealed timeout's (else what is left of the run's age), whatever
+//   its code asks. A test's run (a draft's or an App test's) opens none. Its task step must
 //   record exactly the decision the host opened in it, its asking step
 //   asks only that one, by the host's own notice (`askDeciders`: the
 //   isolate learns nobody's address), its authority decided again first,
-//   and never reminds, and its wait is
+//   once (a failure after it fails the step for good), never reminding;
+//   and its wait is
 //   for that decision only, until its deadline (`decisionWait`). The
 //   outcome is read from the decision's row, never from the event that
 //   wakes the run nor from the isolate, and taken only as the binding
@@ -549,8 +551,9 @@ const openedSchema = z.strictObject({
 const openingSchema = z.strictObject({
   step: z.string(),
   from: z.string(),
-  description: z.string().optional(),
-  // The host's own: its deadline is the sealed timeout's.
+  // The host's own: it asks the prompt its enter step recorded (which the
+  // SDK passes trimmed), until the sealed timeout's deadline.
+  description: z.unknown(),
   timeout: z.unknown(),
 });
 
@@ -1661,7 +1664,8 @@ class SealedRun implements SealedRunKind {
    * asks (`request`), from what its enter step recorded alone
    * (`openRunDecision`): its recipients the binding covers, never the
    * run's person, its deadline the sealed timeout's. Its code's `from`
-   * and description must be what was recorded; its timeout isn't read.
+   * must be the first recipient recorded; its description and timeout
+   * aren't read.
    */
   async #openDecision(
     attempt: StepAttempt,
@@ -1677,8 +1681,7 @@ class SealedRun implements SealedRunKind {
         asks === undefined ||
         !opening.success ||
         opening.data.step !== attempt.step ||
-        opening.data.from !== asks.recipients[0] ||
-        opening.data.description !== asks.prompt
+        opening.data.from !== asks.recipients[0]
       ) {
         return await this.#host.refuseIn(
           attempt,
@@ -1696,9 +1699,12 @@ class SealedRun implements SealedRunKind {
         );
       }
       const { calling, createdAt } = this.run;
-      if (calling.candidate !== undefined) {
+      // A test's run (a draft's, or one an App's test started) reaches no
+      // person: until its decisions are answered from its fixtures here,
+      // it opens none.
+      if (calling.candidate !== undefined || calling.fixture === true) {
         throw callInvalid(
-          "binding: A test run of a draft opens no decision on the run host yet."
+          "binding: A test run opens no decision on the run host yet."
         );
       }
       // Its input is shown to people other than the run's person.
@@ -1756,6 +1762,9 @@ class SealedRun implements SealedRunKind {
       await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
       await askDeciders(this.#env, calling, opened);
+      // Its people were told: a later failure of the step fails it for
+      // good, never asking them again.
+      this.#effected.add(attempt);
       return [];
     });
   }
