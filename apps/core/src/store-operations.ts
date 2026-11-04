@@ -5,7 +5,6 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { effectErrors, operationErrors } from "@grasp-os/shared/operations";
 import type { AppErrorPayload } from "@grasp-os/shared/operations";
@@ -349,13 +348,6 @@ export const declaredFingerprint = async (shape: {
     uses: [],
     tables: {},
   });
-
-/** The fingerprint of a whole set of served operations, by path, on a store. */
-export const servedFingerprint = async (
-  storeId: StoreId,
-  fingerprints: Readonly<Record<string, string>>
-): Promise<string> =>
-  await sha256Hex(canonicalJson({ storeId, operations: { ...fingerprints } }));
 
 /** The receipt of a failed call, as the consumer's code may see it. */
 export const consumerFailure = (error: AppErrorPayload): Error => {

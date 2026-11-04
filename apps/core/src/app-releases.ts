@@ -1078,7 +1078,14 @@ const sealedAppManifest = async (
   try {
     const contracts = contractsSchema.parse(JSON.parse(text));
     return readAppManifest(JSON.stringify(contracts.manifest));
-  } catch {
+  } catch (error) {
+    // A release sealed by an SDK whose manifest this one no longer reads
+    // (a hard cut) as much as one damaged: a listing skips it, logged.
+    log.warn("release.contracts_unreadable", {
+      appId: app,
+      version,
+      ...errorFields(error),
+    });
     throw versionErrors.create("version.artifact_corrupt", {
       path: generatedPaths.contracts,
     });
