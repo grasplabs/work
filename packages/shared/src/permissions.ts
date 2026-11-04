@@ -433,7 +433,7 @@ export const blueprintWorkflowMaxLength = 256 * 1024;
 /**
  * An independent workflow a built-in blueprint ships (core's
  * app-blueprints.ts): each App created from it gets a workflow of its
- * creator's own, published from `definition` (grasp-open-workflow/1 JSON)
+ * creator's own, published from `definition` (grasp-workflow/1 JSON)
  * and bound to the App under `alias`, and asks, under `binding`, for the
  * permission to start it. Never a grant: the request waits for an admin,
  * and each of the version's catalog bindings for an admin's approval.

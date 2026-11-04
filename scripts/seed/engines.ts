@@ -1,8 +1,7 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 /**
  * The demo company's domains (core's Apps), each binding independent
- * workflows that run on the local stack as they would anywhere: JSON
- * definitions in the grasp-open-workflow/1 profile, their calculations
+ * workflows that run on the local stack as they would anywhere:
+ * grasp-workflow/1 definitions, their calculations
  * in compute modules, with `workflowTest` suites in the App, calling
  * nothing outside Grasp, so a run needs no connection. Inputs stand in
  * for what a connection would bring (an email, an invoice from the
@@ -14,20 +13,12 @@ import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 
 import type { PersonKey, TeamName } from "./company.ts";
 import {
-  answerTask,
-  approvedRoute,
   boolean,
   computeBinding,
-  computeTask,
-  decisionTask,
-  integer,
-  limitParam,
+  computeStep,
   listOf,
-  number,
   objectOf,
-  personParam,
   text,
-  textOrNull,
 } from "./definitions.ts";
 import type { DefinitionParts } from "./definitions.ts";
 
@@ -77,6 +68,7 @@ export interface WorkflowSeed {
   id: string;
   /** The alias its domain App binds it under: `workflows.<alias>`. */
   alias: string;
+  /** What its domain App's screen calls it. */
   title: string;
   /**
    * Who owns it, as in the prototype, when not its domain's owner: a
@@ -119,9 +111,6 @@ export interface EngineSeed {
   agents: string;
   workflows: WorkflowSeed[];
 }
-
-/** Euros in cents, as money parameters and amounts hold them. */
-const euros = (amount: number): number => Math.round(amount * 100);
 
 /** What a person may answer a decision with: a comment, or nothing. */
 export const decisionResponse = JSON.stringify(
@@ -222,14 +211,17 @@ const clientOnboarding: WorkflowSeed = {
   owner: "nina",
   parts: {
     input: objectOf({ client: text, town: text, documents: listOf(text) }),
-    output: objectOf({
-      client: text,
-      town: text,
-      complete: boolean,
-      chase: listOf(text),
-    }),
+    output: {
+      schema: objectOf({
+        client: text,
+        town: text,
+        complete: boolean,
+        chase: listOf(text),
+      }),
+      value: { $expr: "steps.check.output" },
+    },
     bindings: { check: computeBinding("onboarding", "check") },
-    tasks: [computeTask("check-documents", "check", "${ $workflow.input }")],
+    steps: [computeStep("check", "check", "input")],
   },
   modules: { "code/onboarding.ts": onboardingModule },
   declared: {
@@ -270,125 +262,6 @@ ${failsInItsCalculation}`,
     }),
 };
 
-const summaryModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const summarise = compute({
-  input: v.object({ client: v.string(), loan: v.number(), chase: v.array(v.string()) }),
-  output: v.object({ client: v.string(), loan: v.number() }),
-  handler: ({ client, loan, chase }) => {
-    if (chase.length > 0) {
-      throw new Error(\`The file of \${client} still lacks: \${chase.join(", ")}.\`);
-    }
-    return { client, loan };
-  },
-});
-`;
-
-const mortgageFiles: WorkflowSeed = {
-  id: "mortgage-files",
-  alias: "mortgageFiles",
-  title: "Mortgage files",
-  owner: "mark",
-  parts: {
-    input: objectOf({ client: text, loan: number, chase: listOf(text) }),
-    output: objectOf({
-      client: text,
-      loan: number,
-      handedOver: boolean,
-      adviser: textOrNull,
-    }),
-    params: { advisers: personParam("Who takes files over") },
-    bindings: {
-      summarise: computeBinding("files", "summarise"),
-      accept: {
-        kind: "decision",
-        contract: "noordkade/mortgage-file-handover",
-      },
-    },
-    tasks: [
-      computeTask("summarise", "summarise", "${ $workflow.input }", "file"),
-      decisionTask("accept", {
-        binding: "accept",
-        param: "advisers",
-        prompt: '${ "Take over the file of " + $workflow.input.client }',
-        input: "${ $context.file }",
-        days: 5,
-      }),
-      approvedRoute("taken", "hand-over", "keep"),
-      answerTask(
-        "hand-over",
-        "${ $context.file + {handedOver: true, adviser: $context.decision.by} }"
-      ),
-      answerTask(
-        "keep",
-        "${ $context.file + {handedOver: false, adviser: null} }"
-      ),
-    ],
-  },
-  modules: { "code/files.ts": summaryModule },
-  decision: {
-    binding: "accept",
-    param: "advisers",
-    team: "Mortgage advice",
-    contract: "noordkade/mortgage-file-handover",
-    input: JSON.stringify(
-      v.object({ client: v.string(), loan: v.number() }).descriptor
-    ),
-  },
-  declared: {
-    input:
-      "v.object({ client: v.string(), loan: v.number(), chase: v.array(v.string()) })",
-    output:
-      "v.object({ client: v.string(), loan: v.number(), handedOver: v.boolean(), adviser: v.string().nullable() })",
-  },
-  tests: suite({
-    "hands a complete file over once an adviser takes it": `const run = await desk.start(workflows.mortgageFiles, { client: "Fam. Bakker", loan: 41500000, chase: [] });
-await decider.respond(run, "accept-ask", { approved: true });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { client: "Fam. Bakker", loan: 41500000, handedOver: true, adviser: "fixture-decider" },
-});`,
-    "keeps the file when no adviser takes it": `const run = await desk.start(workflows.mortgageFiles, { client: "T. Kok", loan: 28000000, chase: [] });
-await decider.respond(run, "accept-ask", { approved: false });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { client: "T. Kok", loan: 28000000, handedOver: false, adviser: null },
-});`,
-    "refuses a file that still lacks documents": `const run = await desk.start(workflows.mortgageFiles, { client: "R. Bos", loan: 30000000, chase: ["payslip"] });
-${failsInItsCalculation}`,
-  }),
-  sample: { client: "Fam. Bakker", loan: 41_500_000, chase: [] },
-  runs: (draw) =>
-    Array.from({ length: 16 }, (_, index) => {
-      const lacking = index % 9 === 4;
-      return {
-        by: "nina" as const,
-        input: {
-          client: draw.pick(clients),
-          loan: euros(draw.between(180, 520) * 1000),
-          chase: lacking ? ["employer statement"] : [],
-        },
-        ...(lacking
-          ? {}
-          : {
-              answer:
-                index >= 13
-                  ? "open"
-                  : {
-                      by: "mark" as const,
-                      approved: index % 6 !== 2,
-                      ...(index % 6 === 2
-                        ? {
-                            comment:
-                              "The valuation report is older than six months.",
-                          }
-                        : {}),
-                    },
-            }),
-      };
-    }),
-};
-
 const opportunityToCash: EngineSeed = {
   name: "Opportunity-to-Cash",
   process: "o2c",
@@ -406,7 +279,7 @@ From a mortgage application to a complete client file in an adviser's hands.
 - \`clientOnboarding\` checks the application for the four documents every file needs (identity, payslip, employer statement, bank statements) and opens the file with what is still to chase.
 - \`mortgageFiles\` hands a complete file to mortgage advice: an adviser takes it over, or it stays with onboarding.
 `,
-  workflows: [clientOnboarding, mortgageFiles],
+  workflows: [clientOnboarding],
 };
 
 // Issue-to-Resolution
@@ -472,9 +345,12 @@ const emailTriage: WorkflowSeed = {
   title: "Email triage",
   parts: {
     input: objectOf({ from: text, subject: text, body: text }),
-    output: objectOf({ from: text, queue: text, urgent: boolean }),
+    output: {
+      schema: objectOf({ from: text, queue: text, urgent: boolean }),
+      value: { $expr: "steps.sort.output" },
+    },
     bindings: { sort: computeBinding("triage", "sort") },
-    tasks: [computeTask("sort", "sort", "${ $workflow.input }")],
+    steps: [computeStep("sort", "sort", "input")],
   },
   modules: { "code/triage.ts": triageModule },
   declared: {
@@ -511,167 +387,6 @@ ${failsInItsCalculation}`,
     }),
 };
 
-const complaintsModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const register = compute({
-  input: v.object({ client: v.string(), about: v.string(), compensation: v.number(), received: v.string() }),
-  output: v.object({ client: v.string(), about: v.string(), acknowledgeBy: v.string() }),
-  handler: ({ client, about, received }) => {
-    // Two working days after the day it came in.
-    const due = new Date(\`\${received}T00:00:00Z\`);
-    let workingDays = 0;
-    while (workingDays < 2) {
-      due.setUTCDate(due.getUTCDate() + 1);
-      const day = due.getUTCDay();
-      if (day !== 0 && day !== 6) {
-        workingDays += 1;
-      }
-    }
-    return { client, about, acknowledgeBy: due.toISOString().slice(0, 10) };
-  },
-});
-`;
-
-const complaints: WorkflowSeed = {
-  id: "complaints",
-  alias: "complaints",
-  title: "Complaints",
-  parts: {
-    input: objectOf({
-      client: text,
-      about: text,
-      compensation: integer,
-      received: text,
-    }),
-    output: objectOf({
-      client: text,
-      about: text,
-      acknowledgeBy: text,
-      compensation: integer,
-      approvedBy: textOrNull,
-    }),
-    params: {
-      limit: limitParam("Compliance approves compensation above", 25_000),
-      compliance: personParam("Who approves compensation"),
-    },
-    bindings: {
-      register: computeBinding("complaints", "register"),
-      approval: {
-        kind: "decision",
-        contract: "noordkade/complaint-compensation",
-      },
-    },
-    tasks: [
-      computeTask("register", "register", "${ $workflow.input }", "complaint"),
-      {
-        size: {
-          switch: [
-            {
-              small: {
-                when: "${ $workflow.input.compensation <= $params.limit }",
-                then: "offer",
-              },
-            },
-            { large: { then: "approve-compensation" } },
-          ],
-        },
-      },
-      answerTask(
-        "offer",
-        "${ $context.complaint + {compensation: $workflow.input.compensation, approvedBy: null} }"
-      ),
-      decisionTask("approve-compensation", {
-        binding: "approval",
-        param: "compliance",
-        prompt: '${ "Approve compensation for " + $workflow.input.client }',
-        input:
-          "${ {client: $workflow.input.client, compensation: $workflow.input.compensation} }",
-        days: 3,
-      }),
-      approvedRoute("approved", "grant", "refuse"),
-      answerTask(
-        "grant",
-        "${ $context.complaint + {compensation: $workflow.input.compensation, approvedBy: $context.decision.by} }"
-      ),
-      answerTask(
-        "refuse",
-        "${ $context.complaint + {compensation: 0, approvedBy: null} }"
-      ),
-    ],
-  },
-  modules: { "code/complaints.ts": complaintsModule },
-  decision: {
-    binding: "approval",
-    param: "compliance",
-    team: "Compliance",
-    contract: "noordkade/complaint-compensation",
-    input: JSON.stringify(
-      v.object({ client: v.string(), compensation: v.number() }).descriptor
-    ),
-  },
-  declared: {
-    input:
-      "v.object({ client: v.string(), about: v.string(), compensation: v.number().integer(), received: v.string() })",
-    output:
-      "v.object({ client: v.string(), about: v.string(), acknowledgeBy: v.string(), compensation: v.number().integer(), approvedBy: v.string().nullable() })",
-  },
-  tests: suite({
-    "offers small compensation without asking, and acknowledges within two working days": `const run = await desk.start(workflows.complaints, { client: "K. Mulder", about: "Waiting on the phone", compensation: 2500, received: "2026-10-05" });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { client: "K. Mulder", about: "Waiting on the phone", acknowledgeBy: "2026-10-07", compensation: 2500, approvedBy: null },
-});`,
-    "acknowledges a complaint from a Friday by Tuesday": `const run = await desk.start(workflows.complaints, { client: "R. Bos", about: "A late answer", compensation: 0, received: "2026-10-09" });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { client: "R. Bos", about: "A late answer", acknowledgeBy: "2026-10-13", compensation: 0, approvedBy: null },
-});`,
-    "asks compliance for larger compensation": `const run = await desk.start(workflows.complaints, { client: "M. Hendriks", about: "The valuation", compensation: 75000, received: "2026-10-05" });
-await decider.respond(run, "approve-compensation-ask", { approved: true });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { client: "M. Hendriks", about: "The valuation", acknowledgeBy: "2026-10-07", compensation: 75000, approvedBy: "fixture-decider" },
-});`,
-  }),
-  sample: {
-    client: "M. Hendriks",
-    about: "The valuation",
-    compensation: 2500,
-    received: "2026-10-05",
-  },
-  dateInput: "received",
-  runs: (draw) =>
-    Array.from({ length: 11 }, (_, index) => {
-      const large = index % 3 !== 1;
-      return {
-        by: "lisa" as const,
-        input: {
-          client: draw.pick(clients),
-          about: draw.pick([
-            "The valuation",
-            "Waiting on the phone",
-            "A late answer",
-            "The advice fee",
-          ]),
-          compensation: large
-            ? euros(draw.between(6, 12) * 50)
-            : euros(draw.between(1, 4) * 25),
-        },
-        ...(large
-          ? {
-              answer:
-                index === 9
-                  ? "open"
-                  : {
-                      by: "joost" as const,
-                      approved: index !== 5,
-                    },
-            }
-          : {}),
-      };
-    }),
-};
-
 const issueToResolution: EngineSeed = {
   name: "Issue-to-Resolution",
   process: "i2r",
@@ -689,191 +404,10 @@ Every question and complaint that reaches customer service.
 - \`emailTriage\` puts each email from the shared inbox in the queue that answers it: file status, documents, payments, complaints, or general.
 - \`complaints\` registers a complaint with its acknowledgement deadline, and asks compliance before offering compensation above the limit.
 `,
-  workflows: [emailTriage, complaints],
+  workflows: [emailTriage],
 };
 
 // Purchase-to-Pay and Record-to-Report
-
-const suppliers = [
-  { supplier: "Kantoorhuis Utrecht", what: "Office rent", amount: 4180 },
-  { supplier: "Hypotheekdata BV", what: "Data subscription", amount: 2950 },
-  { supplier: "Brinkman ICT", what: "Laptops", amount: 1720 },
-  { supplier: "Drukkerij Noord", what: "Brochures", amount: 640 },
-  { supplier: "Eneco", what: "Energy", amount: 1315 },
-  { supplier: "KPN", what: "Phones", amount: 486 },
-  { supplier: "Schoonmaak Plus", what: "Cleaning", amount: 920 },
-  { supplier: "Juridisch Advies Groep", what: "Legal advice", amount: 3400 },
-] as const;
-
-const invoicesModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-/** The ledger account each kind of cost is booked on. */
-const accounts = [
-  { account: "4100 Housing", words: ["rent", "energy", "cleaning"] },
-  { account: "4300 Software and data", words: ["subscription", "laptops", "phones"] },
-  { account: "4500 Marketing", words: ["brochures"] },
-  { account: "4700 Advice", words: ["legal"] },
-];
-
-export const code = compute({
-  input: v.object({ supplier: v.string(), invoice: v.string(), description: v.string(), amount: v.number(), vatNumber: v.string().optional() }),
-  output: v.object({ invoice: v.string(), account: v.string() }),
-  handler: ({ supplier, invoice, description, vatNumber }) => {
-    if (!vatNumber) {
-      throw new Error(\`Invoice \${invoice} from \${supplier} has no VAT number.\`);
-    }
-    const words = description.toLowerCase();
-    const found = accounts.find(({ words: giveaways }) => giveaways.some((word) => words.includes(word)));
-    return { invoice, account: found?.account ?? "4900 Other costs" };
-  },
-});
-`;
-
-const supplierInvoices: WorkflowSeed = {
-  id: "supplier-invoices",
-  alias: "supplierInvoices",
-  title: "Supplier invoices",
-  parts: {
-    input: objectOf(
-      {
-        supplier: text,
-        invoice: text,
-        description: text,
-        amount: integer,
-        vatNumber: text,
-      },
-      ["vatNumber"]
-    ),
-    output: objectOf({
-      invoice: text,
-      account: text,
-      amount: integer,
-      approved: boolean,
-      approvedBy: textOrNull,
-    }),
-    params: {
-      limit: limitParam("Approve invoices above", 250_000),
-      approvers: personParam("Who approves invoices"),
-    },
-    bindings: {
-      code: computeBinding("invoices", "code"),
-      approval: { kind: "decision", contract: "noordkade/invoice-approval" },
-    },
-    tasks: [
-      computeTask("code", "code", "${ $workflow.input }", "coded"),
-      {
-        size: {
-          switch: [
-            {
-              small: {
-                when: "${ $workflow.input.amount <= $params.limit }",
-                then: "book",
-              },
-            },
-            { large: { then: "approve" } },
-          ],
-        },
-      },
-      answerTask(
-        "book",
-        "${ $context.coded + {amount: $workflow.input.amount, approved: true, approvedBy: null} }"
-      ),
-      decisionTask("approve", {
-        binding: "approval",
-        param: "approvers",
-        prompt:
-          '${ "Approve invoice " + $workflow.input.invoice + " from " + $workflow.input.supplier }',
-        input:
-          "${ {supplier: $workflow.input.supplier, invoice: $workflow.input.invoice, amount: $workflow.input.amount} }",
-        days: 7,
-      }),
-      approvedRoute("approved", "pay", "hold"),
-      answerTask(
-        "pay",
-        "${ $context.coded + {amount: $workflow.input.amount, approved: true, approvedBy: $context.decision.by} }"
-      ),
-      answerTask(
-        "hold",
-        "${ $context.coded + {amount: $workflow.input.amount, approved: false, approvedBy: null} }"
-      ),
-    ],
-  },
-  modules: { "code/invoices.ts": invoicesModule },
-  decision: {
-    binding: "approval",
-    param: "approvers",
-    team: "Finance",
-    contract: "noordkade/invoice-approval",
-    input: JSON.stringify(
-      v.object({
-        supplier: v.string(),
-        invoice: v.string(),
-        amount: v.number(),
-      }).descriptor
-    ),
-  },
-  declared: {
-    input:
-      "v.object({ supplier: v.string(), invoice: v.string(), description: v.string(), amount: v.number().integer(), vatNumber: v.string().optional() })",
-    output:
-      "v.object({ invoice: v.string(), account: v.string(), amount: v.number().integer(), approved: v.boolean(), approvedBy: v.string().nullable() })",
-  },
-  tests: suite({
-    "codes a small invoice and books it without asking": `const run = await desk.start(workflows.supplierInvoices, { supplier: "KPN", invoice: "KPN-2291", description: "Phones", amount: 48600, vatNumber: "NL009292056B01" });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { invoice: "KPN-2291", account: "4300 Software and data", amount: 48600, approved: true, approvedBy: null },
-});`,
-    "asks finance to approve an invoice above the limit": `const run = await desk.start(workflows.supplierInvoices, { supplier: "Kantoorhuis Utrecht", invoice: "KU-1043", description: "Office rent", amount: 418000, vatNumber: "NL812345678B01" });
-await decider.respond(run, "approve-ask", { approved: true });
-t.equal(await t.runs.untilTerminal(run), {
-  status: "completed",
-  output: { invoice: "KU-1043", account: "4100 Housing", amount: 418000, approved: true, approvedBy: "fixture-decider" },
-});`,
-    "refuses an invoice without a VAT number": `const run = await desk.start(workflows.supplierInvoices, { supplier: "Drukkerij Noord", invoice: "DN-77", description: "Brochures", amount: 64000 });
-${failsInItsCalculation}`,
-  }),
-  sample: {
-    supplier: "KPN",
-    invoice: "KPN-2291",
-    description: "Phones",
-    amount: 48_600,
-    vatNumber: "NL009292056B01",
-  },
-  runs: (draw) =>
-    Array.from({ length: 30 }, (_, index) => {
-      const { supplier, what, amount } = draw.pick(suppliers);
-      const cents = euros(amount * (0.9 + draw.next() * 0.2));
-      const asks = cents > euros(2500);
-      const noVat = index % 11 === 3;
-      const prefix = supplier
-        .split(" ")
-        .map((word) => word.charAt(0))
-        .join("");
-      return {
-        by: "jeroen" as const,
-        input: {
-          supplier,
-          invoice: `${prefix}-${1000 + index * 7}`,
-          description: what,
-          amount: cents,
-          ...(noVat
-            ? {}
-            : {
-                vatNumber: `NL8${String(index).padStart(2, "0")}315478B01`,
-              }),
-        },
-        ...(asks && !noVat
-          ? {
-              answer:
-                index >= 27
-                  ? "open"
-                  : { by: "eva" as const, approved: index % 8 !== 6 },
-            }
-          : {}),
-      };
-    }),
-};
 
 const purchaseToPay: EngineSeed = {
   name: "Purchase-to-Pay",
@@ -889,9 +423,9 @@ const purchaseToPay: EngineSeed = {
 
 Supplier invoices, from the inbox to the books.
 
-- \`supplierInvoices\` checks each supplier invoice for a VAT number, codes it to a ledger account, and asks finance to approve it when it is above the limit.
+Nothing runs here yet.
 `,
-  workflows: [supplierInvoices],
+  workflows: [],
 };
 
 const reportModule = `import { compute, v } from "@grasp-os/sdk/compute";
@@ -907,11 +441,12 @@ const sections = [
 const section = v.object({ section: v.string(), from: v.string() });
 
 export const plan = compute({
-  input: v.object({ week: v.string().nullable(), today: v.number() }),
+  input: v.object({ week: v.string().nullable() }),
   output: v.object({ week: v.string(), sections: v.array(section), due: v.string() }),
-  handler: ({ week, today }) => {
-    // The Monday of the week it ran in, unless it was given one.
-    const monday = new Date(today);
+  handler: ({ week }) => {
+    // The Monday of the week it ran in, unless it was given one: its
+    // answer is kept with the run, so a replay never reads the clock again.
+    const monday = new Date();
     monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
     return { week: week ?? monday.toISOString().slice(0, 10), sections, due: "10:00" };
   },
@@ -924,19 +459,16 @@ const weeklyReport: WorkflowSeed = {
   title: "Weekly report",
   parts: {
     input: objectOf({ week: text }, ["week"]),
-    output: objectOf({
-      week: text,
-      sections: listOf(objectOf({ section: text, from: text })),
-      due: text,
-    }),
+    output: {
+      schema: objectOf({
+        week: text,
+        sections: listOf(objectOf({ section: text, from: text })),
+        due: text,
+      }),
+      value: { $expr: "steps.plan.output" },
+    },
     bindings: { plan: computeBinding("report", "plan") },
-    tasks: [
-      computeTask(
-        "plan",
-        "plan",
-        "${ {week: ($workflow.input.week // null), today: $workflow.startedAt.epoch.milliseconds} }"
-      ),
-    ],
+    steps: [computeStep("plan", "plan", "{ week: input.week ?? null }")],
   },
   modules: { "code/report.ts": reportModule },
   declared: {
@@ -985,151 +517,6 @@ The numbers the board reads.
 
 // Risk-to-Compliance
 
-const countries = ["NL", "NL", "NL", "BE", "DE", "GB"] as const;
-
-const kycModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const screen = compute({
-  input: v.object({ client: v.string(), country: v.string(), politicallyExposed: v.boolean(), identity: v.string().optional() }),
-  output: v.object({ client: v.string(), risk: v.enum(["low", "medium", "high"]) }),
-  handler: ({ client, country, politicallyExposed, identity }) => {
-    if (!identity) {
-      throw new Error(\`No identity document to check for \${client}.\`);
-    }
-    let risk: "low" | "medium" | "high" = "medium";
-    if (politicallyExposed) {
-      risk = "high";
-    } else if (country === "NL") {
-      risk = "low";
-    }
-    return { client, risk };
-  },
-});
-`;
-
-const kycReview: WorkflowSeed = {
-  id: "kyc-review",
-  alias: "kycReview",
-  title: "KYC review",
-  parts: {
-    input: objectOf(
-      {
-        client: text,
-        country: text,
-        politicallyExposed: boolean,
-        identity: text,
-      },
-      ["identity"]
-    ),
-    output: objectOf({
-      client: text,
-      risk: text,
-      cleared: boolean,
-      clearedBy: textOrNull,
-    }),
-    params: { officers: personParam("Who clears high-risk clients") },
-    bindings: {
-      screen: computeBinding("kyc", "screen"),
-      review: { kind: "decision", contract: "noordkade/enhanced-review" },
-    },
-    tasks: [
-      computeTask("screen", "screen", "${ $workflow.input }", "screened"),
-      {
-        risk: {
-          switch: [
-            {
-              high: {
-                when: '${ $context.screened.risk == "high" }',
-                then: "enhanced-review",
-              },
-            },
-            { other: { then: "clear" } },
-          ],
-        },
-      },
-      answerTask(
-        "clear",
-        "${ $context.screened + {cleared: true, clearedBy: null} }"
-      ),
-      decisionTask("enhanced-review", {
-        binding: "review",
-        param: "officers",
-        prompt:
-          '${ "Clear " + $workflow.input.client + " after enhanced due diligence" }',
-        input: "${ $context.screened }",
-        days: 10,
-      }),
-      approvedRoute("reviewed", "cleared", "not-cleared"),
-      answerTask(
-        "cleared",
-        "${ $context.screened + {cleared: true, clearedBy: $context.decision.by} }"
-      ),
-      answerTask(
-        "not-cleared",
-        "${ $context.screened + {cleared: false, clearedBy: null} }"
-      ),
-    ],
-  },
-  modules: { "code/kyc.ts": kycModule },
-  decision: {
-    binding: "review",
-    param: "officers",
-    team: "Compliance",
-    contract: "noordkade/enhanced-review",
-    input: JSON.stringify(
-      v.object({ client: v.string(), risk: v.string() }).descriptor
-    ),
-  },
-  declared: {
-    input:
-      "v.object({ client: v.string(), country: v.string(), politicallyExposed: v.boolean(), identity: v.string().optional() })",
-    output:
-      "v.object({ client: v.string(), risk: v.string(), cleared: v.boolean(), clearedBy: v.string().nullable() })",
-  },
-  tests: suite({
-    "clears a low-risk client at once": `const run = await desk.start(workflows.kycReview, { client: "Fam. Willems", country: "NL", politicallyExposed: false, identity: "passport" });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { client: "Fam. Willems", risk: "low", cleared: true, clearedBy: null } });`,
-    "asks an officer to clear a politically exposed client": `const run = await desk.start(workflows.kycReview, { client: "S. de Jong", country: "NL", politicallyExposed: true, identity: "passport" });
-await decider.respond(run, "enhanced-review-ask", { approved: true });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { client: "S. de Jong", risk: "high", cleared: true, clearedBy: "fixture-decider" } });`,
-    "refuses a client without an identity document": `const run = await desk.start(workflows.kycReview, { client: "T. Kok", country: "NL", politicallyExposed: false });
-${failsInItsCalculation}`,
-  }),
-  sample: {
-    client: "Fam. Willems",
-    country: "NL",
-    politicallyExposed: false,
-    identity: "passport",
-  },
-  runs: (draw) =>
-    Array.from({ length: 22 }, (_, index) => {
-      const exposed = index % 5 === 2;
-      const noIdentity = index % 10 === 6;
-      return {
-        by: "nina" as const,
-        input: {
-          client: draw.pick(clients),
-          country: draw.pick(countries),
-          politicallyExposed: exposed,
-          ...(noIdentity
-            ? {}
-            : { identity: draw.pick(["passport", "identity card"]) }),
-        },
-        ...(exposed && !noIdentity
-          ? {
-              answer:
-                index === 17
-                  ? "open"
-                  : {
-                      by: "joost" as const,
-                      approved: true,
-                    },
-            }
-          : {}),
-      };
-    }),
-};
-
 const riskToCompliance: EngineSeed = {
   name: "Risk-to-Compliance",
   process: "r2c",
@@ -1144,9 +531,9 @@ const riskToCompliance: EngineSeed = {
 
 Know-your-customer checks for every new client.
 
-- \`kycReview\` screens a new client and scores the risk: low for Dutch residents, medium for clients abroad, high for politically exposed people, whom a compliance officer clears after enhanced due diligence.
+Nothing runs here yet.
 `,
-  workflows: [kycReview],
+  workflows: [],
 };
 
 /**
@@ -1168,7 +555,10 @@ Everything around employees, from hiring to leaving. Nothing runs here yet.
 
 /**
  * The prototype's domains (`lib/processes.ts`), each one of core's Apps,
- * with the workflows of the prototype's that core can run.
+ * with the workflows of the prototype's that core can run: those that ask
+ * someone to decide (mortgage handovers, complaint compensation, invoice
+ * approval, enhanced due diligence) come back once grasp-workflow/1 has
+ * its decision step.
  */
 export const engines: EngineSeed[] = [
   opportunityToCash,

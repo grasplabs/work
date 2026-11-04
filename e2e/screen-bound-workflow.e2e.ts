@@ -1,5 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
@@ -22,38 +21,25 @@ test.use({ trace: "retain-on-failure" });
 const live = { timeout: 30_000 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /**
  * A workflow that holds for an hour, then greets: a run stays running
  * until someone cancels it.
  */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      { hold: { wait: "PT1H" } },
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-    ],
-  });
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: objectSchema({ who: { type: "string" } }),
+  output: {
+    schema: objectSchema({ status: { type: "string" } }),
+    value: { status: { $expr: '"Hello, " + input.who' } },
+  },
+  steps: [{ id: "hold", type: "wait", for: "1 hour" }],
+});
 
 /**
  * The App: it declares the `followUp` workflow, and its screen drives the
@@ -147,7 +133,7 @@ const boundApp = async (
       `follow-up-${crypto.randomUUID().slice(0, 8)}`
     );
     await builds.api.workflowResources.publish(workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition,
       basedOn: null,
     });
     await builds.api.workflowResources.bindToApp(workflow.id, {

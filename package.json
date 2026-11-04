@@ -41,6 +41,7 @@
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
+    "@grasp-os/workflow-schema": "workspace:*",
     "@playwright/test": "catalog:",
     "@secretlint/secretlint-rule-preset-recommend": "catalog:",
     "@shadcn/lint": "catalog:",

@@ -353,6 +353,9 @@ importers:
       '@grasp-os/workerflow':
         specifier: workspace:*
         version: link:packages/workerflow
+      '@grasp-os/workflow-schema':
+        specifier: workspace:*
+        version: link:packages/workflow-schema
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.63.0

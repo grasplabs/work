@@ -7,7 +7,7 @@ import type {
   DeclaredPermission,
   Authority,
 } from "@grasp-os/shared/permissions";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -164,54 +164,34 @@ const guests: DeclaredPermission = {
 
 /** A JSON Schema of an object of `properties`, all required. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /**
- * A workflow a release ships with `hello`, named `name`: a model, bound
- * as `model` to the catalog's `contract`, greets its input's `who`.
+ * A workflow a release ships with `hello`: a model, bound as `model` to
+ * the catalog's `contract`, greets its input's `who`.
  */
-const greeter = (contract: string, name = "greeter"): string =>
+const greeter = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: "Greeter",
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { model: { kind: "model", contract } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ line: { type: "string" } }),
+      value: { line: { $expr: "steps.greet.output.line" } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ line: { type: "string" } }) },
-    do: [
+    bindings: { model: { kind: "model", contract } },
+    steps: [
       {
-        greet: {
-          call: "grasp.model",
-          with: {
-            binding: "model",
-            instructions: "Greet them.",
-            // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-            input: { who: "${ $workflow.input.who }" },
-            outputSchema: objectSchema({ line: { type: "string" } }),
-          },
-          // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-          export: { as: "${ {line: .line} }" },
-        },
+        id: "greet",
+        type: "agent",
+        binding: "model",
+        instructions: "Greet them.",
+        input: { who: { $expr: "input.who" } },
+        output: objectSchema({ line: { type: "string" } }),
       },
-      // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-      { finish: { set: { line: "${ $context.line }" } } },
     ],
   });
 
@@ -1042,42 +1022,6 @@ describe("the built-in blueprints", () => {
       unapproved: "workflow.binding_unapproved",
       otherCopy: "workflow.start_denied",
       ran: "completed",
-    });
-
-    await reinstall();
-  });
-
-  it("publish a copy's workflow as its own, whatever workflow the release's definition names", async () => {
-    await reinstall();
-    const builder = await signedInApi(idp, "builder");
-    const owner = await signedInApi(idp, "builder");
-    const contract = `fixture/greeter-${unique()}`;
-    // Someone else's workflow, which the release's definition names.
-    const victim = await owner.api.workflowResources.create(
-      `victim-${unique()}`
-    );
-    await expect(
-      install(shippingGreeter(contract, greeter(contract, victim.name)))
-    ).resolves.toBeTruthy();
-    await builder.api.apps.blueprints.create("hello", { name: "Names" });
-    const [workflow] = await builder.api.workflowResources.list();
-    const definition = z
-      .object({
-        document: z.object({ namespace: z.string(), name: z.string() }),
-      })
-      .parse(
-        JSON.parse(
-          await builder.api.workflowResources.definition(workflow?.id ?? "", 1)
-        )
-      );
-    expect({
-      named: definition.document.name === workflow?.name,
-      namespace: definition.document.namespace,
-      victim: await owner.api.workflowResources.versions(victim.id),
-    }).toStrictEqual({
-      named: true,
-      namespace: workflowNamespace,
-      victim: [],
     });
 
     await reinstall();
