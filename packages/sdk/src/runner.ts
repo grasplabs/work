@@ -479,38 +479,18 @@ export interface MigrationRequest {
 
 /**
  * What a batch answered: each row's output, in order, or the row whose
- * handler threw, what it said and where (its stack, null when it has
- * none). The host reads all of it as hostile.
+ * handler threw, and what it said. The host reads all of it as hostile.
  */
 export type MigrationAnswer =
   | { readonly ok: true; readonly rows: readonly unknown[] }
-  | {
-      readonly ok: false;
-      readonly index: number;
-      readonly message: string;
-      readonly stack: string | null;
-    };
+  | { readonly ok: false; readonly index: number; readonly message: string };
 
 /** The longest message of a handler's failure a batch answers. */
 const failureMaxLength = 500;
 
-/** The longest stack of a handler's failure a batch answers. */
-const stackMaxLength = 4000;
-
 /** A function that refuses, for what a migration can't use. */
 const unavailable = (what: string) => (): never => {
   throw new Error(impureMessage(what));
-};
-
-/** The stack of what a handler threw, bounded; null when it has none. */
-const stackOf = (error: unknown): string | null => {
-  try {
-    const stack: unknown = error instanceof Error ? error.stack : undefined;
-    return typeof stack === "string" ? stack.slice(0, stackMaxLength) : null;
-  } catch {
-    // A stack whose getter throws: App code's, and it says nothing.
-    return null;
-  }
 };
 
 /** The message of what a handler threw, bounded. */
@@ -749,7 +729,6 @@ export const runMigration = (
           ok: false,
           index,
           message: messageOf(error),
-          stack: stackOf(error),
         };
       }
     }

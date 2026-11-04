@@ -301,15 +301,13 @@ describe("the runner", () => {
       { id: "n1", fields: { title: "One" } },
       { id: "n2", fields: { title: "Two" } },
     ];
-    const failed = runMigration(notes([failing]), { name: "failing", rows });
-    expect(failed).toMatchObject({
+    expect(
+      runMigration(notes([failing]), { name: "failing", rows })
+    ).toStrictEqual({
       ok: false,
       index: 1,
       message: "No category for this one",
     });
-    expect(failed.ok ? null : failed.stack).toContain(
-      "No category for this one"
-    );
     const waited = runMigration(notes([waiting]), {
       name: "waiting",
       rows,

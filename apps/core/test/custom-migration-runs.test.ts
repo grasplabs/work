@@ -68,7 +68,7 @@ const reportedRollback = async (
 // - A transform's failure lets the release run, or reaches no one who can
 //   act on it, or carries a record its builders can't read into what they
 //   are told: "refuses the release while its transform fails, telling the
-//   App on which record and where".
+//   App on which record".
 // - A transform that answers wrong rewrites real records, or its release
 //   runs, on App code's word that it works: "keeps a migration that fails
 //   on its fixtures off every record, and refuses its release" and
@@ -469,7 +469,7 @@ export default appTest({
     });
   });
 
-  it("refuses the release while its transform fails, telling the App on which record and where", async () => {
+  it("refuses the release while its transform fails, telling the App on which record", async () => {
     const { fixture, store } = await migrated(
       5,
       `(ctx, row) => {
@@ -492,14 +492,9 @@ export default appTest({
               table: "notes",
               migration: "derive-category",
               reason: "threw",
-              // Each person's own notes: what the transform said of
-              // one isn't shown to the App's builders, where it threw is.
-              issues: [
-                threwOnRecord,
-                expect.stringMatching(
-                  /^It threw at migrations\/derive-category\.js, line \d+, column \d+$/u
-                ),
-              ],
+              // Each person's own notes: what the transform said of one
+              // isn't shown to the App's builders, only on which record.
+              issues: [threwOnRecord],
             },
           },
         });

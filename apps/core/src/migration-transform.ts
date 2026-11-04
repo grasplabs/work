@@ -69,21 +69,25 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   which pass the rules before and after. A transform answers only for
 //   the records of its own table it was handed, never another table's,
 //   so it can't move rows into a table whose rules admit more people.
-// - The transform writes a record's values into its failure
-//   (`throw new Error(row.amount)`), which the migration's builders are
-//   shown (store-host.ts, `schemaStatus`), though the table's access or
-//   rules keep the record from them. On a table whose access mode or row
-//   rules choose who reads a row (`audienceOf`), no text App code chose
-//   is surfaced: a handler's failure names the record, a fixed message
-//   (`threwOnRecord`) and where it threw, read from its stack only as a
-//   module of the release and a line within it (`locationOf`), never the
-//   stack's text; a failure outside a handler is a fixed message too.
-//   The SDK's own refusals (`migrationPlatformMessages`) are fixed texts
-//   and pass. What still tells something: which record failed, and the
-//   line it threw on, as much as a transform choosing where to throw
-//   tells anyway; a forged stack names no more than a place in the
-//   module. A table that every member reads keeps the message, and so do
-//   fixtures, the App's own data (`transformRows`).
+// - The transform writes a record's values into its failure, which the
+//   migration's builders are shown (store-host.ts, `schemaStatus`) though
+//   the table may keep the record from them: in what it throws
+//   (`throw new Error(row.amount)`), in a key its output holds
+//   (`{ [row.amount]: 1 }`, which validation names), in a stack it forges
+//   (a line or column of its choosing). On records of any table but one
+//   every member or builder reads whole (`hidesText`: read access
+//   `appMembers` or `appBuilders`, no row rules), nothing App code can
+//   influence is shown: a handler's failure is a fixed message
+//   (`threwOnRecord`), with no stack or place; an output or input that
+//   doesn't fit is a fixed message and the declared fields it fails on
+//   (`shownIssues`); a failure outside a handler is a fixed message, or
+//   one of the sandbox's verdicts as a fixed text (`verdictOf`). The SDK's
+//   own refusals (`migrationPlatformMessages`) are fixed texts and pass.
+//   What still tells something, inherently: the failure names its record
+//   (its ID), and which of a batch's N records fails says about log2(N)
+//   bits, once per failed run, with a few more in its reason and which
+//   declared fields it fails on. A table read whole keeps the message, and
+//   so do fixtures, the App's own data (`transformRows`).
 // - The transform answers differently each time: randomness and clocks
 //   are taken away while it runs and while its answer is serialized (sdk
 //   runner, `runMigration`). Best effort, not a boundary: a value captured
@@ -221,6 +225,13 @@ const answerTooLarge = "The migration's answer is too large.";
 /** What a handler's failure says on a table whose rows reach some people only. */
 export const threwOnRecord = "The migration's transform threw on this record.";
 
+/** What a row that doesn't fit the migration's input says on such a table. */
+export const inputMismatch = "A record doesn't fit the migration's input.";
+
+/** What an output that doesn't fit the table says on such a table. */
+export const outputMismatch =
+  "The migration's output for this record doesn't fit its table.";
+
 /** What a failure outside a handler says on such a table. */
 export const failedOutside =
   "The migration's code failed outside its handler, as its modules loaded or as it answered.";
@@ -325,18 +336,49 @@ const isObject = (json: Json | undefined): json is Record<string, Json> =>
 const validated = (
   schema: ReturnType<typeof schemaFromDescriptor>,
   value: unknown
-): { fields: StoreFields } | { issues: string[] } => {
+):
+  | { fields: StoreFields }
+  | { issues: string[]; named: readonly unknown[] } => {
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    return { issues: ["The schema answered asynchronously"] };
+    return { issues: ["The schema answered asynchronously"], named: [] };
   }
   if (result.issues !== undefined) {
-    return { issues: issuesOf(result.issues) };
+    return {
+      issues: issuesOf(result.issues),
+      named: result.issues.map(({ path }) => path[0]),
+    };
   }
   const json = jsonOf(result.value);
   return isObject(json)
     ? { fields: json }
-    : { issues: ["The value isn't an object of fields"] };
+    : { issues: ["The value isn't an object of fields"], named: [] };
+};
+
+/**
+ * Issues where `hidden` (`hidesText`): a fixed text and the fields of
+ * `declared` that `named` names, never a key or message the value made
+ * (an undeclared key the output holds is named in its issue's path, and
+ * App code chose it). Otherwise `issues` as they are.
+ */
+const shownIssues = (
+  hidden: boolean,
+  checked: { issues: string[]; named: readonly unknown[] },
+  declared: Readonly<Record<string, unknown>>,
+  fixed: string
+): string[] => {
+  if (!hidden) {
+    return checked.issues;
+  }
+  const fields = [
+    ...new Set(
+      checked.named.filter(
+        (name): name is string =>
+          typeof name === "string" && Object.hasOwn(declared, name)
+      )
+    ),
+  ];
+  return [fixed, ...fields.map((field) => `${field}: doesn't fit`)];
 };
 
 /** Field `name` of `fields` as canonical text; undefined when absent. */
@@ -409,7 +451,8 @@ const passedThrough = (
 /** The rows as the handler gets them: validated against `input`, if declared. */
 const handedRows = (
   declared: MigrationManifest,
-  rows: readonly TransformRow[]
+  rows: readonly TransformRow[],
+  hidden: boolean
 ): { rows: TransformRow[] } | { failure: TransformFailure } => {
   if (declared.input === null) {
     return { rows: [...rows] };
@@ -432,7 +475,7 @@ const handedRows = (
         failure: {
           id: row.id,
           reason: "invalid_input",
-          issues: checked.issues,
+          issues: shownIssues(hidden, checked, input.fields, inputMismatch),
         },
       };
     }
@@ -441,19 +484,13 @@ const handedRows = (
   return { rows: handed };
 };
 
-/** The most of a failure's stack read for where it threw. */
-const stackMaxChars = 4000;
-
-/** A frame of a stack in an App module: its module, line and column. */
-const appFrame = /\b(?<module>app~[\w~.-]+\.js):(?<line>\d+):(?<column>\d+)/gu;
-
 /** What the isolate answered, read as the runner's answer, or why not. */
 const answerOf = (
   text: unknown,
   count: number
 ):
   | { ok: true; rows: unknown[] }
-  | { ok: false; index: number; message: string; stack: string }
+  | { ok: false; index: number; message: string }
   | undefined => {
   if (
     typeof text !== "string" ||
@@ -479,86 +516,43 @@ const answerOf = (
   }
   const index: unknown = Reflect.get(data, "index");
   const message: unknown = Reflect.get(data, "message");
-  const stack: unknown = Reflect.get(data, "stack");
   return ok === false &&
     typeof index === "number" &&
     Number.isInteger(index) &&
     index >= 0 &&
     index < count &&
     typeof message === "string"
-    ? {
-        ok: false,
-        index,
-        message: message.slice(0, 500),
-        stack: typeof stack === "string" ? stack.slice(0, stackMaxChars) : "",
-      }
+    ? { ok: false, index, message: message.slice(0, 500) }
     : undefined;
 };
 
 /**
- * Where a handler threw, as `stack` (App code's, so hostile) names it:
- * the first frame in one of `modules` (the release's compiled modules) at
- * a line and column that module has, as its file, line and column; none
- * when no frame is one. Only a module's name and a place within it are
- * taken, never the stack's text, so it carries no more than where the
- * transform chose to throw. The place is in the compiled module, which
- * may join a file's lines: its column says where on the line.
- */
-const locationOf = (
-  modules: Readonly<Record<string, string>>,
-  stack: string
-): string[] => {
-  for (const { groups } of stack.matchAll(appFrame)) {
-    const { module = "", line = "", column = "" } = groups ?? {};
-    const source = Object.hasOwn(modules, module) ? modules[module] : undefined;
-    const lineNumber = Number(line);
-    const columnNumber = Number(column);
-    const text = source?.split("\n")[lineNumber - 1];
-    if (
-      text !== undefined &&
-      Number.isSafeInteger(lineNumber) &&
-      lineNumber >= 1 &&
-      Number.isSafeInteger(columnNumber) &&
-      columnNumber >= 1 &&
-      columnNumber <= text.length + 1
-    ) {
-      // `app~migrations~split.js` is the App's `migrations/split` file,
-      // compiled.
-      const file = module.slice("app~".length).replaceAll("~", "/");
-      return [
-        `It threw at ${file}, line ${String(lineNumber)}, column ${String(columnNumber)}`,
-      ];
-    }
-  }
-  return [];
-};
-
-/**
- * Whether what App code says as it fails on `of` of `table` is kept from
- * those it is shown to: on records of a table whose access mode or row
- * rules choose who reads a row (see the header). Never for fixtures,
- * which are the App's own data.
+ * Whether what a failure on `of` of `table` says is kept to fixed texts
+ * (see the header): on records of any table but one every member, or
+ * every builder, reads whole (read access `appMembers` or `appBuilders`,
+ * no row rules). Never for fixtures, which are the App's own data.
  */
 const hidesText = (
   table: TransformTable,
   of: "records" | "fixtures"
 ): boolean => {
-  const audience = audienceOf(table);
-  return of === "records" && (audience.owner || audience.fields.length > 0);
+  const readWhole =
+    (table.access.read === "appMembers" ||
+      table.access.read === "appBuilders") &&
+    table.rules === undefined;
+  return of === "records" && !readWhole;
 };
 
 /**
  * What a failure says of `message` (App code's, unless one of the
- * platform's own): all of it, or `fixed` and `location` only where
- * `hidden` (`hidesText`).
+ * platform's own): all of it, or `fixed` only where `hidden`
+ * (`hidesText`).
  */
 const failureIssues = (
   hidden: boolean,
   message: string,
-  fixed: string,
-  location: readonly string[] = []
-): string[] =>
-  !hidden || platformMessages.has(message) ? [message] : [fixed, ...location];
+  fixed: string
+): string[] => (!hidden || platformMessages.has(message) ? [message] : [fixed]);
 
 /**
  * Refuses a batch only a caller's bug sends: past its bounds, holding a
@@ -618,7 +612,8 @@ const transformRows = async (
   if (rows.length === 0) {
     return { ok: true, rows: [] };
   }
-  const handed = handedRows(declared, rows);
+  const hidden = hidesText(target, of);
+  const handed = handedRows(declared, rows, hidden);
   if ("failure" in handed) {
     return { ok: false, failure: handed.failure };
   }
@@ -642,7 +637,6 @@ const transformRows = async (
     // loaded, or the sandbox ended it): no record is to blame. The
     // sandbox's message may carry what the App's code threw.
     const message = (error instanceof Error ? error.message : "").slice(0, 500);
-    const hidden = hidesText(target, of);
     return {
       ok: false,
       failure: {
@@ -673,12 +667,7 @@ const transformRows = async (
       failure: {
         id: rows[answer.index]?.id ?? "",
         reason: "threw",
-        issues: failureIssues(
-          hidesText(target, of),
-          answer.message,
-          threwOnRecord,
-          locationOf(release.modules, answer.stack)
-        ),
+        issues: failureIssues(hidden, answer.message, threwOnRecord),
       },
     };
   }
@@ -696,7 +685,7 @@ const transformRows = async (
         failure: {
           id: row.id,
           reason: "invalid_output",
-          issues: checked.issues,
+          issues: shownIssues(hidden, checked, target.fields, outputMismatch),
         },
       };
     }

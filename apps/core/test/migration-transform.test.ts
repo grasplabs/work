@@ -6,6 +6,7 @@ import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
   transformBatch,
+  outputMismatch,
   threwOnRecord,
   transformBatchMaxRows,
 } from "../src/migration-transform.ts";
@@ -45,6 +46,11 @@ import type { Fixture } from "./sealed-apps.ts";
 // - The transform moves a record into someone else's sight by rewriting
 //   a field a row rule reads: "refuses an output that changes a field a
 //   row rule reads".
+// - The transform writes a record its builders can't read into its
+//   failure, through what it throws, a stack it forges or a key it
+//   writes: "shows nothing App code can influence of a failure …", "names
+//   the record whose transform threw, but not what it said …",
+//   "validates every output against the target table".
 // - A caller hands it managed fields, or a batch past its bounds: "refuses
 //   rows holding managed fields", "refuses a batch past its bounds".
 // - The transform answers differently each time, through the prototypes,
@@ -627,15 +633,17 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   });
 
   it.each([
-    ["writes-managed", "invalid_output"],
-    ["writes-undeclared", "invalid_output"],
-    ["writes-wrong-type", "invalid_output"],
+    // Each owner's notes: the failure names only the declared fields it
+    // fails on, never a key the output made up.
+    ["writes-managed", [outputMismatch]],
+    ["writes-undeclared", [outputMismatch]],
+    ["writes-wrong-type", [outputMismatch, "category: doesn't fit"]],
   ] as const)(
     "validates every output against the target table: %s is refused",
-    async (name, reason) => {
-      await expect(run(name)).resolves.toMatchObject({
+    async (name, issues) => {
+      await expect(run(name)).resolves.toStrictEqual({
         ok: false,
-        failure: { id: "n1", reason },
+        failure: { id: "n1", reason: "invalid_output", issues },
       });
     }
   );
@@ -671,19 +679,11 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     });
   });
 
-  it("names the record whose transform threw, and where, but not what it said on a table each owner reads alone", async () => {
-    const outcome = await run("throws");
-
-    expect(outcome).toMatchObject({
+  it("names the record whose transform threw, but not what it said, on a table each owner reads alone", async () => {
+    await expect(run("throws")).resolves.toStrictEqual({
       ok: false,
-      failure: { id: "n2", reason: "threw" },
+      failure: { id: "n2", reason: "threw", issues: [threwOnRecord] },
     });
-    expect(outcome.ok ? [] : outcome.failure.issues).toStrictEqual([
-      threwOnRecord,
-      expect.stringMatching(
-        /^It threw at migrations\/throws\.js, line \d+, column \d+$/u
-      ),
-    ]);
   });
 
   it("refuses a batch that mixes owners of a table with owner access, which only a caller's bug sends", async () => {
@@ -793,8 +793,8 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
 
 /**
  * Salaries read by the person each names and the team it is for, each
- * migration's table its own, with `fields`; an `open-` migration's table
- * has no rules, every member reading it.
+ * migration's table its own, with `fields`; an `open-` or `none-`
+ * migration's table has no rules (`salariesApp` sets who reads it).
  */
 const salariesSchema = (names: readonly string[], fields: string): string =>
   `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
@@ -806,7 +806,7 @@ ${fields}
 export default defineSchema({
 ${names
   .map((name) =>
-    name.startsWith("open-")
+    name.startsWith("open-") || name.startsWith("none-")
       ? `  ${tableOf(name)}: defineTable(salaryFields),`
       : `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
   )
@@ -818,12 +818,21 @@ const salaryBase = `  employee: v.person(),
   team: v.string(),
   amount: v.number(),`;
 
-/** The App registering `names`' migrations, when `registered`. */
+/**
+ * The App registering `names`' migrations, when `registered`: every table
+ * read and changed by its members, but a `none-` migration's, which no one
+ * reads.
+ */
 const salariesApp = (names: readonly string[], registered: boolean): string =>
-  appOf(names, registered).replaceAll(
-    '{ read: "owner", write: "owner" }',
-    '{ read: "appMembers", write: "appMembers" }'
-  );
+  appOf(names, registered)
+    .replaceAll(
+      /(?<table>none_\w+): \{ read: "owner", write: "owner" \}/gu,
+      '$<table>: { read: "none", write: "appMembers" }'
+    )
+    .replaceAll(
+      '{ read: "owner", write: "owner" }',
+      '{ read: "appMembers", write: "appMembers" }'
+    );
 
 /** Module state of each salary migration: the row before, while a call lasts. */
 const salaryPrelude = "let previous: number | undefined;";
@@ -846,13 +855,18 @@ const salaryHandlers = {
   "throws-amount": `(ctx, row) => {
     throw new Error(\`Salary: \${row.amount}\`);
   }`,
-  // The same, past the stack too: a forged one, its line the salary.
+  // The same, past the stack too: a forged one, its column the salary.
   "forges-stack": `(ctx, row) => {
-    const error = new Error(\`Salary: \${row.amount}\`);
-    error.stack = \`Error\\n    at handler (app~migrations~forges-stack.js:\${row.amount}:1)\\nSalary: \${row.amount}\`;
+    const error = new Error("Nothing to see");
+    error.stack = \`Error\\n    at handler (app~migrations~forges-stack.js:1:\${row.amount})\`;
     throw error;
   }`,
+  // The salary as a key of its output, which validation names.
+  "keys-amount": `(ctx, row) => ({ ...row, band: "low", [String(row.amount)]: 1 }) as never`,
   "open-throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
+  "none-throws-amount": `(ctx, row) => {
     throw new Error(\`Salary: \${row.amount}\`);
   }`,
 } as const;
@@ -971,42 +985,39 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
     }
   );
 
-  it("never shows what a transform threw on a record of a table with row rules: only the record, a fixed message and where", async () => {
-    const thrown = await runSalaries("throws-amount", [
-      salary("s1", "u_bob", "t_a", 91_234),
-    ]);
-    const forged = await runSalaries("forges-stack", [
-      salary("s1", "u_bob", "t_a", 91_234),
-    ]);
+  it("shows nothing App code can influence of a failure on a record its table hides: not what it threw, a stack it forged or a key it wrote", async () => {
+    const record = [salary("s1", "u_bob", "t_a", 91_234)];
+    const thrown = await runSalaries("throws-amount", record);
+    const forged = await runSalaries("forges-stack", record);
+    const keyed = await runSalaries("keys-amount", record);
+    // A table no one reads hides as much.
+    const unread = await runSalaries("none-throws-amount", record);
     // On a table every member reads, what it threw is shown as it said.
-    const open = await runSalaries("open-throws-amount", [
-      salary("s1", "u_bob", "t_a", 91_234),
-    ]);
+    const open = await runSalaries("open-throws-amount", record);
 
+    const threw = {
+      ok: false,
+      failure: { id: "s1", reason: "threw", issues: [threwOnRecord] },
+    };
     expect({
       thrown,
       forged,
+      keyed,
+      unread,
       open,
-      leaked: JSON.stringify([thrown, forged]).includes("91234"),
+      leaked: JSON.stringify([thrown, forged, keyed, unread]).includes("91234"),
     }).toStrictEqual({
-      thrown: {
+      thrown: threw,
+      forged: threw,
+      keyed: {
         ok: false,
         failure: {
           id: "s1",
-          reason: "threw",
-          issues: [
-            threwOnRecord,
-            expect.stringMatching(
-              /^It threw at migrations\/throws-amount\.js, line \d+, column \d+$/u
-            ),
-          ],
+          reason: "invalid_output",
+          issues: [outputMismatch],
         },
       },
-      // A line past the module's end is no place it threw: left out.
-      forged: {
-        ok: false,
-        failure: { id: "s1", reason: "threw", issues: [threwOnRecord] },
-      },
+      unread: threw,
       open: {
         ok: false,
         failure: { id: "s1", reason: "threw", issues: ["Salary: 91234"] },
