@@ -20,12 +20,14 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import type { AnyRouter } from "@tanstack/react-router";
+import { RpcTarget } from "capnweb";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
+import { socketsTo } from "../screens/test-socket.ts";
 import { AppWorkspace } from "./app-workspace.tsx";
 
 // An App's workspace against core's `apps` as the page reaches it over
@@ -362,8 +364,37 @@ const draftOf = (app: string): ChatDraft => ({
   callId: null,
 });
 
+/**
+ * Core, over the page's own connection (a WebSocket) and a real Cap'n Web
+ * session, as far as a preview's load reaches it: who is signed in, and
+ * each preview asked for, kept and never answered.
+ */
+class PreviewingCore extends RpcTarget {
+  readonly asked: unknown[][] = [];
+
+  authenticate(): this {
+    return this;
+  }
+
+  readonly userId = "user-1";
+
+  whoami(): { userId: string } {
+    return { userId: this.userId };
+  }
+
+  get chats(): this {
+    return this;
+  }
+
+  async preview(...args: unknown[]): Promise<never> {
+    this.asked.push(args);
+    return await Promise.withResolvers<never>().promise;
+  }
+}
+
 describe(AppWorkspace, () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     act(() => {
       root?.unmount();
     });
@@ -589,6 +620,8 @@ describe(AppWorkspace, () => {
     };
     takenDown();
 
+    const core = new PreviewingCore();
+    socketsTo(core);
     await opened(
       fake.apps,
       identityOf(false),
@@ -609,6 +642,9 @@ describe(AppWorkspace, () => {
         sandbox: frame?.getAttribute("sandbox"),
       },
       review: document.querySelector('[role="dialog"] h2')?.textContent,
+      // What the frame asked core to build: the App's version 2, not the
+      // chat's draft (proposing dropped it) nor a version of the draft.
+      asked: core.asked,
     }).toStrictEqual({
       withoutChat: { ready: true, frame: null },
       label: true,
@@ -619,6 +655,7 @@ describe(AppWorkspace, () => {
         sandbox: "allow-scripts",
       },
       review: "Publish version 2",
+      asked: [["chat-proposed", "invoice-desk", undefined, undefined, 2]],
     });
   });
 
