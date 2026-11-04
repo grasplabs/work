@@ -6,9 +6,11 @@ import {
   checked,
   decision,
   everyBinding,
+  eventWait,
   everyOperator,
   everyStep,
   withDecisions,
+  withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildWorkflows } from "../src/screens.ts";
@@ -55,6 +57,33 @@ const fixtures = {
     }),
     bindings: withDecisions().bindings,
   }),
+  // Event waits, one in a loop's items, and steps reading how they ended.
+  eventWaits: () =>
+    withEventWaits(
+      eventWait({ if: { $expr: 'input.who !== "Ada"' } }),
+      {
+        id: "answer",
+        type: "do",
+        binding: "mail",
+        operation: "mail.send",
+        if: { $expr: "!steps.reply.output.timedOut" },
+        arguments: {
+          to: { $expr: "steps.reply.output.event.data.from" },
+          subject: { $expr: "steps.reply.output.event.type" },
+        },
+      },
+      {
+        id: "rounds",
+        type: "forEach",
+        items: { $expr: "input.rounds" },
+        do: [
+          eventWait({
+            id: "each",
+            event: { from: "replies", type: ["grasp.a", "grasp.b"] },
+          }),
+        ],
+      }
+    ),
 };
 
 describe("grasp-workflow/1's generated code", () => {

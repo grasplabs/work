@@ -11,8 +11,8 @@ import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 // (generate.ts). schema.ts defines it; check.ts checks it.
 //
 // A step kind joins the format as its SDK call joins the run host: a new
-// `type` in the union, nothing else changing (decision and forEach came so;
-// fork, race, event waits and child runs come so).
+// `type` in the union, nothing else changing (decision, forEach and event
+// waits came so; fork, race and child runs come so).
 
 /**
  * The format's published JSON Schema, by its versioned URL: every document
@@ -117,6 +117,7 @@ export const bindingKinds = [
   "compute",
   "action",
   "decision",
+  "event",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
@@ -215,12 +216,54 @@ export interface ForEachStep extends StepBase {
   readonly do: readonly Step[];
 }
 
-/** Waits: for a time span, or until a deadline (ms since the epoch). */
-export type WaitStep = StepBase &
-  (
-    | { readonly type: "wait"; readonly for: Duration }
-    | { readonly type: "wait"; readonly until: Expression }
-  );
+/**
+ * The events an event wait takes: those sent to the run through event
+ * binding `from`, of `type` or any of a list of types, each one the
+ * binding's contract admits.
+ */
+export interface EventFilter {
+  readonly from: string;
+  readonly type: string | readonly string[];
+}
+
+/**
+ * An event wait's output: the first event of its filter sent to the run
+ * (once the run started, or while it waited), as the host minted it, or
+ * `{ timedOut: true }` when none came within its timeout. A timeout is an
+ * outcome a later step reads (`steps.<id>.output.timedOut`), never a
+ * failure; the event's data is `steps.<id>.output.event.data`.
+ */
+export type EventWaitOutput =
+  | {
+      readonly timedOut: false;
+      readonly event: {
+        readonly id: string;
+        readonly type: string;
+        readonly source: string;
+        readonly subject?: string;
+        /** When the run accepted it, ISO 8601. */
+        readonly time: string;
+        readonly data: Json;
+      };
+    }
+  | { readonly timedOut: true };
+
+/**
+ * Waits: for a time span, until a deadline (ms since the epoch), or for an
+ * event (`EventWaitOutput`), at most `timeout`, which an event wait always
+ * names: a run never waits for an event with no end.
+ */
+export type WaitStep =
+  | (StepBase & { readonly type: "wait"; readonly for: Duration })
+  | (StepBase & { readonly type: "wait"; readonly until: Expression })
+  | EventWaitStep;
+
+/** A wait for an event (`WaitStep`). */
+export interface EventWaitStep extends StepBase {
+  readonly type: "wait";
+  readonly event: EventFilter;
+  readonly timeout: Duration;
+}
 
 /** Runs `then` when `condition` holds, `else` otherwise. */
 export interface IfStep extends StepBase {
@@ -316,6 +359,10 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
+  /** The types one event wait takes, as the host seals its filters. */
+  eventTypes: 16,
+  /** An event's type, as the host keeps it. */
+  eventTypeLength: 256,
   params: 64,
   bindings: 64,
 } as const;
@@ -347,6 +394,10 @@ export const durationMs = (duration: Duration): number => {
  * in all, every item's counted, and the items one list may hold.
  */
 export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${platformLimits.workflowSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${platformLimits.workflowCollectionItems.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
+
+/** What a wait is, to whoever writes one: the schema's description. */
+export const waitDescription =
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,

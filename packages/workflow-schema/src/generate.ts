@@ -13,6 +13,7 @@ import {
 import type {
   Binding,
   ErrorFilter,
+  EventWaitStep,
   Json,
   PlainParam,
   Step,
@@ -33,7 +34,8 @@ import type {
 // or `catch`); a call is `env[<binding>].call(<operation>, <arguments>)`
 // inside its task's step; a deadline wait records its deadline in its
 // `enter` step and sleeps `until` it; a raise is a task step the host
-// fails unless it records `{ skipped: true }`; a try's catch asks
+// fails unless it records `{ skipped: true }`; an event wait is its task
+// step's `step.listen`, the host deciding what it takes; a try's catch asks
 // `step.caught` and throws the failure on when its catch doesn't take it;
 // a step in a try whose catch retries offers `retry`, which names the
 // catch that takes a failure and whether it retries. Every expression is
@@ -72,7 +74,8 @@ import type {
 //   is in the sealed table, built here from the same document, never read
 //   from the code: which steps exist, which call each makes through which
 //   binding, every literal of its arguments, each catch's filter, each
-//   raise's error, each wait's length.
+//   raise's error, each wait's length, each event wait's binding, types
+//   and timeout.
 
 /** The SDK the generated module imports, and nothing else. */
 export const generatedImport = "@grasp-os/sdk/workflow";
@@ -126,6 +129,21 @@ export type SealedCall =
     }
   | { readonly name: "grasp.sleepUntil"; readonly timestamp: Template };
 
+/**
+ * An event wait's events, as the host takes them (core's sealed listen):
+ * the first of any of its types sent through its event binding, its
+ * envelope as the host minted it, matched by type alone.
+ */
+export interface SealedListen {
+  readonly binding: string;
+  readonly strategy: "any";
+  readonly read: "envelope";
+  readonly filters: readonly {
+    readonly type: string;
+    readonly attributes: readonly never[];
+  }[];
+}
+
 /** A try task's catch, as the host decides it (core's sealed catch). */
 export interface SealedCatch {
   readonly variable: string;
@@ -142,7 +160,14 @@ export interface SealedCatch {
 /** One task of the module, as the host checks its steps (core's `SealedTask`). */
 export interface SealedTask {
   readonly id: string;
-  readonly kind: "call" | "wait" | "try" | "raise" | "for" | "switch";
+  readonly kind:
+    | "call"
+    | "wait"
+    | "try"
+    | "raise"
+    | "for"
+    | "switch"
+    | "listen";
   readonly pointer: string;
   /** Its engine steps, `<id>:<step>`: a wait sleeps in its `task` step. */
   readonly steps: readonly StepKey[];
@@ -165,6 +190,7 @@ export interface SealedTask {
     readonly while?: number;
   };
   readonly call?: SealedCall;
+  readonly listen?: SealedListen;
   readonly milliseconds?: number;
   readonly catch?: SealedCatch;
   readonly error?: {
@@ -809,12 +835,53 @@ class Generator {
     );
   }
 
+  /**
+   * An event wait: a task of its own (`listen`) whose task step waits for
+   * the first event of its sealed binding and types sent to the run, its
+   * timeout sealed beside them. The host decides what it takes and until
+   * when from the table alone (`step.listen` passes neither), and answers
+   * `{ timedOut: true }` past its timeout. Its `if`, if any, is decided
+   * in an enter step before it, as a sleep's.
+   */
+  #listen(step: Placed<EventWaitStep>, depth: number): void {
+    const { from, type } = step.event;
+    const types = typeof type === "string" ? [type] : type;
+    this.#task({
+      id: step.id,
+      kind: "listen",
+      pointer: step.pointer,
+      steps: step.if === undefined ? ["task"] : ["enter", "task"],
+      listen: {
+        binding: from,
+        strategy: "any",
+        read: "envelope",
+        filters: types.map((each) => ({ type: each, attributes: [] })),
+      },
+      timeoutMs: durationMs(step.timeout),
+    });
+    const listen = (inner: number): void => {
+      this.#line(
+        inner,
+        `steps[${literal(step.id)}] = { output: await step.listen(${literal(step.id)}, ${this.#options(step, "task")}) };`
+      );
+    };
+    if (step.if === undefined) {
+      listen(depth);
+      return;
+    }
+    this.#decided(step, depth, "enter", "{ output: null }", listen);
+  }
+
   #wait(
     step: Placed<Extract<Step, { type: "wait" }>>,
     tries: readonly PlacedTry[],
     depth: number
   ): void {
     const done = `steps[${literal(step.id)}] = { output: null };`;
+    if ("event" in step) {
+      this.#listen(step, depth);
+      return;
+    }
     if ("for" in step) {
       const milliseconds = durationMs(step.for);
       const sleep = (inner: number): void => {

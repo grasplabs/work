@@ -6,8 +6,10 @@ import { generateWorkflow } from "../src/generate.ts";
 import {
   checked,
   decision,
+  eventWait,
   everyStep,
   withDecisions,
+  withEventWaits,
   withLoops,
 } from "./fixtures.ts";
 
@@ -192,6 +194,14 @@ const betweenSteps = (
   visit(parse(source, asModule).program, 0);
   return { guards, conditions };
 };
+
+/** The sealed listen of an event wait through `replies` for `types`. */
+const listenFor = (...types: string[]) => ({
+  binding: "replies",
+  strategy: "any",
+  read: "envelope",
+  filters: types.map((type) => ({ type, attributes: [] })),
+});
 
 describe("generating a workflow", () => {
   it("keeps every string, key and title of the document data", () => {
@@ -538,6 +548,89 @@ describe("generating a workflow", () => {
         input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
         timeoutMs: 2 * 86_400_000,
       },
+    });
+  });
+
+  it("seals an event wait's binding, types and timeout, and leaves what it takes to the host", () => {
+    const generated = generateWorkflow(
+      checked(
+        withEventWaits(
+          eventWait(),
+          eventWait({
+            id: "either",
+            if: { $expr: "steps.reply.output.timedOut" },
+            event: { from: "replies", type: ["grasp.a", "grasp.b"] },
+            timeout: "52 weeks",
+          }),
+          {
+            id: "items",
+            type: "forEach",
+            items: { $expr: "input.rows" },
+            do: [eventWait({ id: "each" })],
+          }
+        )
+      ),
+      "workflow"
+    );
+    const taskOf = (id: string) => {
+      const task = generated.tasks.find((each) => each.id === id);
+      return (
+        task && {
+          kind: task.kind,
+          steps: task.steps,
+          scope: task.scope,
+          listen: task.listen,
+          timeoutMs: task.timeoutMs,
+        }
+      );
+    };
+    expect({
+      reply: taskOf("reply"),
+      either: taskOf("either"),
+      each: taskOf("each"),
+      // Its step names only itself: the host reads what it takes and
+      // until when from the table, never from the code.
+      listens: [
+        ...generated.source.matchAll(
+          /steps\["(?<id>[a-z]+)"\] = \{ output: await step\.listen\("\k<id>", \{ (?<options>[^}]*) \}\) \};/gu
+        ),
+      ].map((match) => [
+        match.groups?.id,
+        match.groups?.options?.replaceAll(/index\d+/gu, "i"),
+      ]),
+      // Its `if` decided in an enter step before it, as a sleep's.
+      decidesInEnter:
+        /step\.do\("either", \{ key: "enter", description: "either" \}, async \(\) => \([^\n]* \? \{ output: null \} : \{ skipped: true \}\)\);/u.test(
+          generated.source
+        ),
+    }).toStrictEqual({
+      reply: {
+        kind: "listen",
+        steps: ["task"],
+        scope: [],
+        listen: listenFor("grasp.reply.received"),
+        timeoutMs: 3 * 86_400_000,
+      },
+      either: {
+        kind: "listen",
+        steps: ["enter", "task"],
+        scope: [],
+        listen: listenFor("grasp.a", "grasp.b"),
+        timeoutMs: 52 * 7 * 86_400_000,
+      },
+      each: {
+        kind: "listen",
+        steps: ["task"],
+        scope: ["items"],
+        listen: listenFor("grasp.reply.received"),
+        timeoutMs: 3 * 86_400_000,
+      },
+      listens: [
+        ["reply", 'key: "task", description: "reply"'],
+        ["either", 'key: "task", description: "either"'],
+        ["each", 'key: "task@" + i, description: "each"'],
+      ],
+      decidesInEnter: true,
     });
   });
 

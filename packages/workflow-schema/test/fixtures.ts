@@ -234,6 +234,31 @@ export const decision = (change: Record<string, unknown> = {}) => ({
 });
 
 /**
+ * `everyStep` with an event binding, `replies`, and `steps` after its own:
+ * the first of them is at `/steps/5`.
+ */
+export const withEventWaits = (...steps: unknown[]) => {
+  const document = everyStep();
+  return {
+    ...document,
+    bindings: {
+      ...document.bindings,
+      replies: { kind: "event", contract: "grasp.replies@1" },
+    },
+    steps: [...document.steps, ...steps],
+  };
+};
+
+/** An event wait for a reply through `replies`, for at most 3 days. */
+export const eventWait = (change: Record<string, unknown> = {}) => ({
+  id: "reply",
+  type: "wait",
+  event: { from: "replies", type: "grasp.reply.received" },
+  timeout: "3 days",
+  ...change,
+});
+
+/**
  * `everyStep` with `steps` after its own (the first at `/steps/5`): pages
  * of rows, the rows of each page mailed while they have a name, a deadline
  * waited for and a failure caught in each row.

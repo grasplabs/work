@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkWorkflow } from "../src/check.ts";
-import { decision, everyStep, withDecisions, withLoops } from "./fixtures.ts";
+import {
+  decision,
+  eventWait,
+  everyStep,
+  withDecisions,
+  withEventWaits,
+  withLoops,
+} from "./fixtures.ts";
 
 // Checking grasp-workflow/1: its JSON Schema through the standard
 // validator, then only what a schema can't say. Each way a document can be
@@ -366,6 +373,86 @@ describe("checking a workflow", () => {
       later: ["/steps/5/input/$expr"],
       ask: ["/steps/5/ask"],
       remindAfter: ["/steps/5/remindAfter"],
+    });
+  });
+
+  it("holds an event wait to an event binding, its types and a timeout of at most a year", () => {
+    const at = (change: Record<string, unknown>) =>
+      codesAt(withEventWaits(eventWait(change)));
+    expect({
+      ok: codesAt(
+        withEventWaits(
+          eventWait(),
+          eventWait({
+            id: "either",
+            if: { $expr: "steps.reply.output.timedOut" },
+            event: {
+              from: "replies",
+              type: ["grasp.reply.received", "grasp.reply.bounced"],
+            },
+            timeout: "52 weeks",
+          }),
+          {
+            id: "answer",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            if: { $expr: "!steps.reply.output.timedOut" },
+            arguments: {
+              to: { $expr: "steps.reply.output.event.data.from" },
+              subject: { $expr: "steps.reply.output.event.subject ?? ''" },
+            },
+          }
+        )
+      ),
+      noTimeout: codesAt(
+        withEventWaits({
+          id: "reply",
+          type: "wait",
+          event: eventWait().event,
+        })
+      ),
+      overAYear: at({ timeout: "53 weeks" }),
+      notEvent: at({ event: { from: "mail", type: "grasp.reply.received" } }),
+      undeclared: at({
+        event: { from: "inbox", type: "grasp.reply.received" },
+      }),
+      badAlias: at({ event: { from: "no-dashes", type: "x" } }),
+      noType: at({ event: { from: "replies" } }),
+      noTypes: at({ event: { from: "replies", type: [] } }),
+      twice: at({ event: { from: "replies", type: ["a", "a"] } }),
+      tooMany: at({
+        event: {
+          from: "replies",
+          type: Array.from({ length: 17 }, (_, i) => `t${i}`),
+        },
+      }),
+      match: at({
+        event: { from: "replies", type: "x", match: { subject: "a" } },
+      }),
+      alsoFor: at({ for: "1 hour" }),
+      timeoutOnSleep: codesAt(
+        withEventWaits({
+          id: "nap",
+          type: "wait",
+          for: "1 hour",
+          timeout: "1 day",
+        })
+      ),
+    }).toStrictEqual({
+      ok: "ok",
+      noTimeout: { "/steps/5": "workflow.missing_property" },
+      overAYear: { "/steps/5/timeout": "workflow.duration_too_long" },
+      notEvent: { "/steps/5/event/from": "workflow.binding_kind" },
+      undeclared: { "/steps/5/event/from": "workflow.unknown_binding" },
+      badAlias: { "/steps/5/event/from": "workflow.invalid_alias" },
+      noType: { "/steps/5/event": "workflow.missing_property" },
+      noTypes: { "/steps/5/event/type": "workflow.out_of_bounds" },
+      twice: { "/steps/5/event/type": "workflow.invalid" },
+      tooMany: { "/steps/5/event/type": "workflow.out_of_bounds" },
+      match: { "/steps/5/event/match": "workflow.unknown_property" },
+      alsoFor: { "/steps/5": "workflow.wait_kind" },
+      timeoutOnSleep: { "/steps/5/timeout": "workflow.unknown_property" },
     });
   });
 
