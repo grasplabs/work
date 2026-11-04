@@ -62,10 +62,13 @@ import { detailsRemoved } from "./workflows/retention.ts";
 // workflow the App's binding of `<alias>` names now. Threat model (also on
 // GRA-673), and how each is closed:
 //
-// - A reference made up, or of another release or contract: it resolves
-//   only against the App's current sealed release, its declared workflow
-//   and what its seal resolved, rebuilt into the generated queries, and
-//   must name exactly that release, kind and fingerprint.
+// - A reference made up, or kept from another release: it is a name and
+//   a kind, resolved by name in the release that answers the call (the
+//   App's current one), against its declared workflow and what its seal
+//   resolved, rebuilt into the generated queries. A name that release
+//   doesn't declare is `operation.not_found`, another kind
+//   `operation.kind_mismatch`, and arguments are checked by its own
+//   descriptors.
 // - Reading another person's runs, or another App's: `runs` lists only
 //   runs whose start receipt says this App started them for the caller,
 //   of the workflow its active binding of the alias names, read here and

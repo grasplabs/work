@@ -38,10 +38,12 @@ import type { StoredPreferences } from "./store-host.ts";
 //   arguments are strict objects with no person in them, so naming one is
 //   refused as any unknown key. No role reads another's, an admin's
 //   neither.
-// - A reference made up, or of another App, release or contract: it
-//   resolves only against the App's current sealed release and the
-//   preferences it declares, rebuilt here, and must name exactly that
-//   release, kind and fingerprint. An App that declares none has none.
+// - A reference made up, or kept from another release: it is a name and
+//   a kind, resolved by name in the release that answers the call (the
+//   App's current one) against the preferences that release declares,
+//   rebuilt here. A name it doesn't declare is `operation.not_found`,
+//   another kind `operation.kind_mismatch`, and arguments are checked by
+//   that release's own descriptors. An App that declares none has none.
 //   No function of the App's shadows them: the SDK keeps the top-level
 //   `preferences` segment for the platform.
 // - Keys, values or sizes the App didn't declare: a patch is the strict,
@@ -104,7 +106,11 @@ export interface ResolvedPreferenceOperation {
   readonly preferences: unknown;
   readonly args: unknown;
   readonly returns: unknown;
-  /** Its exact contract's fingerprint, which the reference named. */
+  /**
+   * Its contract's fingerprint in the release that answers: part of what
+   * an `update`'s idempotency key is bound to, so a resend under a release
+   * whose contract differs is another change.
+   */
   readonly fingerprint: string;
 }
 

@@ -14,10 +14,12 @@ import type { BuildOptions } from "./screens.ts";
 
 // What an App's screens import as `@server/_generated/api` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
-// function's contract ID, exact fingerprint, kind and argument
-// descriptors) and grant nothing: core resolves every call against the
-// sealed release that runs and refuses a reference that doesn't match it
-// exactly (app-functions.ts).
+// function's name, and a mutation's or an action's kind and argument
+// descriptors) and grant nothing: core resolves every call by name in the
+// release that answers it, the App's current one, refuses a name it
+// doesn't hold or a function of another kind, and checks the arguments
+// with that function's own validator (app-functions.ts,
+// `publicOperationOf`).
 //
 // Generation is deterministic: the same manifest and identity always make
 // the same bytes. This module makes them from files as they are, which is
