@@ -130,8 +130,18 @@ const startEmpty = async (): Promise<void> => {
 
 countBackgroundCalls();
 await startEmpty();
-// The built-ins' install, once per runtime, then empty storage again.
+// The built-ins' install, once per runtime, then empty storage again,
+// once the calls it left going have gone quiet. The install's audit
+// events drain in the background, each drain calling the AuditLog object
+// and the databases after the install's request ended; a reset that
+// aborts an object mid-call leaves the module runner's import for it
+// pending for good (see the imports above), and every request after it,
+// the file's first sign-in included, waited until its test timed out.
+// On a loaded CI runner the drains were still going when the reset came:
+// experiment E02, first on its shard, hung on its first sign-in for
+// every one of its tests.
 if (await installBuiltinsFirst()) {
+  await backgroundCallsQuiet();
   await startEmpty();
 }
 

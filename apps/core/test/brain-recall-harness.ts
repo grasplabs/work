@@ -101,8 +101,11 @@ const policyOfArm = (arm: BrainRecallArm): BrainRecallPolicy => {
 const inputOfArm = (arm: BrainRecallArm): BrainRecallInput =>
   arm.endsWith(":question") ? "question" : "keywords";
 
-/** How long an arm is asked for an update before it counts as never finding it. */
-const lagLimitMs = 5000;
+/**
+ * How long an arm is asked for an update before it counts as never
+ * finding it, unless the run says otherwise (`lagLimitMs`).
+ */
+const lagLimitDefaultMs = 5000;
 
 /** How often an arm is asked again while it hasn't found an update. */
 const lagPollMs = 100;
@@ -291,12 +294,17 @@ const askAll = async (
   return observations;
 };
 
-/** How long each arm took to find each of `cases`' markers, once `since` wrote them. */
+/**
+ * How long each arm took to find each of `cases`' markers, once `since`
+ * wrote them: each arm asked at least once, and again until it finds the
+ * marker or `limitMs` has passed.
+ */
 const lagsOf = async (
   company: BrainCompany,
   cases: readonly BrainRecallCase[],
   arms: readonly BrainRecallArm[],
-  since: number
+  since: number,
+  limitMs: number
 ): Promise<UpdateLag[]> => {
   const lags: UpdateLag[] = [];
   for (const recallCase of cases) {
@@ -308,9 +316,10 @@ const lagsOf = async (
         // may tick between the two, and an arm the first ask finds lags 0.
         let firstAsk: number | undefined;
         let lagMs: number | null = null;
-        while (lagMs === null && performance.now() - first < lagLimitMs) {
-          const asking = performance.now();
-          firstAsk ??= asking;
+        let asking = true;
+        while (asking) {
+          const askedAt = performance.now();
+          firstAsk ??= askedAt;
           // oxlint-disable-next-line no-await-in-loop -- asked until found
           const { texts } = await askedOf(
             arm,
@@ -318,7 +327,10 @@ const lagsOf = async (
             recallCase
           );
           if (texts.some((text) => text.includes(marker))) {
-            lagMs = asking - firstAsk;
+            lagMs = askedAt - firstAsk;
+            asking = false;
+          } else if (performance.now() - first + lagPollMs >= limitMs) {
+            asking = false;
           } else {
             // oxlint-disable-next-line no-await-in-loop -- a pause before asking again
             await scheduler.wait(lagPollMs);
@@ -342,6 +354,12 @@ export interface BrainRecallOptions {
   cases?: readonly BrainRecallCase[];
   /** Whether the reranker behind connect is a real model, not a stub. */
   measured: boolean;
+  /**
+   * How long an arm is asked again for an update it hasn't found; 0 asks
+   * once, for a run whose index is written with the document, as it is
+   * in workerd, where any lag is a kept recall outliving the write.
+   */
+  lagLimitMs?: number;
   seed?: number;
   /** What the run's numbers depend on, beyond the code: its model and profile. */
   identity: { model: string; profile: string; build?: unknown };
@@ -398,6 +416,7 @@ export const runBrainRecallComparison = async (
     cases = brainRecallCases,
     measured,
     seed = 304,
+    lagLimitMs = lagLimitDefaultMs,
     identity,
   }: BrainRecallOptions
 ): Promise<BrainRecallReport> => {
@@ -420,7 +439,13 @@ export const runBrainRecallComparison = async (
       );
     }
     await applyWindow(company, "t1");
-    const lags = await lagsOf(company, late, arms, performance.now());
+    const lags = await lagsOf(
+      company,
+      late,
+      arms,
+      performance.now(),
+      lagLimitMs
+    );
     observations.push(...(await askAll(company, late, arms, 0, random)));
 
     const byId = new Map(cases.map((each) => [each.id, each]));
