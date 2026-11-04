@@ -708,8 +708,11 @@ export const buildAppCode = async (
     options
   );
 
-/** An App's server code with its tests: what `checkAppCode` reads. */
-const appCodeAndTestFiles = (files: AppFiles): AppFiles => ({
+/**
+ * An App's server code with its tests: what `checkAppCode` reads, and
+ * with `buildAppCode`'s (a part of it) all a seal compiles and inspects.
+ */
+export const appCodeAndTestFiles = (files: AppFiles): AppFiles => ({
   ...appTestFiles(files),
   ...appCodeFiles(files),
 });

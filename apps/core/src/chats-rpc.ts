@@ -75,7 +75,11 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import type { LeasedBuild } from "./screen-delivery.ts";
-import { frameAccess, stageFrame } from "./screen-frame.ts";
+import {
+  frameAccess,
+  stageFrame,
+  updatingFrameAccess,
+} from "./screen-frame.ts";
 import {
   admitPreviewCall,
   admitWindow,
@@ -213,18 +217,17 @@ const builderRolesKey = async (env: Env, userId: string): Promise<string> => {
  */
 const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
   check,
-  // The draft still at the subscription's revision, and the person still
-  // building the App: a read under way as the draft moved on pushes
-  // nothing, and its subscription ends.
+  // The draft still served at the subscription's revision (its own, or
+  // one since which only its screens changed), and the person still
+  // building the App: a read under way as the draft's server code moved
+  // on pushes nothing, and its subscription ends.
   access: async (by, app, key) => {
     const { chatId, revision } = previewOfKey(key);
-    const now = await workspace(env, personalWorkspaceId(by.userId)).draft(
-      chatId,
-      app
-    );
-    return now.revision === revision && (await buildsNow(env, by, app))
-      ? "open"
-      : "role";
+    const served = await workspace(
+      env,
+      personalWorkspaceId(by.userId)
+    ).previewServes(chatId, app, revision);
+    return served && (await buildsNow(env, by, app)) ? "open" : "role";
   },
   // The teams they are in now with them, which a table's row rules read
   // (store-rules.ts): a preview read under one set is never pushed under
@@ -712,15 +715,54 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       // As its recheck (`buildsNow`): an archived App has no preview.
       const { id, name } = await editableApp(this.#env, by, app);
-      // No line of loads of its own: the page asks for one at a time, and
-      // two asks for the same files share one build, held to the build
-      // wait (screens.ts `withinBuildWait`, `screen.build_slow`).
-      return await this.#loadPreview(by, chatId, id, name, {
-        screen,
-        version,
-        appVersion,
-      });
+      return await this.#oneBuildAtATime(
+        by,
+        chatId,
+        id,
+        async () =>
+          await this.#loadPreview(by, chatId, id, name, {
+            screen,
+            version,
+            appVersion,
+          })
+      );
     });
+  }
+
+  /**
+   * `build`, a build of `chatId`'s preview of App `id`, run in its place
+   * in that preview's line in the chat's object (preview-builds.ts), so
+   * no tab or caller builds and seals for every ask: what it answered, or
+   * how it failed; `app.preview_superseded` when a newer ask took its
+   * place. The build runs here; the object only holds the place while it
+   * does, and hears nothing of what it answers.
+   */
+  async #oneBuildAtATime<T>(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    build: () => Promise<T>
+  ): Promise<T> {
+    let outcome: { built: T } | { failed: unknown } | undefined;
+    await this.#chatsOf(by.userId).previewBuild(
+      chatIdOf(chatId),
+      by.userId,
+      id,
+      async () => {
+        try {
+          outcome = { built: await build() };
+        } catch (error) {
+          outcome = { failed: error };
+        }
+      }
+    );
+    if (outcome === undefined) {
+      throw new Error("The preview's build ran and answered nothing.");
+    }
+    if ("failed" in outcome) {
+      throw outcome.failed;
+    }
+    return outcome.built;
   }
 
   /**
@@ -739,21 +781,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<PreviewUpdate> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
-      const { files, references, revision } = await this.#previewed(
-        by,
-        chatId,
-        id,
-        {}
-      );
-      const built = await this.#previewBuild(files, references, id, screen);
-      if (built.refresh === undefined) {
-        // A preview's build always has its entries: the build is at fault.
-        throw new Error("The preview's build has no entry to refresh.");
-      }
-      return {
-        app: id,
-        refresh: await refreshOf(revision, built.screen, built),
-      };
+      return await this.#oneBuildAtATime(by, chatId, id, async () => {
+        const { files, references, revision } = await this.#previewed(
+          by,
+          chatId,
+          id,
+          {}
+        );
+        const built = await this.#previewBuild(files, references, id, screen);
+        if (built.refresh === undefined) {
+          // A preview's build always has its entries: the build is at fault.
+          throw new Error("The preview's build has no entry to refresh.");
+        }
+        return {
+          app: id,
+          refresh: await refreshOf(revision, built.screen, built),
+        };
+      });
     });
   }
 
@@ -775,8 +819,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }> {
     const chats = this.#chatsOf(by.userId);
     if (appVersion !== undefined) {
-      // The chat's own person's, as each kind of preview is
-      // (`takePreviewUpdate` checked it), of a version they may read.
+      // From the person's own chat, as each kind of preview is
+      // (`agent.chat_not_found` for anyone else's, or none), of a version
+      // they may read.
+      await chats.chatSummary(chatIdOf(chatId), by.userId);
       const row = await findVersion(this.#env, id, appVersion);
       const files = await readTree(this.#env, id, row.tree);
       return {
@@ -842,8 +888,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     // A preview reads no real data; its frame still runs exactly this
     // build and nothing else, until the page hands it an update.
     await stageFrame(this.#env, built.artifact, built.code, { preview: true });
-    // Only the draft as it is now takes updates: a version opened
-    // read-only stays as it was.
+    // Only the draft as it is now takes updates, and only its frame's
+    // policy allows them (screen-frame.ts): a version opened read-only
+    // stays as it was.
     const updates =
       revision !== readOnlyRevision && built.refresh !== undefined;
     return {
@@ -853,7 +900,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       screens,
       screen: built.screen,
       artifact: built.artifact,
-      frameToken: await frameAccess(this.#env, built.artifact),
+      frameToken: updates
+        ? await updatingFrameAccess(this.#env, built.artifact)
+        : await frameAccess(this.#env, built.artifact),
       ...(updates
         ? { refresh: await refreshOf(revision, built.screen, built) }
         : {}),
@@ -953,13 +1002,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // A window counts as the pages it reads (query-windows.ts).
       await admitWindow(this.#env, by, id, request);
       const chat = chatIdOf(chatId);
-      // The chat is theirs, with a draft of the App at `revision`.
-      const draft = await this.#chatsOf(by.userId).previewDraft(
-        chat,
-        by.userId,
-        id
-      );
-      if (draft.revision !== revision) {
+      // The chat is theirs, with a draft of the App that a screen at
+      // `revision` still reaches.
+      const chats = this.#chatsOf(by.userId);
+      await chats.previewDraft(chat, by.userId, id);
+      if (!(await chats.previewServes(chat, id, revision))) {
         throw appErrors.create("app.preview_outdated");
       }
       return this.#previewQueries.subscribe(
@@ -1030,13 +1077,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       relayed.stop = relayPreviewStream(frames, {
         deliver: toPage,
         // The session still theirs, the App still theirs to build, and the
-        // draft still at the stream's revision.
+        // draft still served at the stream's revision.
         stillOpen: async () => {
           const now = await this.#check();
           if (now.userId !== by.userId) {
             throw authErrors.create("auth.unauthenticated");
           }
-          if ((await chats.draftRevision(chat, id)) !== revision) {
+          if (!(await chats.previewServes(chat, id, revision))) {
             throw appErrors.create("app.preview_outdated");
           }
           if (!(await buildsNow(this.#env, now, id))) {

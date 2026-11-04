@@ -122,6 +122,20 @@ export const frameAccess = async (
   await accessToken(env, `frame:${artifact}`, now + frameAccessMs);
 
 /**
+ * A token for the frame of `artifact`, a chat's preview of its draft as
+ * it is now, that takes the draft's updates (`previewScripts`): only core
+ * hands one out, for that preview alone. A version of a draft or an App
+ * opened read-only is framed with `frameAccess`, and takes none, whatever
+ * else the same build was framed for.
+ */
+export const updatingFrameAccess = async (
+  env: Env,
+  artifact: string,
+  now = Date.now()
+): Promise<string> =>
+  await accessToken(env, `frame-updates:${artifact}`, now + frameAccessMs);
+
+/**
  * When a token `windowedAccess` makes at `now` expires: the end of the
  * next window of `moduleAccessWindowMs`.
  */
@@ -950,9 +964,12 @@ const scriptJson = (value: unknown): string =>
 // Fast Refresh, keeping what the screen holds (@grasp-os/sdk's
 // preview-runtime.ts). A frame's policy is fixed when its document loads,
 // so no new module address could be named in it: a preview's frame, and
-// only one staged as a preview's (`preview`, under core's MAC), allows
-// `data:` modules too (the decision on GRA-409). The ways it could fail,
-// and what closes each:
+// only one both staged as a preview's build (`preview`, under core's MAC)
+// and framed with a token core made for taking updates
+// (`updatingFrameAccess`, the draft as it is now alone), allows `data:`
+// modules too (the decision on GRA-409). A version opened read-only is
+// the same build at times, so the token decides, not the build. The ways
+// it could fail, and what closes each:
 //
 // - The production frame's policy loosens: it is built from the same
 //   list without `previewScripts`, byte for byte as before, and a
@@ -1001,7 +1018,16 @@ export const screenFrameResponse = async (
     return refused(404);
   }
   const token = url.searchParams.get("token");
-  if (!(await hasFrameAccess(env, `frame:${artifact.data}`, token))) {
+  // Framed to take a draft's updates (`updatingFrameAccess`), or as it is.
+  const updating = await hasFrameAccess(
+    env,
+    `frame-updates:${artifact.data}`,
+    token
+  );
+  if (
+    !updating &&
+    !(await hasFrameAccess(env, `frame:${artifact.data}`, token))
+  ) {
     return refused(403);
   }
   const stored = await env.FILES.get(frameKey(artifact.data));
@@ -1067,7 +1093,8 @@ export const screenFrameResponse = async (
     await hashSource(bootstrap),
     await hashSource(importMap),
     ...new Set(Object.values(manifest.imports).map((hash) => addressOf(hash))),
-    ...(manifest.preview ? previewScripts : []),
+    // A preview's build, framed to take its draft's updates: both.
+    ...(manifest.preview && updating ? previewScripts : []),
   ];
   // The page's language, one it speaks or English: never text of the
   // page's own in the document.

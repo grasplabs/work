@@ -4,6 +4,7 @@ import {
   manifestText,
 } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
+import { readOnlyRevision } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, StoreId } from "@grasp-os/shared/ids";
@@ -73,6 +74,7 @@ import type { Invocation } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
+import { appCodeAndTestFiles } from "./screens.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -523,26 +525,27 @@ export interface PreviewCallOptions {
 const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
 
 /**
- * The folders of a draft whose files only its screens build from: the
- * screens' build reads them, and its seal compiles and inspects nothing
- * of them, so a write of them alone leaves its release as it was.
+ * Whether a draft's seal reads the file at `path`: one its builds select
+ * (`appCodeAndTestFiles`, the very selection its compile and type check
+ * make), never decided by a list of its own. Of every other file (screens,
+ * components, anything else) the seal keeps only the whole tree's hash,
+ * as provenance; nothing it runs or checks comes from them.
  */
-const screenFolders = ["screens/", "components/"];
+const sealReads = (path: string): boolean =>
+  Object.hasOwn(appCodeAndTestFiles({ [path]: "" }), path);
 
 /**
  * What of `draft` its draft release is sealed from, as text to compare:
- * the version it changes and every change outside `screenFolders`. Two
- * revisions with the same server code run on one release and one store,
- * so a write of a screen reaches its preview without a seal, and keeps
- * what the preview's store holds.
+ * the version it changes and every change of a file its seal reads
+ * (`sealReads`). Two revisions with the same server code run on one
+ * release and one store, so a write of a screen reaches its preview
+ * without a seal, and keeps what the preview's store holds.
  */
 const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
   canonicalJson({
     base,
     changes: Object.fromEntries(
-      Object.entries(changes).filter(
-        ([path]) => !screenFolders.some((folder) => path.startsWith(folder))
-      )
+      Object.entries(changes).filter(([path]) => sealReads(path))
     ),
   });
 
@@ -640,6 +643,12 @@ export class SealedPreviews {
   readonly #discarding = new Set<string>();
   /** What each preview runs, by `nameOf`. In memory: a restart loads it again. */
   readonly #running = new Map<string, Running>();
+  /**
+   * The server code of each chat's draft of an App, by `nameOf`, and the
+   * first revision it has been that since (`serves`). In memory: a
+   * restart knows only the draft's revision now.
+   */
+  readonly #serverSince = new Map<string, { server: string; since: number }>();
   /** The receipts kept of settled invocations, oldest first (`#kept`). */
   readonly #receipts: { running: Running; name: string; live: Live }[] = [];
 
@@ -1712,10 +1721,48 @@ export class SealedPreviews {
    * of its screens alone leaves as it was (`serverOf`).
    */
   revised(chatId: ChatId, app: string, draft: Draft): void {
-    const known = this.#running.get(nameOf(chatId, app));
+    const name = nameOf(chatId, app);
+    const server = serverOf(draft);
+    const kept = this.#serverSince.get(name);
+    const known = this.#running.get(name);
     if (known === undefined || !runsServerOf(known, draft)) {
       this.drop(chatId, app);
     }
+    this.#serverSince.set(
+      name,
+      kept?.server === server ? kept : { server, since: draft.revision }
+    );
+  }
+
+  /**
+   * Whether a screen of the draft at `revision` may call `draft`, the
+   * chat's draft of `app` now: at its revision, or at one since which
+   * only its screens changed (`serverOf`), so what it calls is the very
+   * code and store the draft runs now. A frame keeps the last version of
+   * its screen that worked while a write of it fails, and calls from
+   * there; one past the draft's server code is `app.preview_outdated`.
+   * After this object starts again, only the draft's own revision, as it
+   * knows of no earlier one.
+   */
+  serves(
+    chatId: ChatId,
+    app: string,
+    draft: Draft,
+    revision: unknown
+  ): boolean {
+    if (
+      typeof revision !== "number" ||
+      !Number.isSafeInteger(revision) ||
+      revision === readOnlyRevision ||
+      revision > draft.revision
+    ) {
+      return false;
+    }
+    if (revision === draft.revision) {
+      return true;
+    }
+    const kept = this.#serverSince.get(nameOf(chatId, app));
+    return kept?.server === serverOf(draft) && revision >= kept.since;
   }
 
   /**
@@ -1726,6 +1773,8 @@ export class SealedPreviews {
   drop(chatId: ChatId, app: string): void {
     const running = this.#running.get(nameOf(chatId, app));
     this.#running.delete(nameOf(chatId, app));
+    // No earlier revision serves once the draft was dropped or proposed.
+    this.#serverSince.delete(nameOf(chatId, app));
     // Its streaming actions stop, and commit nothing more: each protected
     // step checks the preview is still the one running.
     for (const { live } of running?.streams.values() ?? []) {
