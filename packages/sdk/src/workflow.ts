@@ -5,6 +5,7 @@ import type { CollectionReader } from "@grasp-os/shared/knowledge";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
+  sensitiveParamKey,
   stepIdempotencyKey,
   triggerDeclarationsSchema,
 } from "@grasp-os/shared/workflows";
@@ -162,6 +163,28 @@ const parseOrThrow = <Schema extends z.ZodType>(
     throw new WorkflowError(code, `${what}: ${z.prettifyError(result.error)}`);
   }
   return result.data;
+};
+
+/** The longest name a workflow's parameter has. */
+const maxParamName = 64;
+
+/**
+ * Where a connector call's argument is the sensitive parameter `name`:
+ * `await env.mail.call("mail.send", { to, token: sensitiveParam("token") })`.
+ * The run never sees the value. Its run host puts in the value the run's
+ * start froze, and only where the sealed build has that parameter as a
+ * connector call's argument. Any other place refuses it, and so does an
+ * App's run.
+ */
+export const sensitiveParam = (
+  name: string
+): Readonly<Record<typeof sensitiveParamKey, string>> => {
+  if (typeof name !== "string" || name === "" || name.length > maxParamName) {
+    throw invalidCall(
+      `A sensitive parameter needs a name of 1 to ${maxParamName} characters`
+    );
+  }
+  return freeze({ [sensitiveParamKey]: name });
 };
 
 // Parameters

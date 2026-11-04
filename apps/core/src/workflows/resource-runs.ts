@@ -184,7 +184,8 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
  * App slots of the attempts running at once its attempts take
  * (admission.ts): the workflow's own, as an App's runs take their App's.
  */
-const ownerOf = (workflow: string): string => `workflow-resource:${workflow}`;
+export const workflowOwnerOf = (workflow: string): string =>
+  `workflow-resource:${workflow}`;
 
 /** What a start's run is admitted as: its pins, from the authorization. */
 export interface RunAdmission {
@@ -286,7 +287,7 @@ export const runOf = async (
     .get();
 
 /** The input and frozen parameters a run reads from its receipt. */
-const receiptOf = async (env: Env, id: string) =>
+export const receiptOf = async (env: Env, id: string) =>
   await drizzle(env.DB)
     .select({
       manifestHash: workflowStartReceipts.manifestHash,
@@ -1094,7 +1095,7 @@ export const runResourceWorkflow = async (
   return await runActivation(env, engineStep, memory, {
     run,
     output,
-    owner: ownerOf(pin.workflow),
+    owner: workflowOwnerOf(pin.workflow),
     // Counted on its account: its lineage's root (its own, or its
     // parent's for a child), or its workflow's account in the lineage a
     // trigger started it in (quotas.ts, `triggeredAccountClaimed`).

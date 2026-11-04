@@ -456,6 +456,54 @@ export const triggerDeclarationsSchema = z
 export const coreStepPrefix = "$grasp:";
 
 /**
+ * The key of a sensitive parameter's placeholder, `{"$grasp:param": name}`
+ * (the SDK's `sensitiveParam`): where a sealed build seals that parameter
+ * as a connector call's argument, its run host puts in the value the run's
+ * start froze (core's workflows/sealed-run.ts). An App's run may send
+ * none (core's workflows/app-run.ts).
+ */
+export const sensitiveParamKey = "$grasp:param";
+
+/**
+ * The parameter `value` is the placeholder of: only an object whose one
+ * key is `sensitiveParamKey`, naming it as text. Any other value, one with
+ * other `$grasp:` keys included, is data.
+ */
+export const placeholderOf = (value: unknown): string | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const keys = Object.keys(value);
+  const name: unknown = Reflect.get(value, sensitiveParamKey);
+  return keys.length === 1 &&
+    keys[0] === sensitiveParamKey &&
+    typeof name === "string"
+    ? name
+    : undefined;
+};
+
+/** Whether `value` holds a placeholder (`placeholderOf`) at any depth. */
+export const holdsPlaceholder = (value: unknown): boolean => {
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (typeof node === "object" && node !== null && !seen.has(node)) {
+      if (placeholderOf(node) !== undefined) {
+        return true;
+      }
+      seen.add(node);
+      const items: unknown[] = Object.values(node);
+      // One at a time: a spread of a large list would overflow the stack.
+      for (const item of items) {
+        pending.push(item);
+      }
+    }
+  }
+  return false;
+};
+
+/**
  * What a decision task's waits for its answer, and its looks after them,
  * start with (core's workflows/resource-host.ts): core's steps, so they
  * count against none of the run's steps however long it waits, each named

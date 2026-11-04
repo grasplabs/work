@@ -959,6 +959,8 @@ export const buildOf = (manifest: string): SealedBuild =>
 /** A version's executable build, loaded and verified, as a run runs it. */
 export interface LoadedBuild {
   readonly hash: string;
+  /** The generator that made it (`generatorVersion` then). */
+  readonly generator: string;
   /** The compiled generated module, by flat name. */
   readonly modules: Readonly<Record<string, string>>;
   /** The SDK modules it was compiled against, by flat name. */
@@ -1344,6 +1346,7 @@ const verifiedBuild = async (
   // caller changes what another runs.
   return Object.freeze({
     hash: build.hash,
+    generator: build.generator,
     modules: Object.freeze(modules),
     sdk: Object.freeze(sdk),
     tasks: Object.freeze(tasks.tasks.map((task) => Object.freeze(task))),

@@ -370,7 +370,8 @@ export const isolateCall = async (
   return signal === undefined ? await called : await givenUpOn(called, signal);
 };
 
-const runModule = "grasp-run.js";
+/** A run's main module, by its flat name (`runMain`). */
+export const runModule = "grasp-run.js";
 const testsModule = "grasp-tests.js";
 const metadataModule = "grasp-metadata.js";
 const dryRunModule = "grasp-dry-run.js";
@@ -535,7 +536,22 @@ export const bindings = ({ connections, collections, brains = [] }) => {
 `;
 
 /**
- * The main module of a run of workflow `id`: the engine the SDK runs on,
+ * The module a run's main module (`runMain`) runs the workflow of, and
+ * what it must export: an App's workflow `id`, or a sealed build's
+ * generated module, which the build's hash proves (sealed-run.ts).
+ */
+interface RunDefinition {
+  /** Its flat name: its default export is the workflow. */
+  module: string;
+  /** The ID its workflow must have, where its name doesn't prove it. */
+  id?: WorkflowId;
+  /** What the run fails with when it exports no such workflow. */
+  refusal: string;
+}
+
+/**
+ * The main module of a run of the workflow `definition` names: the engine
+ * the SDK runs on,
  * each of its calls sent to core's host (host.ts), and each error in plain
  * data both ways. Every binding (its App, its collections and
  * connections), and what the SDK does inside a step (a model
@@ -547,19 +563,21 @@ export const bindings = ({ connections, collections, brains = [] }) => {
  * the runtime's own built-ins, and the definition the SDK makes is frozen
  * with the runtime's `Object.freeze`, so no module replaces its `run`.
  */
-const runMain = (
-  id: WorkflowId
-): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+const runMain = ({
+  module,
+  id,
+  refusal,
+}: RunDefinition): string => `import { WorkerEntrypoint } from "cloudflare:workers";
 import { bindings, currentAttempt, inAttempt, unwrapped } from ${JSON.stringify(runBindingsModule)};
 import ${JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"))};
-import definition from ${JSON.stringify(appModuleName(workflowPaths(id).workflow))};
+import definition from ${JSON.stringify(module)};
 ${settling}
 
 export class Run extends WorkerEntrypoint {
   async run(host, { runId, params, input, connections, collections, brains }) {
     return await settled(async () => {
-      if (definition?.metadata?.id !== ${JSON.stringify(id)} || typeof definition.run !== "function") {
-        throw new Error(${JSON.stringify(`workflows/${id}.ts must export the workflow "${id}" as its default export.`)});
+      if (${id === undefined ? "" : `definition?.metadata?.id !== ${JSON.stringify(id)} || `}typeof definition?.run !== "function") {
+        throw new Error(${JSON.stringify(refusal)});
       }
       const engine = {
         runId,
@@ -578,6 +596,18 @@ export class Run extends WorkerEntrypoint {
   }
 }
 `;
+
+/**
+ * The modules a run's isolate loads besides its workflow's and the SDK's:
+ * its main module (`runModule`, `runMain`) and what builds its bindings
+ * (`runBindings`).
+ */
+export const runModules = (
+  definition: RunDefinition
+): Record<string, string> => ({
+  [runBindingsModule]: runBindings,
+  [runModule]: runMain(definition),
+});
 
 /** The main module that runs workflow `id`'s tests (`runWorkflowTests`). */
 const testsMain = (
@@ -1250,8 +1280,11 @@ export const loadRun = (
       mainModule: runModule,
       modules: async () => ({
         ...(await modulesOf(env, app, version, files)),
-        [runBindingsModule]: runBindings,
-        [runModule]: runMain(workflow),
+        ...runModules({
+          module: appModuleName(workflowPaths(workflow).workflow),
+          id: workflow,
+          refusal: `workflows/${workflow}.ts must export the workflow "${workflow}" as its default export.`,
+        }),
       }),
       attemptMethods,
     },
