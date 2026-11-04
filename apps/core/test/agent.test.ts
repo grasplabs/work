@@ -762,7 +762,7 @@ describe("chat agent sandbox", () => {
     const reply = ask("Wait, then look.");
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(3);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
       },
       { timeout: 10_000 }
     );
@@ -923,9 +923,24 @@ describe("chat agent turns", () => {
     await stub.cancel(chat.id, personId);
 
     await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
+    // pi ends the aborted call with its own result; the run's record says
+    // how the run itself ended.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: true, text: "Error (cancelled):\nThe run was cancelled." },
+      { isError: true, text: "Tool executeCode was aborted" },
     ]);
+    await vi.waitFor(async () => {
+      await expect(
+        runInDurableObject(stub, (_instance, state) =>
+          state.storage.sql
+            .exec<{ status: string }>(
+              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              chat.id
+            )
+            .toArray()
+            .map(({ status }) => status)
+        )
+      ).resolves.toStrictEqual(["cancelled"]);
+    });
     // No request after the cancelled step.
     expect(provider.requests).toHaveLength(1);
   });
