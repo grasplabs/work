@@ -3908,6 +3908,11 @@ msgstr "Verwijst naar een bron waar je geen toegang meer toe hebt"
 msgid "Clear"
 msgstr "Wissen"
 
+#. placeholder {0}: field.name
+#: src/workflows/start-run.tsx
+msgid "Clear {0}"
+msgstr ""
+
 #: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"

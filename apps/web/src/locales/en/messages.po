@@ -3908,6 +3908,11 @@ msgstr "Cites a source you no longer have access to"
 msgid "Clear"
 msgstr "Clear"
 
+#. placeholder {0}: field.name
+#: src/workflows/start-run.tsx
+msgid "Clear {0}"
+msgstr "Clear {0}"
+
 #: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
