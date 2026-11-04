@@ -48,6 +48,7 @@ const form: WorkflowStartForm = {
     required: ["times", "who"],
     additionalProperties: false,
   },
+  people: null,
 };
 
 /**
@@ -133,6 +134,25 @@ const button = (text: string): HTMLButtonElement | undefined =>
     (each) => each.textContent.trim() === text
   );
 
+/** The buttons whose text is `text`. */
+const buttonsNamed = (text: string): HTMLButtonElement[] =>
+  [...document.querySelectorAll("button")].filter(
+    (each) => each.textContent.trim() === text
+  );
+
+/** Clicks `element`, and lets what it does settle. */
+const click = async (
+  element: HTMLElement | null | undefined
+): Promise<void> => {
+  if (!(element instanceof HTMLElement)) {
+    throw new TypeError("Nothing to click");
+  }
+  await act(async () => {
+    element.click();
+    await settled();
+  });
+};
+
 /** Presses the button whose text is `text`, and lets what it does settle. */
 const press = async (text: string): Promise<void> => {
   await act(async () => {
@@ -160,6 +180,16 @@ const type = async (label: string, value: string): Promise<void> => {
       }
       field.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    await settled();
+  });
+};
+
+/** Picks the option of the open list whose text is `text`. */
+const choose = async (text: string): Promise<void> => {
+  await act(async () => {
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((each) => each.textContent.trim().endsWith(text))
+      ?.click();
     await settled();
   });
 };
@@ -209,10 +239,75 @@ describe("starting a workflow by hand", () => {
     });
   });
 
+  it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
+    const asked = await shown(
+      () => <StartIndependentRun workflow="workflow-1" />,
+      {
+        version: 3,
+        input: {
+          type: "object",
+          properties: {
+            approver: { type: "string", "x-grasp-value": { kind: "person" } },
+            watcher: { type: "string", "x-grasp-value": { kind: "person" } },
+          },
+          required: ["approver"],
+          additionalProperties: false,
+        },
+        people: {
+          people: [{ id: "user-ada", name: "Ada Lovelace" }],
+          teams: [{ id: "team-finance", name: "Finance" }],
+        },
+      }
+    );
+    await press("Start");
+    const typed = document.querySelector("input");
+    await press("Start the run");
+    const unpicked = {
+      asked: asked.length,
+      said: said().includes("Fill this in."),
+    };
+    const [approver, watcher] = buttonsNamed("Choose…");
+    await click(approver);
+    const offered = [...document.querySelectorAll('[role="option"]')].map(
+      (each) => each.textContent.trim()
+    );
+    await choose("Everyone with the Admin role");
+    await press("Admin");
+    await choose("Ada Lovelace");
+    // An optional one picked by mistake is cleared again.
+    await click(watcher);
+    await choose("Finance");
+    await click(
+      document.querySelector<HTMLButtonElement>('[aria-label="Clear watcher"]')
+    );
+    await press("Start the run");
+
+    expect({ typed, unpicked, offered, asked }).toStrictEqual({
+      typed: null,
+      unpicked: { asked: 0, said: true },
+      offered: [
+        "ALAda Lovelace",
+        "Finance",
+        "Everyone with the Admin role",
+        "Everyone with the Builder role",
+        "Everyone with the User role",
+      ],
+      asked: [
+        {
+          workflow: "workflow-1",
+          version: 3,
+          input: { approver: "person:user-ada" },
+          keyed: true,
+        },
+      ],
+    });
+  });
+
   it("offers no Start for a workflow core gives no version to start", async () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: null,
       input: null,
+      people: null,
     });
 
     expect(button("Start")).toBeUndefined();

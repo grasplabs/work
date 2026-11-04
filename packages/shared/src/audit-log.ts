@@ -222,6 +222,10 @@ const typeRules: readonly {
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },
+  // Someone with a role in a workflow reading the organization's people
+  // and teams, to name one in its start form (core's
+  // src/workflow-start-form.ts): how many it answered, never whom.
+  { action: "workflow.people.read", type: "read" },
   // An attachment of a message an independent workflow's email trigger
   // received, copied into the run it started as a file of the run.
   { action: "workflow.email.attachment", type: "action" },

@@ -3908,6 +3908,11 @@ msgstr "Zitiert eine Quelle, auf die Sie keinen Zugriff mehr haben"
 msgid "Clear"
 msgstr "Zurücksetzen"
 
+#. placeholder {0}: field.name
+#: src/workflows/start-run.tsx
+msgid "Clear {0}"
+msgstr "{0} zurücksetzen"
+
 #: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
@@ -5367,6 +5372,10 @@ msgstr "Alle, mit denen es geteilt wird, und ihre Agenten lesen es als akzeptier
 #: src/chat/builds.tsx
 msgid "everyone who uses the App"
 msgstr "allen, die die App nutzen"
+
+#: src/people/people-teams-picker.tsx
+msgid "Everyone with the {name} role"
+msgstr "Alle mit der Rolle {name}"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -11331,6 +11340,7 @@ msgstr "Rolle beim Teilen"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
+#: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
 msgstr "Rollen"
@@ -11740,6 +11750,10 @@ msgstr "Personen suchen"
 #: src/people/share-picker.tsx
 msgid "Search people and teams"
 msgstr "Personen und Teams suchen"
+
+#: src/people/people-teams-picker.tsx
+msgid "Search people, teams and roles"
+msgstr "Personen, Teams und Rollen suchen"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."

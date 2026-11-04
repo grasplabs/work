@@ -3908,6 +3908,11 @@ msgstr "Cite une source à laquelle vous n’avez plus accès"
 msgid "Clear"
 msgstr "Effacer"
 
+#. placeholder {0}: field.name
+#: src/workflows/start-run.tsx
+msgid "Clear {0}"
+msgstr "Effacer {0}"
+
 #: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
@@ -5367,6 +5372,10 @@ msgstr "Tous ceux avec qui il est partagé, et leurs agents, le lisent comme acc
 #: src/chat/builds.tsx
 msgid "everyone who uses the App"
 msgstr "toutes les personnes qui utilisent l’App"
+
+#: src/people/people-teams-picker.tsx
+msgid "Everyone with the {name} role"
+msgstr "Tous ceux qui ont le rôle {name}"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -11331,6 +11340,7 @@ msgstr "Rôle à attribuer"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
+#: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
 msgstr "Rôles"
@@ -11740,6 +11750,10 @@ msgstr "Rechercher des personnes"
 #: src/people/share-picker.tsx
 msgid "Search people and teams"
 msgstr "Rechercher des personnes et des équipes"
+
+#: src/people/people-teams-picker.tsx
+msgid "Search people, teams and roles"
+msgstr "Rechercher des personnes, des équipes et des rôles"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."

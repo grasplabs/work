@@ -50,19 +50,27 @@ export const readRequestNames = async (
   return { requests, directory: { people, apps: appsById(apps) } };
 };
 
+/** Workflow `id`, by the name core gave it in `names`, else by its ID. */
+const workflowNamed = (
+  id: string,
+  names: Permission["workflowNames"]
+): string => i18n._(msg`Workflow ${ph({ workflow: names?.[id] ?? id })}`);
+
 /**
  * What holds a permission other than an App, for people: the agent, or an
- * independent workflow, store or trigger, by its ID.
+ * independent workflow (by its name in `names`, where core gave it),
+ * store or trigger, by its ID.
  */
 export const holderName = (
-  subject: Exclude<PermissionSubject, { type: "app" }>
+  subject: Exclude<PermissionSubject, { type: "app" }>,
+  names?: Permission["workflowNames"]
 ): string => {
   switch (subject.type) {
     case "agent": {
       return i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
     }
     case "workflow": {
-      return i18n._(msg`Workflow ${ph({ workflow: subject.workflowId })}`);
+      return workflowNamed(subject.workflowId, names);
     }
     case "store": {
       return i18n._(msg`Store ${ph({ store: subject.storeId })}`);
@@ -81,14 +89,14 @@ export const holderName = (
  * a trigger by its kind and what starts it, as core lists it.
  */
 export const subjectOf = (
-  { subject, trigger }: Permission,
+  { subject, trigger, workflowNames }: Permission,
   directory: Directory
 ): string => {
   if (subject.type === "app") {
     return appName(directory, subject.appId);
   }
   if (trigger === undefined) {
-    return holderName(subject);
+    return holderName(subject, workflowNames);
   }
   const kind = i18n._(kindLabels[trigger.kind]);
   const what = triggerDescription(trigger);
@@ -148,9 +156,12 @@ const storeObject = (storeId: string, reach: Permission["reach"]): string => {
   return i18n._(msg`Store ${ph({ store: storeId })}`);
 };
 
-/** What it asks for, by ID: connections and collections have no names here. */
+/**
+ * What it asks for: a workflow by its name, connections and collections
+ * by ID, as they have no names here.
+ */
 export const objectOf = (
-  { object, actions, reach }: Permission,
+  { object, actions, reach, workflowNames }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -201,7 +212,7 @@ export const objectOf = (
   if (object.type === "store") {
     return storeObject(object.storeId, reach);
   }
-  return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
+  return workflowNamed(object.workflowId, workflowNames);
 };
 
 /**

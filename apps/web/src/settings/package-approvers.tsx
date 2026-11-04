@@ -101,11 +101,12 @@ export const PackageApprovers = ({
               void readCandidates();
             }}
             onPick={({ type, id }) => {
-              void grant(
-                type === "person"
-                  ? { type: "person", userId: id }
-                  : { type: "team", teamId: id }
-              );
+              // Offered no roles: no role approves packages.
+              if (type === "person") {
+                void grant({ type: "person", userId: id });
+              } else if (type === "team") {
+                void grant({ type: "team", teamId: id });
+              }
             }}
           />
         ) : undefined

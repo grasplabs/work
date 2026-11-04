@@ -12,7 +12,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { workflowStartForm } from "../src/workflow-start-form.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // Starting an independent workflow by hand from its page (GRA-1305): what
 // the page reads to start one (src/workflow-start-form.ts), and that the
@@ -164,11 +164,71 @@ describe("starting an independent workflow by hand", () => {
           required: ["times", "who"],
           additionalProperties: false,
         },
+        // No field takes a person: nobody to pick.
+        people: null,
       },
       starts: "ok",
       missing: "workflow.start_invalid",
       extra: "workflow.start_invalid",
       wrongType: "workflow.start_invalid",
+    });
+  });
+
+  it("marks a field that takes a person, offers the organization's people and teams by name to pick, and takes a person, team or role", async () => {
+    const { ada, uma } = await greetingWorkflow();
+    const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", {
+        approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        note: { type: "string" },
+      }),
+      basedOn: null,
+    });
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    let form = await workflowStartForm(env, uma, workflow.id);
+    const recorded = await auditedDuring(async () => {
+      form = await workflowStartForm(env, uma, workflow.id);
+    });
+    const startWith = async (approver: string): Promise<string> =>
+      await started(uma, workflow.id, form.version, { approver, note: "" });
+
+    expect({
+      properties: form.input?.properties,
+      // Uma, a user, picks from everyone, by name and ID alone.
+      offersAda: form.people?.people.find(({ id }) => id === ada.userId),
+      // Each read on the record: how many, never whom.
+      recorded: recorded.map(({ action, actor, target, detail }) => ({
+        action,
+        actor,
+        target,
+        counts:
+          detail.people === form.people?.people.length &&
+          detail.teams === form.people?.teams.length,
+      })),
+      teams: Array.isArray(form.people?.teams),
+      person: await startWith(`person:${ada.userId}`),
+      role: await startWith("role:admin"),
+    }).toStrictEqual({
+      properties: {
+        approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        note: { type: "string" },
+      },
+      offersAda: { id: ada.userId, name: "Person" },
+      recorded: [
+        {
+          action: "workflow.people.read",
+          actor: { type: "person", userId: uma.userId },
+          target: { type: "workflow_resource", id: workflow.id },
+          counts: true,
+        },
+      ],
+      teams: true,
+      person: "ok",
+      role: "ok",
     });
   });
 
@@ -219,7 +279,7 @@ describe("starting an independent workflow by hand", () => {
     }).toStrictEqual({
       live: { version: 1, fields: ["times", "who"] },
       starts: "ok",
-      unpublished: { version: null, input: null },
+      unpublished: { version: null, input: null, people: null },
     });
   });
 });

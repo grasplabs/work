@@ -20,11 +20,17 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
+import { PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import {
+  PeopleTeamsPicker,
+  subjectKey,
+  subjectNamed,
+} from "../people/people-teams-picker.tsx";
+import type { PeopleAndTeams } from "../people/people-teams-picker.tsx";
 import { useCore } from "../use-core.ts";
 import { startFieldsOf, startInputOf } from "./start-input.ts";
 import type {
@@ -39,7 +45,9 @@ import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 // core says a start runs, with a form for its input from that version's
 // schema (`workflowResources.startForm`, start-input.ts), or a run of an
 // App's workflow, whose input, if it takes any, is typed as JSON (an
-// App's workflow says what it takes only in its own code). Offered to
+// App's workflow says what it takes only in its own code). A field that
+// takes a person is picked from the organization's people, teams and
+// roles: core gives the people and teams with the form. Offered to
 // anyone with a role in the workflow or the App, who may start it; core
 // decides again on the start, and what it refuses is said in the dialog.
 // Each start carries a key made when the dialog opens, so pressing again
@@ -105,16 +113,51 @@ const FieldInput = ({
   field,
   id,
   value,
+  people,
   onChange,
 }: {
   field: StartField;
   id: string;
   value: string | boolean | undefined;
+  /** Whom a field that takes a person may name, as core gave them. */
+  people: PeopleAndTeams | null;
   onChange: (value: string | boolean) => void;
 }) => {
   const { t } = useLingui();
   const text = typeof value === "string" ? value : "";
   switch (field.kind) {
+    case "person": {
+      // The one picked, by name, and for an optional field a way to pick
+      // nobody again: core checks the start's input again.
+      const picked = text === "" ? undefined : subjectNamed(text, people);
+      return (
+        <div className="flex items-center gap-1">
+          <PeopleTeamsPicker
+            candidates={people}
+            disabled={false}
+            holding={new Set(text === "" ? [] : [text])}
+            buttonId={id}
+            label={picked ?? (text === "" ? t`Choose…` : text)}
+            onPick={(subject) => {
+              onChange(subjectKey(subject));
+            }}
+            roles
+          />
+          {field.required || text === "" ? null : (
+            <Button
+              aria-label={t`Clear ${field.name}`}
+              onClick={() => {
+                onChange("");
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <XIcon />
+            </Button>
+          )}
+        </div>
+      );
+    }
     case "yes": {
       return (
         <Checkbox
@@ -182,12 +225,15 @@ const FieldInput = ({
 const StartDialog = ({
   description,
   fields,
+  people = null,
   jsonOptional,
   start,
   onFiles,
 }: {
   description: ReactNode;
   fields: StartField[] | undefined;
+  /** Whom a field that takes a person may name, as core gave them. */
+  people?: PeopleAndTeams | null;
   jsonOptional: boolean;
   start: (input: unknown, key: string) => Promise<Started>;
   /** Shows the workflow's Files and apps, where a refused binding is approved. */
@@ -316,6 +362,7 @@ const StartDialog = ({
                     onChange={(value) => {
                       setValues({ ...values, [name]: value });
                     }}
+                    people={people}
                     value={values[name]}
                   />
                   {problem?.field === name ? (
@@ -407,6 +454,7 @@ export const StartIndependentRun = ({
         </Trans>
       }
       fields={startFieldsOf(form?.input)}
+      people={form?.people ?? null}
       jsonOptional={false}
       onFiles={onFiles}
       start={async (input, key) => {

@@ -40,9 +40,11 @@ test.describe.configure({ retries: 0 });
 /** A new workflow's name, as New workflow makes one. */
 const newName = /^new-workflow-[\da-f]{8}$/u;
 
-/** Picks `person` in the open people and teams list on `page`. */
+/** Picks `person` in the open list of people, teams and roles on `page`. */
 const pick = async (page: Page, person: Person): Promise<void> => {
-  await page.getByPlaceholder("Search people and teams").fill(person.email);
+  await page
+    .getByPlaceholder("Search people, teams and roles")
+    .fill(person.email);
   await page.getByRole("option", { name: "Person" }).click();
 };
 
@@ -138,7 +140,15 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .click(pageRead);
   const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("invoice").fill("INV-42");
-  await start.getByLabel("approver").fill(`person:${decider.userId}`);
+  // Picked from the organization's people, never typed as an ID. Everyone
+  // the stack signs in is called Person, and a starter sees names, not
+  // emails: told apart by the ID each option goes by.
+  await start.getByLabel("approver").click();
+  await page
+    .getByRole("option", { name: "Person" })
+    .and(page.locator(`[data-value="person:${decider.userId}"]`))
+    .click();
+  await expect(start.getByLabel("approver")).toHaveText("Person");
   await start.getByRole("button", { name: "Start the run" }).click();
   await expect(start.getByRole("status")).toHaveText(
     "The run started. It is listed with the workflow's runs.",
@@ -196,8 +206,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(page.getByText("Waiting for an admin")).toBeVisible(pageRead);
 
   // Its start waits for an admin, who grants it from their inbox. The
-  // request names the trigger by its kind, and the workflow by its ID.
-  const request = `start on Workflow ${workflow}`;
+  // request names the trigger by its kind, and the workflow by its name.
+  const request = `start on Workflow ${name}`;
   await asAdmin.goto("/inbox");
   await asAdmin
     .getByRole("region", { name: "What waits on you" })

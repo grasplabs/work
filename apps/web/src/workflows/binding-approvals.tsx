@@ -33,7 +33,7 @@ import { useCoreAction } from "../use-core-action.ts";
 
 // A workflow version's bindings that wait on an admin, each approved for
 // that version: where core offers targets that would serve it, the choice
-// of one; for a decision, the people and teams who answer it, which core
+// of one; for a decision, the people, teams and roles who answer it, which core
 // can't pick; otherwise why nothing can be approved yet. The inbox and the
 // workflow's own page list them alike, but the inbox has no offers for the
 // kinds slow to read (a connector, a store operation, a template), so it
@@ -170,7 +170,7 @@ const OfferedChoice = ({
   );
 };
 
-/** Who answers a decision, picked from the organization, and Approve. */
+/** Who answers a decision, picked from the organization's people, teams and roles, and Approve. */
 const DecidersChoice = ({
   alias,
   busy,
@@ -228,6 +228,9 @@ const DecidersChoice = ({
           disabled={busy || reading || deciders.length >= decisionDecidersMax}
           holding={holding}
           label={<Trans>Add who answers</Trans>}
+          // A decision sent to a role (`role:admin`) is answered only by a
+          // binding that names that role.
+          roles
           onOpen={() => {
             void readCandidates();
           }}
