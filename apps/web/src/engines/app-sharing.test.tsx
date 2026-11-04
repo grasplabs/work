@@ -259,7 +259,7 @@ describe("Sharing an App's App", () => {
     const { session, asked } = fakeMembers([], {
       people: [
         { id: "user-eva-0000aaaaaa", name: "Eva de Vries" },
-        { id: "user-eva-1111bbbbbb", name: "eva de Vries" },
+        { id: "user-eva-1111bbbbbb", name: "eva  de \u200BVries" },
         { id: "user-bo", name: "Bo" },
       ],
       teams: [],
@@ -279,7 +279,7 @@ describe("Sharing an App's App", () => {
       // Bo's name is theirs alone, so it says nothing more.
       first: [
         ["Eva de Vries", "ID …aaaaaa"],
-        ["eva de Vries", "ID …bbbbbb"],
+        ["eva  de \u200BVries", "ID …bbbbbb"],
         ["Bo"],
       ],
       second: [["Eva de Vries", "ID …aaaaaa"], ["Bo"]],
@@ -287,7 +287,7 @@ describe("Sharing an App's App", () => {
         ["add", "person", "user-eva-1111bbbbbb", "user"],
         ["add", "person", "user-eva-0000aaaaaa", "user"],
       ],
-      listed: ["eva de Vries (ID …bbbbbb)", "Eva de Vries (ID …aaaaaa)"],
+      listed: ["eva  de \u200BVries (ID …bbbbbb)", "Eva de Vries (ID …aaaaaa)"],
     });
     expect(button("Stop sharing with Eva de Vries (ID …aaaaaa)")).toBeDefined();
   });

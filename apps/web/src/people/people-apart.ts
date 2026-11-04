@@ -22,12 +22,23 @@ export interface Named {
 /** How many of the end of an ID tell a namesake apart. */
 const idEndLength = 6;
 
+/** Characters a page shows nothing of: zero-width spaces, joiners. */
+const invisible = /\p{Cf}/gu;
+
+/** A run of spaces, which a page shows as one. */
+const spaces = /\s+/gu;
+
 /**
- * A name as namesakes are compared: apart from how its letters are
- * encoded, case and outer spaces.
+ * A name as namesakes are compared: as a page shows it, apart from how
+ * its letters are encoded, invisible characters, runs of spaces and case.
  */
 const nameKey = (name: string): string =>
-  name.normalize("NFC").trim().toLocaleLowerCase();
+  name
+    .normalize("NFKC")
+    .replace(invisible, "")
+    .replace(spaces, " ")
+    .trim()
+    .toLocaleLowerCase();
 
 /** What tells people of the same name apart (`usePeopleApart`). */
 export interface PeopleApart {
