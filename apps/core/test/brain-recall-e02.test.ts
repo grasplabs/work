@@ -103,11 +103,11 @@ const armOf = (result: BrainRecallReport, arm: string) => {
 const expecting = brainRecallCases.filter(({ marker }) => marker !== undefined);
 
 describe("experiment E02, hybrid recall against full-text search", () => {
-  // Run once before the tests, so a run that fails or stalls fails them all
-  // within one timeout, not one each, and never outlives the test that
-  // started it: once that test ended, its IdP stopped answering, and the
-  // run's next sign-in went to Microsoft itself. The IdP answers the run as
-  // `mockIdp` has it answer each test. Storage lasts the whole file. An
+  // Run once before the tests, so a run that fails or times out fails the
+  // file once, not each test after a wait of its own, and no test ends
+  // while the run goes on: once a test ended, its IdP stopped answering,
+  // and the run's next sign-in went to Microsoft itself. The IdP answers
+  // the run as `mockIdp` has it answer each test. Storage lasts the whole file. An
   // update is asked for once (`lagLimitMs: 0`): workerd writes the index
   // with the document, so an arm that misses it misses it for good, and
   // asking again for seconds measured nothing.

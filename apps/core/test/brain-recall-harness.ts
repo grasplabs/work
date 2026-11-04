@@ -20,8 +20,8 @@
  * see moves the recall generation, so a repeat is cold again. Each recall
  * records its ranked texts, latency and charged cost; brain-recall-scoring
  * turns them into the report. Cases of the `t1` window are asked as soon
- * as its updates are saved, and again until each arm finds them: how long
- * that takes is the arm's update lag.
+ * as its updates are saved, and again until each arm finds them or the
+ * run's lag limit passes: how long that takes is the arm's update lag.
  *
  * Only the model provider behind connect is swapped in CI, by the caller:
  * whatever answers the provider the organization connected
@@ -66,7 +66,7 @@ import {
 import type { BrainRecallCase } from "./fixtures/brain-recall-cases.ts";
 
 /** Bumped with any change to how the harness runs or measures a recall. */
-export const brainRecallHarnessVersion = "1";
+export const brainRecallHarnessVersion = "2";
 
 export const brainRecallPolicies = [
   "fullText",
@@ -374,6 +374,8 @@ export interface BrainRecallReport {
     policies: Record<string, string>;
     repeats: number;
     seed: number;
+    /** How long an arm was asked again for an update (`lagLimitMs`). */
+    lagLimitMs: number;
     /** Lanes recall read and those it left out, with why, as it reported. */
     lanes: { queried: string[]; omitted: string[] };
     model: string;
@@ -490,6 +492,7 @@ export const runBrainRecallComparison = async (
         },
         repeats,
         seed,
+        lagLimitMs,
         lanes: { queried, omitted },
         ...identity,
       },
