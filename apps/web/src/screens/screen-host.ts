@@ -580,7 +580,7 @@ export interface ScreenOpening {
  */
 /**
  * Asks the person whether to open a link to `link.origin` (ASCII; the
- * whole URL too, for an App that read restricted data), in the page's own
+ * whole URL too, when core wants it confirmed), in the page's own
  * dialog; rejects while another question waits.
  */
 export type ConfirmLink = (link: {

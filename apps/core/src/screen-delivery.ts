@@ -37,7 +37,10 @@ import { appHost } from "./durable-objects.ts";
 // security-headers.ts). Nor can it post it to another window: the page
 // keeps no handle on a site that opened it (its opener policy), and a
 // message from any window but the page or the frame itself never reaches
-// a screen, so another App's frame beside it hears nothing. The one way
+// a screen, so another App's frame beside it hears nothing overtly (two
+// colluding Apps side by side can still signal through what the tab
+// shares, such as its history's length, and pass it on only through the
+// second App's own grants). The one way
 // out its App declares, a link to its own listed sites, opens only once
 // the person confirmed it with the whole URL shown, unless an admin
 // classified the App's data `ordinary` (app-link-route.ts). Every call it makes is

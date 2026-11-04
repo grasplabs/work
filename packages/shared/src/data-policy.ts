@@ -6,13 +6,16 @@ import type { AppId } from "./ids.ts";
 // (spec 10.7.1, the App's UI outside Grasp's shell, holding an App token),
 // whose code runs with the network a browser or a native app gives it.
 // An App's own screens run in Grasp's sandboxed frame and get its data
-// whatever this says (core's screen-delivery.ts).
+// whatever this says (core's screen-delivery.ts), but `ordinary` also lets
+// them open the links their App declares on a click, without the person
+// confirming each with the whole URL shown (core's app-link-route.ts).
 
 /**
  * What an App's data is to code Grasp didn't serve:
  * - `sensitive`, as every App's is until an admin says otherwise: it gets
  *   none of it;
- * - `ordinary`: an admin accepted that it goes there.
+ * - `ordinary`: an admin accepted that it goes there, and out in its
+ *   pages' declared links without the person confirming each.
  */
 export const outputClassSchema = z.enum(["sensitive", "ordinary"]);
 export type OutputClass = z.output<typeof outputClassSchema>;

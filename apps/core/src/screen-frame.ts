@@ -910,7 +910,12 @@ const start = (event) => {
 // A message from any window but the page, or the frame's own (which
 // libraries post to themselves to schedule work), never reaches the
 // screen's code: another App's frame on the same page (a side panel)
-// could otherwise hand it what it read, for its own App to send on.
+// could otherwise hand it what it read, for its own App to send on. This
+// closes the overt way between two Apps' frames, not every covert one:
+// two Apps whose builders collude, shown side by side, can still signal
+// through what the tab shares (its history's length, timing). What they
+// pass on then still leaves only through the second App's own grants,
+// which an admin gave it, each call audited.
 const sourceOf = Object.getOwnPropertyDescriptor(MessageEvent.prototype, "source").get;
 const stopNow = Event.prototype.stopImmediatePropagation;
 const page = parent;
