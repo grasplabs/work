@@ -331,6 +331,10 @@ const listed = (alias: string): string[] | undefined => {
         .map((each) => each.textContent.trim());
 };
 
+/** What the tab says it did, each message apart. */
+const saidNow = (): string[] =>
+  [...document.querySelectorAll("output")].map((each) => each.textContent);
+
 /** Opens the list of who answers and picks `name` from it. */
 const pick = async (name: string) => {
   await press(button("Add who answers"));
@@ -350,7 +354,7 @@ describe("a workflow's Files and apps tab", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits", async () => {
+  it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits, saying once what they did last", async () => {
     const { session, approved, answerFirstCatalog } = fakeCore();
     answerFirstCatalog();
     await shown(session, true);
@@ -360,11 +364,20 @@ describe("a workflow's Files and apps tab", () => {
     await pick("Finance");
     await press(button("Approve approval"));
     await press(button("Approve crm"));
+    const waits = document.body.textContent.includes(
+      "Waiting for your approval"
+    );
+    const said = saidNow();
+    await press(button("Revoke crm"));
+    // The dialog's own button, after the row's.
+    await press(buttons("Revoke").at(-1));
 
     expect({
       unpicked,
       approved,
-      waits: document.body.textContent.includes("Waiting for your approval"),
+      waits,
+      said,
+      saidAfterRevoking: saidNow(),
     }).toStrictEqual({
       unpicked: true,
       approved: [
@@ -389,6 +402,8 @@ describe("a workflow's Files and apps tab", () => {
         },
       ],
       waits: false,
+      said: ["Approved: crm."],
+      saidAfterRevoking: ["Revoked: crm."],
     });
   });
 
