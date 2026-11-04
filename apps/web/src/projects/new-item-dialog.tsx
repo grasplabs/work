@@ -22,74 +22,64 @@ import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useId, useState } from "react";
 
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useMadeOnce } from "../use-made-once.ts";
+import { useNewWorkflow } from "../workflows/new-workflow.ts";
 import { namesInProject } from "./project-people-names.ts";
 
 // Making an App or a workflow from inside a project: it goes in the
 // project, and starts shared with everyone in it as users, which can be
-// switched off before making it. Made first, then filed (and shared) in
-// one call, as from the Add dialog; a share core refuses still leaves the
-// new item made, and filed nowhere.
+// switched off before making it. Made first, then filed (and shared); a
+// share core refuses leaves the new item made and filed nowhere, and
+// making it again with the same name files that one rather than making
+// another. A workflow opens as New workflow's do (new-workflow.ts).
 
 type Kind = "app" | "workflow";
-
-/** Runs of what a workflow's name may not hold, and dashes at its ends. */
-const notInName = /[^a-z0-9]+/gu;
-/** The accents NFKD splits off letters: "ü" keeps its "u". */
-const accents = /\p{M}/gu;
-const edgeDashes = /^-+|-+$/gu;
-
-/**
- * A workflow's name from what was typed: core's names are lowercase
- * letters, digits and dashes (`workflowNameSchema`), and a workflow's
- * name is its own for good, so it takes a part nobody had, as New
- * workflow's do (workflows/independent-workflows.tsx). "Invoice approvals"
- * becomes `invoice-approvals-1a2b3c4d`.
- */
-export const workflowNameOf = (typed: string): string => {
-  const words = typed
-    .normalize("NFKD")
-    .replaceAll(accents, "")
-    .toLowerCase()
-    .replaceAll(notInName, "-")
-    .replaceAll(edgeDashes, "")
-    .slice(0, 48)
-    .replaceAll(edgeDashes, "");
-  return `${words === "" ? "new-workflow" : words}-${crypto.randomUUID().slice(0, 8)}`;
-};
 
 /** The form, a fresh one for each opening. */
 const NewItemForm = ({ project }: { project: Project }) => {
   const { t } = useLingui();
   const ids = useId();
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
+  const app = useCoreAction();
+  const workflow = useNewWorkflow();
+  const { once } = useMadeOnce();
   const [kind, setKind] = useState<Kind>("workflow");
   const [name, setName] = useState("");
   const [share, setShare] = useState(true);
+  const busy = app.busy || workflow.busy;
+  const failure = kind === "app" ? app.failure : workflow.failure;
   const projectName = project.name;
   const who = formatList(namesInProject(project));
+  const fileIn = async (
+    session: Session,
+    type: Kind,
+    id: string
+  ): Promise<void> => {
+    await session.projects.file(project.id, { item: { type, id }, share });
+  };
   const make = async (): Promise<void> => {
-    const made = await run(async (session) => {
-      const created =
-        kind === "app"
-          ? await session.apps.create({ name: name.trim() })
-          : await session.workflowResources.create(workflowNameOf(name));
-      const { id } = created;
-      await session.projects.file(project.id, {
-        item: { type: kind, id },
-        share,
+    if (kind === "workflow") {
+      await workflow.make(name, async (session, id) => {
+        await fileIn(session, "workflow", id);
       });
-      return id;
-    });
-    if (made === undefined) {
       return;
     }
-    await (kind === "app"
-      ? navigate({ to: "/apps/$app/edit", params: { app: made } })
-      : navigate({ to: "/workflows/$workflow", params: { workflow: made } }));
+    const typed = name.trim();
+    const made = await app.run(async (session) => {
+      const id = await once(typed, async () => {
+        const created = await session.apps.create({ name: typed });
+        return created.id;
+      });
+      await fileIn(session, "app", id);
+      return id;
+    });
+    if (made !== undefined) {
+      await navigate({ to: "/apps/$app/edit", params: { app: made } });
+    }
   };
   return (
     <form

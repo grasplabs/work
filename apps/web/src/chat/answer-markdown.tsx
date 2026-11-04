@@ -17,16 +17,16 @@ import {
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Table } from "@grasp-os/ui/components/table";
-import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
-import { createContext, use, useEffect, useState } from "react";
+import { createContext, use, useState } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import type { Components, Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+import { useCopy } from "../copy.ts";
 import { downloadText } from "../export/export-file.tsx";
 import { plainComponents, plainUrl } from "../knowledge/markdown.tsx";
 import {
@@ -52,34 +52,6 @@ import { CitedNote, citedNoteLink, CitedSpan } from "./cited-note.tsx";
 // inline style, and dark mode comes with the theme. Only a block that
 // names its language is highlighted: guessing one would cost each render
 // and often guess wrong.
-
-/** How long a copy button says "Copied". */
-const copiedMs = 1500;
-
-/** Copies text, and says so for a moment; a refused clipboard says that. */
-const useCopy = () => {
-  const { t } = useLingui();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    const timer = copied
-      ? setTimeout(() => {
-          setCopied(false);
-        }, copiedMs)
-      : undefined;
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
-  const copy = async (text: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      toast.add({ type: "error", title: t`Copying didn't work` });
-    }
-  };
-  return { copied, copy };
-};
 
 /** A code block: its language over it, highlighted, and a copy button. */
 const CodeBlock = ({

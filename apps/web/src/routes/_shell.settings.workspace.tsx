@@ -1,6 +1,6 @@
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -305,7 +305,7 @@ const Workspace = () => {
   const { t } = useLingui();
   const { page, staff } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const editable = isAdmin(identity.role) && !identity.staff;
+  const editable = isMemberAdmin(identity);
   return (
     <>
       {page.state === "ready" ? (

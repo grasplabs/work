@@ -16,7 +16,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 // App, each section as they may see it, from "…" on the App's bar; its
 // builders have the same beside the chat in its workspace. The inbox and
 // the admin's pages link here for what is decided about an App: its
-// versions, its connections, the approvals its pages and packages wait on.
+// versions, its connections, the approvals its packages wait on.
 // Someone who may approve packages but isn't one of the App's members gets
 // those alone: all core lets them read of it.
 

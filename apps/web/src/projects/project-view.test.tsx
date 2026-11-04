@@ -21,6 +21,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ProjectView } from "./project-view.tsx";
 
 // A project's page against core's projects API as the page reaches it
@@ -91,10 +93,20 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
 };
 
 const fakeProjects = (
-  pages: ProjectItemsPage[] = [{ items: [desk], more: false }]
+  pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
+  /** How many filings core refuses before it takes one. */
+  refusals = 0
 ) => {
   const left = [...pages];
   const asked: unknown[][] = [];
+  let refused = 0;
+  const workflowResources = {
+    create: async (name: string): Promise<{ id: string }> => {
+      await Promise.resolve();
+      asked.push(["create", name.slice(0, -9)]);
+      return { id: "wf-made" };
+    },
+  };
   const projects = {
     itemCandidates: async (): Promise<ProjectItemCandidate[]> => {
       await Promise.resolve();
@@ -102,6 +114,10 @@ const fakeProjects = (
     },
     file: async (_id: string, file: FileItem): Promise<void> => {
       await Promise.resolve();
+      if (refused < refusals) {
+        refused += 1;
+        throw new Error("The share was refused.");
+      }
       asked.push(["file", file.item.id, file.share]);
     },
     unfile: async (_id: string, item: ProjectItemRef): Promise<void> => {
@@ -118,10 +134,13 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { projects }, asked };
+  return { session: { projects, workflowResources }, asked };
 };
 
 let root: Root | undefined;
+
+/** How the chat dock sits, for the page to read. */
+const DockMode = () => <output aria-label="Dock">{useDockMode()}</output>;
 
 const settled = async (): Promise<void> => {
   await act(async () => {
@@ -137,7 +156,7 @@ const settled = async (): Promise<void> => {
 const shown = async (
   session: ReturnType<typeof fakeProjects>["session"],
   shownProject: Project
-): Promise<void> => {
+) => {
   const core = {
     withSession: async <T,>(
       run: (reached: typeof session) => Promise<T>
@@ -145,7 +164,10 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ProjectView identity={{ role: "builder" }} project={shownProject} />
+      <>
+        <ProjectView identity={{ role: "builder" }} project={shownProject} />
+        <DockMode />
+      </>
     ),
   });
   const router = createRouter({
@@ -167,6 +189,7 @@ const shown = async (
     await router.load();
   });
   await settled();
+  return router;
 };
 
 const press = async (element: Element | undefined | null) => {
@@ -187,6 +210,18 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
+const type = async (input: Element | null, value: string) => {
+  if (!(input instanceof HTMLInputElement)) {
+    throw new TypeError("Nothing to type in");
+  }
+  await act(async () => {
+    // Through the element's own setter, as typing reaches React.
+    Reflect.set(HTMLInputElement.prototype, "value", value, input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
 const choose = async (select: HTMLSelectElement, value: string) => {
   await act(async () => {
     // Through the element's own setter, as a person's choice reaches React.
@@ -204,6 +239,42 @@ describe("A project's page", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    setDockMode("bar");
+    setActiveChat(undefined);
+  });
+
+  it("makes a workflow in the project once, though filing it failed the first time, and opens it with a new chat docked beside it", async () => {
+    setActiveChat("chat-about-holidays");
+    const { session, asked } = fakeProjects(undefined, 1);
+    const router = await shown(session, project("builder"));
+
+    await press(button("New"));
+    await type(
+      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
+      "Invoice approvals"
+    );
+    await press(button("Make"));
+    const refused = document.body.textContent?.includes(
+      "The share was refused."
+    );
+    await press(button("Make"));
+
+    expect({
+      refused,
+      asked,
+      at: router.state.location.pathname,
+      dock: document.querySelector('output[aria-label="Dock"]')?.textContent,
+      chat: activeChat(),
+    }).toStrictEqual({
+      refused: true,
+      asked: [
+        ["create", "invoice-approvals"],
+        ["file", "wf-made", true],
+      ],
+      at: "/workflows/wf-made",
+      dock: "drawer",
+      chat: undefined,
+    });
   });
 
   it("adds a workflow without sharing it unless asked, and names who would gain access", async () => {

@@ -1,27 +1,12 @@
 import type { ProjectCounts } from "@grasp-os/shared/projects";
 import { Plural, Trans } from "@lingui/react/macro";
-import {
-  ClockIcon,
-  LayoutGridIcon,
-  PlugIcon,
-  WorkflowIcon,
-} from "lucide-react";
+import { LayoutGridIcon, PlugIcon, WorkflowIcon } from "lucide-react";
 
-// What a project holds that the person may open, counted by core, and its
-// hours. Hours come from its workflows' weekly measures, which core
-// doesn't keep yet (GRA-447): until it does, every project says it has
-// none, and there is no bar of saved, expected and still-manual hours to
-// draw, nor a legend for one.
+// What a project holds that the person may open, counted by core. Its
+// hours, from its workflows' weekly measures, show once core keeps those
+// (GRA-447).
 
-/** A project's hours a week: none measured yet. */
-export const ProjectHours = () => (
-  <span className="text-muted-foreground inline-flex items-center gap-1.5">
-    <ClockIcon aria-hidden="true" className="size-3.5" />
-    <Trans>No hours measured yet</Trans>
-  </span>
-);
-
-/** How many workflows, apps and connections a project holds. */
+/** How many workflows, Apps and connections a project holds. */
 export const ProjectCountsLine = ({ counts }: { counts: ProjectCounts }) => {
   const { workflows, apps, connections } = counts;
   return (
@@ -37,9 +22,9 @@ export const ProjectCountsLine = ({ counts }: { counts: ProjectCounts }) => {
       <span className="inline-flex items-center gap-1.5">
         <LayoutGridIcon aria-hidden="true" className="size-3.5" />
         {apps === 0 ? (
-          <Trans>No apps yet</Trans>
+          <Trans>No Apps yet</Trans>
         ) : (
-          <Plural one="# app" other="# apps" value={apps} />
+          <Plural one="# App" other="# Apps" value={apps} />
         )}
       </span>
       <span className="inline-flex items-center gap-1.5">

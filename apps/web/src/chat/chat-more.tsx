@@ -37,8 +37,9 @@ import {
   PrinterIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useCopy } from "../copy.ts";
 import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
@@ -52,9 +53,6 @@ import type { SourceName } from "./sources.tsx";
 // "New chat" (grasplabs/prototype `components/chat/chat-more.tsx`): copy
 // it as Markdown, download it, rename it, and delete it. Its row in the list of chats does the same, but
 // here it is where the chat is read, and nothing lies over the messages.
-
-/** How long "Copied" stands in place of "Copy as Markdown". */
-const copiedMs = 1500;
 
 /** Characters a file name can't hold on some system, and runs of space. */
 const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
@@ -152,7 +150,7 @@ export const ChatMore = ({
   const { i18n, t } = useLingui();
   // The same watch the thread reads, so what is copied is what is shown.
   const { view } = useFollowedChat(chat.id);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopy();
   // Which chat a dialog was opened for: one opened for another chat, left
   // by Back or a link while it was open, is closed, never acting on this one.
   const [renamingId, setRenamingId] = useState<string>();
@@ -167,16 +165,6 @@ export const ChatMore = ({
   };
   // Until the chat's first update is in, there is only its title to copy.
   const ready = view.loaded;
-  useEffect(() => {
-    const timer = copied
-      ? setTimeout(() => {
-          setCopied(false);
-        }, copiedMs)
-      : undefined;
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
   const markdown = (): string =>
     chatMarkdown({
       title: chat.title,
@@ -186,16 +174,6 @@ export const ChatMore = ({
       names: sourceNames,
       i18n,
     });
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(markdown());
-      setCopied(true);
-    } catch {
-      // The browser refused the clipboard (no permission): nothing was
-      // copied, so it doesn't say it was.
-      toast.add({ type: "error", title: t`Copying didn't work` });
-    }
-  };
   const download = async (format: ExportFormat): Promise<void> => {
     try {
       await exportAs(
@@ -235,7 +213,7 @@ export const ChatMore = ({
             closeOnClick={false}
             disabled={!ready}
             onClick={() => {
-              void copy();
+              void copy(markdown());
             }}
           >
             {copied ? <CheckIcon /> : <CopyIcon />}

@@ -194,7 +194,7 @@ msgid "{approvals, plural, one {This ends # approval of these packages.} other {
 msgstr "{approvals, plural, one {Cela met fin à # approbation de ces paquets.} other {Cela met fin à # approbations de ces paquets.}}"
 
 #: src/projects/project-counts.tsx
-msgid "{apps, plural, one {# app} other {# apps}}"
+msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
 
 #: src/engines/package-approvals.tsx
@@ -1974,11 +1974,6 @@ msgstr "ID de l’acteur"
 msgid "Add"
 msgstr "Ajouter"
 
-#: src/projects/project-people.tsx
-msgctxt "add someone to a project"
-msgid "Add"
-msgstr "Ajouter"
-
 #: src/projects/file-item-dialog.tsx
 msgctxt "put in a project"
 msgid "Add"
@@ -2032,6 +2027,10 @@ msgstr "Ajouter une intégration"
 msgid "Add approver"
 msgstr "Ajouter un approbateur"
 
+#: src/projects/project-people.tsx
+msgid "Add as"
+msgstr "Ajouter en tant que"
+
 #: src/connections/http-connections.tsx
 msgid "Add HTTP connection"
 msgstr "Ajouter une connexion HTTP"
@@ -2049,8 +2048,8 @@ msgid "add records to {tables}"
 msgstr "ajouter des enregistrements à {tables}"
 
 #: src/projects/project-people.tsx
-msgid "Add someone…"
-msgstr "Ajouter quelqu’un…"
+msgid "Add someone"
+msgstr "Ajouter quelqu’un"
 
 #: src/interview/closed.tsx
 msgid "Add something"
@@ -4411,8 +4410,7 @@ msgstr "Copier le secret"
 msgid "Copy the URL of the webhook ending {ending}"
 msgstr "Copier l'URL du webhook se terminant par {ending}"
 
-#: src/chat/answer-markdown.tsx
-#: src/chat/chat-more.tsx
+#: src/copy.ts
 msgid "Copying didn't work"
 msgstr "La copie n’a pas fonctionné"
 
@@ -5265,6 +5263,7 @@ msgid "Everyone has a link of their own: whoever has it is them, so send each on
 msgstr "Chacun a son propre lien : qui l’a est cette personne, alors envoyez chaque lien uniquement à son titulaire. Les liens pas encore disponibles s’ouvrent le jour prévu, ou dès que le responsable a parlé."
 
 #: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Everyone in {project}"
 msgstr "Tout le monde dans {project}"
@@ -8255,12 +8254,9 @@ msgstr "Aucune application ne s’appelle « {asked} »"
 msgid "No App or workflow has approved packages."
 msgstr "Aucune application ni aucun workflow n’a de paquets approuvés."
 
-#: src/projects/project-counts.tsx
-msgid "No apps yet"
-msgstr "Aucune app pour l’instant"
-
 #: src/chat/side-panel.tsx
 #: src/engines/apps-overview.tsx
+#: src/projects/project-counts.tsx
 msgid "No Apps yet"
 msgstr "Aucune application pour l’instant"
 
@@ -8337,10 +8333,6 @@ msgstr "Pas encore d’objectifs."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Aucun groupe"
-
-#: src/projects/project-counts.tsx
-msgid "No hours measured yet"
-msgstr "Aucune heure mesurée pour l’instant"
 
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -8598,6 +8590,7 @@ msgstr "Personne ne pourra plus l’ouvrir ni le démarrer. Ses versions sont co
 msgid "Nobody comes in: Grasp does all of it."
 msgstr "Personne n’intervient : Grasp fait tout."
 
+#: src/projects/project-people.tsx
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
@@ -9887,9 +9880,8 @@ msgid "Pending"
 msgstr "En attente"
 
 #: src/chat/builds.tsx
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 #: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx
@@ -9986,10 +9978,6 @@ msgstr "Personne"
 msgctxt "who does a step"
 msgid "Person"
 msgstr "Personne"
-
-#: src/projects/project-people.tsx
-msgid "Person or team to add"
-msgstr "Personne ou équipe à ajouter"
 
 #: src/settings/erasures.tsx
 msgid "Personal connections"
@@ -10116,8 +10104,8 @@ msgstr "Profil"
 msgid "Project"
 msgstr "Projet"
 
-#: src/engines/app-sharing.tsx
 #: src/frame/app-sidebar.tsx
+#: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/routes/_shell.projects.index.tsx
@@ -10481,7 +10469,7 @@ msgstr "Relecture"
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "La lecture a échoué à répétition, vos déclencheurs n'y lancent donc plus rien de nouveau pour l'instant. Grasp continue d'essayer ; si cela ne revient pas, vérifiez la connexion."
 
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
 msgstr "Lecture des personnes et des équipes…"
@@ -11595,7 +11583,7 @@ msgstr "Rechercher des membres"
 msgid "Search people"
 msgstr "Rechercher des personnes"
 
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/settings/package-approvers.tsx
 msgid "Search people and teams"
 msgstr "Rechercher des personnes et des équipes"
@@ -12887,10 +12875,9 @@ msgid "Team: {name}"
 msgstr "Équipe : {name}"
 
 #: src/brain/brain.ts
-#: src/engines/app-sharing.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
-#: src/projects/project-people.tsx
+#: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx

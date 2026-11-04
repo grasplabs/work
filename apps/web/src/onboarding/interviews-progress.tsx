@@ -24,6 +24,7 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { copyText } from "../copy.ts";
 import { downloadCsv } from "../csv.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
@@ -51,16 +52,6 @@ const firstName = (name: string): string => name.split(" ")[0] ?? name;
 
 /** A date as the page's language writes it, from an ISO day. */
 const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
-
-/** Copies text, and says whether it worked: browsers refuse without focus or permission. */
-const copyText = async (text: string): Promise<boolean> => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 /** A line that turns up: said by Stephen on the onboarding's step, only shown elsewhere. */
 const Line = ({ text, spoken }: { text: string; spoken: boolean }) =>
