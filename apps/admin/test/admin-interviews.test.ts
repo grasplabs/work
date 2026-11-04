@@ -366,9 +366,14 @@ describe("an organization's interviews", () => {
 
     expect({
       status,
-      figures: ["In the lab", "Finished, with real people"].map((label) =>
-        html.includes(`>${label}<`)
-      ),
+      figures: [
+        "In the lab",
+        "Finished, with real people",
+        "Notes kept, with real people",
+        "Rating, with real people",
+      ].map((label) => html.includes(`>${label}<`)),
+      // Core here doesn't say which Stephen held an interview.
+      inUse: html.includes("No interview says which Stephen held it yet."),
       // No lab run is kept in this checkout, and Ben and Dan, Stephen's two, didn't finish.
       noRun: html.includes("No lab run is kept yet"),
       finished: html.includes(">0 of 2<"),
@@ -381,7 +386,8 @@ describe("an organization's interviews", () => {
       leaked: missingIn(html, [said, fact, linkCode]).length,
     }).toStrictEqual({
       status: 200,
-      figures: [true, true],
+      figures: [true, true, true, true],
+      inUse: true,
       noRun: true,
       finished: true,
       opens: true,
