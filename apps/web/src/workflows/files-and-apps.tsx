@@ -291,6 +291,7 @@ const Approved = ({
   names,
   teams,
   revokes,
+  onSaid,
   onChanged,
 }: {
   workflow: string;
@@ -300,11 +301,12 @@ const Approved = ({
   names: Names;
   teams: ReadonlyMap<string, string>;
   revokes: boolean;
+  /** What was done last, which the tab says, or nothing once another starts. */
+  onSaid: (said?: string) => void;
   onChanged: () => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [said, setSaid] = useState<string>();
   // Its catalog bindings: whichever other workflow a binding names is
   // hidden from all but its builders, so known by kind alone.
   const catalog = declared.filter(({ kind }) => kind !== "workflow");
@@ -316,13 +318,13 @@ const Approved = ({
     );
   }
   const revoke = async (alias: string, approval: string): Promise<void> => {
-    setSaid(undefined);
+    onSaid();
     const revoked = await run(async (session) => {
       await session.workflowResources.revokeBinding(workflow, approval);
       return true;
     });
     if (revoked === true) {
-      setSaid(t`Revoked: ${alias}.`);
+      onSaid(t`Revoked: ${alias}.`);
       onChanged();
     }
   };
@@ -405,7 +407,6 @@ const Approved = ({
         })}
       </ul>
       <ErrorText>{failure}</ErrorText>
-      {said === undefined ? null : <output>{said}</output>}
     </div>
   );
 };
@@ -521,7 +522,8 @@ export const FilesAndApps = ({
   const [approvals, setApprovals] =
     useState<Loaded<ListedWorkflowBindingApproval[]>>();
   const [teams, setTeams] = useState<ReadonlyMap<string, string>>(new Map());
-  // What was approved last, said even once nothing waits any more.
+  // What was approved or revoked last, said by the tab, once: even after
+  // the last binding waiting is approved and its section goes.
   const [said, setSaid] = useState<string>();
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
@@ -696,6 +698,7 @@ export const FilesAndApps = ({
                   onChanged={() => {
                     void changed();
                   }}
+                  onSaid={setSaid}
                   revokes={approves}
                   version={data.version}
                   workflow={workflow}

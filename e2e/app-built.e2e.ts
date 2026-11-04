@@ -30,9 +30,10 @@ test.describe.configure({ retries: 0 });
 test("a builder has an App built in its chat, publishes it, and someone it is shared with adds a contact its data then shows", async ({
   pageOf,
 }) => {
-  // Its longest waits, one after another: two of the agent's turns (30 s
-  // each) and ten builds or reads (20 s each): 260 s, before its clicks.
-  test.setTimeout(270_000);
+  // Its longest waits, one after another: two of the agent's turns and
+  // the preview's first load (30 s each) and ten builds or reads (20 s
+  // each): 290 s, before its clicks.
+  test.setTimeout(300_000);
   const { builder, user } = peopleIn("appBuilt");
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
@@ -59,6 +60,9 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   // The preview is the draft's screen, on a store of its own.
   const preview = page.getByRole("region", { name: /^Preview of /u });
   const frame = preview.frameLocator("iframe");
+  // Its first load waits for core to build the draft, behind any update
+  // ahead of it: as long as an agent's turn.
+  await expect(frame.getByLabel("Contact's name")).toBeVisible(agentTurn);
   await frame.getByLabel("Contact's name").fill("Ada Lovelace");
   await frame.getByRole("button", { name: "Add contact" }).click();
   await expect(
