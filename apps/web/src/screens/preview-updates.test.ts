@@ -171,6 +171,30 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     });
   });
 
+  it("files what the frame reports while it tries an update under that update's revision, and the rest under the one it shows", async () => {
+    const reportedAt: number[] = [];
+    const held: { updates?: PreviewUpdates } = {};
+    const run = following([answered(refreshAt(2))], (part) => {
+      // The frame reports the update's render error before it answers.
+      reportedAt.push(held.updates?.reportingAt() ?? -1);
+      return part.revision === 2 ? "failed" : "applied";
+    });
+    const { updates } = run;
+    held.updates = updates;
+    const before = updates.reportingAt();
+    updates.follow(run.toFrame);
+    updates.revise(2);
+    await vi.waitFor(() => {
+      expect(run.seen.handed).toStrictEqual([1, 2]);
+    });
+    // Rolled back: what the frame meets now is the version it shows.
+    expect({ before, reportedAt, after: updates.reportingAt() }).toStrictEqual({
+      before: 1,
+      reportedAt: [1, 2],
+      after: 1,
+    });
+  });
+
   it("says a problem the screen reported is being fixed, once", () => {
     const { updates, seen } = following([]);
     updates.problem();

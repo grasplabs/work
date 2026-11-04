@@ -875,6 +875,8 @@ const handedClosed = async (
 export interface PreviewFollow {
   problem: () => void;
   followUpdates: NonNullable<FrameTarget["followUpdates"]>;
+  /** The revision what the frame reports now is of (preview-updates.ts). */
+  reportingAt: () => number;
 }
 
 /** Whether `answer`, a preview call's, failed through the draft's own fault. */
@@ -1084,13 +1086,16 @@ export const previewTarget = (
           await chats.previewCancelStream(chatId, app, revision, request)
       ),
     report: async (problem) => {
+      // Of the revision the frame ran it on, read as it arrives: an
+      // update's failure comes before the frame answers for it.
+      const at = follow?.reportingAt() ?? revision;
       // The screen's own failures, never a library's warnings, are
       // problems to fix.
       if (problem.kind !== "warning") {
         follow?.problem();
       }
       await on(link, async ({ chats }) => {
-        await chats.previewReport(chatId, app, revision, screen, problem);
+        await chats.previewReport(chatId, app, at, screen, problem);
       });
     },
     ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
@@ -1762,6 +1767,7 @@ export const runPreview = (
           followUpdates: (toFrame) => {
             updates.follow(toFrame);
           },
+          reportingAt: () => updates.reportingAt(),
         });
         moves.to = target.moved;
         revisions.listener = (next) => {

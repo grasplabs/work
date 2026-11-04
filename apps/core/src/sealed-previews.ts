@@ -519,6 +519,12 @@ export interface PreviewCallOptions {
    * check, never for the screen's answer.
    */
   readonly draftFailure?: (message: string) => void;
+  /**
+   * The revision of the screen that called, when it isn't the draft's
+   * (`serves`): what its function writes with `console` is filed under
+   * it, never under the draft's (server-logs.ts).
+   */
+  readonly revision?: number;
 }
 
 /** The version a draft's release is sealed as: the one it would become. */
@@ -775,7 +781,7 @@ export class SealedPreviews {
         observe === undefined
           ? invocation
           : { ...invocation, observeReads: observe };
-      const hosted = this.#hostedOf(chatId, app, running, release);
+      const hosted = this.#hostedOf(chatId, app, options.revision, release);
       const answered = await (call.window === undefined
         ? callOperation(
             hosted,
@@ -1113,15 +1119,18 @@ export class SealedPreviews {
   #hostedOf(
     chatId: ChatId,
     app: AppId,
-    running: Running,
+    /**
+     * The revision of the screen it runs for, which its lines are filed
+     * under (the draft's now, unless said): one preview runs on across
+     * writes of its screens, so never the revision it started at.
+     */
+    revision: number | undefined,
     release: Release
   ): ReturnType<typeof hostedRelease> {
     const preview = {
       workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
       chatId,
-      // The draft's revision now: one preview runs on across writes of
-      // its screens, and its lines are for the check of the newest.
-      revision: this.#revisionOf(chatId, app) ?? running.revision,
+      revision: revision ?? this.#revisionOf(chatId, app) ?? readOnlyRevision,
     };
     return hostedRelease(this.#env, release, (fn) =>
       exports.AppTail({
@@ -1146,7 +1155,9 @@ export class SealedPreviews {
     app: AppId,
     draft: Draft,
     request: unknown,
-    attach: boolean
+    attach: boolean,
+    /** The revision of the screen that started it (`PreviewCallOptions.revision`). */
+    revision = draft.revision
   ): Promise<ReadableStream<Uint8Array>> {
     const { call, key } = streamRequestOf(request);
     // Input past what reads as a value is refused, never hashed as none:
@@ -1213,7 +1224,7 @@ export class SealedPreviews {
         chatId,
         personId,
         app,
-        running,
+        { running, revision },
         call,
         live
       );
@@ -1275,7 +1286,7 @@ export class SealedPreviews {
     chatId: ChatId,
     personId: string,
     app: AppId,
-    running: Running,
+    { running, revision }: { running: Running; revision: number },
     call: FunctionRequest,
     live: Live
   ): Promise<{ result: OperationResult; reached: boolean; effects: number }> {
@@ -1305,7 +1316,7 @@ export class SealedPreviews {
       });
       reached = true;
       const answered = await callOperation(
-        this.#hostedOf(chatId, app, running, release),
+        this.#hostedOf(chatId, app, revision, release),
         invocation,
         { path, kind: call.reference.kind },
         call.input,

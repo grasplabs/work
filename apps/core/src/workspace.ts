@@ -22,6 +22,7 @@ import {
   chatPlatformName,
   chatPlatformSchema,
   chatToolEventsKept,
+  readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -4424,10 +4425,14 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Keeps `problem`, what the preview of `personId`'s own chat's draft of
    * App `appId` at `revision` reported on `screen`, for the agent's next
-   * check (preview-reports.ts). Dropped once the draft is at another
-   * revision, and never kept for a preview opened read-only (a version
-   * of the draft or of the App): a chat with no draft is at that
-   * revision too, yet nothing it reports is its draft's.
+   * check (preview-reports.ts): only of the draft's own revision, which a
+   * frame names for what that revision's screen ran into, an update of it
+   * the frame tried and rolled back too (@grasp-os/sdk's
+   * preview-updates.ts). Dropped for any other: an earlier screen's
+   * problems decide nothing of the draft now. Never kept for a preview
+   * opened read-only (a version of the draft or of the App): a chat with
+   * no draft is at that revision too, yet nothing it reports is its
+   * draft's.
    */
   previewReport(
     chatId: unknown,
@@ -4439,10 +4444,7 @@ export class Workspace extends DurableObject<Env> {
   ): void {
     const { id } = this.#ownChat(chatId, personId);
     const draft = this.draft(id, appId);
-    // From a frame showing an earlier revision of the same server code
-    // too (`SealedPreviews.serves`): one whose newer screen failed, which
-    // is what the agent is to fix now.
-    if (!this.#sealedPreviews.serves(id, appId, draft, revision)) {
+    if (revision === readOnlyRevision || revision !== draft.revision) {
       return;
     }
     this.#previewReports.report(id, appId, draft.revision, {
@@ -4518,6 +4520,11 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<string> {
     const draft = this.#servedDraft(chatId, personId, appId, revision);
     const id = chatIdSchema.parse(chatId);
+    // A screen of the draft's own revision: only what it ran into decides
+    // the draft's check. A frame still on an earlier screen of the same
+    // server code is answered, but what it saw is that earlier screen's,
+    // never the draft's: it marks nothing seen and fails nothing.
+    const ranDraft = revision === draft.revision;
     try {
       // What the draft's code threw, for the agent's check alone: the
       // screen's answer stays `internal.unexpected`, with no message.
@@ -4530,19 +4537,24 @@ export class Workspace extends DurableObject<Env> {
         request,
         {
           ...options,
+          // `serves` checked it is a revision: what its function logs is
+          // that screen's.
+          revision: Number(revision),
           draftFailure: (message) => {
             thrown = message;
           },
         }
       );
       const problem = functionProblem(request, answered.answer.result, thrown);
-      if (problem !== undefined) {
+      if (problem !== undefined && ranDraft) {
         this.#previewReports.report(id, appId, draft.revision, problem);
       }
       return JSON.stringify(answered);
     } finally {
       // Once the call ended, however: its failure is kept by then.
-      this.#previewReports.saw(id, appId, draft.revision);
+      if (ranDraft) {
+        this.#previewReports.saw(id, appId, draft.revision);
+      }
     }
   }
 
@@ -4568,8 +4580,10 @@ export class Workspace extends DurableObject<Env> {
       appIdSchema.parse(appId),
       draft,
       request,
-
-      attach
+      attach,
+      // `serves` checked it is a revision: what the stream logs is that
+      // screen's.
+      Number(revision)
     );
   }
 

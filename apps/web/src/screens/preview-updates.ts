@@ -99,6 +99,8 @@ export class PreviewUpdates {
   #asked: number;
   #asking = false;
   #closed = false;
+  /** The revision the frame is trying now, while it is handed one. */
+  #trying: number | undefined;
   #health: PreviewHealth = "working";
   /** What the frame took since it started, which bounds it. */
   readonly #taken = { revisions: 0, bytes: 0 };
@@ -137,6 +139,17 @@ export class PreviewUpdates {
   /** The frame reported a problem: it is being fixed. */
   problem(): void {
     this.#say("fixing");
+  }
+
+  /**
+   * The revision what the frame reports now is of: the one it is trying
+   * while it is handed an update, whose failure it reports before it
+   * answers (and rolls back), or else the one it shows. Core files a
+   * report only under the draft's own revision, so an update that failed
+   * fails that revision's check, and an earlier screen's never does.
+   */
+  reportingAt(): number {
+    return this.#trying ?? this.#shown;
   }
 
   /** Stops following: the frame is gone. */
@@ -220,6 +233,7 @@ export class PreviewUpdates {
       return false;
     }
     let answer: PreviewApplied = "refused";
+    this.#trying = update.revision;
     try {
       for (const part of partsOf(update)) {
         // oxlint-disable-next-line no-await-in-loop -- parts in order
@@ -231,6 +245,8 @@ export class PreviewUpdates {
     } catch {
       // The frame's bridge is gone: the frame is stopped as it is.
       return false;
+    } finally {
+      this.#trying = undefined;
     }
     if (answer === "reset") {
       this.#reset();

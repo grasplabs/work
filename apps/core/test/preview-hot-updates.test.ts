@@ -299,9 +299,15 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     await live.until((latest) => {
       expect(latest?.result).toStrictEqual({ ok: true, value: ["still here"] });
     });
-    await chats.previewReport(chatId, app, revision, "desk", {
+    // What the frame met trying the broken update is filed under the
+    // revision it tried; what the earlier screen it shows meets, nowhere.
+    await chats.previewReport(chatId, app, broken, "desk", {
       kind: "error",
       message: "The fix didn't render.",
+    });
+    await chats.previewReport(chatId, app, revision, "desk", {
+      kind: "error",
+      message: "The earlier screen failed.",
     });
     const reported = await chatsOf(builder).previewReports(
       chatId,
@@ -334,6 +340,53 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       reported: ["The fix didn't render."],
       ahead: "app.preview_outdated",
       afterServer: "app.preview_outdated",
+    });
+  });
+
+  it("decides a revision's check only by what that revision's screen ran into, never an earlier screen's", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
+    const { chats } = builder.api;
+    const object = chatsOf(builder);
+    const titles = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.titles"
+    );
+    const broken = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.broken"
+    );
+    // A false pass: the agent writes the screen again, and before the
+    // frame takes it, the screen still on `revision` calls fine. The new
+    // revision is no more seen than before.
+    const next = await write(
+      { "screens/desk.tsx": deskSaying("Unseen") },
+      revision
+    );
+    await chats.previewFunction(chatId, app, revision, titles);
+    const unseen = await object.previewReports(chatId, app, next, 0);
+    // A false failure: the earlier screen's call fails through the
+    // draft's code, which the new revision's screen never called.
+    await chats.previewFunction(chatId, app, revision, broken);
+    const notFailed = await object.previewReports(chatId, app, next, 0);
+    // Its own screen's calls decide it, a failure included.
+    await chats.previewFunction(chatId, app, next, broken);
+    const own = await object.previewReports(chatId, app, next, 0);
+    expect({
+      unseen: { seen: unseen.seen, problems: unseen.problems },
+      notFailed: { seen: notFailed.seen, problems: notFailed.problems },
+      own: {
+        seen: own.seen,
+        problems: own.problems.map(({ source, at }) => ({ source, at })),
+      },
+    }).toStrictEqual({
+      unseen: { seen: false, problems: [] },
+      notFailed: { seen: false, problems: [] },
+      own: {
+        seen: true,
+        problems: [{ source: "server", at: "notes.broken" }],
+      },
     });
   });
 
