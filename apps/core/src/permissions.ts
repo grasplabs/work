@@ -1026,36 +1026,11 @@ export const requestPermission = async (
   }
   if ((await findRow(env, row.id)) === undefined) {
     // A trigger deleted meanwhile is refused as one gone is.
-    await requireTriggerPins(env, subject, object, actions);
+    await requireSubjectBuilder(subject, roles);
     throw permissionErrors.create("permission.conflict", { binding });
   }
   return permission;
 };
-
-/**
- * The statements revoking `held`, permissions of a subject going away (a
- * trigger deleted), for `by` at `revokedAt`, for the batch that removes
- * it: each audited as `permission.revoked` only if it was still
- * unrevoked as it ran.
- */
-export const revokedWith = (
-  db: DrizzleD1Database,
-  by: Acting,
-  held: readonly Row[],
-  revokedAt: Date
-) =>
-  held.flatMap((row) => [
-    db
-      .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt })
-      .where(
-        and(eq(permissions.id, row.id), ne(permissions.status, "revoked"))
-      ),
-    outboxedIfChanged(
-      db,
-      changeEntry(by, "permission.revoked", toPermission(row))
-    ),
-  ]);
 
 /**
  * What a blueprint of App `app` declares as it is marked
@@ -1425,6 +1400,47 @@ const auditDetailSql = sql`json_patch(
     ELSE '{}'
   END
 )`;
+
+/**
+ * The statements revoking, for `by`, every permission of `subject` that
+ * isn't revoked yet, for the batch that removes `subject` (a trigger
+ * deleted): each audited as `permission.revoked`, from the rows the
+ * batch itself finds, so none is revoked unaudited, whenever it landed.
+ */
+export const revokedWith = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject
+): BatchItem<"sqlite">[] => {
+  const held = and(ofSubject(subject), ne(permissions.status, "revoked"));
+  const now = new Date();
+  const eventId = eventIdSql(crypto.randomUUID());
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
+    'action', 'permission.revoked',
+    'target', json_object('type', 'permission', 'id', ${permissions.id}),
+    'provenance', json('[]'),
+    'detail', json_set(
+      ${auditDetailSql},
+      '$.actions', ${joined(permissions.actions)},
+      '$.binding', ${permissions.binding}
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
+      ),
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
+      .where(held),
+  ];
+};
 
 /**
  * That `by` could grant a permission as the batch runs, as SQL: an admin

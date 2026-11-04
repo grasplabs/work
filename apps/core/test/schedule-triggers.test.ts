@@ -238,6 +238,58 @@ const failingOnce = (matches: RegExp): Env => {
 };
 
 /**
+ * `env` whose database runs `meanwhile` once, just before the first
+ * statement `at` matches is run on its own (not in a batch): another
+ * request's change landing between what was read and that statement.
+ */
+const changedBefore = (at: RegExp, meanwhile: () => Promise<unknown>): Env => {
+  let ran = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property): unknown => {
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        if (
+          typeof value === "function" &&
+          (property === "first" ||
+            property === "all" ||
+            property === "raw" ||
+            property === "run")
+        ) {
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (!ran) {
+              ran = true;
+              await meanwhile();
+            }
+            const answer: unknown = await Reflect.apply(value, target, args);
+            return answer;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          const statement = target.prepare(query);
+          return ran || !at.test(query) ? statement : racing(statement);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
  * `env` whose database runs `meanwhile` once, just before the batch that
  * admits a start (the one inserting its receipt) is sent: another
  * request's change landing between a due schedule's read and its start.
@@ -782,6 +834,28 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     });
   });
 
+  it("start an occurrence whose start was granted between its read and its skip", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    const occurrence = lastMinute();
+    await dueAt(waiting.id, occurrence);
+    // Granted after the clock read it as waiting, before it skipped it.
+    await startDueScheduleTriggers(
+      changedBefore(
+        /^update "trigger_schedules"/iu,
+        async () => await grantStart(admin, waiting.id)
+      )
+    );
+    const runs = await runsOf(waiting.id);
+
+    expect(runs.map(({ key }) => key)).toStrictEqual([
+      keyOf(waiting.id, 1, occurrence),
+    ]);
+  });
+
   it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
@@ -843,7 +917,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       granted: [{ status: "revoked", revokedBy: admin.userId }],
       // Audited as revoked, by whoever deleted the trigger.
       grantRevokedBy: [admin.userId],
-      askedAgain: "permission.invalid",
+      askedAgain: "workflow.trigger_unavailable",
       racing: [{ status: "revoked", revokedBy: admin.userId }],
     });
   });

@@ -1,5 +1,9 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { maxFailedStarts } from "@grasp-os/shared/workflows";
@@ -9,12 +13,14 @@ import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
+  permissions,
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { stopNoticed } from "../notifications.ts";
+import { allowingPermissionSql } from "../permissions.ts";
 import { nextOccurrence, startStatusSql } from "../trigger-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 
@@ -316,21 +322,41 @@ const movedOn = async (
  * `start` waits for an admin: to its next occurrence after `now`, its
  * counts as they were, nothing audited. Waiting is no failure, and the
  * trigger's page says it waits, so no refusal is tried, counted toward
- * stopping, or logged for each occurrence. Only over the schedule read.
+ * stopping, or logged for each occurrence. Only over the schedule read,
+ * and only while the trigger still holds no active `start`: whether it
+ * moved on.
  */
 const skipped = async (
   env: Env,
   schedule: DueSchedule,
   now: Date
-): Promise<void> => {
-  await drizzle(env.DB)
+): Promise<boolean> => {
+  const moved = await drizzle(env.DB)
     .update(triggerSchedules)
     .set({
       nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
       attempts: 0,
       lastAttemptAt: null,
     })
-    .where(asRead(schedule));
+    .where(
+      and(
+        asRead(schedule),
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowingPermissionSql(
+          {
+            type: "trigger",
+            triggerId: triggerIdSchema.parse(schedule.triggerId),
+          },
+          undefined,
+          {
+            type: "workflow",
+            workflowId: workflowResourceIdSchema.parse(schedule.workflowId),
+          },
+          "start"
+        )})`
+      )
+    )
+    .returning({ triggerId: triggerSchedules.triggerId });
+  return moved.length > 0;
 };
 
 /**
@@ -345,8 +371,8 @@ const skipped = async (
  *    authority it had then, is sent to the engine by the start repair
  *    (resource-runs.ts) if it wasn't; no grant, capacity or permission
  *    read now holds a started occurrence back.
- * 2. Not started: while the trigger's `start` waits for an admin, it is
- *    skipped, untried (`skipped`). Otherwise a start is tried, admitted
+ * 2. Not started: while the trigger's `start` waits for an admin, read
+ *    again as it moves on, it is skipped, untried (`skipped`). Otherwise a start is tried, admitted
  *    only while the occurrence is still the schedule's next (`stillNext`)
  *    and, being keyed by the occurrence, once. Admitted, it moves on.
  * 3. The try failed: recorded only while no start of it was admitted
@@ -361,8 +387,8 @@ const startScheduled = async (
     await movedOn(env, schedule, now);
     return;
   }
-  if (schedule.awaitingStart) {
-    await skipped(env, schedule, now);
+  // Granted since it was read: tried as any other.
+  if (schedule.awaitingStart && (await skipped(env, schedule, now))) {
     return;
   }
   try {
