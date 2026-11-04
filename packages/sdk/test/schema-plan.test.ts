@@ -352,6 +352,20 @@ describe("safe changes", () => {
 });
 
 describe("a widening", () => {
+  test("never adds a nested default: records stored without it lack it, so it is checked and filled in", () => {
+    const detail = (tone: ValueShape[string]) =>
+      notes({ ...noteFields, detail: v.object({ tone }).optional() });
+    const before = detail(v.string().optional());
+    const after = detail(v.string().default("plain"));
+    const plan = planSchemaChange(before, after);
+    expect(plan).toMatchObject({ accepted: true, activates: true });
+    expect(checksOf(plan)).toStrictEqual([
+      { table: "notes", field: "detail", answer: null },
+    ]);
+    // A version without it writes records that lack it.
+    expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
+  });
+
   test("applies at once, every record fitting it, and the version before stays covered", () => {
     for (const title of [
       v.string().min(1).max(500),
@@ -576,6 +590,33 @@ describe("changes that need a migration", () => {
     expect(
       refusedOf(planSchemaChange(linked("notes", true), linked("notes", false)))
     ).toStrictEqual(refusal);
+  });
+
+  test("a field a row rule reads that a check would fill a default into is refused, with no answer too", () => {
+    const shared: SchemaAccess = {
+      tables: { notes: { read: "appMembers", write: "appMembers" } },
+    };
+    const before = schemaManifest(
+      defineSchema({
+        notes: defineTable({
+          title: v.string(),
+          team: v.string().optional(),
+        }).access({ read: [rows.team("team")] }),
+      }),
+      shared
+    );
+    const after = schemaManifest(
+      defineSchema({
+        notes: defineTable({
+          title: v.string(),
+          team: v.string().max(10).default("sales"),
+        }).access({ read: [rows.team("team")] }),
+      }),
+      shared
+    );
+    expect(refusedOf(planSchemaChange(before, after))).toStrictEqual([
+      { table: "notes", field: "team", reason: "rule_field_rewritten" },
+    ]);
   });
 
   test("a defaulted field a row rule reads is refused: filling it in would choose who sees records", () => {

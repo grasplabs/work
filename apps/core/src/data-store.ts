@@ -182,11 +182,6 @@ export class DataStore extends DurableObject<Env> {
     return this.#live().schemaStatus(storeId, schemaHash, consumer);
   }
 
-  /** `StoreHost.survivesMigration`. */
-  survivesMigration(storeId: StoreId, schemaHash: string): boolean {
-    return this.#live().survivesMigration(storeId, schemaHash);
-  }
-
   /** `StoreHost.compatibleVersions`. */
   compatibleVersions(
     storeId: StoreId,

@@ -329,20 +329,24 @@ const wordCharacter = /[\p{L}\p{N}]/u;
 
 /**
  * The FTS5 query for `terms` (`searchTerms`, at least one) in `search`:
- * every word in one of its text fields, the last as a prefix, and, for an
- * owner-only table, the caller's ID in the owner column.
+ * every word in one of its text fields, the last as a prefix, and, for a
+ * table owner-only now (`ownerScoped`, from the store's contract, not
+ * the index: a version pinned to an index built while the table was
+ * owner-only searches every owner's records once it isn't), the caller's
+ * ID in the owner column.
  */
 export const searchMatch = (
   search: PhysicalSearch,
   terms: readonly string[],
-  principal: string
+  principal: string,
+  ownerScoped: boolean
 ): string => {
   const words = terms.map((term, position) =>
     position === terms.length - 1 ? `${quoted(term)}*` : quoted(term)
   );
   const columns = search.fields.map((_field, position) => `f${position}`);
   const text = `{${columns.join(" ")}} : (${words.join(" AND ")})`;
-  return search.ownerScoped && wordCharacter.test(principal)
+  return search.ownerScoped && ownerScoped && wordCharacter.test(principal)
     ? `${text} AND owner : ${quoted(principal)}`
     : text;
 };

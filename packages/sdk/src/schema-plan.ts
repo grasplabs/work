@@ -61,9 +61,9 @@ import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 //   must fit the new descriptor. When one doesn't, the change is a
 //   question (the store answers its rows and why, never their values),
 //   answered by a value the App declares for the field (`SchemaAnswer`,
-//   a backfill's default for the rows that don't fit), or by an explicit
-//   migration, a per-row function in code (below), the one way to
-//   reshape what records hold;
+//   a backfill's default for the records that lack it, never written over
+//   a value they hold), or by an explicit migration, a per-row function
+//   in code (below), the one way to reshape what records hold;
 // - a field renamed (`renames`, a seam for the App definition's stable
 //   field IDs): the new field takes the old one's value, which stays in
 //   the record, its field kept as optional;
@@ -137,11 +137,11 @@ export interface PlannedIndex {
 }
 
 /**
- * An App's value for the records of one field a narrowing doesn't fit
- * (`app({ answers })`): only a record whose value doesn't fit the field's
- * new descriptor (or that lacks it) takes it, and it must fit in turn. A
- * backfill's default, not a migration: anything that reshapes what a
- * record holds is an explicit migration, a per-row function in code.
+ * An App's value for the records that lack one field a change requires
+ * (`app({ answers })`): only a record that doesn't hold it, or holds
+ * null, takes it, and it must fit. A backfill's default, never written
+ * over a value a record holds: anything that reshapes what a record holds
+ * is an explicit migration, a per-row function in code.
  */
 export interface SchemaAnswer extends PlannedField {
   readonly value: FrozenJson;
@@ -376,15 +376,99 @@ const presenceWidens = (
 ): boolean => after.presence === "optional" || before.presence !== "optional";
 
 /**
+ * Whether `after` gives a field nested in an object a default that
+ * `before` didn't: a stored record may lack the field, and a read leaves
+ * it missing (defaults are filled in as values are written, never made up
+ * as they are read), so such a change fills it in first (`checks`,
+ * `withDefaultsFilled`), never counts as a widening. Through objects,
+ * array items and record values; a union's members are left as they are.
+ */
+const addsNestedDefault = (
+  before: ValueDescriptor,
+  after: ValueDescriptor
+): boolean => {
+  if (before.kind === "object" && after.kind === "object") {
+    return Object.entries(after.fields).some(([name, field]) => {
+      const was = own(before.fields, name);
+      return field.presence === "default"
+        ? was?.presence !== "default"
+        : was !== undefined && addsNestedDefault(was, field);
+    });
+  }
+  if (before.kind === "array" && after.kind === "array") {
+    return addsNestedDefault(before.item, after.item);
+  }
+  if (before.kind === "record" && after.kind === "record") {
+    return addsNestedDefault(before.value, after.value);
+  }
+  return false;
+};
+
+/**
  * Whether every value field `before` holds, `after` takes, and a record
- * lacking it fits `after` wherever it fit `before`: a widening, which no
- * stored record can fail (descriptor-assignable.ts, `assignable`, is
- * conservative: what it can't prove isn't one).
+ * lacking it fits `after` wherever it fit `before`, as stored: a
+ * widening, which no stored record can fail and none needs filling in
+ * for (descriptor-assignable.ts, `assignable`, is conservative: what it
+ * can't prove isn't one; a nested default added isn't one either,
+ * `addsNestedDefault`).
  */
 export const fieldWidens = (
   before: ValueDescriptor,
   after: ValueDescriptor
-): boolean => presenceWidens(before, after) && assignable(before, after);
+): boolean =>
+  presenceWidens(before, after) &&
+  assignable(before, after) &&
+  !addsNestedDefault(before, after);
+
+/**
+ * `value`, which fits `descriptor`, with every default of a field nested
+ * in an object that it lacks filled in: through objects, array items and
+ * record values, as a write would have stored them. Nothing it holds is
+ * changed. A union's members are left as they are.
+ */
+export const withDefaultsFilled = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): unknown => {
+  if (
+    descriptor.kind === "object" &&
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  ) {
+    const held: Readonly<Record<string, unknown>> = Object.fromEntries(
+      Object.entries(value)
+    );
+    const filled: Record<string, unknown> = { ...held };
+    for (const [name, field] of Object.entries(descriptor.fields)) {
+      if (Object.hasOwn(held, name)) {
+        filled[name] = withDefaultsFilled(field, held[name]);
+      } else if (field.presence === "default") {
+        filled[name] = field.defaultValue ?? null;
+      }
+    }
+    return filled;
+  }
+  if (descriptor.kind === "array" && Array.isArray(value)) {
+    return value.map((item: unknown) =>
+      withDefaultsFilled(descriptor.item, item)
+    );
+  }
+  if (
+    descriptor.kind === "record" &&
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  ) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        withDefaultsFilled(descriptor.value, item),
+      ])
+    );
+  }
+  return value;
+};
 
 /** `descriptor` as a field that may be left out. */
 const relaxed = (descriptor: ValueDescriptor): ValueDescriptor =>
@@ -582,7 +666,9 @@ const checkOf = (
   const { table, field } = change;
   const from = context.renamedFrom.get(field) ?? null;
   const answer = from === null ? (context.answers.get(field) ?? null) : null;
-  const rewrites = answer !== null || from !== null;
+  // A value, a rename or a default fill all write the field.
+  const rewrites =
+    answer !== null || from !== null || change.after.presence === "default";
   if (rewrites && context.ruleFields.has(field)) {
     refused.push({ table, field, reason: "rule_field_rewritten" });
     return;

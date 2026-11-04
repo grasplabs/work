@@ -658,8 +658,6 @@ export const migrationErrors = defineErrorFamily({
     "This version's schema no longer fits the store: a migration moved its records on. Make the migrated version current.",
   "migration.not_current":
     "This version's schema change is applied to the store's records as the version is made current. Until then it can't write to the store.",
-  "migration.undo_blocked":
-    "This version can't be made current again yet: records don't fit it, and the change history doesn't hold what they held before the schema change that left it behind (they changed since, their table is sensitive, or their values were erased). Change those records, or keep the current version.",
   "migration.rollback_incompatible":
     "This version's schema no longer fits its store: a migration moved its records on, so it can't be made current again. Make one of the compatible versions current instead.",
 });
@@ -713,7 +711,7 @@ export interface MigrationFailure {
 }
 
 /**
- * An App's value for the records of one field a narrowing doesn't fit
+ * An App's value for the records that lack one field a change requires
  * (the SDK's `SchemaAnswer`, schema-plan.ts): a backfill's default.
  */
 export const schemaAnswerSchema = z.strictObject({

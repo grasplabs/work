@@ -14,6 +14,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
+import type { OpenStore } from "./data-stores.ts";
 import {
   businessStores,
   businessStoreVersions,
@@ -181,14 +182,17 @@ export const provideWorkflowStores = async (
   requireBuilder(by);
   requireNotStaff(by);
   const bindings: WorkflowStoreBinding[] = [];
-  // One store after another: each is its own object, and a refusal stops
-  // the publication before the next is touched.
+  const consumer = { resourceId: workflowId, resourceVersion: version };
+  const prepared: { opened: OpenStore; schemaHash: string; awaits: boolean }[] =
+    [];
+  // Prepared first, one store after another: each is its own object, and
+  // a refusal (a dry run whose records don't fit) stops the publication
+  // before any store's contract moves for it.
   for (const [name, store] of stores) {
     // oxlint-disable-next-line no-await-in-loop -- see above
     const storeId = await storeFor(env, by, workflowId, name);
     // oxlint-disable-next-line no-await-in-loop -- see above
     const opened = await openStore(env, storeId);
-    const consumer = { resourceId: workflowId, resourceVersion: version };
     // oxlint-disable-next-line no-await-in-loop -- see above
     const defined = await defineSchemaOnStore(
       env,
@@ -196,16 +200,14 @@ export const provideWorkflowStores = async (
       manifestText(store.manifest),
       consumer
     );
-    // A published version runs at once: a change that checks records
-    // (sdk schema-plan.ts, `activates`) is applied now, every record
-    // checked, or the publication fails with its questions.
-    if (defined.contract.awaits) {
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await opened.activate(defined.schemaHash, consumer);
-    }
     if (defined.schemaHash !== store.schemaHash) {
       throw new Error("The store defined another schema than the workflow's");
     }
+    prepared.push({
+      opened,
+      schemaHash: defined.schemaHash,
+      awaits: defined.contract.awaits,
+    });
     bindings.push({
       name,
       storeId,
@@ -215,6 +217,18 @@ export const provideWorkflowStores = async (
         canonicalJson({ ...store.fingerprints })
       ),
     });
+  }
+  // A published version runs at once: a change that checks records (sdk
+  // schema-plan.ts, `activates`) is applied now, every store's dry run
+  // having passed. Each applies all or nothing; only a write landing on a
+  // later store between its dry run and here can still refuse it, after
+  // an earlier one applied, and the version its records then fit is the
+  // one being published, which a retry publishes.
+  for (const { opened, schemaHash, awaits } of prepared) {
+    if (awaits) {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await opened.activate(schemaHash, consumer);
+    }
   }
   return bindings;
 };

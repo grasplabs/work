@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5b88e5de-bc98-4b16-9391-1845b27ec4bc",
+  "id": "e727d793-f003-4cb9-88e1-971e69b38410",
   "prevId": "bff2a725-89aa-4112-9648-83e313ec86a5",
   "tables": {
     "sdk_abandoned_targets": {
@@ -1577,15 +1577,6 @@
             "changed_at"
           ],
           "isUnique": false
-        },
-        "sdk_record_changes_held": {
-          "name": "sdk_record_changes_held",
-          "columns": [
-            "commit",
-            "table_id"
-          ],
-          "isUnique": false,
-          "where": "source = 'schema_change'"
         }
       },
       "foreignKeys": {},
@@ -1923,101 +1914,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "sdk_schema_changes": {
-      "name": "sdk_schema_changes",
-      "columns": {
-        "change_id": {
-          "name": "change_id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "base_hash": {
-          "name": "base_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "base_manifest": {
-          "name": "base_manifest",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "contract_hash": {
-          "name": "contract_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "schema_hash": {
-          "name": "schema_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "commit": {
-          "name": "commit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "plan": {
-          "name": "plan",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "superseded": {
-          "name": "superseded",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rewritten": {
-          "name": "rewritten",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "undone_at": {
-          "name": "undone_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "sdk_schema_changes_contract": {
-          "name": "sdk_schema_changes_contract",
-          "columns": [
-            "contract_hash"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "sdk_schemas": {
       "name": "sdk_schemas",
       "columns": {
@@ -2186,14 +2082,6 @@
         },
         "history_bytes": {
           "name": "history_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "history_held": {
-          "name": "history_held",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

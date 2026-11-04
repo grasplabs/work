@@ -6,10 +6,11 @@ import { isPlainObject } from "./value-descriptor.ts";
 import type { FrozenJson } from "./value-descriptor.ts";
 
 // An App's answers (`app({ answers })`, schema-plan.ts `SchemaAnswer`): a
-// value for the records of one field a narrowing doesn't fit, as a
-// backfill's default is one. Anything that reshapes what a record holds
-// is an explicit migration in code. Checked here as the App declares
-// them and as its manifest is read back.
+// value for the records that lack one field a change requires, as a
+// backfill's default is one, never written over a value they hold.
+// Anything that reshapes what a record holds is an explicit migration in
+// code. Checked here as the App declares them and as its manifest is read
+// back.
 
 /** The most answers an App declares. */
 export const appMaxSchemaAnswers = 64;

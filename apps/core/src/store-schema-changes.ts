@@ -1,10 +1,7 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
-import type {
-  AcceptedPlan,
-  PlannedCheck,
-  SchemaManifest,
-} from "@grasp-os/sdk/host";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { withDefaultsFilled } from "@grasp-os/sdk/host";
+import type { AcceptedPlan, PlannedCheck } from "@grasp-os/sdk/host";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import {
   documentMaxBytes,
   schemaQuestionRecordsMax,
@@ -15,40 +12,38 @@ import type {
   SchemaQuestion,
   StoreFields,
 } from "@grasp-os/shared/stores";
-import { and, asc, eq, gt, lt } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
-import { z } from "zod";
 
-import { recordChanges, records } from "./db/data-store/schema.ts";
+import { records } from "./db/data-store/schema.ts";
 import { recordChangesIn } from "./store-changes.ts";
-import { fitsTable } from "./store-migrations.ts";
 import { validates } from "./store-queries.ts";
 
 // A schema change the store checks every record for before its contract
 // takes it (the SDK's schema-plan.ts, `activates`: a narrowing, a field
-// required, a conversion, a rename, a changed access mode or row rule),
-// as the store's host carries it out (store-host.ts, `activateReady`).
-// The plan is pure and the SDK's; this is where it meets the records.
+// required, a nested default, a rename, a changed access mode or row
+// rule, or a rollback to a schema a change left behind), as the store's
+// host carries it out (store-host.ts, `activateReady`). The plan is pure
+// and the SDK's; this is where it meets the records.
 //
 // It runs twice: as the release is sealed, a dry run over every record
 // that writes nothing and answers what doesn't fit; and as the release is
-// made current, in the one transaction that rewrites the records an
-// answer or a default changes and moves the contract. Threat model, and
-// how each is closed:
+// made current, in the one transaction that gives records what they lack
+// and moves the contract. Threat model, and how each is closed:
 //
-// - Data lost to a narrowing, or a value guessed: a record that doesn't
-//   fit a checked field is rewritten only with the App's own value for it
-//   (a backfill's default; anything that reshapes a record is an explicit
-//   migration in code), and only when that value fits the field;
-//   otherwise the record is reported and nothing is applied. Nothing is
+// - Data lost or a value guessed: the platform never writes over a value
+//   a record holds. It only gives a record what it lacks (a field it
+//   doesn't hold or holds as null): the field's default, a nested
+//   default, a renamed field's value, or the App's value for the field
+//   (`SchemaAnswer`, a backfill's default), and only when that fits. A
+//   value that doesn't fit is reported, and only an explicit migration,
+//   code the App's builders write and review, reshapes it. Nothing is
 //   removed: a field the schema leaves out stays in every record and in
-//   the contract, and every rewrite is recorded in the store's change
-//   history (`sdk_record_changes`, source `schema_change`, under a commit
-//   of its own) with what the fields held before, where its undo reads
-//   them from.
+//   the contract. Every write is recorded in the store's change history
+//   (source `schema_change`) as any write is.
 // - A partial migration: a crash, a timeout or a record that fails
-//   halfway. The check, every rewrite and its history, the contract's
-//   move and the schemas it leaves behind are one SQLite transaction
+//   halfway. The check, every write and its history, the contract's move
+//   and the schemas it leaves behind are one SQLite transaction
 //   (`transactionSync`), which a failure anywhere in it rolls back whole,
 //   so the version in force goes on serving the records as they were.
 //   There is no state between: a store killed mid-change wakes up with
@@ -61,17 +56,19 @@ import { validates } from "./store-queries.ts";
 // - A version pinned to the old schema writes what the new contract
 //   doesn't take: activation leaves behind every schema the new contract
 //   doesn't cover (sdk schema-plan.ts, `schemaCovered`), and the store
-//   refuses its writes (`migration.incompatible_write`) until an undo
-//   brings it back.
-// - A rule bypassed: an answer or a rename never rewrites a field a row
-//   rule reads, before or after (`rule_field_rewritten`, refused by the
-//   plan), so a record's audience changes only through writes, which
-//   pass the rules (store-rules.ts); nor a field the store's reference or
-//   file index reads. A changed access mode or row rule rewrites nothing:
-//   the store reads and writes every version under its contract's
-//   (store-host.ts, `#pinned`), so once the contract takes them they hold
-//   for every record and every version still pinned, and no older
-//   version reads on under looser ones.
+//   refuses its writes (`migration.incompatible_write`). A rollback is
+//   making such a release current again: its schema planned onto the
+//   contract, every record of every table it narrows checked against it,
+//   refused with questions when one doesn't fit.
+// - A rule bypassed: nothing here writes a field a row rule reads, before
+//   or after (`rule_field_rewritten`, refused by the plan: a value, a
+//   rename or a default for one), so a record's audience changes only
+//   through writes, which pass the rules (store-rules.ts); nor a field
+//   the store's reference or file index reads. A changed access mode or
+//   row rule writes nothing: the store reads and writes every version
+//   under its contract's (store-host.ts, `#pinned`), so once the contract
+//   takes them they hold for every record and every version still
+//   pinned, and no older version reads on under looser ones.
 // - A dry run leaking hidden rows: a question names a record by its ID
 //   and why it doesn't fit (`SchemaCheckReason`, a fixed word), never a
 //   value, a validator's message or anything the record holds, on any
@@ -81,24 +78,6 @@ import { validates } from "./store-queries.ts";
 //   (store-migrations.ts): that the record exists, and which of a field's
 //   checks it fails. A question lists at most `schemaQuestionRecordsMax`
 //   records, and counts the rest.
-// - An undo overwriting what was written since: it puts back what a
-//   record's fields held only where the fields the change wrote still hold
-//   exactly what it wrote (its history row's `after`), whoever wrote
-//   since and whether or not they kept history (a fill or a transform
-//   doesn't); every other record of the tables it changed must fit the
-//   contract before as it is, or the undo is refused, naming them, with
-//   nothing written. A record deleted since stays deleted.
-// - The undo's history crowded out, or crowding out the store's edits: a
-//   change's rows are held outside the history's bounds and retention
-//   while it can be undone, and removed as the contract moves past it
-//   (store-changes.ts, `releaseHeld`).
-// - What an undo puts back outliving the rules that govern it: it is read
-//   from the change history, never kept apart, so its own rules hold. A
-//   sensitive table's history keeps no values, a person's erasure clears
-//   the values of what they wrote (the change's row is recorded for the
-//   record's owner; an erased change of the record before it, by whoever
-//   wrote it, counts too), and retention prunes it: in each case there is
-//   nothing to put back, and the record is checked as it is instead.
 
 type Db = DrizzleSqliteDODatabase;
 
@@ -167,23 +146,53 @@ type Settled =
       }[];
     };
 
+/** What settling a field answers: kept, a value to write, or why not. */
+type FieldSettled =
+  | { readonly kept: true }
+  | { readonly value: unknown }
+  | { readonly reason: SchemaCheckReason };
+
+/**
+ * What a field the record lacks takes (it doesn't hold it, or holds null):
+ * the value of the field it was renamed from, or the App's value for it,
+ * when that fits.
+ */
+const givenField = (
+  checked: CheckedField,
+  fields: StoreFields,
+  present: boolean
+): FieldSettled => {
+  const { descriptor, check } = checked;
+  // A field renamed takes the old field's value; any other, the App's.
+  const from = check?.from ?? null;
+  let given: unknown = check?.answer?.value;
+  if (from !== null) {
+    given = Object.hasOwn(fields, from) ? fields[from] : undefined;
+  }
+  if (given === undefined) {
+    return { reason: present ? "invalid" : "missing" };
+  }
+  return validates(descriptor, given) ? { value: given } : { reason: "unfit" };
+};
+
 /**
  * The value `checked` takes in a record holding `fields`: kept where it
- * fits, filled in with its default where it is missing, or what the
- * check's answer makes of it; a failure where none of those fits.
+ * fits (its nested defaults filled in where they are missing), or, where
+ * the record lacks it, its default or what `givenField` gives it; a
+ * failure where none of those fits. Never over a value the record holds.
  */
 const settledField = (
   checked: CheckedField,
   fields: StoreFields
-):
-  | { readonly kept: true }
-  | { readonly value: unknown }
-  | { readonly reason: SchemaCheckReason } => {
-  const { field, descriptor, check } = checked;
+): FieldSettled => {
+  const { field, descriptor } = checked;
   const present = Object.hasOwn(fields, field);
-  const value = present ? fields[field] : undefined;
+  const value = present ? (fields[field] ?? null) : null;
   if (present && validates(descriptor, value)) {
-    return { kept: true };
+    const filled = withDefaultsFilled(descriptor, value);
+    return canonicalText(filled) === canonicalText(value)
+      ? { kept: true }
+      : { value: filled };
   }
   if (!present && descriptor.presence === "optional") {
     return { kept: true };
@@ -191,16 +200,11 @@ const settledField = (
   if (!present && descriptor.presence === "default") {
     return { value: descriptor.defaultValue ?? null };
   }
-  // A field renamed takes the old field's value; any other, the App's.
-  const from = check?.from ?? null;
-  if (from !== null && !Object.hasOwn(fields, from)) {
-    return { reason: "missing" };
+  if (present && value !== null) {
+    // A value the record holds, which doesn't fit: a migration's.
+    return { reason: "invalid" };
   }
-  const given = from === null ? check?.answer?.value : fields[from];
-  if (given === undefined) {
-    return { reason: present ? "invalid" : "missing" };
-  }
-  return validates(descriptor, given) ? { value: given } : { reason: "unfit" };
+  return givenField(checked, fields, present);
 };
 
 /**
@@ -324,7 +328,7 @@ const eachRecord = (
   }
 };
 
-/** Where a change's rewrites, or an undo's, go and how they are recorded. */
+/** Where a change's writes go, and how they are recorded. */
 export interface ChangeWrite {
   /** The store's commit they are recorded under in the change history. */
   readonly commit: number;
@@ -386,7 +390,6 @@ const rewrite = (
       actor: { type: "system" },
       commit: write.commit,
       principal: record.ownerId,
-      held: true,
     },
     write.now
   );
@@ -428,166 +431,6 @@ export const runChange = (
         rewrite(db, table.table, record, settled.fields, write);
         changedTables.add(record.tableId);
         tally.rewritten += 1;
-      }
-    });
-  }
-  return { questions, rewritten: tally.rewritten, changedTables };
-};
-
-/** A change to undo, as its record holds it. */
-export interface UndoneChange {
-  /** The commit its rewrites were recorded under. */
-  readonly commit: number;
-  /** The contract before the change, which every record must fit again. */
-  readonly base: SchemaManifest;
-  /** The tables it checked, by name, with their IDs. */
-  readonly tables: readonly { table: string; tableId: string }[];
-}
-
-/** The first of `declared`'s fields `fields` doesn't fit, and why. */
-const firstMisfit = (
-  declared: Readonly<Record<string, ValueDescriptor>>,
-  fields: StoreFields
-): { field: string; reason: SchemaCheckReason } => {
-  for (const [field, descriptor] of Object.entries(declared)) {
-    if (!Object.hasOwn(fields, field)) {
-      if (descriptor.presence !== "optional") {
-        return { field, reason: "missing" };
-      }
-    } else if (!validates(descriptor, fields[field])) {
-      return { field, reason: "invalid" };
-    }
-  }
-  return { field: "", reason: "invalid" };
-};
-
-const fieldNamesSchema = z.array(z.string());
-
-/** Field `name` of `fields` as canonical text; undefined when absent. */
-const holds = (fields: StoreFields, name: string): string | undefined =>
-  Object.hasOwn(fields, name) ? canonicalJson(fields[name] ?? null) : undefined;
-
-/**
- * What `record` held before the change whose history row is `row`, as
- * the history keeps it: its fields with the changed ones put back as they
- * were. Only while the fields the change wrote still hold exactly what it
- * wrote (its `after`): a write since, or a fill or a transform, which keep
- * no history, leaves it to be checked as it is. None too when the history
- * kept no values (a sensitive table, values too large, or erased), or
- * when `erased`: an earlier change of the record had its values erased,
- * so what it held came from a person since erased.
- */
-const heldBefore = (
-  record: typeof records.$inferSelect,
-  row: typeof recordChanges.$inferSelect | undefined,
-  erased: boolean
-): StoreFields | undefined => {
-  if (
-    row === undefined ||
-    row.beforeJson === null ||
-    row.afterJson === null ||
-    erased
-  ) {
-    return undefined;
-  }
-  const current = storedFieldsSchema.parse(JSON.parse(record.valueJson));
-  const names = fieldNamesSchema.parse(JSON.parse(row.fields));
-  const written = storedFieldsSchema.parse(JSON.parse(row.afterJson));
-  if (names.some((name) => holds(current, name) !== holds(written, name))) {
-    return undefined;
-  }
-  const held: Record<string, unknown> = { ...current };
-  for (const name of names) {
-    Reflect.deleteProperty(held, name);
-  }
-  return storedFieldsSchema.parse({
-    ...held,
-    ...storedFieldsSchema.parse(JSON.parse(row.beforeJson)),
-  });
-};
-
-/**
- * The change's history rows of table `tableId`, by record, and the
- * records an earlier change of had its values erased: one read each.
- */
-const historyOfChange = (db: Db, commit: number, tableId: string) => {
-  const rows = new Map(
-    db
-      .select()
-      .from(recordChanges)
-      .where(
-        and(
-          eq(recordChanges.source, "schema_change"),
-          eq(recordChanges.commit, commit),
-          eq(recordChanges.tableId, tableId)
-        )
-      )
-      .all()
-      .map((row) => [row.recordId, row])
-  );
-  // The change's rows were recorded in one transaction: every change of
-  // its records before it has a lower ID than its first.
-  const first = Math.min(...[...rows.values()].map(({ id }) => id));
-  const erased = new Set(
-    rows.size === 0
-      ? []
-      : db
-          .selectDistinct({ recordId: recordChanges.recordId })
-          .from(recordChanges)
-          .where(
-            and(
-              eq(recordChanges.tableId, tableId),
-              lt(recordChanges.id, first),
-              eq(recordChanges.valuesLeftOut, "erased")
-            )
-          )
-          .all()
-          .map(({ recordId }) => recordId)
-  );
-  return { rows, erased };
-};
-
-/**
- * Undoes change `change` in the transaction that moves the contract back,
- * for `write`: every record it rewrote whose history still holds what it
- * held before, and nobody changed since, gets that back (its revision
- * moved on, so a reader holding the change's version knows it changed),
- * recorded in the history in turn; every other record of the tables it
- * checked must fit the contract before as it is. Answers the questions of
- * those that don't, and what it put back. As with `runChange`, the
- * transaction must be thrown out when any question is asked.
- */
-export const undoChange = (
-  db: Db,
-  change: UndoneChange,
-  write: ChangeWrite
-): ChangeRun => {
-  const questions = new Questions();
-  const changedTables = new Set<string>();
-  const tally = { rewritten: 0 };
-  for (const { table, tableId } of change.tables) {
-    const declared = Object.hasOwn(change.base.tables, table)
-      ? (change.base.tables[table]?.fields ?? {})
-      : {};
-    const { rows, erased } = historyOfChange(db, change.commit, tableId);
-    eachRecord(db, tableId, (record) => {
-      const before = heldBefore(
-        record,
-        rows.get(record.recordId),
-        erased.has(record.recordId)
-      );
-      if (before !== undefined && fitsTable(declared, before)) {
-        if (questions.empty) {
-          rewrite(db, table, record, before, write);
-          changedTables.add(tableId);
-          tally.rewritten += 1;
-        }
-        return;
-      }
-      const fields = storedFieldsSchema.parse(JSON.parse(record.valueJson));
-      if (!fitsTable(declared, fields)) {
-        const { field, reason } = firstMisfit(declared, fields);
-        questions.add(table, field, record.recordId, reason, []);
       }
     });
   }

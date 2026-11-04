@@ -1,6 +1,7 @@
 import { declaredStoresOf } from "@grasp-os/open-workflow/stores";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -133,22 +134,27 @@ const storesOf = async (id: string) => {
  * store, under the schema `definition` declares for it: a record a
  * version making the total text doesn't fit.
  */
-const putOrder = async (id: string, definition: string): Promise<void> => {
+const putOrder = async (
+  id: string,
+  definition: string,
+  { store = "intake", total = 1 }: { store?: string; total?: number } = {}
+): Promise<string> => {
   const stores = await storesOf(id);
-  const named = stores.find(({ name }) => name === "intake");
+  const named = stores.find(({ name }) => name === store);
   const declaredStores = await declaredStoresOf(definition);
-  const declared = declaredStores.get("intake");
+  const declared = declaredStores.get(store);
   if (named === undefined || declared === undefined) {
-    throw new Error("No intake store");
+    throw new Error(`No ${store} store`);
   }
   await commit(await openStore(env, named.storeId), declared.schemaHash, [
     {
       op: "insert",
       table: "orders",
       id: newRecordId(),
-      fields: { customer: "acme", total: 1 },
+      fields: { customer: "acme", total },
     },
   ]);
+  return named.storeId;
 };
 
 /** The store bindings of version `version` of workflow `id`. */
@@ -346,6 +352,68 @@ describe("stores a workflow declares", () => {
       dropped: "role.forbidden",
       narrowed: "migration.required",
       current: first.version,
+    });
+  });
+
+  it("move no store's contract when another store's records don't fit the version", async () => {
+    const ada = await person("builder");
+    const { id, name } = await newWorkflow(ada);
+    const two = (total: unknown) => ({
+      ...intake(orders({}, total)),
+      second: intake(orders({}, total)).intake,
+    });
+    const firstDefinition = definitionOf(name, "1.0.0", two(wholeTotal));
+    const first = await publishWorkflowVersion(env, ada, id, {
+      definition: firstDefinition,
+      basedOn: null,
+    });
+    // Each store's total narrows to at most 100: the first's order fits,
+    // the second's doesn't.
+    const intakeStore = await putOrder(id, firstDefinition);
+    await putOrder(id, firstDefinition, { store: "second", total: 500 });
+    const opened = await openStore(env, intakeStore);
+    const contract = async () =>
+      await runInDurableObject(
+        env.DATA_STORES.getByName(intakeStore),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ hash: string }>(
+              "SELECT contract_hash AS hash FROM sdk_store"
+            )
+            .one().hash
+      );
+    const before = await contract();
+    const narrowed = await outcome(
+      publishWorkflowVersion(env, ada, id, {
+        definition: definitionOf(
+          name,
+          "2.0.0",
+          two({ ...wholeTotal, maximum: 100 })
+        ),
+        basedOn: first.version,
+      })
+    );
+    const declaredStores = await declaredStoresOf(firstDefinition);
+    const declared = declaredStores.get("intake");
+
+    expect({
+      narrowed,
+      unchanged: (await contract()) === before,
+      // Version 1, still current, writes on to the first store.
+      stillWrites: await outcome(
+        commit(opened, declared?.schemaHash ?? "", [
+          {
+            op: "insert",
+            table: "orders",
+            id: newRecordId(),
+            fields: { customer: "acme", total: 1000 },
+          },
+        ])
+      ),
+    }).toStrictEqual({
+      narrowed: "migration.required",
+      unchanged: true,
+      stillWrites: "ok",
     });
   });
 

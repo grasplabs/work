@@ -58,6 +58,7 @@ export {
   holdsId,
   planSchemaChange,
   schemaCovered,
+  withDefaultsFilled,
 } from "./schema-plan.ts";
 export type {
   AcceptedPlan,
