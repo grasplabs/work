@@ -301,17 +301,7 @@ const ActivityWorkflow = ({ row }: { row: RunActivityWorkflow }) => {
       </Link>
     );
   }
-  return row.current ? (
-    <Link
-      className="hover:underline"
-      params={{ app: row.app, workflow: row.workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {row.workflow}
-    </Link>
-  ) : (
-    row.workflow
-  );
+  return row.workflow;
 };
 
 /** Each workflow's runs over the window: how many started, completed and failed. */

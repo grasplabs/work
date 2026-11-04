@@ -245,13 +245,7 @@ const LaneMark = ({
 /** A lane's name, opening its workflow. */
 const LaneLink = ({ lane, className }: { lane: Lane; className: string }) =>
   lane.of.kind === "app" ? (
-    <Link
-      className={className}
-      params={{ app: lane.of.app, workflow: lane.of.workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {lane.name}
-    </Link>
+    <span className={className}>{lane.name}</span>
   ) : (
     <Link
       className={className}

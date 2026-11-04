@@ -51,9 +51,7 @@ export const workflowAppsOf = ({
   const serving = new Set(
     uses
       .filter(({ workflows }) =>
-        workflows.some(
-          (using) => using.kind === "independent" && using.id === workflow
-        )
+        workflows.some((using) => using.id === workflow)
       )
       .map(({ connectionId }) => connectionId)
   );

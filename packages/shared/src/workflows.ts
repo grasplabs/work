@@ -1491,11 +1491,7 @@ export interface RunActivity {
   workflows: RunActivityWorkflow[];
 }
 
-/**
- * A workflow that uses a connection, as Integrations names and links it:
- * an App's (its App and its name in the App's code), or an independent
- * workflow (its ID and name).
- */
+/** A workflow that uses a connection, as Integrations names and links it. */
 export interface ConnectionWorkflow {
   id: string;
   name: string;

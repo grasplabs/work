@@ -62,7 +62,7 @@ const shown = async (
       component: () => (
         <AppPage
           app={appAs(role)}
-          contents={{ version: 1, screens, workflows: [] }}
+          contents={{ version: 1, screens }}
           fullPage={null}
           identity={{ staff }}
           open={screens[0]}

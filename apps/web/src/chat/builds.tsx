@@ -18,7 +18,7 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { i18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { HammerIcon, TriangleAlertIcon } from "lucide-react";
@@ -35,12 +35,10 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
 import {
   migrationFixturesText,
   pendingToShow,
   readyToMakeCurrent,
-  triggerChangeText,
   stillMadeCurrent,
   serverFileLabels,
   serverFileOf,
@@ -130,35 +128,6 @@ const migrationWarning = (
     : i18n._(
         msg`Changed: it reads and rewrites every record of ${table}, whoever owns it`
       );
-
-/** How a workflow changed, before its ID. */
-const workflowChangeWords = {
-  added: msg`Added workflow`,
-  modified: msg`Changed workflow`,
-  removed: msg`Removed workflow`,
-} as const;
-
-type Change = keyof typeof changeWords;
-
-/** How a step changed, with its name. */
-const stepChangeText = (change: Change, name: string): string => {
-  if (change === "added") {
-    return i18n._(msg`Added step ${name}`);
-  }
-  return change === "modified"
-    ? i18n._(msg`Changed step ${name}`)
-    : i18n._(msg`Removed step ${name}`);
-};
-
-/** How a parameter changed, with its name. */
-const paramChangeText = (change: Change, name: string): string => {
-  if (change === "added") {
-    return i18n._(msg`Added parameter ${name}`);
-  }
-  return change === "modified"
-    ? i18n._(msg`Changed parameter ${name}`)
-    : i18n._(msg`Removed parameter ${name}`);
-};
 
 /** Who proposed a version, as its reviewer reads it. */
 const proposerText = ({ proposedBy }: VersionReview): string => {
@@ -448,98 +417,6 @@ const ReviewDetails = ({
           )}
         </section>
       )}
-      {review.workflows.length === 0 ? null : (
-        <section aria-label={t`Workflows`} className="flex flex-col gap-1">
-          <h4 className="font-medium">
-            <Trans>Workflows</Trans>
-          </h4>
-          <ul className="flex flex-col gap-2">
-            {review.workflows.map((workflow) => (
-              <li className="flex flex-col gap-1" key={workflow.id}>
-                <span className="flex items-center gap-2">
-                  {i18n._(workflowChangeWords[workflow.change])}{" "}
-                  <code className="font-mono">{workflow.id}</code>
-                  {workflow.sideEffect && workflow.change !== "removed" ? (
-                    <Badge variant="attention">
-                      <Trans>May change something outside Grasp</Trans>
-                    </Badge>
-                  ) : null}
-                </span>
-                {workflow.change === "removed" ? (
-                  <span className="text-muted-foreground">
-                    {workflow.sideEffect
-                      ? t`It no longer runs (it could change things).`
-                      : t`It no longer runs.`}
-                  </span>
-                ) : null}
-                {workflow.triggers === null ? (
-                  <span className="text-muted-foreground">
-                    <Trans>
-                      What makes it run on its own can&apos;t be read from its
-                      code.
-                    </Trans>
-                  </span>
-                ) : (
-                  workflow.triggers.map((change) => (
-                    <span
-                      key={`${change.change}:${JSON.stringify(change.trigger)}`}
-                    >
-                      {triggerChangeText(change)}
-                    </span>
-                  ))
-                )}
-                {workflow.shared.length === 0 ? null : (
-                  <span className="text-muted-foreground">
-                    {t`Code it may use changed: ${ph({ code: formatList(workflow.shared) })}`}
-                  </span>
-                )}
-                {workflow.steps === null ? (
-                  <span className="text-muted-foreground">
-                    {workflow.calls.length === 0
-                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings.`
-                      : t`Its steps can't be read from its code, so any step may do anything its code does, calling ${ph({ tools: formatList(workflow.calls) })}.`}
-                  </span>
-                ) : (
-                  workflow.steps.map((step) => (
-                    <span className="flex items-center gap-2" key={step.name}>
-                      {stepChangeText(step.change, step.name)}
-                      {step.sideEffect ? (
-                        <Badge variant="attention">
-                          <Trans>May change something outside Grasp</Trans>
-                        </Badge>
-                      ) : null}
-                      {step.calls.length === 0 ? null : (
-                        <Badge variant="outline">
-                          {t`Calls ${ph({ tools: formatList(step.calls) })} (any of their methods): may change things`}
-                        </Badge>
-                      )}
-                      {step.sharedCode ? (
-                        <Badge variant="outline">
-                          <Trans>Shared code changed</Trans>
-                        </Badge>
-                      ) : null}
-                      <ChosenAtRunTime options={step.dynamic} />
-                    </span>
-                  ))
-                )}
-                {workflow.params === null ? (
-                  <span className="text-muted-foreground">
-                    <Trans>
-                      Its parameters can&apos;t be read from its code.
-                    </Trans>
-                  </span>
-                ) : (
-                  workflow.params.map((param) => (
-                    <span key={param.name}>
-                      {paramChangeText(param.change, param.name)}
-                    </span>
-                  ))
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
       <section
         aria-label={t`What the App holds`}
         className="flex flex-col gap-1"
@@ -595,23 +472,6 @@ const ReviewDetails = ({
             })}
           </ul>
         )}
-      </section>
-      <section aria-label={t`Tests`} className="flex flex-col gap-1">
-        <h4 className="font-medium">
-          <Trans>Tests</Trans>
-        </h4>
-        <p>
-          {review.tests.status === "passed"
-            ? t`All workflow tests pass.`
-            : null}
-          {review.tests.status === "none" ? t`No workflows to test.` : null}
-          {review.tests.status === "failed" ? t`Workflow tests fail:` : null}
-        </p>
-        {review.tests.failures.map((failure) => (
-          <p className="text-status-attention" key={failure}>
-            {failure}
-          </p>
-        ))}
       </section>
     </div>
   );

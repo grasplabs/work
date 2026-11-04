@@ -65,7 +65,6 @@ export type InboxKind =
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
-  | { kind: "workflow"; app: string; workflow: string }
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   /**
    * An App: its own page, or the section of its settings where what the
@@ -503,7 +502,7 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         },
         { label: t`Last`, value: formatDateTime(at) },
       ],
-      about: { kind: "workflow", app, workflow },
+      about: { kind: "engine", engine: app },
       forWhom: { person: me },
       date: at,
       urgent: false,

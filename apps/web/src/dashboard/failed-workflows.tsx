@@ -7,7 +7,6 @@ import type {
 import type { StoppedEventsItem } from "@grasp-os/shared/waiting";
 import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
@@ -79,18 +78,10 @@ const FailedWorkflow = ({
   notification: RunFailedNotification;
   model: string | undefined;
 }) => {
-  const { app, appName, workflow, run, failures, at, read } = notification;
+  const { appName, workflow, run, failures, at, read } = notification;
   const { t } = useLingui();
   const date = formatDateTime(at);
-  const link = (
-    <Link
-      className="underline"
-      params={{ app, workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {workflow}
-    </Link>
-  );
+  const link = <span className="font-medium">{workflow}</span>;
   return (
     <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
       <ItemMark icon={TriangleAlertIcon} />

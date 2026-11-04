@@ -232,38 +232,18 @@ const RunOutcome = ({
   );
 };
 
-/**
- * When a run started: for an engine's run, a link to its own page, with
- * its step history. An independent workflow's run has no page of its own.
- */
-const RunTime = ({ run }: { run: ListedRun }) => {
-  const { t } = useLingui();
-  const time = formatDateTime(run.createdAt);
-  return run.type === "app" ? (
-    <Link
-      aria-label={t`Run history, ${ph({ time })}`}
-      className="text-muted-foreground tabular-nums underline-offset-4 hover:underline"
-      params={{ app: run.app, workflow: run.workflow, run: run.id }}
-      to="/workflows/$app/$workflow/runs/$run"
-    >
-      {time}
-    </Link>
-  ) : (
-    <span className="text-muted-foreground tabular-nums">{time}</span>
-  );
-};
+/** When a run started. */
+const RunTime = ({ run }: { run: ListedRun }) => (
+  <span className="text-muted-foreground tabular-nums">
+    {formatDateTime(run.createdAt)}
+  </span>
+);
 
 /** A run's workflow, opening it, over its engine or that it is independent. */
 const RunWorkflow = ({ run }: { run: ListedRun }) =>
   run.type === "app" ? (
     <div className="flex flex-col">
-      <Link
-        className="underline-offset-4 hover:underline"
-        params={{ app: run.app, workflow: run.workflow }}
-        to="/workflows/$app/$workflow"
-      >
-        {run.workflow}
-      </Link>
+      <span>{run.workflow}</span>
       <span className="text-muted-foreground">{run.appName}</span>
     </div>
   ) : (

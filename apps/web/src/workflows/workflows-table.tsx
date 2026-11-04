@@ -87,7 +87,6 @@ const RunCount = ({
       search={{
         tab: "runs",
         app: workflow.app,
-        workflow: workflow.workflow,
         status,
       }}
       to="/workflows"
@@ -214,7 +213,6 @@ const Lead = ({
             aria-label={t`Open the App ${name}`}
             className="focus-visible:ring-ring/50 relative z-10 flex-none rounded-lg outline-none focus-visible:ring-3"
             params={{ app: workflow.app }}
-            search={{ section: "workflows" }}
             to="/apps/$app/settings"
           />
         }
@@ -248,13 +246,7 @@ const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => {
   const className =
     "truncate outline-none after:absolute after:inset-0 focus-visible:underline";
   return workflow.type === "app" ? (
-    <Link
-      className={className}
-      params={{ app: workflow.app, workflow: workflow.workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {workflow.workflow}
-    </Link>
+    <span className={className}>{workflow.workflow}</span>
   ) : (
     <Link
       className={className}
@@ -280,7 +272,6 @@ const Place = ({ workflow }: { workflow: WorkflowSummary }) =>
     <Link
       className="relative z-10 truncate underline-offset-4 hover:underline"
       params={{ app: workflow.app }}
-      search={{ section: "workflows" }}
       to="/apps/$app/settings"
     >
       {workflow.appName}

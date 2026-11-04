@@ -51,7 +51,6 @@ const overview = (
   contents: {
     version: screens.length === 0 ? null : 1,
     screens,
-    workflows: [],
   },
 });
 

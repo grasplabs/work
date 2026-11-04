@@ -19,7 +19,7 @@ import {
 } from "@grasp-os/ui/components/native-select";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
@@ -42,23 +42,18 @@ import type {
 import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 
 // Starting a workflow by hand from its page (GRA-1305), as the person
-// who presses Start: a run of an independent workflow at the version
-// core says a start runs, with a form for its input from that version's
-// schema (`workflowResources.startForm`, start-input.ts), or a run of an
-// App's workflow, whose input, if it takes any, is typed as JSON (an
-// App's workflow says what it takes only in its own code). A field that
-// takes a person is picked from the organization's people, teams and
-// roles: core gives the people and teams with the form. Offered to
-// anyone with a role in the workflow or the App, who may start it; core
-// decides again on the start, and what it refuses is said in the dialog.
+// who presses Start: a run at the version core says a start runs, with a
+// form for its input from that version's schema
+// (`workflowResources.startForm`, start-input.ts). A field that takes a
+// person is picked from the organization's people, teams and roles: core
+// gives the people and teams with the form. Offered to anyone with a role
+// in the workflow, who may start it; core decides again on the start, and
+// what it refuses is said in the dialog.
 // Each start carries a key made when the dialog opens, so pressing again
 // after a lost answer starts nothing twice.
 
 /** What a start started, as the dialog says it. */
-type Started =
-  | { kind: "unrunnable"; version: number }
-  | { kind: "listed" }
-  | { kind: "run"; app: string; workflow: string; run: string };
+type Started = { kind: "unrunnable"; version: number } | { kind: "listed" };
 
 /** What the dialog says once a start went through. */
 const StartedText = ({ started }: { started: Started }) => {
@@ -74,21 +69,6 @@ const StartedText = ({ started }: { started: Started }) => {
         <Trans>
           The run started. It is listed with the workflow&apos;s runs.
         </Trans>
-      );
-    }
-    case "run": {
-      return (
-        <Link
-          className="underline-offset-4 hover:underline"
-          params={{
-            app: started.app,
-            workflow: started.workflow,
-            run: started.run,
-          }}
-          to="/workflows/$app/$workflow/runs/$run"
-        >
-          <Trans>The run started. Open it.</Trans>
-        </Link>
       );
     }
     default: {
@@ -221,7 +201,7 @@ const FieldInput = ({
 
 /**
  * The Start button, and the dialog it opens: `fields` as a form, or JSON
- * when they are undefined (left empty, no input, where `jsonOptional`);
+ * when they are undefined;
  * `start` starts the run with the input and the dialog's key, and says
  * what it started.
  */
@@ -229,7 +209,6 @@ const StartDialog = ({
   description,
   fields,
   people = null,
-  jsonOptional,
   start,
   onFiles,
 }: {
@@ -237,7 +216,6 @@ const StartDialog = ({
   fields: StartField[] | undefined;
   /** Whom a field that takes a person may name, as core gave them. */
   people?: PeopleAndTeams | null;
-  jsonOptional: boolean;
   start: (input: unknown, key: string) => Promise<Started>;
   /** Shows the workflow's Files and apps, where a refused binding is approved. */
   onFiles?: (() => void) | undefined;
@@ -246,7 +224,7 @@ const StartDialog = ({
   const ids = useId();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<StartValues>({});
-  const [json, setJson] = useState(jsonOptional ? "" : "{}");
+  const [json, setJson] = useState("{}");
   const [problem, setProblem] = useState<{
     field: string;
     problem: StartFieldProblem;
@@ -267,9 +245,6 @@ const StartDialog = ({
         return { ok: false };
       }
       return { ok: true, input: taken.input };
-    }
-    if (jsonOptional && json.trim() === "") {
-      return { ok: true, input: undefined };
     }
     try {
       const parsed: unknown = JSON.parse(json);
@@ -334,11 +309,7 @@ const StartDialog = ({
           {fields === undefined ? (
             <div className="flex flex-col gap-2">
               <Label htmlFor={`${ids}-json`}>
-                {jsonOptional ? (
-                  <Trans>Input, as JSON, if it takes any</Trans>
-                ) : (
-                  <Trans>Input, as JSON</Trans>
-                )}
+                <Trans>Input, as JSON</Trans>
               </Label>
               <Textarea
                 id={`${ids}-json`}
@@ -458,7 +429,6 @@ export const StartIndependentRun = ({
       }
       fields={startFieldsOf(form?.input)}
       people={form?.people ?? null}
-      jsonOptional={false}
       onFiles={onFiles}
       start={async (input, key) => {
         const started = await core.withSession(
@@ -474,32 +444,6 @@ export const StartIndependentRun = ({
         return started.runId === null
           ? { kind: "unrunnable", version }
           : { kind: "listed" };
-      }}
-    />
-  );
-};
-
-/** Start for workflow `workflow` of App `app`, at the App's current version. */
-export const StartAppRun = ({
-  app,
-  workflow,
-}: {
-  app: string;
-  workflow: string;
-}) => {
-  const core = useCore();
-  return (
-    <StartDialog
-      description={
-        <Trans>Starts it as you, on the App&apos;s current version.</Trans>
-      }
-      fields={undefined}
-      jsonOptional
-      start={async (input) => {
-        const run = await core.withSession(
-          async (session) => await session.workflows.start(app, workflow, input)
-        );
-        return { kind: "run", app, workflow, run: run.id };
       }}
     />
   );

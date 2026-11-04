@@ -1,7 +1,6 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -72,29 +71,6 @@ const counterApp = (name = "counter"): Record<string, string> => ({
   [`screens/${name}.tsx`]: screen,
 });
 
-const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "tally",
-  { input: z.unknown(), params: {} },
-  async (step) => await step.do("count", { description: "Count" }, async () => 1)
-);
-`;
-
-const tallyTests = `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import tally from "./tally.ts";
-
-export default workflowTests(tally, [{ name: "counts", mocks: { count: 1 }, expect: { output: 1 } }]);
-`;
-
-/** The counter App's files: a screen and a workflow. */
-const counterFiles = {
-  ...counterApp(),
-  "workflows/tally.ts": tally,
-  "workflows/tally.workflow-tests.ts": tallyTests,
-};
-
 /** Runs `run` with `person`'s API over `/rpc`, closed after. */
 const withApi = async <T>(
   person: Person,
@@ -115,7 +91,7 @@ const withApi = async <T>(
 const newApp = async (
   person: Person,
   appName: string,
-  files: Record<string, string> = counterFiles
+  files: Record<string, string> = counterApp()
 ): Promise<string> =>
   await withApi(person, async (api) => {
     const { id } = await api.apps.create({
@@ -257,7 +233,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.keyboard.press("Escape");
 
   // Its settings, beside the chat in its workspace: what it is, its
-  // workflows and their runs, its connections and its members.
+  // connections and its members.
   await page.getByRole("link", { name: "Edit" }).click();
   await page
     .getByRole("navigation", { name: "Workspace views" })
@@ -265,11 +241,6 @@ test("a builder finds an App in the list, opens it and uses its page with live d
     .click();
   await expect(page.getByLabel("What it is for")).toHaveValue("Counts clicks");
   const sections = page.getByRole("navigation", { name: "Settings sections" });
-  await sections.getByRole("link", { name: "Workflows" }).click();
-  await expect(
-    page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
-  ).toHaveText("tally");
-  await expect(page.getByText("No runs yet.")).toBeVisible();
   // A builder sees the connections it uses; this one uses none.
   await sections.getByRole("link", { name: "Connections" }).click();
   await expect(
@@ -441,23 +412,6 @@ test("signing in goes back to the page asked for, and only to a page of this sit
     await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);
   }
-});
-
-test("a runs read that never comes leaves the App's workflows usable, and says so", async ({
-  pageOf,
-}) => {
-  const page = await pageOf(builder);
-  const gate = await callGate(page, '["workflows","runs"]');
-  gate.hold();
-  await page.goto(`/apps/${app}/settings?section=workflows`);
-
-  await expect(
-    page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
-  ).toHaveText("tally");
-  await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
-  ).toBeVisible({ timeout: 15_000 });
-  gate.release();
 });
 
 test("loading a page again after a new version shows that version, and the App's first page when the one open is gone", async ({
