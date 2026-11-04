@@ -11677,6 +11677,10 @@ msgstr "Busca en tus chats y abre uno."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Se busca arriba. Pasado ese tiempo, los eventos pasan al archivo."
 
+#: src/chat/thread.tsx
+msgid "Searched Grasp's reference for {text}"
+msgstr "Se buscó {text} en la referencia de Grasp"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Buscó en el conocimiento"
@@ -11692,6 +11696,10 @@ msgstr "Buscó en el registro de auditoría"
 #: src/chat/thread.tsx
 msgid "Searched the brain for {query}"
 msgstr "Se buscó {query} en el cerebro"
+
+#: src/chat/thread.tsx
+msgid "Searching Grasp's reference for {text}"
+msgstr "Buscando {text} en la referencia de Grasp"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"

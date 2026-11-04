@@ -127,6 +127,7 @@ export const releaseFiles = [
   compilerAssets.serverSdkModules,
   compilerAssets.packageBuilder,
   compilerAssets.esbuildWasm,
+  compilerAssets.reference,
 ].toSorted();
 
 /**

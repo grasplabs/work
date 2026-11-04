@@ -208,6 +208,32 @@ const draftFixable: ReadonlySet<string> = new Set([
   ...draftSealFailures,
 ]);
 
+/** One diagnostic of a refused build's details, as a refusal keeps it. */
+const detailDiagnosticSchema = z.object({
+  file: z.string().nullable(),
+  line: z.number().nullable(),
+  message: z.string(),
+});
+
+/**
+ * Why a draft didn't seal, as lines the model fixes it by: each of its
+ * build's diagnostics as `file:line: message`, or what its inspection
+ * threw (app-inspection.ts). Nothing for details of any other shape.
+ */
+const detailLines = (details: unknown): string[] => {
+  const diagnostics = z
+    .object({ diagnostics: z.array(detailDiagnosticSchema) })
+    .safeParse(details);
+  if (diagnostics.success) {
+    return diagnostics.data.diagnostics.map(
+      ({ file, line, message }) =>
+        `${file ?? "(the App)"}${line === null ? "" : `:${line}`}: ${message}`
+    );
+  }
+  const said = z.object({ message: z.string().min(1) }).safeParse(details);
+  return said.success ? [said.data.message] : [];
+};
+
 /**
  * A failure of a call of a draft of spec 8's layout that is the draft's to
  * fix, as the agent reads it: a function its path doesn't name, or code
@@ -221,10 +247,13 @@ const draftCallFailure = (error: unknown): DraftCall | undefined => {
   if (typeof code !== "string" || !draftFixable.has(code)) {
     return undefined;
   }
+  const message = error instanceof Error ? error.message : code;
+  const details: unknown =
+    error instanceof Error ? Reflect.get(error, "details") : undefined;
   return {
     ok: false,
     code,
-    message: error instanceof Error ? error.message : code,
+    message: [message, ...detailLines(details)].join("\n"),
     note: callNote,
   };
 };
@@ -1409,8 +1438,10 @@ const buildDeclaration = `/**
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
- * this. A visitor's call can't tell anyone. For the rest, \`check\`
- * type-checks against the SDK and names what doesn't fit.
+ * this. A visitor's call can't tell anyone. For the rest, read Grasp's
+ * reference (\`readFile\` without \`app\`): the SDK's sources, which
+ * \`check\` type-checks against (\`@grasp-os/sdk/src/app.ts\`), and a
+ * complete App (\`blueprints/board-page/\`).
  *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
@@ -1508,8 +1539,10 @@ build: {
    * connections, Knowledge or models (\`resource.unavailable\`); what it
    * wrote with \`console\`, in the next check's \`preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
-   * of its functions, code that doesn't seal, or a function's own failure
-   * as the preview answered it (a contract it broke, say); anything else
+   * of its functions, code that doesn't seal (\`message\` names why: each
+   * diagnostic as \`file:line: message\`, or what its registration threw),
+   * or a function's own failure as the preview answered it (a contract it
+   * broke, say); anything else
    * (no draft, a refusal of the call) is thrown. Only an App with
    * \`app.ts\` and \`schema.ts\` previews (\`app.preview_layout\`, thrown).
    */

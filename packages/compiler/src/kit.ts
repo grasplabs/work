@@ -86,7 +86,36 @@ export const compilerAssets = {
   packageBuilder: "package-builder.js",
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
+  /**
+   * The SDK's and the UI kit's sources as the type check reads them
+   * (`Kit.types`), by `referencePath`: what a chat's agent reads to write
+   * App code that checks (`referenceFiles`).
+   */
+  reference: "reference.json",
 } as const;
+
+/** The packages of the kit's types the agent's reference holds. */
+const referencePackages = [
+  "/node_modules/@grasp-os/sdk/src/",
+  "/node_modules/@grasp-os/ui/src/",
+];
+
+/**
+ * The kit's types of the SDK and the UI kit, by their path in the agent's
+ * reference: `@grasp-os/sdk/src/app.ts` for
+ * `/node_modules/@grasp-os/sdk/src/app.ts`. The very text App code is
+ * type-checked against, so the reference can't drift from the check.
+ */
+export const referenceOf = (
+  types: Readonly<Record<string, string>>
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(types)
+      .filter(([path]) =>
+        referencePackages.some((folder) => path.startsWith(folder))
+      )
+      .map(([path, text]) => [path.slice("/node_modules/".length), text])
+  );
 
 /**
  * The lock a build of the compiler into the assets directory `assets`

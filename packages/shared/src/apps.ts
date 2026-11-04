@@ -1082,7 +1082,7 @@ export const appErrors = defineErrorFamily({
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
   "app.checks_exhausted":
-    "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may. Stop, and tell the person what still fails.",
+    "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may: checking opens again at the person's next message. Fix what the last check named, reading how it is written in Grasp's reference (readFile without an App: @grasp-os/sdk/src/app.ts, and a working App in blueprints/board-page/), then tell the person what you changed and what still fails.",
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":

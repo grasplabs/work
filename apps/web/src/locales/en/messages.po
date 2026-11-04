@@ -11677,6 +11677,10 @@ msgstr "Search your chats, and open one."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Searched above. After this, events move to the archive."
 
+#: src/chat/thread.tsx
+msgid "Searched Grasp's reference for {text}"
+msgstr "Searched Grasp's reference for {text}"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Searched knowledge"
@@ -11692,6 +11696,10 @@ msgstr "Searched the audit trail"
 #: src/chat/thread.tsx
 msgid "Searched the brain for {query}"
 msgstr "Searched the brain for {query}"
+
+#: src/chat/thread.tsx
+msgid "Searching Grasp's reference for {text}"
+msgstr "Searching Grasp's reference for {text}"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
