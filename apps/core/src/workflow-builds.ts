@@ -584,7 +584,7 @@ const sealedExpressionSchema = z.strictObject({
  * (`SealedTask.state`): its leave step, else its own task step where its
  * code records it; none for a raise, whose step fails, a decision task,
  * whose steps record its decision, or a task whose own step is a wait (a
- * sleep, an event wait) and that has no leave step.
+ * sleep, an event wait, a child run's) and that has no leave step.
  */
 export const stateStepOf = (
   task: Pick<SealedTask, "kind" | "steps"> & {
@@ -597,9 +597,11 @@ export const stateStepOf = (
   if (task.steps.includes("leave")) {
     return "leave";
   }
+  // Its own step waits: for a time, an event, or its child run.
   const waits =
     task.kind === "wait" ||
     task.kind === "listen" ||
+    task.kind === "run" ||
     task.call?.name === "grasp.sleepUntil";
   return task.steps.includes("task") && !waits ? "task" : undefined;
 };

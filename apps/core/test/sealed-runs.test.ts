@@ -895,6 +895,7 @@ const ranAs = async (
     calling,
     maxSleepMs,
     keeps,
+    steps,
   }: {
     /** How its attempts are admitted, from the run; at once if not given. */
     admitAttempt?: (
@@ -912,23 +913,25 @@ const ranAs = async (
      * format to come seals it (`SealedTask.state`).
      */
     keeps?: Readonly<Record<string, Kept>>;
+    /** Tasks' sealed steps in place of the build's, by task. */
+    steps?: Readonly<Record<string, SealedTask["steps"]>>;
   } = {}
 ) => {
   const loaded = await sealedRunOf(runId);
   const run = {
     ...loaded,
-    ...(keeps === undefined
-      ? {}
-      : {
-          build: {
-            ...loaded.build,
-            tasks: loaded.build.tasks.map((task) =>
-              Object.hasOwn(keeps, task.id)
-                ? { ...task, state: keeps[task.id] }
-                : task
-            ),
-          },
-        }),
+    build: {
+      ...loaded.build,
+      tasks: loaded.build.tasks.map((task) => ({
+        ...task,
+        ...(keeps !== undefined && Object.hasOwn(keeps, task.id)
+          ? { state: keeps[task.id] }
+          : {}),
+        ...(steps !== undefined && Object.hasOwn(steps, task.id)
+          ? { steps: steps[task.id] ?? task.steps }
+          : {}),
+      })),
+    },
     ...(maxModelCalls === undefined ? {} : { maxModelCalls }),
     ...(calling === undefined ? {} : { calling: calling(loaded.calling) }),
     ...(maxSleepMs === undefined ? {} : { maxSleepMs }),
@@ -3376,6 +3379,10 @@ const finishKeeps: Record<string, Kept> = { finish: finishKept };
 const keepFinish = (state: string): string =>
   `return ${taskStep("finish", `{ output: { status: "done" }, state: ${state} }`)};`;
 
+/** `finish`'s leave step, recording `record`. */
+const leaveStep = (record: string): string =>
+  `return await step.do("finish", { key: "leave", description: "Its end" }, async () => (${record}));`;
+
 /** How many times run `runId`'s steps' state was written, and withheld. */
 const stateEvents = async (runId: string) => {
   const events = await allEvents();
@@ -3499,13 +3506,45 @@ describe("a sealed run's state between runs on the run host", () => {
     const sealedKeeps = readSealedTasks(keeping("finish")).tasks.find(
       ({ id }) => id === "finish"
     )?.state;
-    // A raise's step always fails: a build keeping state there is refused.
-    let onRaise = "sealed";
-    try {
-      readSealedTasks(keeping("stop"));
-    } catch {
-      onRaise = "refused";
+    // State only where a step records it: never a raise's, which always
+    // fails, nor a task whose own step waits and that has no leave step.
+    const tableOf = (
+      task: (typeof generated.tasks)[number],
+      kept: boolean
+    ): "sealed" | "refused" => {
+      try {
+        readSealedTasks(
+          sealedTasksText({
+            ...generated,
+            tasks: [task].map((each) =>
+              kept ? { ...each, state: finishKept } : each
+            ),
+          })
+        );
+        return "sealed";
+      } catch {
+        return "refused";
+      }
+    };
+    const [finishTask, stopTask] = generated.tasks;
+    if (finishTask === undefined || stopTask === undefined) {
+      throw new Error("The definition generated no tasks");
     }
+    const waiting = {
+      ...finishTask,
+      kind: "wait",
+      milliseconds: 1000,
+    } as const;
+    const table = {
+      raise: tableOf(stopTask, false),
+      raiseKeeping: tableOf(stopTask, true),
+      wait: tableOf(waiting, false),
+      waitKeeping: tableOf(waiting, true),
+      waitLeavingKeeping: tableOf(
+        { ...waiting, steps: ["task", "leave"] },
+        true
+      ),
+    };
     const keeps = { finish: sealedKeeps ?? {} };
     const runId = await waitingRun(sealed);
     const wrong = await ranAs(
@@ -3520,16 +3559,58 @@ describe("a sealed run's state between runs on the run host", () => {
     );
     expect({
       sealedKeeps,
-      onRaise,
+      table,
       wrong: wrong.tampered,
       right: right.tampered,
       state: await workflowStateOf(env, sealed.workflow.id),
     }).toStrictEqual({
       sealedKeeps: finishKept,
-      onRaise: "refused",
+      table: {
+        raise: "sealed",
+        raiseKeeping: "refused",
+        wait: "sealed",
+        waitKeeping: "refused",
+        waitLeavingKeeping: "sealed",
+      },
       wrong: ["workflow.invalid"],
       right: [],
       state: { count: 1, seen: "Ada", kind: "visit" },
+    });
+  });
+
+  it("keeps state by a task's leave step where it seals one, and nothing its task step records", async () => {
+    const leaving = { finish: ["task", "leave"] as const };
+    const taskStepOf = `const done = ${taskStep("finish", '{ output: { status: "done" } }')};`;
+    const runId = await waitingRun(sealed);
+    const left = await ranAs(
+      runId,
+      moduleOf(
+        `${taskStepOf} ${leaveStep('{ output: done.output, state: { count: 1, seen: input.who, kind: "visit" } }')}`
+      ),
+      { keeps: finishKeeps, steps: { finish: [...leaving.finish] } }
+    );
+    // The task step isn't the state step: what it records is its own,
+    // and nothing is written.
+    const earlyRun = await waitingRun(sealed);
+    const early = await ranAs(
+      earlyRun,
+      moduleOf(
+        `return ${taskStep("finish", '{ output: null, state: { count: 1, seen: input.who, kind: "visit" } }')};`
+      ),
+      { keeps: finishKeeps, steps: { finish: [...leaving.finish] } }
+    );
+    expect({
+      left: left.tampered,
+      early: early.tampered,
+      earlyEvents: await stateEvents(earlyRun),
+      state: await workflowStateOf(env, sealed.workflow.id),
+      events: await stateEvents(runId),
+    }).toStrictEqual({
+      left: [],
+      early: [],
+      earlyEvents: { written: 0, withheld: 0 },
+      state: { count: 1, seen: "Ada", kind: "visit" },
+      events: { written: 1, withheld: 0 },
     });
   });
 

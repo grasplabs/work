@@ -1463,7 +1463,9 @@ describe("test runs of a workflow's draft", () => {
 });
 
 describe("a draft's test run and what its workflow keeps between runs", () => {
-  it("reads the state its start froze, whatever is written since, and writes none back", async () => {
+  // What its isolate reads of it, and a step keeping state, come with
+  // the format's generator (`$state`); the run host's tests hold both.
+  it("freezes the state with its row as it starts, whatever is written since, and runs with it", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
       tasks: [{ finish: { set: { status: "done" } } }],
