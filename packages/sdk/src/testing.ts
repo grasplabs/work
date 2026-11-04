@@ -407,7 +407,8 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   const engine: WorkflowEngine = {
     runId: runIdSchema.parse(options.runId ?? "run-1"),
     params: options.params ?? {},
-    state: options.state ?? {},
+    // A copy: the run freezes what it reads, never the test's own object.
+    state: structuredClone(options.state ?? {}),
     env: heldEnv(options.env ?? {}, checkCall),
     do: async (name, { retries, sideEffect = false, input }, fn) => {
       if (results.has(name)) {

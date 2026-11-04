@@ -244,16 +244,21 @@ const taskBase = {
   /**
    * What it keeps in its workflow's state once it succeeded, by key: each
    * value's template, as a call's (`templateSchema`: its expressions'
-   * slots, its literals exact), which never names a sensitive parameter:
-   * state is read by the workflow's every later run. Its state step (its leave step, else its task
-   * step) records `{ output, state }` (sealed-run.ts, `stateStepOf`).
+   * slots, its literals exact), which never names a sensitive parameter,
+   * as state is read by the workflow's every later run; and the
+   * descriptor of the value it takes, which the host holds it to. Only a
+   * task with a state step keeps any (`stateStepOf`), which records
+   * `{ output, state }` (sealed-run.ts).
    */
   state: z
-    .record(workflowStateKeySchema, templateSchema)
+    .record(
+      workflowStateKeySchema,
+      z.strictObject({ template: templateSchema, value: descriptorSchema })
+    )
     .refine(
       (state) =>
         Object.keys(state).length <= maxStateKeys &&
-        !Object.values(state).some(namesParam)
+        !Object.values(state).some(({ template }) => namesParam(template))
     )
     .optional(),
 };
@@ -574,8 +579,44 @@ const sealedExpressionSchema = z.strictObject({
     .optional(),
 });
 
+/**
+ * The step of `task` that records what it keeps in its workflow's state
+ * (`SealedTask.state`): its leave step, else its own task step where its
+ * code records it; none for a raise, whose step fails, a decision task,
+ * whose steps record its decision, or a task whose own step is a wait (a
+ * sleep, an event wait) and that has no leave step.
+ */
+export const stateStepOf = (
+  task: Pick<SealedTask, "kind" | "steps"> & {
+    call?: { name: string };
+  }
+): "leave" | "task" | undefined => {
+  if (task.kind === "raise" || task.call?.name === "grasp.decision") {
+    return undefined;
+  }
+  if (task.steps.includes("leave")) {
+    return "leave";
+  }
+  const waits =
+    task.kind === "wait" ||
+    task.kind === "listen" ||
+    task.call?.name === "grasp.sleepUntil";
+  return task.steps.includes("task") && !waits ? "task" : undefined;
+};
+
 const tasksFileSchema = z.strictObject({
-  tasks: z.array(sealedTaskSchema).max(10_000),
+  tasks: z
+    .array(sealedTaskSchema)
+    .max(10_000)
+    // State only where a step records it.
+    .refine((tasks) =>
+      tasks.every(
+        ({ state, ...task }) =>
+          state === undefined ||
+          Object.keys(state).length === 0 ||
+          stateStepOf(task) !== undefined
+      )
+    ),
   expressions: z.array(sealedExpressionSchema).max(10_000),
   /** Whether the workflow has its own input.from and output.as steps. */
   workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
@@ -585,7 +626,12 @@ const tasksFileSchema = z.strictObject({
   limits: workflowLimitsSchema,
 });
 
+/** A sealed task table's text, as the host takes it; throws if it isn't one. */
+export const readSealedTasks = (text: string) =>
+  tasksFileSchema.parse(JSON.parse(text));
+
 export type SealedTask = z.infer<typeof sealedTaskSchema>;
+
 export type WorkflowLimits = z.infer<typeof workflowLimitsSchema>;
 export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
@@ -607,8 +653,7 @@ export const compiledTasksOf = (
   if (bytes === undefined) {
     throw new Error("A compiled build holds no tasks.json");
   }
-  return tasksFileSchema.parse(JSON.parse(new TextDecoder().decode(bytes)))
-    .tasks;
+  return readSealedTasks(new TextDecoder().decode(bytes)).tasks;
 };
 
 /**
@@ -646,6 +691,112 @@ export interface CompiledBuild {
   /** Each artifact's bytes, by its SHA-256; none for a build that isn't executable. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
 }
+
+/** What the generator made of a definition it lowers. */
+type Generated = Extract<ReturnType<typeof generateWorkflow>, { ok: true }>;
+
+/**
+ * One task as the generator made it, and what it keeps in its workflow's
+ * state, which the format's generator seals with it (`SealedTask.state`).
+ */
+type GeneratedTask = Generated["tasks"][number] & {
+  readonly state?: unknown;
+};
+
+/**
+ * The sealed task table (`tasks.json`) of `generated`, as the host reads
+ * it back (`readSealedTasks`): each task's fields as plain JSON.
+ */
+export const sealedTasksText = (
+  generated: Pick<
+    Generated,
+    "tasks" | "expressions" | "workflow" | "params" | "limits"
+  >
+): string =>
+  canonicalJson({
+    tasks: generated.tasks.map(
+      ({
+        id,
+        kind,
+        pointer,
+        milliseconds,
+        duration,
+        call,
+        listen,
+        run,
+        error,
+        catch: handler,
+        inputFrom,
+        outputAs,
+        exportAs,
+        timeoutMs,
+        steps,
+        schemas,
+        scope,
+        branches,
+        loop,
+        fork,
+        state,
+      }: GeneratedTask) => ({
+        id,
+        kind,
+        pointer,
+        steps,
+        scope: [...scope],
+        branches: [...branches],
+        ...(loop === undefined
+          ? {}
+          : { loop: z.json().parse(structuredClone(loop)) }),
+        ...(fork === undefined ? {} : { fork: { ...fork } }),
+        // The SDK's descriptors and the templates, as the plain JSON
+        // they are.
+        schemas: z.json().parse(structuredClone(schemas)),
+        ...(milliseconds === undefined ? {} : { milliseconds }),
+        ...(duration === undefined
+          ? {}
+          : { duration: z.json().parse(structuredClone(duration)) }),
+        ...(call === undefined
+          ? {}
+          : { call: z.json().parse(structuredClone(call)) }),
+        ...(listen === undefined
+          ? {}
+          : { listen: z.json().parse(structuredClone(listen)) }),
+        ...(run === undefined
+          ? {}
+          : { run: z.json().parse(structuredClone(run)) }),
+        ...(error === undefined
+          ? {}
+          : { error: z.json().parse(structuredClone(error)) }),
+        ...(handler === undefined
+          ? {}
+          : { catch: z.json().parse(structuredClone(handler)) }),
+        ...(inputFrom === undefined
+          ? {}
+          : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
+        ...(outputAs === undefined
+          ? {}
+          : { outputAs: z.json().parse(structuredClone(outputAs)) }),
+        ...(exportAs === undefined
+          ? {}
+          : { exportAs: z.json().parse(structuredClone(exportAs)) }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...(state === undefined
+          ? {}
+          : { state: z.json().parse(structuredClone(state)) }),
+      })
+    ),
+    expressions: generated.expressions.map((expression) =>
+      z.json().parse(
+        structuredClone({
+          ...expression,
+          loopVariables: [...expression.loopVariables],
+        })
+      )
+    ),
+    workflow: { ...generated.workflow },
+    params: [...generated.params],
+    limits: { ...generated.limits },
+  });
 
 /**
  * Compiles `checked` (published as `definition`, its exact text) into a
@@ -731,89 +882,7 @@ export const compileWorkflow = async (
   const texts = new Map<string, string>([
     [definitionArtifact, definition],
     [generatedPath, generated.source],
-    [
-      tasksArtifact,
-      canonicalJson({
-        tasks: generated.tasks.map(
-          ({
-            id,
-            kind,
-            pointer,
-            milliseconds,
-            duration,
-            call,
-            listen,
-            run,
-            error,
-            catch: handler,
-            inputFrom,
-            outputAs,
-            exportAs,
-            timeoutMs,
-            steps,
-            schemas,
-            scope,
-            branches,
-            loop,
-            fork,
-          }) => ({
-            id,
-            kind,
-            pointer,
-            steps,
-            scope: [...scope],
-            branches: [...branches],
-            ...(loop === undefined
-              ? {}
-              : { loop: z.json().parse(structuredClone(loop)) }),
-            ...(fork === undefined ? {} : { fork: { ...fork } }),
-            // The SDK's descriptors and the templates, as the plain JSON
-            // they are.
-            schemas: z.json().parse(structuredClone(schemas)),
-            ...(milliseconds === undefined ? {} : { milliseconds }),
-            ...(duration === undefined
-              ? {}
-              : { duration: z.json().parse(structuredClone(duration)) }),
-            ...(call === undefined
-              ? {}
-              : { call: z.json().parse(structuredClone(call)) }),
-            ...(listen === undefined
-              ? {}
-              : { listen: z.json().parse(structuredClone(listen)) }),
-            ...(run === undefined
-              ? {}
-              : { run: z.json().parse(structuredClone(run)) }),
-            ...(error === undefined
-              ? {}
-              : { error: z.json().parse(structuredClone(error)) }),
-            ...(handler === undefined
-              ? {}
-              : { catch: z.json().parse(structuredClone(handler)) }),
-            ...(inputFrom === undefined
-              ? {}
-              : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
-            ...(outputAs === undefined
-              ? {}
-              : { outputAs: z.json().parse(structuredClone(outputAs)) }),
-            ...(exportAs === undefined
-              ? {}
-              : { exportAs: z.json().parse(structuredClone(exportAs)) }),
-            ...(timeoutMs === undefined ? {} : { timeoutMs }),
-          })
-        ),
-        expressions: generated.expressions.map((expression) =>
-          z.json().parse(
-            structuredClone({
-              ...expression,
-              loopVariables: [...expression.loopVariables],
-            })
-          )
-        ),
-        workflow: { ...generated.workflow },
-        params: [...generated.params],
-        limits: { ...generated.limits },
-      }),
-    ],
+    [tasksArtifact, sealedTasksText(generated)],
     [
       sourceMapArtifact,
       canonicalJson({

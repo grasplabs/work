@@ -2,6 +2,7 @@ import {
   generatedImport,
   generatorVersion,
 } from "@grasp-os/open-workflow/generate";
+import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -31,7 +32,7 @@ import { z } from "zod";
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { memberRole } from "../auth/identity.ts";
 import type { DecisionOutcome } from "../decisions/decisions.ts";
-import { generatedModule } from "../workflow-builds.ts";
+import { generatedModule, stateStepOf } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
   SealedCall,
@@ -293,9 +294,10 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (`stateStepOf`: its leave step, else its task step), whose record
 //   must be exactly `{ output, state }` with exactly those keys, each
 //   value held to its template as a call's (`matched`: literals exact, an
-//   expression's value any JSON, never a sensitive parameter), within a
-//   step's record and no marker of core's (`#stateChecked`); anything else
-//   is tampering. It is written only as the host records the step
+//   expression's value any JSON, never a sensitive parameter) and to the
+//   descriptor of the value its key takes, by the SDK's own validator,
+//   no marker of core's in it (`#stateChecked`); anything else is
+//   tampering: the host holds them to the build, never to the isolate. It is written only as the host records the step
 //   (host.ts, `RunKind.stepRecording`): after the host's last check of
 //   the attempt, its lease held, so never by an attempt that failed, was
 //   refused, caught or held, nor by a failed retry round. It writes
@@ -1055,28 +1057,10 @@ const recordable = (value: unknown): boolean => {
   );
 };
 
-/**
- * The step of `task` that records what it keeps in its workflow's state
- * (`SealedTask.state`): its leave step, else its own task step, where its
- * code records it; none for a decision task, a sleep's own step or an
- * event wait's, which its code doesn't record.
- */
-const stateStepOf = (task: SealedTask): string | undefined => {
-  if (task.steps.includes("leave")) {
-    return "leave";
-  }
-  return task.steps.includes("task") &&
-    !isDecisionTask(task) &&
-    !sleepsOf(task) &&
-    !isEventWait(task)
-    ? "task"
-    : undefined;
-};
-
 /** A task that keeps something in its workflow's state, and what. */
 interface Keeps {
   readonly task: SealedTask;
-  readonly kept: Readonly<Record<string, SealedTemplate>>;
+  readonly kept: NonNullable<SealedTask["state"]>;
 }
 
 /**
@@ -1733,8 +1717,8 @@ class SealedRun implements SealedRunKind {
    * (`keepsOf`):
    * `{ output, state }`, `state` with exactly the sealed keys, each value
    * held to its template as a call's arguments are (`matched`, no
-   * sensitive parameter anywhere), and the whole within a step's record,
-   * no marker of core's in it. Anything else is tampering. More than a
+   * sensitive parameter anywhere) and to its sealed descriptor, by the
+   * SDK's validator, no marker of core's in any. Anything else is tampering. More than a
    * workflow's state takes in all fails the step. What it keeps
    * is written once its step is recorded (`stepRecording`).
    */
@@ -1748,7 +1732,6 @@ class SealedRun implements SealedRunKind {
     const given = record.success ? Object.entries(record.data.state) : [];
     if (
       !record.success ||
-      !recordable(value) ||
       given.length !== sealed.length ||
       given.some(
         ([key, each]) => !Object.hasOwn(kept, key) || isCoreMarker(each)
@@ -1762,13 +1745,18 @@ class SealedRun implements SealedRunKind {
     }
     try {
       for (const [key, each] of given) {
-        matched(
-          kept[key] ?? { literal: null },
-          each,
-          `state.${key}`,
-          undefined,
-          []
-        );
+        const shape = kept[key];
+        if (shape === undefined) {
+          throw tampering(`state.${key} isn't sealed.`);
+        }
+        matched(shape.template, each, `state.${key}`, undefined, []);
+        // Of the shape its key takes, by the SDK's own validator.
+        const checked = schemaFromDescriptor(canonicalJson(shape.value))[
+          "~standard"
+        ].validate(each);
+        if ("then" in checked || checked.issues !== undefined) {
+          throw tampering(`state.${key} isn't of the shape the build sealed.`);
+        }
       }
     } catch (error) {
       return await this.#refused(

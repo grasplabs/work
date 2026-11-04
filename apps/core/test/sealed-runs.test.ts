@@ -1,5 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { kitModuleName } from "@grasp-os/compiler";
+import { generateWorkflow } from "@grasp-os/open-workflow/generate";
+import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -39,8 +41,12 @@ import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { generatedModule } from "../src/workflow-builds.ts";
-import type { SealedTemplate } from "../src/workflow-builds.ts";
+import {
+  generatedModule,
+  readSealedTasks,
+  sealedTasksText,
+} from "../src/workflow-builds.ts";
+import type { SealedTask } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
@@ -905,7 +911,7 @@ const ranAs = async (
      * What tasks keep in the workflow's state, by task, as a build of the
      * format to come seals it (`SealedTask.state`).
      */
-    keeps?: Readonly<Record<string, Record<string, SealedTemplate>>>;
+    keeps?: Readonly<Record<string, Kept>>;
   } = {}
 ) => {
   const loaded = await sealedRunOf(runId);
@@ -3344,17 +3350,27 @@ return await step.do("mark", { key: "task@0/0", description: "Its task" }, async
   });
 });
 
+/** What a task keeps of one key: its template and its value's shape. */
+type Kept = NonNullable<SealedTask["state"]>;
+
+/** The descriptor of `schema`, as a build seals it. */
+const sealedShape = (schema: { descriptor: unknown }) =>
+  z.json().parse(schema.descriptor);
+
 /**
  * What `finish` keeps in the tests below, as a build sealing state does:
- * two expressions' values and a literal.
+ * two expressions' values and a literal, each of its own shape.
  */
-const finishKeeps = {
-  finish: {
-    count: { slot: 0 },
-    seen: { slot: 1 },
-    kind: { literal: "visit" },
+const finishKept: Kept = {
+  count: { template: { slot: 0 }, value: sealedShape(v.number()) },
+  seen: {
+    template: { slot: 1 },
+    value: sealedShape(v.union(v.string(), v.object({ who: v.string() }))),
   },
-} satisfies Record<string, Record<string, SealedTemplate>>;
+  kind: { template: { literal: "visit" }, value: sealedShape(v.string()) },
+};
+
+const finishKeeps: Record<string, Kept> = { finish: finishKept };
 
 /** `finish`'s own step, keeping `state` beside its output. */
 const keepFinish = (state: string): string =>
@@ -3412,7 +3428,7 @@ describe("a sealed run's state between runs on the run host", () => {
     );
     expect({
       first,
-      again: again.tampered,
+      again,
       state: await workflowStateOf(env, sealed.workflow.id),
       events: await stateEvents(runId),
     }).toStrictEqual({
@@ -3423,16 +3439,104 @@ describe("a sealed run's state between runs on the run host", () => {
         },
         tampered: [],
       },
-      again: [],
+      // Its step succeeded all the same: the first write stands.
+      again: {
+        ended: {
+          output: { status: "done" },
+          state: { count: 2, seen: "Bob", kind: "visit" },
+        },
+        tampered: [],
+      },
       state: { count: 1, seen: "Ada", kind: "visit" },
       events: { written: 1, withheld: 0 },
+    });
+  });
+
+  it("seals what a generated task keeps in the build's task table, and the host holds a run to it", async () => {
+    const checked = await validateWorkflow(
+      JSON.stringify({
+        document: {
+          dsl: "1.0.3",
+          namespace: workflowNamespace,
+          name: "kept",
+          version: "1.0.0",
+          title: "kept",
+          metadata: {
+            grasp: {
+              profile: "grasp-open-workflow/1",
+              params: {},
+              bindings: {},
+            },
+          },
+        },
+        input: { schema: objectSchema({ who: { type: "string" } }) },
+        output: { schema: objectSchema({ status: { type: "string" } }) },
+        do: [
+          { finish: { set: { status: "done" } } },
+          {
+            stop: {
+              raise: { error: { type: "urn:grasp:error:stop", status: 422 } },
+            },
+          },
+        ],
+      }),
+      { catalog: () => {} }
+    );
+    if (!checked.ok) {
+      throw new Error("The definition doesn't validate");
+    }
+    const generated = generateWorkflow(checked.workflow);
+    if (!generated.ok) {
+      throw new Error("The definition doesn't generate");
+    }
+    const keeping = (id: string) =>
+      sealedTasksText({
+        ...generated,
+        tasks: generated.tasks.map((task) =>
+          task.id === id ? { ...task, state: finishKept } : task
+        ),
+      });
+    const sealedKeeps = readSealedTasks(keeping("finish")).tasks.find(
+      ({ id }) => id === "finish"
+    )?.state;
+    // A raise's step always fails: a build keeping state there is refused.
+    let onRaise = "sealed";
+    try {
+      readSealedTasks(keeping("stop"));
+    } catch {
+      onRaise = "refused";
+    }
+    const keeps = { finish: sealedKeeps ?? {} };
+    const runId = await waitingRun(sealed);
+    const wrong = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(keepFinish('{ count: "1", seen: input.who, kind: "visit" }')),
+      { keeps }
+    );
+    const right = await ranAs(
+      runId,
+      moduleOf(keepFinish('{ count: 1, seen: input.who, kind: "visit" }')),
+      { keeps }
+    );
+    expect({
+      sealedKeeps,
+      onRaise,
+      wrong: wrong.tampered,
+      right: right.tampered,
+      state: await workflowStateOf(env, sealed.workflow.id),
+    }).toStrictEqual({
+      sealedKeeps: finishKept,
+      onRaise: "refused",
+      wrong: ["workflow.invalid"],
+      right: [],
+      state: { count: 1, seen: "Ada", kind: "visit" },
     });
   });
 
   it("refuses state the build didn't seal, and keeps none of it", async () => {
     const refused = async (
       record: string,
-      keeps: Record<string, Record<string, SealedTemplate>> = finishKeeps
+      keeps: Record<string, Kept> = finishKeeps
     ) => {
       const { ended, tampered } = await ranAs(
         await waitingRun(sealed),
@@ -3456,12 +3560,25 @@ describe("a sealed run's state between runs on the run host", () => {
         '{ output: null, state: { count: 1, seen: "Ada", kind: "other" } }'
       ),
       noState: await refused("{ output: null }"),
+      wrongShape: await refused(
+        '{ output: null, state: { count: "one", seen: "Ada", kind: "visit" } }'
+      ),
+      wrongNested: await refused(
+        '{ output: null, state: { count: 1, seen: { who: 7 }, kind: "visit" } }'
+      ),
       extraField: await refused(
         '{ output: null, state: { count: 1, seen: "Ada", kind: "visit" }, also: 1 }'
       ),
       sensitive: await refused(
         '{ output: null, state: { secret: sensitiveParam("token") } }',
-        { finish: { secret: { param: "token" } } }
+        {
+          finish: {
+            secret: {
+              template: { param: "token" },
+              value: sealedShape(v.string()),
+            },
+          },
+        }
       ),
       state: await workflowStateOf(env, sealed.workflow.id),
     }).toStrictEqual({
@@ -3469,6 +3586,8 @@ describe("a sealed run's state between runs on the run host", () => {
       missingKey: asTampering,
       literalChanged: asTampering,
       noState: asTampering,
+      wrongShape: asTampering,
+      wrongNested: asTampering,
       extraField: asTampering,
       sensitive: asTampering,
       state: {},
@@ -3485,7 +3604,7 @@ describe("a sealed run's state between runs on the run host", () => {
       moduleOf(`
 let rounds = 0;
 return ${taskStep("fetch", '(() => { rounds += 1; const record = { output: null, state: { count: rounds, seen: input.who, kind: "visit" } }; if (rounds < 3) throw new Error("not yet"); return record; })()')};`),
-      { keeps: { fetch: finishKeeps.finish }, engine: retryingEngine(tries) }
+      { keeps: { fetch: finishKept }, engine: retryingEngine(tries) }
     );
     // A step that fails for good, its code going on past it: no write.
     const failed = await waitingRun(sealed);
@@ -3534,7 +3653,13 @@ return null;`),
           'await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); return { output: null, state: { big: "x".repeat(70000) } };'
         )
       ),
-      { keeps: { send: { big: { slot: 0 } } } }
+      {
+        keeps: {
+          send: {
+            big: { template: { slot: 0 }, value: sealedShape(v.string()) },
+          },
+        },
+      }
     );
     expect({
       big: { ended: big.ended, tampered: big.tampered },
