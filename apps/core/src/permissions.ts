@@ -996,6 +996,13 @@ export const requestPermission = async (
   // (`noBindingClash`), in the insert itself: the unique indexes each
   // cover one side only.
   const { subjectType, subjectId } = subjectColumns(subject);
+  // A trigger's only while it is live, in the insert too: one deleted
+  // since it was read (`requireTriggerPins`) revoked its permissions, and
+  // takes no request after.
+  const live =
+    subject.type === "trigger"
+      ? sql` AND EXISTS (SELECT 1 FROM ${triggerResources} WHERE ${triggerResources.id} = ${subjectId} AND ${triggerResources.deletedAt} IS NULL)`
+      : sql``;
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
@@ -1003,7 +1010,7 @@ export const requestPermission = async (
       insertWhere(
         db,
         row,
-        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')`
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}`
       ),
       outboxedIfChanged(
         db,
@@ -1017,6 +1024,8 @@ export const requestPermission = async (
     throw error;
   }
   if ((await findRow(env, row.id)) === undefined) {
+    // A trigger deleted meanwhile is refused as one gone is.
+    await requireTriggerPins(env, subject, object, actions);
     throw permissionErrors.create("permission.conflict", { binding });
   }
   return permission;

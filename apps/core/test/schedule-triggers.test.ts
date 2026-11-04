@@ -2,14 +2,17 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
 import { maxFailedStarts, workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { listNotifications } from "../src/notifications.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
   listPermissions,
+  requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
 import {
@@ -769,6 +772,60 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       whileWaiting: { goesOn: true, failedStarts: 0 },
       granted: { movedOn: true, failedStarts: 0 },
       runs: [keyOf(waiting.id, 1, occurrence)],
+    });
+  });
+
+  it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const granted = await scheduleTrigger(admin, workflow.id);
+    const racing = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // Refused, so its builder asks again.
+    await revokePermission(env, admin, await askedStart(admin, racing.id));
+    await deleteTriggerResource(env, admin, granted.id);
+    const statusesOf = async (trigger: string) => {
+      const held = await listPermissions(env, admin, {
+        type: "trigger",
+        triggerId: trigger,
+      });
+      return held.map(({ status, revokedBy }) => ({ status, revokedBy }));
+    };
+    // Deleted between what the request read and its write.
+    const askedAgain = await outcome(
+      requestPermission(
+        env,
+        admin,
+        {
+          subject: { type: "trigger", triggerId: racing.id },
+          object: { type: "workflow", workflowId: workflow.id },
+          actions: ["start"],
+          binding: triggerStartBinding,
+        },
+        {
+          app: () => {
+            throw new Error("No App here");
+          },
+          resource: async (ref, needed) => {
+            await requireResourceRole(env, admin, ref, needed);
+          },
+        },
+        async () => {
+          await deleteTriggerResource(env, admin, racing.id);
+        }
+      )
+    );
+
+    expect({
+      granted: await statusesOf(granted.id),
+      askedAgain,
+      racing: await statusesOf(racing.id),
+    }).toStrictEqual({
+      // The start it asked for as it was created, granted, then revoked.
+      granted: [{ status: "revoked", revokedBy: admin.userId }],
+      askedAgain: "permission.invalid",
+      racing: [{ status: "revoked", revokedBy: admin.userId }],
     });
   });
 
