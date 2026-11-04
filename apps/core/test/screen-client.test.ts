@@ -527,12 +527,13 @@ describe("the session client", { timeout: 120_000 }, () => {
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
     const keyed = { idempotencyKey: "made-under-v1" };
-    // It saves at once, then takes a while before it answers.
+    // It saves at once, then answers only once a read is refused because
+    // its release is revoked, below.
     const running = failureOf(
-      client.action(api.stamp, { title: "Ran", thenMs: 2500 }, keyed)
+      client.action(api.stamp, { title: "Ran", untilRevoked: true }, keyed)
     );
     await expect
-      .poll(async () => await titles(client, api))
+      .poll(async () => await titles(client, api), { timeout: 20_000 })
       .toStrictEqual(["Ran"]);
     // Version 2 published, and version 1 revoked, while it runs.
     const { version } = await opened.builder.api.apps.files.commit(
@@ -559,6 +560,17 @@ describe("the session client", { timeout: 120_000 }, () => {
         refusal: "screen.revoked",
       },
     });
+    // It answered, after the revoke: its receipt holds the answer withheld.
+    const [row] = await drizzle(env.DB)
+      .select({ name: actionInvocations.name })
+      .from(actionInvocations)
+      .where(eq(actionInvocations.appId, opened.app));
+    await expect(
+      runInDurableObject(
+        actionInvocation(env, row?.name ?? ""),
+        (_instance, state) => state.storage.kv.get("invocation")
+      )
+    ).resolves.toMatchObject({ state: "settled", result: { ok: true } });
   });
 
   it("answers an action whose receipt is larger than a screen takes as uncertain, with its key", async () => {
