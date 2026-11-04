@@ -368,7 +368,7 @@ const directories = new WeakMap<GraspClient, PeopleDirectory>();
 
 /**
  * The organization's people, read-only, for a member, in an App that
- * declares it (`app({ people: true })`): `find` by ID, `search` by name or
+ * declares it (`app({ permissions: { people: true } })`): `find` by ID, `search` by name or
  * email, and `team` for a team's members, at most 100 a read, each person
  * with only their name, email and teams. A visitor is refused every read
  * (`visitor.not_granted`). Call it from an event handler or an effect.

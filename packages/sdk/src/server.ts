@@ -351,7 +351,7 @@ export interface CallerCtx {
   readonly caller: Caller;
   /**
    * The organization's members, read-only, for an App that declares it
-   * (`app({ people: true })`; `permission.denied` otherwise): by ID, by
+   * (`app({ permissions: { people: true } })`; `permission.denied` otherwise): by ID, by
    * name or email, or by team, at most 100 a read, each with only their
    * name, email and teams. A visitor's call is refused it
    * (`visitor.not_granted`).

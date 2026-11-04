@@ -111,7 +111,7 @@ export class App extends DurableObject<Env> {
     { readonly userId: string; readonly onRevoked: AccessWatcher }
   >();
 
-  /** Statistics points the App recorded, and reads, in the current minute. */
+  /** The platform's statistics the App read in the current minute. */
   #statisticsMinute = { minute: 0, read: 0 };
 
   /** The minute a read refused past its bounds was last audited. */
