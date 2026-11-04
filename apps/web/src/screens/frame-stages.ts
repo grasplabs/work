@@ -3,7 +3,7 @@ import {
   screenMountedSchema,
   screenReadySchema,
 } from "@grasp-os/shared/screens";
-import type { ScreenMounted } from "@grasp-os/shared/screens";
+import type { ScreenMounted, ScreenReady } from "@grasp-os/shared/screens";
 
 // The two stages a screen's frame starts in, as the page waits for them
 // (@grasp-os/shared/screens): `ready` from the frame's own document, then
@@ -63,18 +63,28 @@ const isFromFrame = (message: FrameMessage, frame: FrameWindow): boolean => {
   );
 };
 
+/**
+ * The frame saying this `load` of it listens, with whether its browser
+ * can run a screen at all (`supported`); undefined for any other message.
+ */
+export const readyOf = (
+  message: FrameMessage,
+  frame: FrameWindow,
+  load: string
+): ScreenReady | undefined => {
+  if (!isFromFrame(message, frame)) {
+    return undefined;
+  }
+  const ready = screenReadySchema.safeParse(message.data);
+  return ready.success && ready.data.load === load ? ready.data : undefined;
+};
+
 /** Whether `message` is the frame saying this `load` of it listens. */
 export const isReady = (
   message: FrameMessage,
   frame: FrameWindow,
   load: string
-): boolean => {
-  if (!isFromFrame(message, frame)) {
-    return false;
-  }
-  const ready = screenReadySchema.safeParse(message.data);
-  return ready.success && ready.data.load === load;
-};
+): boolean => readyOf(message, frame, load) !== undefined;
 
 /** Which start of the frame the page expects `mounted` for. */
 export type ExpectedStart = Omit<ScreenMounted, "type">;

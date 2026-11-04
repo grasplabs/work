@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -23,7 +24,9 @@ import { StartAppRun, StartIndependentRun } from "./start-run.tsx";
 // core named, with exactly the input its form makes and one key per try;
 // a field it can't send stops the start before core is asked; one core
 // gives no version for has no Start. An App's workflow starts with the
-// JSON typed, or none, and links to its run.
+// JSON typed, or none, and links to its run. A start form core can't give
+// says why there is no Start; a start refused for an unapproved binding
+// says what to do and leads to where it is approved.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -47,16 +50,33 @@ const form: WorkflowStartForm = {
   },
 };
 
-/** `page` shown with core faked: what core was asked to start. */
-const shown = async (page: () => ReactNode, given: WorkflowStartForm) => {
+/**
+ * `page` shown with core faked, its start form `given` or refused with it,
+ * and each start refused with `refusal` when there is one: what core was
+ * asked to start.
+ */
+const shown = async (
+  page: () => ReactNode,
+  given: WorkflowStartForm | Error,
+  refusal?: Error
+) => {
   const asked: Record<string, unknown>[] = [];
   const workflowResources = {
-    startForm: async () => await Promise.resolve(given),
+    startForm: async () => {
+      await Promise.resolve();
+      if (given instanceof Error) {
+        throw given;
+      }
+      return given;
+    },
     start: async (
       workflow: string,
       start: { version: number; input: unknown; key: string }
     ) => {
       await Promise.resolve();
+      if (refusal !== undefined) {
+        throw refusal;
+      }
       asked.push({
         workflow,
         version: start.version,
@@ -196,6 +216,54 @@ describe("starting a workflow by hand", () => {
     });
 
     expect(button("Start")).toBeUndefined();
+  });
+
+  it("says why it can't offer Start when core can't say how the workflow starts", async () => {
+    await shown(
+      () => <StartIndependentRun workflow="workflow-1" />,
+      workflowResourceErrors.create("workflow.resource_unavailable")
+    );
+
+    expect({
+      start: button("Start"),
+      said: said().includes(
+        "Can't offer Start: This workflow doesn't exist or was deleted."
+      ),
+    }).toStrictEqual({ start: undefined, said: true });
+  });
+
+  it("says what to do about a start refused for an unapproved binding, and leads to where it is approved", async () => {
+    const shownFiles: string[] = [];
+    await shown(
+      () => (
+        <StartIndependentRun
+          onFiles={() => {
+            shownFiles.push("files");
+          }}
+          workflow="workflow-1"
+        />
+      ),
+      form,
+      workflowResourceErrors.create("workflow.binding_unapproved")
+    );
+    await press("Start");
+    await type("who", "Ada");
+    await type("times", "2");
+    await press("Start the run");
+    const refused = said().includes(
+      "Ask for it to go live, or ask an admin to approve it on the workflow's Files and apps tab."
+    );
+    await press("Open Files and apps");
+
+    expect({
+      refused,
+      shownFiles,
+      dialog: button("Start the run"),
+    }).toStrictEqual({
+      refused: true,
+      shownFiles: ["files"],
+      dialog: undefined,
+    });
   });
 
   it("starts an App's workflow with no input when none is typed, then with the JSON typed, and links to its run", async () => {

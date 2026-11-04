@@ -65,8 +65,8 @@ import { errorResponse } from "./errors.ts";
 import { escapeHtml } from "./mail-outbox.ts";
 import { sendMail } from "./mail.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
-import { deliveryOf, leasedBuild, standingOf } from "./screen-trust.ts";
-import type { LeasedBuild } from "./screen-trust.ts";
+import { deliveryOf, leasedBuild, standingOf } from "./screen-delivery.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import { visitorScreen } from "./screens-rpc.ts";
 import { requireNotStaff } from "./sharing.ts";
 
@@ -670,10 +670,10 @@ const requireVisitorDelivery = async (
 
 /**
  * `run`'s answer for a visitor's screen running `target.build`, as
- * `delivering` (screen-trust.ts) is for a member's: trust is read before
- * `run`, so code nobody approved starts nothing, and again before
- * whatever `run` ends with is handed over, its answer or its error, so an
- * approval taken back while it ran keeps both here. What `run` already
+ * `delivering` (screen-delivery.ts) is for a member's: its delivery is
+ * read before `run`, so code refused starts nothing, and again before
+ * whatever `run` ends with is handed over, its answer or its error, so a
+ * release revoked while it ran keeps both here. What `run` already
  * changed stays changed.
  */
 export const deliveredToVisitor = async <Answer>(

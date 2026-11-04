@@ -18,7 +18,6 @@ import {
   RocketIcon,
   ScaleIcon,
   ShieldAlertIcon,
-  ShieldCheckIcon,
   SparklesIcon,
   SplitIcon,
   TriangleAlertIcon,
@@ -63,7 +62,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   packages: msg({ message: "Packages", context: "inbox item kind" }),
-  appApproval: msg({ message: "App approval", context: "inbox item kind" }),
   failedRun: msg({ message: "Failed run", context: "inbox item kind" }),
   stoppedSchedule: msg({
     message: "Stopped schedule",
@@ -105,7 +103,6 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   packages: PackageIcon,
-  appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,

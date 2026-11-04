@@ -135,6 +135,8 @@ describe("an independent workflow's triggers over /rpc", () => {
         address: null,
         webhook: null,
         stopped: false,
+        // It asks an admin for its start as it is created.
+        start: "requested",
       },
       nextAtIsAhead: true,
       listed: [trigger],
@@ -242,6 +244,18 @@ describe("an independent workflow's triggers over /rpc", () => {
     );
     const seenByAdmin =
       await admin.api.workflowResources.triggers.list(workflow);
+    // The `start` it asked for as it was created, as the admin's pending
+    // list shows it: there until the trigger is deleted.
+    const asked = async () => {
+      const { items } = await admin.api.waiting.list();
+      return items.filter(
+        (item) =>
+          item.kind === "permissionRequest" &&
+          item.request.subject.type === "trigger" &&
+          item.request.subject.triggerId === trigger.id
+      ).length;
+    };
+    const askedBefore = await asked();
     await admin.api.workflowResources.triggers.delete(trigger.id);
 
     expect({
@@ -252,6 +266,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       enabled: enabled.enabled,
       seenByAdmin,
       afterDelete: await owner.api.workflowResources.triggers.list(workflow),
+      asked: { before: askedBefore, afterDelete: await asked() },
       deleteAgain: await outcome(
         owner.api.workflowResources.triggers.delete(trigger.id)
       ),
@@ -264,6 +279,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       enabled: true,
       seenByAdmin: [{ ...trigger, nextAt: enabled.nextAt }],
       afterDelete: [],
+      asked: { before: 1, afterDelete: 0 },
       deleteAgain: "workflow.trigger_unavailable",
       logged: [
         { action: "trigger.created", actor: owner.userId },

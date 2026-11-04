@@ -77,10 +77,10 @@ const backfillFailedTexts = {
 
 /** Where the engine's page helps, by the failure's reason. */
 const backfillFailedLinks = {
-  invalid_value: msg`An admin can see the record that holds it back, and abandon the change, in the App's details.`,
-  too_large: msg`An admin can see the record that holds it back, and abandon the change, in the App's details.`,
-  migration: msg`An admin can see what went wrong, and abandon the change, in the App's details.`,
-  stalled: msg`No record is to blame, so an admin can only abandon the change, in the App's details.`,
+  invalid_value: msg`An admin can see the record that holds it back, and abandon the change, in the App's settings.`,
+  too_large: msg`An admin can see the record that holds it back, and abandon the change, in the App's settings.`,
+  migration: msg`An admin can see what went wrong, and abandon the change, in the App's settings.`,
+  stalled: msg`No record is to blame, so an admin can only abandon the change, in the App's settings.`,
 } as const;
 
 /**

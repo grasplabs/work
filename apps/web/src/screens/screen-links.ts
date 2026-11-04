@@ -19,9 +19,10 @@ import { msg } from "@lingui/core/macro";
 // - Asked for: the person's click in this frame, as downloads take it
 //   (`frameGesture`, screen-files.ts: activation reaching the page from
 //   the focused frame, never the page's own, one per click), taken as the
-//   message arrives. Without one, or for an App that read restricted data
-//   (core's `confirm`), the page asks in its own dialog, naming the origin
-//   core checked, in ASCII; the frame puts nothing of its own in it. An
+//   message arrives. Without one, or for an App whose data an admin didn't
+//   classify `ordinary`, or that read restricted data (core's `confirm`),
+//   the page asks in its own dialog, naming the origin core checked, in
+//   ASCII, and then the whole URL; the frame puts nothing of its own in it. An
 //   activation that lapsed while core answered asks too, rather than open
 //   a window the browser would block.
 // - Opened: by the page, in a browsing context of its own, with no opener
@@ -66,9 +67,9 @@ const pageRefusal = (
 };
 
 /**
- * What the person is asked about a link core decided: its origin, and for
- * an App that read restricted data (core's `confirm`), the whole URL, so
- * they see what it would carry out.
+ * What the person is asked about a link core decided: its origin, and when
+ * core says so (`confirm`: the App's data isn't `ordinary`, or it read
+ * restricted data), the whole URL, so they see what it would carry out.
  */
 const asked = ({
   origin,
@@ -157,9 +158,9 @@ export const openLinkPort = (
     // The activation it opens with (the click in the frame, or on the
     // dialog's Open) may have lapsed while core answered: ask (again),
     // rather than open a window the browser would block unseen. Core
-    // recorded what it accepted; the person decides whether it opens. An
-    // App that read restricted data since the person saw only the origin
-    // asks again too, showing the whole URL.
+    // recorded what it accepted; the person decides whether it opens. A
+    // link core now wants confirmed (`confirm`), after the person saw only
+    // the origin, asks again too, showing the whole URL.
     /**
      * Asks the person about `decision`, then core again at the moment they
      * confirm: they may have read the dialog for a long while, so a link
@@ -186,8 +187,8 @@ export const openLinkPort = (
     if (mustAsk()) {
       decided = await confirmedNow(decided);
       // Once more if the dialog's own activation lapsed while core decided
-      // again (a slow answer), or to show the whole URL of an App that read
-      // restricted data meanwhile.
+      // again (a slow answer), or to show the whole URL core now wants
+      // confirmed.
       if (mustAsk()) {
         decided = await confirmedNow(decided);
         // Still without an activation to open with, or with more to show:

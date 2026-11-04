@@ -105,7 +105,7 @@ const opened = async (
   });
   const appPage = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/apps/$app",
+    path: "/apps/$app/edit",
     component: () => <h1>An App</h1>,
   });
   const router = createRouter({
@@ -200,7 +200,7 @@ describe("blueprints", () => {
       calls: [
         "create blueprint-invoices Invoices: Open invoices and who chases them",
       ],
-      at: "/apps/app-new",
+      at: "/apps/app-new/edit",
       heading: "An App",
     });
   });

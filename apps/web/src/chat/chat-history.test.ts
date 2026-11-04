@@ -1,13 +1,12 @@
-import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { groupChats, whenShort } from "./chat-history.ts";
-import { projectsByUse } from "./project-shelf.tsx";
 
 // The person's chats as the ⌘K window and the empty chat show core's list:
 // by when each was last used, so an old chat someone just continued is
-// under Today, not where it was started; the time as short as a row has
-// room for; and their projects, the one used last first.
+// under Today, not where it was started; and the time as short as a row
+// has room for.
 
 const now = new Date(2026, 9, 29, 15, 30);
 
@@ -15,27 +14,14 @@ const now = new Date(2026, 9, 29, 15, 30);
 const daysBack = (days: number, hour = 9): string =>
   new Date(2026, 9, 29 - days, hour).toISOString();
 
-const chat = (
-  title: string,
-  lastAt: string,
-  projectId: string | null = null
-): ChatSummary => ({
+const chat = (title: string, lastAt: string): ChatSummary => ({
   id: title,
   title,
   createdAt: daysBack(40),
   lastAt,
   running: false,
-  projectId,
   appId: null,
   via: "web",
-});
-
-const project = (id: string, createdAt: string): ChatProject => ({
-  id,
-  name: id,
-  goal: "",
-  createdAt,
-  documents: [],
 });
 
 describe("chat history", () => {
@@ -69,28 +55,5 @@ describe("chat history", () => {
       thisWeek: "Tue",
       earlier: "29 Sept",
     });
-  });
-
-  it("puts the project used last first, and an unused one by when it was made", () => {
-    const shelf = projectsByUse(
-      [
-        project("Old, used today", daysBack(60)),
-        project("New, unused", daysBack(1)),
-        project("Used last week", daysBack(50)),
-      ],
-      [
-        chat("a", daysBack(0), "Old, used today"),
-        chat("b", daysBack(5), "Old, used today"),
-        chat("c", daysBack(4), "Used last week"),
-        chat("d", daysBack(0)),
-      ]
-    );
-    expect(
-      shelf.map(({ project: { id }, chats }) => [id, chats])
-    ).toStrictEqual([
-      ["Old, used today", 2],
-      ["New, unused", 0],
-      ["Used last week", 1],
-    ]);
   });
 });

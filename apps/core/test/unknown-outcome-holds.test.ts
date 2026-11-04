@@ -8,6 +8,7 @@ import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, liveStatus } from "./runs.ts";
 import { connectDb } from "./test-env.ts";
 import {
+  asleep,
   day,
   loseAnswers,
   sentFrom,
@@ -323,7 +324,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     );
     await elapse(2000);
     expect({
-      live: await liveStatus(run.id),
+      // Between its checks (every `WORKFLOW_OFF_WAIT_MS`), as it went on
+      // waiting: a check itself shows it running for a moment.
+      live: await asleep(run.id),
       drafts: await draftsIn(mailbox),
       calls: await callsOn(connectionId),
     }).toStrictEqual({ live: "waiting", drafts: 1, calls: 2 });

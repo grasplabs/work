@@ -10,7 +10,7 @@ import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { browserApi } from "../src/rpc.ts";
 import type { CoreRpc } from "../src/rpc.ts";
 import { openTestRun } from "./agent-chat.ts";
-import { approvalApp } from "./decisions.ts";
+import { approvalApp } from "./approval-app.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 

@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -32,7 +32,7 @@ const StephenPage = () => {
   return (
     <StephenSettings
       classes={page.data.classes}
-      editable={isAdmin(identity.role) && !identity.staff}
+      editable={isMemberAdmin(identity)}
       reach={page.data.reach}
       week={page.data.week}
       workflows={page.data.workflows}

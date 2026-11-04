@@ -34,9 +34,9 @@ type Builder = Pick<Awaited<ReturnType<typeof signedInApi>>, "api">;
 
 /**
  * Classifies the App's data as ordinary, as an admin does
- * (`ScreenTrustApi.classify`): its screens then get it whoever approved
- * their code, or nobody. For tests of what a screen does with its App,
- * which aren't about who approved its code (screen-trust.test.ts is).
+ * (`DataPolicyApi.classify`): code core didn't serve, a call with no
+ * lease, then gets it too. For tests that call an App's functions without
+ * a screen's lease, which aren't about that (screen-delivery.test.ts is).
  */
 export const ordinaryData = async (app: string): Promise<void> => {
   await env.DB.prepare(
@@ -62,7 +62,7 @@ export const published = async (app: string): Promise<void> => {
 /**
  * Commits `files` as the App's next version, makes it current and
  * publishes the App, with its data classified as ordinary
- * (`ordinaryData`).
+ * (`ordinaryData`), so a call without a screen's lease reaches it too.
  */
 export const release = async (
   builder: Builder,

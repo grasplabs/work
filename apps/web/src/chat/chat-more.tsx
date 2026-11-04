@@ -1,4 +1,4 @@
-import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import { chatTitleSchema } from "@grasp-os/shared/chat";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -33,15 +33,13 @@ import {
   DownloadIcon,
   EllipsisIcon,
   FileTextIcon,
-  FolderIcon,
-  FolderInputIcon,
-  FolderMinusIcon,
   PencilIcon,
   PrinterIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useCopy } from "../copy.ts";
 import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
@@ -53,12 +51,8 @@ import type { SourceName } from "./sources.tsx";
 
 // Everything that can be done with the open chat, behind three dots beside
 // "New chat" (grasplabs/prototype `components/chat/chat-more.tsx`): copy
-// it as Markdown, download it, rename it, move it into a project or out of
-// one, and delete it. Its row in the list of chats does the same, but
+// it as Markdown, download it, rename it, and delete it. Its row in the list of chats does the same, but
 // here it is where the chat is read, and nothing lies over the messages.
-
-/** How long "Copied" stands in place of "Copy as Markdown". */
-const copiedMs = 1500;
 
 /** Characters a file name can't hold on some system, and runs of space. */
 const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
@@ -143,25 +137,20 @@ const RenameDialog = ({
 };
 
 /**
- * The open chat's menu in the page header. `projects` are the person's,
- * to move it to; `sourceNames` name where its answers came from in what
- * it copies and downloads.
+ * The open chat's menu in the page header. `sourceNames` name where its
+ * answers came from in what it copies and downloads.
  */
 export const ChatMore = ({
   chat,
-  projects,
   sourceNames,
 }: {
   chat: ChatSummary;
-  projects: readonly ChatProject[];
   sourceNames: ReadonlyMap<string, SourceName>;
 }) => {
   const { i18n, t } = useLingui();
-  const router = useRouter();
-  const { run } = useCoreAction();
   // The same watch the thread reads, so what is copied is what is shown.
   const { view } = useFollowedChat(chat.id);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopy();
   // Which chat a dialog was opened for: one opened for another chat, left
   // by Back or a link while it was open, is closed, never acting on this one.
   const [renamingId, setRenamingId] = useState<string>();
@@ -176,16 +165,6 @@ export const ChatMore = ({
   };
   // Until the chat's first update is in, there is only its title to copy.
   const ready = view.loaded;
-  useEffect(() => {
-    const timer = copied
-      ? setTimeout(() => {
-          setCopied(false);
-        }, copiedMs)
-      : undefined;
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
   const markdown = (): string =>
     chatMarkdown({
       title: chat.title,
@@ -195,16 +174,6 @@ export const ChatMore = ({
       names: sourceNames,
       i18n,
     });
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(markdown());
-      setCopied(true);
-    } catch {
-      // The browser refused the clipboard (no permission): nothing was
-      // copied, so it doesn't say it was.
-      toast.add({ type: "error", title: t`Copying didn't work` });
-    }
-  };
   const download = async (format: ExportFormat): Promise<void> => {
     try {
       await exportAs(
@@ -217,24 +186,6 @@ export const ChatMore = ({
         type: "error",
         title: t`The export didn't work. Try again.`,
       });
-    }
-  };
-  const move = async (projectId: string | null): Promise<void> => {
-    const moved = await run(
-      async (session) => {
-        await session.chats.moveChat(chat.id, projectId);
-        return true;
-      },
-      (reason) => {
-        toast.add({
-          type: "error",
-          title: t`The chat wasn't moved`,
-          description: reason,
-        });
-      }
-    );
-    if (moved === true) {
-      await router.invalidate();
     }
   };
   return (
@@ -262,7 +213,7 @@ export const ChatMore = ({
             closeOnClick={false}
             disabled={!ready}
             onClick={() => {
-              void copy();
+              void copy(markdown());
             }}
           >
             {copied ? <CheckIcon /> : <CopyIcon />}
@@ -301,44 +252,6 @@ export const ChatMore = ({
             <PencilIcon />
             <Trans>Rename</Trans>
           </DropdownMenuItem>
-          {projects.length === 0 ? null : (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <FolderInputIcon />
-                <Trans>Move to project</Trans>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-52">
-                {projects.map((project) => (
-                  <DropdownMenuItem
-                    disabled={project.id === chat.projectId}
-                    key={project.id}
-                    onClick={() => {
-                      void move(project.id);
-                    }}
-                  >
-                    <FolderIcon />
-                    <span className="min-w-0 flex-1 truncate">
-                      {project.name}
-                    </span>
-                    {project.id === chat.projectId ? <CheckIcon /> : null}
-                  </DropdownMenuItem>
-                ))}
-                {chat.projectId === null ? null : (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => {
-                        void move(null);
-                      }}
-                    >
-                      <FolderMinusIcon />
-                      <Trans>Take out of the project</Trans>
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {

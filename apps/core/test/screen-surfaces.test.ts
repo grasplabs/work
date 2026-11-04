@@ -1,12 +1,14 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { artifactKey } from "../src/app-releases.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // An App's surfaces (spec 34.1), as core decides them for the page: where
@@ -61,8 +63,8 @@ export default function Note({ input }: ScreenProps<typeof screens.note>) {
 `,
 });
 
-/** A builder's surfaced Notes, current, its screens approved by an admin. */
-const surfacedApp = async (name = "Notes", approved = true) => {
+/** A builder's surfaced Notes, current: its screens need nobody's approval. */
+const surfacedApp = async (name = "Notes") => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name });
@@ -72,15 +74,7 @@ const surfacedApp = async (name = "Notes", approved = true) => {
     "First"
   );
   await builder.api.apps.versions.setCurrent(id, version);
-  if (approved) {
-    const review = await admin.api.screenTrust.review(id);
-    await admin.api.screenTrust.approve(id, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
-  }
-  return { app: id, builder, admin };
+  return { app: id, builder, admin, version };
 };
 
 /** The code refusing `person`'s navigation (`ok` if none). */
@@ -351,15 +345,21 @@ describe("an App's surfaces", () => {
     });
   });
 
-  it("list in the sidebar only Apps whose screens would get their data", async () => {
-    const approved = await surfacedApp("Approved");
-    const unapproved = await surfacedApp("Unapproved", false);
-    const [first] = await approved.builder.api.screens.sidebar();
-    const theirs = await unapproved.builder.api.screens.sidebar();
+  it("list in the sidebar an App made current, with nobody approving its screens, and none of a revoked release's", async () => {
+    const current = await surfacedApp("Current");
+    const revoked = await surfacedApp("Revoked");
+    await revokeRelease(
+      env,
+      await actingPerson("admin"),
+      { app: appIdSchema.parse(revoked.app), version: revoked.version },
+      "Leaks data"
+    );
+    const [first] = await current.builder.api.screens.sidebar();
+    const theirs = await revoked.builder.api.screens.sidebar();
     expect({
-      approved: first?.app,
-      unapproved: theirs.filter(({ app }) => app === unapproved.app),
-    }).toStrictEqual({ approved: approved.app, unapproved: [] });
+      current: first?.app,
+      revoked: theirs.filter(({ app }) => app === revoked.app),
+    }).toStrictEqual({ current: current.app, revoked: [] });
   });
 
   it("show no sidebar entries for an App whose manifest core would have to work out now", async () => {

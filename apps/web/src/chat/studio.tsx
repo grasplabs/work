@@ -28,7 +28,7 @@ import type { ShownVersion } from "./draft-versions.tsx";
  * at that version's first screen (the screens to pick are the latest's).
  * Loaded afresh at each of the draft's writes, as its key says.
  */
-const DraftPreview = ({
+export const DraftPreview = ({
   chatId,
   draft,
   name,
@@ -114,10 +114,12 @@ const StudioBar = ({
     <Link
       className={buttonVariants({ variant: "outline" })}
       params={{ app: draft.app }}
-      to="/apps/$app"
+      // The workspace carries this chat on, with the draft it builds.
+      search={{ chat: chatId }}
+      to="/apps/$app/edit"
     >
       <EyeIcon data-icon="inline-start" />
-      <Trans>View App</Trans>
+      <Trans>Open in the App&apos;s workspace</Trans>
     </Link>
   </div>
 );

@@ -1,0 +1,1309 @@
+import type { AppRole } from "@grasp-os/shared/apps";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  fileItemSchema,
+  newProjectMemberSchema,
+  newProjectSchema,
+  projectChangesSchema,
+  projectCursorSchema,
+  projectErrors,
+  projectIcons,
+  projectItemRefSchema,
+  projectMemberRefSchema,
+  projectPageSize,
+} from "@grasp-os/shared/projects";
+import type {
+  FileItem,
+  NewProject,
+  NewProjectMember,
+  Project,
+  ProjectChanges,
+  ProjectCounts,
+  ProjectCursor,
+  ProjectIcon,
+  ProjectItem,
+  ProjectItemCandidate,
+  ProjectItemRef,
+  ProjectItemsPage,
+  ProjectMemberRef,
+  ProjectMembersPage,
+  ProjectRole,
+  ProjectShareCandidates,
+  ProjectSummary,
+  ProjectsApi,
+} from "@grasp-os/shared/projects";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
+import { and, asc, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+
+import {
+  appsSharedWithProject,
+  revocationsOf,
+  tellKept,
+} from "./access-revocations.ts";
+import { appsReadableBy } from "./app-access.ts";
+import { addMember } from "./app-members.ts";
+import { appFor, listApps } from "./apps.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "./audit-outbox.ts";
+import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import {
+  apps,
+  appMembers,
+  members,
+  permissions,
+  projectItems,
+  projectMembers,
+  projects,
+  teams,
+  users,
+  workflowResourceMembers,
+  workflowResources,
+} from "./db/core/schema.ts";
+import { inList, notNullFailed } from "./db/d1.ts";
+import {
+  peopleInProjectCount,
+  requireStillBuilt,
+  projectsFoundBy,
+  requireProjectRole,
+  rolesIn,
+} from "./project-access.ts";
+import type { ProjectRow } from "./project-access.ts";
+import { projectBuiltBySql, projectStillBuiltSql } from "./project-sql.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import { memberEntry, requireNotStaff, requireSharable } from "./sharing.ts";
+import {
+  listWorkflowResources,
+  nextGeneration,
+  nextGenerationWhere,
+  requireWorkflowRole,
+  shareWorkflowResource,
+} from "./workflow-resources.ts";
+
+// Projects (GRA-1458): an optional grouping of Apps and workflows for a
+// process, team or goal, with a name, a description, an icon and whoever is
+// in it (project-access.ts). Connections are never grouped: a project
+// counts those its items use. Deleting a project never deletes its items.
+//
+// The safety rule is that filing never shares. The ways it could fail, and
+// what stops each:
+//
+// - Filing widening access: filing writes `project_items` alone, which no
+//   access check reads. An item reaches a project's people only through a
+//   `project` row in its own sharing list (`app_members`,
+//   `workflow_resource_members`), which only a builder of the item who
+//   also builds the project adds (`share`, off by default; or the item's
+//   own Share dialog), with every per-person check sharing makes
+//   (`app.share_unreadable` for each person the project reaches).
+// - A project's people seeing what they weren't shared: its page and its
+//   counts list only what the asker opens anyway (`listApps`,
+//   `listWorkflowResources`, less the Apps `appsReadableBy` would refuse
+//   them), so an item filed but not shared with them, or one that read
+//   data they can't read, is neither named nor counted.
+// - Access kept after it is taken away: a `project` row is read against
+//   `project_members` and `team_members` in the statement that decides
+//   (sharing.ts, `projectsOfSql`). Taking someone out of a project, an item
+//   out of it, or deleting it keeps a revocation for each App it reached in
+//   the same batch (access-revocations.ts), and moves each workflow's
+//   policy generation on, so open screens clear and admitted starts are
+//   refused.
+// - A project's name leaking: a project isn't there for anyone not in it
+//   (`project.not_found`), and an item's sharing list names its project row
+//   only to people in the project.
+// - Grasp staff deciding whom a client's data reaches: they change no
+//   project, as they share nothing.
+//
+// Every change is audited in the batch that makes it, naming the project
+// by ID, never its name or description: the log holds no content.
+
+/** The audit log's target type of a project. */
+const targetType = "project";
+
+/** The audit entry of `by`'s `action` on project `id`. */
+const entry = (
+  by: Identity,
+  action: string,
+  id: string,
+  detail: AuditEntry["detail"] = {}
+): AuditEntry => ({
+  actor: actorOf(by),
+  action,
+  target: { type: targetType, id },
+  detail,
+});
+
+const invalid = (issue: string) =>
+  projectErrors.create("project.member_invalid", { issues: [issue] });
+
+/** An icon as stored, read back as one of ours. */
+const iconOf = (icon: string): ProjectIcon =>
+  projectIcons.find((each) => each === icon) ?? "folder";
+
+/** What `by` may open now: their Apps and live workflows, by ID. */
+interface Visible {
+  apps: Map<string, { name: string; role: AppRole }>;
+  workflows: Map<string, Pick<WorkflowResource, "name" | "role">>;
+}
+
+/**
+ * What `by` may open, as their own lists of Apps and workflows decide it,
+ * less the Apps they would be refused on opening, having read data they
+ * can't read where it comes from (`appsReadableBy`, app-provenance.ts): a
+ * project shows nothing beyond it, named or counted.
+ */
+const visibleTo = async (env: Env, by: Identity): Promise<Visible> => {
+  const [listed, openWorkflows] = await Promise.all([
+    listApps(env, by),
+    listWorkflowResources(env, by),
+  ]);
+  const readable = await appsReadableBy(
+    env,
+    by,
+    listed.map(({ id }) => id)
+  );
+  const openApps = listed.filter(({ id }) => readable.has(id));
+  return {
+    apps: new Map(openApps.map(({ id, name, role }) => [id, { name, role }])),
+    workflows: new Map(
+      openWorkflows.map(({ id, name, role }) => [id, { name, role }])
+    ),
+  };
+};
+
+/** A page and one more: whether more follow, without counting them. */
+const pageAndOne = projectPageSize + 1;
+
+/**
+ * The items in `ids`' projects, as SQL rows (`projectId`, `type`, `id`,
+ * `at`) for `FROM`: each once, filed in a project or shared with it (an
+ * item's own Share dialog shares without filing), at when it first came
+ * in. Read, counted and paged in SQL, whatever a project holds.
+ */
+const itemRowsSql = (ids: readonly string[]): SQL =>
+  sql`(SELECT projectId, type, id, MIN(at) AS at FROM (
+      SELECT ${projectItems.projectId} AS projectId, ${projectItems.itemType} AS type, ${projectItems.itemId} AS id, ${projectItems.addedAt} AS at
+        FROM ${projectItems} WHERE ${inList(projectItems.projectId, ids)}
+      UNION ALL SELECT ${appMembers.memberId}, 'app', ${appMembers.appId}, ${appMembers.addedAt}
+        FROM ${appMembers} WHERE ${appMembers.memberType} = 'project' AND ${inList(appMembers.memberId, ids)}
+      UNION ALL SELECT ${workflowResourceMembers.memberId}, 'workflow', ${workflowResourceMembers.workflowResourceId}, ${workflowResourceMembers.addedAt}
+        FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${inList(workflowResourceMembers.memberId, ids)}
+    ) GROUP BY projectId, type, id)`;
+
+/** That a row of `itemRowsSql` (as `items`) is one `visible` opens, as SQL. */
+const opensSql = (visible: Visible): SQL =>
+  sql`((items.type = 'app' AND ${inList(sql`items.id`, [...visible.apps.keys()])})
+    OR (items.type = 'workflow' AND ${inList(sql`items.id`, [...visible.workflows.keys()])}))`;
+
+/** That a row comes after `after` in a page's order (`at`, `type`, `id`), as SQL. */
+const afterSql = (
+  after: ProjectCursor | undefined,
+  at: SQL,
+  type: SQL,
+  id: SQL
+): SQL => {
+  if (after === undefined) {
+    return sql`1`;
+  }
+  const from = Date.parse(after.at);
+  return sql`(${at} > ${from} OR (${at} = ${from} AND (${type} > ${after.type} OR (${type} = ${after.type} AND ${id} > ${after.id}))))`;
+};
+
+/**
+ * Each of `ids`' projects' counts, of what `visible` opens: in two reads
+ * whatever the projects hold.
+ */
+const countsIn = async (
+  env: Env,
+  ids: readonly string[],
+  visible: Visible
+): Promise<Map<string, ProjectCounts>> => {
+  const counts = new Map(
+    ids.map((id): [string, ProjectCounts] => [
+      id,
+      { apps: 0, workflows: 0, connections: 0 },
+    ])
+  );
+  if (ids.length === 0) {
+    return counts;
+  }
+  const db = drizzle(env.DB);
+  const [byType, byConnections] = await Promise.all([
+    db.all<{ projectId: string; type: string; count: number }>(
+      sql`SELECT items.projectId AS projectId, items.type AS type, count(*) AS count
+        FROM ${itemRowsSql(ids)} AS items WHERE ${opensSql(visible)}
+        GROUP BY items.projectId, items.type`
+    ),
+    // The connections its items hold a grant on that isn't revoked, each
+    // once. CROSS JOIN keeps SQLite on the project's items first, then the
+    // grants' subject index: left to choose without statistics, it walked
+    // every connection grant in the organization.
+    db.all<{ projectId: string; count: number }>(
+      sql`SELECT items.projectId AS projectId, count(DISTINCT ${permissions.objectId}) AS count
+        FROM ${itemRowsSql(ids)} AS items
+        CROSS JOIN ${permissions} ON ${permissions.subjectType} = items.type AND ${permissions.subjectId} = items.id
+        WHERE ${permissions.objectType} = 'connection' AND ${permissions.status} <> 'revoked'
+          AND ${opensSql(visible)}
+        GROUP BY items.projectId`
+    ),
+  ]);
+  for (const { projectId, type, count: held } of byType) {
+    const own = counts.get(projectId);
+    if (own !== undefined && type === "app") {
+      own.apps = held;
+    } else if (own !== undefined && type === "workflow") {
+      own.workflows = held;
+    }
+  }
+  for (const { projectId, count: used } of byConnections) {
+    const own = counts.get(projectId);
+    if (own !== undefined) {
+      own.connections = used;
+    }
+  }
+  return counts;
+};
+
+const summaryOf = (
+  project: ProjectRow,
+  role: ProjectRole,
+  counts: ProjectCounts
+): ProjectSummary => ({
+  id: project.id,
+  name: project.name,
+  description: project.description,
+  icon: iconOf(project.icon),
+  role,
+  counts,
+});
+
+/** The projects `by` is in, newest first; every one for an admin. */
+export const listProjects = async (
+  env: Env,
+  by: Identity
+): Promise<ProjectSummary[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(projects)
+    .where(projectsFoundBy(by))
+    .orderBy(desc(projects.createdAt), asc(projects.id));
+  if (rows.length === 0) {
+    return [];
+  }
+  const ids = rows.map(({ id }) => id);
+  const [visible, roles] = await Promise.all([
+    visibleTo(env, by),
+    rolesIn(env, by, rows),
+  ]);
+  const counts = await countsIn(env, ids, visible);
+  return rows.flatMap((row) => {
+    const role = roles.get(row.id);
+    const own = counts.get(row.id);
+    return role === undefined || own === undefined
+      ? []
+      : [summaryOf(row, role, own)];
+  });
+};
+
+/**
+ * The role project `id`'s row has in each of `items` shared with it, by
+ * item key (`type:id`): one page's, never every share it holds.
+ */
+const sharesOf = async (
+  env: Env,
+  id: string,
+  items: readonly { type: string; id: string }[]
+): Promise<Map<string, ProjectRole>> => {
+  const appIds = items
+    .filter(({ type }) => type === "app")
+    .map((each) => each.id);
+  const workflowIds = items
+    .filter(({ type }) => type === "workflow")
+    .map((each) => each.id);
+  const db = drizzle(env.DB);
+  const [sharedApps, sharedWorkflows] = await db.batch([
+    db
+      .select({ id: appMembers.appId, role: appMembers.role })
+      .from(appMembers)
+      .where(
+        and(
+          eq(appMembers.memberType, "project"),
+          eq(appMembers.memberId, id),
+          inList(appMembers.appId, appIds)
+        )
+      ),
+    db
+      .select({
+        id: workflowResourceMembers.workflowResourceId,
+        role: workflowResourceMembers.role,
+      })
+      .from(workflowResourceMembers)
+      .where(
+        and(
+          eq(workflowResourceMembers.memberType, "project"),
+          eq(workflowResourceMembers.memberId, id),
+          inList(workflowResourceMembers.workflowResourceId, workflowIds)
+        )
+      ),
+  ]);
+  return new Map([
+    ...sharedApps.map(({ id: app, role }): [string, ProjectRole] => [
+      `app:${app}`,
+      role,
+    ]),
+    ...sharedWorkflows.map(({ id: workflow, role }): [string, ProjectRole] => [
+      `workflow:${workflow}`,
+      role,
+    ]),
+  ]);
+};
+
+/**
+ * A page of project `id`'s items that `visible` opens, after `after` or
+ * from the start, in the order they came in, each with the role the
+ * project's share of it has.
+ */
+const itemsPage = async (
+  env: Env,
+  id: string,
+  visible: Visible,
+  after?: ProjectCursor
+): Promise<ProjectItemsPage> => {
+  const db = drizzle(env.DB);
+  const rows = await db.all<{ type: string; id: string; at: number }>(
+    sql`SELECT items.type AS type, items.id AS id, items.at AS at
+      FROM ${itemRowsSql([id])} AS items
+      WHERE ${opensSql(visible)} AND ${afterSql(after, sql`items.at`, sql`items.type`, sql`items.id`)}
+      ORDER BY items.at, items.type, items.id
+      LIMIT ${pageAndOne}`
+  );
+  const page = rows.slice(0, projectPageSize);
+  const shared = await sharesOf(env, id, page);
+  return {
+    items: page.flatMap(({ type, id: itemId, at }): ProjectItem[] => {
+      const seen =
+        type === "app"
+          ? visible.apps.get(itemId)
+          : visible.workflows.get(itemId);
+      if ((type !== "app" && type !== "workflow") || seen === undefined) {
+        return [];
+      }
+      return [
+        {
+          type,
+          id: itemId,
+          name: seen.name,
+          sharedAs: shared.get(`${type}:${itemId}`) ?? null,
+          builds: seen.role === "builder",
+          addedAt: new Date(at).toISOString(),
+        },
+      ];
+    }),
+    more: rows.length > projectPageSize,
+  };
+};
+
+/**
+ * A page of who is in project `id` besides its owner, named, still there,
+ * after `after` or from the start, in the order they were added.
+ */
+const membersPage = async (
+  env: Env,
+  id: string,
+  after?: ProjectCursor
+): Promise<ProjectMembersPage> => {
+  const rows = await drizzle(env.DB)
+    .select({ row: projectMembers, person: users.name, team: teams.name })
+    .from(projectMembers)
+    .leftJoin(
+      users,
+      and(
+        eq(projectMembers.memberType, "person"),
+        eq(users.id, projectMembers.memberId)
+      )
+    )
+    .leftJoin(
+      teams,
+      and(
+        eq(projectMembers.memberType, "team"),
+        eq(teams.id, projectMembers.memberId),
+        eq(teams.organizationId, organizationId)
+      )
+    )
+    .where(
+      and(
+        eq(projectMembers.projectId, id),
+        or(
+          and(
+            eq(projectMembers.memberType, "person"),
+            activeMember(projectMembers.memberId)
+          ),
+          and(eq(projectMembers.memberType, "team"), isNotNull(teams.id))
+        ),
+        afterSql(
+          after,
+          sql`${projectMembers.addedAt}`,
+          sql`${projectMembers.memberType}`,
+          sql`${projectMembers.memberId}`
+        )
+      )
+    )
+    .orderBy(
+      asc(projectMembers.addedAt),
+      asc(projectMembers.memberType),
+      asc(projectMembers.memberId)
+    )
+    .limit(pageAndOne);
+  return {
+    members: rows.slice(0, projectPageSize).map(({ row, person, team }) => ({
+      type: row.memberType,
+      id: row.memberId,
+      name: person ?? team,
+      role: row.role,
+      addedBy: row.addedBy,
+      addedAt: row.addedAt.toISOString(),
+    })),
+    more: rows.length > projectPageSize,
+  };
+};
+
+/** How many of project `id`'s items `visible` opens are shared with it. */
+const sharedCount = async (
+  env: Env,
+  id: string,
+  visible: Visible
+): Promise<number> => {
+  const row = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM ${itemRowsSql([id])} AS items
+      WHERE ${opensSql(visible)} AND (
+        (items.type = 'app' AND EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = items.id AND ${appMembers.memberType} = 'project' AND ${appMembers.memberId} = ${id}))
+        OR (items.type = 'workflow' AND EXISTS (SELECT 1 FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.workflowResourceId} = items.id AND ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id})))`
+  );
+  return row.count;
+};
+
+/**
+ * Project `id`, as its page shows it to `by`, who is in it: its counts
+ * whole, and the first page of its items and of its members (`items`,
+ * `members` for the rest).
+ */
+export const getProject = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<Project> => {
+  const { project, role } = await requireProjectRole(env, by, id, "user");
+  const visible = await visibleTo(env, by);
+  const [counts, firstItems, firstMembers, people, shared, owner] =
+    await Promise.all([
+      countsIn(env, [project.id], visible),
+      itemsPage(env, project.id, visible),
+      membersPage(env, project.id),
+      peopleInProjectCount(env, project.id),
+      sharedCount(env, project.id, visible),
+      drizzle(env.DB)
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, project.ownerId))
+        .get(),
+    ]);
+  return {
+    ...summaryOf(
+      project,
+      role,
+      counts.get(project.id) ?? { apps: 0, workflows: 0, connections: 0 }
+    ),
+    owner: { id: project.ownerId, name: owner?.name ?? null },
+    members: firstMembers.members,
+    moreMembers: firstMembers.more,
+    people,
+    items: firstItems.items,
+    moreItems: firstItems.more,
+    shared,
+  };
+};
+
+/** The page of project `id`'s items after `after`, for `by`, who is in it. */
+export const listProjectItems = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  after: unknown
+): Promise<ProjectItemsPage> => {
+  const { project } = await requireProjectRole(env, by, id, "user");
+  const cursor = projectErrors.parse(
+    "project.invalid",
+    projectCursorSchema,
+    after
+  );
+  return await itemsPage(env, project.id, await visibleTo(env, by), cursor);
+};
+
+/** The page of project `id`'s members after `after`, for `by`, who is in it. */
+export const listProjectMembers = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  after: unknown
+): Promise<ProjectMembersPage> => {
+  const { project } = await requireProjectRole(env, by, id, "user");
+  const cursor = projectErrors.parse(
+    "project.invalid",
+    projectCursorSchema,
+    after
+  );
+  return await membersPage(env, project.id, cursor);
+};
+
+/** Makes a project for `by`, its owner, with nothing in it. */
+export const createProject = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<ProjectSummary> => {
+  requireNotStaff(by);
+  // Only someone whose role builds makes a project, as an App: its builders
+  // decide whom what is shared with it reaches (project-access.ts).
+  requireBuilder(by);
+  const made = projectErrors.parse("project.invalid", newProjectSchema, input);
+  const row: ProjectRow = {
+    id: crypto.randomUUID(),
+    name: made.name,
+    description: made.description,
+    icon: made.icon,
+    ownerId: by.userId,
+    createdAt: new Date(),
+  };
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db.insert(projects).values(row),
+    outboxed(db, entry(by, "project.created", row.id)),
+  ]);
+  return summaryOf(row, "builder", { apps: 0, workflows: 0, connections: 0 });
+};
+
+/** The columns a project write's guard (project-sql.ts) leaves NULL. */
+const guardedColumns = [
+  "projects.name",
+  "project_members.project_id",
+  "project_items.project_id",
+] as const;
+
+/**
+ * `write`, a batch that writes to project `id` under a guard read in its
+ * own statements (`stillBuilds`, `projectStillBuiltSql`): when a guard
+ * fails the batch, nothing is written, and it is answered as
+ * `requireStillBuilt` says (deleted, or no longer `by`'s to build) since
+ * it was checked.
+ */
+const guarded = async <T>(
+  env: Env,
+  id: string,
+  by: Identity,
+  write: () => Promise<T>
+): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (guardedColumns.some((column) => notNullFailed(error, column))) {
+      await requireStillBuilt(env, id, by.userId);
+      // Theirs to build again by now: still, it wasn't when the write ran.
+      throw roleErrors.create("role.forbidden");
+    }
+    throw error;
+  }
+};
+
+/**
+ * A batch's first statement for a write to project `id` by `by`: it
+ * fails the batch (NOT NULL on `projects.name`) unless `by` builds the
+ * project when the batch runs, so a builder removed or demoted while
+ * their call was under way changes nothing. It changes no row's data.
+ */
+const stillBuilds = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  by: Identity
+) =>
+  db
+    .update(projects)
+    .set({
+      name: sql`CASE WHEN ${projectBuiltBySql(id, by.userId)} THEN ${projects.name} ELSE NULL END`,
+    })
+    .where(eq(projects.id, id));
+
+/** Changes project `id`'s name, description or icon, for its builders. */
+export const updateProject = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  input: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const changes = projectErrors.parse(
+    "project.invalid",
+    projectChangesSchema,
+    input
+  );
+  const set = Object.fromEntries(
+    Object.entries(changes).filter(([, value]) => value !== undefined)
+  );
+  const db = drizzle(env.DB);
+  await guarded(env, project.id, by, async () => {
+    await auditedBatch(env, db, [
+      stillBuilds(db, project.id, by),
+      db.update(projects).set(set).where(eq(projects.id, project.id)),
+      outboxedIfChanged(
+        db,
+        entry(by, "project.updated", project.id, {
+          changed: Object.keys(set).toSorted().join(","),
+        })
+      ),
+    ]);
+  });
+};
+
+/**
+ * That something was shared with project `id`: the workflows shared with
+ * it, as a condition on `workflow_resources`.
+ */
+const workflowsSharedWithProject = (id: string) =>
+  sql`${workflowResources.id} IN (SELECT ${workflowResourceMembers.workflowResourceId} FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id})`;
+
+/**
+ * Deletes project `id`, for its builders: its rows, its members and what
+ * is filed in it, and every share with it, so nobody keeps what it
+ * reached. Nothing filed in it is deleted.
+ *
+ * Audited once, as `project.deleted`, with how many items (filed or shared
+ * with it) and members it held: what matters for compliance is who deleted
+ * it and when. Each item's share with it ends with it, and is not recorded
+ * again on every item: losing access is the safe direction, and the
+ * project's own event says why.
+ */
+export const removeProject = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const db = drizzle(env.DB);
+  // Counted just before the deletion: an item or member added in between
+  // goes with it uncounted, which the event's purpose (who deleted it, and
+  // when) doesn't need exact.
+  const held = await db.get<{ items: number; members: number }>(
+    sql`SELECT (SELECT count(*) FROM ${itemRowsSql([project.id])}) AS items,
+      (SELECT count(*) FROM ${projectMembers} WHERE ${projectMembers.projectId} = ${project.id}) AS members`
+  );
+  const event = createAuditEvent(
+    entry(by, "project.deleted", project.id, {
+      items: held.items,
+      members: held.members,
+    }),
+    "core"
+  );
+  const results = await guarded(
+    env,
+    project.id,
+    by,
+    async () =>
+      await auditedBatch(env, db, [
+        stillBuilds(db, project.id, by),
+        // Read before the shares go: the Apps whose screens look again.
+        revocationsOf(db, appsSharedWithProject(project.id), null, sql`1 = 1`),
+        nextGenerationWhere(db, workflowsSharedWithProject(project.id)),
+        db
+          .delete(appMembers)
+          .where(
+            and(
+              eq(appMembers.memberType, "project"),
+              eq(appMembers.memberId, project.id)
+            )
+          ),
+        db
+          .delete(workflowResourceMembers)
+          .where(
+            and(
+              eq(workflowResourceMembers.memberType, "project"),
+              eq(workflowResourceMembers.memberId, project.id)
+            )
+          ),
+        db.delete(projectItems).where(eq(projectItems.projectId, project.id)),
+        db
+          .delete(projectMembers)
+          .where(eq(projectMembers.projectId, project.id)),
+        db.delete(projects).where(eq(projects.id, project.id)),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+      ])
+  );
+  await tellKept(env, results[1]);
+};
+
+/** The rows of project `id` that are `member`. */
+const memberRowOf = (id: string, member: ProjectMemberRef) =>
+  and(
+    eq(projectMembers.projectId, id),
+    eq(projectMembers.memberType, member.type),
+    eq(projectMembers.memberId, member.id)
+  );
+
+/**
+ * Adds a person or team to project `id`, or gives them another role in
+ * it, for its builders: they reach what is shared with the project from
+ * their next call, each still only as their own checks allow
+ * (app-access.ts). Adding again in the same role records nothing.
+ */
+export const addProjectMember = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  input: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const member = projectErrors.parse(
+    "project.invalid",
+    newProjectMemberSchema,
+    input
+  );
+  await requireSharable(env, member, {
+    owner: project.ownerId,
+    builds: member.role === "builder",
+    invalid,
+    ownerIssue: "id: They own the project, and always build it.",
+    buildsIssue:
+      "role: Only the organization's admins and builders build projects.",
+  });
+  const db = drizzle(env.DB);
+  const addedAt = new Date();
+  const batch = auditedBatch(env, db, [
+    db
+      .insert(projectMembers)
+      .values({
+        // Only while the project is there and still theirs to build:
+        // otherwise NULL, which fails the batch, so an add racing a
+        // deletion or a demotion writes nothing.
+        projectId: projectStillBuiltSql(project.id, by.userId),
+        memberType: member.type,
+        memberId: member.id,
+        role: member.role,
+        addedBy: by.userId,
+        addedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          projectMembers.projectId,
+          projectMembers.memberType,
+          projectMembers.memberId,
+        ],
+        set: { role: member.role, addedBy: by.userId, addedAt },
+        setWhere: ne(projectMembers.role, member.role),
+      }),
+    outboxedIfChanged(
+      db,
+      memberEntry(
+        by,
+        "project.member.added",
+        { type: targetType, id: project.id },
+        member
+      )
+    ),
+  ]);
+  await guarded(env, project.id, by, async () => await batch);
+};
+
+/**
+ * Takes a person or team out of project `id`, for its builders: what is
+ * shared with the project stops reaching them on their next call, their
+ * open screens of its Apps look again, and its workflows' admitted starts
+ * are refused. Taking out someone not in it changes nothing.
+ */
+export const removeProjectMember = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  input: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const member = projectErrors.parse(
+    "project.invalid",
+    projectMemberRefSchema,
+    input
+  );
+  const db = drizzle(env.DB);
+  const before = await db
+    .select({ role: projectMembers.role })
+    .from(projectMembers)
+    .where(memberRowOf(project.id, member))
+    .get();
+  if (before === undefined) {
+    return;
+  }
+  const event = createAuditEvent(
+    memberEntry(
+      by,
+      "project.member.removed",
+      { type: targetType, id: project.id },
+      { ...member, role: before.role }
+    ),
+    "core"
+  );
+  const results = await guarded(
+    env,
+    project.id,
+    by,
+    async () =>
+      await auditedBatch(env, db, [
+        stillBuilds(db, project.id, by),
+        db.delete(projectMembers).where(memberRowOf(project.id, member)),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+        revocationsOf(
+          db,
+          appsSharedWithProject(project.id),
+          member.type === "person" ? [member.id] : null,
+          storedEvent(event.id)
+        ),
+        nextGenerationWhere(
+          db,
+          and(workflowsSharedWithProject(project.id), storedEvent(event.id))
+        ),
+      ])
+  );
+  await tellKept(env, results[3]);
+};
+
+/** Whom a builder of project `id` may add to it. */
+export const projectShareCandidates = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<ProjectShareCandidates> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const db = drizzle(env.DB);
+  // Who is in it already, its owner included, isn't offered: adding them
+  // again would change their role, and the page shows only its first
+  // members.
+  const inIt = (type: "person" | "team", column: SQLiteColumn) =>
+    sql`NOT EXISTS (SELECT 1 FROM ${projectMembers} WHERE ${projectMembers.projectId} = ${project.id} AND ${projectMembers.memberType} = ${type} AND ${projectMembers.memberId} = ${column})`;
+  const [people, organizationTeams] = await Promise.all([
+    db
+      .select({ id: users.id, name: users.name })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          notRemoved(members.userId),
+          ne(users.id, project.ownerId),
+          inIt("person", users.id)
+        )
+      )
+      .orderBy(asc(users.name), asc(users.id)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(
+        and(eq(teams.organizationId, organizationId), inIt("team", teams.id))
+      )
+      .orderBy(asc(teams.name), asc(teams.id)),
+  ]);
+  return { people, teams: organizationTeams };
+};
+
+/** What `by` may file in project `id`: what they open, not in it yet. */
+export const projectItemCandidates = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<ProjectItemCandidate[]> => {
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const visible = await visibleTo(env, by);
+  // Of what they open, what is in it already: as many as they open, at most.
+  const filed = await drizzle(env.DB).all<{ type: string; id: string }>(
+    sql`SELECT items.type AS type, items.id AS id FROM ${itemRowsSql([project.id])} AS items
+      WHERE ${opensSql(visible)}`
+  );
+  const inIt = new Set(filed.map(({ type, id: item }) => `${type}:${item}`));
+  return [
+    ...[...visible.apps].map(([app, { name, role }]): ProjectItemCandidate => ({
+      type: "app",
+      id: app,
+      name,
+      builds: role === "builder",
+    })),
+    ...[...visible.workflows].map(
+      ([workflow, { name, role }]): ProjectItemCandidate => ({
+        type: "workflow",
+        id: workflow,
+        name,
+        builds: role === "builder",
+      })
+    ),
+  ].filter(({ type, id: item }) => !inIt.has(`${type}:${item}`));
+};
+
+/**
+ * The item `ref` names, which `by` must open: its ID as stored. Refuses
+ * one they can't open as one that isn't there.
+ */
+const openedItem = async (
+  env: Env,
+  by: Identity,
+  ref: ProjectItemRef
+): Promise<string> => {
+  if (ref.type === "app") {
+    const app = await appFor(env, by, ref.id, "user");
+    return app.id;
+  }
+  const workflow = await requireWorkflowRole(env, by, ref.id, "user");
+  return workflow.id;
+};
+
+/** Whether `item` is shared with project `id` already, in any role. */
+const sharedAlready = async (
+  env: Env,
+  id: string,
+  item: ProjectItemRef
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const row =
+    item.type === "app"
+      ? await db
+          .select({ one: sql`1` })
+          .from(appMembers)
+          .where(
+            and(
+              eq(appMembers.appId, item.id),
+              eq(appMembers.memberType, "project"),
+              eq(appMembers.memberId, id)
+            )
+          )
+          .get()
+      : await db
+          .select({ one: sql`1` })
+          .from(workflowResourceMembers)
+          .where(
+            and(
+              eq(workflowResourceMembers.workflowResourceId, item.id),
+              eq(workflowResourceMembers.memberType, "project"),
+              eq(workflowResourceMembers.memberId, id)
+            )
+          )
+          .get();
+  return row !== undefined;
+};
+
+/**
+ * Files an App or workflow `by` opens in project `id`, for its builders.
+ * Filing shares nothing. With `share`, it is also shared with everyone in
+ * the project as users, as the item's own sharing does it, so only for a
+ * builder of the item and with every check that makes: shared first, so a
+ * refused share files nothing. A share the item has with the project
+ * already is kept as it is.
+ */
+export const fileItem = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  input: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const { item, share } = projectErrors.parse(
+    "project.invalid",
+    fileItemSchema,
+    input
+  );
+  const itemId = await openedItem(env, by, item);
+  const ref: ProjectItemRef = { type: item.type, id: itemId };
+  // Whether this call shares it: a share it has already is kept as it is.
+  const shares = share && !(await sharedAlready(env, project.id, ref));
+  if (shares) {
+    const toProject = {
+      type: "project",
+      id: project.id,
+      role: "user",
+    } as const;
+    await (ref.type === "app"
+      ? addMember(env, by, itemId, toProject)
+      : shareWorkflowResource(env, by, itemId, toProject));
+  }
+  const db = drizzle(env.DB);
+  const batch = auditedBatch(env, db, [
+    db
+      .insert(projectItems)
+      .values({
+        // Only while the project is there and still theirs to build:
+        // otherwise NULL, which fails the batch.
+        projectId: projectStillBuiltSql(project.id, by.userId),
+        itemType: ref.type,
+        // Only while the item is still there: one removed or deleted
+        // since it was opened, after its cleanup ran, would otherwise
+        // leave a row nobody sees.
+        itemId:
+          ref.type === "app"
+            ? sql`(SELECT ${apps.id} FROM ${apps} WHERE ${apps.id} = ${itemId} AND ${apps.removedAt} IS NULL)`
+            : sql`(SELECT ${workflowResources.id} FROM ${workflowResources} WHERE ${workflowResources.id} = ${itemId} AND ${workflowResources.deletedAt} IS NULL)`,
+        addedBy: by.userId,
+        addedAt: new Date(),
+      })
+      .onConflictDoNothing(),
+    outboxedIfChanged(
+      db,
+      entry(by, "project.item.filed", project.id, {
+        itemType: ref.type,
+        item: itemId,
+        shared: shares,
+      })
+    ),
+  ]);
+  // Deleted since the share, if any, which went with nothing to reach.
+  await guarded(env, project.id, by, async () => {
+    try {
+      await batch;
+    } catch (error) {
+      if (notNullFailed(error, "project_items.item_id")) {
+        throw projectErrors.create("project.item_not_found");
+      }
+      throw error;
+    }
+  });
+};
+
+/**
+ * Takes an item out of project `id`, for its builders. Its share with the
+ * project goes with it: whom that reached loses it, with the item's own
+ * unsharing's revocation and audit. Narrowing whom an item reaches is
+ * safe for a project's builder to decide, though they may not build it.
+ */
+export const unfileItem = async (
+  env: Env,
+  by: Identity,
+  id: unknown,
+  input: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const { project } = await requireProjectRole(env, by, id, "builder");
+  const item = projectErrors.parse(
+    "project.invalid",
+    projectItemRefSchema,
+    input
+  );
+  const db = drizzle(env.DB);
+  const unfiled = db
+    .delete(projectItems)
+    .where(
+      and(
+        eq(projectItems.projectId, project.id),
+        eq(projectItems.itemType, item.type),
+        eq(projectItems.itemId, item.id)
+      )
+    );
+  const unfiledEntry = outboxedIfChanged(
+    db,
+    entry(by, "project.item.unfiled", project.id, {
+      itemType: item.type,
+      item: item.id,
+    })
+  );
+  if (item.type === "workflow") {
+    const ofProject = and(
+      eq(workflowResourceMembers.workflowResourceId, item.id),
+      eq(workflowResourceMembers.memberType, "project"),
+      eq(workflowResourceMembers.memberId, project.id)
+    );
+    const before = await db
+      .select({ role: workflowResourceMembers.role })
+      .from(workflowResourceMembers)
+      .where(ofProject)
+      .get();
+    if (before === undefined) {
+      await guarded(env, project.id, by, async () => {
+        await auditedBatch(env, db, [
+          stillBuilds(db, project.id, by),
+          unfiled,
+          unfiledEntry,
+        ]);
+      });
+      return;
+    }
+    const event = createAuditEvent(
+      memberEntry(
+        by,
+        "workflow.member.removed",
+        { type: "workflow_resource", id: item.id },
+        { type: "project", id: project.id, role: before.role }
+      ),
+      "core"
+    );
+    await guarded(env, project.id, by, async () => {
+      await auditedBatch(env, db, [
+        stillBuilds(db, project.id, by),
+        unfiled,
+        unfiledEntry,
+        db.delete(workflowResourceMembers).where(ofProject),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+        nextGeneration(db, item.id, storedEvent(event.id)),
+      ]);
+    });
+    return;
+  }
+  const ofProject = and(
+    eq(appMembers.appId, item.id),
+    eq(appMembers.memberType, "project"),
+    eq(appMembers.memberId, project.id)
+  );
+  const before = await db
+    .select({ role: appMembers.role })
+    .from(appMembers)
+    .where(ofProject)
+    .get();
+  if (before === undefined) {
+    await guarded(env, project.id, by, async () => {
+      await auditedBatch(env, db, [
+        stillBuilds(db, project.id, by),
+        unfiled,
+        unfiledEntry,
+      ]);
+    });
+    return;
+  }
+  const event = createAuditEvent(
+    memberEntry(
+      by,
+      "app.member.removed",
+      { type: "app", id: item.id },
+      { type: "project", id: project.id, role: before.role }
+    ),
+    "core"
+  );
+  const unshared = await guarded(
+    env,
+    project.id,
+    by,
+    async () =>
+      await auditedBatch(env, db, [
+        stillBuilds(db, project.id, by),
+        unfiled,
+        unfiledEntry,
+        db.delete(appMembers).where(ofProject),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+        // Everyone in the project looks again: who keeps it otherwise is
+        // their own check's to say.
+        revocationsOf(db, eq(apps.id, item.id), null, storedEvent(event.id)),
+      ])
+  );
+  await tellKept(env, unshared[5]);
+};
+
+/** A signed-in person's `projects`. */
+export class ProjectsRpc extends CoreRpcTarget implements ProjectsApi {
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  async list(): Promise<ProjectSummary[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjects(this.#env, by)
+    );
+  }
+
+  async items(id: string, after: ProjectCursor): Promise<ProjectItemsPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjectItems(this.#env, by, id, after)
+    );
+  }
+
+  async members(id: string, after: ProjectCursor): Promise<ProjectMembersPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjectMembers(this.#env, by, id, after)
+    );
+  }
+
+  async get(id: string): Promise<Project> {
+    return await withPerson(
+      this.#check,
+      async (by) => await getProject(this.#env, by, id)
+    );
+  }
+
+  async create(project: NewProject): Promise<ProjectSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) => await createProject(this.#env, by, project)
+    );
+  }
+
+  async update(id: string, changes: ProjectChanges): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await updateProject(this.#env, by, id, changes);
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await removeProject(this.#env, by, id);
+    });
+  }
+
+  async addMember(id: string, member: NewProjectMember): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await addProjectMember(this.#env, by, id, member);
+    });
+  }
+
+  async removeMember(id: string, member: ProjectMemberRef): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await removeProjectMember(this.#env, by, id, member);
+    });
+  }
+
+  async shareCandidates(id: string): Promise<ProjectShareCandidates> {
+    return await withPerson(
+      this.#check,
+      async (by) => await projectShareCandidates(this.#env, by, id)
+    );
+  }
+
+  async itemCandidates(id: string): Promise<ProjectItemCandidate[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await projectItemCandidates(this.#env, by, id)
+    );
+  }
+
+  async file(id: string, file: FileItem): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await fileItem(this.#env, by, id, file);
+    });
+  }
+
+  async unfile(id: string, item: ProjectItemRef): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await unfileItem(this.#env, by, id, item);
+    });
+  }
+}

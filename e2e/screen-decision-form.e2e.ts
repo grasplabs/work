@@ -1,6 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
@@ -245,7 +244,7 @@ export default function Desk() {
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
  * workflow of `builder`'s asking `admin` or `colleague`, its decision
  * binding approved for them, released, published and current, its
- * screens' code approved and its `start` grant given by `admin`. Bound
+ * `start` grant given by `admin`. Bound
  * before the release, so the screens' `workflows.followUp` names the
  * decision.
  */
@@ -299,12 +298,6 @@ const boundApp = async (
     );
     await builds.api.apps.versions.setCurrent(app, version);
     await builds.api.apps.publish(app);
-    const review = await decides.api.screenTrust.review(app);
-    await decides.api.screenTrust.approve(app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

@@ -34,6 +34,22 @@ export interface Pickable {
   email?: string;
 }
 
+/**
+ * A list's filter: what was typed, found as typed in an option's words
+ * (its `keywords`, else its value), never letter by letter: "Eva" never
+ * finds "Wouter van den Berg".
+ */
+export const matchTyped = (
+  value: string,
+  search: string,
+  keywords?: string[]
+): number =>
+  (keywords === undefined || keywords.length === 0 ? value : keywords.join(" "))
+    .toLowerCase()
+    .includes(search.trim().toLowerCase())
+    ? 1
+    : 0;
+
 /** Someone's portrait: their initials. */
 const PersonAvatar = ({ name }: { name: string }) => (
   <Avatar size="sm">
@@ -57,7 +73,9 @@ export const PersonOption = ({
   <CommandItem
     data-checked={checked}
     onSelect={onSelect}
-    value={`${person.name} ${person.email ?? ""}`}
+    keywords={[person.name, person.email ?? ""]}
+    // Their ID keeps two people of the same name apart.
+    value={`person:${person.id}`}
   >
     <PersonAvatar name={person.name} />
     <span className="flex-1 truncate">{person.name}</span>
@@ -133,12 +151,7 @@ export const PersonPicker = ({
         )}
       </PopoverTrigger>
       <PopoverContent align={align} className="w-72" variant="flush">
-        {/* Names match as typed, not letter by letter: "Eva" never finds "Wouter van den Berg". */}
-        <Command
-          filter={(value: string, search: string) =>
-            value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
-          }
-        >
+        <Command filter={matchTyped}>
           <CommandInput placeholder={t`Search people`} />
           <CommandList>
             {people === null ? (

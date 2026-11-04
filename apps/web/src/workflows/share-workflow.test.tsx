@@ -43,6 +43,7 @@ const candidates = {
     { id: "bo", name: "Bo" },
   ],
   teams: [{ id: "team-1", name: "Finance" }],
+  projects: [],
 };
 
 /** The dialog for a reader in `role`, core refusing shares with `refuses`: what core was asked. */

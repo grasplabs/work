@@ -1,9 +1,5 @@
 // @vitest-environment happy-dom
-import type {
-  ChatProject,
-  ChatSearchHit,
-  ChatSummary,
-} from "@grasp-os/shared/chat";
+import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -23,8 +19,7 @@ import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 // faked: it opens with the keys on any page, lists the person's chats by
 // when they were last used, narrows them by title at once as the person
 // types, then to what core found was said, showing where, each chat as
-// core lists it now; and a project on the left shows its chats alone,
-// with the way to its page, and asks core to look in it alone.
+// core lists it now; and the same keys close it again.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -32,34 +27,19 @@ let root: Root | undefined;
 
 const today = new Date().toISOString();
 
-const chat = (
-  id: string,
-  title: string,
-  projectId: string | null = null
-): ChatSummary => ({
+const chat = (id: string, title: string): ChatSummary => ({
   id,
   title,
   createdAt: today,
   lastAt: today,
   running: false,
-  projectId,
   appId: null,
   via: "web",
 });
 
-const board = chat("board", "Board report", "p-1");
+const board = chat("board", "Board report");
 const lease = chat("lease", "Lease of the office");
 const travel = chat("travel", "Trip to Lyon");
-
-const projects: ChatProject[] = [
-  {
-    id: "p-1",
-    name: "Q4 board",
-    goal: "",
-    createdAt: today,
-    documents: [],
-  },
-];
 
 /**
  * A page in the frame, with nothing of the chats on it, whose core lists
@@ -69,12 +49,11 @@ const shown = async (
   found: (query: string) => Promise<ChatSearchHit[]>,
   listed: ChatSummary[] = [board, lease, travel]
 ) => {
-  const asked: { query: string; projectId: string | null }[] = [];
+  const asked: string[] = [];
   const chats = {
     list: async () => await Promise.resolve(listed),
-    projects: async () => await Promise.resolve(projects),
-    search: async (query: string, projectId: string | null = null) => {
-      asked.push({ query, projectId });
+    search: async (query: string) => {
+      asked.push(query);
       return await found(query);
     },
   };
@@ -112,8 +91,8 @@ const dialog = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="dialog"]');
 
 /**
- * The chats the window lists, each as its title, its project in all
- * chats, and any line found under it; when it was used left out.
+ * The chats the window lists, each as its title and any line found under
+ * it; when it was used left out.
  */
 const rows = (): string[] =>
   [...(dialog()?.querySelectorAll("[cmdk-item]") ?? [])].map((row) => {
@@ -182,7 +161,7 @@ describe("the chats window", () => {
 
     await openWindow({ key: "k", metaKey: true });
     expect(rows()).toStrictEqual([
-      "Board reportQ4 board ·",
+      "Board report",
       "Lease of the office",
       "Trip to Lyon",
     ]);
@@ -191,7 +170,7 @@ describe("the chats window", () => {
     await type("lease");
     expect(rows()).toStrictEqual(["Lease of the office"]);
     await vi.waitFor(() => {
-      expect(asked).toStrictEqual([{ query: "lease", projectId: null }]);
+      expect(asked).toStrictEqual(["lease"]);
     });
 
     await act(async () => {
@@ -205,7 +184,7 @@ describe("the chats window", () => {
       await answer.promise;
     });
     expect(rows()).toStrictEqual([
-      "Board reportQ4 board · …the lease ends in March",
+      "Board report…the lease ends in March",
       "Lease of the office",
     ]);
     expect(dialog()?.querySelector("mark")?.textContent).toBe("lease");
@@ -218,14 +197,14 @@ describe("the chats window", () => {
     );
     await openWindow({ key: "k", metaKey: true });
     expect(rows()).toStrictEqual([
-      "Board reportQ4 board ·",
+      "Board report",
       "Lease of the officevia Slack ·",
       "Trip to Lyonvia Microsoft Teams ·",
     ]);
   });
 
-  it("shows a chat found as core lists it now, renamed or moved since", async () => {
-    const renamed = { ...lease, title: "Office lease 2027", projectId: "p-1" };
+  it("shows a chat found as core lists it now, renamed since", async () => {
+    const renamed = { ...lease, title: "Office lease 2027" };
     await shown(
       async () => await Promise.resolve([{ chat: lease, said: null }]),
       [board, renamed, travel]
@@ -233,37 +212,14 @@ describe("the chats window", () => {
     await openWindow({ key: "k", metaKey: true });
     await type("office");
     await vi.waitFor(() => {
-      expect(rows()).toStrictEqual(["Office lease 2027Q4 board ·"]);
+      expect(rows()).toStrictEqual(["Office lease 2027"]);
     });
   });
 
-  it("shows one project's chats alone, with the way to its page, and looks in it alone", async () => {
-    const { asked } = await shown(async () => await Promise.resolve([]));
+  it("closes again with the same keys", async () => {
+    await shown(async () => await Promise.resolve([]));
     await openWindow({ key: "k", ctrlKey: true });
 
-    const scope = [...(dialog()?.querySelectorAll("nav button") ?? [])].find(
-      (button) => button.textContent?.startsWith("Q4 board")
-    );
-    await act(async () => {
-      scope?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect({
-      rows: rows(),
-      pressed: scope?.getAttribute("aria-pressed"),
-      page: dialog()?.querySelector('a[href="/projects/p-1"]')?.textContent,
-    }).toStrictEqual({
-      rows: ["Board report"],
-      pressed: "true",
-      page: "Instructions and files",
-    });
-
-    await type("minutes");
-    await vi.waitFor(() => {
-      expect(asked).toStrictEqual([{ query: "minutes", projectId: "p-1" }]);
-    });
-
-    // The same keys close it again.
     await press({ key: "k", ctrlKey: true });
     await vi.waitFor(() => {
       expect(dialog()).toBeNull();

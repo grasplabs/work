@@ -203,6 +203,17 @@ const factsOf = (interview: HeldInterview): { facts: number; out: number } =>
   };
 
 /** The day something happened, as the number of days since the interviews started. */
+/** Which Stephen held an interview, in which language and when it started, as Grasp OS's core says: none it doesn't say. */
+const heldBy = (
+  interview: HeldInterview
+): { stephen?: string; language?: string; startedAt?: string } => ({
+  ...(interview.progress.startedAt === null
+    ? {}
+    : { startedAt: new Date(interview.progress.startedAt).toISOString() }),
+  ...(interview.stephen === undefined ? {} : { stephen: interview.stephen }),
+  ...(interview.language === undefined ? {} : { language: interview.language }),
+});
+
 const dayAt = (start: string, time: string | null | undefined) =>
   present(time) ? Math.max(0, daysBetween(start, time)) : null;
 
@@ -378,6 +389,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         toRead: false,
         rating: interview.progress.rating ?? null,
         interviewer: interviewerOf(interview.progress.interviewer),
+        ...heldBy(interview),
       },
     ];
   });

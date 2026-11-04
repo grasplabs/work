@@ -3,6 +3,7 @@ import {
   actionShapeRequestSchema,
   connectErrors,
   connectorContractRequestSchema,
+  connectorContractsRequestSchema,
   nativeOperationRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -132,6 +133,49 @@ export const connectorContract = async (
     throw connectErrors.create("connect.contract_not_found");
   }
   return served;
+};
+
+/**
+ * The IDs of the contracts `request`'s connection could serve, by its kind
+ * as `connectorContract` decides it: what an admin is offered to bind a
+ * workflow's connector binding to, each read as it is served when it is
+ * offered and again when it is approved.
+ */
+export const connectorContracts = async (
+  env: Env,
+  request: unknown
+): Promise<string[]> => {
+  const parsed = connectorContractsRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const connection = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(eq(connections.id, parsed.data.connectionId))
+    .get();
+  if (connection === undefined || connection.status === "disconnected") {
+    return [];
+  }
+  if (connection.serverKind === "composio") {
+    return [`${composioContractPrefix}.${connection.provider}@1`];
+  }
+  if (connection.serverKind === "http") {
+    return (await httpConfigOf(env, connection.id)) === undefined
+      ? []
+      : [httpContract];
+  }
+  const connector =
+    connection.server === composioContractPrefix
+      ? undefined
+      : nativeConnector(connection.server);
+  if (
+    connection.serverKind !== "native" ||
+    connector?.manifest.provider !== connection.provider
+  ) {
+    return [];
+  }
+  return [...generatedContracts(connector.manifest).keys()];
 };
 
 /** The properties a served JSON Schema names, or `null` for none it can tell. */

@@ -3,7 +3,6 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -23,8 +22,8 @@ import { routed, signedIn, signedInApi, withSignIn } from "./sign-in.ts";
 
 // A running App's screen calling one of its App's functions over core's
 // plain request (app-function-route.ts), from the page's side: a screen
-// whose build an admin approved calls through; one nobody approved, one
-// with someone else's lease, another site, someone signed out or without
+// with the lease core gave its build calls through, no admin approving
+// it; one with no lease of core's, one with someone else's lease, another site, someone signed out or without
 // a role, a session that is someone else's than the frame's, and a body
 // larger than any request may be, are refused, the last before core reads
 // past its bound.
@@ -78,49 +77,45 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** A builder's Notes App, activated, with its screen's build approved by an admin. */
-const approvedApp = async () => {
+/**
+ * A builder's Notes App, activated, with the lease core gave its screen's
+ * build as the builder opened it: no admin approves a screen's build.
+ */
+const servedApp = async () => {
   const builder = await personApi("builder");
-  const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
-  const review = await admin.api.screenTrust.review(id);
-  await admin.api.screenTrust.approve(id, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const { lease } = await builder.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
   return { builder, app: id, lease, release };
 };
 
-type Approved = Awaited<ReturnType<typeof approvedApp>>;
+type Served = Awaited<ReturnType<typeof servedApp>>;
 
 /**
- * `approvedApp`, its data classified ordinary and shared with `other`: a
+ * `servedApp`, its data classified ordinary and shared with `other`: a
  * screen of it runs without a lease of the caller's, so a lease signed
  * for the frame's person is no fence on its own.
  */
 const sharedOrdinaryApp = async () => {
-  const approved = await approvedApp();
+  const served = await servedApp();
   const admin = await personApi("admin");
-  const { generation } = await admin.api.screenTrust.review(approved.app);
-  await admin.api.screenTrust.classify(approved.app, "ordinary", generation);
+  const { generation } = await admin.api.dataPolicy.read(served.app);
+  await admin.api.dataPolicy.classify(served.app, "ordinary", generation);
   const other = await personApi("builder");
-  await approved.builder.api.apps.members.add(approved.app, {
+  await served.builder.api.apps.members.add(served.app, {
     type: "person",
     id: other.userId,
     role: "user",
   });
-  return { approved, other };
+  return { served, other };
 };
 
 /** A call's request, as the screen client writes it. */
 const requestFor = (
-  { release }: Approved,
+  { release }: Served,
   path: string,
   input: Json,
   idempotencyKey?: string
@@ -192,65 +187,65 @@ const resultOf = async (response: Response): Promise<unknown> => {
     : undefined;
 };
 
-/** The notes the App holds, as its builder's approved screen reads them. */
-const titlesOf = async (approved: Approved): Promise<unknown> =>
+/** The notes the App holds, as its builder's screen reads them. */
+const titlesOf = async (served: Served): Promise<unknown> =>
   await resultOf(
-    await post(approved.app, requestFor(approved, "notes.titles", {}), {
-      as: approved.builder,
-      lease: approved.lease,
+    await post(served.app, requestFor(served, "notes.titles", {}), {
+      as: served.builder,
+      lease: served.lease,
     })
   );
 
 describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
-  it("calls through for an approved build, as the person signed in", async () => {
-    const approved = await approvedApp();
+  it("calls through for the build core leased, as the person signed in", async () => {
+    const served = await servedApp();
     const created = await resultOf(
       await post(
-        approved.app,
-        requestFor(approved, "notes.create", { title: "Launch" }),
-        { as: approved.builder, lease: approved.lease }
+        served.app,
+        requestFor(served, "notes.create", { title: "Launch" }),
+        { as: served.builder, lease: served.lease }
       )
     );
     expect(created).toMatchObject({ ok: true });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: ["Launch"],
     });
   });
 
-  it("refuses a build nobody approved, or someone else's lease, before the call", async () => {
-    const approved = await approvedApp();
-    const other = await approvedApp();
-    const create = requestFor(approved, "notes.create", { title: "Leaked" });
-    const as = approved.builder;
+  it("refuses a call with no lease of core's, or another App's, before it runs", async () => {
+    const served = await servedApp();
+    const other = await servedApp();
+    const create = requestFor(served, "notes.create", { title: "Leaked" });
+    const as = served.builder;
     expect({
-      noLease: await refusalOf(await post(approved.app, create, { as })),
+      noLease: await refusalOf(await post(served.app, create, { as })),
       forged: await refusalOf(
-        await post(approved.app, create, {
+        await post(served.app, create, {
           as,
           lease: `${"a".repeat(64)}.x`,
         })
       ),
       anotherApps: await refusalOf(
-        await post(approved.app, create, { as, lease: other.lease })
+        await post(served.app, create, { as, lease: other.lease })
       ),
     }).toStrictEqual({
       noLease: { status: 403, code: "screen.unreviewed" },
       forged: { status: 403, code: "screen.unreviewed" },
       anotherApps: { status: 403, code: "screen.unreviewed" },
     });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: [],
     });
   });
 
   it("refuses a call whose session is someone else's than the frame's, or that names nobody, before it runs", async () => {
-    const { approved, other } = await sharedOrdinaryApp();
+    const { served, other } = await sharedOrdinaryApp();
     // The frame's person, and its save under a key whose answer was lost,
     // sent again once someone else's cookie is the browser's.
     const save = requestFor(
-      approved,
+      served,
       "notes.create",
       { title: "Mine" },
       crypto.randomUUID()
@@ -259,38 +254,36 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       as: Sent["as"],
       named?: string | null
     ): Promise<Response> =>
-      await post(approved.app, save, {
+      await post(served.app, save, {
         as,
-        lease: approved.lease,
+        lease: served.lease,
         ...(named === undefined ? {} : { named }),
       });
     expect({
-      someoneElse: await refusalOf(
-        await sentAs(other, approved.builder.userId)
-      ),
+      someoneElse: await refusalOf(await sentAs(other, served.builder.userId)),
       nobodyNamed: await refusalOf(await sentAs(other, null)),
     }).toStrictEqual({
       someoneElse: { status: 401, code: "auth.principal_changed" },
       // A page older than the header: out of date, not someone else.
       nobodyNamed: { status: 403, code: "screen.reload_required" },
     });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: [],
     });
     // The same person on a new session is still the frame's: their save goes
     // through, once.
-    const again = await signedIn(idp, "microsoft", approved.builder.person, {
-      coreEnv: withSignIn({ admins: [approved.builder.person.email] }),
+    const again = await signedIn(idp, "microsoft", served.builder.person, {
+      coreEnv: withSignIn({ admins: [served.builder.person.email] }),
     });
-    const sameUser = { session: again, userId: approved.builder.userId };
+    const sameUser = { session: again, userId: served.builder.userId };
     await expect(resultOf(await sentAs(sameUser))).resolves.toMatchObject({
       ok: true,
     });
-    await expect(
-      resultOf(await sentAs(approved.builder))
-    ).resolves.toMatchObject({ ok: true });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(resultOf(await sentAs(served.builder))).resolves.toMatchObject(
+      { ok: true }
+    );
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: ["Mine"],
     });
@@ -301,14 +294,14 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     // exact.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
     try {
-      const { approved, other } = await sharedOrdinaryApp();
-      const titles = requestFor(approved, "notes.titles", {});
-      const { lease } = approved;
+      const { served, other } = await sharedOrdinaryApp();
+      const titles = requestFor(served, "notes.titles", {});
+      const { lease } = served;
       const statuses = async (sent: Sent, count: number): Promise<number[]> => {
         const seen: number[] = [];
         for (let call = 0; call < count; call += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
-          const response = await post(approved.app, titles, sent);
+          const response = await post(served.app, titles, sent);
           seen.push(response.status);
           // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
           await response.body?.cancel();
@@ -318,11 +311,11 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       const { burst } = screenLimits.requests;
       const refused = {
         someoneElse: await statuses(
-          { as: other, named: approved.builder.userId, lease },
+          { as: other, named: served.builder.userId, lease },
           burst
         ),
         nobodyNamed: await statuses(
-          { as: approved.builder, named: null, lease },
+          { as: served.builder, named: null, lease },
           burst
         ),
       };
@@ -334,7 +327,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       // screen counted one.
       expect({
         other: await statuses({ as: other, lease }, burst),
-        builder: await statuses({ as: approved.builder, lease }, burst - 1),
+        builder: await statuses({ as: served.builder, lease }, burst - 1),
       }).toStrictEqual({
         other: Array.from({ length: burst }, () => 200),
         builder: Array.from({ length: burst - 1 }, () => 200),
@@ -345,29 +338,29 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
   });
 
   it("refuses another site, a body that isn't JSON, someone signed out and someone without a role", async () => {
-    const approved = await approvedApp();
+    const served = await servedApp();
     const stranger = await personApi("builder");
-    const create = requestFor(approved, "notes.create", { title: "Forged" });
-    const { lease } = approved;
-    const as = approved.builder;
+    const create = requestFor(served, "notes.create", { title: "Forged" });
+    const { lease } = served;
+    const as = served.builder;
     expect({
       site: await refusalOf(
-        await post(approved.app, create, {
+        await post(served.app, create, {
           as,
           lease,
           origin: "https://elsewhere.test",
         })
       ),
       form: await refusalOf(
-        await post(approved.app, create, {
+        await post(served.app, create, {
           as,
           lease,
           contentType: "text/plain",
         })
       ),
-      signedOut: await refusalOf(await post(approved.app, create, { lease })),
+      signedOut: await refusalOf(await post(served.app, create, { lease })),
       stranger: await refusalOf(
-        await post(approved.app, create, { as: stranger, lease })
+        await post(served.app, create, { as: stranger, lease })
       ),
     }).toStrictEqual({
       site: { status: 403, code: "request.forbidden" },
@@ -375,25 +368,23 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       signedOut: { status: 401, code: "auth.unauthenticated" },
       stranger: { status: 403, code: "app.not_found" },
     });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: [],
     });
   });
 
   it("refuses a request with no Origin, an opaque one, or a subdomain's", async () => {
-    const approved = await approvedApp();
-    const create = requestFor(approved, "notes.create", { title: "Forged" });
-    const sent = { as: approved.builder, lease: approved.lease };
+    const served = await servedApp();
+    const create = requestFor(served, "notes.create", { title: "Forged" });
+    const sent = { as: served.builder, lease: served.lease };
     const subdomain = new URL(clientOrigin);
     subdomain.hostname = `evil.${subdomain.hostname}`;
     await expect(
       Promise.all(
         [null, "null", subdomain.origin].map(
           async (origin) =>
-            await refusalOf(
-              await post(approved.app, create, { ...sent, origin })
-            )
+            await refusalOf(await post(served.app, create, { ...sent, origin }))
         )
       )
     ).resolves.toStrictEqual(
@@ -402,7 +393,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         code: "request.forbidden",
       }))
     );
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: [],
     });
@@ -414,14 +405,14 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     // requests take. A fresh person and App, so no other test's count.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
     try {
-      const approved = await approvedApp();
-      const titles = requestFor(approved, "notes.titles", {});
-      const sent = { as: approved.builder, lease: approved.lease };
+      const served = await servedApp();
+      const titles = requestFor(served, "notes.titles", {});
+      const sent = { as: served.builder, lease: served.lease };
       // Opening the screen counted one already.
       const statuses: number[] = [];
       for (let count = 0; count < screenLimits.requests.burst; count += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
-        const response = await post(approved.app, titles, sent);
+        const response = await post(served.app, titles, sent);
         statuses.push(response.status);
         // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
         await response.body?.cancel();
@@ -430,7 +421,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         ...Array.from({ length: screenLimits.requests.burst - 1 }, () => 200),
         429,
       ]);
-      const refused = await post(approved.app, titles, sent);
+      const refused = await post(served.app, titles, sent);
       await expect(refusalOf(refused)).resolves.toStrictEqual({
         status: 429,
         code: "screen.rate_limited",
@@ -441,38 +432,36 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
   });
 
   it("refuses a call of a revoked release before it runs, as the build revoked, and tells the page so", async () => {
-    const approved = await approvedApp();
+    const served = await servedApp();
     const admin = await person("admin");
     await revokeRelease(
       env,
       admin,
-      { app: appIdSchema.parse(approved.app), version: 1 },
+      { app: appIdSchema.parse(served.app), version: 1 },
       "Leaks data"
     );
     await expect(
       refusalOf(
         await post(
-          approved.app,
-          requestFor(approved, "notes.create", { title: "After" }),
-          { as: approved.builder, lease: approved.lease }
+          served.app,
+          requestFor(served, "notes.create", { title: "After" }),
+          { as: served.builder, lease: served.lease }
         )
       )
     ).resolves.toStrictEqual({ status: 403, code: "screen.revoked" });
     // The page asks core on its own connection, and tears the frame down.
     await expect(
-      approved.builder.api.screens
-        .frame(approved.app, approved.lease)
-        .delivery()
+      served.builder.api.screens.frame(served.app, served.lease).delivery()
     ).resolves.toBe("revoked");
   });
 
   it("refuses a body whose length says it is past the bound, unread", async () => {
-    const approved = await approvedApp();
+    const served = await servedApp();
     await expect(
       refusalOf(
-        await post(approved.app, requestFor(approved, "notes.titles", {}), {
-          as: approved.builder,
-          lease: approved.lease,
+        await post(served.app, requestFor(served, "notes.titles", {}), {
+          as: served.builder,
+          lease: served.lease,
           headers: { "content-length": String(functionRequestMaxBytes + 1) },
         })
       )
@@ -480,11 +469,11 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
   });
 
   it("stops reading a body past its bound, whatever its length says, and runs nothing", async () => {
-    const approved = await approvedApp();
-    const as = approved.builder;
-    const { lease } = approved;
+    const served = await servedApp();
+    const as = served.builder;
+    const { lease } = served;
     // A valid call, padded past the bound, sent as a stream with no length.
-    const padded = requestFor(approved, "notes.create", {
+    const padded = requestFor(served, "notes.create", {
       title: "Padded",
     }).replace("{", `{ ${" ".repeat(functionRequestMaxBytes)}`);
     const bytes = new TextEncoder().encode(padded);
@@ -498,14 +487,14 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     });
     expect({
       streamed: await refusalOf(
-        await post(approved.app, streamed, { as, lease })
+        await post(served.app, streamed, { as, lease })
       ),
-      whole: await refusalOf(await post(approved.app, padded, { as, lease })),
+      whole: await refusalOf(await post(served.app, padded, { as, lease })),
     }).toStrictEqual({
       streamed: { status: 413, code: "request.too_large" },
       whole: { status: 413, code: "request.too_large" },
     });
-    await expect(titlesOf(approved)).resolves.toStrictEqual({
+    await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
       value: [],
     });

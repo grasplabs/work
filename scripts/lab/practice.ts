@@ -74,6 +74,17 @@ const playedSchema = z.object({
       })
     )
     .optional(),
+  /** People v2: how they type (surface.ts), put on each answer after the model wrote it. */
+  surface: z
+    .object({
+      typos: z.number(),
+      phone: z.boolean(),
+      capitals: z.enum(["always", "rarely", "never"]),
+      dropsStops: z.number(),
+      splits: z.number(),
+      mixesDutch: z.boolean(),
+    })
+    .optional(),
   seed: z.int().optional(),
   said: z.array(z.array(z.string())),
   notesAt: z.array(z.int()),

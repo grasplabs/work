@@ -358,36 +358,58 @@ describe("an organization's interviews", () => {
 
     const { status, html } = await page("/lab");
     const name = `Acme ${interviewing.clientId}`;
-    const row = html.slice(
-      html.indexOf(`>${name}</a>`),
-      html.indexOf("</tr>", html.indexOf(`>${name}</a>`))
-    );
+    const rowOf = (text: string) =>
+      text.slice(
+        text.indexOf(`>${name}</a>`),
+        text.indexOf("</tr>", text.indexOf(`>${name}</a>`))
+      );
 
     expect({
       status,
-      inAll: [
-        "Finished",
-        "What people thought",
-        "Left in",
-        "Stopped halfway",
+      figures: [
+        "In the lab",
+        "Finished, with real people",
+        "Notes kept, with real people",
+        "Rating, with real people",
       ].map((label) => html.includes(`>${label}<`)),
+      // Core here doesn't say which Stephen held an interview.
+      inUse: html.includes("No interview says which Stephen held it yet."),
+      // No lab run is kept in this checkout, and Ben and Dan, Stephen's two, didn't finish.
+      noRun: html.includes("No lab run is kept yet"),
+      finished: html.includes(">0 of 2<"),
       // One row a company whose interviews started, opening its interviewers.
       opens: html.includes(
         `href="/organizations/${interviewing.clientId}/interviews?tab=interviewers"`
       ),
-      // Ana gave Claire a 5; Ben stopped at the steps.
-      rated: row.includes("5.0 (1)"),
       quietListed: html.includes(`>Acme ${quiet.clientId}</a>`),
       quietCounted: html.includes("started interviews yet."),
       leaked: missingIn(html, [said, fact, linkCode]).length,
     }).toStrictEqual({
       status: 200,
-      inAll: [true, true, true, true],
+      figures: [true, true, true, true],
+      inUse: true,
+      noRun: true,
+      finished: true,
       opens: true,
-      rated: true,
       quietListed: false,
       quietCounted: true,
       leaked: 3,
     });
+
+    // Claire is a switch for the whole page: Ana talked with her, finished, and gave her a 5.
+    const claire = await page("/lab?who=claire");
+    expect({
+      finished: claire.html.includes(">1 of 1<"),
+      rated: rowOf(claire.html).includes("5.0 (1)"),
+      leaked: missingIn(claire.html, [said, fact, linkCode]).length,
+    }).toStrictEqual({ finished: true, rated: true, leaked: 3 });
+
+    // Every organization follows Stable here: on Edge there is no one to count.
+    const edge = await page("/lab?where=edge");
+    const stable = await page("/lab?where=stable");
+    expect({
+      edgeListed: edge.html.includes(`>${name}</a>`),
+      stableListed: stable.html.includes(`>${name}</a>`),
+    }).toStrictEqual({ edgeListed: false, stableListed: true });
   });
 });

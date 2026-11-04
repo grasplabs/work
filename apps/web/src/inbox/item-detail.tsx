@@ -1,4 +1,5 @@
 import type { DependencyReview } from "@grasp-os/shared/dependencies";
+import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -9,10 +10,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
@@ -35,6 +32,7 @@ import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { ItemMark, KindPill } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
@@ -843,91 +841,6 @@ const WorkflowGoLiveDetail = ({
   );
 };
 
-type PendingBinding = Extract<
-  InboxSource,
-  { type: "bindings" }
->["item"]["pending"]["bindings"][number];
-
-/**
- * One binding that waits: what it reaches, and, where core offers targets
- * that would serve it, the choice of one and Approve; otherwise where it is
- * approved instead.
- */
-const BindingRow = ({
-  binding,
-  onApprove,
-  busy,
-}: {
-  binding: PendingBinding;
-  onApprove: (target: PendingBinding["offered"][number]) => Promise<void>;
-  busy: boolean;
-}) => {
-  const { t } = useLingui();
-  const id = useId();
-  const [chosen, setChosen] = useState(0);
-  const { alias, kind, contractId, offered } = binding;
-  const choice = offered[chosen];
-  // What an offered target is, in words: what it names, or what it is.
-  const wordsOf = ({ target, label }: PendingBinding["offered"][number]) => {
-    if (target.kind === "event") {
-      return t`The events its contract admits`;
-    }
-    if (target.kind === "files") {
-      return t`The run's own files`;
-    }
-    return label === "" ? target.kind : label;
-  };
-  return (
-    <li className="flex flex-col gap-2 rounded-lg border px-4 py-3">
-      <span className="flex flex-wrap items-center gap-2">
-        <code className="font-mono">{alias}</code>
-        <span className="text-muted-foreground">
-          {t`${kind}: ${contractId}`}
-        </span>
-      </span>
-      {choice === undefined ? (
-        <p className="text-muted-foreground">
-          {t`Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page.`}
-        </p>
-      ) : (
-        <div className="flex flex-wrap items-end gap-2">
-          {offered.length === 1 ? (
-            <span>{wordsOf(choice)}</span>
-          ) : (
-            <NativeSelect
-              aria-label={t`What ${alias} reaches`}
-              id={id}
-              onChange={(event) => {
-                setChosen(Number(event.target.value));
-              }}
-              value={String(chosen)}
-            >
-              {offered.map((each, at) => (
-                <NativeSelectOption
-                  key={JSON.stringify(each.target)}
-                  value={String(at)}
-                >
-                  {wordsOf(each)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          )}
-          <Button
-            aria-label={t`Approve ${alias}`}
-            disabled={busy}
-            onClick={() => {
-              void onApprove(choice);
-            }}
-            size="sm"
-          >
-            <Trans>Approve</Trans>
-          </Button>
-        </div>
-      )}
-    </li>
-  );
-};
-
 /**
  * A version of a workflow whose bindings no admin approved: each approved
  * here for the version shown, through the workflow's own approval, which
@@ -946,12 +859,12 @@ const BindingsDetail = ({
   const { busy, failure, run } = useCoreAction();
   const approve = async (
     alias: string,
-    offered: PendingBinding["offered"][number]
+    target: WorkflowBindingTarget
   ): Promise<void> => {
     await run(async (session) => {
       await session.workflowResources.approveBinding(workflow.id, {
         alias,
-        target: offered.target,
+        target,
         reviewed: { version },
       });
       const { name } = workflow;
@@ -964,18 +877,12 @@ const BindingsDetail = ({
       acts={[]}
       busy={busy}
       extra={
-        <ul aria-label={t`Its bindings`} className="flex flex-col gap-2">
-          {bindings.map((binding) => (
-            <BindingRow
-              binding={binding}
-              busy={busy}
-              key={binding.alias}
-              onApprove={async (offered) => {
-                await approve(binding.alias, offered);
-              }}
-            />
-          ))}
-        </ul>
+        <PendingBindingList
+          bindings={bindings}
+          busy={busy}
+          elsewhere={workflow.id}
+          onApprove={approve}
+        />
       }
       failure={failure}
       frame={frame}

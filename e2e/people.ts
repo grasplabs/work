@@ -288,7 +288,7 @@ const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
   appPage: { builder: "builder", user: "user", colleague: "builder" },
   screens: { one: "builder", two: "builder" },
-  screenAttacks: { builder: "builder", admin: "admin" },
+  screenAttacks: { builder: "builder" },
   screenWorkflows: { builder: "builder", admin: "admin" },
   screenBoundWorkflow: { builder: "builder", admin: "admin" },
   screenDecisionForm: {
@@ -296,7 +296,6 @@ const cast = {
     admin: "admin",
     colleague: "user",
   },
-  screenApproval: { builder: "builder", admin: "admin" },
   notesApp: { builder: "builder" },
   screenNavigation: { builder: "builder" },
   appSurfaces: { builder: "builder", user: "user" },
@@ -591,10 +590,34 @@ export const signInTo = async (
 };
 
 /**
- * Classifies the App's data as ordinary, as the configured admin: its
- * screens then get it without anyone approving their code. For tests of
- * what a screen does with its App; screen-approval.e2e.ts is the one
- * about approving its code.
+ * Revokes the App's newest release, as the configured admin: its screens
+ * get none of the App's data from then on, the screens already running
+ * included.
+ */
+export const revokeNewestRelease = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const [newest] = await api.apps.versions.releases(app);
+    if (newest === undefined) {
+      throw new Error(`The App ${app} has no release to revoke`);
+    }
+    await api.apps.versions.revoke(app, newest.version, {
+      reason: "An end-to-end test revokes it",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Classifies the App's data as `ordinary`, as the configured admin: its
+ * pages' links then open on a click, without the person confirming each.
  */
 export const ordinaryData = async (app: string): Promise<void> => {
   const cookie = process.env[adminVariable];
@@ -605,29 +628,8 @@ export const ordinaryData = async (app: string): Promise<void> => {
   }
   const { core, api } = apiOf({ cookie });
   try {
-    const { generation } = await api.screenTrust.review(app);
-    await api.screenTrust.classify(app, "ordinary", generation);
-  } finally {
-    core[Symbol.dispose]();
-  }
-};
-
-/**
- * Classifies the App's data as sensitive again: its builds nobody
- * approved get none of it from then on, the screens already running
- * included.
- */
-export const sensitiveData = async (app: string): Promise<void> => {
-  const cookie = process.env[adminVariable];
-  if (cookie === undefined) {
-    throw new Error(
-      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
-    );
-  }
-  const { core, api } = apiOf({ cookie });
-  try {
-    const { generation } = await api.screenTrust.review(app);
-    await api.screenTrust.classify(app, "sensitive", generation);
+    const { generation } = await api.dataPolicy.read(app);
+    await api.dataPolicy.classify(app, "ordinary", generation);
   } finally {
     core[Symbol.dispose]();
   }
@@ -635,8 +637,7 @@ export const sensitiveData = async (app: string): Promise<void> => {
 
 /**
  * Writes `files` to the App (null deletes one), commits them and makes
- * that version current, with the App's data classified as ordinary
- * (`ordinaryData`).
+ * that version current.
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
@@ -649,5 +650,4 @@ export const release = async (
   // Published, for the people it is shared with (a draft is its
   // builders' alone).
   await api.apps.publish(app);
-  await ordinaryData(app);
 };

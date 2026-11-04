@@ -1252,6 +1252,12 @@ export interface ResourceListedRun {
   queued?: RunQueue;
   /** While it is `queued` for an AI provider: which, and what's wrong. */
   aiProvider?: RunAiProviderWait;
+  /**
+   * An open decision it waits for that the person may answer now (the
+   * latest such), answered on its own page (`/decisions/<id>`); none when
+   * they may answer none of them.
+   */
+  decision?: string;
   createdAt: string;
   endedAt: string | null;
 }

@@ -106,6 +106,7 @@ import { connectionOwners } from "./connections.ts";
 import {
   actionShape,
   connectorContract,
+  connectorContracts,
   nativeOperation,
 } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
@@ -606,6 +607,10 @@ export default class Connect
 
   async connectorContract(request: unknown): Promise<ConnectorContract> {
     return await connectorContract(this.env, request);
+  }
+
+  async connectorContracts(request: unknown): Promise<string[]> {
+    return await connectorContracts(this.env, request);
   }
 
   /**

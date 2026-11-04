@@ -5,7 +5,7 @@ import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, ordinaryData, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // A chat builds an App in a studio: the chat alone until its agent writes
@@ -219,7 +219,6 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Published, for the people it is shared with (a draft is its
     // builders' alone).
     await api.apps.publish(app.id);
-    await ordinaryData(app.id);
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
 
@@ -329,9 +328,28 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(frame.getByRole("status")).toHaveText("3 in the preview");
     await page.setViewportSize({ width: 1280, height: 720 });
 
-    // View App opens the App itself.
-    await studio.getByRole("link", { name: "View App" }).click();
-    await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
+    // The App's workspace is a link away.
+    await studio
+      .getByRole("link", { name: "Open in the App's workspace" })
+      .click();
+    // It carries this chat on, with the draft it builds.
+    await expect(page).toHaveURL(
+      new RegExp(`/apps/${app.id}/edit\\?chat=${chat.id}$`, "u")
+    );
+    // There, the draft this chat builds is the preview, not the live App.
+    await expect(
+      page.getByText("Unpublished changes", { exact: true })
+    ).toBeVisible();
+    // It stays this chat's as the person moves between the views.
+    const views = page.getByRole("navigation", { name: "Workspace views" });
+    await views.getByRole("link", { name: "Code" }).click();
+    await views.getByRole("link", { name: "Preview" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/apps/${app.id}/edit\\?chat=${chat.id}$`, "u")
+    );
+    await expect(
+      page.getByText("Unpublished changes", { exact: true })
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
     ).toBeVisible();

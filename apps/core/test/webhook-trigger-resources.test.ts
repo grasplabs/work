@@ -3,17 +3,18 @@ import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import { workflowWebhookHeaders } from "@grasp-os/shared/workflow-triggers";
+import {
+  triggerStartBinding,
+  workflowWebhookHeaders,
+} from "@grasp-os/shared/workflow-triggers";
 import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 import { env } from "cloudflare:workers";
 import { Webhook } from "standardwebhooks";
 import { describe, expect, it } from "vite-plus/test";
 
-import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { grantPermission, listPermissions } from "../src/permissions.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -97,35 +98,10 @@ const definitionOf = (name: string): string =>
     do: [{ finish: { set: { invoice: "${ $workflow.input.invoice }" } } }],
   });
 
-/** `request`, asked for and granted by `by`. */
-const granted = async (
-  by: Identity,
-  request: Omit<PermissionRequest, "binding">
-): Promise<string> => {
-  const { id } = await requestPermission(
-    env,
-    by,
-    {
-      ...request,
-      binding: `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`,
-    },
-    {
-      app: () => {
-        throw new Error("No App here");
-      },
-      resource: async (ref, needed) => {
-        await requireResourceRole(env, by, ref, needed);
-      },
-    }
-  );
-  await grantPermission(env, by, id, { version: null });
-  return id;
-};
-
 /**
  * A builder's workflow with a webhook trigger of theirs on it, made over
- * `/rpc`: the trigger as created, its secret with it; its `start`
- * granted by an admin unless `grant` is false.
+ * `/rpc`: the trigger as created, its secret with it; the `start` it asked
+ * for as it was created granted by an admin unless `grant` is false.
  */
 const webhookTrigger = async ({ grant = true } = {}) => {
   const builder = await signedInApi(idp, "builder");
@@ -144,17 +120,15 @@ const webhookTrigger = async ({ grant = true } = {}) => {
     config: {},
   });
   if (grant) {
-    await granted(by, {
-      subject: {
-        type: "trigger",
-        triggerId: triggerIdSchema.parse(trigger.id),
-      },
-      object: {
-        type: "workflow",
-        workflowId: workflowResourceIdSchema.parse(id),
-      },
-      actions: ["start"],
-    });
+    // The request the trigger made as it was created.
+    const [asked] = await listPermissions(
+      env,
+      by,
+      { type: "trigger", triggerId: trigger.id },
+      undefined,
+      "requested"
+    );
+    await grantPermission(env, by, asked?.id ?? "", { version: null });
   }
   return { builder, admin: by, workflow: id, trigger };
 };
@@ -458,18 +432,99 @@ describe("a workflow's webhook trigger", () => {
     });
   });
 
-  it("starts nothing until an admin grants it its start", async () => {
-    const { trigger } = await webhookTrigger({ grant: false });
-    const delivered = await send(
-      trigger.webhook?.token ?? "",
-      trigger.secret ?? "",
-      invoice
-    );
+  it("asks an admin for its start as it is created, starting nothing until they grant it, and asks again once refused", async () => {
+    const { builder, workflow, trigger } = await webhookTrigger({
+      grant: false,
+    });
+    const decider = await signedInApi(idp, "admin");
+    const { triggers } = builder.api.workflowResources;
+    const token = trigger.webhook?.token ?? "";
+    const secret = trigger.secret ?? "";
+    const startStanding = async () => {
+      const listed = await triggers.list(workflow);
+      return listed.map(({ start }) => start);
+    };
+    // What the admin's pending list shows of this trigger's requests.
+    const waitingFor = async () => {
+      const { items } = await decider.api.waiting.list();
+      return items.flatMap((item) =>
+        item.kind === "permissionRequest" &&
+        item.request.subject.type === "trigger" &&
+        item.request.subject.triggerId === trigger.id
+          ? [item.request]
+          : []
+      );
+    };
+    const [first] = await waitingFor();
+    const beforeGrant = await send(token, secret, invoice, { id: "msg_1" });
+    const asked = {
+      standing: await startStanding(),
+      shown: first && {
+        object: first.object,
+        actions: first.actions,
+        requestedBy: first.requestedBy,
+      },
+      delivered: beforeGrant.status,
+    };
+    await decider.api.waiting.settle({
+      kind: "permissionRequest",
+      id: first?.id ?? "",
+      verdict: "reject",
+    });
+    const stillWaiting = await waitingFor();
+    const refused = {
+      standing: await startStanding(),
+      waiting: stillWaiting.length,
+    };
+    await builder.api.permissions.request({
+      subject: {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(trigger.id),
+      },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow),
+      },
+      actions: ["start"],
+      binding: triggerStartBinding,
+    });
+    const [again] = await waitingFor();
+    const askedAgain = await startStanding();
+    await decider.api.waiting.settle({
+      kind: "permissionRequest",
+      id: again?.id ?? "",
+      verdict: "grant",
+      reviewed: { version: null },
+    });
+    const delivered = await send(token, secret, invoice, { id: "msg_2" });
 
     expect({
-      status: delivered.status,
-      inputs: await runInputsOf(trigger.id),
-    }).toStrictEqual({ status: 422, inputs: [] });
+      asked,
+      refused,
+      askedAgain,
+      granted: {
+        standing: await startStanding(),
+        delivered: delivered.status,
+        inputs: await runInputsOf(trigger.id),
+      },
+    }).toStrictEqual({
+      asked: {
+        standing: ["requested"],
+        shown: {
+          object: { type: "workflow", workflowId: workflow },
+          actions: ["start"],
+          requestedBy: builder.userId,
+        },
+        delivered: 422,
+      },
+      refused: { standing: ["revoked"], waiting: 0 },
+      askedAgain: ["requested"],
+      granted: {
+        standing: ["active"],
+        delivered: 202,
+        inputs: [{ invoice: "INV-1", amount: 120 }],
+      },
+    });
   });
 
   it("takes only its newest secret once rotated, and none once revoked, until rotated again", async () => {

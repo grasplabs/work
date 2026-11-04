@@ -266,6 +266,20 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     input: templateSchema,
     // How long it takes answers, from its task's timeout (generate.ts).
     timeoutMs: z.int().positive().optional(),
+    // How long after asking it asks once more, if nobody answered.
+    remindAfterMs: z.int().positive().optional(),
+    // The workflow's own action that tells the people it asks, as the
+    // generator sealed it: run by the host, never by the isolate.
+    ask: z
+      .strictObject({
+        binding: aliasSchema,
+        module: z.string().regex(workflowModulePattern).max(256),
+        export: z
+          .string()
+          .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
+          .max(256),
+      })
+      .optional(),
   }),
   z.strictObject({
     name: z.literal("grasp.compute"),
@@ -1298,6 +1312,15 @@ const verifiedBuild = async (
   // Every calculation a task calls is one the seal holds, of a module it
   // compiled: checked once here, so a run never looks one up in vain.
   const callsSealed = tasks.tasks.every((task) => {
+    // A decision's ask is an action's, as an action task's call is.
+    if (task.kind === "call" && task.call.name === "grasp.decision") {
+      const { ask } = task.call;
+      return (
+        ask === undefined ||
+        compute?.contracts.get(`${ask.module}#${ask.export}`)?.kind ===
+          "operation"
+      );
+    }
     if (
       task.kind !== "call" ||
       (task.call.name !== "grasp.compute" && task.call.name !== "grasp.action")

@@ -27,6 +27,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appIntegrations,
   appMembers,
+  projectItems,
   appVersions,
   appResourceBindings,
   appWebhookDeliveries,
@@ -166,6 +167,16 @@ const endedWith = (
         )
       ),
     db.delete(appMembers).where(and(eq(appMembers.appId, appId), gone)),
+    // Out of every project too: a removed App takes no project's room.
+    db
+      .delete(projectItems)
+      .where(
+        and(
+          eq(projectItems.itemType, "app"),
+          eq(projectItems.itemId, appId),
+          gone
+        )
+      ),
     db
       .delete(appIntegrations)
       .where(and(eq(appIntegrations.appId, appId), gone)),
@@ -387,6 +398,20 @@ const reapIfAbandoned = async (
   }
   await afterRemoval(env, app.id);
   return true;
+};
+
+/**
+ * Reaps provisional App `app` now, as `reapAbandonedApps` reaps one, if
+ * nothing of it was made current or committed and its chat holds no
+ * draft of it: for one whose chat never came to be (`ChatsApi.newApp`).
+ * Whether it was.
+ */
+export const reapProvisionalApp = async (
+  env: Env,
+  app: { id: string; name: string; workspaceId: string; chatId: string }
+): Promise<boolean> => {
+  const now = new Date();
+  return await reapIfAbandoned(env, drizzle(env.DB), app, now);
 };
 
 /**

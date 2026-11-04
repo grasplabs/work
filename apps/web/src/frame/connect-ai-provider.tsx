@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -9,8 +8,10 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import { Trans } from "@lingui/react/macro";
-import { Link, useMatch } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";
+
+import { useMemberAdmin } from "../use-member-admin.ts";
 
 // What an AI feature shows while the organization has no AI provider to
 // call: every model call fails as `model.no_provider` until one of its
@@ -18,13 +19,6 @@ import { KeyRoundIcon } from "lucide-react";
 // providers). Never an error: a state with the way out. An admin who can
 // connect one gets the link; anyone else, Grasp staff included (who may
 // read but never change whose key pays), is told who can.
-
-/** Whether the signed-in person can connect a provider: the organization's own admins. */
-const useCanConnect = (): boolean => {
-  const shell = useMatch({ from: "/_shell", shouldThrow: false });
-  const identity = shell?.context.identity;
-  return identity !== undefined && isAdmin(identity.role) && !identity.staff;
-};
 
 /**
  * Connect an AI provider: a link to Settings › AI providers for whoever can,
@@ -36,7 +30,7 @@ export const ConnectAiProvider = ({
 }: {
   size?: "default" | "sm" | "xs";
 }) => {
-  const canConnect = useCanConnect();
+  const canConnect = useMemberAdmin();
   return (
     <Empty size={size}>
       <EmptyHeader>

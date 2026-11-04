@@ -21,6 +21,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { publishTemplate } from "../src/resource-templates.ts";
+import { workflowPendingBindings } from "../src/workflow-binding-requests.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -306,14 +307,22 @@ const readingWorkflow = async (
     contract: "grasp.letter@1",
     content,
   });
+  // As an admin approves it on the workflow's page: the version offered.
+  const [pending] = await workflowPendingBindings(env, admin, workflow.id);
+  const offered = pending?.bindings
+    .find(({ alias }) => alias === "letter")
+    ?.offered.find(
+      ({ target }) =>
+        target.kind === "template" &&
+        target.templateId === template.templateId &&
+        target.contentHash === template.contentHash
+    );
+  if (offered === undefined) {
+    throw new Error("The template version isn't offered");
+  }
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "letter",
-    target: {
-      kind: "template",
-      templateId: template.templateId,
-      version: template.version,
-      contentHash: await sha256Hex(canonicalJson(content)),
-    },
+    target: offered.target,
     reviewed: { version: 1 },
   });
   return {

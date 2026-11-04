@@ -108,6 +108,7 @@ import { callCompute } from "./resource-compute.ts";
 import {
   askDeciders,
   candidateDecision,
+  recipientsNow,
   checkCandidateDecision,
   decisionRunOf,
   openRunDecision,
@@ -306,6 +307,13 @@ import { heldWakeType } from "./wakes.ts";
 //   nobody answered fails the call: no outcome is made up for it. A run an
 //   App's test started waits the same way for a decision of its test's
 //   own, which only its fixture's principal answers (fixture-decisions.ts).
+// - A decision's people told twice, or told by the isolate. Its ask and
+//   its reminder are each a step of the host's own (`#askOnce`), named by
+//   the host, never by a step name the isolate passes: a replay asks
+//   nobody again. A task that names an action to tell them (`ask`) runs it
+//   in that step as an action task's step runs it, admitted, its packages
+//   admitted again and tried once, on what the host built: who the
+//   decision asks then, each with its link, and whether it reminds them.
 
 /** What a step that can't say the run busy ends (`RunStep.busy`). */
 const noBusy = (): void => {
@@ -728,13 +736,19 @@ const stepNamePattern =
 const scopeSegmentPattern =
   /^(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.(?<index>0|[1-9][0-9]{0,3})$/u;
 
-/** The steps there are: a task's, or the workflow's own data flow. */
+/**
+ * The steps there are: a task's, the workflow's own data flow, or a
+ * decision's ask or reminder, which only the host runs, by its own name
+ * (`#askOnce`): no step name the isolate passes is one.
+ */
 type StepKind =
   | "task"
   | "enter"
   | "leave"
   | "item"
   | "catch"
+  | "ask"
+  | "remind"
   | "workflow-input"
   | "workflow-output";
 
@@ -992,6 +1006,9 @@ const stagesOf: Readonly<Record<StepKind, readonly Stage[]>> = {
   item: ["taskDefinition"],
   // A catch's conditions are the host's own to evaluate (`#catches`).
   catch: [],
+  // What a decision's ask action gets is the host's own to build.
+  ask: [],
+  remind: [],
   "workflow-input": ["workflowInputFrom"],
   "workflow-output": ["workflowOutputAs"],
 };
@@ -1003,6 +1020,8 @@ const checksOf: Readonly<Record<StepKind, readonly DataCheck[]>> = {
   leave: ["output", "export"],
   item: [],
   catch: [],
+  ask: [],
+  remind: [],
   "workflow-input": [],
   "workflow-output": [],
 };
@@ -1029,6 +1048,10 @@ type DecisionTask = Extract<SealedTask, { kind: "call" }> & {
 
 const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
   task?.kind === "call" && task.call.name === "grasp.decision";
+
+/** Whether `step` is a decision's ask or reminder, run by its action. */
+const isAsking = (step: StepOf): boolean =>
+  step.kind === "ask" || step.kind === "remind";
 
 /**
  * Whether `step` is a decision task's call step: its enter step took the
@@ -1340,10 +1363,13 @@ const configOf = (step: StepOf) => {
     ownTimeout ?? stepConfig.timeout,
     ...attemptMs
   );
+  // A decision's ask action is an action: tried once, so a replay or a
+  // retry never tells its people twice.
   const once =
-    step.kind === "task" &&
-    task?.kind === "call" &&
-    triedOnce.has(task.call.name);
+    isAsking(step) ||
+    (step.kind === "task" &&
+      task?.kind === "call" &&
+      triedOnce.has(task.call.name));
   return { retries: stepConfig.retries, timeout, once };
 };
 
@@ -1831,6 +1857,14 @@ export class ResourceRunHost
    * so each item of a loop takes its own.
    */
   readonly #decisions = new Map<string, string>();
+  /**
+   * The decision tasks' call steps, by name, whose ask or reminder failed
+   * (`#askOnce`): its people may have been told, so no catch takes it as a
+   * failure of a call that never went out.
+   */
+  readonly #askFailed = new Set<string>();
+  /** The decision each ask or reminder step (`#askOnce`), by name, asks for. */
+  readonly #asks = new Map<string, string>();
   readonly #decisionInputs = new Map<string, Json>();
   /**
    * The model calls of the run's JSON model tasks: those its replayed steps
@@ -2635,7 +2669,7 @@ export class ResourceRunHost
           // catch may take, an unknown outcome's, that it decided on.
           this.#failed(
             reached?.scope ?? [],
-            reached?.kind === "catch"
+            reached?.kind === "catch" || this.#askFailed.has(String(name))
               ? notCaught()
               : failureOf(
                   failedWith(error),
@@ -3360,7 +3394,9 @@ export class ResourceRunHost
           );
         }
         ran();
-        call = fn(this.#attemptHostOf(attempt));
+        call = isAsking(step)
+          ? this.#asking(attempt)
+          : fn(this.#attemptHostOf(attempt));
       }
       this.#hooks.attemptCall?.(call, stepDone);
       let result: Settled<unknown>;
@@ -3796,26 +3832,103 @@ export class ResourceRunHost
   }
 
   /**
+   * Asks the people of decision `decision`, opened for the call step
+   * `step` of a decision task (on `data`, as it captured it), or reminds
+   * them, once, in a step of its own, so a replay asks nobody again: by
+   * the host's own notice (`askDeciders`), or, for a task that names an
+   * action to (`ask`), by that action, in an attempt of its own, admitted
+   * and tried once as an action task's step is (`#asking`). One that
+   * fails fails its decision task as no catch takes (`#askFailed`): its
+   * people may have been told, and the run ends, its decision with it.
+   */
+  async #askOnce(
+    step: StepOf,
+    data: { input: Json; context: Json },
+    decision: string,
+    reminder: boolean
+  ): Promise<void> {
+    try {
+      await this.#askedIn(step, data, decision, reminder);
+    } catch (error) {
+      this.#askFailed.add(step.name);
+      throw error;
+    }
+  }
+
+  /** `#askOnce`'s work, which may fail. */
+  async #askedIn(
+    step: StepOf,
+    data: { input: Json; context: Json },
+    decision: string,
+    reminder: boolean
+  ): Promise<void> {
+    const name = `${step.name}:decision:${reminder ? "remind" : "asked"}`;
+    this.#asks.set(name, decision);
+    if (!isDecisionTask(step.task) || step.task.call.ask === undefined) {
+      await this.#step.do(
+        name,
+        {},
+        async () =>
+          await askDeciders(this.#env, this.#run.calling, decision, reminder)
+      );
+      return;
+    }
+    const run: StepRun = {
+      step: { ...step, kind: reminder ? "remind" : "ask", name },
+      name,
+      data,
+      capturedSize: 0,
+      taskStart: undefined,
+      entering: false,
+      wait: loadWaitStart,
+      collecting: false,
+      decided: undefined,
+      failure: undefined,
+    };
+    const stepDone = Promise.withResolvers<null>();
+    try {
+      await this.#roundsFrom(
+        run,
+        name,
+        async (context) =>
+          // Its attempt runs the host's own work (`#asking`), never
+          // anything of the isolate's.
+          await this.#attempt(
+            run,
+            context,
+            async () => await Promise.resolve(null),
+            stepDone.promise
+          )
+      );
+    } finally {
+      stepDone.resolve(null);
+    }
+  }
+
+  /**
    * Waits, before the call step `stepName` of decision task `task` runs on
    * `data`, for the outcome of the decision its enter step opened, and
    * answers it: none for a test run, which opened nothing. The step runs
    * only on the input that enter step recorded, after its deadline, both
    * as this activation reached them. Its people are asked first, once, in
-   * a step of their own (`askDeciders`). Each look at the decision is a step
+   * a step of their own (`#askOnce`). Each look at the decision is a step
    * of its own, whether it was answered and when recorded, so a replay
    * waits as the first activation did; between them, a durable wait for
    * the decision's wake (decisions.ts), holding no isolate, until its
-   * deadline. A wake only makes the run look again: a stray or forged
-   * event of its type, which answered nothing, makes it wait again for the
-   * time it had left. Then the outcome, read from the decision and
-   * recorded, a decision still open closed as timed out in the same
-   * conditional update an answer uses, so an answer that lands first is
-   * the outcome instead.
+   * reminder is due (its `remindAfterMs` after the look that followed the
+   * ask), then, if nobody answered before it and its deadline, the
+   * reminder, asked as the ask was, and the same wait until its deadline.
+   * A wake only makes the run look again: a stray or forged event of its
+   * type, which answered nothing, makes it wait again for the time it had
+   * left. Then the outcome, read from the decision and recorded, a
+   * decision still open closed as timed out in the same conditional
+   * update an answer uses, so an answer that lands first is the outcome
+   * instead.
    */
   async #awaitDecision(
     step: StepOf,
     task: DecisionTask,
-    data: { input: Json }
+    data: { input: Json; context: Json }
   ): Promise<DecisionOutcome | undefined> {
     const { name: stepName, place } = step;
     const entered = this.#decisionInputs.get(place);
@@ -3840,13 +3953,7 @@ export class ResourceRunHost
     // test (fixture-decisions.ts): nobody is told of it.
     const fixture = this.#hooks.fixture === true;
     if (!fixture) {
-      // Its people asked once, the ask a step of its own: a replay asks
-      // nobody again.
-      await this.#step.do(
-        `${stepName}:decision:asked`,
-        {},
-        async () => await askDeciders(this.#env, this.#run.calling, decision)
-      );
+      await this.#askOnce(step, data, decision, false);
     }
     const run = decisionRunOf(this.#run.calling);
     const outcomeOf = async (close: boolean): Promise<DecisionOutcome> =>
@@ -3873,30 +3980,60 @@ export class ResourceRunHost
     // Under core's prefix, which no step of the run's own can take.
     const pollStep = (part: "wait" | "woken", round: number) =>
       `${decisionPollStepPrefix}${stepName}:${part}:${round}`;
-    for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
-      // A test's run looks again every so often as well: its answer keeps
-      // no wake owed (fixture-decisions.ts), so one lost on the way is
-      // read from the decision at the next look, within its test.
-      const timeout = fixture
-        ? Math.min(deadline - seen.at, fixtureDecisionLookMs)
-        : deadline - seen.at;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
-        await this.#step.waitForEvent(pollStep("wait", round), {
-          type: decisionEventType(decision),
-          timeout,
-        });
-      } catch (error) {
-        if (!isTimeout(error)) {
-          throw error;
+    // Numbered on from the reminder's waits to the deadline's, so each
+    // wait and look of either has a name of its own.
+    let round = 0;
+    const waitUntil = async (until: number): Promise<void> => {
+      for (; !seen.answered && seen.at < until; round += 1) {
+        // A test's run looks again every so often as well: its answer
+        // keeps no wake owed (fixture-decisions.ts), so one lost on the
+        // way is read from the decision at the next look, within its test.
+        const timeout = fixture
+          ? Math.min(until - seen.at, fixtureDecisionLookMs)
+          : until - seen.at;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+          await this.#step.waitForEvent(pollStep("wait", round), {
+            type: decisionEventType(decision),
+            timeout,
+          });
+        } catch (error) {
+          if (!isTimeout(error)) {
+            throw error;
+          }
+          // Past its deadline the outcome is read once, closing it: no
+          // look before it. Past a reminder's time, the look says whether
+          // anyone answered before it.
+          if (!fixture && until === deadline) {
+            break;
+          }
         }
-        if (!fixture) {
-          break;
-        }
+        // oxlint-disable-next-line no-await-in-loop -- one look per wake
+        seen = await look(pollStep("woken", round));
       }
-      // oxlint-disable-next-line no-await-in-loop -- one look per wake
-      seen = await look(pollStep("woken", round));
+    };
+    // A test's run tells nobody, so it reminds nobody either.
+    const { remindAfterMs } = task.call;
+    const remindAt =
+      fixture || remindAfterMs === undefined
+        ? undefined
+        : seen.at + remindAfterMs;
+    if (remindAt !== undefined && remindAt < deadline) {
+      await waitUntil(remindAt);
+      if (!seen.answered && seen.at < deadline) {
+        // As after any durable wait: its person may have left meanwhile.
+        await this.#requirePerson();
+        // A branch another settled its scope over while it waited reminds
+        // nobody, by either way of asking (an action's attempt would be
+        // refused, `#attempt`); it looks all the same, so a replay waits
+        // as the first activation did, whichever it found.
+        if (!this.#fencedOff(step.scope)) {
+          await this.#askOnce(step, data, decision, true);
+        }
+        seen = await look(`${stepName}:decision:reminded`);
+      }
     }
+    await waitUntil(deadline);
     // Recorded: an answer after it can't change what a replay hears.
     return outcomeSchema.parse(
       await this.#step.do(
@@ -5104,7 +5241,12 @@ export class ResourceRunHost
       );
     }
     if (call.name === "grasp.action") {
-      return await this.#action(attempt, task, call, passed);
+      return await this.#action(
+        attempt,
+        task,
+        call,
+        await this.#built(attempt, call.arguments, passed, passed.size)
+      );
     }
     if (call.name === "grasp.decision") {
       return await this.#decided(attempt, task, call);
@@ -5201,11 +5343,12 @@ export class ResourceRunHost
     attempt: StepAttempt,
     funded: boolean
   ): Promise<void> {
-    if (
-      step.kind !== "task" ||
-      step.task?.kind !== "call" ||
-      step.task.call.name !== "grasp.action"
-    ) {
+    const acts =
+      (step.kind === "task" &&
+        step.task?.kind === "call" &&
+        step.task.call.name === "grasp.action") ||
+      isAsking(step);
+    if (!acts) {
       return;
     }
     try {
@@ -5223,6 +5366,81 @@ export class ResourceRunHost
   }
 
   /**
+   * The work of `attempt` of a decision's ask or reminder step (`#askOnce`)
+   * whose task names an action to tell its people (`ask`): one of its
+   * lineage's host calls, then who the decision asks now, each with its
+   * link (`decisionRecipients`, which audits the ask), then the action,
+   * on `{ recipients, reminder }`, as an action task's (`#action`). A
+   * reminder of a decision answered, closed or past its deadline asks
+   * nobody, and runs nothing. Settled as the isolate settles a step's
+   * work: its record, `{ output: null }`, or the failure of its call.
+   */
+  async #asking(attempt: StepAttempt): Promise<Settled<unknown>> {
+    return await settle(async () => {
+      const { step } = attempt;
+      const { task } = step;
+      const decision = this.#asks.get(attempt.name);
+      if (
+        !isDecisionTask(task) ||
+        task.call.ask === undefined ||
+        decision === undefined
+      ) {
+        return this.#refuse("Only a decision's ask runs its action.");
+      }
+      const { ask } = task.call;
+      const reminder = step.kind === "remind";
+      attempt.call = "pending";
+      try {
+        this.#requireCurrent(attempt);
+        await ResourceRunHost.#hostCall(attempt);
+        this.#requireCurrent(attempt);
+        // Audited as asked before the action runs, as an App run's ask
+        // is (`step.decision`): an action refused after it fails the run,
+        // which no catch takes, so the ask is never taken as not made.
+        const recipients = await recipientsNow(
+          this.#env,
+          this.#run.calling,
+          decision,
+          reminder,
+          async () => {
+            await Promise.resolve();
+            this.#requireCurrent(attempt);
+          }
+        );
+        if (!reminder || recipients.length > 0) {
+          await this.#action(
+            attempt,
+            task,
+            {
+              name: "grasp.action",
+              binding: ask.binding,
+              module: ask.module,
+              export: ask.export,
+              arguments: { literal: null },
+            },
+            {
+              recipients: recipients.map(({ userId, name, email, link }) => ({
+                userId,
+                name,
+                email,
+                link,
+              })),
+              reminder,
+            }
+          );
+        }
+        attempt.call = "done";
+        attempt.answer = null;
+        return { output: null };
+      } catch (error) {
+        attempt.call = "failed";
+        attempt.callError = forIsolate(error);
+        throw error;
+      }
+    });
+  }
+
+  /**
    * `#made`'s work for an action task: the action run in the modules'
    * sandbox (resource-action.ts), each of its resource calls one of the
    * run's named calls, as a task's own: its version's approved packages
@@ -5233,9 +5451,8 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: Extract<SealedTask, { kind: "call" }>,
     call: Extract<SealedCall, { name: "grasp.action" }>,
-    frame: { input: Json; output: Json; size: number }
+    input: Json
   ): Promise<Json> {
-    const input = await this.#built(attempt, call.arguments, frame, frame.size);
     const stepKey = stepIdempotencyKey(this.#run.runId, attempt.step.name);
     return await callAction(
       this.#env,
@@ -6198,6 +6415,16 @@ export class ResourceRunHost
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
+    // The host's own work answered it (`#asking`): nothing else is taken.
+    if (isAsking(step)) {
+      if (
+        attempt.call !== "done" ||
+        canonicalJson(value) !== '{"output":null}'
+      ) {
+        this.#refuse("A decision's ask records nothing.");
+      }
+      return;
+    }
     if (task === undefined) {
       if (!z.strictObject({ output: z.json() }).safeParse(value).success) {
         this.#refuse("The workflow's own step records its output.");

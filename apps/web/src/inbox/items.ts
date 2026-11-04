@@ -9,7 +9,6 @@ import type {
   TriggerStoppedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
-import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type {
   BindingApprovalItem,
   GoLiveItem,
@@ -35,8 +34,8 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, packages proposed for an engine, an engine's apps
-// whose code nobody approved, a version of an App the person answers for
+// or agent asked for, packages proposed for an engine, a version of an
+// App the person answers for
 // up for review, a workflow that failed while acting for the person. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
@@ -56,7 +55,6 @@ export type InboxKind =
   | "unknownOutcome"
   | "permissionRequest"
   | "packages"
-  | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
   | "revokedPackage"
@@ -70,11 +68,15 @@ export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   /**
-   * An App: its own page, or its details (`details`), or the Versions tab
-   * there (`versions`), where what the item is about is decided. Details
-   * also show the packages alone to an approver with no role in the App.
+   * An App: its own page, or the section of its settings where what the
+   * item is about is decided. Its settings also show the packages alone to
+   * an approver with no role in the App.
    */
-  | { kind: "engine"; engine: string; place?: "details" | "versions" }
+  | {
+      kind: "engine";
+      engine: string;
+      place?: "connections" | "packages" | "versions";
+    }
   | { kind: "app"; app: string; screen?: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -88,7 +90,6 @@ export type InboxSource =
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
-  | { type: "screens"; waiting: ScreensWaiting }
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
@@ -148,7 +149,6 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   unknownOutcome: "apps",
   permissionRequest: "apps",
   packages: "apps",
-  appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
@@ -320,7 +320,11 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.appId, place: "details" }
+          ? {
+              kind: "engine",
+              engine: request.subject.appId,
+              place: "connections",
+            }
           : undefined,
       date: request.requestedAt,
       urgent: false,
@@ -361,7 +365,7 @@ const packageItems = (
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.id, place: "details" }
+          ? { kind: "engine", engine: request.subject.id, place: "packages" }
           : undefined,
       forWhom: { role: t`package approvers` },
       date: request.requestedAt,
@@ -370,38 +374,7 @@ const packageItems = (
     };
   });
 
-/** An App whose current pages run code nobody approved: approved in its details. */
-const screenItems = (
-  engines: readonly ScreensWaiting[],
-  readAt: string
-): InboxItem[] =>
-  engines.map((waiting) => {
-    const { name, screens, version } = waiting;
-    const count = screens.length;
-    return {
-      id: `screens:${waiting.app}`,
-      kind: "appApproval",
-      title: plural(count, {
-        one: `${name} has # page whose code nobody approved`,
-        other: `${name} has # pages whose code nobody approved`,
-      }),
-      context: name,
-      body: [
-        t`A page runs only once an admin approved its code. That happens in the App's details.`,
-      ],
-      facts: [
-        { label: t`Version`, value: String(version) },
-        { label: t`Pages`, value: formatList(screens) },
-      ],
-      about: { kind: "engine", engine: waiting.app, place: "details" },
-      // Core says what waits now, not since when: as of the read.
-      date: readAt,
-      urgent: false,
-      source: { type: "screens", waiting },
-    };
-  });
-
-/** A version of an App the person answers for, up for review: made current under Versions in its details. */
+/** A version of an App the person answers for, up for review: made current under Versions in its settings. */
 const versionItems = (
   versions: readonly GoLiveItem[],
   me: string,
@@ -416,7 +389,7 @@ const versionItems = (
       title: t`Make version ${version} of ${name} live?`,
       context: name,
       body: [
-        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's details.`,
+        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's settings.`,
       ],
       facts: [{ label: t`Version`, value: String(version) }],
       about: { kind: "engine", engine: app.id, place: "versions" },
@@ -578,7 +551,7 @@ const revokedSubject = (
   subject.type === "app"
     ? {
         name: subject.appName,
-        about: { kind: "engine", engine: subject.app, place: "details" },
+        about: { kind: "engine", engine: subject.app, place: "packages" },
       }
     : {
         name: subject.workflowName,
@@ -797,7 +770,6 @@ export const inboxItems = (
     ? readyOf(waiting.requests)
     : undefined;
   const dependencies = readyOf(waiting.dependencies);
-  const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
@@ -845,7 +817,6 @@ export const inboxItems = (
     ...(dependencies === undefined
       ? []
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
-    ...screenItems(screens, readAt),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
@@ -866,7 +837,6 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.outcomes,
     waiting.requests,
     waiting.dependencies,
-    waiting.screens,
     waiting.failed,
     waiting.reconnect,
     waiting.versions,

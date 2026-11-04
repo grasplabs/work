@@ -18,6 +18,7 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BrainIcon,
+  FolderIcon,
   LayoutGridIcon,
   MessagesSquareIcon,
   WorkflowIcon,
@@ -38,7 +39,7 @@ import { SurfaceNav } from "./surface-nav.tsx";
 // onboarding alone get none: Grasp steers the onboarding from its admin.
 
 interface Section {
-  to: "/" | "/brain" | "/apps" | "/workflows" | "/integrations";
+  to: "/" | "/brain" | "/projects" | "/apps" | "/workflows" | "/integrations";
   label: MessageDescriptor;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -46,25 +47,21 @@ interface Section {
 const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/brain", label: msg`Brain`, icon: BrainIcon },
+  { to: "/projects", label: msg`Projects`, icon: FolderIcon },
   { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];
 
-/**
- * A section's entry: Chat is itself and its projects' pages; any other
- * holds the pages under it.
- */
+/** A section's entry: Chat is itself; any other holds the pages under it. */
 const SectionItem = ({ section }: { section: Section }) => {
   const { i18n } = useLingui();
   const matchRoute = useMatchRoute();
   const { to, label, icon: Icon } = section;
-  const inProject =
-    to === "/" && matchRoute({ to: "/projects/$projectId" }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={inProject || matchRoute({ to, fuzzy: to !== "/" }) !== false}
+        isActive={matchRoute({ to, fuzzy: to !== "/" }) !== false}
         render={<Link to={to} />}
       >
         <Icon />

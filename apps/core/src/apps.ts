@@ -78,7 +78,6 @@ import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { appBindingKinds, madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
-import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireStoreSchemaActive } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 import {
@@ -989,14 +988,6 @@ export const commitFiles = async (
   // The pages open on the App hear of it (spec 11.5): their screens show
   // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
-  // What its screens build to, for what waits on an admin
-  // (screen-builds.ts), in the background: only once they built just now,
-  // so from the cache.
-  // A build that failed, or didn't finish in its wait, isn't started again
-  // here: it is recorded once it is made current, opened or reviewed.
-  if (builds.screens.status === "ok") {
-    waitUntil(recordVersionBuilds(env, appId, row.version, saved));
-  }
   return { ...toVersion(row), builds };
 };
 
@@ -1092,7 +1083,8 @@ export const draftOverLatest = async (
 
 /**
  * Commits a chat's draft (`draftOverLatest`) as the App's next version,
- * by `by` (the chat's agent, acting for its person, `by.via`) with
+ * by `by` (the chat's agent, acting for its person, `by.via`, or the
+ * person themselves, the chat named in its audit then) with
  * `message`, and puts it up for review, in one batch: it is never
  * committed without being proposed. Its files were built as they were
  * checked. A version committed meanwhile takes the number: `app.conflict`.
@@ -1104,7 +1096,9 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /** The chat whose draft it is, which its audit names. */
+  fromChat?: string
 ): Promise<AppVersion> => {
   const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -1173,6 +1167,7 @@ export const proposeDraft = async (
         db,
         changeEntry(by, "app.version.proposed", appId, {
           version: row.version,
+          ...(fromChat === undefined ? {} : { chat: fromChat }),
         }),
         sql`NOT ${archivedNow(appId)}`
       ),
@@ -1829,22 +1824,5 @@ export const makeCurrent = async (
   // The pages open on the App hear of it (spec 11.5): their screens show
   // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
-  // What its screens build to, for what waits on an admin
-  // (screen-builds.ts), in the background: read from the release, which
-  // sealed them (screen-references.ts), checked above, so nothing is
-  // compiled. What doesn't get recorded now is when it is opened or
-  // reviewed.
-  waitUntil(
-    recordVersionBuilds(env, appId, number, files, {
-      // Imported here, not at the top: the screens reach releases, which
-      // reach back into this module for App lookups.
-      codesOf: async () => {
-        const { versionScreenCodes } = await import("./screen-references.ts");
-        return await versionScreenCodes(env, appId, number, files, {
-          unsealed: "refuse",
-        });
-      },
-    })
-  );
   return toApp(changed);
 };

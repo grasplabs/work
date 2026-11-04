@@ -6,6 +6,7 @@ import type {
   ChatSummary,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
+import { workflowNameSchema } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowDraft,
   WorkflowResource,
@@ -32,6 +33,7 @@ import { ChatDock } from "../chat/chat-dock.tsx";
 import { setDockMode } from "../chat/dock-mode.ts";
 import { useDraftFromChat } from "./draw-in-chat.ts";
 import { NewWorkflow } from "./independent-workflows.tsx";
+import { workflowNameOf } from "./new-workflow.ts";
 import { WorkflowFlow } from "./workflow-flow.tsx";
 
 // New workflow, against core's workflowResources and chats as the page
@@ -145,19 +147,15 @@ const fakeCore = () => {
         await Promise.resolve();
         return {};
       },
-      create: async (
-        title: string,
-        projectId?: string | null
-      ): Promise<ChatSummary> => {
+      create: async (title: string): Promise<ChatSummary> => {
         await Promise.resolve();
-        asked.push(["chat", title, projectId]);
+        asked.push(["chat", title]);
         return {
           id: "new-chat",
           title,
           createdAt: "2026-11-03T09:00:00.000Z",
           lastAt: "2026-11-03T09:00:00.000Z",
           running: false,
-          projectId: null,
           appId: null,
           via: "web",
         };
@@ -479,7 +477,7 @@ describe("New workflow", () => {
 
     expect({
       process: fake.asked.find(([call]) => call === "setProcess"),
-      // An ordinary chat, in no project, named after the question.
+      // An ordinary chat, named after the question.
       chat: fake.asked.find(([call]) => call === "chat"),
       sent: fake.asked.find(([call]) => call === "send"),
       open: activeChat(),
@@ -489,11 +487,43 @@ describe("New workflow", () => {
       chat: [
         "chat",
         "Which business process is this workflow for? Purchase-to-Pay",
-        null,
       ],
       sent: ["send", "new-chat", asked],
       open: "new-chat",
       drawn: ["receive-invoice"],
+    });
+  });
+});
+
+// A workflow made from a project's New dialog takes its name from what
+// was typed, in the form core accepts (`workflowNameSchema`), whatever was
+// typed.
+describe("a new workflow's name", () => {
+  it("is one core accepts, from whatever was typed", () => {
+    const typed = [
+      "Invoice approvals",
+      "Q1 cash — Ünïcödé!!",
+      "",
+      "   ",
+      "-",
+      "x".repeat(200),
+    ];
+
+    const names = typed.map(workflowNameOf);
+
+    expect({
+      valid: names.map((name) => workflowNameSchema.safeParse(name).success),
+      words: names.map((name) => name.slice(0, -9)),
+    }).toStrictEqual({
+      valid: [true, true, true, true, true, true],
+      words: [
+        "invoice-approvals",
+        "q1-cash-unicode",
+        "new-workflow",
+        "new-workflow",
+        "new-workflow",
+        "x".repeat(48),
+      ],
     });
   });
 });

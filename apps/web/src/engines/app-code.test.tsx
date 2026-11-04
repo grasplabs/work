@@ -16,9 +16,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppPage } from "./app-page.tsx";
+import { AppCode } from "./app-code.tsx";
 
-// An App's Code tab on its page, against core's Apps API as the page
+// An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 1 is current and version 2, up for
 // review, changes one line of app.ts, adds a screen and deletes old.ts.
 // Core's diff is the files as they were and are, as its `diffFiles`
@@ -146,10 +146,7 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/**
- * The App's page for one of `role` in it, its Code asked for at an
- * address that also names its open screen; version `current` runs.
- */
+/** The App's Code in its workspace, for one of `role` in it; version `current` runs. */
 const shown = async (
   role: ViewedApp["role"],
   current: number | null = 1,
@@ -164,23 +161,13 @@ const shown = async (
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/apps/$app",
-    component: () => (
-      <AppPage
-        app={builtApp(role, current)}
-        contents={{ version: current, screens: ["home"], workflows: [] }}
-        identity={{ staff: false }}
-        open="home"
-        view="code"
-      >
-        <p>The screen</p>
-      </AppPage>
-    ),
+    path: "/apps/$app/edit",
+    component: () => <AppCode app={builtApp(role, current)} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
     history: createMemoryHistory({
-      initialEntries: [`/apps/${appId}?screen=home&view=code`],
+      initialEntries: [`/apps/${appId}/edit?view=code`],
     }),
     context: { core },
   });
@@ -230,7 +217,7 @@ const changesShown = () =>
     ),
   }));
 
-describe("An App's Code tab", () => {
+describe("An App's Code", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -239,32 +226,15 @@ describe("An App's Code tab", () => {
     document.body.replaceChildren();
   });
 
-  it("is there for its builders, with the current version's code, and not the screen", async () => {
+  it("shows the current version's code, read-only", async () => {
     await shown("builder");
 
     expect({
-      tab: named("a", "Code")?.getAttribute("aria-current"),
-      screen: document.body.textContent.includes("The screen"),
       file: fileShown(),
       readOnly: document.body.textContent.includes(
         "Read-only. Changes to the code go through the chat."
       ),
-    }).toStrictEqual({
-      tab: "page",
-      screen: false,
-      file: appV1,
-      readOnly: true,
-    });
-  });
-
-  it("is not there for its users, who see the App", async () => {
-    await shown("user");
-
-    expect({
-      tab: named("a", "Code"),
-      screen: document.body.textContent.includes("The screen"),
-      code: document.querySelector("figure pre"),
-    }).toStrictEqual({ tab: undefined, screen: true, code: null });
+    }).toStrictEqual({ file: appV1, readOnly: true });
   });
 
   it("shows the text of the file picked, the draft's too", async () => {
@@ -277,18 +247,6 @@ describe("An App's Code tab", () => {
     expect({ picked, draft: fileShown() }).toStrictEqual({
       picked: schemaText,
       draft: inboxText,
-    });
-  });
-
-  it("switches between the App and its Code, keeping the screen open", async () => {
-    await shown("builder");
-
-    expect({
-      app: named("a", "App")?.getAttribute("href"),
-      code: named("a", "Code")?.getAttribute("href"),
-    }).toStrictEqual({
-      app: `/apps/${appId}?screen=home`,
-      code: `/apps/${appId}?screen=home&view=code`,
     });
   });
 

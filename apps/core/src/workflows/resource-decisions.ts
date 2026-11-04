@@ -18,6 +18,7 @@ import { teamMembers, teams } from "../db/core/schema.ts";
 import {
   askDecision,
   decisionAsks,
+  decisionRecipients,
   openDecision,
 } from "../decisions/decisions.ts";
 import type {
@@ -442,18 +443,44 @@ export const openRunDecision = async (
 };
 
 /**
- * Asks the people `run`'s open decision `decision` is for (`askDecision`):
- * who they are now is audited (`workflow.decision.asked`), and the
- * decision waits for them in their inbox (`waitingDecisions`), with its
- * link. However many they are, the ask never fails the run: past what one
- * audit entry lists, it records how many alone. How many were asked; none
- * once it was answered or closed.
+ * Asks the people `run`'s open decision `decision` is for (`askDecision`),
+ * or, as its `reminder`, asks them again: who they are now is audited
+ * (`workflow.decision.asked`), and the decision waits for them in their
+ * inbox (`waitingDecisions`), with its link. However many they are, the
+ * ask never fails the run: past what one audit entry lists, it records
+ * how many alone. How many were asked; none once it was answered or
+ * closed.
  */
 export const askDeciders = async (
   env: Env,
   run: CallingRun,
-  decision: string
-): Promise<number> => await askDecision(env, decisionRunOf(run), decision);
+  decision: string,
+  reminder = false
+): Promise<number> =>
+  await askDecision(env, decisionRunOf(run), decision, reminder);
+
+/**
+ * The people `run`'s open decision `decision` asks now, each with its
+ * link, for the run's own action that tells them (a decision's `ask`):
+ * the ask, or its `reminder`, audited with whom by ID
+ * (`decisionRecipients`), once `stillAsking` held. Nobody once it was
+ * answered, closed or past its deadline; more than a decision lists is
+ * refused (`decision.too_many_deciders`), as an App run's ask is.
+ */
+export const recipientsNow = async (
+  env: Env,
+  run: CallingRun,
+  decision: string,
+  reminder: boolean,
+  stillAsking: () => Promise<void>
+) =>
+  await decisionRecipients(
+    env,
+    decisionRunOf(run),
+    decision,
+    reminder,
+    stillAsking
+  );
 
 /**
  * What `run`'s decision call of task `task`, through binding `alias`,

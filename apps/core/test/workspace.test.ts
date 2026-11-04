@@ -93,7 +93,6 @@ describe("Workspace schema", () => {
       "agent-1",
       undefined,
       undefined,
-      undefined,
       "teams"
     );
     const web = await stub.createChat("From Grasp", "person-1", "agent-1");

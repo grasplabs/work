@@ -1,5 +1,4 @@
 // oxlint-disable max-classes-per-file -- a connection's screens, and each frame's own way to its App on that connection, which shares its checks
-import { compilerVersion } from "@grasp-os/compiler";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
@@ -22,7 +21,6 @@ import {
   operationErrors,
 } from "@grasp-os/shared/operations";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
   jsonBytes,
   rateLimited,
@@ -35,6 +33,7 @@ import {
   screenRouteSchema,
 } from "@grasp-os/shared/screens";
 import type {
+  ScreenDelivery,
   AppErrorLog,
   AppVersionPush,
   QuerySnapshotPush,
@@ -55,8 +54,6 @@ import type {
   RunSummary,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
-import { and, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
@@ -70,7 +67,6 @@ import {
   usableApp,
   versionFiles,
 } from "./apps.ts";
-import { screenBuilds } from "./db/core/schema.ts";
 import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -80,9 +76,6 @@ import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
-import { recordBuilds } from "./screen-builds.ts";
-import { frameAccess, stageFrame } from "./screen-frame.ts";
-import { versionScreenCodes } from "./screen-references.ts";
 import {
   deliveryOf,
   deliveryAt,
@@ -92,8 +85,10 @@ import {
   leaseFor,
   requireDelivery,
   standingOf,
-} from "./screen-trust.ts";
-import type { LeasedBuild, Standing } from "./screen-trust.ts";
+} from "./screen-delivery.ts";
+import type { LeasedBuild, Standing } from "./screen-delivery.ts";
+import { frameAccess, stageFrame } from "./screen-frame.ts";
+import { versionScreenCodes } from "./screen-references.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { controlScreenRun } from "./workflows/controls.ts";
@@ -129,13 +124,13 @@ import { runSummary } from "./workflows/summary.ts";
 // answers its workflow runs (workflows/screen-runs.ts). Only its builders
 // read its error log.
 //
-// Having a role is not enough to get the App's data into a screen: the
-// code the screen runs must be approved, or the App's data classified as
-// fine for code nobody approved (screen-trust.ts, which says why). Every
-// call here that reaches the App's data or its runs passes that gate, and
-// so does every push; only a screen's own reports of its problems, the
-// App's version number and its error log, which only its builders read
-// and no frame reaches, don't. Which build a frame runs is the one
+// A screen's build needs nobody's approval: it reaches only its App's
+// functions, as its viewer (screen-delivery.ts says why that is enough).
+// What still keeps the App's data from a screen is its release revoked,
+// or a frame core leased no build: every call here that reaches the App's
+// data or its runs passes that gate, and so does every push; only a screen's own reports of its
+// problems, the App's version number and its error log, which only its
+// builders read and no frame reaches, don't. Which build a frame runs is the one
 // core leased it (`frame`), never what the frame says.
 //
 // A callback the App keeps (a screen's subscription), or its host keeps
@@ -498,7 +493,8 @@ const routeSourceOf = async (
 /**
  * A running App's screen, built from its current version, with core's
  * lease on that build for the person: only a build that gets the App's
- * data now, once this request of theirs is counted (`admitted`). One that
+ * data now (its release not revoked), once this request of theirs is
+ * counted (`admitted`). One that
  * doesn't is refused before its code is where a frame can load it; one
  * that does is put there (`stageFrame`). With the input its route takes
  * (`routedOpen`), checked before anything is built: the screen gets only
@@ -532,9 +528,6 @@ const openScreen = async (
     await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
   )(file);
   const { artifact } = built;
-  // What it builds to now, refused or not: a fact about the version, for
-  // what waits on an admin (screen-builds.ts).
-  await recordBuilds(env, id, version, [built]);
   const build = { artifact, version };
   await requireDelivery(env, by, id, build, {
     operation: "open",
@@ -622,13 +615,9 @@ export const visitorScreen = async (
     await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
   )(file);
   const { artifact } = built;
-  await recordBuilds(env, id, version, [built]);
   const build = { artifact, version };
-  const delivery = deliveryOf(await standingOf(env, id, build));
-  if (delivery !== "open") {
-    throw screenErrors.create(
-      delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
-    );
+  if (deliveryOf(await standingOf(env, id, build)) !== "open") {
+    throw screenErrors.create("screen.revoked");
   }
   await stageFrame(env, artifact, built.code);
   return {
@@ -772,43 +761,6 @@ const sidebarLimits = { apps: 50, together: 5 };
 const sidebarReads = new TokenBuckets({ burst: 10, perMinute: 30 });
 
 /**
- * The screens of `app`'s `version` that would get the App's data now, of
- * `screens`: each as this release builds it (`screen_builds`), approved or
- * of an App whose data is ordinary (`deliveryOf`). A screen not built yet
- * isn't listed: what isn't known to open isn't offered. Opening one still
- * checks it, whatever this says.
- */
-const deliveredScreens = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  screens: readonly string[]
-): Promise<ReadonlySet<string>> => {
-  if (screens.length === 0) {
-    return new Set();
-  }
-  const builds = await drizzle(env.DB)
-    .select({ screen: screenBuilds.screen, artifact: screenBuilds.artifact })
-    .from(screenBuilds)
-    .where(
-      and(
-        eq(screenBuilds.appId, app),
-        eq(screenBuilds.version, version),
-        eq(screenBuilds.release, compilerVersion),
-        inArray(screenBuilds.screen, [...screens])
-      )
-    );
-  const delivered = await Promise.all(
-    builds.map(async ({ screen, artifact }) =>
-      deliveryOf(await standingOf(env, app, { artifact, version })) === "open"
-        ? [screen]
-        : []
-    )
-  );
-  return new Set(delivered.flat());
-};
-
-/**
  * One App's sidebar entries; none when its surfaces can't be read now,
  * so one App failing leaves the others' entries as they are.
  */
@@ -825,13 +777,10 @@ const sidebarEntries = async (
     const listed = surfaceSummaries(manifest).filter(
       ({ kind }) => kind === "sidebar"
     );
-    const delivered = await deliveredScreens(
-      env,
-      app.id,
-      app.currentVersion,
-      listed.map(({ screen }) => screen)
-    );
-    surfaces = listed.filter(({ screen }) => delivered.has(screen));
+    // A revoked release's screens get nothing: none of them is offered.
+    // Opening one still checks it, whatever this says.
+    const { releaseRevoked } = await standingOf(env, app.id);
+    surfaces = releaseRevoked ? [] : listed;
   } catch (error) {
     if (!isExpectedError(error)) {
       log.warn("screen.sidebar_app_failed", {
@@ -968,7 +917,7 @@ const followedCallback = (
     app: AppId;
     build: LeasedBuild | undefined;
     operation: string;
-    /** Whether to look once now: its trust was read before it followed. */
+    /** Whether to look once now: its delivery was read before it followed. */
     lookNow?: boolean;
   },
   released: () => void
@@ -1815,7 +1764,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
       const { id } = await usableApp(this.#env, by, app);
       // Core's own lease names the build, never the page or the frame; a
       // lease core didn't sign for them and this App names none, and is
-      // decided as a build nobody approved.
+      // decided as code core didn't serve.
       const build = await leasedBuild(this.#env, by.userId, id, lease);
       return new ScreenFrameRpc({
         env: this.#env,

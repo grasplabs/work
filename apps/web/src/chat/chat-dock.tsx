@@ -1,5 +1,4 @@
 import type { ChatMessage } from "@grasp-os/shared/chat";
-import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
@@ -8,7 +7,6 @@ import {
   Link,
   useLocation,
   useMatch,
-  useNavigate,
   useRouteContext,
   useRouter,
 } from "@tanstack/react-router";
@@ -23,17 +21,14 @@ import { lazy, Suspense, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import type { Session } from "../core.ts";
-import { buildsApp } from "../engines/app-role.ts";
 import { ErrorText } from "../error-text.tsx";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCore } from "../use-core.ts";
 import { useWorkflowStart } from "../workflows/draw-in-chat.ts";
 import type { DockStart } from "../workflows/draw-in-chat.ts";
-import { appSlot, setActiveChat, useActiveChat } from "./active-chat.ts";
+import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
@@ -44,7 +39,6 @@ import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 import { useAsk } from "./use-ask.ts";
-import type { AskOptions } from "./use-ask.ts";
 
 // The conversation, with its Markdown and code highlighting, loads once a
 // chat is open: most pages show the dock folded or empty.
@@ -181,15 +175,12 @@ const DockHeader = ({
   mode,
   onMove,
   onNewChat,
-  newChatAlways = false,
 }: {
   title: string;
   chatId: string | undefined;
   mode: "frame" | "drawer";
   onMove: (next: DockMode) => void;
   onNewChat: () => void;
-  /** New chat goes elsewhere (New App), so it is there before any chat is. */
-  newChatAlways?: boolean;
 }) => {
   const { t } = useLingui();
   return (
@@ -201,11 +192,6 @@ const DockHeader = ({
       }
     >
       <h2 className="flex-1 font-medium">{title}</h2>
-      {chatId === undefined && newChatAlways ? (
-        <HeaderButton label={t`New chat`} onClick={onNewChat}>
-          <SquarePenIcon />
-        </HeaderButton>
-      ) : null}
       {chatId === undefined ? null : (
         <>
           <Link
@@ -380,74 +366,10 @@ const footLook = (mode: DockMode): string | undefined => {
     : undefined;
 };
 
-/** The chat of App `app` the person changes it in, made the first time. */
-const appChatOf = async (session: Session, app: string): Promise<string> => {
-  const chat = await session.chats.forApp(app);
-  return chat.id;
-};
-
-/**
- * What the dock's slot does that differs by whose chat it is. Grasp's or
- * the brain's: New chat starts afresh here. An App's own (`app`): its chat
- * is the person's for the App (`chats.forApp`), made once they first ask
- * in it or open it; what they say moves on to the App's versions in Chat,
- * with the chat open; and New chat goes to New App.
- */
-const useSlotWays = (
-  app: string | undefined,
-  slot: ChatSlot,
-  focusBox: () => void
-) => {
-  const navigate = useNavigate();
-  const core = useCore();
-  const [failure, setFailure] = useState<string>();
-  const options: AskOptions | undefined =
-    app === undefined
-      ? undefined
-      : {
-          chatFor: async (session) => await appChatOf(session, app),
-          onAsked: (chatId) => {
-            void navigate({ to: "/", search: { chat: chatId, panel: true } });
-          },
-        };
-  /** Finds the App's chat, to open it before anything is asked. */
-  const openApp = async (forApp: string): Promise<void> => {
-    setFailure(undefined);
-    try {
-      const chatId = await core.withSession(
-        async (session) => await appChatOf(session, forApp)
-      );
-      setActiveChat(chatId, slot);
-    } catch (error) {
-      setFailure(failureText(error));
-    }
-  };
-  return {
-    options,
-    failure,
-    /** Whether the dock opens before any chat is, and New chat is there. */
-    always: app !== undefined,
-    /** Whether the bar offers to open the dock, holding `chatId`. */
-    opens: (chatId: string | undefined): boolean =>
-      chatId !== undefined || app !== undefined,
-    /**
-     * The dock moved to `next`, holding `chatId`: an App's chat opened
-     * before anything is asked in it shows what was said in it before.
-     */
-    onMoved: (next: DockMode, chatId: string | undefined): void => {
-      if (next !== "bar" && chatId === undefined && app !== undefined) {
-        void openApp(app);
-      }
-    },
-    handleNewChat: (): void => {
-      if (app === undefined) {
-        setActiveChat(undefined, slot);
-        focusBox();
-      } else {
-        void navigate({ to: "/apps/new" });
-      }
-    },
-  };
+/** Whether `pathname` is an App's own (/apps/<id>, its workspace and full page), not the Apps page or New App. */
+const isAppPage = (pathname: string): boolean => {
+  const [, apps, app] = pathname.split("/");
+  return apps === "apps" && app !== undefined && app !== "" && app !== "new";
 };
 
 /**
@@ -502,20 +424,17 @@ const withOpening = (
 
 /**
  * The dock itself: on every page in the frame but Chat's, carrying on the
- * tab's open chat of `slot` (active-chat.ts); on an App's page for whoever
- * changes it, the App's own (`app`).
+ * tab's open chat of `slot` (active-chat.ts).
  */
 const Dock = ({
   slot,
   words,
-  app,
   start,
   models,
   retry,
 }: {
   slot: ChatSlot;
   words: DockWords;
-  app?: string;
   /** What it asks first, before anything is asked in its chat. */
   start?: DockStart;
   /** The models a question may name; none while they are read. */
@@ -538,15 +457,12 @@ const Dock = ({
       dock.current?.querySelector("textarea")?.focus();
     });
   };
-  const ways = useSlotWays(app, slot, focusBox);
   const { composer, ask } = useAsk(
     chatId,
     offered?.models ?? [],
     offered?.efforts,
     "here",
-    undefined,
-    slot,
-    ways.options
+    slot
   );
   const mode = useDockMode();
   const drawerWidth = useDockDrawerWidth();
@@ -555,14 +471,13 @@ const Dock = ({
   const moveTo = (next: DockMode): void => {
     setDockMode(next);
     focusBox();
-    ways.onMoved(next, chatId);
   };
   // A click into the folded box, with a conversation behind it, opens the
   // chat on it, even with the cursor already in the box. Tabbing into the
   // box is to type in it; the keyboard's way in is the box's own button
   // (OpenChat), which the box's description names.
   const open = mode !== "bar";
-  const unfolds = !open && ways.opens(chatId);
+  const unfolds = !open && chatId !== undefined;
   useUnfoldOnPointer(dock, unfolds, () => {
     moveTo("frame");
   });
@@ -632,8 +547,10 @@ const Dock = ({
             title={words.title}
             mode={drawer ? "drawer" : "frame"}
             onMove={moveTo}
-            newChatAlways={ways.always}
-            onNewChat={ways.handleNewChat}
+            onNewChat={() => {
+              setActiveChat(undefined, slot);
+              focusBox();
+            }}
           />
         ) : null}
         {open ? (
@@ -652,7 +569,6 @@ const Dock = ({
         {open ? <DockQuestions slot={slot} /> : null}
         <div className={footLook(mode)}>
           {box}
-          <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (
             <NoModels
               noModels={noModels}
@@ -668,8 +584,7 @@ const Dock = ({
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size, and a project's, whose box starts a
- * chat in the project. In the brain (its atlas, a region of
+ * which is the chat at full size, and an App's. In the brain (its atlas, a region of
  * it, a note or a part's page) it is the brain's own chat, kept as the
  * person moves about the brain, as in the prototype
  * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
@@ -685,9 +600,6 @@ export const ChatDock = () => {
   const { t } = useLingui();
   const { pathname } = useLocation();
   const { identity } = useRouteContext({ from: "/_shell" });
-  const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
-  const loaded = appPage?.loaderData;
-  const app = loaded?.state === "ready" ? loaded.data.app : undefined;
   const workflowPage = useMatch({
     from: "/_shell/workflows/$workflow",
     shouldThrow: false,
@@ -696,15 +608,17 @@ export const ChatDock = () => {
   const start = useWorkflowStart(
     workflow?.state === "ready" ? workflow.data : undefined
   );
-  // Read here, once for every page, not by each dock: the brain's dock, each
-  // App's and the chat's take each other's place between pages, and each
-  // read them again when it did. Chat is the chat at full size, and a
-  // project's page has its own box, which starts a chat in the project:
-  // neither shows a dock, nor reads its models. Nor does Grasp staff's
-  // session, which reaches the onboarding alone: core refuses it chats.
+  // Read here, once for every page, not by each dock: the brain's dock and
+  // the chat's take each other's place between pages, and each read them
+  // again when it did. Chat is the chat at full size: it shows no dock, nor
+  // reads its models. Nor does an App: the live App is its people's alone,
+  // and its workspace docks the chat that builds it
+  // (engines/app-workspace.tsx). Nor does Grasp staff's session, which
+  // reaches the onboarding alone: core refuses it chats.
   const shown =
     identity.onboardingOnly !== true &&
-    !(pathname === "/" || pathname.startsWith("/projects/"));
+    pathname !== "/" &&
+    !isAppPage(pathname);
   const { value: models, readAgain } = useFrameRead(readModels, shown);
   if (!shown) {
     return null;
@@ -720,29 +634,6 @@ export const ChatDock = () => {
           title: t`Ask the brain`,
           placeholder: t`Ask anything about the brain`,
           empty: t`Ask anything about what the brain holds`,
-        }}
-      />
-    );
-  }
-  // An App's page has the App's own chat here, for whoever changes it;
-  // anyone else asks Grasp as anywhere.
-  if (
-    app !== undefined &&
-    buildsApp(app, identity) &&
-    app.status !== "archived"
-  ) {
-    const { id, name } = app;
-    return (
-      <Dock
-        app={id}
-        key={`app:${id}`}
-        models={models}
-        retry={readAgain}
-        slot={appSlot(id)}
-        words={{
-          title: name,
-          placeholder: t`Say what should change`,
-          empty: t`Say what should change in ${name}. Every change is a new version of it.`,
         }}
       />
     );

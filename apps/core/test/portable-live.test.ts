@@ -79,8 +79,8 @@ const notesApp = async ({ sensitive = false } = {}) => {
   await builder.api.apps.versions.setCurrent(id, version);
   await builder.api.apps.publish(id);
   if (!sensitive) {
-    const { generation } = await admin.api.screenTrust.review(id);
-    await admin.api.screenTrust.classify(id, "ordinary", generation);
+    const { generation } = await admin.api.dataPolicy.read(id);
+    await admin.api.dataPolicy.classify(id, "ordinary", generation);
   }
   const release = await loadRelease(env, id, version);
   return { builder, app: id, release, api: apiOf(release) };
@@ -536,7 +536,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       expect(list.now()).toStrictEqual(["Mine"]);
     });
     const head = await logHead();
-    // A portable host runs no build an admin approved: its App's release
+    // A portable host runs no build core leased: its App's release
     // revoked is what takes the App's data from it.
     await revokeRelease(
       env,

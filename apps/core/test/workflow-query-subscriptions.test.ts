@@ -3,7 +3,6 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -187,7 +186,7 @@ const latestRuns = (
 };
 
 /**
- * The Requests App sealed and current, its screen approved and opened by
+ * The Requests App sealed and current, its screen opened by
  * its builder, `followUp` bound with the App's `start` grant; and the
  * builder's screen following their runs of it, once its first push came.
  */
@@ -226,12 +225,6 @@ const followingRuns = async (
     rolesOf(builder.acting)
   );
   await grantPermission(env, admin.acting, asked.id, { version: 1 });
-  const review = await admin.api.screenTrust.review(fixture.app);
-  await admin.api.screenTrust.approve(fixture.app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const { lease } = await builder.api.screens.open(fixture.app, "desk");
   const release = await loadRelease(env, fixture.app, 1);
 
@@ -483,12 +476,6 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
     )
       .bind(fixture.app, admin.userId, builder.userId, Date.now())
       .run();
-    const review = await admin.api.screenTrust.review(fixture.app);
-    await admin.api.screenTrust.approve(fixture.app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
     const { lease } = await admin.api.screens.open(fixture.app, "desk");
     const release = await loadRelease(env, fixture.app, 1);
     // The admin's screen follows their inbox: nothing in it yet.
@@ -606,12 +593,6 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
         "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
       ).bind(membership, team, admin.userId, Date.now()),
     ]);
-    const review = await admin.api.screenTrust.review(fixture.app);
-    await admin.api.screenTrust.approve(fixture.app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
     const { lease } = await admin.api.screens.open(fixture.app, "desk");
     const release = await loadRelease(env, fixture.app, 1);
     // The admin's screen follows their inbox: nothing in it yet.

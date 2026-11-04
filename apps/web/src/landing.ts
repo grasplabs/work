@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 // Where someone lands right after signing in: where they were going, as
@@ -50,9 +50,7 @@ export const landingAfterSignIn = async ({
   open: () => Promise<boolean>;
 }): Promise<"/setup" | null> => {
   const companyAdmin =
-    isAdmin(identity.role) &&
-    !identity.staff &&
-    identity.onboardingOnly !== true;
+    isMemberAdmin(identity) && identity.onboardingOnly !== true;
   if (path !== "/" || !companyAdmin) {
     return null;
   }

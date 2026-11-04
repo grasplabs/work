@@ -19,6 +19,7 @@ import type {
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
 import type { LabWho } from "@grasp-os/shared/lab";
+import type { CaseScore } from "@grasp-os/shared/lab-compare";
 import type { InterviewLocale, Interviewer } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
@@ -40,7 +41,6 @@ import { signalPlain, signalRules, signals } from "./moments.ts";
 import type { Moment, Signal } from "./moments.ts";
 import type { Asker, Said } from "./person.ts";
 import { notesAfter } from "./play.ts";
-import type { CaseScore } from "./results.ts";
 
 /** A turn as Stephen is asked for it, without a link. */
 export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "key">;

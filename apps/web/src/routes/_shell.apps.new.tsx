@@ -11,8 +11,9 @@ import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// A new App, from New App on the Apps page: the question to start
-// the chat that makes it, and, for someone who builds, the blueprints to
+// A new App, from New App on the Apps page (engines/new-app.tsx): the box
+// to say what to build, which makes the App and opens its workspace with
+// the chat building it, and, for someone who builds, the blueprints to
 // start from instead.
 
 interface NewAppPage {

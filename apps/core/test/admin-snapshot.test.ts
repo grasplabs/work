@@ -439,6 +439,7 @@ describe("the admin snapshot", () => {
           interviewer: null,
           // No turn of Stephen's ran in it yet.
           version: null,
+          locale: null,
           started: true,
           updated: today,
         },
@@ -461,7 +462,7 @@ describe("the admin snapshot", () => {
     expect(text).not.toContain("What does your team do all week?");
   });
 
-  it("says which Stephen held each interview's last turn, in every language, and never the text", async () => {
+  it("says which Stephen held each interview's last turn and in which language, and never the text", async () => {
     const { ids, secret } = await running();
     const store = onboardingStore(env);
     const mark = await sha256Hex(secret);
@@ -470,18 +471,18 @@ describe("the admin snapshot", () => {
       const snapshot = adminSnapshotSchema.parse(
         JSON.parse(await response.text())
       );
-      return snapshot.interviews.find(({ person }) => person === ids.lea)
-        ?.version;
+      const lea = snapshot.interviews.find(({ person }) => person === ids.lea);
+      return lea === undefined ? undefined : [lea.version, lea.locale];
     };
 
-    await expect(versionOf()).resolves.toBeNull();
+    await expect(versionOf()).resolves.toStrictEqual([null, null]);
     await store.turnRan(mark, {
       mark: labMarks.claire.lead.nl,
       interviewer: "claire",
       locale: "nl",
       version: stephenVersion,
     });
-    await expect(versionOf()).resolves.toBe(stephenVersion);
+    await expect(versionOf()).resolves.toStrictEqual([stephenVersion, "nl"]);
   });
 
   it("counts every interview of a large roster, page after page", async () => {

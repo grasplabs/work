@@ -491,6 +491,14 @@ export interface HeldInterview {
    * took out in the read-back. With it, `progress` holds no lines or facts, and none are missing.
    */
   counted?: { facts: number; out: number };
+  /**
+   * Which Stephen held its last turn: one name for every text of a release
+   * (`stephenVersion` in core's onboarding/lab-marks.ts), from Grasp OS's
+   * core. None where it isn't known.
+   */
+  stephen?: string;
+  /** The language its last turn was held in, from Grasp OS's core. None where it isn't known. */
+  language?: string;
 }
 
 /** Where one interview stands, without what was said in it: all the plan, the links and the numbers need, cheap to read on every change. */

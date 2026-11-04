@@ -36,6 +36,7 @@ import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.inte
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
+import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
@@ -57,8 +58,7 @@ import { Route as ShellWorkflowsRequestsRouteImport } from './routes/_shell.work
 import { Route as AppsAppFullRouteImport } from './routes/apps.$app.full'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
-import { Route as ShellAppsAppDataRouteImport } from './routes/_shell.apps.$app_.data'
-import { Route as ShellAppsAppDetailsRouteImport } from './routes/_shell.apps.$app_.details'
+import { Route as ShellAppsAppEditRouteImport } from './routes/_shell.apps.$app_.edit'
 import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
@@ -203,6 +203,11 @@ const ShellKnowledgeCollectionRoute =
     path: '/knowledge/$collection',
     getParentRoute: () => ShellRoute,
   } as any)
+const ShellProjectsIndexRoute = ShellProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
@@ -309,14 +314,9 @@ const KitExamplesNameRoute = KitExamplesNameRouteImport.update({
   path: '/kit/examples/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ShellAppsAppDataRoute = ShellAppsAppDataRouteImport.update({
-  id: '/apps/$app_/data',
-  path: '/apps/$app/data',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellAppsAppDetailsRoute = ShellAppsAppDetailsRouteImport.update({
-  id: '/apps/$app_/details',
-  path: '/apps/$app/details',
+const ShellAppsAppEditRoute = ShellAppsAppEditRouteImport.update({
+  id: '/apps/$app_/edit',
+  path: '/apps/$app/edit',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellAppsAppSettingsRoute = ShellAppsAppSettingsRouteImport.update({
@@ -406,10 +406,10 @@ export interface FileRoutesByFullPath {
   '/brain/': typeof ShellBrainIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/projects/': typeof ShellProjectsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
-  '/apps/$app/data': typeof ShellAppsAppDataRoute
-  '/apps/$app/details': typeof ShellAppsAppDetailsRoute
+  '/apps/$app/edit': typeof ShellAppsAppEditRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
@@ -462,10 +462,10 @@ export interface FileRoutesByTo {
   '/brain': typeof ShellBrainIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
+  '/projects': typeof ShellProjectsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
-  '/apps/$app/data': typeof ShellAppsAppDataRoute
-  '/apps/$app/details': typeof ShellAppsAppDetailsRoute
+  '/apps/$app/edit': typeof ShellAppsAppEditRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
@@ -522,10 +522,10 @@ export interface FileRoutesById {
   '/_shell/brain/': typeof ShellBrainIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/_shell/projects/': typeof ShellProjectsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
-  '/_shell/apps/$app_/data': typeof ShellAppsAppDataRoute
-  '/_shell/apps/$app_/details': typeof ShellAppsAppDetailsRoute
+  '/_shell/apps/$app_/edit': typeof ShellAppsAppEditRoute
   '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
@@ -582,10 +582,10 @@ export interface FileRouteTypes {
     | '/brain/'
     | '/integrations/'
     | '/knowledge/'
+    | '/projects/'
     | '/settings/'
     | '/workflows/'
-    | '/apps/$app/data'
-    | '/apps/$app/details'
+    | '/apps/$app/edit'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
@@ -638,10 +638,10 @@ export interface FileRouteTypes {
     | '/brain'
     | '/integrations'
     | '/knowledge'
+    | '/projects'
     | '/settings'
     | '/workflows'
-    | '/apps/$app/data'
-    | '/apps/$app/details'
+    | '/apps/$app/edit'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
@@ -697,10 +697,10 @@ export interface FileRouteTypes {
     | '/_shell/brain/'
     | '/_shell/integrations/'
     | '/_shell/knowledge/'
+    | '/_shell/projects/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
-    | '/_shell/apps/$app_/data'
-    | '/_shell/apps/$app_/details'
+    | '/_shell/apps/$app_/edit'
     | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/links/$app/$surface'
@@ -916,6 +916,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/projects/': {
+      id: '/_shell/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ShellProjectsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/projects/$projectId': {
       id: '/_shell/projects/$projectId'
       path: '/projects/$projectId'
@@ -1063,18 +1070,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KitExamplesNameRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_shell/apps/$app_/data': {
-      id: '/_shell/apps/$app_/data'
-      path: '/apps/$app/data'
-      fullPath: '/apps/$app/data'
-      preLoaderRoute: typeof ShellAppsAppDataRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/apps/$app_/details': {
-      id: '/_shell/apps/$app_/details'
-      path: '/apps/$app/details'
-      fullPath: '/apps/$app/details'
-      preLoaderRoute: typeof ShellAppsAppDetailsRouteImport
+    '/_shell/apps/$app_/edit': {
+      id: '/_shell/apps/$app_/edit'
+      path: '/apps/$app/edit'
+      fullPath: '/apps/$app/edit'
+      preLoaderRoute: typeof ShellAppsAppEditRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/apps/$app_/settings': {
@@ -1210,9 +1210,9 @@ interface ShellRouteChildren {
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
+  ShellProjectsIndexRoute: typeof ShellProjectsIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
-  ShellAppsAppDataRoute: typeof ShellAppsAppDataRoute
-  ShellAppsAppDetailsRoute: typeof ShellAppsAppDetailsRoute
+  ShellAppsAppEditRoute: typeof ShellAppsAppEditRoute
   ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
@@ -1237,9 +1237,9 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
+  ShellProjectsIndexRoute: ShellProjectsIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
-  ShellAppsAppDataRoute: ShellAppsAppDataRoute,
-  ShellAppsAppDetailsRoute: ShellAppsAppDetailsRoute,
+  ShellAppsAppEditRoute: ShellAppsAppEditRoute,
   ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,

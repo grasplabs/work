@@ -1000,7 +1000,7 @@ describe("a running screen's drafts once core stops its build", () => {
       // The page's state isn't looked at here.
     });
     target.saveDraft("n1", "Typed as it was revoked");
-    // An approval taken back: core's version subscription says to look.
+    // A release revoked: core's version subscription says to look.
     (await following.promise)({ type: "current", version: 1, recheck: true });
     await vi.advanceTimersByTimeAsync(0);
     person.resolve({ userId: "ada" });
