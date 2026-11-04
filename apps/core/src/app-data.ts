@@ -43,6 +43,8 @@ import { teamsOf } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
+import { keepSensitiveReads } from "./sensitive-reads.ts";
+import type { SensitiveReadContext } from "./sensitive-reads.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
@@ -97,7 +99,10 @@ import { requireNotStaff } from "./sharing.ts";
 // - Bulk reads and writes nobody can trace: each export and import is in
 //   the audit log (`app.data.exported`, `app.data.imported`), with the
 //   table and how many rows; each record an import inserts is in the
-//   store's history.
+//   store's history. A table its schema declares sensitive is recorded on
+//   every read besides (`app.data.read`, sensitive-reads.ts): each page
+//   and record the browser reads of it, and an export's pages, once as
+//   the export ends.
 
 /** An App's current version's store, as `by` reads it here. */
 interface Opened {
@@ -271,14 +276,64 @@ const pageQuery = (
   terminal: { kind: "paginate", pageSize: size, cursor },
 });
 
-/** One page of `table` as `open` reads it. */
+/** Who `by`'s reads of `open` are recorded as (sensitive-reads.ts). */
+const readContext = (by: Identity, open: Opened): SensitiveReadContext => ({
+  actor: actorOf(by),
+  target: { type: "app", id: open.app.id },
+  version: open.version,
+  principal: by.userId,
+  runId: null,
+});
+
+/**
+ * Keeps `by`'s reads of `open`, as the browser or an export made them, of
+ * each sensitive table they reached: `reads` of it, answering `rows` of
+ * its records. Nothing for a table that isn't sensitive.
+ */
+const keepPageReads = async (
+  env: Env,
+  by: Identity,
+  open: Opened,
+  via: "browser" | "export",
+  reached: ReadonlyMap<string, { reads: number; rows: number }>
+): Promise<void> => {
+  if (reached.size === 0) {
+    return;
+  }
+  await keepSensitiveReads(
+    env,
+    readContext(by, open),
+    [...reached].map(([table, { reads, rows }]) => ({
+      via,
+      table,
+      reads,
+      rows,
+    }))
+  );
+};
+
+/** One read's `ReadResult.sensitive`, as `keepPageReads` takes it. */
+const reachedBy = (
+  sensitive: Readonly<Record<string, number>>
+): Map<string, { reads: number; rows: number }> =>
+  new Map(
+    Object.entries(sensitive).map(([table, rows]) => [
+      table,
+      { reads: 1, rows },
+    ])
+  );
+
+/**
+ * One page of `table` as `open` reads it, and what it answered of
+ * sensitive tables (`ReadResult.sensitive`).
+ */
 const readPage = async (
   open: Opened,
   table: string,
   size: number,
   cursor: string | null
-): Promise<AppDataPage> => {
-  const { value } = await open.store.read(open.scope, {
+): Promise<AppDataPage & { sensitive: Record<string, number> }> => {
+  const { value, sensitive } = await open.store.read(open.scope, {
     kind: "query",
     query: pageQuery(table, size, cursor),
   });
@@ -294,6 +349,7 @@ const readPage = async (
   return {
     records: items.map(recordOf),
     cursor: typeof next === "string" ? next : null,
+    sensitive,
   };
 };
 
@@ -762,20 +818,36 @@ const importRows = async (
 
 /**
  * `table` as CSV, a page at a time as the client takes it in, checking
- * with `recheck` before every page; recorded before anything is read.
+ * with `recheck` before every page; recorded before anything is read, and
+ * what it read of a sensitive table handed to `keep` as it ends.
  */
 const exportStream = (
   open: Opened,
   table: string,
-  recheck: () => Promise<Opened>
+  recheck: () => Promise<Opened>,
+  keep: (
+    reached: ReadonlyMap<string, { reads: number; rows: number }>
+  ) => Promise<void>
 ): ReadableStream<Uint8Array> => {
   const declared = tableOf(open, table);
   const fields = Object.keys(declared.fields);
   let started = false;
   let cursor: string | null = null;
   let count = 0;
+  // What its pages read of a sensitive table, kept once as it ends: read
+  // through, failed or let go of by the client. (`app.data.exported`,
+  // kept before anything was read, names the export whatever comes of it.)
+  const reached = new Map<string, { reads: number; rows: number }>();
+  let kept = false;
+  const end = async (): Promise<void> => {
+    if (!kept) {
+      kept = true;
+      await keep(reached);
+    }
+  };
   return new ReadableStream<Uint8Array>(
     {
+      cancel: end,
       pull: async (controller) => {
         try {
           // Every page of the version its header named, or none: one made
@@ -796,6 +868,13 @@ const exportStream = (
             return;
           }
           const page = await readPage(now, table, queryMaxResults, cursor);
+          for (const [name, rows] of Object.entries(page.sensitive)) {
+            const sofar = reached.get(name);
+            reached.set(name, {
+              reads: (sofar?.reads ?? 0) + 1,
+              rows: (sofar?.rows ?? 0) + rows,
+            });
+          }
           count += page.records.length;
           if (count > appDataExportMaxRecords) {
             throw appDataErrors.create("app_data.export_too_large");
@@ -818,9 +897,11 @@ const exportStream = (
           }
           ({ cursor } = page);
           if (cursor === null) {
+            await end();
             controller.close();
           }
         } catch (error) {
+          await end();
           controller.error(error);
         }
       },
@@ -871,7 +952,14 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
       if (cursor !== null && typeof cursor !== "string") {
         throw appDataErrors.create("app_data.invalid");
       }
-      return await readPage(open, table, appDataPageSize, cursor);
+      const { sensitive, ...page } = await readPage(
+        open,
+        table,
+        appDataPageSize,
+        cursor
+      );
+      await keepPageReads(this.#env, by, open, "browser", reachedBy(sensitive));
+      return page;
     });
   }
 
@@ -884,12 +972,13 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
     return await withPerson(this.#check, async (by) => {
       const open = await versionedStore(this.#env, by, app, version);
       tableOf(open, table);
-      const { value } = await open.store.read(open.scope, {
+      const { value, sensitive } = await open.store.read(open.scope, {
         kind: "get",
         table,
         id,
         expectedRevision: null,
       });
+      await keepPageReads(this.#env, by, open, "browser", reachedBy(sensitive));
       return value === null ? null : recordOf(value);
     });
   }
@@ -928,7 +1017,10 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
           await withPerson(
             this.#check,
             async (now) => await openedStore(this.#env, now, app)
-          )
+          ),
+        async (reached) => {
+          await keepPageReads(this.#env, by, open, "export", reached);
+        }
       );
     });
   }

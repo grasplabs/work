@@ -331,6 +331,14 @@ export interface Invocation {
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
   /**
+   * Keeps the record of what the call read of the store's sensitive
+   * tables (`SensitiveRead`), once for the whole call, nested functions
+   * included, after it answered or failed and before its caller hears
+   * either. Never throws. None where nothing is kept: a store only a
+   * test or a draft's preview reaches holds no one's data.
+   */
+  readonly sensitiveReads?: (reads: readonly SensitiveRead[]) => Promise<void>;
+  /**
    * Told what the function the caller named threw that its caller hears
    * only as `internal.unexpected`, at most once a call: its name and
    * message, when they are strings, cut to `draftFailureMaxLength`, as
@@ -349,6 +357,45 @@ export interface Invocation {
    */
   readonly people?: PeopleAccess;
 }
+
+/**
+ * What one function of a call read of one sensitive table
+ * (`defineTable(...).sensitive()`, as the store holds it): how many reads
+ * reached the table, and how many of its records they answered, related
+ * records included. A read that answered none still counts: a filter on
+ * the table's fields that matched nothing tells something of them too.
+ */
+export interface SensitiveRead {
+  /** The function's path in the App, which read it. */
+  readonly function: string;
+  readonly table: string;
+  readonly reads: number;
+  readonly rows: number;
+}
+
+/**
+ * A call's sensitive reads so far, by function and table: kept by the
+ * host, where App code can't reach them, and shared by every function in
+ * the call, every attempt of it included (a run made again for stale
+ * reads still handed App code what the stale one read).
+ */
+type SensitiveTally = Map<string, SensitiveRead>;
+
+/** Counts what `operation`'s read answered of sensitive tables into `tally`. */
+const tallied =
+  (tally: SensitiveTally, operation: OperationManifest) =>
+  (sensitive: Readonly<Record<string, number>>): void => {
+    for (const [table, rows] of Object.entries(sensitive)) {
+      const key = JSON.stringify([operation.path, table]);
+      const sofar = tally.get(key);
+      tally.set(key, {
+        function: operation.path,
+        table,
+        reads: (sofar?.reads ?? 0) + 1,
+        rows: (sofar?.rows ?? 0) + rows,
+      });
+    }
+  };
 
 /** The most of a draft's failure a preview is told (`draftFailure`). */
 export const draftFailureMaxLength = 2000;
@@ -1213,8 +1260,12 @@ const verbsOf = (operation: OperationManifest, table: string) => {
   return verbs;
 };
 
-/** One read for `operation`, if it may read the table, through `reader`. */
+/**
+ * One read for `operation`, if it may read the table, through `reader`,
+ * what it answered of sensitive tables counted in `run`'s call.
+ */
 const readFor = async (
+  run: Run,
   operation: OperationManifest,
   reader: StoreReader,
   request: unknown
@@ -1228,7 +1279,7 @@ const readFor = async (
   if (!verbsOf(operation, table).read) {
     throw dataErrors.create("data.access_denied", { table });
   }
-  return await reader.read(read);
+  return await reader.read(read, tallied(run.sensitive, operation));
 };
 
 /**
@@ -2495,6 +2546,11 @@ interface Run {
    */
   readonly evidence: { kept: boolean };
   /**
+   * What the call read of sensitive tables (`SensitiveTally`): shared by
+   * every function in it, kept once as the call ends (`callOperation`).
+   */
+  readonly sensitive: SensitiveTally;
+  /**
    * The first failure a nested function of the current attempt threw that
    * said more than the platform's generic text (`tellerOf`): shared by
    * every function in the call, and cleared as each attempt of the one
@@ -3114,7 +3170,7 @@ const stagedQuery = async (
   return await runHandler(run, narrowed, args, {
     read: async (request) => {
       spend();
-      return await readFor(narrowed, reader, request);
+      return await readFor(run, narrowed, reader, request);
     },
   });
 };
@@ -3282,7 +3338,7 @@ const runQuery = async (
           return await runHandler(run, operation, args, {
             read: async (request) => {
               spendRead(budget, 0);
-              return await readFor(operation, reader, request);
+              return await readFor(run, operation, reader, request);
             },
           });
         },
@@ -3371,7 +3427,7 @@ const runMutation = async (
         {
           read: async (request) => {
             spend();
-            return await readFor(operation, reader, request);
+            return await readFor(run, operation, reader, request);
           },
           write: staging.stage,
           // Any write refused, at the channel's boundary or in staging,
@@ -3827,16 +3883,16 @@ const tellDraft = (invocation: Invocation, told: Told): void => {
 };
 
 /**
- * Calls the public function `reference` names of `app` for `invocation`,
- * with `args`: what it returned, or why it failed, as its caller may see
- * it (see the header). Never throws.
+ * `callOperation`'s answer, what the call read of sensitive tables counted
+ * into `sensitive`. Never throws.
  */
-export const callOperation = async (
+const answer = async (
   app: HostedApp,
   asked: Invocation,
   reference: OperationReference,
   args: unknown,
-  options: CallOptions = {}
+  options: CallOptions,
+  sensitive: SensitiveTally
 ): Promise<OperationResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
   const invocation: Invocation = {
@@ -3889,6 +3945,7 @@ export const callOperation = async (
         depth: 0,
         budget: options.budget ?? callBudget(),
         evidence: { kept: false },
+        sensitive,
         told,
         call: new CallTree(options.parentSession),
         ...(progress === undefined ? {} : { progress }),
@@ -3913,4 +3970,34 @@ export const callOperation = async (
     }
     return { ok: false, error: payload };
   }
+};
+
+/**
+ * Calls the public function `reference` names of `app` for `invocation`,
+ * with `args`: what it returned, or why it failed, as its caller may see
+ * it (see the header), once what it read of sensitive tables is kept
+ * (`Invocation.sensitiveReads`): one record a function and table for the
+ * whole call, however many reads and records, so a read stays one store
+ * call and a function reading a thousand records writes one record, not
+ * a thousand. Kept here, past everything App code runs, so no answer or
+ * failure of its own (a throw, a timeout, a cancel) leaves it out. Never
+ * throws.
+ */
+export const callOperation = async (
+  app: HostedApp,
+  asked: Invocation,
+  reference: OperationReference,
+  args: unknown,
+  options: CallOptions = {}
+): Promise<OperationResult> => {
+  const sensitive: SensitiveTally = new Map();
+  const result = await answer(app, asked, reference, args, options, sensitive);
+  if (sensitive.size > 0) {
+    try {
+      await asked.sensitiveReads?.([...sensitive.values()]);
+    } catch (error) {
+      log.error("operation.sensitive_reads_unkept", errorFields(error));
+    }
+  }
+  return result;
 };

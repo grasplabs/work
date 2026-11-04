@@ -10534,6 +10534,10 @@ msgid "Read others' words"
 msgstr "Worte anderer lesen"
 
 #: src/activity/audit-words.ts
+msgid "Read records of a sensitive table"
+msgstr "Datensätze einer sensiblen Tabelle gelesen"
+
+#: src/activity/audit-words.ts
 msgid "Read restricted sources, and is held to them"
 msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 

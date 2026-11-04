@@ -31,6 +31,7 @@ import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
 import { isApprovedVersion } from "./permissions.ts";
 import { hostedRelease, requireNotRevoked } from "./release-runner.ts";
+import { keptSensitiveReads } from "./sensitive-reads.ts";
 
 // A business store's public operations, shared with other consumers (spec
 // 24, 40.8): another App, or an independent workflow, calls the public
@@ -553,6 +554,15 @@ export const callStoreOperation = async (
   const invocation: Invocation = {
     principal: caller.principal,
     actor: caller.actor,
+    // What it read of the store's sensitive tables, as the store's.
+    sensitiveReads: keptSensitiveReads(env, {
+      actor: caller.actor,
+      target: { type: "store", id: storeId },
+      version,
+      principal: caller.principal,
+      requestId: caller.requestId,
+      runId: caller.runId,
+    }),
     consumer: {
       resourceId: consumer.subject.id,
       resourceVersion: consumer.version,

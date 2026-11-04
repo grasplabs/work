@@ -313,6 +313,16 @@ const accessOf = (
  */
 export type RecordSql = Pick<SqlStorage, "exec">;
 
+/**
+ * What a read reads records through, and tells how many records of each
+ * table it answers (`answered`): every record that leaves the store as a
+ * document, a related one included, whatever the terminal. The host
+ * audits those of a sensitive table (store-host.ts, `#readIn`).
+ */
+export interface ReadSql extends RecordSql {
+  readonly answered: (table: string, records: number) => void;
+}
+
 /** A record's row, as a read selects it. */
 export interface ReadRow extends Record<string, SqlStorageValue> {
   record_id: string;
@@ -531,7 +541,7 @@ const scanned = (scan: Scan, bytes: number): void => {
  * see. A different `expectedRevision` on one it may see is a conflict.
  */
 export const readRecord = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   request: GetRequest
@@ -549,6 +559,9 @@ export const readRecord = (
   if (row === undefined) {
     return null;
   }
+  // Answered even when its revision conflicts: the failure says the
+  // record is there.
+  sql.answered(table.name, 1);
   if (
     request.expectedRevision !== null &&
     row.revision !== request.expectedRevision
@@ -1120,7 +1133,7 @@ const idsIn = (value: unknown): string[] => {
  * table.
  */
 const recordsById = (
-  sql: RecordSql,
+  sql: ReadSql,
   scope: ReadScope,
   target: ReadTable,
   ids: ReadonlySet<string>,
@@ -1144,6 +1157,7 @@ const recordsById = (
     scannedBytes(scan, row.bytes);
     found.set(row.record_id, documentOf(target, row, row.value_json));
   }
+  sql.answered(target.name, found.size);
   return found;
 };
 
@@ -1152,7 +1166,7 @@ const recordsById = (
  * `fields` under `_with`, as the header above says.
  */
 const withRelated = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1552,7 +1566,7 @@ const groupsOf = (
 
 /** At most `limit` matches, as documents of `table`, with their relations. */
 const withDocuments = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1562,6 +1576,7 @@ const withDocuments = (
   scan: Scan
 ): ReadDocument[] => {
   const documents = documentsOf(table, matches, limit);
+  sql.answered(table.name, documents.length);
   withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
   return documents;
 };
@@ -1577,7 +1592,7 @@ const withDocuments = (
  * A search's page is ordered by relevance (`searchMatches`).
  */
 export const readPage = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest,
@@ -1628,6 +1643,7 @@ export const readPage = (
   const items = page.map(({ row, valueJson }) =>
     documentOf(table, row, valueJson ?? "{}")
   );
+  sql.answered(table.name, items.length);
   withRelated(sql, pinned, scope, table, items, query.with ?? [], scan);
   return {
     items,
@@ -1646,7 +1662,7 @@ export const readPage = (
 
 /** Answers a search's terminal other than a page (`runQuery`). */
 const runSearch = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
@@ -1708,7 +1724,7 @@ const runSearch = (
  * records of its `with`. A page is read with `readPage`.
  */
 export const runQuery = (
-  sql: RecordSql,
+  sql: ReadSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest

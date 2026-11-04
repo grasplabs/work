@@ -85,6 +85,7 @@ import {
   readWorkflowWatch,
   watchesWorkflow,
 } from "./screen-workflows.ts";
+import { keptSensitiveReads } from "./sensitive-reads.ts";
 import { appWorkflowNotifications } from "./workflow-notifications.ts";
 import {
   callWorkflowQuery,
@@ -316,9 +317,18 @@ export const invocationFor = async (
     release.store === null
       ? noStore()
       : await openStore(env, release.store.storeId);
+  const actor = callerActor(by.userId, { agent, chain, runOrigin });
   return {
     principal: by.userId,
-    actor: callerActor(by.userId, { agent, chain, runOrigin }),
+    actor,
+    sensitiveReads: keptSensitiveReads(env, {
+      actor,
+      target: { type: "app", id: app },
+      version: release.manifest.resourceVersion,
+      principal: by.userId,
+      requestId,
+      runId: null,
+    }),
     consumer: {
       resourceId: app,
       resourceVersion: release.manifest.resourceVersion,
@@ -559,6 +569,14 @@ export const runInvocationFor = async (
   return {
     principal: authority.onBehalfOf,
     actor: runActorOf(run),
+    sensitiveReads: keptSensitiveReads(env, {
+      actor: runActorOf(run),
+      target: { type: "app", id: app },
+      version,
+      principal: authority.onBehalfOf,
+      requestId,
+      runId,
+    }),
     consumer: { resourceId: app, resourceVersion: version },
     // Who calls: the person the run acts for, the one who started it.
     people: memberPeople(env, {
@@ -1425,6 +1443,14 @@ export const visitorInvocation = async (
   return {
     principal: caller.principal,
     actor: caller.actor,
+    sensitiveReads: keptSensitiveReads(env, {
+      actor: caller.actor,
+      target: { type: "app", id: caller.app },
+      version: release.manifest.resourceVersion,
+      principal: caller.principal,
+      requestId,
+      runId: null,
+    }),
     consumer: {
       resourceId: caller.app,
       resourceVersion: release.manifest.resourceVersion,

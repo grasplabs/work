@@ -127,6 +127,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Read restricted sources, and is held to them`,
   },
   { action: "staff.session", text: msg`Grasp staff signed in` },
+  { action: "app.data.read", text: msg`Read records of a sensitive table` },
   { action: "app.call", text: msg`Called another App` },
   { action: "app.called", text: msg`Was called by another App` },
   { action: "app.member.added", text: msg`Added a member to an App` },
