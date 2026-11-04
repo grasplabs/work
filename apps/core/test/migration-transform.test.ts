@@ -6,6 +6,8 @@ import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
   transformBatch,
+  failedOutside,
+  inputMismatch,
   outputMismatch,
   threwOnRecord,
   transformBatchMaxRows,
@@ -869,7 +871,30 @@ const salaryHandlers = {
   "none-throws-amount": `(ctx, row) => {
     throw new Error(\`Salary: \${row.amount}\`);
   }`,
+  // Throws the salary outside its own body: as the isolate serializes
+  // the batch's answer, after the handler returned.
+  // (A `toJSON` every object inherits, which throws only on the runner's
+  // answer, the one object with an own `ok`.)
+  "stringifies-amount": `(ctx, row) => {
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true,
+      value(this: object): unknown {
+        if (Object.hasOwn(this, "ok")) {
+          throw new Error(\`Salary: \${row.amount}\`);
+        }
+        return this;
+      },
+    });
+    return { ...row, band: "low" };
+  }`,
+  // Declares an input no salary under 100,000 fits (`refinedInput`).
+  "refines-amount": `(ctx, row) => ({ ...row, band: "high" })`,
+  "open-refines-amount": `(ctx, row) => ({ ...row, band: "high" })`,
 } as const;
+
+/** An input that refines a salary's amount: none under 100,000 fits. */
+const refinedInput =
+  "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: v.number().min(100000) }),";
 
 /** What each salary migration's fixtures are: two people's, as records are. */
 const salaryFixtures = `[
@@ -896,8 +921,9 @@ const sealedSalaries = async () =>
               toSchema,
               fixtures: salaryFixtures,
               prelude: salaryPrelude,
-              input:
-                "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
+              input: name.endsWith("refines-amount")
+                ? refinedInput
+                : "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
             }).replaceAll("noteFields", "salaryFields"),
           ])
         ),
@@ -985,11 +1011,13 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
     }
   );
 
-  it("shows nothing App code can influence of a failure on a record its table hides: not what it threw, a stack it forged or a key it wrote", async () => {
+  it("shows nothing App code can influence of a failure on a record its table hides: not what it threw, in its handler or after, a stack it forged, a key it wrote or an input it refused", async () => {
     const record = [salary("s1", "u_bob", "t_a", 91_234)];
     const thrown = await runSalaries("throws-amount", record);
     const forged = await runSalaries("forges-stack", record);
     const keyed = await runSalaries("keys-amount", record);
+    const outside = await runSalaries("stringifies-amount", record);
+    const refined = await runSalaries("refines-amount", record);
     // A table no one reads hides as much.
     const unread = await runSalaries("none-throws-amount", record);
     // On a table every member reads, what it threw is shown as it said.
@@ -1003,9 +1031,18 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
       thrown,
       forged,
       keyed,
+      outside,
+      refined,
       unread,
       open,
-      leaked: JSON.stringify([thrown, forged, keyed, unread]).includes("91234"),
+      leaked: JSON.stringify([
+        thrown,
+        forged,
+        keyed,
+        outside,
+        refined,
+        unread,
+      ]).includes("91234"),
     }).toStrictEqual({
       thrown: threw,
       forged: threw,
@@ -1017,6 +1054,22 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
           issues: [outputMismatch],
         },
       },
+      outside: {
+        ok: false,
+        failure: {
+          id: null,
+          reason: "invalid_answer",
+          issues: [failedOutside],
+        },
+      },
+      refined: {
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "invalid_input",
+          issues: [inputMismatch, "amount: doesn't fit"],
+        },
+      },
       unread: threw,
       open: {
         ok: false,
@@ -1024,6 +1077,20 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
       },
       leaked: false,
     });
+  });
+
+  it("shows a record that doesn't fit the migration's input in full on a table every member reads", async () => {
+    const outcome = await runSalaries("open-refines-amount", [
+      salary("s1", "u_bob", "t_a", 91_234),
+    ]);
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      failure: { id: "s1", reason: "invalid_input" },
+    });
+    const issues = outcome.ok ? [] : outcome.failure.issues;
+    expect(issues).not.toContain(inputMismatch);
+    expect(issues).toStrictEqual([expect.stringMatching(/^amount: ./u)]);
   });
 
   it("runs fixtures of different people a batch each as the release is sealed, and records a rule field's change as their failure", async () => {
