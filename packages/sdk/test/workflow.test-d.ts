@@ -102,7 +102,8 @@ await step.do(
 
 // The typed options and the schemas that check them at run time take the
 // same options.
-expectTypeOf<keyof DoOptions>().toEqualTypeOf<
+// But for `retry`, generated code's alone, checked apart.
+expectTypeOf<Exclude<keyof DoOptions, "retry">>().toEqualTypeOf<
   keyof z.input<typeof stepOptionSchemas.do>
 >();
 expectTypeOf<

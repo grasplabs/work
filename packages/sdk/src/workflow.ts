@@ -1076,6 +1076,10 @@ const resolveParams = (
 const idempotencyKeyOf = (engine: WorkflowEngine, step: string): string =>
   stepIdempotencyKey(engine.runId, step);
 
+/** Whether `value` is an object of options, its keys readable. */
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 /** A step call's options, checked against its method's schema. */
 const optionsOf = <Schema extends z.ZodType>(
   schema: Schema,
@@ -1139,12 +1143,27 @@ const createRunner = (
   const steps: UntypedStepRunner = {
     do: async (name, rawOptions, fn) =>
       await exclusive(`Step "${name}"`, async () => {
-        const options = optionsOf(stepOptionSchemas.do, name, rawOptions);
+        // `retry` is generated code's alone, checked apart from the
+        // options the describer reads.
+        const retry = optionsOf(
+          generatedStepOptionSchemas.retry,
+          name,
+          isObject(rawOptions) ? rawOptions.retry : undefined
+        );
+        const options = optionsOf(
+          stepOptionSchemas.do,
+          name,
+          isObject(rawOptions)
+            ? Object.fromEntries(
+                Object.entries(rawOptions).filter(([key]) => key !== "retry")
+              )
+            : rawOptions
+        );
         const step = start(name, options.key);
         if (typeof fn !== "function") {
           throw invalidCall(`Step "${name}" needs a function to run`);
         }
-        const { input, retries, timeout, retry } = options;
+        const { input, retries, timeout } = options;
         const sideEffect = options.sideEffect === true;
         return await engine.do(
           step,
