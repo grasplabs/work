@@ -536,25 +536,39 @@ export const recallFor = async (
   turn: CodeTurn,
   question: string,
   signal?: AbortSignal
-): Promise<{ runId: string; text: string } | undefined> => {
+): Promise<Recall | undefined> => {
   const query = question.trim().slice(0, searchQueryMaxLength);
   if (query === "") {
     return undefined;
   }
+  const callId = `recall_${crypto.randomUUID().replaceAll("-", "")}`;
+  const code = questionRecallCode(query);
   const { runId, run } = await runOpen(
     {
       ...turn,
       codeTimeoutMs: Math.min(turn.codeTimeoutMs, questionRecallTimeoutMs),
     },
-    `recall_${crypto.randomUUID().replaceAll("-", "")}`,
-    questionRecallCode(query),
+    callId,
+    code,
     signal,
     () => {
       // The recall logs nothing worth showing as it runs.
     }
   );
-  return { runId, text: describeRun(run) };
+  return { runId, callId, code, status: run.status, text: describeRun(run) };
 };
+
+/**
+ * A question's recall, as it ran: its run and call, the code it ran, how
+ * it ended, and what it found, as the question carries it.
+ */
+export interface Recall {
+  runId: string;
+  callId: string;
+  code: string;
+  status: string;
+  text: string;
+}
 
 /** How a turn ended. */
 export type TurnOutcome = "answered" | "cancelled" | "failed";

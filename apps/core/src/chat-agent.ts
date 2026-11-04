@@ -209,6 +209,22 @@ export const questionText = (message: UserMessage): string => {
   return first?.type === "text" ? first.text : "";
 };
 
+/** What the recall `questionContent` put in `message` found, if it recalled. */
+export const recallTextOf = (message: UserMessage): string | undefined => {
+  if (typeof message.content === "string") {
+    return undefined;
+  }
+  for (const part of message.content) {
+    if (part.type === "text") {
+      const header = recallPattern.exec(part.text);
+      if (header !== null) {
+        return part.text.slice(header[0].length);
+      }
+    }
+  }
+  return undefined;
+};
+
 /** A user message with each recall of a run in `withheld` read as a note. */
 const withRecallsNoted = (
   message: UserMessage,

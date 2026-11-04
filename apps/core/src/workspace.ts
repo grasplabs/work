@@ -631,6 +631,13 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
  */
 const traceKeyPrefix = "trace:";
 
+/**
+ * A chat whose turn runs in its `ChatSession`, as that object says
+ * (`turnRunning`): kept in storage, so a restart of this object mid-turn
+ * still shows the chat running while its turn goes on there.
+ */
+const runningKeyPrefix = "running:";
+
 /** Most characters of what a chat read that its writes are traced to. */
 const traceCharsMax = 200_000;
 
@@ -1021,7 +1028,7 @@ export class Workspace extends DurableObject<Env> {
         title: row.title,
         createdAt: row.createdAt.toISOString(),
         lastAt: row.lastAt.toISOString(),
-        running: this.#turns.has(row.id),
+        running: this.#isRunning(row.id),
         appId: row.appId,
         via: row.via,
       },
@@ -2235,6 +2242,34 @@ export class Workspace extends DurableObject<Env> {
    * a question with the files it carries; in a chat platform's chat, the
    * agent's words without links (`withoutLinks`).
    */
+  /**
+   * Whether the chat's turn runs: from the question until its
+   * `ChatSession` says it runs (`#turns`), then as that object says.
+   */
+  #isRunning(chatId: ChatId): boolean {
+    return (
+      this.#turns.has(chatId) ||
+      this.ctx.storage.kv.get(`${runningKeyPrefix}${chatId}`) !== undefined
+    );
+  }
+
+  /**
+   * The chat's `ChatSession` tells whether its turn runs, as its agent's
+   * run starts and ends (chat-harness.ts): what the chat shows as running.
+   */
+  turnRunning(chatId: ChatId, running: boolean): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    const key = `${runningKeyPrefix}${chatId}`;
+    if (running) {
+      this.ctx.storage.kv.put(key, true);
+    } else {
+      this.ctx.storage.kv.delete(key);
+    }
+    this.#changed(chatId);
+  }
+
   keepTurnMessages(chatId: ChatId, messages: readonly TurnMessage[]): void {
     const chat = this.chatState(chatId);
     if (chat === undefined || this.#deleting.has(chatId)) {
@@ -2242,7 +2277,7 @@ export class Workspace extends DurableObject<Env> {
     }
     const { via } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
-    for (const { message, files = [] } of messages) {
+    for (const { message, files = [], thinkingMs } of messages) {
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
         // Only a response the provider counted a prompt for: not a request
@@ -2257,7 +2292,7 @@ export class Workspace extends DurableObject<Env> {
       const id = this.#keep(
         chatId,
         via === "web" ? message : inOwnWords(message),
-        { files }
+        { files, ...(thinkingMs === undefined ? {} : { thinkingMs }) }
       );
       if (live !== undefined && message.role === "assistant") {
         live.answer = id;
@@ -3247,7 +3282,7 @@ export class Workspace extends DurableObject<Env> {
       title: chat.title,
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
-      running: this.#turns.has(chat.id),
+      running: this.#isRunning(chat.id),
       appId: chat.appId,
       via: chat.via,
     };
@@ -3660,6 +3695,7 @@ export class Workspace extends DurableObject<Env> {
         this.#versions.deleteChat(id);
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
@@ -4746,7 +4782,7 @@ export class Workspace extends DurableObject<Env> {
     return {
       partial: partial === undefined ? null : partialOf(partial),
       output: outputOf(this.#outputs.get(chatId)),
-      running: this.#turns.has(chatId),
+      running: this.#isRunning(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,
       held: this.#heldVersions.get(chatId) ?? 0,

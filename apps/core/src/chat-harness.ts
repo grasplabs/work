@@ -9,9 +9,12 @@ import {
   defineDoc,
   Harness,
   LiveDoc,
+  watchEvents,
 } from "@earendil-works/pi-durable";
 import type {
+  AgentEvent,
   Conversation,
+  MessageChange,
   EntryId,
   EntryRecord,
   Registry,
@@ -44,6 +47,7 @@ import {
   questionKind,
   questionText,
   rebase,
+  recallTextOf,
 } from "./chat-agent.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { workspace } from "./durable-objects.ts";
@@ -102,6 +106,8 @@ export interface TurnEnd {
 export interface TurnMessage {
   message: Message;
   files?: string[];
+  /** How long a response thought, as its stream showed it. */
+  thinkingMs?: number;
 }
 
 const context = BACKGROUND_CONTEXT;
@@ -127,7 +133,73 @@ const CopiedDoc = defineDoc<{ after: EntryId | null }>({
   checkpointWhen: () => true,
 });
 
-const questionDataSchema = z.object({ files: z.array(z.string()) });
+/**
+ * What a question's entry keeps besides its message: the files it carries,
+ * and its recall's call, so the chat shows the recall as a step of its own.
+ */
+const questionDataSchema = z.object({
+  files: z.array(z.string()),
+  recall: z
+    .object({
+      runId: z.string(),
+      callId: z.string(),
+      code: z.string(),
+      status: z.string(),
+    })
+    .optional(),
+});
+
+const noUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+/**
+ * A question's recall as the chat shows it: a code step the platform ran
+ * before the first request, its call and its result, as the model's own
+ * code steps show. Only in the chat's copy: the model reads what it found
+ * with the question.
+ */
+const recallStepOf = (
+  recall: NonNullable<z.infer<typeof questionDataSchema>["recall"]>,
+  text: string,
+  timestamp: number
+): TurnMessage[] => [
+  {
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: recall.callId,
+          name: "executeCode",
+          arguments: { code: recall.code },
+        },
+      ],
+      api: "openai-responses",
+      provider: gateway,
+      model: "recall",
+      usage: noUsage,
+      stopReason: "toolUse",
+      timestamp,
+    },
+  },
+  {
+    message: {
+      role: "toolResult",
+      toolCallId: recall.callId,
+      toolName: "executeCode",
+      content: [{ type: "text", text }],
+      details: { status: recall.status, runId: recall.runId },
+      isError: recall.status !== "completed",
+      timestamp,
+    },
+  },
+];
 
 /** A turn's request, as `TurnDoc` keeps it: our own JSON, checked as an object. */
 const turnRequestSchema = z.custom<TurnRequest>(
@@ -151,22 +223,69 @@ const liveSchema = z.object({
     .optional(),
 });
 
-/** The message a committed entry shows the person, if it shows one. */
-const shownOf = (entry: EntryRecord): TurnMessage | undefined => {
+/**
+ * The messages a committed entry shows the person: a question, then its
+ * recall's step if it recalled; a response or a tool's result; or none.
+ */
+const shownOf = (entry: EntryRecord): TurnMessage[] => {
   const [message] = entry.model ?? [];
   if (message === undefined) {
-    return undefined;
+    return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
     const data = questionDataSchema.safeParse(entry.data);
-    return {
-      message: { ...message, content: questionText(message) },
-      files: data.success ? data.data.files : [],
-    };
+    const recall = data.success ? data.data.recall : undefined;
+    const recalled = recall === undefined ? undefined : recallTextOf(message);
+    return [
+      {
+        message: { ...message, content: questionText(message) },
+        files: data.success ? data.data.files : [],
+      },
+      ...(recall === undefined || recalled === undefined
+        ? []
+        : recallStepOf(recall, recalled, message.timestamp)),
+    ];
   }
   return entry.kind === "pi.assistant" || entry.kind === "pi.tool-result"
-    ? { message }
-    : undefined;
+    ? [{ message }]
+    : [];
+};
+
+/**
+ * Times the thinking of the response streaming in, from its stream's
+ * changes as pi commits them: from a thinking part's start to the start
+ * of the next part, or the response's end, the parts' times added up. To
+ * the grain of pi's commits of the stream; a response a restart cut
+ * short has none.
+ */
+const thinkingClock = () => {
+  let ms: number | undefined;
+  let since: number | undefined;
+  const stop = (): void => {
+    if (since !== undefined) {
+      ms = (ms ?? 0) + Date.now() - since;
+      since = undefined;
+    }
+  };
+  return {
+    see: (changes: readonly MessageChange[]): void => {
+      for (const { type } of changes) {
+        if (type === "thinking_start") {
+          stop();
+          since = Date.now();
+        } else if (type === "text_start" || type === "toolcall_start") {
+          stop();
+        }
+      }
+    },
+    /** The response's thinking time, now it ended: none if it didn't think. */
+    take: (): number | undefined => {
+      stop();
+      const taken = ms;
+      ms = undefined;
+      return taken;
+    },
+  };
 };
 
 /** The brain as `personId` may read it now: what a step of thinking may name. */
@@ -200,6 +319,12 @@ export class ChatHarness {
   #copying: Promise<void> = Promise.resolve();
   /** The partial answer the Workspace was shown last. */
   #shown = "null";
+  /** Whether the Workspace was told the agent's run is under way. */
+  #told: boolean | undefined;
+  /** The thinking of the response streaming in, as `thinkingClock` times it. */
+  readonly #thinking = thinkingClock();
+  /** Each response's thinking time, by its entry, until it is copied. */
+  readonly #thought = new Map<EntryId, number>();
 
   constructor(
     ctx: DurableObjectState,
@@ -255,9 +380,67 @@ export class ChatHarness {
     const view = await conversation.viewState(context);
     view.subscribe((value) => {
       opened.#showPartial(value.docs["pi.live"]);
+    });
+    // The agent's own events: when its run starts and ends, which the
+    // chat shows as running, and its thinking as it streams.
+    const events = await watchEvents(harness, conversation.id, context);
+    opened.#see(events.snapshot);
+    events.start(async (batch) => {
+      for (const event of batch) {
+        opened.#see(event);
+      }
+      // One batch a commit: copied once its events are seen, so a
+      // response goes with its thinking time.
       opened.#copySoon();
+      await Promise.resolve();
     });
     return opened;
+  }
+
+  /** Takes in one of the agent's events (`watchEvents`). */
+  #see(event: AgentEvent): void {
+    if (event.type === "snapshot") {
+      this.#tell(event.run !== undefined);
+    } else if (event.type === "run_start" || event.type === "run_end") {
+      this.#tell(event.type === "run_start");
+    } else if (event.type === "message_update") {
+      this.#thinking.see(event.changes);
+    } else if (event.type === "message_end") {
+      const ms = this.#thinking.take();
+      if (ms !== undefined && event.entry.kind === "pi.assistant") {
+        this.#thought.set(event.entry.id, ms);
+      }
+    }
+  }
+
+  /**
+   * Tells the chat's Workspace whether the agent's run is under way, once
+   * each time that changes: this object's state is what the chat shows,
+   * so a restart of the Workspace mid-turn still shows it running.
+   */
+  #tell(running: boolean): void {
+    if (this.#told === running) {
+      return;
+    }
+    this.#told = running;
+    this.#ctx.waitUntil(
+      (async () => {
+        const request = await this.#request();
+        if (request === undefined) {
+          return;
+        }
+        try {
+          await this.#host(request.scope).turnRunning(
+            request.scope.chatId,
+            running
+          );
+        } catch (error) {
+          // Told again at the next change, or as the object wakes.
+          this.#told = undefined;
+          throw error;
+        }
+      })()
+    );
   }
 
   /** When the Harness next needs the object (`Harness.wake`). */
@@ -300,7 +483,19 @@ export class ChatHarness {
           whenBusy: "reject",
           entry: {
             kind: questionKind,
-            data: { files: request.question.files.map(({ id }) => id) },
+            data: {
+              files: request.question.files.map(({ id }) => id),
+              ...(recall === undefined
+                ? {}
+                : {
+                    recall: {
+                      runId: recall.runId,
+                      callId: recall.callId,
+                      code: recall.code,
+                      status: recall.status,
+                    },
+                  }),
+            },
           },
         },
         context
@@ -580,6 +775,7 @@ export class ChatHarness {
     const copied = await this.#harness.snapshot(CopiedDoc, context);
     const after = copied?.after ?? null;
     const shown: TurnMessage[] = [];
+    const seen: EntryId[] = [];
     let last: EntryId | undefined;
     let cursor;
     do {
@@ -596,9 +792,12 @@ export class ChatHarness {
       for (const entry of page.items) {
         if (entry.id !== after) {
           last = entry.id;
-          const message = shownOf(entry);
-          if (message !== undefined) {
-            shown.push(message);
+          seen.push(entry.id);
+          const thinkingMs = this.#thought.get(entry.id);
+          for (const message of shownOf(entry)) {
+            shown.push(
+              thinkingMs === undefined ? message : { ...message, thinkingMs }
+            );
           }
         }
       }
@@ -615,6 +814,9 @@ export class ChatHarness {
       const doc = await tx.doc(CopiedDoc);
       doc.after = through;
     }, context);
+    for (const id of seen) {
+      this.#thought.delete(id);
+    }
   }
 
   /** Shows the Workspace the answer streaming in, as `pi.live` has it. */
