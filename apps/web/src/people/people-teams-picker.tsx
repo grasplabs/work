@@ -15,7 +15,7 @@ import {
 } from "@grasp-os/ui/components/popover";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon, ShieldIcon, UsersIcon } from "lucide-react";
+import { PlusIcon, IdCardIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -219,7 +219,7 @@ export const PeopleTeamsPicker = ({
                           keywords={[name]}
                           value={subjectKey({ type: "role", id: role })}
                         >
-                          <ShieldIcon className="text-muted-foreground" />
+                          <IdCardIcon className="text-muted-foreground" />
                           <span className="flex-1 truncate">
                             {t`Everyone with the ${name} role`}
                           </span>
