@@ -45,6 +45,22 @@ const keptKey = (app: string, stored: string): string => {
   return `${keptPrefix}${day}/${app}/${id}`;
 };
 
+/**
+ * Where attachment `index` of message `id`, to email trigger `triggerId`,
+ * waits while one delivery's start copies it into the run
+ * (inbound-email.ts): a key of that delivery's own, so another delivery
+ * of the message deleting its copy never takes this one; under today's
+ * day, so a copy its start never deleted goes with that day's kept
+ * messages (`deleteExpiredEmail`). No App's ID is `triggers`, so no App's
+ * run reads it as a message of its own.
+ */
+export const stagedAttachmentKey = (
+  triggerId: string,
+  id: string,
+  index: number
+): string =>
+  `${keptPrefix}${dayOf(new Date())}/triggers/${triggerId}/${id}/${String(index)}-${crypto.randomUUID()}`;
+
 /** The most kept messages one clock run deletes: one R2 list and delete. */
 const maxDeletedPerRun = 1000;
 

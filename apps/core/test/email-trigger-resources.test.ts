@@ -1,5 +1,9 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import {
+  sha256Hex,
+  sha256HexOfBytes,
+  toBase64,
+} from "@grasp-os/shared/encoding";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -17,11 +21,14 @@ import {
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { runFileLimits } from "@grasp-os/shared/run-files";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import { inboundEmailMaxBytes } from "@grasp-os/shared/workflows";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import worker from "../src/index.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -30,10 +37,18 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
+import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { deliver, invoiceMail, storedObjects } from "./email-triggers.ts";
+import {
+  addedSince,
+  deliver,
+  invoiceMail,
+  storedObjects,
+} from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -82,13 +97,17 @@ const admin = async (): Promise<Identity> => {
 
 const stringOrNull = { anyOf: [{ type: "string" }, { type: "null" }] };
 
-/** An attachment, as a message's input lists it. */
+/**
+ * An attachment, as a message's input lists it: as a file of the run too,
+ * when a run file may be it.
+ */
 const attachment = {
   type: "object",
   properties: {
     filename: stringOrNull,
     mimeType: { type: "string" },
     size: { type: "integer" },
+    file: { type: "object", "x-grasp-value": { kind: "file" } },
   },
   required: ["filename", "mimeType", "size"],
   additionalProperties: false,
@@ -172,26 +191,50 @@ const granted = async (
   return id;
 };
 
+/** What a test's email trigger is on, when not the plain `definitionOf`. */
+interface Starting {
+  /** The workflow's definition, by its name. */
+  definition?: (name: string) => string;
+  /** Its own modules, by path. */
+  modules?: Record<string, string>;
+  /** Its files binding, approved by the admin, for a catalog key of its own. */
+  files?: true;
+  input?: InputMapping;
+}
+
 /**
  * A builder's workflow with an email trigger of theirs on it, made over
  * `/rpc`, granted `start` by an admin: the trigger as its owner sees it,
  * and the address it receives at.
  */
-const emailTrigger = async () => {
+const emailTrigger = async ({
+  definition = definitionOf,
+  modules,
+  files,
+  input = mapping,
+}: Starting = {}) => {
   const builder = await signedInApi(idp, "builder");
   const by = await admin();
   const { id, name } = await builder.api.workflowResources.create(
     `intake-${unique()}`
   );
   await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(name),
+    definition: definition(name),
     basedOn: null,
+    ...(modules === undefined ? {} : { modules }),
   });
+  if (files === true) {
+    await approveWorkflowBinding(env, by, id, {
+      alias: "files",
+      target: { kind: "files" },
+      reviewed: { version: 1 },
+    });
+  }
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: id,
     version: 1,
-    config: { input: mapping },
+    config: { input },
   });
   const start = await granted(by, {
     subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -404,6 +447,22 @@ const stampOf = async (
   return stamp;
 };
 
+/** Run `runId`'s files, as core keeps them, oldest first. */
+const runFilesOf = async (runId: string) => {
+  const { results } = await env.DB.prepare(
+    "SELECT id, name, type, size, state FROM workflow_run_files WHERE run_id = ? ORDER BY created_at, name"
+  )
+    .bind(runId)
+    .all<{
+      id: string;
+      name: string;
+      type: string;
+      size: number;
+      state: string;
+    }>();
+  return results;
+};
+
 describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
   it("start one run per message, mapped into its input and acting for the trigger's creator, however often it is delivered, at an address shown with the trigger", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
@@ -422,6 +481,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     const routed = await deliver(address, message);
     const listed = await builder.api.workflowResources.triggers.list(workflow);
     const runs = await runsOf(trigger.id);
+    const [file] = await runFilesOf(runs[0]?.id ?? "");
 
     expect({
       statuses: [first.status, again.status],
@@ -457,13 +517,18 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
         {
           key: true,
           principal: builder.userId,
-          // Listed, never kept: an independent run reads no attachment.
+          // Never kept as a message: its attachment is a file of the run.
           input: {
             subject: "Invoice INV-7",
             from: "ben@acme.test",
             stored: null,
             attachments: [
-              { filename: "inv-7.pdf", mimeType: "application/pdf", size: 5 },
+              {
+                filename: "inv-7.pdf",
+                mimeType: "application/pdf",
+                size: 5,
+                file: { id: file?.id },
+              },
             ],
           },
         },
@@ -561,6 +626,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       invoiceMail({ to: address, from: "CEO <ceo@acme.test>" })
     );
     const runs = await runsOf(trigger.id);
+    const [file] = await runFilesOf(runs[0]?.id ?? "");
 
     expect({
       statuses: [automatic, ownFrom, ownEnvelope, spoofed].map(
@@ -582,7 +648,12 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
             from: "ceo@acme.test",
             stored: null,
             attachments: [
-              { filename: "inv-7.pdf", mimeType: "application/pdf", size: 5 },
+              {
+                filename: "inv-7.pdf",
+                mimeType: "application/pdf",
+                size: 5,
+                file: { id: file?.id },
+              },
             ],
           },
         },
@@ -590,7 +661,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("bounce a message over the size limit, and keep no message's attachments", async () => {
+  it("bounce a message over the size limit, and keep nothing of a message but its run's files", async () => {
     const { trigger, address } = await emailTrigger();
     const before = await storedObjects();
 
@@ -1000,3 +1071,394 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     });
   });
 });
+
+/** A PNG's bytes: its signature, then `size` bytes in all. */
+const png = (size = 40): Uint8Array => {
+  const bytes = new Uint8Array(size);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return bytes;
+};
+
+/** `value` as UTF-8 bytes. */
+const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
+
+/** An attachment of a test's message: its bytes, and what its sender says of them. */
+interface Part {
+  type: string;
+  name: string;
+  bytes: Uint8Array;
+  inline?: true;
+}
+
+/** A message from Ben to `to` with `parts` attached, as it goes over the wire. */
+const mailWith = (to: string, parts: readonly Part[]): string =>
+  [
+    "From: Ben <ben@acme.test>",
+    `To: ${to}`,
+    `Message-ID: <m-${unique()}@acme.test>`,
+    "Subject: Scans",
+    "Date: Mon, 28 Sep 2026 08:00:00 +0000",
+    "MIME-Version: 1.0",
+    'Content-Type: multipart/mixed; boundary="b"',
+    "",
+    "--b",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "Scans attached.",
+    ...parts.flatMap(({ type, name, bytes, inline }) => [
+      "--b",
+      `Content-Type: ${type}; name="${name}"`,
+      `Content-Disposition: ${inline === true ? "inline" : "attachment"}; filename="${name}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      toBase64(bytes),
+    ]),
+    "--b--",
+    "",
+  ].join("\r\n");
+
+/**
+ * The module of a workflow reading the files its run was handed: `read`
+ * answers a file's content as text, through the workflow's files binding.
+ */
+const readerModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+const files = resource.files("files", { operations: ["read"] });
+
+export const read = action({
+  args: { file: v.string() },
+  returns: v.object({ content: v.string() }),
+  uses: [files],
+  handler: async (ctx, args) => {
+    const reader = ctx.resources.files as unknown as { read: (request: object) => Promise<unknown> };
+    return { content: String(await reader.read({ file: args.file })) };
+  },
+});
+`;
+
+/**
+ * A workflow taking a message's attachments, whose run reads the first as
+ * a file of its own, through its files binding of catalog key `key`, and
+ * returns its content.
+ */
+const readerOf =
+  (key: string) =>
+  (name: string): string =>
+    JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name,
+        version: "1.0.0",
+        title: name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: {
+              read: {
+                kind: "operation",
+                contract: "local:code/reader.ts#read",
+              },
+              files: { kind: "files", contract: key },
+            },
+          },
+        },
+      },
+      input: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: { attachments: { type: "array", items: attachment } },
+            required: ["attachments"],
+            additionalProperties: false,
+          },
+        },
+      },
+      output: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: { content: { type: "string" } },
+            required: ["content"],
+            additionalProperties: false,
+          },
+        },
+      },
+      do: [
+        {
+          read: {
+            call: "grasp.operation",
+            with: {
+              binding: "read",
+              arguments: {
+                file: "${ $workflow.input.attachments[0].file.id }",
+              },
+            },
+          },
+        },
+      ],
+    });
+
+/** A workflow taking a message's attachments as each of `fields`. */
+const takingAttachments =
+  (fields: readonly string[]) =>
+  (name: string): string =>
+    JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name,
+        version: "1.0.0",
+        title: name,
+        metadata: {
+          grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+        },
+      },
+      input: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: Object.fromEntries(
+              fields.map((field) => [
+                field,
+                { type: "array", items: attachment },
+              ])
+            ),
+            required: fields,
+            additionalProperties: false,
+          },
+        },
+      },
+      output: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: { subject: { type: "string" } },
+            required: ["subject"],
+            additionalProperties: false,
+          },
+        },
+      },
+      do: [{ finish: { set: { subject: "Read" } } }],
+    });
+
+/** A mapping of a message's attachments into each of `fields`. */
+const attachmentsAs = (...fields: string[]) => ({
+  fields: Object.fromEntries(fields.map((field) => [field, "/attachments"])),
+  defaults: {},
+});
+
+/** What run `runId` returned, once it completed. */
+const outputOf = async (runId: string): Promise<unknown> =>
+  await vi.waitFor(
+    async () => {
+      const row = await runOf(env, runId);
+      if (row?.status !== "completed") {
+        throw new Error(`Run ${runId} is ${row?.status ?? "missing"}`);
+      }
+      const { output } = await resultOf(env, row);
+      return output;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** Whether each attachment of a run's input is a file of the run. */
+const filedOf = (input: string | null): boolean[] =>
+  z
+    .object({
+      attachments: z.array(z.object({ file: z.unknown().optional() })),
+    })
+    .parse(inputOf(input))
+    .attachments.map(({ file }) => file !== undefined);
+
+describe(
+  "attachments of mail to independent workflows' email triggers",
+  { timeout: 120_000 },
+  () => {
+    it("are files of the run they start, which reads them through its files binding, each copied and audited once however often the message comes", async () => {
+      const key = `files-${unique()}`;
+      await publishCatalogContract(env, await admin(), { key, kind: "files" });
+      const { trigger, workflow, address } = await emailTrigger({
+        definition: readerOf(key),
+        modules: { "code/reader.ts": readerModule },
+        files: true,
+        input: attachmentsAs("attachments"),
+      });
+      const before = await storedObjects();
+      const message = invoiceMail({
+        to: address,
+        messageId: `m-${unique()}@acme.test`,
+      });
+
+      const first = await deliver(address, message);
+      const again = await deliver(address, message);
+      const runs = await runsOf(trigger.id);
+      const run = runs[0]?.id ?? "";
+      const output = await outputOf(run);
+      const files = await runFilesOf(run);
+
+      expect({
+        delivered: [first.rejected, again.rejected],
+        runs: runs.length,
+        input: inputOf(runs[0]?.input ?? null),
+        output,
+        files: files.map(({ name, type, size, state }) => ({
+          name,
+          type,
+          size,
+          state,
+        })),
+        sent: await auditedOf(trigger.id, "workflow.email.attachment.sent"),
+        // Nothing waits in R2 once its start is decided.
+        left: await addedSince(before),
+      }).toStrictEqual({
+        delivered: [undefined, undefined],
+        runs: 1,
+        // The message names the run's own copy, by the same shape.
+        input: {
+          attachments: [
+            {
+              filename: "inv-7.pdf",
+              mimeType: "application/pdf",
+              size: 5,
+              file: { id: files[0]?.id },
+            },
+          ],
+        },
+        // The PDF as it was sent: its bytes, read by reference.
+        output: { content: "%PDF-" },
+        files: [
+          {
+            name: "inv-7.pdf",
+            type: "application/pdf",
+            size: 5,
+            state: "done",
+          },
+        ],
+        // Never its name.
+        sent: [
+          {
+            message: await sha256HexOfBytes(new TextEncoder().encode(message)),
+            attachment: "attachment-0",
+            workflow,
+            run,
+            type: "application/pdf",
+            size: 5,
+          },
+        ],
+        left: [],
+      });
+    });
+
+    it("are files only when a run file may be one, by its bytes and never its label: not an unknown type, a lying label, text that isn't UTF-8 or an inline one", async () => {
+      const { trigger, address } = await emailTrigger();
+
+      const delivered = await deliver(
+        address,
+        mailWith(address, [
+          // A PNG said to be anything: a PNG.
+          { type: "application/octet-stream", name: "scan.bin", bytes: png() },
+          { type: "application/pdf", name: "fake.pdf", bytes: utf8("no pdf") },
+          {
+            type: "application/zip",
+            name: "a.zip",
+            bytes: new Uint8Array([0, 1, 2]),
+          },
+          {
+            type: "text/plain",
+            name: "bad.txt",
+            bytes: new Uint8Array([0xff, 0xfe, 0x41]),
+          },
+          { type: "image/png", name: "logo.png", bytes: png(), inline: true },
+          { type: "text/csv", name: "totals.csv", bytes: utf8("a,b\r\n1,2") },
+        ])
+      );
+      const [run] = await runsOf(trigger.id);
+      await outputOf(run?.id ?? "");
+      const files = await runFilesOf(run?.id ?? "");
+
+      expect({
+        delivered: delivered.rejected,
+        filed: filedOf(run?.input ?? null),
+        files: files.map(({ name, type }) => ({ name, type })),
+      }).toStrictEqual({
+        delivered: undefined,
+        filed: [true, false, false, false, false, true],
+        files: [
+          { name: "scan.bin", type: "image/png" },
+          { name: "totals.csv", type: "text/csv" },
+        ],
+      });
+    });
+
+    it("are files for at most as many as a start hands its run, and a mapping handing it more is refused for good, audited", async () => {
+      const many = Array.from(
+        { length: runFileLimits.startFiles + 2 },
+        (_, at) => ({
+          type: "application/pdf",
+          name: `inv-${String(at)}.pdf`,
+          bytes: utf8("%PDF-"),
+        })
+      );
+      const once = await emailTrigger();
+      const twice = await emailTrigger({
+        definition: takingAttachments(["attachments", "again"]),
+        input: attachmentsAs("attachments", "again"),
+      });
+
+      const first = await deliver(once.address, mailWith(once.address, many));
+      const second = await deliver(
+        twice.address,
+        mailWith(twice.address, many)
+      );
+      const [run] = await runsOf(once.trigger.id);
+      await outputOf(run?.id ?? "");
+      const files = await runFilesOf(run?.id ?? "");
+
+      expect({
+        delivered: [first.rejected, second.rejected],
+        filed: filedOf(run?.input ?? null),
+        files: files.length,
+        refused: await runCount(twice.trigger.id),
+        codes: await refusalsOf(twice.trigger.id),
+      }).toStrictEqual({
+        delivered: [undefined, undefined],
+        filed: many.map((_, at) => at < runFileLimits.startFiles),
+        files: runFileLimits.startFiles,
+        refused: 0,
+        codes: ["file.start_files"],
+      });
+    });
+
+    it("are no one else's by their reference: a start by hand naming one is refused", async () => {
+      const { builder, workflow } = await emailTrigger();
+
+      const refused = await outcome(
+        builder.api.workflowResources.start(workflow, {
+          version: 1,
+          input: {
+            subject: "Invoice",
+            from: "ben@acme.test",
+            stored: null,
+            attachments: [
+              {
+                filename: "inv-7.pdf",
+                mimeType: "application/pdf",
+                size: 5,
+                file: { id: "attachment-0" },
+              },
+            ],
+          },
+          key: unique(),
+        })
+      );
+
+      expect(refused).toBe("file.start_files");
+    });
+  }
+);
