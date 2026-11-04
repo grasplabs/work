@@ -82,15 +82,25 @@ export const stamp = action({
   args: {
     title: noteFields.title,
     pauseMs: v.number().integer().min(0).max(5000).default(0),
-    // How long it takes after its save, before it answers.
-    thenMs: v.number().integer().min(0).max(5000).default(0),
+    // Once saved, it answers only after a read of its note is refused, as
+    // once its release is revoked: the caller's signal, not a time to race.
+    untilRefused: v.boolean().default(false),
   },
   returns: v.object({ id: v.id("notes"), token: v.string() }),
-  uses: [create],
+  uses: [create, get],
   handler: async (ctx, args) => {
     await pause(args.pauseMs);
     const id = await ctx.runMutation(create, { title: args.title, body: "" });
-    await pause(args.thenMs);
+    if (args.untilRefused) {
+      try {
+        for (;;) {
+          await ctx.runQuery(get, { id });
+          await pause(20);
+        }
+      } catch {
+        // Refused: it answers now.
+      }
+    }
     return { id, token: crypto.randomUUID() };
   },
 });
@@ -211,7 +221,7 @@ export const apiOf = (release: Release) => ({
   >(release, "notes.remove"),
   echo: referenceTo<{ word?: string }, string, "action">(release, "notes.echo"),
   stamp: referenceTo<
-    { title: string; pauseMs?: number; thenMs?: number },
+    { title: string; pauseMs?: number; untilRefused?: boolean },
     { id: Id<"notes">; token: string },
     "action"
   >(release, "notes.stamp"),
