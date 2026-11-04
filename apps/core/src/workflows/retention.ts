@@ -488,8 +488,8 @@ const startDetailsRemoved = async (
     db.delete(runEvidenceHolds).where(inArray(runEvidenceHolds.runId, due)),
     // And what the chat that had it started had read (workflow-starts.ts).
     db.delete(runChatSources).where(inArray(runChatSources.runId, due)),
-    // And its inboxes (run-inboxes.ts): a reply or call from now on is to
-    // an address or URL nobody has.
+    // And its inboxes (run-inboxes.ts): a reply from now on is to an
+    // address nobody has.
     db.delete(runInboxes).where(inArray(runInboxes.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who

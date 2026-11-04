@@ -1408,9 +1408,17 @@ export const decideWorkflowStart = async (
     });
     throw await deniedAt(env, id, version, { generation, configRevision });
   }
-  // Its files, copied last, once everything else said yes: under the ID
-  // its run will have, and no run's until it is admitted.
+  // The ID its run will have: its inboxes' tokens and its files' copies
+  // are made under it.
   const runId = crypto.randomUUID();
+  const inboxes = await startInboxes(env, {
+    runId,
+    workflowId: id,
+    bindings: bindings.text,
+    runs: buildHash !== null,
+  });
+  // Its files, copied last, once everything else said yes: no run's until
+  // it is admitted.
   const handed = await handFiles(
     env,
     descriptorFromText(inputDescriptor),
@@ -1418,21 +1426,13 @@ export const decideWorkflowStart = async (
     { runId, workflowId: id, runs: buildHash !== null },
     files
   );
-  // The ID its files were copied under, which its run is admitted under.
-  const admittedId = handed.runId ?? runId;
-  const inboxes = await startInboxes(env, {
-    runId: admittedId,
-    workflowId: id,
-    bindings: bindings.text,
-    runs: buildHash !== null,
-  });
   return {
     authorization: {
       // The ID its files, pins and inboxes were made under.
-      id: admittedId,
+      id: runId,
       alsoAdmitted: (admitted) => [
         ...(handed.admitted?.(admitted) ?? []),
-        ...pinsAdmitted(env, admittedId, pins, admitted),
+        ...pinsAdmitted(env, runId, pins, admitted),
         ...inboxes(admitted),
       ],
       workflowId: id,

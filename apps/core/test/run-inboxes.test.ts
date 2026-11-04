@@ -251,14 +251,8 @@ import { workflow, z } from ${sdkWorkflow};
 export default workflow("sealed", { params: {}, input: z.object({}) }, async (step, { inbox }) => ({ ...inbox }));
 `;
 
-/**
- * Runs `readsInbox` as an activation of run `runId` of its sealed build on
- * the run host, its calls going by `calling` if given: the inbox it read.
- */
-const inboxRead = async (
-  runId: string,
-  calling?: (frozen: CallingRun) => CallingRun
-): Promise<unknown> => {
+/** Run `runId` as the dispatcher loads it, served on the run host. */
+const sealedRunOf = async (runId: string) => {
   const row = await runOf(env, runId);
   if (row === undefined) {
     throw new Error(`Run ${runId} has no row`);
@@ -272,7 +266,18 @@ const inboxRead = async (
     },
     runId
   );
-  const loaded = sealedRunFrom(activation);
+  return sealedRunFrom(activation);
+};
+
+/**
+ * Runs `readsInbox` as an activation of run `runId` of its sealed build on
+ * the run host, its calls going by `calling` if given: the inbox it read.
+ */
+const inboxRead = async (
+  runId: string,
+  calling?: (frozen: CallingRun) => CallingRun
+): Promise<unknown> => {
+  const loaded = await sealedRunOf(runId);
   const run =
     calling === undefined
       ? loaded
@@ -386,6 +391,17 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
       replayed: first,
       otherDiffers: true,
     });
+  });
+
+  it("hands out no address once core's key changed since the start, never one nobody has", async () => {
+    const runId = await waitingRun(sealed);
+    const run = await sealedRunOf(runId);
+    const rotated = await sealedRunStart(
+      { ...env, BETTER_AUTH_SECRET: "another-auth-secret-of-32-chars-or-more" },
+      run
+    );
+
+    expect(rotated.inbox).toStrictEqual({});
   });
 
   it("gives a test run of a draft a placeholder that reaches nobody", async () => {

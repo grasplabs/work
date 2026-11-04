@@ -1,4 +1,5 @@
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { log } from "@grasp-os/shared/log";
 import type { EventIngressKind } from "@grasp-os/shared/workflow-resources";
 import { eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -30,7 +31,8 @@ import type { CallingRun } from "./resource-authority.ts";
 //   is looked up by its primary key (`inboxAt`). The run's code gets it
 //   recomputed from the key (`inboxOf`), never read back. Rotating the
 //   auth secret changes every token, and leaves every reply address
-//   already handed out dead, as it does webhook triggers' secrets.
+//   already handed out dead, as it does webhook triggers' secrets; a run
+//   then reads no address for that binding, never one nobody has.
 // - Someone who sees a token (whoever the mail reached, a forward, a mail
 //   hop's logs, the run's viewers) sending events. Accepted, as for any
 //   reply, and bounded: they reach one run, through one binding, as its
@@ -102,13 +104,13 @@ const replyAddressOf = (token: string, host: string): string =>
 /** A test run's placeholder for a reply address. */
 const placeholder = replyAddressOf("0".repeat(tokenBytes * 2), placeholderHost);
 
-/** The deployment's own hostname, which every reply address is on. */
-const hostOf = (env: Env): string => {
+/**
+ * The deployment's own hostname, which every reply address is on: none
+ * while it has none, when no mail reaches it and no run has an inbox.
+ */
+const hostOf = (env: Env): string | undefined => {
   const origin = signInConfig(env)?.origin;
-  if (origin === undefined) {
-    throw new Error("The deployment has no hostname for its runs' inboxes");
-  }
-  return new URL(origin).hostname;
+  return origin === undefined ? undefined : new URL(origin).hostname;
 };
 
 /** An event binding, by the contract it pinned. */
@@ -175,7 +177,8 @@ export const inboxesAdmitted = async (
     bindings: Iterable<EventBinding>;
   }
 ): Promise<(admitted: SQL) => BatchItem<"sqlite">[]> => {
-  const inboxes = await ingressBindings(env, run.bindings);
+  const inboxes =
+    hostOf(env) === undefined ? [] : await ingressBindings(env, run.bindings);
   const rows = await Promise.all(
     inboxes.map(async ({ alias }) => ({
       tokenHash: await sha256Hex(await tokenOf(env, run.runId, alias)),
@@ -203,7 +206,9 @@ export const inboxesAdmitted = async (
 /**
  * What a run's code reads as `inbox`: each of its inboxes by its binding's
  * alias, its reply address, recomputed from core's key on every
- * activation, so a replay reads the same. A test run of a draft
+ * activation, so a replay reads the same. One whose token no longer
+ * hashes to its row (core's auth secret rotated since the start) is left
+ * out, never handed out as an address nobody has. A test run of a draft
  * (`calling.candidate`) gets a placeholder on `.invalid` for each binding
  * that would have one, and has no rows.
  */
@@ -221,24 +226,25 @@ export const inboxOf = async (
       Object.fromEntries(inboxes.map(({ alias }) => [alias, placeholder]))
     );
   }
-  const rows = await drizzle(env.DB)
-    .select({ binding: runInboxes.binding })
-    .from(runInboxes)
-    .where(eq(runInboxes.runId, run.runId));
-  if (rows.length === 0) {
+  const host = hostOf(env);
+  if (host === undefined) {
     return Object.freeze({});
   }
-  const host = hostOf(env);
+  const rows = await drizzle(env.DB)
+    .select({ binding: runInboxes.binding, tokenHash: runInboxes.tokenHash })
+    .from(runInboxes)
+    .where(eq(runInboxes.runId, run.runId));
   const entries = await Promise.all(
-    rows.map(
-      async ({ binding }) =>
-        [
-          binding,
-          replyAddressOf(await tokenOf(env, run.runId, binding), host),
-        ] as const
-    )
+    rows.map(async ({ binding, tokenHash }) => {
+      const token = await tokenOf(env, run.runId, binding);
+      if ((await sha256Hex(token)) !== tokenHash) {
+        log.warn("workflow.inbox_unkeyed", { run: run.runId, binding });
+        return [];
+      }
+      return [[binding, replyAddressOf(token, host)] as const];
+    })
   );
-  return Object.freeze(Object.fromEntries(entries));
+  return Object.freeze(Object.fromEntries(entries.flat()));
 };
 
 /** A run inbox, as a token names it. */

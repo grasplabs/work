@@ -776,9 +776,10 @@ export interface WorkflowContext<P extends Params, Input> {
    * mail as its Reply-To. Each is the run's own, the same for its whole
    * life, and takes nothing once it ended. Anyone the mail reaches can
    * reply through it: a reply is checked against the contract, but who
-   * sent it isn't vouched for (its `authentication` says what SPF, DKIM
-   * and DMARC found). A test run gets placeholders that reach nobody; any
-   * run not on a sealed build's run host, none.
+   * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
+   * and DMARC found, each of which domain: only `dmarc.result === "pass"`
+   * ties its `from` to who sent it. A test run gets placeholders that
+   * reach nobody; any run not on a sealed build's run host, none.
    */
   inbox: Readonly<Record<string, string>>;
   /**

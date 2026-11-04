@@ -84,29 +84,37 @@ export const emailReplyType = "grasp.email.reply";
 const mailbox = v.object({ name: v.string(), address: v.string() });
 
 /**
- * What an authentication method said of a message, as the receiving
- * server's `Authentication-Results` header records it (RFC 8601 2.7);
- * null when it records none.
+ * What one authentication method said of a message, as the receiving
+ * server's `Authentication-Results` header records it (RFC 8601 2.7), and
+ * of which domain: SPF's of the envelope sender (`smtp.mailfrom`), DKIM's
+ * of the signature (`header.d`), DMARC's of the From header
+ * (`header.from`). A pass vouches only for that domain: SPF and DKIM may
+ * pass for any domain the sender owns, so only DMARC's pass ties the From
+ * header to its sender. Null when the header records no result.
  */
 const methodResult = v
-  .enum([
-    "pass",
-    "fail",
-    "softfail",
-    "neutral",
-    "none",
-    "temperror",
-    "permerror",
-    "policy",
-  ])
+  .object({
+    result: v.enum([
+      "pass",
+      "fail",
+      "softfail",
+      "neutral",
+      "none",
+      "temperror",
+      "permerror",
+      "policy",
+    ]),
+    domain: v.string().nullable(),
+  })
   .nullable();
 
 /**
  * A reply as a run's inbox takes it: the message as an email trigger's run
  * gets it (`InboundEmail` in @grasp-os/shared/workflows, fitted to an
- * event's data), and what SPF, DKIM and DMARC said of it. `from` is what
- * its header says, which only DMARC's `pass` ties to its domain: the
- * workflow checks who replied, never core, which takes every reply. An
+ * event's data), and what SPF, DKIM and DMARC said of it, each of which
+ * domain. `from` is what its header says, which only DMARC's `pass` ties
+ * to its domain: the workflow checks who replied, never core, which takes
+ * every reply. An
  * event contract's `email` type takes exactly this
  * (workflow-catalog.ts), so every reply fits whichever contract a binding
  * pins.
