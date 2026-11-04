@@ -393,7 +393,7 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
     });
   });
 
-  it("hands out no address once core's key changed since the start, never one nobody has", async () => {
+  it("neither hands out nor takes a run's address once core's key changed since the start", async () => {
     const runId = await waitingRun(sealed);
     const run = await sealedRunOf(runId);
     const rotated = await sealedRunStart(
@@ -401,7 +401,20 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
       run
     );
 
-    expect(rotated.inbox).toStrictEqual({});
+    const token = tokenIn(
+      z.record(z.string(), z.string()).parse(await inboxRead(runId)).replies
+    );
+
+    expect({
+      inbox: rotated.inbox,
+      found: await inboxAt(
+        {
+          ...env,
+          BETTER_AUTH_SECRET: "another-auth-secret-of-32-chars-or-more",
+        },
+        token
+      ),
+    }).toStrictEqual({ inbox: {}, found: undefined });
   });
 
   it("gives a test run of a draft a placeholder that reaches nobody", async () => {

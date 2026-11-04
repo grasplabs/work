@@ -28,7 +28,8 @@ import type { CallingRun } from "./resource-authority.ts";
 //   make one, and no two runs or bindings share one.
 // - A token leaking from core's database, its backups or its exports. It
 //   is never stored: a row keeps its SHA-256 alone (`run_inboxes`), which
-//   is looked up by its primary key (`inboxAt`). The run's code gets it
+//   is looked up by its primary key (`inboxAt`), and taken only while the
+//   key still derives it for its run and binding. The run's code gets it
 //   recomputed from the key (`inboxOf`), never read back. Rotating the
 //   auth secret changes every token, and leaves every reply address
 //   already handed out dead, as it does webhook triggers' secrets; a run
@@ -247,6 +248,17 @@ export const inboxOf = async (
   return Object.freeze(Object.fromEntries(entries.flat()));
 };
 
+/** Whether tokens `presented` and `derived` are the same, in constant time. */
+const sameToken = (presented: string, derived: string): boolean => {
+  const encoder = new TextEncoder();
+  const left = encoder.encode(presented);
+  const right = encoder.encode(derived);
+  return (
+    left.byteLength === right.byteLength &&
+    crypto.subtle.timingSafeEqual(left, right)
+  );
+};
+
 /** A run inbox, as a token names it. */
 export interface RunInbox {
   readonly runId: string;
@@ -258,7 +270,9 @@ export interface RunInbox {
 
 /**
  * The inbox `token` names, by its hash; none for a token that isn't one's
- * (never minted, or gone with its run's details).
+ * (never minted, or gone with its run's details), or isn't the one core's
+ * key derives for it now: rotating the auth secret revokes every token
+ * already handed out, as its row would still match it.
  */
 export const inboxAt = async (
   env: Env,
@@ -281,7 +295,10 @@ export const inboxAt = async (
     )
     .where(eq(runInboxes.tokenHash, await sha256Hex(token)))
     .get();
-  if (row === undefined) {
+  if (
+    row === undefined ||
+    !sameToken(token, await tokenOf(env, row.runId, row.binding))
+  ) {
     return undefined;
   }
   const { endedAt, ...inbox } = row;
