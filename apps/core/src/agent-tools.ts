@@ -387,7 +387,7 @@ const definitions = (known: Set<string>) => [
     label: "Create an App",
     api: "build",
     description:
-      "Creates an App owned by the person, with no files yet, and returns its ID. Search the Apps collection and list the person's Apps first: don't make one that already does the job.",
+      "Creates an App owned by the person, with no files yet, and returns its ID. Search the Apps collection and list the person's Apps first: don't make one that already does the job. Refused in an App's own chat, which changes its App.",
     parameters: Type.Object(
       {
         name: Type.String({

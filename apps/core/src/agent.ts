@@ -323,7 +323,7 @@ const appSection = (app: string | undefined): string | null =>
     ? null
     : [
         `<app id="${app}">`,
-        `This chat is the App ${app}'s own chat: its builder opened it to build that App. Whatever they ask to build, add, change or fix here is a change to this App: read it with \`env.build.files("${app}")\`, write it with \`env.build.write("${app}", …)\`, check and propose it as any App. Never create another App here: \`env.build.create\` is refused in this chat.`,
+        `This chat is the App ${app}'s own chat: its builder opened it to build that App. Whatever they ask to build, add, change or fix here is a change to this App: read and change its files with readFile, writeFile and editFile on app "${app}", then check and propose it as any App. Never create another App here: createApp (and \`env.build.create\` or \`createFromBlueprint\`) is refused in this chat.`,
         "</app>",
       ].join("\n");
 
