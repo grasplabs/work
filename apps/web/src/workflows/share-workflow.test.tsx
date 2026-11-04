@@ -49,7 +49,8 @@ const candidates = {
 /** The dialog for a reader in `role`, core refusing shares with `refuses`: what core was asked. */
 const shown = async (
   role: "user" | "builder",
-  refuses?: string
+  refuses?: string,
+  offering = candidates
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   let members: WorkflowMember[] = [
@@ -62,7 +63,7 @@ const shown = async (
     },
   ];
   const workflowResources = {
-    shareCandidates: async () => await Promise.resolve(candidates),
+    shareCandidates: async () => await Promise.resolve(offering),
     members: async () => await Promise.resolve(members),
     share: async (
       workflow: string,
@@ -222,6 +223,26 @@ describe("sharing an independent workflow from its page", () => {
         { share: "workflow-1", type: "person", id: "bo", role: "builder" },
         { unshare: "workflow-1", type: "person", id: "ada" },
       ],
+    });
+  });
+
+  it("tells apart people of the same name by the end of their ID, offered and shared with alike", async () => {
+    await shown("builder", undefined, {
+      ...candidates,
+      people: [...candidates.people, { id: "user-bo-222333", name: "Bo" }],
+    });
+    await press("Share");
+    const labels = [...(select("Share with")?.options ?? [])]
+      .filter(({ value }) => value.startsWith("person:"))
+      .map(({ textContent }) => textContent);
+
+    expect({
+      labels,
+      // Bo, whom it is shared with, is named apart from the other Bo.
+      sharedBo: select("Role of Bo (ID …bo)") === null,
+    }).toStrictEqual({
+      labels: ["Ada", "Bo (ID …222333)"],
+      sharedBo: false,
     });
   });
 

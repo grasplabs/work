@@ -97,7 +97,12 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
 const fakeProjects = (
   pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
   /** How many filings core refuses before it takes one. */
-  refusals = 0
+  refusals = 0,
+  /** The people core offers to add. */
+  people: ProjectShareCandidates["people"] = [
+    { id: "user-bo", name: "Bo" },
+    { id: "user-cy", name: "Cy" },
+  ]
 ) => {
   const left = [...pages];
   const asked: unknown[][] = [];
@@ -120,13 +125,7 @@ const fakeProjects = (
     shareCandidates: async (): Promise<ProjectShareCandidates> => {
       await Promise.resolve();
       asked.push(["shareCandidates"]);
-      return {
-        people: [
-          { id: "user-bo", name: "Bo" },
-          { id: "user-cy", name: "Cy" },
-        ],
-        teams: [{ id: "team-sales", name: "Sales" }],
-      };
+      return { people, teams: [{ id: "team-sales", name: "Sales" }] };
     },
     addMember: async (_id: string, member: NewProjectMember): Promise<void> => {
       await Promise.resolve();
@@ -396,6 +395,30 @@ describe("A project's page", () => {
       found: ["Sales"],
       asked: [["shareCandidates"], ["addMember", "person", "user-bo", "user"]],
       refused: true,
+    });
+  });
+
+  it("tells apart someone offered from someone of the same name in it already, by the end of their ID", async () => {
+    const { session } = fakeProjects(undefined, 0, [
+      { id: "user-ada-222222", name: "Ada" },
+      { id: "user-bo", name: "Bo" },
+    ]);
+    await shown(session, project("builder"));
+
+    await press(button("Add someone"));
+    const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
+      [...each.querySelectorAll("span.truncate")].map(
+        (line) => line.textContent
+      )
+    );
+
+    // The Ada in it is the only one it lists, so it names her as before.
+    expect({
+      options,
+      inIt: button("Take Ada out of the project") !== undefined,
+    }).toStrictEqual({
+      options: [["Ada", "ID …222222"], ["Bo"], ["Sales"]],
+      inIt: true,
     });
   });
 

@@ -27,12 +27,8 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
-import {
-  matchTyped,
-  nameKey,
-  namesakesOf,
-  PersonOption,
-} from "./person-picker.tsx";
+import type { PeopleApart } from "./people-apart.ts";
+import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // Giving people and teams a role in something (an App, a project): one
@@ -111,6 +107,7 @@ export const SharePicker = ({
   roleHeading,
   roleName,
   empty,
+  hintOf,
   children,
 }: {
   offered: ShareOffer | undefined;
@@ -124,6 +121,11 @@ export const SharePicker = ({
   roleName: string;
   /** What the list says when nobody is left to offer. */
   empty: ReactNode;
+  /**
+   * What tells someone apart from a namesake (`usePeopleApart`), among
+   * everyone the page knows: those offered and those who have a role.
+   */
+  hintOf: PeopleApart["hint"];
   children: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -134,7 +136,6 @@ export const SharePicker = ({
     onPick(picked, role);
   };
   const { people, teams, projects = [] } = offered ?? {};
-  const namesakes = namesakesOf(people ?? []);
   return (
     <Popover
       onOpenChange={(next: boolean) => {
@@ -179,7 +180,7 @@ export const SharePicker = ({
                     {people.map((person) => (
                       <PersonOption
                         key={person.id}
-                        namesake={namesakes.has(nameKey(person.name))}
+                        hint={hintOf(person)}
                         onSelect={() => {
                           pick({ type: "person", id: person.id });
                         }}

@@ -35,6 +35,8 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
+import type { PeopleApart } from "../people/people-apart.ts";
 import { RoleSelect, SharePicker } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
@@ -64,15 +66,21 @@ interface MemberWords {
   unnamedProject: string;
 }
 
-/** Who `member` is, in words. */
-const memberName = (member: AppMember, words: MemberWords) => {
+/** Who `member` is, in words: a person told apart from a namesake. */
+const memberName = (
+  member: AppMember,
+  words: MemberWords,
+  apart: PeopleApart
+) => {
   if (member.type === "project") {
     return member.name === null
       ? words.unnamedProject
       : words.project(member.name);
   }
   const name = member.name ?? member.id;
-  return member.type === "team" ? words.team(name) : name;
+  return member.type === "team"
+    ? words.team(name)
+    : apart.named({ id: member.id, name });
 };
 
 /** The people and teams App `app` is shared with. */
@@ -97,6 +105,9 @@ export const ShareApp = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [candidates, setCandidates] = useState<ShareCandidates>();
+  // Everyone in the organization, so someone is told apart from a
+  // namesake it is shared with already, or its owner.
+  const apart = usePeopleApart(candidates?.people ?? []);
   const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
   const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
     !shared.has(`${type}:${id}`) && !(type === "person" && id === app.owner);
@@ -141,6 +152,7 @@ export const ShareApp = ({
         disabled={busy}
         failure={failure}
         empty={<Trans>Nobody else to share with.</Trans>}
+        hintOf={apart.hint}
         offered={offered}
         onOpen={() => {
           void read();
@@ -163,19 +175,26 @@ const MemberRow = ({
   app,
   member,
   editable,
+  apart,
 }: {
   app: App;
   member: AppMember;
   editable: boolean;
+  /** Telling apart the people it is shared with of the same name. */
+  apart: PeopleApart;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const name = memberName(member, {
-    team: (team) => t`${team} (team)`,
-    project: (project) => t`Everyone in ${project}`,
-    unnamedProject: t`Everyone in a project you aren’t in`,
-  });
+  const name = memberName(
+    member,
+    {
+      team: (team) => t`${team} (team)`,
+      project: (project) => t`Everyone in ${project}`,
+      unnamedProject: t`Everyone in a project you aren’t in`,
+    },
+    apart
+  );
   const ref: AppMemberRef = { type: member.type, id: member.id };
   const change = async (
     action: (
@@ -283,6 +302,11 @@ export const AppMembers = ({
 }) => {
   const { t } = useLingui();
   const editable = sharesApp(app, identity);
+  const apart = usePeopleApart(
+    members.flatMap(({ type, id, name }) =>
+      type === "person" && name !== null ? [{ id, name }] : []
+    )
+  );
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -320,6 +344,7 @@ export const AppMembers = ({
             <TableBody>
               {members.map((member) => (
                 <MemberRow
+                  apart={apart}
                   app={app}
                   editable={editable}
                   key={`${member.type}:${member.id}`}

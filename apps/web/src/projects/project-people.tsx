@@ -23,6 +23,8 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
+import type { Named, PeopleApart } from "../people/people-apart.ts";
 import { SharePicker } from "../people/share-picker.tsx";
 import type { Picked } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -34,17 +36,37 @@ import { usePages } from "./project-pages.ts";
 // take people out; taking someone out confirms that they lose what is
 // shared with the project.
 
-/** A member as listed: a team says so. */
-const useMemberName = () => {
+/** A member as listed: a team says so, a person is told apart from a namesake. */
+const useMemberName = (apart: PeopleApart) => {
   const { t } = useLingui();
   return (member: ProjectMember): string => {
     const name = member.name ?? member.id;
-    return member.type === "team" ? t`${name} (team)` : name;
+    return member.type === "team"
+      ? t`${name} (team)`
+      : apart.named({ id: member.id, name });
   };
 };
 
-/** Adding a person or team, for the project's builders. */
-const AddPerson = ({ project }: { project: Project }) => {
+/** The project's people the page has read, its owner first, by name. */
+const knownPeople = (
+  project: Project,
+  members: readonly ProjectMember[]
+): Named[] =>
+  [project.owner, ...members.filter(({ type }) => type === "person")].flatMap(
+    ({ id, name }) => (name === null ? [] : [{ id, name }])
+  );
+
+/**
+ * Adding a person or team, for the project's builders. `known` is who is
+ * in it, read so far, whom someone offered is told apart from too.
+ */
+const AddPerson = ({
+  project,
+  known,
+}: {
+  project: Project;
+  known: readonly Named[];
+}) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
@@ -56,6 +78,7 @@ const AddPerson = ({ project }: { project: Project }) => {
     list: ProjectShareCandidates;
   }>();
   const candidates = offered?.from === project ? offered.list : undefined;
+  const apart = usePeopleApart([...known, ...(candidates?.people ?? [])]);
   const read = async (): Promise<void> => {
     if (candidates !== undefined) {
       return;
@@ -90,6 +113,7 @@ const AddPerson = ({ project }: { project: Project }) => {
           disabled={busy}
           failure={failure}
           empty={<Trans>Nobody else to add.</Trans>}
+          hintOf={apart.hint}
           offered={candidates}
           onOpen={() => {
             void read();
@@ -112,15 +136,16 @@ const AddPerson = ({ project }: { project: Project }) => {
 const RemovePerson = ({
   project,
   member,
+  name,
 }: {
   project: Project;
   member: ProjectMember;
+  /** As the list names them. */
+  name: string;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const nameOf = useMemberName();
-  const name = nameOf(member);
   const projectName = project.name;
   return (
     <>
@@ -192,7 +217,6 @@ const RemovePerson = ({
 
 /** The project's people, and for its builders adding and taking them out. */
 export const ProjectPeople = ({ project }: { project: Project }) => {
-  const nameOf = useMemberName();
   const pages = usePages(
     project,
     project.members,
@@ -203,7 +227,13 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
     }
   );
   const builds = project.role === "builder";
-  const owner = project.owner.name ?? project.owner.id;
+  const known = knownPeople(project, pages.all);
+  const apart = usePeopleApart(known);
+  const nameOf = useMemberName(apart);
+  const owner = apart.named({
+    id: project.owner.id,
+    name: project.owner.name ?? project.owner.id,
+  });
   return (
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col divide-y rounded-md border">
@@ -224,7 +254,11 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
                 {roleLabel(member.role)}
               </span>
               {builds ? (
-                <RemovePerson member={member} project={project} />
+                <RemovePerson
+                  member={member}
+                  name={nameOf(member)}
+                  project={project}
+                />
               ) : null}
             </span>
           </li>
@@ -243,7 +277,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
         </Button>
       ) : null}
       <ErrorText>{pages.failure}</ErrorText>
-      {builds ? <AddPerson project={project} /> : null}
+      {builds ? <AddPerson known={known} project={project} /> : null}
     </div>
   );
 };
