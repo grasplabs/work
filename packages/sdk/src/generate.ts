@@ -1203,10 +1203,12 @@ const standInImport =
  * The stand-in trees' type: at every path, a reference that takes and
  * answers `any`, so a call through one (`useQuery`, `ctx.runQuery`) types
  * its answer `any` too, never `unknown`, and nothing that uses it fails
- * for want of the real references.
+ * for want of the real references. Its `mode` is `any`, so it is taken
+ * where a reference that answers once is (`useQuery`) and where one that
+ * streams is (`useStream`); real references keep their own.
  */
 const standInTree = `
-type StandIn = OperationReference<any, any, any, any> & { readonly [name: string]: StandIn };
+type StandIn = Omit<OperationReference<any, any, any, any, any>, "mode"> & { readonly mode: any; readonly [name: string]: StandIn };
 `;
 
 export const symbolicModules = (): Record<string, string> => {

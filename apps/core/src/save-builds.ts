@@ -160,35 +160,6 @@ const savedBuild = async (
 };
 
 /**
- * What TypeScript says of a value it can only type `any`: a callback's
- * parameter, or a name destructured from it. Against the stand-ins typed
- * `any` (`symbolicModules`), every callback over what a reference returns
- * says it; what the stand-ins stand in for says why.
- */
-const implicitAny: ReadonlySet<string> = new Set(["TS7006", "TS7031"]);
-
-/**
- * `built`, checked against the stand-ins for references its server code
- * couldn't generate (`withDraftReferences`), less what only they make it
- * say (`implicitAny`): failed only for what remains.
- */
-const withoutStandInNoise = (built: {
-  ok: boolean;
-  diagnostics?: Diagnostic[];
-}): { ok: boolean; diagnostics?: Diagnostic[] } => {
-  if (built.ok || built.diagnostics === undefined) {
-    return built;
-  }
-  const diagnostics = built.diagnostics.filter(
-    ({ rule }) => !implicitAny.has(rule)
-  );
-  return {
-    ok: !diagnostics.some(({ severity }) => severity === "error"),
-    diagnostics,
-  };
-};
-
-/**
  * Builds a saved version's screens and workflows, both at once, into the
  * build cache (screens.ts), so the version opens and runs without
  * building. Answers once both are done with how each
@@ -245,9 +216,7 @@ export const buildOnSave = async (
           source.app,
           options
         );
-        return standIn
-          ? { ...withoutStandInNoise(built), standIn: true as const }
-          : built;
+        return standIn ? { ...built, standIn: true as const } : built;
       },
       env,
       signal
@@ -331,17 +300,15 @@ const checkedDraftCode = async (
   const inspected = await inspection();
   if ("failed" in inspected) {
     const { failed: error } = inspected;
-    const checked = withoutStandInNoise(
-      await checkAppCode(
-        env,
-        {
-          ...code,
-          ...symbolicModules(),
-          [generatedPaths.server]: serverModuleSource,
-        },
-        app,
-        options
-      )
+    const checked = await checkAppCode(
+      env,
+      {
+        ...code,
+        ...symbolicModules(),
+        [generatedPaths.server]: serverModuleSource,
+      },
+      app,
+      options
     );
     // What doesn't build, the check names with its type errors; what
     // built but didn't register, inspection says.
@@ -351,7 +318,7 @@ const checkedDraftCode = async (
           ok: false,
           diagnostics: [
             inspectionProblem(error),
-            ...(checked.diagnostics ?? []),
+            ...(checked.ok ? [] : checked.diagnostics),
           ],
         };
   }

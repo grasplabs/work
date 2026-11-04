@@ -201,6 +201,17 @@ const compileErrorAt = (error: unknown, message: string): Location => {
     : located;
 };
 
+/**
+ * Whether Babel's parser refused the source: @babel/core marks what its
+ * parser threw `BABEL_PARSE_ERROR`. The file has no syntax tree, so
+ * nothing checked past the break is to be trusted. Never a React Compiler
+ * error, nor any other of a file that parsed.
+ */
+const parseFailed = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  Reflect.get(error, "code") === "BABEL_PARSE_ERROR";
+
 /** A compile error's message, in words for whoever fixes the file. */
 const compileMessage = (message: string): string =>
   message.includes("Handle Import expressions")
@@ -265,13 +276,15 @@ const refreshHeader = (path: string): string =>
 
 /**
  * Compiles one App file, with what it imports, or says why it can't be:
- * with `refresh`, for a preview, instrumented for React Fast Refresh.
+ * with `refresh`, for a preview, instrumented for React Fast Refresh. A
+ * file the parser refuses is added to `unparsed` (`together`).
  */
 const compileFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
   typeFiles: ReadonlySet<string>,
+  unparsed: Set<string>,
   refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
@@ -281,6 +294,9 @@ const compileFile = (
       refresh,
     });
   } catch (error) {
+    if (parseFailed(error)) {
+      unparsed.add(path);
+    }
     const message = messageIn(path, error);
     return {
       errors: [
@@ -342,12 +358,16 @@ const compileFile = (
 const declarationImportErrors = (
   path: string,
   source: string,
-  typeFiles: ReadonlySet<string>
+  typeFiles: ReadonlySet<string>,
+  unparsed: Set<string>
 ): Diagnostic[] => {
   const imports: ImportSite[] = [];
   try {
     stripTypes(source, path, [collectImports(imports)]);
   } catch (error) {
+    if (parseFailed(error)) {
+      unparsed.add(path);
+    }
     const message = messageIn(path, error);
     return [problem("compile", message, { file: path, ...locationOf(error) })];
   }
@@ -612,6 +632,8 @@ export const buildScreensIncrementally = async (
   const imports = new Map<string, ModuleImports>();
   const candidates: string[] = [];
   const errors: Diagnostic[] = [];
+  // The files the parser refused, whose checks past the break are guesses.
+  const unparsed = new Set<string>();
   const keyed = await Promise.all(
     sources.map(
       async ([path, source]) =>
@@ -640,7 +662,14 @@ export const buildScreensIncrementally = async (
       metrics.reused += 1;
       continue;
     }
-    const result = compileFile(path, source, known, typeFiles, preview);
+    const result = compileFile(
+      path,
+      source,
+      known,
+      typeFiles,
+      unparsed,
+      preview
+    );
     if ("code" in result) {
       // The references' classes are the host's, never a screen's.
       const own =
@@ -665,7 +694,9 @@ export const buildScreensIncrementally = async (
   // own types are.
   for (const [path, source] of Object.entries(app)) {
     if (declarationFile.test(path)) {
-      errors.push(...declarationImportErrors(path, source, typeFiles));
+      errors.push(
+        ...declarationImportErrors(path, source, typeFiles, unparsed)
+      );
     }
   }
   // The type check and the lint run whatever the compile found, so one
@@ -673,7 +704,8 @@ export const buildScreensIncrementally = async (
   // error again is left out (`together`).
   const diagnostics = together(
     errors,
-    await checkScreens(files, reuse, fresh, metrics)
+    await checkScreens(files, reuse, fresh, metrics),
+    unparsed
   );
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
     return done({ ok: false, diagnostics });
@@ -963,11 +995,15 @@ const typeImportErrorAsResult = (
   return error === undefined ? { module: undefined } : { error };
 };
 
-/** Compiles one file of an App's server code, or says why it can't be. */
+/**
+ * Compiles one file of an App's server code, or says why it can't be. A
+ * file the parser refuses is added to `unparsed` (`together`).
+ */
 const compileAppCodeFile = (
   path: string,
   source: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  unparsed: Set<string>
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
@@ -978,6 +1014,9 @@ const compileAppCodeFile = (
       collectDirectives(directives),
     ]);
   } catch (error) {
+    if (parseFailed(error)) {
+      unparsed.add(path);
+    }
     const message = messageIn(path, error);
     return {
       errors: [
@@ -1044,13 +1083,11 @@ const compileAppCodeFile = (
   }
 };
 
-/**
- * Builds an App's server code of spec 8's layout: its schema, values,
- * registration and operations, with the modules the host generated for
- * it (`.grasp/`), each held to what its kind may import. Types are
- * stripped, not checked.
- */
-export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
+/** `buildAppCode` (below), adding each file the parser refuses to `unparsed`. */
+const buildAppCodeNoting = (
+  files: Record<string, string>,
+  unparsed: Set<string>
+): AppCodeBuild => {
   const code = appCodeFiles(files);
   const tooMuch = appCodeLimitErrors(code);
   if (tooMuch.length > 0) {
@@ -1096,7 +1133,7 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
       continue;
     }
     named.set(name, path);
-    const result = compileAppCodeFile(path, source, known);
+    const result = compileAppCodeFile(path, source, known, unparsed);
     if ("code" in result) {
       modules[name] = result.code;
     } else {
@@ -1107,6 +1144,15 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
 };
+
+/**
+ * Builds an App's server code of spec 8's layout: its schema, values,
+ * registration and operations, with the modules the host generated for
+ * it (`.grasp/`), each held to what its kind may import. Types are
+ * stripped, not checked.
+ */
+export const buildAppCode = (files: Record<string, string>): AppCodeBuild =>
+  buildAppCodeNoting(files, new Set());
 
 /**
  * The declaration of the App's workflow bindings its workflows are
@@ -1255,7 +1301,7 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   const errors: Diagnostic[] = [];
   for (const [path, source] of Object.entries(code)) {
     if (appCodeKind(path) === "test") {
-      const result = compileAppCodeFile(path, source, known);
+      const result = compileAppCodeFile(path, source, known, new Set());
       if ("code" in result) {
         modules[appModuleName(path)] = result.code;
       } else {
@@ -1284,7 +1330,8 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
   }
   // The type check runs whatever the build found, so one check names
   // everything there is to fix (`together`).
-  const built = buildAppCode(files);
+  const unparsed = new Set<string>();
+  const built = buildAppCodeNoting(files, unparsed);
   // Its tests, checked in the same program: their `#grasp` is the
   // references generated for this very release, which exist only here.
   // Only tests that build (`buildAppTests`: what a test may import and
@@ -1308,7 +1355,10 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
     appCodeTarget
   );
   if (!built.ok) {
-    return { ok: false, diagnostics: together(built.diagnostics, diagnostics) };
+    return {
+      ok: false,
+      diagnostics: together(built.diagnostics, diagnostics, unparsed),
+    };
   }
   return diagnostics.some((diagnostic) => isError(diagnostic))
     ? { ok: false, diagnostics }

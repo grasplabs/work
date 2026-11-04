@@ -1,5 +1,6 @@
 import { startAppCompiler } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
+import { generatedPaths, symbolicModules } from "@grasp-os/sdk/host";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -458,9 +459,15 @@ export default function Peers() {
         "screens/when.tsx": `import { useState } from "react";
 import { Button } from "@grasp-os/ui/components/button";
 
+const nothing = (): void => undefined;
+
 export default function When({ open }: { open: boolean }) {
   if (open) {
     useState(0);
+  }
+  // TS1345: a type check of a file that parses, though its code is TS1xxx.
+  if (nothing()) {
+    return null;
   }
   return <Button className="rounded-full">Go</Button>;
 }
@@ -479,10 +486,62 @@ export default function When({ open }: { open: boolean }) {
       ok: false,
       found: [
         "screens/tickets.tsx TS2322",
+        "screens/when.tsx TS1345",
         "screens/when.tsx compile",
         "screens/when.tsx shadcn/no-restyle",
       ],
     });
+  });
+
+  it("checks a screen against the stand-ins for its server's references with every kind of call, reporting only its own untyped parameters", async () => {
+    // While the server code doesn't register, `#grasp` is a stand-in
+    // (symbolicModules): a query, a mutation, a stream and a paged query
+    // through it type-check, and callbacks over what they answer take
+    // their type from it. A helper's untyped parameter is still reported.
+    const built = await buildScreens(
+      env,
+      app({
+        [generatedPaths.references]:
+          symbolicModules()[generatedPaths.references] ?? "",
+        "screens/writer.tsx": `import { useMutation, usePaginatedQuery, useQuery, useStream } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+
+import { api } from "#grasp";
+
+const shout = (text) => String(text).toUpperCase();
+
+export default function Writer() {
+  const notes = useQuery(api.notes.list, {});
+  const pages = usePaginatedQuery(api.notes.page, {}, { initialPageSize: 10 });
+  const save = useMutation(api.notes.save);
+  const draft = useStream(api.writer.draft);
+  if (notes === undefined) {
+    return <p>Loading</p>;
+  }
+  return (
+    <main className="flex flex-col gap-2">
+      {notes.items.map((note) => (
+        <p key={note.id}>{shout(note.title)}</p>
+      ))}
+      {pages.items.map(({ id, title }) => (
+        <p key={id}>{title}</p>
+      ))}
+      <p>{draft.status === "running" ? String(draft.progress?.text) : ""}</p>
+      <Button onClick={() => void save({ title: "New" })}>Save</Button>
+      <Button onClick={() => void draft.run({ topic: "notes" })}>Draft</Button>
+    </main>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect(
+      built.diagnostics
+        .filter(({ severity }) => severity === "error")
+        .map(({ file, line, rule }) => `${file}:${line} ${rule}`)
+    ).toStrictEqual(["screens/writer.tsx:6 TS7006"]);
   });
 
   it("passes a screen that names the window's members, or only looks like WebRTC", async () => {
