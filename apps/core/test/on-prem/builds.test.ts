@@ -70,7 +70,7 @@ const answerTime = async (): Promise<number> => {
 };
 
 describe("a build task's CPU on-prem", () => {
-  it("gives the compiler and the package builder each one build task's CPU, spec 18.1's 20 s, on the sandbox host", async () => {
+  it("gives the compiler and the package builder each one build task's CPU, spec 18.1's 60 s, on the sandbox host", async () => {
     const host = env.SANDBOX_HOST;
     if (host === undefined) {
       throw new Error("The on-prem project binds SANDBOX_HOST.");
@@ -114,6 +114,49 @@ describe("a build task's CPU on-prem", () => {
 });
 
 describe("the App compiler on-prem", () => {
+  it("builds a large App's first build in batches, each a session of its own", async () => {
+    const host = env.SANDBOX_HOST;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    let sessions = 0;
+    const counting: Fetcher = {
+      ...host,
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new Request(input, init).headers.has(sandboxCpuHeader)) {
+          sessions += 1;
+        }
+        return await host.fetch(input, init);
+      },
+      connect: host.connect.bind(host),
+    };
+    // Three screens of this test's own, each larger than a batch sized to
+    // 10 ms of CPU time: a batch each, then the build.
+    const tag = crypto.randomUUID();
+    const files = Object.fromEntries(
+      ["one", "two", "three"].map((name) => [
+        `screens/${name}.tsx`,
+        `// ${tag}
+export default function Screen() {
+  return (
+    <main>
+${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).join("\n")}
+    </main>
+  );
+}
+`,
+      ])
+    );
+
+    const built = await buildScreens(
+      { ...onPrem, SANDBOX_HOST: counting, BUILD_BATCH_CPU_MS: "10" },
+      files,
+      "app-test"
+    );
+
+    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 4 });
+  });
+
   it("builds an App's screens on the sandbox host, not in core", async () => {
     const built = await buildScreens(onPrem, screen(""), "app-test");
 

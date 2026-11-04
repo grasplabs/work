@@ -7,6 +7,7 @@ import {
   startAppCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 
 import {
@@ -295,12 +296,14 @@ export interface PlatformRunner {
   /**
    * What `method` of `program` answers for `args`: values, and functions
    * the program may call back. Throws as {@link runPlatformCode} does,
-   * wherever it runs.
+   * wherever it runs. With `once`, a stop is thrown as it is, never tried
+   * again in a fresh isolate: for a caller whose own retry it is.
    */
   readonly run: (
     program: PlatformProgram,
     method: string,
-    args: readonly unknown[]
+    args: readonly unknown[],
+    options?: { readonly once?: boolean }
   ) => Promise<unknown>;
   /**
    * The longest one call of `program` may take here, from reading its code
@@ -336,7 +339,8 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   let builder: ReturnType<typeof startPackageBuilder> | undefined;
   const compile = async (
     method: string,
-    args: readonly unknown[]
+    args: readonly unknown[],
+    once: boolean
   ): Promise<unknown> => {
     try {
       return await loaderCall(
@@ -345,7 +349,7 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
         args
       );
     } catch (error) {
-      if (!(error instanceof PlatformBoundError)) {
+      if (once || !(error instanceof PlatformBoundError)) {
         throw error;
       }
       return await loaderCall(
@@ -357,18 +361,24 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   };
   return {
     inCore: true,
-    run: async (program, method, args) => {
+    run: async (program, method, args, options) => {
       if (program === "compiler") {
-        return await compile(method, args);
+        return await compile(method, args, options?.once === true);
       }
       builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);
       return await loaderCall(await builder, method, args);
     },
     // No wall-clock bound in core: the runtime bounds each call's CPU.
-    // Two calls at most (a compile tried again), each as long as one may
-    // take on the sandbox host.
+    // Two calls at most (a compile tried again). The compiler's is bound
+    // by its CPU time alone, as it computes and waits on nothing; the
+    // builder's as long as one may take on the sandbox host, as it waits
+    // on reads of its tarballs.
     callMs: (program) =>
-      2 * (platformCodeReadMs + sessionCallMs(programWallMs[program])),
+      2 *
+      (platformCodeReadMs +
+        (program === "compiler"
+          ? platformLimits.compilerTaskCpuMs
+          : sessionCallMs(programWallMs[program]))),
   };
 };
 

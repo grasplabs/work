@@ -12,26 +12,38 @@ import { unique } from "./sign-in.ts";
 // - One call transforms the whole App and the runtime stops it past its
 //   CPU time: the build is kept as failed, and the App never builds again
 //   until the next release.
-// - A batch stopped at a bound fails the build, rather than being split.
+// - A batch stopped at a bound fails the build, rather than being split,
+//   or is tried again whole in a fresh isolate before it is split, paying
+//   its CPU time twice at every split.
 // - A build stopped part way starts again from nothing, and stops again.
+// - A build its own paths refuse (a name clash) spends its batches first.
 // - The isolate is named by the App's code: a Dynamic Worker billed per
 //   unique name a day, and one kept for every version ever built.
 // - Apps share one isolate: one App's heavy builds stop another's.
-// Plain workerd enforces no CPU time, so a call's time here is its wall
-// time in a test process that runs nothing else, the runtime's message
-// stands in for a stop, and `COMPILER_TASK_CPU_MS` scales the CPU time
-// down to scale an App up.
+// Plain workerd enforces no CPU time: what bounds a call's is the source
+// it is handed, held to a batch's characters (`batchCharacters` in
+// screens.ts: 4 s at 45 µs a character); the runtime's message stands in
+// for a stop, and `BUILD_BATCH_CPU_MS` sizes batches smaller to scale an
+// App up.
 
-/** Cloudflare runs the compiler up to this many times slower than a laptop. */
-const cloudflareSlowdown = 5;
+/** A batch's characters at its 4 s of CPU time, at 45 µs a character. */
+const batchCharacters = 88_888;
 
-/** One call into the compiler's isolate: its method, how much source it took, how long it ran. */
+/** One call into the compiler's isolate: its method, what it was handed, whether it was stopped, how long it ran. */
 interface Call {
   method: string;
+  paths: string[];
   files: number;
   characters: number;
+  stopped: boolean;
   ms: number;
 }
+
+/** Whether every transform call was held to `characters`, or was one file. */
+const heldTo = (calls: readonly Call[], characters: number): boolean =>
+  calls
+    .filter(({ method }) => method === "transform")
+    .every((call) => call.characters <= characters || call.files === 1);
 
 /**
  * The files a compiler call was handed, each method's second argument: a
@@ -52,9 +64,9 @@ const handedOf = (args: unknown[]): Record<string, string> => {
 const cpuStop = "Worker exceeded CPU time limit.";
 
 /**
- * Core's Loader, recording each isolate's name and each compiler call
- * that answered, and ending the calls `fails` picks with the message it
- * gives (`cpuStop`, as the runtime stops one).
+ * Core's Loader, recording each isolate's name and each compiler call,
+ * and ending the calls `fails` picks with the message it gives
+ * (`cpuStop`, as the runtime stops one).
  */
 const recordingLoader = (
   fails: (
@@ -74,22 +86,24 @@ const recordingLoader = (
         }
         return async (...args: unknown[]): Promise<unknown> => {
           const handed = handedOf(args);
-          const failure = fails(property, handed);
-          if (failure !== undefined) {
-            failed += 1;
-            throw new Error(failure);
-          }
-          const started = Date.now();
-          const answer: unknown = await Reflect.apply(value, target, args);
-          calls.push({
+          const call = {
             method: property,
+            paths: Object.keys(handed).toSorted(),
             files: Object.keys(handed).length,
             characters: Object.values(handed).reduce(
               (sum, source) => sum + source.length,
               0
             ),
-            ms: Date.now() - started,
-          });
+          };
+          const failure = fails(property, handed);
+          if (failure !== undefined) {
+            failed += 1;
+            calls.push({ ...call, stopped: true, ms: 0 });
+            throw new Error(failure);
+          }
+          const started = Date.now();
+          const answer: unknown = await Reflect.apply(value, target, args);
+          calls.push({ ...call, stopped: false, ms: Date.now() - started });
           return answer;
         };
       },
@@ -307,37 +321,32 @@ describe("a first screens build of a large App", () => {
     vi.restoreAllMocks();
   });
 
-  it("transforms an App four times a 60-screen App's size in calls each within the CPU time", async () => {
-    // A 60-screen App at today's limit, with 5 s of CPU time per call:
-    // batches a quarter of their size (1 s of the 5 s, against 4 s), as a
-    // 240-screen App is batched with all of it.
-    const callCpuMs = 5000;
+  it("transforms an App four times a 60-screen App's size in calls each held to a batch", async () => {
+    // A 60-screen App at today's limit, in batches of a quarter of their
+    // size (1 s of CPU time, against 4 s), as a 240-screen App is batched.
+    const quarter = Math.floor(batchCharacters / 4);
     const files = syntheticApp(60, 4);
-    const whose = `app-${unique()}`;
     const { loader, calls } = recordingLoader();
-    const onCloudflare = {
-      ...env,
-      LOADER: loader,
-      RUNTIME_PROFILE: "cloudflare",
-      COMPILER_TASK_CPU_MS: String(callCpuMs),
-    };
-    // The App's isolate started first: its start (about a second here)
-    // doesn't shrink with the CPU time, and fits the whole of it.
-    await buildScreens(onCloudflare, syntheticApp(1, 1), whose);
-    calls.length = 0;
 
-    const built = await buildScreens(onCloudflare, files, whose);
+    const built = await buildScreens(
+      {
+        ...env,
+        LOADER: loader,
+        RUNTIME_PROFILE: "cloudflare",
+        BUILD_BATCH_CPU_MS: "1000",
+      },
+      files,
+      `app-${unique()}`
+    );
 
     const transforms = calls.filter(({ method }) => method === "transform");
-    const slowest = Math.max(...transforms.map(({ ms }) => ms));
-    // The measured times, for the record: the build's own call (the type
-    // check, the lint and the CSS over the whole App) is not batched.
+    // For the record only: wall times here say little of Cloudflare's CPU.
     console.log(
       "screen-batches",
       JSON.stringify({
         characters: charactersOf(files),
         transforms: transforms.length,
-        slowestTransformMs: slowest,
+        slowestTransformMs: Math.max(...transforms.map(({ ms }) => ms)),
         builds: calls
           .filter(({ method }) => method !== "transform")
           .map(({ method, ms }) => ({ method, ms })),
@@ -350,21 +359,23 @@ describe("a first screens build of a large App", () => {
       everyFileOnce:
         transforms.reduce((sum, { files: count }) => sum + count, 0) ===
         Object.keys(files).length,
-      withinCpuTime: slowest * cloudflareSlowdown < callCpuMs,
+      heldToABatch: heldTo(calls, quarter),
     }).toStrictEqual({
       ok: true,
       atTheLimit: true,
       batched: true,
       everyFileOnce: true,
-      withinCpuTime: true,
+      heldToABatch: true,
     });
   }, 300_000);
 
-  it("splits a batch stopped at its CPU time, and resumes a build stopped part way", async () => {
-    // Batches of a few of these files: about 13,000 characters each.
-    const cpuMs = "3000";
-    const files = syntheticApp(6, 1);
+  it("splits a batch stopped at its CPU time, each part tried once, and resumes a build stopped part way", async () => {
+    // Batches as production sizes them: about 89,000 characters, some six
+    // of these screens each.
+    const files = syntheticApp(8, 4);
+    const count = Object.keys(files).length;
     const whose = `app-${unique()}`;
+    const onCloudflare = { ...env, RUNTIME_PROFILE: "cloudflare" };
     // Every batch of several files stops, and the build's own call ends
     // before it answers, as when its request is cancelled.
     const stopping = recordingLoader((method, handed) => {
@@ -377,12 +388,7 @@ describe("a first screens build of a large App", () => {
     });
     const stopped = await batchesLogged(async () => {
       const ended = await buildScreens(
-        {
-          ...env,
-          LOADER: stopping.loader,
-          RUNTIME_PROFILE: "cloudflare",
-          COMPILER_TASK_CPU_MS: cpuMs,
-        },
+        { ...onCloudflare, LOADER: stopping.loader },
         files,
         whose
       ).catch((error: unknown) => error);
@@ -392,34 +398,65 @@ describe("a first screens build of a large App", () => {
 
     const resumed = await batchesLogged(async () => {
       const built = await buildScreens(
-        {
-          ...env,
-          LOADER: after.loader,
-          RUNTIME_PROFILE: "cloudflare",
-          COMPILER_TASK_CPU_MS: cpuMs,
-        },
+        { ...onCloudflare, LOADER: after.loader },
         files,
         whose
       );
       expect(built.ok).toBeTruthy();
     });
 
+    const transforms = stopping.calls.filter(
+      ({ method }) => method === "transform"
+    );
+    const tried = transforms.map(({ paths }) => paths.join("\n"));
     expect({
-      batchesStopped: stopping.failed() > 2,
-      split: stopping.calls
-        .filter(({ method }) => method === "transform")
-        .map(({ files: count }) => count),
+      batched: charactersOf(files) > batchCharacters,
+      heldToABatch: heldTo(stopping.calls, batchCharacters),
+      batchesStopped: transforms.some(({ stopped: was }) => was),
+      // No part tried twice: a stop splits it, never retries it whole.
+      eachTriedOnce: new Set(tried).size === tried.length,
+      split: transforms
+        .filter(({ stopped: was }) => !was)
+        .map(({ files: one }) => one),
       stopped,
       resumed,
       calls: after.calls.map(({ method }) => method),
     }).toStrictEqual({
+      batched: true,
+      heldToABatch: true,
       batchesStopped: true,
+      eachTriedOnce: true,
       // Every batch of several stopped, and split down to one file each.
-      split: Array.from({ length: 7 }, () => 1),
+      split: Array.from({ length: count }, () => 1),
       // The build ended before it logged.
       stopped: [],
       // Nothing transformed again: the stopped build's batches were kept.
-      resumed: [{ batchCalls: 0, batched: 0, compiled: 0, reused: 7 }],
+      resumed: [{ batchCalls: 0, batched: 0, compiled: 0, reused: count }],
+      calls: ["buildIncrementally"],
+    });
+  }, 120_000);
+
+  it("refuses an App its paths refuse before it spends a batch", async () => {
+    const files = {
+      ...syntheticApp(8, 4),
+      // Both would be the module `components/panel`.
+      "components/panel.ts": "export const panel = 1;\n",
+    };
+    const { loader, calls } = recordingLoader();
+
+    const built = await buildScreens(
+      { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
+      files,
+      `app-${unique()}`
+    );
+
+    expect({
+      batched: charactersOf(files) > batchCharacters,
+      refused: built.ok ? [] : built.diagnostics.map(({ rule }) => rule),
+      calls: calls.map(({ method }) => method),
+    }).toStrictEqual({
+      batched: true,
+      refused: ["file-names"],
       calls: ["buildIncrementally"],
     });
   }, 120_000);
@@ -438,7 +475,7 @@ describe("a first screens build of a large App", () => {
     await buildScreens(onCloudflare, first, whose);
     await buildScreens(onCloudflare, changed, whose);
     await buildScreens(
-      { ...onCloudflare, COMPILER_TASK_CPU_MS: "10" },
+      { ...onCloudflare, BUILD_BATCH_CPU_MS: "10" },
       syntheticApp(3, 1),
       whose
     );

@@ -61,26 +61,26 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
 
   it("holds the lease through a build of many calls longer than the lease, and only that build runs", async () => {
     const key = `screen-builds/test/${crypto.randomUUID()}.json`;
-    const leaseMs = 300;
+    const leaseMs = 1000;
     let builders = 0;
     const started = Promise.withResolvers<boolean>();
-    // Six calls of 150 ms, renewing the lease as each starts: three
-    // leases' time in all.
+    // Ten calls of 200 ms, renewing the lease as each starts: twice the
+    // lease's time in all, each renewal 800 ms before the lease would end.
     const batched = async (renew: () => Promise<void>) => {
       builders += 1;
       started.resolve(true);
-      for (const _ of Array.from({ length: 6 })) {
+      for (const _ of Array.from({ length: 10 })) {
         // oxlint-disable-next-line no-await-in-loop -- one call after another
         await renew();
         // oxlint-disable-next-line no-await-in-loop -- one call after another
-        await scheduler.wait(150);
+        await scheduler.wait(200);
       }
       return { text: '{"ok":true,"by":"batched"}', cache: true };
     };
     const first = throughCache(env, key, leaseMs, batched, () => ({}));
     await started.promise;
     // Asked for again past the first lease's time, while it still builds.
-    await scheduler.wait(leaseMs + 100);
+    await scheduler.wait(1200);
     const second = await throughCache(
       env,
       key,
@@ -108,39 +108,111 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
     });
   });
 
-  it("gives a build's renewed lease up a lease's time after its holder stopped renewing", async () => {
+  it("gives a build's renewed lease up a lease's time after its holder last renewed it", async () => {
     const key = `screen-builds/test/${crypto.randomUUID()}.json`;
     const leaseMs = 300;
-    const renewed = Promise.withResolvers<boolean>();
+    const renewed = Promise.withResolvers<number>();
     const never = Promise.withResolvers<never>();
-    // Renews once, then hangs: as a build whose isolate died.
+    const started = Date.now();
+    // Renews once, 200 ms in, then hangs: as a build whose isolate died.
+    // Unrenewed, its lease would end 100 ms after that renewal.
     void throughCache(
       env,
       key,
       leaseMs,
       async (renew) => {
+        await scheduler.wait(200);
+        const renewing = Date.now();
         await renew();
-        renewed.resolve(true);
+        renewed.resolve(renewing);
         return await never.promise;
       },
       () => ({})
     );
-    await renewed.promise;
-    const since = Date.now();
+    const renewing = await renewed.promise;
+    let takenAt = 0;
 
     const taken = await throughCache(
       env,
       key,
       10_000,
-      async () =>
-        await Promise.resolve({ text: '{"ok":true,"by":"next"}', cache: true }),
+      async () => {
+        takenAt = Date.now();
+        return await Promise.resolve({
+          text: '{"ok":true,"by":"next"}',
+          cache: true,
+        });
+      },
       () => ({})
     );
 
     expect({
       text: taken.text,
-      tookOver: Date.now() - since >= leaseMs - 50,
-    }).toStrictEqual({ text: '{"ok":true,"by":"next"}', tookOver: true });
+      // Not before the renewed lease ended, well past the first one's end.
+      afterRenewal: takenAt - renewing >= leaseMs,
+      pastFirstLease: takenAt - started >= 200 + leaseMs,
+    }).toStrictEqual({
+      text: '{"ok":true,"by":"next"}',
+      afterRenewal: true,
+      pastFirstLease: true,
+    });
+  });
+
+  it("never lets a holder that lost its lease renew it back, nor keep its build", async () => {
+    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const aStarted = Promise.withResolvers<boolean>();
+    const bBuilding = Promise.withResolvers<boolean>();
+    // A: its lease ends while it builds; once B holds the lease, A renews
+    // and finishes.
+    const a = throughCache(
+      env,
+      key,
+      300,
+      async (renew) => {
+        aStarted.resolve(true);
+        await bBuilding.promise;
+        await renew();
+        return { text: '{"ok":true,"by":"a"}', cache: true };
+      },
+      () => ({})
+    );
+    await aStarted.promise;
+    await scheduler.wait(400);
+    let leaseLeftMs = 0;
+    // B: takes A's lapsed lease over, and builds until A is done.
+    const b = await throughCache(
+      env,
+      key,
+      10_000,
+      async () => {
+        bBuilding.resolve(true);
+        await a;
+        const row = await env.DB.prepare(
+          "SELECT lease_expires_at AS expires FROM build_receipts WHERE key = ?"
+        )
+          .bind(key)
+          .first<{ expires: number }>();
+        leaseLeftMs = (row?.expires ?? 0) - Date.now();
+        return { text: '{"ok":true,"by":"b"}', cache: true };
+      },
+      () => ({})
+    );
+    const objects = await env.FILES.list({ prefix: `${key}~` });
+    const kept = await readVerified(env, key);
+
+    expect({
+      // B's lease stands as B took it, not A's 300 ms renewal.
+      bStillHolds: leaseLeftMs > 5000,
+      b: b.text,
+      // Only B's bytes were written, and only they are served.
+      objects: objects.objects.length,
+      kept: kept.state === "hit" ? kept.text : kept.state,
+    }).toStrictEqual({
+      bStillHolds: true,
+      b: '{"ok":true,"by":"b"}',
+      objects: 1,
+      kept: '{"ok":true,"by":"b"}',
+    });
   });
 
   it("waits for another holder backing off, not polling core's database at a fixed rate", async () => {

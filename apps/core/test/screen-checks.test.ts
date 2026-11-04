@@ -700,7 +700,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("answers only check, build and inspect", async () => {
+  it("answers only its own methods: build, buildIncrementally, transform, check and inspect", async () => {
     const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     const answers = await Promise.all(
       ["buildWorkflows", "buildAppCode", "checkAppCode", "buildServer"].map(

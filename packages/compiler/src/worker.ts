@@ -89,18 +89,14 @@ import type {
   Increments,
   ModuleRecord,
 } from "./increments.ts";
-import type { CodeFolder } from "./inputs.ts";
 import {
   appCodeLimitErrors,
   buildFiles,
-  componentsFolder,
   declarationFile,
   limitErrors,
   computeModuleErrors,
   openWorkflowErrors,
   screenFile,
-  strayFileMessage,
-  strayFilesIn,
   workflowFiles,
   workflowsFolder,
 } from "./inputs.ts";
@@ -119,6 +115,8 @@ import { lint } from "./lint.ts";
 import { startEsbuild } from "./packages/build.ts";
 import { previewEntries } from "./preview-entry.ts";
 import type { Bundle } from "./preview-entry.ts";
+import { problem, screenRefusals, strayProblems } from "./refusals.ts";
+import type { Location } from "./refusals.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -167,12 +165,6 @@ const framedLine = /^> *(?<line>\d+) \|/mu;
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-interface Location {
-  file?: string;
-  line?: number;
-  column?: number;
-}
-
 /** Where Babel says an error is: its syntax errors carry `loc`, columns from 0. */
 const locationOf = (error: unknown): Location => {
   if (typeof error !== "object" || error === null || !("loc" in error)) {
@@ -218,47 +210,6 @@ const compileMessage = (message: string): string =>
   message.includes("Handle Import expressions")
     ? "import() can't be used inside a component or hook: import the module at the top of the file."
     : message;
-
-/** An error, which fails the build. */
-const problem = (
-  rule: string,
-  message: string,
-  at: Location = {}
-): Diagnostic => ({ ...at, rule, severity: "error", message });
-
-/** Two App files that would share a module name, e.g. `a.ts` and `a.tsx`. */
-const nameClashes = (paths: string[]): Diagnostic[] => {
-  const byName = new Map<string, string>();
-  const clashes: Diagnostic[] = [];
-  for (const path of paths) {
-    const other = byName.get(appModuleName(path));
-    if (other === undefined) {
-      byName.set(appModuleName(path), path);
-    } else {
-      clashes.push(
-        problem("file-names", `Rename it or ${other}; they can't both exist.`, {
-          file: path,
-        })
-      );
-    }
-  }
-  return clashes;
-};
-
-/**
- * What `files` hold in `folders` that isn't their code, each refused by
- * name under `rule`: nothing there is ever silently left out of a build.
- */
-const strayProblems = (
-  files: Readonly<Record<string, string>>,
-  folders: readonly CodeFolder[],
-  rule: string
-): Diagnostic[] =>
-  folders.flatMap((folder) =>
-    strayFilesIn(files, folder).map((file) =>
-      problem(rule, strayFileMessage(file, folder), { file })
-    )
-  );
 
 /**
  * An error's message without the file Babel names in it (as `/<path>`):
@@ -647,29 +598,14 @@ export const buildScreensIncrementally = async (
   if (tooMuch.length > 0) {
     return done({ ok: false, diagnostics: tooMuch });
   }
-  const strays = strayProblems(app, [componentsFolder], "screens");
-  if (strays.length > 0) {
-    return done({ ok: false, diagnostics: strays });
+  const refused = screenRefusals(app);
+  if (refused.length > 0) {
+    return done({ ok: false, diagnostics: refused });
   }
   // Only screens, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
   const { sources, known: paths, typeFiles: typed } = screenSources(app);
-  if (!paths.some((path) => screenFile.test(path))) {
-    return done({
-      ok: false,
-      diagnostics: [
-        problem(
-          "screens",
-          "The App has no screens: add one as screens/<name>.tsx."
-        ),
-      ],
-    });
-  }
-  const clashes = nameClashes(paths);
-  if (clashes.length > 0) {
-    return done({ ok: false, diagnostics: clashes });
-  }
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
   const typeFiles = new Set(typed);

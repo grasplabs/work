@@ -253,7 +253,7 @@ const takeLease = async (
 
 /**
  * Holds `key`'s lease for `holder` another `ms` from now, if it still
- * holds it: a build of many calls renews it as each ends, so it holds it
+ * holds it: a build of many calls renews it as each starts, so it holds it
  * throughout, while one that died still gives it up a lease's time after
  * its last renewal.
  */
@@ -369,7 +369,7 @@ export type CacheOutcome = "hit" | "shared" | "built" | "quarantined";
  * when it may be, or the build another isolate holding the lease kept
  * meanwhile. A build waited for at most `leaseMs`, the lease's own time:
  * past it, the lease is taken over. A build of many calls renews the
- * lease (`renew`, another `leaseMs` from then) as each ends.
+ * lease (`renew`, another `leaseMs` from then) as each starts.
  */
 export const throughCache = async (
   env: CacheEnv,

@@ -86,6 +86,7 @@ export type {
   Increments,
   ModuleRecord,
 } from "./increments.ts";
+export { screenRefusals } from "./refusals.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";

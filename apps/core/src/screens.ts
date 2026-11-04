@@ -18,6 +18,7 @@ import {
   moduleRecordOf,
   openWorkflowErrors,
   screenIncrementKeys,
+  screenRefusals,
   screenSources,
   workflowBindingsPath,
   workflowBuildFiles,
@@ -45,7 +46,6 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   screenErrors,
   screenNameSchema,
@@ -158,7 +158,7 @@ interface FailedBuild {
 /** What building reads from core's env. */
 export type BuildEnv = PlatformEnv &
   CacheEnv &
-  Pick<Env, "COMPILER_TASK_CPU_MS"> & {
+  Pick<Env, "BUILD_BATCH_CPU_MS"> & {
     /** Where builds are cached: core's R2 bucket, in the EU. */
     FILES: Pick<R2Bucket, "get" | "put">;
   };
@@ -343,33 +343,24 @@ const transformCpuMsPerCharacter = 0.045;
 /**
  * The CPU time on Cloudflare a batch of transforms is sized to: a few
  * seconds, so a first build answers in steps and a stop costs little, far
- * below a call's ceiling (`compilerTaskCpuMs`), which only stops failures.
+ * below a call's ceiling (`compilerTaskCpuMs`, 60 s), which only stops
+ * failures and leaves room for a cold isolate's start (loading Babel, the
+ * React Compiler and the kit) and a machine slower than measured.
  */
 const batchCpuMs = 4000;
 
 /**
- * The most of a call's CPU time a batch is sized to: the rest is left to a
- * cold isolate's start (loading Babel, the React Compiler and the kit) and
- * to a machine slower than measured.
- */
-const batchCpuShare = 0.2;
-
-/**
  * The most characters of source one batch of transforms takes
  * (`transformInBatches`): about 89,000 (`batchCpuMs`), or fewer where
- * tests set a call's CPU time lower (`COMPILER_TASK_CPU_MS`). One file
+ * tests size batches to less CPU time (`BUILD_BATCH_CPU_MS`). One file
  * larger than that (up to the 200,000 a file may have) is a batch of its
  * own, still well within a call's CPU time.
  */
 const batchCharacters = (env: BuildEnv): number => {
-  const set = Number(env.COMPILER_TASK_CPU_MS);
+  const set = Number(env.BUILD_BATCH_CPU_MS);
   const cpuMs =
-    Number.isInteger(set) && set > 0 && set < platformLimits.compilerTaskCpuMs
-      ? set
-      : platformLimits.compilerTaskCpuMs;
-  return Math.floor(
-    Math.min(batchCpuMs, cpuMs * batchCpuShare) / transformCpuMsPerCharacter
-  );
+    Number.isInteger(set) && set > 0 && set < batchCpuMs ? set : batchCpuMs;
+  return Math.floor(cpuMs / transformCpuMsPerCharacter);
 };
 
 /**
@@ -408,7 +399,8 @@ const batchesOf = (
  * so a build stopped part way resumes where it stopped. A batch stopped at
  * a bound is split and each half tried again; one file stopped alone is
  * left to the build, which says why. Nothing when all that's missing fits
- * in one batch: the build transforms it itself. The build's lease is
+ * in one batch, the build transforms it itself; nor when the build is
+ * refused before anything compiles (`screenRefusals`). The build's lease is
  * renewed as each batch starts (`renew`). What the batches made, by key,
  * for the build to reuse, and how many calls they took.
  */
@@ -431,14 +423,19 @@ const transformInBatches = async (
     renew: () => Promise<void>;
   }
 ): Promise<{ made: Increments["modules"]; calls: number }> => {
-  const { sources, known, typeFiles } = screenSources(buildFiles(files));
+  const made: Increments["modules"] = {};
+  let calls = 0;
+  const app = buildFiles(files);
+  // Refused in milliseconds by the build itself: no batch is spent first.
+  if (screenRefusals(app).length > 0) {
+    return { made, calls };
+  }
+  const { sources, known, typeFiles } = screenSources(app);
   const { modules: keys } = await screenIncrementKeys(files, preview);
   const missing = sources.filter(
     ([path]) => !Object.hasOwn(reuse.modules, keys[path] ?? "")
   );
   const characters = batchCharacters(env);
-  const made: Increments["modules"] = {};
-  let calls = 0;
   if (
     missing.reduce((sum, [, source]) => sum + source.length, 0) <= characters
   ) {
@@ -454,11 +451,14 @@ const transformInBatches = async (
     let answer: unknown;
     calls += 1;
     try {
-      answer = await runner.run("compiler", "transform", [
-        target,
-        batch,
-        { known, typeFiles },
-      ]);
+      // Once: a stop splits the batch, which is its retry, and nothing of
+      // a stopped batch is kept as failed.
+      answer = await runner.run(
+        "compiler",
+        "transform",
+        [target, batch, { known, typeFiles }],
+        { once: true }
+      );
     } catch (error) {
       if (!(error instanceof PlatformBoundError)) {
         throw error;
@@ -513,7 +513,7 @@ const compiledIncrementally = async (
     profile: BuildProfile;
     checks: boolean;
     leaseMs: number;
-    /** Renews the build's lease: as each batch ends. */
+    /** Renews the build's lease: as each batch starts, and before the build's own call. */
     renew: () => Promise<void>;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
