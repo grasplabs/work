@@ -26,6 +26,8 @@ interface FixtureEnv {
   RUNS: DurableObjectNamespace<Runs>;
   /** The outside world: the test's own HTTP server. */
   EFFECTS: Fetcher;
+  /** Which deploy of the code this process serves (`Workerd.redeploy`). */
+  DEPLOY: string;
 }
 
 /**
@@ -130,6 +132,31 @@ const hex = (digest: ArrayBuffer): string =>
 
 const declinedCard = (): Error =>
   namedError("PaymentError", "The card was declined");
+
+/**
+ * Steps called one after another, each an effect labelled with its name,
+ * fingerprinted by their names in order, as a host fingerprints the steps
+ * of the code it resolved.
+ */
+const inOrder = (
+  env: FixtureEnv,
+  names: readonly string[]
+): WorkflowDefinition => ({
+  fingerprint: names.join(" > "),
+  run: async (event, step) => {
+    const receipts: string[] = [];
+    for (const name of names) {
+      receipts.push(
+        // oxlint-disable-next-line no-await-in-loop -- steps in order
+        await step.do(
+          name,
+          async (context) => await effect(env, event.instanceId, name, context)
+        )
+      );
+    }
+    return receipts;
+  },
+});
 
 const definitionsFor = (
   env: FixtureEnv
@@ -328,6 +355,22 @@ const definitionsFor = (
       });
     },
   },
+  // Three steps, the second deploy's as the definition's name says:
+  // "renamed" calls the second "bill", "reordered" swaps the first two,
+  // "kept" changes nothing.
+  renamed: inOrder(
+    env,
+    env.DEPLOY === "1"
+      ? ["reserve", "charge", "ship"]
+      : ["reserve", "bill", "ship"]
+  ),
+  reordered: inOrder(
+    env,
+    env.DEPLOY === "1"
+      ? ["reserve", "charge", "ship"]
+      : ["charge", "reserve", "ship"]
+  ),
+  kept: inOrder(env, ["reserve", "charge", "ship"]),
   // A step, a wait for an "approved" event, another step.
   approval: {
     run: async (event, step) => {

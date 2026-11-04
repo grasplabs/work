@@ -487,6 +487,10 @@ export const defaultSubscriptionWaitMs = 60_000;
 /** The longest a host may let a subscription wait: 10 minutes. */
 export const maxSubscriptionWaitMs = 10 * 60_000;
 
+/** A fingerprint of a definition's steps as an error names it. */
+const fingerprintText = (fingerprint: string | null): string =>
+  fingerprint === null ? "with no fingerprint" : JSON.stringify(fingerprint);
+
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
   from: { name: string; count: number; type: StepType } | null;
@@ -578,6 +582,29 @@ const statusOf = (run: RunRow): InstanceStatus => {
 const errorOf = (settlement: Settlement): Error => {
   const error = settlement.ok ? undefined : settlement.error;
   return error instanceof Error ? error : new Error(String(error));
+};
+
+/**
+ * Ends a run its activation has no definition to run: none, so nothing
+ * to get its rollbacks back from either; or one whose steps changed under
+ * it (a halt, `#matching`), whose forward steps and rollbacks alike can't
+ * be replayed on the new ones. Either way it rolls back nothing.
+ */
+const endUnresolved = async (
+  activation: Activation,
+  resolved: Settlement | { halt: Error },
+  compensating: boolean
+): Promise<void> => {
+  if (compensating) {
+    await activation.endCompensation({
+      status: "errored",
+      error: "halt" in resolved ? resolved.halt : errorOf(resolved),
+    });
+    return;
+  }
+  await ("halt" in resolved
+    ? activation.settle({ ok: false, error: resolved.halt }, true)
+    : activation.settle(resolved));
 };
 
 const hasEnded = (run: RunRow): boolean =>
@@ -1852,20 +1879,54 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     return row?.count ?? 0;
   }
 
-  /** The definition, or why there is none, as the run's end. */
-  #resolve(run: RunRow): WorkflowDefinition | Settlement {
+  /**
+   * `definition`, if its steps are the ones the run's journal was made on;
+   * otherwise a halt (`#resolve`).
+   */
+  #matching(
+    run: RunRow,
+    definition: WorkflowDefinition
+  ): WorkflowDefinition | { halt: Error } {
+    const fingerprint = definition.fingerprint ?? null;
+    if (fingerprint === run.fingerprint) {
+      return definition;
+    }
+    const { sql } = this.ctx.storage;
+    if (sql.exec("SELECT 1 FROM steps LIMIT 1").toArray().length === 0) {
+      sql.exec("UPDATE run SET fingerprint = ?", fingerprint);
+      return definition;
+    }
+    return {
+      halt: namedError(
+        "WorkflowReplayMismatchError",
+        `The run's definition no longer replays as its journal recorded: its steps were made on ${fingerprintText(run.fingerprint)}, and the definition's steps are now ${fingerprintText(fingerprint)}`
+      ),
+    };
+  }
+
+  /**
+   * The definition, or why there is none, as the run's end; or, as a halt,
+   * that its steps aren't the ones the run's journal was made on
+   * (`#matching`). A run whose journal holds no step yet (never run, or
+   * restarted from its start) has nothing to replay: it takes the
+   * definition's fingerprint as it is now, in this activation's write.
+   */
+  #resolve(run: RunRow): WorkflowDefinition | Settlement | { halt: Error } {
     const identity = {
       definition: run.definition,
       version: run.version ?? undefined,
     };
+    let definition: WorkflowDefinition | undefined;
     try {
-      const definition = this.definition(identity);
-      if (definition !== undefined) {
-        return definition;
-      }
+      definition = this.definition(identity);
     } catch (error) {
       const { name, message } = errorRecord(error);
       return { ok: false, error: namedError(name, message) };
+    }
+    if (definition !== undefined) {
+      // Outside the try: a failed journal write is the engine's fault,
+      // not the host's, and ends the activation as faulted (`alarm`).
+      return this.#matching(run, definition);
     }
     const version =
       identity.version === undefined
@@ -1878,6 +1939,22 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         `There is no workflow definition ${JSON.stringify(identity.definition)}${version}`
       ),
     };
+  }
+
+  /**
+   * Journals activation `generation` as faulted, if storage lets it;
+   * otherwise its row stays open, as after a crash.
+   */
+  #endFaulted(generation: number): void {
+    try {
+      this.#store.sql.exec(
+        "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
+        Date.now(),
+        generation
+      );
+    } catch {
+      // Its row stays open, as after a crash.
+    }
   }
 
   /**
@@ -2142,15 +2219,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // this activation died: none of the definition runs. Journaled as
       // faulted if storage lets it; the host's retry of this alarm is the
       // run's way back.
-      try {
-        storage.sql.exec(
-          "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
-          Date.now(),
-          generation
-        );
-      } catch {
-        // Its row stays open, as after a crash.
-      }
+      this.#endFaulted(generation);
       throw error;
     }
 
@@ -2169,16 +2238,19 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       () => this.clock(),
       compensating
     );
-    const resolved = this.#resolve(run);
+    let resolved: WorkflowDefinition | Settlement | { halt: Error };
+    try {
+      resolved = this.#resolve(run);
+    } catch (error) {
+      // Taking the definition's fingerprint failed (#matching): a fault,
+      // as any journal write's. The watchdog set above brings the run
+      // back; throwing would hand that to the host's finite retries.
+      warnRecovered("workflow_activation_faulted", error);
+      this.#endFaulted(generation);
+      return;
+    }
     if (!("run" in resolved)) {
-      // No definition to run, nor to get its rollbacks back from: the run
-      // ends, rolling back nothing.
-      await (compensating
-        ? activation.endCompensation({
-            status: "errored",
-            error: errorOf(resolved),
-          })
-        : activation.settle(resolved));
+      await endUnresolved(activation, resolved, compensating);
       return;
     }
     if (compensating) {

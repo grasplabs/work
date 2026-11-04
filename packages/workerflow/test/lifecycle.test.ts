@@ -30,6 +30,7 @@ import {
   warningsDuring,
 } from "./outside.ts";
 import { slowStreamFirst, slowStreamRest } from "./result-definitions.ts";
+import { redeployedSteps } from "./worker.ts";
 
 const instance = async (
   definition: string,
@@ -691,6 +692,99 @@ describe("terminate", () => {
   });
 });
 
+describe("steps a deploy changed under a run", () => {
+  it("end a run with a journaled step, rolling back nothing", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({ id });
+    await suspendedOn("redeployed", id, "go");
+    // A deploy renames the step after the wait; the event wakes the run.
+    redeployedSteps.names = ["dispatch"];
+    const run = await instance("redeployed", id);
+    await run.sendEvent({ type: "go", payload: null });
+
+    const status = await ended("redeployed", id);
+
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
+    // Charge registered a rollback, which the new code can't be trusted to
+    // give back: none ran, and nothing after the wait did either.
+    expect(effectsOf(id).map(({ label }) => label)).toStrictEqual(["charge"]);
+  });
+
+  it("leave a run that has journaled no step yet to run the steps it finds", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    const first = hold(id, "redeployed", 1);
+    await workflow("redeployed").create({ id });
+    await first.held;
+    // The deploy lands while the first activation is out before any step,
+    // and a later one (the watchdog's) takes the run over.
+    redeployedSteps.names = ["dispatch"];
+    await deliverAlarm("redeployed", id);
+    first.release();
+    await suspendedOn("redeployed", id, "go");
+    const run = await instance("redeployed", id);
+    await run.sendEvent({ type: "go", payload: null });
+
+    const status = await ended("redeployed", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: [
+        seen(id, "charge").receipts[0],
+        seen(id, "dispatch").receipts[0],
+      ],
+    });
+  });
+
+  it("end a run rolling back, running none of its rollbacks again", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({
+      id,
+      params: { flaky: "charge", undoDelay: "1 hour" },
+    });
+    await suspendedOn("redeployed", id, "go");
+    const run = await instance("redeployed", id);
+    await run.terminate({ rollback: true });
+    // Charge's rollback failed once and waits an hour for its retry.
+    await until("the rollback to wait for its retry", async () => {
+      const journal = await journalOf("redeployed", id);
+      return journal.run.status === "rollingBack" &&
+        journal.steps.some(
+          (step) => step.type === "rollback" && step.state === "retrying"
+        ) &&
+        journal.activations.every((row) => row.ended !== null)
+        ? true
+        : undefined;
+    });
+    // A deploy renames the step after the wait; the retry's alarm comes.
+    redeployedSteps.names = ["dispatch"];
+    await deliverAlarm("redeployed", id);
+
+    const status = await until("the run to end", async () => {
+      const current = await run.status();
+      return current.status === "terminated" ? current : undefined;
+    });
+
+    expect(status).toMatchObject({
+      status: "terminated",
+      rollback: {
+        status: "errored",
+        error: { name: "WorkflowReplayMismatchError" },
+      },
+    });
+    // The rollback's first attempt, and no retry from the new code.
+    expect(effectsOf(id).map(({ label }) => label)).toStrictEqual([
+      "charge",
+      "undo-charge",
+    ]);
+  });
+});
+
 describe("restart", () => {
   it("runs an ended run again from its start, each step under a new key", async () => {
     const id = newId();
@@ -743,6 +837,43 @@ describe("restart", () => {
     ).toStrictEqual([
       ["charge", "succeeded", keys[0]],
       ["ship", "succeeded", keys[2]],
+    ]);
+  });
+
+  it("from its start takes the steps its definition has now; from a step keeps the ones it was created on", async () => {
+    const id = newId();
+    const other = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({ id });
+    await workflow("redeployed").create({ id: other });
+    await suspendedOn("redeployed", id, "go");
+    await suspendedOn("redeployed", other, "go");
+    // A deploy renames the step after the wait under both runs.
+    redeployedSteps.names = ["dispatch"];
+
+    const run = await instance("redeployed", id);
+    await run.restart();
+    await suspendedOn("redeployed", id, "go");
+    await run.sendEvent({ type: "go", payload: null });
+    const restarted = await ended("redeployed", id);
+    const kept = await instance("redeployed", other);
+    await kept.restart({ from: { name: "go", type: "waitForEvent" } });
+    const stray = await ended("redeployed", other);
+
+    expect(restarted).toStrictEqual({
+      status: "complete",
+      output: [
+        seen(id, "charge").receipts[1],
+        seen(id, "dispatch").receipts[0],
+      ],
+    });
+    expect(stray).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
+    // The kept run's step before the wait ran once, and nothing after it.
+    expect(effectsOf(other).map(({ label }) => label)).toStrictEqual([
+      "charge",
     ]);
   });
 

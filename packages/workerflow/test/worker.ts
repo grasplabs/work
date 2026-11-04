@@ -156,6 +156,46 @@ const rollbackShapes: Record<string, unknown> = {
   "config not an object": { rollback: () => "undone", rollbackConfig: 5 },
 };
 
+/**
+ * The steps the `redeployed` definition calls after its wait for "go",
+ * which a test changes under a run as a deploy would: its fingerprint is
+ * their names.
+ */
+export const redeployedSteps = { names: ["ship"] };
+
+/**
+ * A step with a rollback, a wait for "go", then `redeployedSteps` as they
+ * are now.
+ */
+const redeployed = (): WorkflowDefinition => {
+  const { names } = redeployedSteps;
+  return {
+    fingerprint: names.join(" > "),
+    run: async ({ instanceId, payload }, step) => {
+      // Before any step: a test can hold the run's first activation here.
+      await checkpoint(instanceId, "redeployed");
+      const receipts = [
+        await step.do(
+          "charge",
+          async (context) => await effect(instanceId, "charge", context),
+          undoing(instanceId, payload, "charge", step)
+        ),
+      ];
+      await step.waitForEvent("go", { type: "go" });
+      for (const name of names) {
+        receipts.push(
+          // oxlint-disable-next-line no-await-in-loop -- steps in order
+          await step.do(
+            name,
+            async (context) => await effect(instanceId, name, context)
+          )
+        );
+      }
+      return receipts;
+    },
+  };
+};
+
 export const definitions: Record<string, WorkflowDefinition> = {
   // Steps that register rollbacks, and one that doesn't. With `wait`, the
   // run then waits for a "confirm" event; with `fail`, a last step fails,
@@ -1348,6 +1388,9 @@ export class TestRuns extends WorkflowRun {
   }: DefinitionIdentity): WorkflowDefinition | undefined {
     if (definition === "leased") {
       return leased((key, attempt) => this.attemptLease(key, attempt));
+    }
+    if (definition === "redeployed") {
+      return redeployed();
     }
     return definitions[definition] ?? resultDefinitions[definition];
   }

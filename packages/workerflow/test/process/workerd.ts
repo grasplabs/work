@@ -81,7 +81,15 @@ const freePort = async (): Promise<number> => {
   return address.port;
 };
 
-const config = (storage: string, port: number, effectsPort: number): string =>
+/** The deploy a fresh workerd serves until a test redeploys it. */
+const firstDeploy = "1";
+
+const config = (
+  storage: string,
+  port: number,
+  effectsPort: number,
+  deploy: string
+): string =>
   `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -100,6 +108,7 @@ const main :Workerd.Worker = (
   bindings = [
     (name = "RUNS", durableObjectNamespace = "Runs"),
     (name = "EFFECTS", service = "effects"),
+    (name = "DEPLOY", text = "${deploy}"),
   ],
   durableObjectNamespaces = [(className = "Runs", uniqueKey = "workerflow-runs", enableSql = true)],
   durableObjectStorage = (localDisk = "storage"),
@@ -110,14 +119,28 @@ const main :Workerd.Worker = (
 export class Workerd {
   readonly #work: string;
   readonly #config: string;
+  readonly #storage: string;
+  readonly #port: number;
+  readonly #effectsPort: number;
   readonly url: string;
   #process: ChildProcess | undefined;
   #log = "";
 
-  private constructor(work: string, configPath: string, port: number) {
+  private constructor(work: string, port: number, effectsPort: number) {
     this.#work = work;
-    this.#config = configPath;
+    this.#config = path.join(work, "config.capnp");
+    this.#storage = path.join(work, "storage");
+    this.#port = port;
+    this.#effectsPort = effectsPort;
     this.url = `http://127.0.0.1:${port}`;
+    this.#configure(firstDeploy);
+  }
+
+  #configure(deploy: string): void {
+    writeFileSync(
+      this.#config,
+      config(this.#storage, this.#port, this.#effectsPort, deploy)
+    );
   }
 
   /** A fresh storage directory, with the bundled fixture next to it. */
@@ -128,9 +151,7 @@ export class Workerd {
     // workerd embeds a module by a path relative to its config.
     copyFileSync(module, path.join(work, "worker.js"));
     const port = await freePort();
-    const configPath = path.join(work, "config.capnp");
-    writeFileSync(configPath, config(storage, port, effectsPort));
-    return new Workerd(work, configPath, port);
+    return new Workerd(work, port, effectsPort);
   }
 
   /**
@@ -191,6 +212,17 @@ export class Workerd {
 
   async restart(): Promise<void> {
     await this.kill();
+    await this.start();
+  }
+
+  /**
+   * A deploy: kills the process and starts it again on the same storage,
+   * serving the fixture's `deploy` (its `DEPLOY` binding), as a release
+   * that changed the code under the runs out.
+   */
+  async redeploy(deploy: string): Promise<void> {
+    await this.kill();
+    this.#configure(deploy);
     await this.start();
   }
 

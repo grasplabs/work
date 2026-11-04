@@ -359,6 +359,26 @@ export interface EventMatch {
 /** A workflow: what the host resolves a run's definition to. */
 export interface WorkflowDefinition<Params = unknown> {
   run: (event: WorkflowEvent<Params>, step: WorkflowStep) => Promise<unknown>;
+  /**
+   * What identifies the steps `run` calls and their order, as the host
+   * computes it from the code it resolved (a hash of a sealed JSON
+   * workflow's steps, say); opaque to the engine. A run keeps the one its
+   * definition had when it first ran (taken again once a restart forgot
+   * every step), and an activation whose definition has another (absent
+   * counts as one too) ends the run with a WorkflowReplayMismatchError
+   * before any of it runs, rolling back nothing: a deploy that renamed,
+   * reordered or removed a step under a running run, though its version
+   * stayed, never has the run's journal answer another step, nor runs its
+   * rollbacks from the new code.
+   *
+   * Replay matches steps by name and count only: their order may
+   * legitimately differ between replays where it rests on the
+   * definition's own I/O (`busy`), so the engine can't tell a changed
+   * step from a late one by watching the calls. Keeping a run on the code
+   * it started on (its version) is what lets it go on; this is the
+   * backstop when that code changed anyway.
+   */
+  fingerprint?: string;
 }
 
 /** Which definition a run executes; both opaque to the engine. */
