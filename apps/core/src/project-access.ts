@@ -152,46 +152,25 @@ export const requireProjectRole = async (
 };
 
 /**
- * Why a write guarded by project `id`'s room (project-sql.ts) wrote
- * nothing, read now: `project.not_found` once it is gone,
- * `role.forbidden` once `by` no longer builds it, and `project.full`
- * otherwise.
+ * Refuses unless project `id` is there and `by` builds it now:
+ * `project.not_found` once it is gone, `role.forbidden` once they no
+ * longer build it. Says why a write under `projectStillBuiltSql`
+ * (project-sql.ts) wrote nothing.
  */
-export const projectRefusal = async (
+export const requireStillBuilt = async (
   env: Pick<Env, "DB">,
   id: string,
   by: string
-): Promise<Error> => {
+): Promise<void> => {
   const row = await drizzle(env.DB).get<{ there: number; builds: number }>(
     sql`SELECT EXISTS (SELECT 1 FROM ${projects} WHERE ${projects.id} = ${id}) AS there,
       ${projectBuiltBySql(id, by)} AS builds`
   );
   if (row.there === 0) {
-    return projectErrors.create("project.not_found");
+    throw projectErrors.create("project.not_found");
   }
   if (row.builds === 0) {
-    return roleErrors.create("role.forbidden");
-  }
-  return projectErrors.create("project.full");
-};
-
-/**
- * Refuses, as `projectRefusal` says, unless `guard` (a project's ID
- * while `by` builds it and it has room, project-sql.ts) reads a project
- * now: for a write elsewhere, such as an item's own Share dialog, before
- * it writes under the same guard.
- */
-export const requireProjectRoom = async (
-  env: Pick<Env, "DB">,
-  id: string,
-  by: string,
-  guard: SQL
-): Promise<void> => {
-  const row = await drizzle(env.DB).get<{ id: string | null } | undefined>(
-    sql`SELECT ${guard} AS id`
-  );
-  if (row?.id === null || row?.id === undefined) {
-    throw await projectRefusal(env, id, by);
+    throw roleErrors.create("role.forbidden");
   }
 };
 
@@ -268,16 +247,12 @@ export const namedProjectsFor = async (
 };
 
 /**
- * The people in project `id` now, by user ID: its owner, the people in it,
- * and everyone in a team in it, each once, while they are members of the
- * organization. Whom a share with the project reaches.
+ * The people in project `id` now, as SQL rows of `person`, each once:
+ * its owner, the people in it, and everyone in a team in it, while they
+ * are members of the organization.
  */
-export const peopleInProject = async (
-  env: Pick<Env, "DB">,
-  id: string
-): Promise<string[]> => {
-  const rows = await drizzle(env.DB).all<{ userId: string }>(
-    sql`SELECT person AS userId FROM (
+const peopleInProjectSql = (id: string): SQL =>
+  sql`(SELECT person FROM (
       SELECT ${projects.ownerId} AS person FROM ${projects} WHERE ${projects.id} = ${id}
       UNION SELECT ${projectMembers.memberId} FROM ${projectMembers}
         WHERE ${projectMembers.projectId} = ${id} AND ${projectMembers.memberType} = 'person'
@@ -285,7 +260,26 @@ export const peopleInProject = async (
         JOIN ${projectMembers} ON ${projectMembers.memberType} = 'team'
           AND ${projectMembers.memberId} = ${teamMembers.teamId}
         WHERE ${projectMembers.projectId} = ${id}
-    ) WHERE ${activeMember(sql.raw("person"))}`
+    ) WHERE ${activeMember(sql.raw("person"))})`;
+
+/** The people in project `id` now, by user ID: whom a share with it reaches. */
+export const peopleInProject = async (
+  env: Pick<Env, "DB">,
+  id: string
+): Promise<string[]> => {
+  const rows = await drizzle(env.DB).all<{ person: string }>(
+    sql`SELECT person FROM ${peopleInProjectSql(id)}`
   );
-  return rows.map(({ userId }) => userId).toSorted();
+  return rows.map(({ person }) => person).toSorted();
+};
+
+/** How many people a share with project `id` reaches now (`peopleInProject`), counted in SQL. */
+export const peopleInProjectCount = async (
+  env: Pick<Env, "DB">,
+  id: string
+): Promise<number> => {
+  const row = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM ${peopleInProjectSql(id)}`
+  );
+  return row.count;
 };
