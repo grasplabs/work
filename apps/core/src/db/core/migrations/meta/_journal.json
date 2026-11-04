@@ -1499,6 +1499,20 @@
       "when": 1793801650367,
       "tag": "0213_app_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "6",
+      "when": 1793829115265,
+      "tag": "0214_workflow_stores_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "6",
+      "when": 1793829431450,
+      "tag": "0215_workflow_state",
+      "breakpoints": true
     }
   ]
 }

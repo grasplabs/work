@@ -9,6 +9,7 @@ import type {
   WorkflowActionReview,
   WorkflowResourceRun,
   WorkflowResourceVersion,
+  WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -60,6 +61,7 @@ import { partsOf } from "../workflows/diagram-parts.ts";
 import type { DiagramPart } from "../workflows/diagram-parts.ts";
 import { useDraftFromChat } from "../workflows/draw-in-chat.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
+import { KeptState } from "../workflows/kept-state.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
@@ -644,6 +646,7 @@ const WorkflowResourceView = ({
   draft,
   versions,
   params,
+  state,
   runs,
   askable,
   lifecycle,
@@ -657,6 +660,7 @@ const WorkflowResourceView = ({
   draft: Loaded<WorkflowDraft> | undefined;
   versions: Loaded<WorkflowResourceVersion[]>;
   params: Loaded<WorkflowParams>;
+  state: Loaded<WorkflowState>;
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
   lifecycle: Loaded<WorkflowLifecycle>;
@@ -835,6 +839,15 @@ const WorkflowResourceView = ({
             ) : (
               <NotLoadedState page={params} />
             )}
+            {state.state === "ready" ? (
+              <KeptState
+                editable={builder}
+                loaded={state.data}
+                workflow={resource.id}
+              />
+            ) : (
+              <NotLoadedState page={state} />
+            )}
           </div>
         </TabsContent>
         <TabsContent value="versions">
@@ -903,6 +916,7 @@ const WorkflowResourcePage = () => {
     draft,
     versions,
     params,
+    state,
     runs,
     askable,
     lifecycle,
@@ -953,6 +967,7 @@ const WorkflowResourcePage = () => {
           names={{ people, me: identity.userId }}
           params={params}
           resource={resource.data}
+          state={state}
           opens={tab}
           runs={runs}
           versions={versions}
@@ -996,6 +1011,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       draft,
       versions,
       params,
+      state,
       runs,
       askable,
       lifecycle,
@@ -1010,6 +1026,10 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       loadFromCore(
         core,
         async (session) => await session.workflowResources.params(workflow)
+      ),
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.state(workflow)
       ),
       loadFromCore(
         core,
@@ -1034,6 +1054,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       draft,
       versions,
       params,
+      state,
       runs,
       askable,
       lifecycle,

@@ -268,7 +268,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "core.stephen_request_topics": noPerson,
   "core.workflow_ai_waits": noPerson,
-  "core.workflow_stores": noPerson,
+  "core.workflow_state": {
+    company: "what a workflow keeps between its runs, as their outputs (D3)",
+  },
+  "core.workflow_state_writes": noPerson,
   "core.workflow_item_tests": {
     company: "a workflow's test runs, by whom they ran as (D3)",
   },

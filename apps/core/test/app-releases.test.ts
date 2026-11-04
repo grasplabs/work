@@ -37,7 +37,6 @@ import {
 } from "../src/db/core/schema.ts";
 import { platformRunner } from "../src/platform-sandbox.ts";
 import { buildAppCode, buildAppTests, buildScreens } from "../src/screens.ts";
-import { claimStore } from "../src/store-owners.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -1619,32 +1618,6 @@ JSON.stringify = (value, ...rest) => {
     ).resolves.toBe("version.store_bound_elsewhere");
     const opened = await openStore(env, first.store);
     await expect(opened.generations(["beta"])).resolves.toStrictEqual({});
-  });
-
-  it("can't be bound to a store a workflow owns, and never touches its tables", async () => {
-    const fixture = await appWith(withTable(notesFiles(), "gamma"));
-    const store = await createStore(env, fixture.owner);
-    await claimStore(env, store, {
-      kind: "workflow",
-      id: crypto.randomUUID(),
-    });
-    // A workflow's store is managed by the organization's admins alone
-    // (data-stores.ts): its creator, a builder, can't seal onto it.
-    await expect(
-      failure(
-        async () =>
-          await sealRelease(env, {
-            app: fixture.app,
-            version: 1,
-            store,
-            by: fixture.owner,
-          })
-      )
-    ).resolves.toBe("data.store_unavailable");
-    const opened = await openStore(env, store);
-    await expect(opened.generations(["gamma"])).rejects.toThrow(
-      /wasn't handed/u
-    );
   });
 
   it("goes to exactly one of two Apps sealed onto a new store at once, and only its tables", async () => {

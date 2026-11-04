@@ -80,6 +80,8 @@ import {
   workflowResourceProcesses,
   workflowResources,
   workflowResourceVersions,
+  workflowState,
+  workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
@@ -127,11 +129,6 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
-import {
-  provideWorkflowStores,
-  workflowStoreStatements,
-} from "./workflow-stores.ts";
-import type { WorkflowStoreBinding } from "./workflow-stores.ts";
 import { forValidation } from "./workflows/connector-schemas.ts";
 import {
   packagesHoldSql,
@@ -1934,8 +1931,6 @@ interface Publication {
   packages: SealedPackageManifest | undefined;
   /** Admits the write, right before it commits: throws to write nothing. */
   admit: (() => Promise<void>) | undefined;
-  /** The stores it declares, created and defined for it (workflow-stores.ts). */
-  stores: readonly WorkflowStoreBinding[];
 }
 
 /**
@@ -1960,7 +1955,6 @@ const writeVersion = async (
     actions,
     packages,
     admit,
-    stores,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1997,20 +1991,6 @@ const writeVersion = async (
     // admits again (workflows/sealed-packages.ts); the entries' code is
     // among the build's artifacts.
     ...(packages === undefined ? {} : { packages }),
-    // The stores it declares, each with its schema and its operations'
-    // fingerprints, as the version binds them (GRA-682).
-    ...(stores.length === 0
-      ? {}
-      : {
-          stores: stores.map(
-            ({ name, storeId, schemaHash, operationManifestHash }) => ({
-              name,
-              storeId,
-              schemaHash,
-              operationManifestHash,
-            })
-          ),
-        }),
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -2084,13 +2064,6 @@ const writeVersion = async (
         .update(workflowResources)
         .set({ currentVersion: version })
         .where(eq(workflowResources.id, workflow.id)),
-      ...workflowStoreStatements(
-        db,
-        workflow.id,
-        version,
-        manifestHash,
-        stores
-      ),
       ...bindings.map((binding) =>
         binding.kind === "workflow"
           ? db.insert(sdkResourceBindings).values({
@@ -2129,9 +2102,6 @@ const writeVersion = async (
           definitionHash,
           contractHash,
           manifestHash,
-          // How many stores it binds: their IDs are in its manifest, which
-          // `manifestHash` names; joined they'd pass a detail's limit.
-          stores: stores.length,
         })
       ),
     ]);
@@ -2199,8 +2169,6 @@ const bindingKey = (binding: PinnedBinding): string =>
  * (data-stores.ts). Staff may still publish a version that binds the same.
  * Binding nothing is a change too, when the current version binds
  * something: dropping what a client chose is theirs to decide as well.
- * Its stores too: staff never declare one (workflow-stores.ts), so a
- * current version that binds a store is one staff can't replace.
  */
 const requireStaffKeepsBindings = async (
   env: Env,
@@ -2217,22 +2185,7 @@ const requireStaffKeepsBindings = async (
       ? []
       : (versions.get(workflow.currentVersion) ?? []);
   const kept = new Set(current.map(bindingKey));
-  const [store] =
-    workflow.currentVersion === null
-      ? []
-      : await drizzle(env.DB)
-          .select({ alias: sdkResourceBindings.alias })
-          .from(sdkResourceBindings)
-          .where(
-            and(
-              eq(sdkResourceBindings.resourceId, workflow.id),
-              eq(sdkResourceBindings.resourceVersion, workflow.currentVersion),
-              eq(sdkResourceBindings.kind, "store")
-            )
-          )
-          .limit(1);
   if (
-    store !== undefined ||
     current.length !== bindings.length ||
     !bindings.every((binding) => kept.has(bindingKey(binding)))
   ) {
@@ -2370,15 +2323,6 @@ const publish = async (
     workflow.id,
     modules
   );
-  // Its stores, created and handed its schema before the version is
-  // written: only on this path, never by a run (workflow-stores.ts).
-  const stores = await provideWorkflowStores(
-    env,
-    by,
-    workflow.id,
-    (workflow.currentVersion ?? 0) + 1,
-    checked.stores
-  );
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -2391,7 +2335,6 @@ const publish = async (
       actions: versionActionsOf(checked.bindings, modules),
       packages: sealed?.manifest,
       admit,
-      stores,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -3323,16 +3266,15 @@ const deletedOnce = async (
           FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
       )
     ),
-    // Its versions bind its stores no more (GRA-682): none of them runs
-    // again, nothing running was left (`boundSql`), so an admin may delete
-    // a store it declared. The stores and their records stay: deleting a
-    // workflow never deletes them (spec 40.8).
-    db.delete(sdkResourceBindings).where(
-      and(
-        eq(sdkResourceBindings.kind, "store"),
-        sql`${sdkResourceBindings.resourceId} IN (SELECT id
-          FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
-      )
+    // What it kept between its runs (workflow-state.ts): no run of it
+    // reads or writes it again.
+    db.delete(workflowState).where(
+      sql`${workflowState.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowStateWrites).where(
+      sql`${workflowStateWrites.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
   ]);
   return deleted.length > 0;

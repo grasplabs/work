@@ -15,7 +15,6 @@ import type {
   DiagnosticCode,
 } from "./diagnostics.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
-import type { DeclaredStore } from "./stores.ts";
 
 /**
  * Thrown once the report holds `maxDiagnostics` errors, or by a fatal
@@ -235,8 +234,6 @@ export interface Checker {
   schemas: Map<string, ValueSchema<unknown, unknown>>;
   functionCalls: FunctionCall[];
   workflowInput?: ValueSchema<unknown, unknown>;
-  /** The stores the definition declares, by name (stores.ts). */
-  stores: Map<string, DeclaredStore>;
   identity?: { namespace: string; name: string; version: string };
 }
 
@@ -259,7 +256,6 @@ export const createChecker = (options: ReadOptions): Checker => ({
   slotsFull: false,
   schemas: new Map(),
   functionCalls: [],
-  stores: new Map(),
 });
 
 /** A value's own key, or `undefined`: never a prototype member. */

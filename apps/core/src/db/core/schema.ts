@@ -1365,50 +1365,16 @@ export const businessStoreVersions = sqliteTable(
 
 /**
  * The one canonical owner of a store's schema and operations (spec 40.8),
- * claimed once and kept for good: retention deletes releases and their
- * bindings, never this. So a store its owner stopped using never comes to
- * serve another owner, which would read what the first left behind. The
- * owner is an App (`appId`), claimed by the first seal that binds the
- * store, or an independent workflow (`workflowId`, GRA-682), claimed when
- * an admin activates a version that declares it: exactly one of the two.
- * A workflow's store has no App, so nothing that looks a store's App up
- * ever finds one for it.
+ * the App whose first seal binds the store, claimed once and kept for
+ * good: retention deletes releases and their bindings, never this. So a
+ * store its App stopped using never comes to serve another App, which
+ * would read what the first left behind.
  */
-export const sdkStoreOwners = sqliteTable(
-  "sdk_store_owners",
-  {
-    storeId: text("store_id").primaryKey(),
-    appId: text("app_id"),
-    workflowId: text("workflow_id"),
-    claimedAt: timestamp("claimed_at").notNull(),
-  },
-  () => [
-    check(
-      "sdk_store_owners_one_owner",
-      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
-    ),
-  ]
-);
-
-/**
- * The stores a standalone workflow declares (GRA-682,
- * workflow-stores.ts), by the name its definition gives each: created
- * when a version declaring it is published, in one batch with its
- * `business_stores` row and its `sdk_store_owners` claim, so a
- * publication run again finds the store it made, never a second one.
- * Kept for good, as the claim is: deleting the workflow never deletes its
- * stores (spec 40.8).
- */
-export const workflowStores = sqliteTable(
-  "workflow_stores",
-  {
-    workflowId: text("workflow_id").notNull(),
-    name: text().notNull(),
-    storeId: text("store_id").notNull().unique(),
-    createdAt: timestamp("created_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.workflowId, table.name] })]
-);
+export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+});
 
 /**
  * The store an App of spec 8's layout runs on, one per App: created by the
@@ -4659,6 +4625,50 @@ export const workflowResourceParams = sqliteTable(
     index("workflow_resource_params_values_kept_idx")
       .on(table.setAt)
       .where(sql`${table.valuesRemovedAt} IS NULL`),
+  ]
+);
+
+/**
+ * What each independent workflow keeps between its runs (src/workflow-state.ts):
+ * a value by key, canonical JSON, written by the run whose step set it
+ * last. A run reads it once as it starts; at most `workflowStateMaxBytes`
+ * per workflow in all. Deleted with its workflow.
+ */
+export const workflowState = sqliteTable(
+  "workflow_state",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    key: text().notNull(),
+    value: text().notNull(),
+    runId: text("run_id").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workflowResourceId, table.key] })]
+);
+
+/**
+ * Each step that wrote a workflow's state (src/workflow-state.ts), by its
+ * idempotency key: written in the batch of the write, so a step replayed
+ * or tried again never writes twice. `bytes` is the workflow's state in
+ * all once it landed, which may not pass the cap: the batch fails else.
+ * `writeId` tells the batch's own receipt from one an earlier one wrote.
+ */
+export const workflowStateWrites = sqliteTable(
+  "workflow_state_writes",
+  {
+    stepKey: text("step_key").primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    runId: text("run_id").notNull(),
+    writeId: text("write_id").notNull(),
+    bytes: integer().notNull(),
+    writtenAt: timestamp("written_at").notNull(),
+  },
+  (table) => [
+    index("workflow_state_writes_workflow_idx").on(table.workflowResourceId),
   ]
 );
 

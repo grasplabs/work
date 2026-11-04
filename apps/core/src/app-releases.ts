@@ -1172,7 +1172,7 @@ const boundStore = async (
   // so a seal that loses the store never defines its tables there, and
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
-  await claimStore(env, opened.id, { kind: "app", id: request.app });
+  await claimStore(env, opened.id, request.app);
   // Its preferences checked against the store's preferences contract
   // first (store-host.ts, `definePreferences`): a version that changes one
   // people may have chosen is refused before its tables are touched. The
@@ -1697,7 +1697,7 @@ export const sealRelease = async (
   } catch (error) {
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       // Another App's, or being deleted (or gone) as the batch ran.
-      throw (await claimedFor(env, store?.storeId, { kind: "app", id: app }))
+      throw (await claimedFor(env, store?.storeId, app))
         ? dataErrors.create("data.store_unavailable")
         : versionErrors.create("version.store_bound_elsewhere");
     }
