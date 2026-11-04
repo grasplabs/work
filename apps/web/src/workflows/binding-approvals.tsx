@@ -191,8 +191,8 @@ const DecidersChoice = ({
 
 /**
  * How one binding is approved: its deciders, a target offered, or why not
- * yet. With `elsewhere`, a binding offered nothing leads to the workflow's
- * page, where every kind is offered its targets.
+ * yet. With `elsewhere`, a connector, store operation or template offered
+ * nothing leads to the workflow's page, where they are offered targets.
  */
 const BindingChoice = ({
   binding: { alias, kind, offered },
@@ -209,7 +209,10 @@ const BindingChoice = ({
   if (kind === "decision") {
     return <DecidersChoice alias={alias} busy={busy} onApprove={onApprove} />;
   }
-  if (first === undefined && elsewhere !== undefined) {
+  // The kinds offered their targets on the workflow's page alone.
+  const slow =
+    kind === "connector" || kind === "operation" || kind === "template";
+  if (first === undefined && slow && elsewhere !== undefined) {
     return (
       <Link
         className="underline-offset-4 hover:underline"
@@ -225,8 +228,8 @@ const BindingChoice = ({
     return (
       <p className="text-muted-foreground">
         <Trans>
-          Nothing the workflow may use serves it yet: grant the workflow what it
-          needs first.
+          Nothing the workflow may use serves it now: grant the workflow what it
+          needs, or try again later.
         </Trans>
       </p>
     );

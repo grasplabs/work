@@ -9059,8 +9059,8 @@ msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Rien ne le lance tout seul : il s'exécute quand quelqu'un le lance."
 
 #: src/workflows/binding-approvals.tsx
-msgid "Nothing the workflow may use serves it yet: grant the workflow what it needs first."
-msgstr "Rien de ce que le workflow peut utiliser ne la sert encore : accordez d'abord au workflow ce dont il a besoin."
+msgid "Nothing the workflow may use serves it now: grant the workflow what it needs, or try again later."
+msgstr "Rien de ce que le workflow peut utiliser ne la sert pour l'instant : accordez au workflow ce dont il a besoin, ou réessayez plus tard."
 
 #: src/engines/app-access-requests.tsx
 msgid "Nothing this App asked for is waiting."

@@ -23,9 +23,16 @@ import {
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin } from "./permissions.ts";
 import { latestTemplateVersions } from "./resource-templates.ts";
-import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
+import { grantedStore, servedIn, storeGrantFor } from "./store-operations.ts";
+import {
+  approvalServing,
+  operationServesContract,
+  requireTargetServes,
+} from "./workflow-bindings.ts";
+import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
+import { workflowStoreServer } from "./workflow-store-host.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
 // the waiting feed's `bindings`): every catalog binding of a workflow's
@@ -56,10 +63,19 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 /** Most workflows one read lists. */
 const pendingWorkflowsMax = 50;
 
-/** Most templates offered for one template binding: the newest, each at its latest version. */
-const templatesOffered = 20;
+/**
+ * Most templates offered for one template binding: the most recently
+ * published, each at its latest version. Approving any other takes the
+ * API.
+ */
+const templatesOffered = 100;
 
 type CatalogBinding = Extract<PinnedBinding, { resourceId: null }>;
+
+/** What an offer needs of a store operation: its kind and shapes. */
+type StoreOperationShape = Parameters<typeof operationServesContract>[0] & {
+  kind: string;
+};
 
 /** A target core offers, with what it names. */
 type Offered = PendingWorkflowBindings["bindings"][number]["offered"][number];
@@ -148,25 +164,82 @@ const connectorTargets = async (env: Env, id: string): Promise<Offered[]> => {
 };
 
 /**
- * Each path each of the workflow's own store permissions lists, as a
- * query and as a mutation: the store's release says which it is, so only
- * the one it serves is offered.
+ * The public queries and mutations, by path, that store permission
+ * `permissionId` of workflow `id` lists and its store serves now: an
+ * App's store as its owner's current release serves it, or a workflow's
+ * as its owner's current version does. Read once for all its paths.
  */
-const operationTargets = async (env: Env, id: string): Promise<Offered[]> => {
-  const rows = await heldOf(env, id, "store");
-  return rows.flatMap((row) =>
-    actionsOf(row.actions).flatMap((operation) =>
-      (["query", "mutation"] as const).map((operationKind): Offered => ({
-        target: {
-          kind: "storeOperation",
-          permissionId: row.id,
-          operation,
-          operationKind,
-        },
-        label: `${row.binding}: ${operation}`,
-      }))
-    )
-  );
+const servedOperations = async (
+  env: Env,
+  id: string,
+  permissionId: string,
+  paths: readonly string[]
+): Promise<{ path: string; operation: StoreOperationShape }[]> => {
+  const consumer = {
+    version: 1,
+    subject: { type: "workflow", id },
+    permissionId,
+  } as const;
+  const grant = await storeGrantFor(env, consumer);
+  if (grant !== undefined) {
+    return paths.flatMap((path) => {
+      const served = servedIn(grant.release, path);
+      return served === undefined || !grant.actions.includes(path)
+        ? []
+        : [{ path, operation: served.operation }];
+    });
+  }
+  const storeId = await grantedStore(env, consumer, paths);
+  const server =
+    storeId === undefined ? undefined : await workflowStoreServer(env, storeId);
+  return paths.flatMap((path) => {
+    const served = server?.store.operations.get(path)?.manifest;
+    return served === undefined ? [] : [{ path, operation: served }];
+  });
+};
+
+/**
+ * The paths the workflow's own store permissions list whose operation
+ * takes and returns exactly what operation contract `key` says, each as
+ * the kind its store serves it.
+ */
+const operationTargets = async (
+  env: Env,
+  id: string,
+  key: string
+): Promise<Offered[]> => {
+  const contracts = await resolveCatalogKeys(env, [key]);
+  const contract = contracts.get(key)?.contract;
+  if (contract === undefined) {
+    return [];
+  }
+  const offered: Offered[] = [];
+  for (const row of await heldOf(env, id, "store")) {
+    // oxlint-disable-next-line no-await-in-loop -- one store read per grant, few
+    const served = await servedOperations(
+      env,
+      id,
+      row.id,
+      actionsOf(row.actions)
+    );
+    for (const { path, operation } of served) {
+      if (
+        (operation.kind === "query" || operation.kind === "mutation") &&
+        operationServesContract(operation, contract)
+      ) {
+        offered.push({
+          target: {
+            kind: "storeOperation",
+            permissionId: row.id,
+            operation: path,
+            operationKind: operation.kind,
+          },
+          label: `${row.binding}: ${path}`,
+        });
+      }
+    }
+  }
+  return offered;
 };
 
 /** The newest templates' latest versions, each pinned by its content's hash. */
@@ -220,7 +293,7 @@ const candidatesOf = async (
       return await connectorTargets(env, id);
     }
     case "operation": {
-      return await operationTargets(env, id);
+      return await operationTargets(env, id, binding.contractId);
     }
     case "template": {
       return await templateTargets(env);

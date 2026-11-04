@@ -22,8 +22,9 @@ import { inboxItems } from "./items.ts";
 // A workflow's bindings that wait on an admin, in the inbox, against core's
 // workflowResources as the page reaches them over RPC, faked: each binding
 // core offers targets for is approved with exactly the chosen target, for
-// the version shown; one it offers none for leads to the workflow's page,
-// where every kind is offered its targets, and offers nothing to press.
+// the version shown; a connector it offers none for leads to the
+// workflow's page, where such kinds are offered targets, and a binding
+// nothing serves says it needs a grant; neither offers anything to press.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -62,6 +63,12 @@ const item: BindingApprovalItem = {
         alias: "crm",
         kind: "connector",
         contractId: "crm/contacts",
+        offered: [],
+      },
+      {
+        alias: "docs",
+        kind: "knowledge",
+        contractId: "docs-v1",
         offered: [],
       },
     ],
@@ -195,11 +202,14 @@ describe("a workflow's bindings in the inbox", () => {
     });
   });
 
-  it("leads to the workflow's page for a binding it offers no target for, with nothing to press", async () => {
+  it("leads to the workflow's page for a connector it offers no target for, and says a binding nothing serves needs a grant, with nothing to press", async () => {
     await shown();
 
     expect({
-      approve: button("Approve crm"),
+      approve: [button("Approve crm"), button("Approve docs")],
+      grant: document.body.textContent.includes(
+        "Nothing the workflow may use serves it now: grant the workflow what it needs, or try again later."
+      ),
       leads: [...document.querySelectorAll("a")]
         .filter(
           (link) =>
@@ -207,7 +217,8 @@ describe("a workflow's bindings in the inbox", () => {
         )
         .map((link) => link.getAttribute("href")),
     }).toStrictEqual({
-      approve: undefined,
+      approve: [undefined, undefined],
+      grant: true,
       leads: ["/workflows/workflow-quotes?tab=files"],
     });
   });

@@ -16,7 +16,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -387,8 +387,12 @@ export const FilesAndApps = ({
   }, [core, workflow, currentVersion, versionsRead, approves]);
 
   // Once a binding is approved: what still waits, and the apps its
-  // approvals connect, read again.
+  // approvals connect, read again; only the latest read is shown, as one
+  // started before a later approval would miss it.
+  const rereads = useRef(0);
   const approved = async (): Promise<void> => {
+    rereads.current += 1;
+    const reread = rereads.current;
     const [waiting, connected] = await Promise.all([
       loadFromCore(
         core,
@@ -403,6 +407,9 @@ export const FilesAndApps = ({
           )
         : undefined,
     ]);
+    if (reread !== rereads.current) {
+      return;
+    }
     setPending(waiting);
     if (connected !== undefined) {
       setApps(connected);
