@@ -27,7 +27,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
 import { instructions, withheldResult } from "../src/agent.ts";
-import { chatAgent, needsRebase, rebase } from "../src/chat-agent.ts";
+import {
+  chatAgent,
+  needsRebase,
+  noticeKind,
+  questionContent,
+  questionKind,
+  rebase,
+} from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
 import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 
@@ -218,14 +225,34 @@ const openChat = async (
       return message;
     };
   /** Submits `question`, with the responses the model gives it. */
-  const submit = async (question: string, responses: FauxResponseStep[]) => {
+  const submit = async (
+    question: string | ReturnType<typeof questionContent>,
+    responses: FauxResponseStep[]
+  ) => {
     queue.push(...responses);
     return await opened.root.submit(
-      { type: "input", content: question },
+      typeof question === "string"
+        ? { type: "input", content: question }
+        : { type: "input", content: question, entry: { kind: questionKind } },
       context
     );
   };
-  const ask = async (question: string, responses: FauxResponseStep[]) => {
+  /** Tells the turn under way `text` between its steps, as the host's notices. */
+  const steer = async (text: string): Promise<void> => {
+    await opened.root.submit(
+      {
+        type: "input",
+        content: text,
+        whenBusy: "steer",
+        entry: { kind: noticeKind },
+      },
+      context
+    );
+  };
+  const ask = async (
+    question: string | ReturnType<typeof questionContent>,
+    responses: FauxResponseStep[]
+  ) => {
     const submitted = await submit(question, responses);
     return await submitted.wait(context);
   };
@@ -250,6 +277,7 @@ const openChat = async (
     await needsRebase(opened.root, revoked, context);
   return {
     ask,
+    steer,
     rebased,
     mustRebase,
     submit,
@@ -501,6 +529,42 @@ describe("what a chat can no longer read", () => {
         .filter(({ role }) => role === "user")
         .map(({ content }) => content)
     ).toStrictEqual(["Read", "Again?"]);
+  });
+
+  it("withholds what the model wrote after a withheld result once rebased, past a notice steered in mid-turn", async () => {
+    const chat = await openChat();
+    await chat.ask("Read", [
+      async (request) => {
+        chat.requests.push(structuredClone(request.messages));
+        await chat.steer("Build job 1 ended.");
+        return call("executeCode", { code: readsSecret });
+      },
+      chat.reply(says("It says secret")),
+    ]);
+    expect(JSON.stringify(chat.requests.at(-1))).toContain(
+      "Build job 1 ended."
+    );
+    chat.revoked.add("run-1");
+    await chat.rebased();
+    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    expect(JSON.stringify(chat.requests.at(-1))).not.toContain("secret");
+  });
+
+  it("withholds a revoked recall a question carried, and what was written after it, once rebased", async () => {
+    const chat = await openChat();
+    await chat.ask(
+      questionContent("Find it", [], {
+        runId: "recall-1",
+        text: "Returned:\nthe secret plan",
+      }),
+      [chat.reply(says("It says secret"))]
+    );
+    chat.revoked.add("recall-1");
+    await chat.rebased();
+    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    const request = JSON.stringify(chat.requests.at(-1));
+    expect(request).not.toContain("secret");
+    expect(request).toContain("Find it");
   });
 
   it("stops a turn whose own result was revoked, and the request carries none of it", async () => {

@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import {
   estimateContextTokens,
   estimateMessageTokens,
@@ -15,6 +15,7 @@ import {
   ResetEntry,
   section,
   SystemEntry,
+  UserEntry,
 } from "@earendil-works/pi-durable";
 import type {
   Conversation,
@@ -24,6 +25,7 @@ import type {
   HookApi,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { dedicatedTools, durableTool } from "./agent-tools.ts";
@@ -32,10 +34,13 @@ import {
   executeCode,
   instructions,
   latestSections,
+  filesNoteText,
   readApi,
+  resultRunId,
   sectionNames,
   sectionsOf,
-  withholdRuns,
+  withheldAssistant,
+  withheldResult,
 } from "./agent.ts";
 import type { CodeRuns, TurnContext } from "./agent.ts";
 
@@ -128,8 +133,102 @@ const BaseDoc = defineDoc<{
   checkpointWhen: () => true,
 });
 
-/** An entry of the history a rebase appended again. */
+/** An entry of the history a rebase appended again, with its own kind as `data`. */
 export const historyKind = "grasp.history";
+
+/** A person's question: it starts a turn. */
+export const questionKind = "grasp.question";
+
+/**
+ * What the host tells a turn under way between its steps (a build job's
+ * end), steered in as a user message: no turn of its own.
+ */
+export const noticeKind = "grasp.notice";
+
+const copiedSchema = z.object({ kind: z.string() });
+
+/** An entry's own kind, a copy's as it was. */
+const kindOf = (entry: EntryRecord): string => {
+  if (entry.kind !== historyKind) {
+    return entry.kind;
+  }
+  const copied = copiedSchema.safeParse(entry.data);
+  return copied.success ? copied.data.kind : entry.kind;
+};
+
+/** Whether `entry` starts a turn: a question, or pi's plain input. */
+const startsTurn = (entry: EntryRecord): boolean => {
+  const kind = kindOf(entry);
+  return kind === questionKind || kind === UserEntry.kind;
+};
+
+// A question carries what the recall before it found (`recallFor` in
+// agent.ts, GRA-1544) as a part of its own, headed by the recall's run: pi
+// takes nothing between an input and the run's first request, and the run
+// is what a revocation withholds it by, as a code step's result.
+
+const recallPattern = /^\[Recall (?<run>[^\]\s]+)\]\n/u;
+
+/** The run the recall in `part` was, if it is one. */
+const recallRunOf = (part: {
+  type: string;
+  text?: string;
+}): string | undefined =>
+  part.type === "text"
+    ? recallPattern.exec(part.text ?? "")?.groups?.run
+    : undefined;
+
+/**
+ * A question as the model reads it: the person's words, the note of the
+ * files it carries, and what the recall before it found, each a part.
+ */
+export const questionContent = (
+  text: string,
+  files: readonly { id: string; type: string }[],
+  recall?: { runId: string; text: string }
+): UserMessage["content"] => [
+  { type: "text", text },
+  ...(files.length === 0
+    ? []
+    : [{ type: "text" as const, text: filesNoteText(files) }]),
+  ...(recall === undefined
+    ? []
+    : [
+        {
+          type: "text" as const,
+          text: `[Recall ${recall.runId}]\n${recall.text}`,
+        },
+      ]),
+];
+
+/** The person's own words of a question, as `questionContent` put them first. */
+export const questionText = (message: UserMessage): string => {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  const [first] = message.content;
+  return first?.type === "text" ? first.text : "";
+};
+
+/** A user message with each recall of a run in `withheld` read as a note. */
+const withRecallsNoted = (
+  message: UserMessage,
+  withheld: ReadonlySet<string>
+): { message: UserMessage; read: boolean } => {
+  if (typeof message.content === "string") {
+    return { message, read: false };
+  }
+  let read = false;
+  const content = message.content.map((part) => {
+    const run = recallRunOf(part);
+    if (run === undefined || !withheld.has(run)) {
+      return part;
+    }
+    read = true;
+    return { type: "text" as const, text: withheldResult };
+  });
+  return { message: read ? { ...message, content } : message, read };
+};
 
 /** Whether every run in `withheld` was left out of the context. */
 const leftOut = (
@@ -203,33 +302,59 @@ const historySince = async (
   return history;
 };
 
-/** Each entry's messages, as `withholdRuns` withholds them while `withheld` is. */
+/** An entry of a rebased history: its own kind, and its messages as they may be sent. */
+interface Copied {
+  kind: string;
+  model: Message[];
+}
+
+/**
+ * The entries of `history` as a rebased context may hold them while
+ * `withheld` is withheld: the result of each run in it, a code step's or
+ * a recall's, read as a note, and so is everything the model wrote after
+ * it in its turn, which may repeat what it read, up to the next question.
+ * A notice steered in mid-turn ends no turn. Each call keeps its ID and
+ * its result; the person's words stay as they are.
+ */
 const withheldFrom = (
   history: readonly EntryRecord[],
   withheld: ReadonlySet<string>
-): Message[][] => {
-  const flat = history.flatMap((entry, index) =>
-    (entry.model ?? []).map((message) => ({ index, message }))
-  );
-  const noted = withholdRuns(
-    flat.map(({ message }) => message),
-    withheld
-  );
-  const grouped: Message[][] = history.map(() => []);
-  for (const [at, { index }] of flat.entries()) {
-    const message = noted[at];
-    if (message !== undefined) {
-      grouped[index]?.push(message);
+): Copied[] => {
+  let after = false;
+  return history.map((entry) => {
+    if (startsTurn(entry)) {
+      after = false;
     }
-  }
-  return grouped;
+    const model = (entry.model ?? []).map((message): Message => {
+      if (message.role === "user") {
+        const noted = withRecallsNoted(message, withheld);
+        after ||= noted.read;
+        return noted.message;
+      }
+      if (message.role === "toolResult") {
+        const run = resultRunId(message);
+        if (!after && (run === undefined || !withheld.has(run))) {
+          return message;
+        }
+        after = true;
+        return {
+          ...message,
+          content: [{ type: "text", text: withheldResult }],
+        };
+      }
+      return message.role === "assistant" && after
+        ? withheldAssistant(message)
+        : message;
+    });
+    return { kind: kindOf(entry), model };
+  });
 };
 
 /**
  * Starts `conversation`'s context afresh without what `withheld` withholds,
  * keeping the rest: a pi reset, then its history since its last rebase
  * again, entry by entry, each run in `withheld` read as a note in place of
- * its result (`withholdRuns`). The history is compacted by pi as it is
+ * its result (`withheldFrom`). The history is compacted by pi as it is
  * appended, whenever it holds more than `room` tokens (the model's window
  * less pi's reserve), so pi's summarizer never takes more than a window.
  * Only while the conversation is idle. A rebase a restart cut short is
@@ -259,21 +384,25 @@ export const rebase = async (
     base.rebasing = true;
     return entry.id;
   }, context);
-  let pending: Message[][] = [];
+  let pending: Copied[] = [];
   let tokens = 0;
   const append = async (): Promise<void> => {
     const drafts = pending;
     pending = [];
     await conversation.commit(async (tx) => {
-      for (const model of drafts) {
+      for (const { kind, model } of drafts) {
         // oxlint-disable-next-line no-await-in-loop -- in order
-        await tx.appendEntry(conversation.id, { kind: historyKind, model });
+        await tx.appendEntry(conversation.id, {
+          kind: historyKind,
+          model,
+          data: { kind },
+        });
       }
     }, context);
   };
-  for (const messages of history) {
-    pending.push(messages);
-    tokens += messages.reduce(
+  for (const copied of history) {
+    pending.push(copied);
+    tokens += copied.model.reduce(
       (sum, message) => sum + estimateMessageTokens(message),
       0
     );
