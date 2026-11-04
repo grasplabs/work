@@ -157,7 +157,8 @@ describe("a built-in method, read as a value", () => {
       then: outcome("{ then: input.list.push }", { input }),
       compared: outcome("{ valueOf: input.list.reverse } < 1", { input }),
     };
-    expect({ results, list: readMember(input, "list") }).toStrictEqual({
+    const list: unknown = readMember(input, "list");
+    expect({ results, list }).toStrictEqual({
       results: {
         // No `toString` to call: JavaScript's own TypeError, the list untouched.
         toString: { threw: "TypeError" },

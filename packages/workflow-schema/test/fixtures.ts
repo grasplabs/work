@@ -160,6 +160,55 @@ export const everyBinding = () => ({
   ],
 });
 
+/**
+ * A workflow whose expressions use every operator and a callback, on
+ * values read from its input and its steps: the generated code holds
+ * each, whatever the data's type.
+ */
+export const everyOperator = () => ({
+  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+  input: {
+    type: "object",
+    properties: {
+      lines: { type: "array", items: { type: "string" } },
+      total: { type: "number" },
+    },
+    required: ["lines", "total"],
+    additionalProperties: false,
+  },
+  output: {
+    schema: {
+      type: "object",
+      properties: {
+        sums: { type: "array", items: { type: "number" } },
+        flags: { type: "array", items: { type: "boolean" } },
+        long: { type: "array", items: { type: "string" } },
+      },
+      required: ["sums", "flags", "long"],
+      additionalProperties: false,
+    },
+    value: {
+      sums: {
+        $expr:
+          "[input.total + 1, input.total - 1, input.total * 2, input.total / 2, input.total % 2, input.total ** 2, -input.total, +input.lines.length]",
+      },
+      flags: {
+        $expr:
+          '[input.lines.length > 0, input.total < 10, input.total >= 1, input.total <= 1, input.total == 1, input.total != 1, !input.lines, typeof input.total === "number"]',
+      },
+      long: { $expr: "input.lines.filter((line) => line.length > 3)" },
+    },
+  },
+  steps: [
+    {
+      id: "check",
+      type: "raise",
+      if: { $expr: "input.lines.length > 0 && input.total * 2 > 10" },
+      error: { type: "urn:grasp:error:too-many", status: 422 },
+    },
+  ],
+});
+
 /** `document` checked, failing the test when it isn't valid. */
 export const checked = (document: unknown): CheckedWorkflow => {
   const result = checkWorkflow(document);
