@@ -68,7 +68,16 @@ const run = (
  */
 const organization = (
   name: string,
-  interviews: readonly { version?: string; finished: boolean }[]
+  interviews: readonly {
+    version?: string;
+    finished: boolean;
+    locale?: string;
+    typed?: boolean;
+    /** When it started, and when it last moved, as ISO time. */
+    on?: string;
+    ended?: string;
+  }[],
+  channel?: string
 ): LabOrganization => {
   const people = interviews.map((_, at) => ({
     id: `p${at}`,
@@ -84,9 +93,11 @@ const organization = (
     interviews: interviews.map((each, at) => ({
       person: `p${at}`,
       kind: "own",
-      startedAt: "2026-10-10T09:00:00.000Z",
-      completedAt: each.finished ? "2026-10-10T09:30:00.000Z" : null,
-      updatedAt: "2026-10-10T09:30:00.000Z",
+      startedAt: each.on ?? "2026-10-10T09:00:00.000Z",
+      completedAt: each.finished
+        ? (each.ended ?? "2026-10-10T09:30:00.000Z")
+        : null,
+      updatedAt: each.ended ?? "2026-10-10T09:30:00.000Z",
       agreed: each.finished,
       phase: each.finished ? "readback" : "steps",
       stoppedAt: each.finished ? null : "steps",
@@ -95,19 +106,35 @@ const organization = (
       out: 1,
       confirmed: each.finished ? 9 : 0,
       rating: each.finished ? 4 : null,
-      typed: false,
+      typed: each.typed ?? false,
       interviewer: "stephen",
       ...(each.version === undefined ? {} : { version: each.version }),
+      ...(each.locale === undefined ? {} : { locale: each.locale }),
     })),
   });
   const { org, state } = adminOrgOf(snapshot, { ...client, name });
-  return { clientId: name, name, view: viewOf(org, state) };
+  return {
+    clientId: name,
+    name,
+    view: viewOf(org, state),
+    ...(channel === undefined ? {} : { channel }),
+  };
 };
 
-/** `count` interviews of `version`, `finished` of them finished. */
-const held = (version: string | undefined, count: number, finished: number) =>
+/** `count` interviews of `version`, `finished` of them finished, in `locale`, started `on` and last moved `ended`. */
+const held = (
+  version: string | undefined,
+  count: number,
+  finished: number,
+  locale?: string,
+  on?: string,
+  ended?: string
+) =>
   Array.from({ length: count }, (_, at) => ({
     ...(version === undefined ? {} : { version }),
+    ...(locale === undefined ? {} : { locale }),
+    ...(on === undefined ? {} : { on }),
+    ...(ended === undefined ? {} : { ended }),
     finished: at < finished,
   }));
 
@@ -261,13 +288,113 @@ describe("real interviews by version", () => {
   it("says when fewer people finish with a newer Stephen, and when most talk with one the lab never measured", () => {
     const lab = labOf(
       [run("v1", [0.6])],
-      [organization("Bakkerij", [...held("v1", 10, 9), ...held("v2", 12, 6)])]
+      [organization("Bakkerij", [...held("v1", 10, 10), ...held("v2", 12, 6)])]
     );
 
     expect(lab.needs.map(({ text }) => text)).toStrictEqual([
       "12 interviews were held with a Stephen the lab never measured. Run the benches on that release.",
-      "Fewer people finish with Not measured: 6 of 12, against 9 of 10 with Stephen 1.",
+      "Fewer people finish with Not measured: 6 of 12, against 10 of 10 with Stephen 1, more than chance.",
     ]);
+  });
+});
+
+describe("live, group by group", () => {
+  it("finds the language where fewer finish while the others hold, and says nothing for a group too small", () => {
+    const lab = labOf(
+      [run("v1", [0.6]), run("v2", [0.6])],
+      [
+        organization("Bakkerij", [
+          ...held("v1", 10, 10, "nl"),
+          ...held("v1", 10, 9, "en"),
+          ...held("v2", 10, 3, "nl"),
+          ...held("v2", 12, 11, "en"),
+          ...held("v2", 3, 0, "de"),
+        ]),
+      ]
+    );
+
+    const groups = Object.fromEntries(
+      (lab.live?.groups ?? []).map((group) => [group.label, group.finishedFell])
+    );
+    expect(lab.live?.now.name).toBe("Stephen 2");
+    expect(lab.live?.before?.name).toBe("Stephen 1");
+    expect(groups).toMatchObject({
+      Dutch: true,
+      English: false,
+      German: false,
+    });
+  });
+
+  it("counts every release one Stephen was run as", () => {
+    const lab = labOf(
+      [run("r1", [0.6], {}, "talks-s"), run("r2", [0.6], {}, "talks-s")],
+      [organization("Bakkerij", [...held("r1", 3, 3), ...held("r2", 2, 1)])]
+    );
+
+    const all = lab.live?.groups.find((group) => group.id === "all");
+    expect([all?.now.finished, all?.now.started]).toStrictEqual([4, 5]);
+  });
+
+  it("sets the Stephen in use against the one people started with before him, whatever order organizations come in or when each last moved", () => {
+    // Molen started with v1 first, though its interviews last moved after Bakkerij's with v2.
+    const older = organization(
+      "Molen",
+      held(
+        "v1",
+        10,
+        10,
+        undefined,
+        "2026-10-08T09:00:00.000Z",
+        "2026-10-13T09:30:00.000Z"
+      )
+    );
+    const newer = organization(
+      "Bakkerij",
+      held(
+        "v2",
+        12,
+        6,
+        undefined,
+        "2026-10-09T09:00:00.000Z",
+        "2026-10-10T09:30:00.000Z"
+      )
+    );
+
+    for (const organizations of [
+      [older, newer],
+      [newer, older],
+    ]) {
+      const lab = labOf([], organizations);
+      expect([lab.live?.now.name, lab.live?.before?.name]).toStrictEqual([
+        "Not measured",
+        "Not measured",
+      ]);
+      expect(lab.needs.map(({ id }) => id)).toContain("finished-all");
+    }
+  });
+
+  it("narrows real interviews to one release channel", () => {
+    const lab = labOf(
+      [run("v1", [0.6])],
+      [
+        organization("Bakkerij", held("v1", 4, 4), "edge"),
+        organization("Molen", held("v1", 6, 3), "stable"),
+      ]
+    );
+    const edge = stephenLabOf({
+      results: [run("v1", [0.6])],
+      scores: [],
+      organizations: [
+        organization("Bakkerij", held("v1", 4, 4), "edge"),
+        organization("Molen", held("v1", 6, 3), "stable"),
+      ],
+      interviewer: "stephen",
+      now,
+      channel: "edge",
+    });
+
+    expect([lab.real.finished, lab.real.started]).toStrictEqual([7, 10]);
+    expect([edge.real.finished, edge.real.started]).toStrictEqual([4, 4]);
   });
 });
 

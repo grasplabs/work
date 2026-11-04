@@ -138,6 +138,9 @@ const interviewOf = (
     ...(typeof interview.version === "string"
       ? { stephen: interview.version }
       : {}),
+    ...(typeof interview.locale === "string"
+      ? { language: interview.locale }
+      : {}),
   };
 };
 

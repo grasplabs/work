@@ -30,10 +30,12 @@ import type {
   LabVersion,
   StephenLab as Lab,
 } from "@grasp-os/shared/admin/stephen-lab";
+import type { LiveGroup, Tally } from "@grasp-os/shared/admin/stephen-live";
 import { meansOf, shown } from "@grasp-os/shared/lab-compare";
 import type { Verdict } from "@grasp-os/shared/lab-compare";
 import type { Result, Scores } from "@grasp-os/shared/lab-runs";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
+import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
   TableBody,
@@ -392,24 +394,117 @@ const Runs = ({ lab }: { lab: Lab }) => {
   );
 };
 
+/** Who finished of who started, as a few words. */
+const finishedWords = (tally: Tally | null): string =>
+  tally === null || tally.started === 0
+    ? "–"
+    : `${tally.finished} of ${tally.started}`;
+
+/** The average rating and how many gave one. */
+const ratingWords = (tally: Tally | null): string => {
+  if (tally === null || tally.ratings.length === 0) {
+    return "–";
+  }
+  const average =
+    tally.ratings.reduce((sum, rating) => sum + rating, 0) /
+    tally.ratings.length;
+  return `${oneDecimal.format(average)} (${tally.ratings.length})`;
+};
+
+/** One group's row: its numbers now and before, and what fell beyond chance. */
+const LiveRow = ({ group }: { group: LiveGroup }) => (
+  <TableRow>
+    <TableCell variant="card">
+      <span className="flex flex-wrap items-center gap-2">
+        {group.label}
+        {group.finishedFell ? (
+          <Badge variant="attention">Fewer finish</Badge>
+        ) : null}
+        {group.ratingFell ? (
+          <Badge variant="attention">Rated lower</Badge>
+        ) : null}
+      </span>
+    </TableCell>
+    <TableCell variant="card">
+      <span className="tabular-nums">{finishedWords(group.now)}</span>
+    </TableCell>
+    <TableCell variant="card">
+      <span className="tabular-nums">{finishedWords(group.before)}</span>
+    </TableCell>
+    <TableCell className="hidden @xl:table-cell" variant="card">
+      <span className="tabular-nums">{ratingWords(group.now)}</span>
+    </TableCell>
+    <TableCell className="hidden @xl:table-cell" variant="card">
+      <span className="tabular-nums">{ratingWords(group.before)}</span>
+    </TableCell>
+  </TableRow>
+);
+
+/** Live: real people group by group with the Stephen most talk with now, against the one before. */
+const Live = ({ live }: { live: Lab["live"] }) => {
+  if (live === null) {
+    return null;
+  }
+  const before = live.before?.name ?? "the one before";
+  return (
+    <Section
+      description={`Real interviews with ${live.now.name}, the Stephen most people talk with now, against ${before}: by voice or typed, lead or team member, and language. A drop is marked only when it is larger than chance, with five interviews or more on each side.`}
+      title="Live"
+    >
+      <div className="@container border-t">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">Group</TableHead>
+              <TableHead variant="card">{`Finished, ${live.now.name}`}</TableHead>
+              <TableHead variant="card">{`Finished, ${before}`}</TableHead>
+              <TableHead className="hidden @xl:table-cell" variant="card">
+                {`Rating, ${live.now.name}`}
+              </TableHead>
+              <TableHead className="hidden @xl:table-cell" variant="card">
+                {`Rating, ${before}`}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {live.groups.map((group) => (
+              <LiveRow group={group} key={group.id} />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Section>
+  );
+};
+
 /** The Lab for Stephen or Claire, across every organization and every run the lab kept. */
 export const StephenLab = ({
   organizations,
   interviewer,
   now,
+  channel,
   results = labResults,
   scores = labScores,
 }: {
   organizations: readonly Organization[];
   interviewer: Interviewer;
   now: string;
+  /** Only the organizations on this release channel; every one without it. */
+  channel?: string;
   results?: readonly Result[];
   scores?: readonly Scores[];
 }) => {
   const read: LabOrganization[] = organizations.flatMap(({ admin, view }) =>
-    view === null
+    view === null || (channel !== undefined && admin.client.channel !== channel)
       ? []
-      : [{ clientId: admin.client.id, name: admin.client.name, view }]
+      : [
+          {
+            clientId: admin.client.id,
+            name: admin.client.name,
+            view,
+            channel: admin.client.channel,
+          },
+        ]
   );
   const lab = stephenLabOf({
     results,
@@ -447,6 +542,7 @@ export const StephenLab = ({
       <WhereHeStands lab={lab} />
       <NeedsUs needs={lab.needs} />
       {lab.versions.length === 0 ? null : <Versions versions={lab.versions} />}
+      <Live live={lab.live} />
       {measured.length === 0 ? (
         <EmptySection>
           No organization has started its interviews yet, so there is nothing of

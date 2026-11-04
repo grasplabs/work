@@ -921,6 +921,10 @@ export interface Interview {
   interviewer: Interviewer;
   /** Which Stephen held its last turn (`stephenVersion` in core's onboarding/lab-marks.ts); none where it isn't known. */
   stephen?: string;
+  /** The language its last turn was held in; none where it isn't known. */
+  language?: string;
+  /** When it started, as ISO time; none before it did. Days above count from each organization's own start, so only this sets interviews of two organizations in order. */
+  startedAt?: string;
 }
 
 /** The kinds of mistake an interviewer makes, as the review scores them. */
