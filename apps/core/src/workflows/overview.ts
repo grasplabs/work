@@ -27,6 +27,7 @@ import type {
   LatestRun,
   ListedRun,
   OutlineNode,
+  ResourceListedRun,
   ResourceWorkflowSummary,
   RunFilterStatus,
   RunsPage,
@@ -115,8 +116,9 @@ import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 // deadline. It goes on once someone answers it, on the decision's own
 // page. A run that waits otherwise (a sleep, a feature switched
 // off, a decision past its deadline that it hasn't timed out yet) goes on
-// by itself, and counts as running. Only an App's runs ask for decisions
-// yet (run-view.ts).
+// by itself, and counts as running. The waiting filter reads an App's
+// runs alone (run-view.ts); an independent workflow's run shows its open
+// decision, and waits, where the person may answer it.
 //
 // A run that goes on without a decision to wait for, while a step of it
 // waits for a share of the model requests in flight (model-waits.ts),
@@ -703,22 +705,27 @@ const answerableDecisions = async (
     .select({
       id: workflowDecisions.id,
       runId: workflowDecisions.runId,
+      resourceRunId: workflowDecisions.resourceRunId,
       deciders: workflowDecisions.deciders,
     })
     .from(workflowDecisions)
     .where(
       and(
-        sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
+        or(
+          sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
+          sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`
+        ),
         stillOpen(workflowDecisions, now)
       )
     )
     .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id));
   const answerable = await answerableBy(env, by, open);
   const byRun = new Map<string, string>();
-  for (const { id, runId } of open) {
-    // Each an App's run's, read by its ID.
-    if (runId !== null && answerable.has(id) && !byRun.has(runId)) {
-      byRun.set(runId, id);
+  for (const { id, runId, resourceRunId } of open) {
+    // An App's run's, or an independent workflow's.
+    const run = runId ?? resourceRunId;
+    if (run !== null && answerable.has(id) && !byRun.has(run)) {
+      byRun.set(run, id);
     }
   }
   return byRun;
@@ -865,8 +872,13 @@ export const listAllRuns = async (
       env,
       db,
       by,
+      // An independent workflow's run waits on its decisions without
+      // being read from them: one that hasn't ended may have one open.
       found.flatMap((run) =>
-        run.kind === "app" && run.decision !== null ? [run.row.id] : []
+        (run.kind === "app" && run.decision !== null) ||
+        (run.kind === "resource" && goesOn(run.row.status))
+          ? [run.row.id]
+          : []
       ),
       now
     ),
@@ -887,20 +899,21 @@ export const listAllRuns = async (
     runs: found.map((run): ListedRun => {
       if (run.kind === "resource") {
         const { row } = run;
-        return queuedRun(
-          {
-            type: "resource",
-            id: runIdSchema.parse(row.id),
-            workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
-            name: workflowNames.get(row.workflowResourceId) ?? "",
-            version: row.version,
-            startedBy: { type: "person", userId: row.principalId },
-            status: shownStatus(row.status),
-            createdAt: row.createdAt.toISOString(),
-            endedAt: row.endedAt?.toISOString() ?? null,
-          },
-          queues.get(row.id)
-        );
+        const listed: ResourceListedRun = {
+          type: "resource",
+          id: runIdSchema.parse(row.id),
+          workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
+          name: workflowNames.get(row.workflowResourceId) ?? "",
+          version: row.version,
+          startedBy: { type: "person", userId: row.principalId },
+          status: shownStatus(row.status),
+          createdAt: row.createdAt.toISOString(),
+          endedAt: row.endedAt?.toISOString() ?? null,
+        };
+        const answered = answering.get(row.id);
+        return answered === undefined
+          ? queuedRun(listed, queues.get(row.id))
+          : { ...listed, status: "waiting", decision: answered };
       }
       const { row, decision } = run;
       const listed: AppListedRun = {
