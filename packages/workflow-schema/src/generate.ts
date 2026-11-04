@@ -1,8 +1,8 @@
-import { pointerJoin } from "@grasp-os/open-workflow/diagnostics";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
 
 import type { CheckedWorkflow } from "./check.ts";
+import { pointerJoin } from "./data-schema.ts";
 import {
   durationMs,
   isPlain,
@@ -179,6 +179,27 @@ export interface Generation {
   readonly params: readonly string[];
   readonly limits: Readonly<Record<string, never>>;
 }
+
+/**
+ * The innermost task whose code holds `line` of the module, if any: where
+ * a diagnostic of the generated code is, in the document's terms.
+ */
+export const taskAtLine = (
+  spans: readonly TaskSpan[],
+  line: number
+): TaskSpan | undefined => {
+  let inner: TaskSpan | undefined;
+  for (const span of spans) {
+    const holds = span.from <= line && line <= span.to;
+    if (
+      holds &&
+      (inner === undefined || span.to - span.from < inner.to - inner.from)
+    ) {
+      inner = span;
+    }
+  }
+  return inner;
+};
 
 const literal = (value: unknown): string => JSON.stringify(value);
 

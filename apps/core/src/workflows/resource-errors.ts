@@ -1,5 +1,6 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { categoryOf, isRetryableCode } from "@grasp-os/shared/operations";
+import { errorTypeBase } from "@grasp-os/workflow-schema/format";
 
 import type { SealedTask } from "../workflow-builds.ts";
 import type { StepError } from "./code.ts";
@@ -22,9 +23,9 @@ import type { StepError } from "./code.ts";
 //   didn't happen. A wait, a pause or a cancellation isn't a failure at
 //   all: the engine never settles the call it suspends.
 // - A workflow passing its own error off as the host's. A `raise` raises
-//   only the literal error its build sealed, of a domain type: validation
-//   refuses the standard types and the statuses of authentication and
-//   authorization (open-workflow's errors.ts), so an authorization error a
+//   only the literal error its build sealed, of a domain type: its check
+//   refuses the host's kinds and the statuses of authentication and
+//   authorization (@grasp-os/workflow-schema's check.ts, `checkRaise`), so an authorization error a
 //   catch sees is always the host's.
 // - A module relabelling a failure. What a step failed with is what the
 //   host answered one of its calls with (resource-host.ts, `hostError`),
@@ -37,9 +38,8 @@ import type { StepError } from "./code.ts";
 //   it has no detail. The message a step failed with (which can hold
 //   data) never reaches a catch.
 
-/** Where the standard error types are, as the profile's examples write them. */
-const standardTypes =
-  "https://open-workflow-specification.org/spec/1.0.0/errors/";
+/** Where the host's own error kinds are, as a catch's filter names them. */
+const standardTypes = errorTypeBase;
 
 /** The standard error types, each with its status, as upstream gives them. */
 const standard = {

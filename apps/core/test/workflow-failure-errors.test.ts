@@ -64,7 +64,7 @@ const onceTask = (
   };
 };
 
-const standard = "https://open-workflow-specification.org/spec/1.0.0/errors/";
+const standard = "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 describe("a step's failure, as a catch sees it", () => {
   it("never lets a catch take an unknown outcome or a refusal of the module", () => {

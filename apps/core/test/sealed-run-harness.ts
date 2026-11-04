@@ -100,7 +100,7 @@ export const objectSchema = (properties: Record<string, unknown>) => ({
 
 /** Where the standard error types are, as a catch's filter names them. */
 export const standardErrors =
-  "https://open-workflow-specification.org/spec/1.0.0/errors/";
+  "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 /** What mail.send takes, `{ to, subject }`, and answers, `{ messageId }`. */
 export const mailInput = v.object({ to: v.string(), subject: v.string() });
