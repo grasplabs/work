@@ -50,6 +50,33 @@ export const matchTyped = (
     ? 1
     : 0;
 
+/** How many of the end of an ID a namesake is told apart by. */
+const idHintLength = 6;
+
+/** A name as `namesakesOf` compares it. */
+export const nameKey = (name: string): string =>
+  name.trim().toLocaleLowerCase();
+
+/**
+ * The names more than one of `people` go by, compared as written apart
+ * from case and spacing: whom a list must tell apart (`PersonOption`'s
+ * `namesake`).
+ */
+export const namesakesOf = (
+  people: readonly Pickable[]
+): ReadonlySet<string> => {
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const { name } of people) {
+    const key = nameKey(name);
+    if (seen.has(key)) {
+      shared.add(key);
+    }
+    seen.add(key);
+  }
+  return shared;
+};
+
 /** Someone's portrait: their initials. */
 const PersonAvatar = ({ name }: { name: string }) => (
   <Avatar size="sm">
@@ -59,28 +86,47 @@ const PersonAvatar = ({ name }: { name: string }) => (
 
 /**
  * One person in a list of people to pick from: their portrait and name,
- * found by either their name or their email as typed.
+ * found by either their name or their email as typed. Someone whose name
+ * another in the list shares (`namesake`) says, under it, who they are:
+ * their email where the list has it, which only an admin's does, else
+ * the end of their ID. Core tells a builder no more of a person than
+ * their name and ID (app-members.ts, `shareCandidates`), and the ID is
+ * what is shared, so that is what tells them apart: the same for that
+ * person in every list, whoever else is in it.
  */
 export const PersonOption = ({
   person,
   checked = false,
+  namesake = false,
   onSelect,
 }: {
   person: Pickable;
   checked?: boolean;
+  /** Another in the list goes by the same name (`namesakesOf`). */
+  namesake?: boolean;
   onSelect: () => void;
-}) => (
-  <CommandItem
-    data-checked={checked}
-    onSelect={onSelect}
-    keywords={[person.name, person.email ?? ""]}
-    // Their ID keeps two people of the same name apart.
-    value={`person:${person.id}`}
-  >
-    <PersonAvatar name={person.name} />
-    <span className="flex-1 truncate">{person.name}</span>
-  </CommandItem>
-);
+}) => {
+  const { t } = useLingui();
+  const end = person.id.slice(-idHintLength);
+  const hint = namesake ? (person.email ?? t`ID …${end}`) : undefined;
+  return (
+    <CommandItem
+      data-checked={checked}
+      onSelect={onSelect}
+      keywords={[person.name, person.email ?? "", hint ?? ""]}
+      // Their ID keeps two people of the same name apart.
+      value={`person:${person.id}`}
+    >
+      <PersonAvatar name={person.name} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{person.name}</span>
+        {hint === undefined ? null : (
+          <span className="text-muted-foreground truncate text-xs">{hint}</span>
+        )}
+      </span>
+    </CommandItem>
+  );
+};
 
 /**
  * The owner's button and its list. `people` is null while they're being
@@ -113,6 +159,7 @@ export const PersonPicker = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const namesakes = namesakesOf(people ?? []);
   const label =
     owner === null
       ? t`Owner: nobody yet. Change owner`
@@ -168,6 +215,7 @@ export const PersonPicker = ({
                   <PersonOption
                     checked={person.id === ownerId}
                     key={person.id}
+                    namesake={namesakes.has(nameKey(person.name))}
                     onSelect={() => {
                       setOpen(false);
                       if (person.id !== ownerId) {

@@ -39,14 +39,13 @@ const grace = {
 const platform = { id: "team-platform", name: "Platform" };
 
 /** Core as the page reaches it, keeping every grant, and each change asked. */
-const fakeCore = (refuse?: string) => {
+const fakeCore = (refuse?: string, people = [grace, ada]) => {
   const asked: unknown[] = [];
   const grants: DependencyApprover[] = [];
   const nameOf = (subject: DependencyApproverSubject): string | null =>
     subject.type === "team"
       ? platform.name
-      : ([ada, grace].find(({ userId }) => userId === subject.userId)?.name ??
-        null);
+      : (people.find(({ userId }) => userId === subject.userId)?.name ?? null);
   const dependencies = {
     approvers: async (): Promise<DependencyApprover[]> => {
       await Promise.resolve();
@@ -87,7 +86,7 @@ const fakeCore = (refuse?: string) => {
   const members = {
     list: async () => {
       await Promise.resolve();
-      return [grace, ada];
+      return people;
     },
   };
   const workflows = {
@@ -232,6 +231,30 @@ describe("Settings › Packages › Who approves packages", () => {
         ["revoke", "grant-1"],
       ],
       listed: [["Platform", "Team"]],
+    });
+  });
+
+  it("tells an admin apart people of the same name by their email", async () => {
+    const twin = {
+      userId: "user-ada-2",
+      name: "Ada Lovelace",
+      email: "a.lovelace@acme.test",
+    };
+    const { session, asked } = fakeCore(undefined, [ada, twin, grace]);
+    await shown(session);
+
+    const names = await offered();
+    await add("a.lovelace@acme.test");
+
+    expect({ names, asked }).toStrictEqual({
+      // Grace's name is hers alone, so it says nothing more.
+      names: [
+        expect.stringMatching(/Ada Lovelaceada@acme\.test$/u),
+        expect.stringMatching(/Ada Lovelacea\.lovelace@acme\.test$/u),
+        expect.stringMatching(/Grace Hopper$/u),
+        "Platform",
+      ],
+      asked: [["grant", { type: "person", userId: twin.userId }]],
     });
   });
 

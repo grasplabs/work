@@ -22,7 +22,12 @@ import type { ReactNode } from "react";
 import type { Session } from "../core.ts";
 import { roleLabel } from "../labels.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
-import { matchTyped, PersonOption } from "./person-picker.tsx";
+import {
+  matchTyped,
+  nameKey,
+  namesakesOf,
+  PersonOption,
+} from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // The organization's people and teams to pick one of: who approves
@@ -125,6 +130,7 @@ export const PeopleTeamsPicker = ({
     candidates?.teams.filter(
       ({ id }) => !holding.has(subjectKey({ type: "team", id }))
     ) ?? [];
+  const namesakes = namesakesOf(people);
   const offeredRoles = roles
     ? roleSchema.options.filter(
         (role) => !holding.has(subjectKey({ type: "role", id: role }))
@@ -177,6 +183,7 @@ export const PeopleTeamsPicker = ({
                     {people.map((person) => (
                       <PersonOption
                         key={person.id}
+                        namesake={namesakes.has(nameKey(person.name))}
                         onSelect={() => {
                           pick({
                             type: "person",

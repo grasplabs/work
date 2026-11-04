@@ -27,7 +27,12 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
-import { matchTyped, PersonOption } from "./person-picker.tsx";
+import {
+  matchTyped,
+  nameKey,
+  namesakesOf,
+  PersonOption,
+} from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // Giving people and teams a role in something (an App, a project): one
@@ -129,6 +134,7 @@ export const SharePicker = ({
     onPick(picked, role);
   };
   const { people, teams, projects = [] } = offered ?? {};
+  const namesakes = namesakesOf(people ?? []);
   return (
     <Popover
       onOpenChange={(next: boolean) => {
@@ -173,6 +179,7 @@ export const SharePicker = ({
                     {people.map((person) => (
                       <PersonOption
                         key={person.id}
+                        namesake={namesakes.has(nameKey(person.name))}
                         onSelect={() => {
                           pick({ type: "person", id: person.id });
                         }}

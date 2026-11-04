@@ -69,11 +69,14 @@ const candidates: ShareCandidates = {
 };
 
 /** Core's App members, kept as builders change them, and each change asked. */
-const fakeMembers = (initial: AppMember[] = []) => {
+const fakeMembers = (
+  initial: AppMember[] = [],
+  offering: ShareCandidates = candidates
+) => {
   const asked: unknown[][] = [];
   let kept = initial;
   const nameOf = ({ type, id }: AppMemberRef): string =>
-    (type === "team" ? candidates.teams : candidates.people).find(
+    (type === "team" ? offering.teams : offering.people).find(
       (each) => each.id === id
     )?.name ?? id;
   const members = {
@@ -83,7 +86,7 @@ const fakeMembers = (initial: AppMember[] = []) => {
     },
     candidates: async (): Promise<ShareCandidates> => {
       await Promise.resolve();
-      return candidates;
+      return offering;
     },
     add: async (_app: string, member: NewAppMember): Promise<AppMember> => {
       await Promise.resolve();
@@ -234,6 +237,42 @@ describe("Sharing an App's App", () => {
         ["add", "team", "team-sales", "user"],
       ],
       listed: ["Ann", "Sales (team)"],
+    });
+  });
+
+  it("tells apart people of the same name by the end of their ID, and shares the one picked", async () => {
+    const { session, asked } = fakeMembers([], {
+      people: [
+        { id: "user-eva-0000aaaaaa", name: "Eva de Vries" },
+        { id: "user-eva-1111bbbbbb", name: "eva de vries " },
+        { id: "user-bo", name: "Bo" },
+      ],
+      teams: [],
+      projects: [],
+    });
+    await shown(session, app("builder"));
+
+    await press(button("Share"));
+    // Each option's name, and what it says under it.
+    const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
+      [...each.querySelectorAll("span.truncate")].map(
+        (line) => line.textContent
+      )
+    );
+    await press(
+      [...document.querySelectorAll("[cmdk-item]")].find((each) =>
+        each.textContent?.includes("bbbbbb")
+      )
+    );
+
+    expect({ options, asked }).toStrictEqual({
+      // Bo's name is theirs alone, so it says nothing more.
+      options: [
+        ["Eva de Vries", "ID …aaaaaa"],
+        ["eva de vries ", "ID …bbbbbb"],
+        ["Bo"],
+      ],
+      asked: [["add", "person", "user-eva-1111bbbbbb", "user"]],
     });
   });
 

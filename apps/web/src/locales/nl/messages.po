@@ -6610,6 +6610,10 @@ msgstr "Ik heb genoeg gehoord om open te gaan. Ik heb eerst nog een paar dingen 
 msgid "Icon"
 msgstr "Icoon"
 
+#: src/people/person-picker.tsx
+msgid "ID …{end}"
+msgstr "ID …{end}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
 msgstr "Als {condition}:"
