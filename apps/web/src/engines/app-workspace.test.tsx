@@ -33,7 +33,8 @@ import { AppWorkspace } from "./app-workspace.tsx";
 // it never shows the live App, only where the App stands (a version ready
 // to publish, nothing unpublished, nothing built yet); Publish moves the
 // App only along what core allows, the page reads it again afterwards,
-// and what core refuses is said; an archived App is restored from it. The
+// and what core refuses is said; a draft the agent didn't propose is
+// proposed by the person and reviewed; an archived App is restored from it. The
 // App's chat stays unanswered here: these are the workspace's own parts.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -202,7 +203,14 @@ const opened = async (
     await Promise.withResolvers<never>().promise,
   /** The drafts each chat holds; by default none. */
   drafts: (chatId: string) => Promise<ChatDraft[]> = async () =>
-    await Promise.resolve([])
+    await Promise.resolve([]),
+  /** How core answers the person proposing a chat's draft; by default not yet. */
+  proposeDraft: (
+    chatId: string,
+    app: string,
+    message: string
+  ) => Promise<number> = async () =>
+    await Promise.withResolvers<never>().promise
 ) => {
   // The App's chat: core never answers `forApp` here. A chat that is
   // followed sends nothing yet and has no drafts.
@@ -214,6 +222,7 @@ const opened = async (
     },
     watch,
     drafts,
+    proposeDraft,
     connectionRequests: async () => await Promise.resolve([]),
   };
   const pendingActions = { list: async () => await Promise.resolve([]) };
@@ -340,6 +349,17 @@ const box = (): HTMLTextAreaElement | null =>
 
 const says = (text: string): boolean =>
   document.body.textContent.includes(text);
+
+/** A chat's draft of `app`, written by its agent and not proposed. */
+const draftOf = (app: string): ChatDraft => ({
+  app,
+  base: 1,
+  changed: ["screens/list.tsx"],
+  deleted: [],
+  revision: 1,
+  updatedAt: "2026-10-20T08:00:00.000Z",
+  callId: null,
+});
 
 describe(AppWorkspace, () => {
   afterEach(() => {
@@ -720,5 +740,144 @@ describe(AppWorkspace, () => {
       handed: true,
       own: false,
     });
+  });
+
+  it("publishes the chat's draft the agent didn't propose: proposed by the person, then reviewed", async () => {
+    const fake = fakeApps("published");
+    let drafted = true;
+    const proposals: string[] = [];
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-unproposed",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () =>
+        await Promise.resolve(drafted ? [draftOf("invoice-desk")] : []),
+      async (chatId, app) => {
+        proposals.push(`${chatId} ${app}`);
+        await Promise.resolve();
+        // Core commits it as version 2, up for review, and drops the draft.
+        fake.proposed(2);
+        drafted = false;
+        return 2;
+      }
+    );
+    await settled();
+    const before = says("Unpublished changes");
+
+    await choose("Published", "Publish changes");
+
+    expect({
+      before,
+      proposals,
+      review: document.querySelector('[role="dialog"] h2')?.textContent,
+      makeCurrent: button("Make version 2 current").disabled,
+    }).toStrictEqual({
+      before: true,
+      proposals: ["chat-unproposed invoice-desk"],
+      review: "Publish version 2",
+      makeCurrent: false,
+    });
+  });
+
+  it("still publishes a draft App as it is, beside publishing its unproposed changes", async () => {
+    const { calls, apps } = fakeApps("draft");
+    await opened(
+      apps,
+      identityOf(false),
+      "chat-both",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve([draftOf("invoice-desk")])
+    );
+    await settled();
+    await press(button("Publish"));
+    const offered = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].map(nameOf);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await Promise.resolve();
+    });
+    await settled();
+
+    await choose("Publish", "PublishFor the people");
+
+    expect({ offered, status: status(), calls }).toStrictEqual({
+      offered: [
+        "Publish changesCheck what the chat built, then review it",
+        "PublishFor the people it is shared with",
+        "LinkNone yet",
+      ],
+      status: "Published",
+      calls: ["publish"],
+    });
+  });
+
+  it("doesn't propose the draft while the chat's agent still writes it", async () => {
+    const proposals: string[] = [];
+    let send: ((update: ChatUpdate) => void) | undefined;
+    await opened(
+      fakeApps("published").apps,
+      identityOf(false),
+      "chat-writing",
+      async (_chat, _after, received) => {
+        send = received;
+        return await Promise.resolve(watching());
+      },
+      undefined,
+      async () => await Promise.resolve([draftOf("invoice-desk")]),
+      async (chatId) => {
+        proposals.push(chatId);
+        return await Promise.resolve(2);
+      }
+    );
+    await settled();
+    await act(async () => {
+      send?.({
+        messages: [],
+        partial: null,
+        running: true,
+        stopped: null,
+        held: 0,
+        drafts: 1,
+      });
+      await Promise.resolve();
+    });
+    await settled();
+
+    await choose("Published", "Publish changes");
+
+    expect({
+      proposals,
+      review: document.querySelector('[role="dialog"]'),
+    }).toStrictEqual({ proposals: [], review: null });
+  });
+
+  it("says why core didn't propose the draft, opening no review", async () => {
+    await opened(
+      fakeApps("draft", { currentVersion: null }).apps,
+      identityOf(false),
+      "chat-failing",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve([draftOf("invoice-desk")]),
+      async () => {
+        await Promise.resolve();
+        throw Object.assign(
+          new Error("The changes don't pass their checks yet."),
+          { code: "app.draft_failed" }
+        );
+      }
+    );
+    await settled();
+
+    await choose("Publish", "Publish changes");
+
+    expect({
+      said: says("The changes don't pass their checks yet."),
+      review: document.querySelector('[role="dialog"]'),
+    }).toStrictEqual({ said: true, review: null });
   });
 });

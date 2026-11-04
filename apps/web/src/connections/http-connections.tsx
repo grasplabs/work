@@ -460,12 +460,15 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
 );
 
 /** One HTTP connection: where it reaches, what it allows, and, for admins, revoking it. */
-const HttpConnectionItem = ({
+export const HttpConnectionItem = ({
   listed: { connection, http },
   manages,
+  heading: Heading = "h3",
 }: {
   listed: HttpListed;
   manages: boolean;
+  /** Its name's heading, under the list's own. */
+  heading?: "h3" | "h4";
 }) => {
   const { t } = useLingui();
   const ranOut = connection.status === "needs_reauth";
@@ -473,7 +476,7 @@ const HttpConnectionItem = ({
   return (
     <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-medium">{http.name}</h3>
+        <Heading className="font-medium">{http.name}</Heading>
         {manages ? (
           <Revoke
             createdAt={connection.createdAt}

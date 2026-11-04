@@ -20,41 +20,41 @@ import { NewApp } from "./new-app.tsx";
 
 // The New App page against core's Apps and chats as the page reaches them
 // over RPC (the boundary from the web app), faked: what is asked makes the
-// App, named after its first line, asks it in the App's own chat, and opens
-// the App's workspace with that chat; a send that failed, sent again, asks
-// in the same App rather than making another.
+// App, named after its first line, with its own chat (`chats.newApp`, which
+// makes it provisional there), asks it in that chat, and opens the App's
+// workspace with it; a send that failed, sent again, asks in the same App
+// rather than making another.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-/** Core's App and chat calls: what was made and asked, in order; `failing` sends refused. */
-const fakeCore = (failing = 0, chatFailing = 0) => {
+/** Core's chat calls: what was made and asked, in order; `failing` sends refused. */
+const fakeCore = (failing = 0, makeFailing = 0) => {
   const calls: string[] = [];
   let refusals = failing;
-  let chatRefusals = chatFailing;
+  let makeRefusals = makeFailing;
+  let made = 0;
   return {
     calls,
-    apps: {
-      create: async ({ name }: { name: string }) => {
-        calls.push(`create App ${name}`);
-        await Promise.resolve();
-        return { id: "app-1", name };
-      },
-    },
     chats: {
-      forApp: async (app: string): Promise<ChatSummary> => {
+      newApp: async ({
+        name,
+      }: {
+        name: string;
+      }): Promise<ChatSummary & { appId: string }> => {
         await Promise.resolve();
-        if (chatRefusals > 0) {
-          chatRefusals -= 1;
-          throw new Error("Grasp can't open the App's chat now.");
+        if (makeRefusals > 0) {
+          makeRefusals -= 1;
+          throw new Error("Grasp can't make the App now.");
         }
-        calls.push(`chat for ${app}`);
+        made += 1;
+        calls.push(`new App ${name} with its chat`);
         return {
-          id: "chat-1",
-          title: "Invoices",
+          id: `chat-${made}`,
+          title: name,
           createdAt: "2026-10-22T08:00:00.000Z",
           lastAt: "2026-10-22T08:00:00.000Z",
           running: false,
-          appId: app,
+          appId: `app-${made}`,
           via: "web",
         };
       },
@@ -73,14 +73,11 @@ const fakeCore = (failing = 0, chatFailing = 0) => {
 let root: Root | undefined;
 
 /** The page at /apps/new, against `chats`; Chat at / says which chat it opened. */
-const opened = async ({ apps, chats }: ReturnType<typeof fakeCore>) => {
+const opened = async ({ chats }: ReturnType<typeof fakeCore>) => {
   const core = {
     withSession: async <T,>(
-      action: (session: {
-        apps: typeof apps;
-        chats: typeof chats;
-      }) => Promise<T>
-    ): Promise<T> => await action({ apps, chats }),
+      action: (session: { chats: typeof chats }) => Promise<T>
+    ): Promise<T> => await action({ chats }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const shell = createRoute({
@@ -185,8 +182,7 @@ describe("making a new app", () => {
     }).toStrictEqual({
       asked: "What do you want to build?",
       calls: [
-        "create App Open invoices board",
-        "chat for app-1",
+        "new App Open invoices board with its chat",
         "send chat-1 Open invoices board\nFor the finance team, by due date (anthropic/claude)",
       ],
       at: "/apps/app-1/edit",
@@ -215,15 +211,14 @@ describe("making a new app", () => {
     }).toStrictEqual({
       failed: { at: "/apps/new", said: true },
       calls: [
-        "create App Holiday planner",
-        "chat for app-1",
+        "new App Holiday planner with its chat",
         "send chat-1 Holiday planner (anthropic/claude)",
       ],
       at: "/apps/app-1/edit",
     });
   });
 
-  it("asks in the App it made when its chat couldn't be opened the first time, making no second App", async () => {
+  it("makes the App when asked again after core couldn't make it, asking in that one", async () => {
     const fake = fakeCore(0, 1);
     const router = await opened(fake);
 
@@ -239,8 +234,7 @@ describe("making a new app", () => {
     }).toStrictEqual({
       failed: "/apps/new",
       calls: [
-        "create App Holiday planner",
-        "chat for app-1",
+        "new App Holiday planner with its chat",
         "send chat-1 Holiday planner (anthropic/claude)",
       ],
       at: "/apps/app-1/edit",

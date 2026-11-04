@@ -825,6 +825,20 @@ export interface ChatsApi {
    * for someone who builds the App, and not while it is archived.
    */
   forApp: (app: string) => Promise<ChatSummary>;
+  /**
+   * A new App (`apps.create`'s input), owned by the person, with its own
+   * chat (`forApp`), made together: the App is provisional in that chat,
+   * as an App a chat's agent creates is, until a version of it is made
+   * current. Until then it is removed, by the platform, once a week
+   * passed with nothing committed to it and that chat's draft of it
+   * unwritten: a draft in another builder's chat doesn't keep it, and a
+   * version up for review goes with it. Refused, making nothing, when
+   * its chat is refused. Only for a builder.
+   */
+  newApp: (input: {
+    name: string;
+    description: string;
+  }) => Promise<ChatSummary & { appId: string }>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
@@ -898,6 +912,19 @@ export interface ChatsApi {
    * stay, to restore one. For the person while they build the App.
    */
   discardDraft: (chatId: string, app: string) => Promise<void>;
+  /**
+   * Proposes the chat's draft of `app` as the App's next version, up for
+   * review, by the person themselves, with `message`: checked first, as
+   * when the chat's agent proposes it, and refused with
+   * `app.draft_failed` when the check fails. Resolves with the version.
+   * For the person while they build the App, and not from a chat that
+   * read restricted data.
+   */
+  proposeDraft: (
+    chatId: string,
+    app: string,
+    message: string
+  ) => Promise<number>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

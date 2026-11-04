@@ -29,6 +29,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -41,8 +42,17 @@ import type {
   ScreenProblem,
 } from "@grasp-os/shared/screens";
 
+import { proposeChatDraft } from "./agent-builds.ts";
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
+import { reapProvisionalApp } from "./app-removal.ts";
+import {
+  appFor,
+  createApp,
+  draftFiles,
+  editableApp,
+  screensIn,
+} from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
@@ -58,6 +68,7 @@ import { relayPreviewStream } from "./preview-stream-relay.ts";
 import { previewLoadMsOf } from "./preview-updates.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
+import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
@@ -110,6 +121,13 @@ const chatIdOf = (chatId: unknown): ChatId => {
   }
   return parsed.data;
 };
+
+/** Logs a new App whose chat failed and that couldn't be reaped: the reaper takes it in time. */
+const unreapedApp =
+  (appId: string) =>
+  (error: unknown): void => {
+    log.warn("chat.new_app_unreaped", { appId, ...errorFields(error) });
+  };
 
 /**
  * Why a question wasn't taken, as its person reads it: an unplanned error
@@ -364,33 +382,81 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(this.#check, async (person) => {
       // A builder's, of an App that isn't archived: the chat changes it.
       const { id, name } = await editableApp(this.#env, person, app);
-      const chats = this.#chatsOf(person.userId);
-      const kept = await chats.appChat(person.userId, id);
-      if (kept !== null) {
-        return kept;
-      }
-      // An App's name always fits a chat's title.
-      const title = chatTitleSchema.parse(name);
-      const chat = await chats.createChat(
-        title,
+      const kept = await this.#chatsOf(person.userId).appChat(
         person.userId,
-        chatAgentId,
-        actorOf(person),
-        undefined,
-        "web",
-        undefined,
         id
       );
-      return {
-        id: chat.id,
-        title: chat.title,
-        createdAt: chat.createdAt.toISOString(),
-        lastAt: chat.lastAt.toISOString(),
-        running: false,
-        appId: chat.appId,
-        via: chat.via,
-      };
+      return kept ?? (await this.#appChat(person, id, name));
     });
+  }
+
+  async newApp(input: {
+    name: string;
+    description: string;
+  }): Promise<ChatSummary & { appId: string }> {
+    return await withPerson(this.#check, async (person) => {
+      // Its chat's ID picked first, so the App is made provisional in it,
+      // as a chat's agent makes one (`createApp`), and reaped as one is
+      // (app-removal.ts, `reapAbandonedApps`).
+      const origin = {
+        workspaceId: personalWorkspaceId(person.userId),
+        chatId: chatIdSchema.parse(crypto.randomUUID()),
+      };
+      const made = await createApp(this.#env, person, input, undefined, origin);
+      try {
+        const chat = await this.#appChat(
+          person,
+          made.id,
+          made.name,
+          origin.chatId
+        );
+        return { ...chat, appId: made.id };
+      } catch (error) {
+        // Refused (too many chats, say): its chat never came to be, so the
+        // App goes now, rather than one more each time the person asks
+        // again. Why the chat was refused is what they read. Anything else
+        // may have made the chat after all: the App is left to the reaper.
+        if (isExpectedError(error)) {
+          await reapProvisionalApp(this.#env, {
+            id: made.id,
+            name: made.name,
+            ...origin,
+          }).catch(unreapedApp(made.id));
+        }
+        throw error;
+      }
+    });
+  }
+
+  /** A new chat of `person`'s for App `id`, named after it (`forApp`). */
+  async #appChat(
+    person: Identity,
+    id: AppId,
+    name: string,
+    chatId?: ChatId
+  ): Promise<ChatSummary> {
+    // An App's name always fits a chat's title.
+    const title = chatTitleSchema.parse(name);
+    const chat = await this.#chatsOf(person.userId).createChat(
+      title,
+      person.userId,
+      chatAgentId,
+      actorOf(person),
+      undefined,
+      "web",
+      undefined,
+      id,
+      chatId
+    );
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: false,
+      appId: chat.appId,
+      via: chat.via,
+    };
   }
 
   async rename(chatId: string, title: string): Promise<void> {
@@ -584,6 +650,52 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         actorOf(by)
       );
+    });
+  }
+
+  /**
+   * Proposes the chat's draft of `app` as the App's next version, by the
+   * person themselves (`proposeChatDraft`, as the chat's agent proposes
+   * it): only while they build the App and it isn't archived, and never
+   * from a chat that read restricted data, which its agent couldn't
+   * propose from either: what it wrote there may carry that data.
+   */
+  async proposeDraft(
+    chatId: string,
+    app: string,
+    message: string
+  ): Promise<number> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await editableApp(this.#env, by, app);
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const authority = chatAuthority({
+        agentId: chatAgentId,
+        personId: by.userId,
+      });
+      const unrestricted = async (): Promise<void> => {
+        if (await isRestricted(this.#env, authority, chatContext(scope))) {
+          throw permissionErrors.create("permission.restricted");
+        }
+      };
+      // Refused early, and again right before the commit: a chat stays
+      // restricted once it is, so a draft its agent wrote after reading
+      // restricted data, while this checked it, is never committed.
+      await unrestricted();
+      const { version } = await proposeChatDraft(
+        this.#env,
+        by,
+        scope,
+        id,
+        message,
+        { admit: unrestricted }
+      );
+      if (version === null) {
+        throw appErrors.create("app.draft_failed");
+      }
+      return version;
     });
   }
 

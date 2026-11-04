@@ -5,6 +5,7 @@ import type {
   AppStatus,
   ViewedApp,
 } from "@grasp-os/shared/apps";
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
@@ -32,6 +33,27 @@ import type { AppSettingsSection } from "./app-settings.tsx";
 // the App only once they confirm.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+/** An HTTP connection an admin approved. */
+const billing: ListedConnection = {
+  id: "connection-billing",
+  source: "http",
+  provider: "http",
+  scope: "shared",
+  status: "active",
+  ownerUserId: null,
+  connectedBy: "admin",
+  connectedByName: "Admin",
+  accountName: null,
+  createdAt: "2026-11-01T09:00:00.000Z",
+  http: {
+    name: "Billing API",
+    origin: "https://billing.example.com",
+    pathPrefixes: ["/v1/invoices"],
+    methods: ["GET"],
+    credentialHeader: "x-api-key",
+  },
+};
 
 /** Core's `apps` and `screens` for one App, as someone with `role` in it reads it. */
 const fakeCore = (
@@ -112,14 +134,29 @@ const fakeCore = (
         throw new Error("Only package approvers read these.");
       },
     },
+    // The App may use one HTTP connection, which no catalog entry lists.
+    permissions: {
+      list: async () =>
+        await Promise.resolve([
+          {
+            object: { type: "connection", connectionId: billing.id },
+            status: "granted",
+          },
+        ]),
+    },
+    connections: {
+      list: async (): Promise<ListedConnection[]> =>
+        await Promise.resolve([billing]),
+      catalog: async () => await Promise.resolve({ entries: [] }),
+    },
   };
 };
 
-const identityOf = (): Identity => ({
+const identityOf = (role: Identity["role"] = "user"): Identity => ({
   userId: "user-2",
   email: "user-2@acme.test",
   name: "user-2",
-  role: "user",
+  role,
   teams: [],
   staff: false,
   expiresAt: "2026-11-01T09:00:00.000Z",
@@ -145,17 +182,21 @@ const isApp = (data: unknown): data is ViewedApp =>
 const opened = async (
   fake: ReturnType<typeof fakeCore>,
   within: "workspace" | "page" = "page",
-  section?: AppSettingsSection
+  section?: AppSettingsSection,
+  role: Identity["role"] = "user"
 ) => {
-  const { apps, screens, dependencies } = fake;
+  const { apps, screens, dependencies, permissions, connections } = fake;
   const core = {
     withSession: async <T,>(
       action: (session: {
         apps: typeof apps;
         screens: typeof screens;
         dependencies: typeof dependencies;
+        permissions: typeof permissions;
+        connections: typeof connections;
       }) => Promise<T>
-    ): Promise<T> => await action({ apps, screens, dependencies }),
+    ): Promise<T> =>
+      await action({ apps, screens, dependencies, permissions, connections }),
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),
@@ -170,7 +211,7 @@ const opened = async (
     return (
       <AppSettings
         app={loaded}
-        identity={identityOf()}
+        identity={identityOf(role)}
         section={section}
         storeChanges={undefined}
         within={within}
@@ -356,6 +397,23 @@ describe(AppSettings, () => {
       calls: ["unshare user-ann"],
       after: false,
       said: true,
+    });
+  });
+
+  it("lists an HTTP connection the App uses among its connections in use", async () => {
+    await opened(fakeCore("builder"), "workspace", "connections", "builder");
+
+    const used = document.querySelector('[aria-labelledby="app-used"]');
+    expect({
+      listed: used?.querySelector("h4")?.textContent,
+      origin: used?.textContent.includes("https://billing.example.com"),
+      none: used?.textContent.includes("doesn't use a connection yet"),
+      revoke: used?.querySelector("button"),
+    }).toStrictEqual({
+      listed: "Billing API",
+      origin: true,
+      none: false,
+      revoke: null,
     });
   });
 

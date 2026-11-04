@@ -1083,7 +1083,8 @@ export const draftOverLatest = async (
 
 /**
  * Commits a chat's draft (`draftOverLatest`) as the App's next version,
- * by `by` (the chat's agent, acting for its person, `by.via`) with
+ * by `by` (the chat's agent, acting for its person, `by.via`, or the
+ * person themselves, the chat named in its audit then) with
  * `message`, and puts it up for review, in one batch: it is never
  * committed without being proposed. Its files were built as they were
  * checked. A version committed meanwhile takes the number: `app.conflict`.
@@ -1095,7 +1096,9 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /** The chat whose draft it is, which its audit names. */
+  fromChat?: string
 ): Promise<AppVersion> => {
   const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -1164,6 +1167,7 @@ export const proposeDraft = async (
         db,
         changeEntry(by, "app.version.proposed", appId, {
           version: row.version,
+          ...(fromChat === undefined ? {} : { chat: fromChat }),
         }),
         sql`NOT ${archivedNow(appId)}`
       ),

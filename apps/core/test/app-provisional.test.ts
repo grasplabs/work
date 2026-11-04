@@ -6,9 +6,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { abandonedAfterMs, reapAbandonedApps } from "../src/app-removal.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
+import { maxChatsPerPerson } from "../src/workspace.ts";
 import { chatOf, testRunOpening } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { chatsOf } from "./previews.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Apps a chat's agent creates (GRA-161): provisional until their first
@@ -259,5 +262,83 @@ describe("an App a chat creates", slow, () => {
       own: "ok",
       acceptedIsProvisional: null,
     });
+  });
+
+  it("made from New App with its own chat, is that chat's: reaped untouched, kept while it drafts there, and refused to a non-builder", async () => {
+    const [builder, user] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const abandoned = await builder.api.chats.newApp({
+      name: `Sketch ${unique()}`,
+      description: "",
+    });
+    const drafting = await builder.api.chats.newApp({
+      name: `Drafting ${unique()}`,
+      description: "A desk",
+    });
+    // Its own chat's draft written now: authoring goes on.
+    const chatId = chatIdSchema.parse(drafting.id);
+    await runInDurableObject(chatsOf(builder), (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      instance.saveDraft(
+        chatId,
+        drafting.appId,
+        null,
+        { "AGENTS.md": "# Drafting\n" },
+        [],
+        0,
+        run
+      );
+    });
+    const ownChat = await builder.api.chats.forApp(drafting.appId);
+    for (const { appId } of [abandoned, drafting]) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await createdAt(appId, longAgo());
+    }
+    await reapAbandonedApps(env, new Date());
+    const refused = await outcome(
+      user.api.chats.newApp({ name: "Not mine", description: "" })
+    );
+    const usersChats = await user.api.chats.list();
+
+    expect({
+      ownChat: ownChat.id === drafting.id,
+      abandoned: await outcome(builder.api.apps.get(abandoned.appId)),
+      drafting: await outcome(builder.api.apps.get(drafting.appId)),
+      refused,
+      usersChats,
+    }).toStrictEqual({
+      ownChat: true,
+      abandoned: "app.not_found",
+      drafting: "ok",
+      refused: "role.forbidden",
+      usersChats: [],
+    });
+  });
+
+  it("made from New App, goes at once when its chat can't be made, making nothing to find", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const kept = chatsOf(builder);
+    for (let batch = 0; batch < maxChatsPerPerson / 50; batch += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a batch at a time
+      await Promise.all(
+        Array.from(
+          { length: 50 },
+          async () => await kept.createChat("Old", builder.userId, chatAgentId)
+        )
+      );
+    }
+    const name = `Too many ${unique()}`;
+
+    const refused = await outcome(
+      builder.api.chats.newApp({ name, description: "" })
+    );
+    const listed = await builder.api.apps.list();
+
+    expect({
+      refused,
+      listed: listed.filter((app) => app.name === name),
+    }).toStrictEqual({ refused: "agent.too_many_chats", listed: [] });
   });
 });
