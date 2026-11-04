@@ -12,6 +12,7 @@ import { adminCommand } from "../seed/admin-command.ts";
 import { inTurns, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
 import { mixesFor, mixLine, tempersOf } from "./drift.ts";
+import { timetableFor } from "./events.ts";
 import type { AnswerKey } from "./keys/types.ts";
 import { realPlayerV2 } from "./people-v2.ts";
 import type { PeopleVersion } from "./people-v2.ts";
@@ -165,6 +166,7 @@ export const simulate = async (
       locale: practice.locale,
       interviewer,
       ...(ideal ? {} : { clock: "talk" as const }),
+      ...(v2 ? { events: timetableFor(place, mark) } : {}),
       ...(deviced === undefined ? {} : { key: deviced }),
     });
     const { key: device, answers: _answers, ...kept } = interview;
