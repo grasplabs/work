@@ -658,9 +658,10 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       return await failure(async () => await seal(desk, version));
     };
     expect([
-      // A new preference, in a version whose table change needs a
-      // migration: the seal fails after its preferences were checked.
-      await sealing(2, withPageSize(100), "v.number()"),
+      // A new preference, in a version whose table change the store
+      // refuses whatever its records hold (a field made to hold a record
+      // ID): the seal fails after its preferences were checked.
+      await sealing(2, withPageSize(100), 'v.id("notes")'),
       // So the builder can still give it another shape.
       await sealing(3, withPageSize(50)),
       await sealing(4, withPageSize(100)),
