@@ -884,10 +884,13 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `Returned:\n# Route plan\n\nDeparts ${secret}.`,
     });
 
-    // Granted again, it may be sent again.
+    // Granted again, it stays a note: the chat's context was rebased
+    // without it, and only a new run reads it again.
     await grant(plans?.collectionId ?? "");
     await ask("And now?");
-    expect(JSON.stringify(provider.requests.at(-1)?.body)).toContain(secret);
+    expect(JSON.stringify(provider.requests.at(-1)?.body)).not.toContain(
+      secret
+    );
 
     // Audited once, by the agent for its person: the run and each source
     // (its collection, and the document it read there), never what it read.
@@ -1265,7 +1268,7 @@ const splitRequest = (body: unknown) => {
 };
 
 describe("a chat's recall before a question", setUpTime, () => {
-  it("hands the model what the Brain recalls for the question, as a code result it reads as data, before its first request", async () => {
+  it("hands the model what the Brain recalls for the question, as a part of the question it reads as data, before its first request", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
@@ -1294,16 +1297,19 @@ describe("a chat's recall before a question", setUpTime, () => {
     expect({
       answer: reply.answer,
       requests: provider.requests.length,
+      // With the question, headed by the recall's run, never as a result.
+      withQuestion:
+        request?.rest.includes("[Recall ") === true &&
+        request.rest.includes(fact),
       inResult: request?.results.includes(fact),
-      elsewhere: request?.rest.includes(fact),
       cites: result?.text.includes(documentId),
       provenance: reply.provenance,
     }).toStrictEqual({
       answer: "Seven.",
       // Answered from the evidence, without a search of its own.
       requests: 1,
-      inResult: true,
-      elsewhere: false,
+      withQuestion: true,
+      inResult: false,
       cites: true,
       provenance: { sources: [collectionId], restricted: false },
     });
@@ -1442,7 +1448,7 @@ describe("a chat's recall before a question", setUpTime, () => {
     expect({
       outcome: reply.outcome,
       statuses: await codeStatuses(stub, chat.id),
-      told: request?.results.includes("wall_expired"),
+      told: request?.rest.includes("wall_expired"),
       sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
         fact
       ),
