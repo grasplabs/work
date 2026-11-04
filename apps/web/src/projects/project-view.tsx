@@ -32,7 +32,7 @@ import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
 import { NewItemDialog } from "./new-item-dialog.tsx";
-import { ProjectCountsLine, ProjectHours } from "./project-counts.tsx";
+import { ProjectCountsLine } from "./project-counts.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 import { ProjectIcon } from "./project-icon.tsx";
 import { usePages } from "./project-pages.ts";
@@ -331,12 +331,7 @@ export const ProjectView = ({
           description={
             project.description === "" ? undefined : project.description
           }
-          meta={
-            <div className="flex flex-col gap-1">
-              <ProjectHours />
-              <ProjectCountsLine counts={project.counts} />
-            </div>
-          }
+          meta={<ProjectCountsLine counts={project.counts} />}
           title={
             <span className="inline-flex items-center gap-3">
               <ProjectIcon icon={project.icon} />

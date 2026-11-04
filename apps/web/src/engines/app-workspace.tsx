@@ -59,9 +59,7 @@ import type { ShownVersion } from "../chat/draft-versions.tsx";
 import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import {
   AppChat,
   AppChatPending,
@@ -71,9 +69,9 @@ import {
 import { AppCode } from "./app-code.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
-import { AppSettings } from "./app-settings.tsx";
+import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection, StoreChangesRead } from "./app-settings.tsx";
-import { sharesApp, ShareApp } from "./app-sharing.tsx";
+import { readMembers, sharesApp, ShareApp } from "./app-sharing.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 import { useAppRead } from "./use-app-read.ts";
 
@@ -320,9 +318,6 @@ const PublishAction = ({ app }: { app: App }) => {
     </>
   );
 };
-
-const readMembers = async (session: Session, app: string) =>
-  await session.apps.members.list(app);
 
 /** Share, for whoever may share the App: whom it is shared with is left out of its list. */
 const ShareOnBar = ({ app }: { app: App }) => {
@@ -593,30 +588,19 @@ const readTables = async (session: Session, app: string) =>
 /** The App's data, for its builders: its tables, one at a time. */
 const DataArea = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
-  if (read === undefined) {
-    return (
-      <div className="p-6">
-        <LoadingLines />
-      </div>
-    );
-  }
-  if (read.state !== "ready") {
-    return (
-      <div className="p-6">
-        <NotLoaded page={read} />
-      </div>
-    );
-  }
-  const { version, tables } = read.data;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6 md:px-6">
-        <AppData
-          app={app}
-          key={`${app}/${version ?? ""}`}
-          tables={tables}
-          version={version}
-        />
+        <Read read={read}>
+          {({ version, tables }) => (
+            <AppData
+              app={app}
+              key={`${app}/${version ?? ""}`}
+              tables={tables}
+              version={version}
+            />
+          )}
+        </Read>
       </div>
     </div>
   );

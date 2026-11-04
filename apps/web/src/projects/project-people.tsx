@@ -16,18 +16,15 @@ import {
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  NativeSelect,
-  NativeSelectOptGroup,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { SharePicker } from "../people/share-picker.tsx";
+import type { Picked } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { usePages } from "./project-pages.ts";
 
@@ -36,12 +33,6 @@ import { usePages } from "./project-pages.ts";
 // in a project reaches only what is shared with it. Its builders add and
 // take people out; taking someone out confirms that they lose what is
 // shared with the project.
-
-const roles: readonly ProjectRole[] = ["user", "builder"];
-
-/** `value` as a role, if it is one. */
-const roleOf = (value: string): ProjectRole | undefined =>
-  roles.find((each) => each === value);
 
 /** A member as listed: a team says so. */
 const useMemberName = () => {
@@ -55,18 +46,16 @@ const useMemberName = () => {
 /** Adding a person or team, for the project's builders. */
 const AddPerson = ({ project }: { project: Project }) => {
   const { t } = useLingui();
-  const ids = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   // Read for one reading of the project: once it is read again (after an
-  // add or a removal), whom to offer is read again too.
+  // add or a removal), whom to offer is read again too. Core offers only
+  // who isn't in it yet, its owner included.
   const [offered, setOffered] = useState<{
     from: Project;
     list: ProjectShareCandidates;
   }>();
   const candidates = offered?.from === project ? offered.list : undefined;
-  const [chosen, setChosen] = useState("");
-  const [role, setRole] = useState<ProjectRole>("user");
   const read = async (): Promise<void> => {
     if (candidates !== undefined) {
       return;
@@ -78,101 +67,44 @@ const AddPerson = ({ project }: { project: Project }) => {
       setOffered({ from: project, list: listed });
     }
   };
-  const [chosenType, chosenId] = chosen.split(":", 2);
-  const add = async (): Promise<void> => {
-    if (
-      (chosenType !== "person" && chosenType !== "team") ||
-      chosenId === undefined ||
-      chosenId === ""
-    ) {
+  const add = async (picked: Picked, role: ProjectRole): Promise<void> => {
+    const { type, id } = picked;
+    if (type === "project") {
       return;
     }
     await run(async (session) => {
       await changeThenRefresh(
         async () => {
-          await session.projects.addMember(project.id, {
-            type: chosenType,
-            id: chosenId,
-            role,
-          });
+          await session.projects.addMember(project.id, { type, id, role });
         },
         async () => {
           await router.invalidate({ sync: true });
         }
       );
     });
-    setChosen("");
   };
-  // Core offers only who isn't in it yet, its owner included.
-  const people = candidates?.people ?? [];
-  const teams = candidates?.teams ?? [];
   return (
-    <form
-      className="flex flex-col gap-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void add();
-      }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <NativeSelect
-          aria-label={t`Person or team to add`}
-          id={`${ids}-who`}
-          onChange={(event) => {
-            setChosen(event.target.value);
-          }}
-          onFocus={() => {
+    <div className="flex flex-col gap-1">
+      <div>
+        <SharePicker
+          disabled={busy}
+          failure={failure}
+          empty={<Trans>Nobody else to add.</Trans>}
+          offered={candidates}
+          onOpen={() => {
             void read();
           }}
-          size="sm"
-          value={chosen}
-        >
-          <NativeSelectOption value="">{t`Add someone…`}</NativeSelectOption>
-          {people.length === 0 ? null : (
-            <NativeSelectOptGroup label={t`People`}>
-              {people.map((person) => (
-                <NativeSelectOption
-                  key={person.id}
-                  value={`person:${person.id}`}
-                >
-                  {person.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelectOptGroup>
-          )}
-          {teams.length === 0 ? null : (
-            <NativeSelectOptGroup label={t`Teams`}>
-              {teams.map((team) => (
-                <NativeSelectOption key={team.id} value={`team:${team.id}`}>
-                  {team.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelectOptGroup>
-          )}
-        </NativeSelect>
-        <NativeSelect
-          aria-label={t`Role in the project`}
-          onChange={(event) => {
-            const next = roleOf(event.target.value);
-            if (next !== undefined) {
-              setRole(next);
-            }
+          onPick={(picked, role) => {
+            void add(picked, role);
           }}
-          size="sm"
-          value={role}
+          roleHeading={<Trans>Add as</Trans>}
+          roleName={t`Role in the project`}
         >
-          {roles.map((each) => (
-            <NativeSelectOption key={each} value={each}>
-              {roleLabel(each)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <Button disabled={busy || chosen === ""} size="sm" type="submit">
-          <Trans context="add someone to a project">Add</Trans>
-        </Button>
+          <Trans>Add someone</Trans>
+        </SharePicker>
       </div>
       <ErrorText>{failure}</ErrorText>
-    </form>
+    </div>
   );
 };
 

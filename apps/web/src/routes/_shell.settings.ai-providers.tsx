@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -29,7 +29,7 @@ const AiProvidersPage = () => {
   }
   return (
     <AiProvidersSettings
-      editable={isAdmin(identity.role) && !identity.staff}
+      editable={isMemberAdmin(identity)}
       listing={page.data}
     />
   );

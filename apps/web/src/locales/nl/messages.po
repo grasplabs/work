@@ -194,7 +194,7 @@ msgid "{approvals, plural, one {This ends # approval of these packages.} other {
 msgstr "{approvals, plural, one {Hiermee eindigt # goedkeuring van deze pakketten.} other {Hiermee eindigen # goedkeuringen van deze pakketten.}}"
 
 #: src/projects/project-counts.tsx
-msgid "{apps, plural, one {# app} other {# apps}}"
+msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
 
 #: src/engines/package-approvals.tsx
@@ -1974,11 +1974,6 @@ msgstr "Actor-ID"
 msgid "Add"
 msgstr "Toevoegen"
 
-#: src/projects/project-people.tsx
-msgctxt "add someone to a project"
-msgid "Add"
-msgstr "Toevoegen"
-
 #: src/projects/file-item-dialog.tsx
 msgctxt "put in a project"
 msgid "Add"
@@ -2032,6 +2027,10 @@ msgstr "Een integratie toevoegen"
 msgid "Add approver"
 msgstr "Goedkeurder toevoegen"
 
+#: src/projects/project-people.tsx
+msgid "Add as"
+msgstr "Toevoegen als"
+
 #: src/connections/http-connections.tsx
 msgid "Add HTTP connection"
 msgstr "HTTP-verbinding toevoegen"
@@ -2049,8 +2048,8 @@ msgid "add records to {tables}"
 msgstr "records aan {tables} toevoegen"
 
 #: src/projects/project-people.tsx
-msgid "Add someone…"
-msgstr "Iemand toevoegen…"
+msgid "Add someone"
+msgstr "Iemand toevoegen"
 
 #: src/interview/closed.tsx
 msgid "Add something"
@@ -4411,8 +4410,7 @@ msgstr "Geheim kopiëren"
 msgid "Copy the URL of the webhook ending {ending}"
 msgstr "URL kopiëren van de webhook die eindigt op {ending}"
 
-#: src/chat/answer-markdown.tsx
-#: src/chat/chat-more.tsx
+#: src/copy.ts
 msgid "Copying didn't work"
 msgstr "Kopiëren is niet gelukt"
 
@@ -5265,6 +5263,7 @@ msgid "Everyone has a link of their own: whoever has it is them, so send each on
 msgstr "Iedereen heeft een eigen link: wie hem heeft, is die persoon, dus stuur elke link alleen naar de eigenaar. Links die nog niet beschikbaar zijn, gaan open op hun dag, of zodra de teamleider heeft gepraat."
 
 #: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Everyone in {project}"
 msgstr "Iedereen in {project}"
@@ -8255,12 +8254,9 @@ msgstr "Geen app heet ‘{asked}’"
 msgid "No App or workflow has approved packages."
 msgstr "Geen app of workflow heeft goedgekeurde pakketten."
 
-#: src/projects/project-counts.tsx
-msgid "No apps yet"
-msgstr "Nog geen apps"
-
 #: src/chat/side-panel.tsx
 #: src/engines/apps-overview.tsx
+#: src/projects/project-counts.tsx
 msgid "No Apps yet"
 msgstr "Nog geen apps"
 
@@ -8337,10 +8333,6 @@ msgstr "Nog geen doelen."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Geen groep"
-
-#: src/projects/project-counts.tsx
-msgid "No hours measured yet"
-msgstr "Nog geen uren gemeten"
 
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -8598,6 +8590,7 @@ msgstr "Niemand kan hem nog openen of starten. Zijn versies blijven bewaard maar
 msgid "Nobody comes in: Grasp does all of it."
 msgstr "Niemand komt erbij: Grasp doet alles."
 
+#: src/projects/project-people.tsx
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Er is niemand anders om toe te voegen."
@@ -9887,9 +9880,8 @@ msgid "Pending"
 msgstr "In afwachting"
 
 #: src/chat/builds.tsx
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 #: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx
@@ -9986,10 +9978,6 @@ msgstr "Persoon"
 msgctxt "who does a step"
 msgid "Person"
 msgstr "Persoon"
-
-#: src/projects/project-people.tsx
-msgid "Person or team to add"
-msgstr "Persoon of team om toe te voegen"
 
 #: src/settings/erasures.tsx
 msgid "Personal connections"
@@ -10116,8 +10104,8 @@ msgstr "Profiel"
 msgid "Project"
 msgstr "Project"
 
-#: src/engines/app-sharing.tsx
 #: src/frame/app-sidebar.tsx
+#: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/routes/_shell.projects.index.tsx
@@ -10481,7 +10469,7 @@ msgstr "Teruglezen"
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "Het lezen bleef mislukken, dus je triggers daar starten voorlopig niets nieuws. Grasp blijft het proberen; als het niet terugkomt, controleer dan de verbinding."
 
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
 msgstr "Mensen en teams worden gelezen…"
@@ -11595,7 +11583,7 @@ msgstr "Leden zoeken"
 msgid "Search people"
 msgstr "Personen zoeken"
 
-#: src/engines/app-sharing.tsx
+#: src/people/share-picker.tsx
 #: src/settings/package-approvers.tsx
 msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"
@@ -12887,10 +12875,9 @@ msgid "Team: {name}"
 msgstr "Team: {name}"
 
 #: src/brain/brain.ts
-#: src/engines/app-sharing.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
-#: src/projects/project-people.tsx
+#: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx

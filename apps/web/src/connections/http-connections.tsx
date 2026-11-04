@@ -8,7 +8,7 @@ import type {
   HttpConnectionInput,
   HttpMethod,
 } from "@grasp-os/shared/http-connections";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   AlertDialog,
@@ -89,10 +89,6 @@ export const httpConnectionsMatching = (
       http.origin.toLocaleLowerCase().includes(needle)
   );
 };
-
-/** Whether `identity` may approve and revoke HTTP connections: admins, never staff. */
-export const managesHttpConnections = (identity: Identity): boolean =>
-  isAdmin(identity.role) && !identity.staff;
 
 /** The credential's kinds, as the form offers them. */
 type CredentialKind = "header" | "bearer";
@@ -532,7 +528,8 @@ export const HttpConnections = ({
   search: string | undefined;
 }) => {
   const { t } = useLingui();
-  const manages = managesHttpConnections(identity);
+  // Admins approve and revoke HTTP connections, never Grasp staff.
+  const manages = isMemberAdmin(identity);
   const shown =
     connections === undefined
       ? []

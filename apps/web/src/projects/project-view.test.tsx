@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import type {
   FileItem,
+  NewProjectMember,
   Project,
   ProjectCursor,
   ProjectItemCandidate,
   ProjectItemsPage,
   ProjectItemRef,
+  ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
@@ -21,6 +23,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ProjectView } from "./project-view.tsx";
 
 // A project's page against core's projects API as the page reaches it
@@ -91,17 +95,56 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
 };
 
 const fakeProjects = (
-  pages: ProjectItemsPage[] = [{ items: [desk], more: false }]
+  pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
+  /** How many filings core refuses before it takes one. */
+  refusals = 0
 ) => {
   const left = [...pages];
   const asked: unknown[][] = [];
+  let refused = 0;
+  const workflowResources = {
+    create: async (name: string): Promise<{ id: string }> => {
+      await Promise.resolve();
+      asked.push(["create", name.slice(0, -9)]);
+      return { id: "wf-made" };
+    },
+  };
+  const apps = {
+    create: async ({ name }: { name: string }): Promise<{ id: string }> => {
+      await Promise.resolve();
+      asked.push(["create", name]);
+      return { id: "app-made" };
+    },
+  };
   const projects = {
+    shareCandidates: async (): Promise<ProjectShareCandidates> => {
+      await Promise.resolve();
+      asked.push(["shareCandidates"]);
+      return {
+        people: [
+          { id: "user-bo", name: "Bo" },
+          { id: "user-cy", name: "Cy" },
+        ],
+        teams: [{ id: "team-sales", name: "Sales" }],
+      };
+    },
+    addMember: async (_id: string, member: NewProjectMember): Promise<void> => {
+      await Promise.resolve();
+      if (member.id === "user-cy") {
+        throw new Error("Cy can't be added.");
+      }
+      asked.push(["addMember", member.type, member.id, member.role]);
+    },
     itemCandidates: async (): Promise<ProjectItemCandidate[]> => {
       await Promise.resolve();
       return candidates;
     },
     file: async (_id: string, file: FileItem): Promise<void> => {
       await Promise.resolve();
+      if (refused < refusals) {
+        refused += 1;
+        throw new Error("The share was refused.");
+      }
       asked.push(["file", file.item.id, file.share]);
     },
     unfile: async (_id: string, item: ProjectItemRef): Promise<void> => {
@@ -118,10 +161,13 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { projects }, asked };
+  return { session: { apps, projects, workflowResources }, asked };
 };
 
 let root: Root | undefined;
+
+/** How the chat dock sits, for the page to read. */
+const DockMode = () => <output aria-label="Dock">{useDockMode()}</output>;
 
 const settled = async (): Promise<void> => {
   await act(async () => {
@@ -137,7 +183,7 @@ const settled = async (): Promise<void> => {
 const shown = async (
   session: ReturnType<typeof fakeProjects>["session"],
   shownProject: Project
-): Promise<void> => {
+) => {
   const core = {
     withSession: async <T,>(
       run: (reached: typeof session) => Promise<T>
@@ -145,7 +191,10 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ProjectView identity={{ role: "builder" }} project={shownProject} />
+      <>
+        <ProjectView identity={{ role: "builder" }} project={shownProject} />
+        <DockMode />
+      </>
     ),
   });
   const router = createRouter({
@@ -167,6 +216,7 @@ const shown = async (
     await router.load();
   });
   await settled();
+  return router;
 };
 
 const press = async (element: Element | undefined | null) => {
@@ -187,6 +237,30 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
+const type = async (input: Element | null, value: string) => {
+  if (!(input instanceof HTMLInputElement)) {
+    throw new TypeError("Nothing to type in");
+  }
+  await act(async () => {
+    // Through the element's own setter, as typing reaches React.
+    Reflect.set(HTMLInputElement.prototype, "value", value, input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/** The names the open list of people and teams shows. */
+const shownNames = () =>
+  [...document.querySelectorAll("[cmdk-item]")].map(
+    (each) => each.querySelector("span.truncate")?.textContent
+  );
+
+/** Who is offered as `name` in the open list of people and teams. */
+const offered = (name: string) =>
+  [...document.querySelectorAll("[cmdk-item]")].find(
+    (each) => each.querySelector("span.truncate")?.textContent === name
+  );
+
 const choose = async (select: HTMLSelectElement, value: string) => {
   await act(async () => {
     // Through the element's own setter, as a person's choice reaches React.
@@ -204,6 +278,42 @@ describe("A project's page", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    setDockMode("bar");
+    setActiveChat(undefined);
+  });
+
+  it("makes a workflow in the project once, though filing it failed the first time, and opens it with a new chat docked beside it", async () => {
+    setActiveChat("chat-about-holidays");
+    const { session, asked } = fakeProjects(undefined, 1);
+    const router = await shown(session, project("builder"));
+
+    await press(button("New"));
+    await type(
+      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
+      "Invoice approvals"
+    );
+    await press(button("Make"));
+    const refused = document.body.textContent?.includes(
+      "The share was refused."
+    );
+    await press(button("Make"));
+
+    expect({
+      refused,
+      asked,
+      at: router.state.location.pathname,
+      dock: document.querySelector('output[aria-label="Dock"]')?.textContent,
+      chat: activeChat(),
+    }).toStrictEqual({
+      refused: true,
+      asked: [
+        ["create", "invoice-approvals"],
+        ["file", "wf-made", true],
+      ],
+      at: "/workflows/wf-made",
+      dock: "drawer",
+      chat: undefined,
+    });
   });
 
   it("adds a workflow without sharing it unless asked, and names who would gain access", async () => {
@@ -234,6 +344,58 @@ describe("A project's page", () => {
       checked: "false",
       offer: true,
       asked: [["file", "wf-quotes", false]],
+    });
+  });
+
+  it("makes an App in the project once, though filing it failed the first time, and opens it to build", async () => {
+    const { session, asked } = fakeProjects(undefined, 1);
+    const router = await shown(session, project("builder"));
+
+    await press(button("New"));
+    await press(button("App"));
+    await type(
+      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
+      "Desk "
+    );
+    await press(button("Make"));
+    await press(button("Make"));
+
+    expect({ asked, at: router.state.location.pathname }).toStrictEqual({
+      asked: [
+        ["create", "Desk"],
+        ["file", "app-made", true],
+      ],
+      at: "/apps/app-made/edit",
+    });
+  });
+
+  it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, project("builder"));
+
+    const before = [...asked];
+    await press(button("Add someone"));
+    const names = shownNames();
+    // Every ID holds an "s" ("user-…", "team-…"): only names are searched.
+    await type(document.querySelector("[cmdk-input]"), "s");
+    const found = shownNames();
+    await type(document.querySelector("[cmdk-input]"), "");
+    await press(offered("Bo"));
+    await press(button("Add someone"));
+    await press(offered("Cy"));
+
+    expect({
+      before,
+      names,
+      found,
+      asked,
+      refused: document.body.textContent?.includes("Cy can't be added."),
+    }).toStrictEqual({
+      before: [],
+      names: ["Bo", "Cy", "Sales"],
+      found: ["Sales"],
+      asked: [["shareCandidates"], ["addMember", "person", "user-bo", "user"]],
+      refused: true,
     });
   });
 

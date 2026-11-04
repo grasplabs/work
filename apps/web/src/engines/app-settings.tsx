@@ -62,7 +62,7 @@ import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
 import { buildsApp } from "./app-role.ts";
-import { AppMembers } from "./app-sharing.tsx";
+import { AppMembers, readMembers } from "./app-sharing.tsx";
 import {
   ArchiveDialog,
   StatusBadge,
@@ -92,7 +92,7 @@ import { useAppRead } from "./use-app-read.ts";
 // that is slow or refused leaves the others; core checks every change.
 
 /** The sections, in the order the list shows them. */
-export const appSettingsSections = [
+const appSettingsSections = [
   "general",
   "sharing",
   "versions",
@@ -135,7 +135,7 @@ const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
 };
 
 /** What a section shows of a read: a skeleton while it comes, why it didn't, or `children` once it did. */
-const Read = <T,>({
+export const Read = <T,>({
   read,
   children,
 }: {
@@ -632,11 +632,6 @@ const General = ({
 };
 
 // --- Sharing -------------------------------------------------------------
-
-const readMembers = async (
-  session: Session,
-  app: string
-): Promise<AppMember[]> => await session.apps.members.list(app);
 
 const Sharing = ({ app, identity }: { app: ViewedApp; identity: Identity }) => {
   const read = useAppRead(app.id, readMembers);

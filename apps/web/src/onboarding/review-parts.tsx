@@ -13,8 +13,9 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { copyText } from "../copy.ts";
 import { formatList } from "../format.ts";
-import { copyText, useEntrance } from "./setup-parts.tsx";
+import { useEntrance } from "./setup-parts.tsx";
 import type { AiReadiness } from "./setup.ts";
 
 // What only the admin can settle in their onboarding, one item each

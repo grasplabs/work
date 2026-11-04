@@ -19,10 +19,7 @@ import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import {
-  ProjectCountsLine,
-  ProjectHours,
-} from "../projects/project-counts.tsx";
+import { ProjectCountsLine } from "../projects/project-counts.tsx";
 import { ProjectDialog } from "../projects/project-dialog.tsx";
 import { ProjectIcon } from "../projects/project-icon.tsx";
 
@@ -56,10 +53,7 @@ const ProjectCard = ({ project }: { project: ProjectSummary }) => (
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col gap-2">
-          <ProjectHours />
-          <ProjectCountsLine counts={project.counts} />
-        </div>
+        <ProjectCountsLine counts={project.counts} />
       </CardContent>
     </Card>
   </li>

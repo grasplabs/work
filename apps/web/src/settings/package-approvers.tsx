@@ -34,7 +34,7 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { PersonOption } from "../people/person-picker.tsx";
+import { matchTyped, PersonOption } from "../people/person-picker.tsx";
 import type { Pickable } from "../people/person-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
@@ -111,12 +111,7 @@ const GrantPicker = ({
         <Trans>Add approver</Trans>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72" variant="flush">
-        {/* Names match as typed, not letter by letter, as in the owner picker. */}
-        <Command
-          filter={(value: string, search: string) =>
-            value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
-          }
-        >
+        <Command filter={matchTyped}>
           <CommandInput placeholder={t`Search people and teams`} />
           <CommandList>
             {candidates === null ? (
@@ -150,8 +145,8 @@ const GrantPicker = ({
                         onSelect={() => {
                           pick({ type: "team", teamId: team.id });
                         }}
-                        // A team's ID keeps it apart from a person of the same name.
-                        value={`${team.name} ${team.id}`}
+                        keywords={[team.name]}
+                        value={`team:${team.id}`}
                       >
                         <UsersIcon className="text-muted-foreground" />
                         <span className="flex-1 truncate">{team.name}</span>

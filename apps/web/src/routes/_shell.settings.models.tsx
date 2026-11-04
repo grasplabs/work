@@ -1,5 +1,5 @@
 import type { ModelSettings } from "@grasp-os/shared/models";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Table,
   TableBody,
@@ -250,12 +250,7 @@ const Models = () => {
       </SettingsSection>
     );
   }
-  return (
-    <Settings
-      canChange={isAdmin(identity.role) && !identity.staff}
-      settings={page.data}
-    />
-  );
+  return <Settings canChange={isMemberAdmin(identity)} settings={page.data} />;
 };
 
 export const Route = createFileRoute("/_shell/settings/models")({

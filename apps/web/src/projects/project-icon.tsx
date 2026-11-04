@@ -14,7 +14,7 @@ import {
 import type { ComponentType, SVGProps } from "react";
 
 // A project's icon, one of the few core keeps (`projectIcons`), drawn on a
-// grey tile as a domain's is (engines/engine-icon.tsx).
+// grey tile as an App's is (engines/engine-icon.tsx).
 
 /** Each icon a project may have, as drawn. */
 export const projectIconShapes: Record<

@@ -47,20 +47,13 @@ import {
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import {
-  createContext,
-  Fragment,
-  lazy,
-  Suspense,
-  use,
-  useEffect,
-  useState,
-} from "react";
+import { createContext, Fragment, lazy, Suspense, use, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
-import { useCanReplaceKey } from "../frame/ai-key-banner.tsx";
+import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
+import { useMemberAdmin } from "../use-member-admin.ts";
 import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
@@ -359,31 +352,12 @@ const CodeStep = ({
 /** Copies the answer's text, and says so for a moment. */
 const CopyAnswer = ({ text }: { text: string }) => {
   const { t } = useLingui();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    const timer = copied
-      ? setTimeout(() => {
-          setCopied(false);
-        }, 1500)
-      : undefined;
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      // The browser refused the clipboard (no permission): nothing copied,
-      // so the button doesn't say it was.
-    }
-  };
+  const { copied, copy } = useCopy();
   return (
     <MessageAction
       label={copied ? t`Copied` : t`Copy the answer`}
       onClick={() => {
-        void copy();
+        void copy(text);
       }}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
@@ -726,7 +700,7 @@ const needsProvider: ReadonlySet<unknown> = new Set([
  */
 const KeyFailed = () => {
   const { i18n } = useLingui();
-  if (!useCanReplaceKey()) {
+  if (!useMemberAdmin()) {
     return failureMessage("model.provider_key_failed", i18n);
   }
   return (

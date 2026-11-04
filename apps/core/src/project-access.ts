@@ -35,7 +35,7 @@ import { projectBuiltBySql } from "./project-sql.ts";
 export type Person = Pick<Identity, "userId" | "role" | "teams">;
 
 /** A project's ID, as core makes them. */
-export const projectIdSchema = z.uuid();
+const projectIdSchema = z.uuid();
 
 /** A project as access reads it. */
 export interface ProjectRow {
