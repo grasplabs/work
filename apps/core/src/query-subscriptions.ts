@@ -93,6 +93,13 @@ import type { SessionCheck } from "./session-check.ts";
 //     connection until it follows the App's revocations, and then the
 //     session is read again, so a read either sees the change or is
 //     followed when the event arrives.
+// - A snapshot stays on screen after the store's rules narrow (a release
+//   that tightens a table's access mode or row rules is made current,
+//   for a workflow store too, which other people may read): no record is
+//   written, but applying the change moves the generation of every table
+//   whose rules changed (store-host.ts, `#applyIn`), so every query that
+//   read one is read again, under the new rules, and drops the rows it no
+//   longer may see.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
 //   version that is no longer current is read on the current release only

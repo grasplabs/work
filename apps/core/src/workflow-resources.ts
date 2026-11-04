@@ -129,6 +129,7 @@ import type {
 } from "./workflow-modules.ts";
 import {
   provideWorkflowStores,
+  workflowStoresBack,
   workflowStoreStatements,
 } from "./workflow-stores.ts";
 import type { WorkflowStoreBinding } from "./workflow-stores.ts";
@@ -2394,6 +2395,14 @@ const publish = async (
       stores,
     });
   } catch (error) {
+    // Its stores took its schema's change before the version was written
+    // (workflow-stores.ts): back to the version D1 has current, whoever's
+    // that is, this one's included if it was written after all.
+    await workflowStoresBack(
+      env,
+      workflow.id,
+      stores.map(({ storeId }) => storeId)
+    );
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
       // A reservation of its build went before the row could name it,
       // which only a publication stalled past the sweep's grace sees:

@@ -108,7 +108,7 @@ const sources = {
   schema_change: msg({
     message: "by a change of the App's data model",
     context:
-      "a change's source: the platform rewrote or restored the record as a new version of the App's data model took effect",
+      "a change's source: the platform filled in a value the record lacked as a new version of the App's data model took effect",
   }),
 } as const satisfies Record<RecordChange["source"], unknown>;
 

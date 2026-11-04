@@ -75,6 +75,7 @@ import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { appCodeAndTestFiles } from "./screens.ts";
+import { schemaRefusal } from "./store-backfill.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -1643,9 +1644,13 @@ export class SealedPreviews {
       );
       // The preview's own store: its version is current there at once, so
       // a change that checks records is applied now (a dry run already
-      // passed, or the define refused with its questions).
+      // passed, or the define refused with its questions), and must leave
+      // the schema in force: one waiting on a backfill is refused as such.
       if (defined.contract.awaits) {
-        await store.activate(defined.schemaHash, consumer);
+        const status = await store.activate(defined.schemaHash, consumer);
+        if (status.state !== "active") {
+          throw schemaRefusal(status);
+        }
       }
     } catch (error) {
       // Discarded since it was checked: forgotten, so the next call starts

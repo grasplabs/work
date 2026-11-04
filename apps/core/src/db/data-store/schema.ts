@@ -279,9 +279,10 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
   /** The plan, as canonical JSON: what it added and retained. */
   plan: text().notNull(),
   /**
-   * The consumer's answers for fields a narrowing may not fit
-   * (store-schema-changes.ts), as canonical JSON `[answer, ...]`: what
-   * its activation rewrites the records that don't fit with.
+   * The consumer's answers for fields records may lack
+   * (store-schema-changes.ts), as canonical JSON `[answer, ...]`: the
+   * value its activation gives the records that lack one, never over a
+   * value a record holds.
    */
   answers: text().notNull().default("[]"),
   createdAt: integer("created_at").notNull(),

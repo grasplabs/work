@@ -20,11 +20,16 @@ import {
   businessStoreVersions,
   sdkResourceBindings,
   sdkStoreOwners,
+  workflowResources,
   workflowStores,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { defineSchemaOnStore } from "./store-backfill.ts";
+import {
+  activateCurrentSchemas,
+  activateOnStore,
+  defineSchemaOnStore,
+} from "./store-backfill.ts";
 import { inventoriedDeleted, liveStoreSql } from "./store-deletion.ts";
 import { storeAlias } from "./workflow-store-host.ts";
 
@@ -163,6 +168,31 @@ const storeFor = async (
 };
 
 /**
+ * Puts `stores` back on the schemas of the version of workflow
+ * `workflowId` D1 has current (store-backfill.ts,
+ * `activateCurrentSchemas`), after a publication applied a change on them
+ * and its version wasn't written: a rule or a narrowing the version D1
+ * runs never took doesn't stay in force.
+ */
+export const workflowStoresBack = async (
+  env: Env,
+  workflowId: string,
+  stores: readonly StoreId[]
+): Promise<void> => {
+  const current = await drizzle(env.DB)
+    .select({ version: workflowResources.currentVersion })
+    .from(workflowResources)
+    .where(eq(workflowResources.id, workflowId))
+    .get();
+  await activateCurrentSchemas(
+    env,
+    workflowId,
+    current?.version ?? null,
+    stores
+  );
+};
+
+/**
  * The stores `stores` declares for version `version` of workflow
  * `workflowId`, each created if the workflow has none of that name yet
  * and handed the version's schema, as `by` publishes it. `by` must build
@@ -219,16 +249,28 @@ export const provideWorkflowStores = async (
     });
   }
   // A published version runs at once: a change that checks records (sdk
-  // schema-plan.ts, `activates`) is applied now, every store's dry run
-  // having passed. Each applies all or nothing; only a write landing on a
-  // later store between its dry run and here can still refuse it, after
-  // an earlier one applied, and the version its records then fit is the
-  // one being published, which a retry publishes.
-  for (const { opened, schemaHash, awaits } of prepared) {
-    if (awaits) {
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await opened.activate(schemaHash, consumer);
+  // schema-plan.ts, `activates`) is applied now, before the version is
+  // written, since applying can still be refused, every store's dry run
+  // having passed. Each applies all or nothing, and must leave its store
+  // holding the schema in force: one still waiting on a pending backfill
+  // refuses the publication (`migration.pending`, retryable). A write
+  // landing on a later store between its dry run and here can refuse it
+  // too, after an earlier one applied: those go back to the version
+  // current (`workflowStoresBack`), as when writing the version fails.
+  try {
+    for (const { opened, schemaHash, awaits } of prepared) {
+      if (awaits) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await activateOnStore(env, opened, schemaHash, consumer);
+      }
     }
+  } catch (error) {
+    await workflowStoresBack(
+      env,
+      workflowId,
+      prepared.map(({ opened }) => opened.id)
+    );
+    throw error;
   }
   return bindings;
 };

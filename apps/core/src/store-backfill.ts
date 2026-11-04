@@ -41,7 +41,7 @@ import { runEngine } from "./workflows/engine.ts";
 // store's contract holds its schema: core asks the store, the authority
 // on its own contract, before it makes such a release current
 // (`requireStoreSchemaActive`). A change that checks the store's records
-// (a narrowing, a conversion, a changed access mode or row rule;
+// (a narrowing, a field required, a rename, a changed access mode or row rule;
 // store-schema-changes.ts) is applied by the store as its release is
 // made current (`activateReady`), all or nothing; the schemas it no
 // longer covers are left behind there, so a release another one's
@@ -351,23 +351,76 @@ export const defineSchemaOnStore = async (
 };
 
 /**
- * Refuses release `version` of `app` while the store it binds doesn't
- * hold its schema in force, keeping its backfill going. A ready explicit
- * migration passes; with `activate` (the last step before the version is
- * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
- * refused as pending if work came back:
- * `migration.pending` (retryable, with the backfill's progress) while
- * its defaulted fields are being filled in, `migration.backfill_failed`
+ * Why a release can't run on a store that answered `status` for its
+ * schema: `migration.pending` (retryable, with the backfill's progress)
+ * while a target is pending or its change waits, `migration.backfill_failed`
  * (naming the record) while the backfill stays failed,
- * `migration.abandoned` once an admin abandoned it. A release without a
- * store passes.
+ * `migration.abandoned` once an admin abandoned it,
+ * `migration.rollback_incompatible` for a schema a migration left
+ * behind; a schema the store never took is its records and core's
+ * disagreeing, which no retry mends.
  */
-export const requireStoreSchemaActive = async (
+export const schemaRefusal = (
+  status: Exclude<SchemaStatus, { state: "active" }>
+): Error => {
+  if (status.state === "abandoned") {
+    return migrationErrors.create("migration.abandoned");
+  }
+  if (status.state === "incompatible") {
+    return migrationErrors.create("migration.rollback_incompatible", {
+      compatible: [],
+    });
+  }
+  if (status.state === "unknown") {
+    return new Error(
+      "The store doesn't hold the schema its release was sealed on"
+    );
+  }
+  if (status.state === "failed") {
+    return migrationErrors.create("migration.backfill_failed", {
+      target: status.target,
+      attempt: status.attempt,
+      failure: status.failure === null ? null : { ...status.failure },
+    });
+  }
+  return migrationErrors.create("migration.pending", {
+    retryable: true,
+    scanned: status.scanned,
+    filled: status.filled,
+  });
+};
+
+/**
+ * Applies the change schema `schemaHash` makes on `store` for `consumer`,
+ * a version that runs at once (a workflow's, as it is published), and
+ * refuses it (`schemaRefusal`) unless the store then holds it in force,
+ * keeping a pending backfill going.
+ */
+export const activateOnStore = async (
   env: Env,
-  app: AppId,
-  version: number,
-  { activate = false }: { activate?: boolean } = {}
+  store: OpenStore,
+  schemaHash: string,
+  consumer: SchemaConsumer
 ): Promise<void> => {
+  const status = await store.activate(schemaHash, consumer);
+  if (status.state === "active") {
+    return;
+  }
+  if (status.state === "pending" || status.state === "failed") {
+    await keepGoingQuietly(env, store.id);
+  }
+  throw schemaRefusal(status);
+};
+
+/**
+ * The stores version `version` of resource `resourceId` (an App or a
+ * workflow) binds, each with the schema it was sealed or published on.
+ */
+export const storeBindings = async (
+  env: Env,
+  resourceId: string,
+  version: number
+): Promise<{ storeId: StoreId; schemaHash: string }[]> => {
   const bound = await drizzle(env.DB)
     .select({
       store: sdkResourceBindings.targetId,
@@ -376,18 +429,39 @@ export const requireStoreSchemaActive = async (
     .from(sdkResourceBindings)
     .where(
       and(
-        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.resourceId, resourceId),
         eq(sdkResourceBindings.resourceVersion, version),
         eq(sdkResourceBindings.kind, "store")
       )
-    )
-    .get();
+    );
+  return bound.map(({ store, schemaHash }) => ({
+    storeId: storeIdSchema.parse(store),
+    schemaHash,
+  }));
+};
+
+/**
+ * Refuses release `version` of `app` while the store it binds doesn't
+ * hold its schema in force, keeping its backfill going. A ready explicit
+ * migration passes; with `activate` (the last step before the version is
+ * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
+ * with the change its schema checks records for, refused as pending if
+ * work came back (`schemaRefusal`), or naming the versions that still fit
+ * for a rollback past a migration. A release without a store passes.
+ */
+export const requireStoreSchemaActive = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  { activate = false }: { activate?: boolean } = {}
+): Promise<void> => {
+  const [bound] = await storeBindings(env, app, version);
   if (bound === undefined) {
     return;
   }
-  const storeId = storeIdSchema.parse(bound.store);
+  const { storeId, schemaHash } = bound;
   const consumer = { resourceId: app, resourceVersion: version };
-  let status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  let status = await schemaStatus(env, storeId, schemaHash, consumer);
   if (status.state === "ready" && !activate) {
     // Its explicit migration is done: it may be made current, and takes
     // over only as it is (`activate`), once every other gate passed.
@@ -397,15 +471,12 @@ export const requireStoreSchemaActive = async (
     // It takes over now, unless a write queued work meanwhile.
     status = await storeObject(env, storeId).activateReady(
       storeId,
-      bound.schemaHash,
+      schemaHash,
       consumer
     );
   }
   if (status.state === "active") {
     return;
-  }
-  if (status.state === "abandoned") {
-    throw migrationErrors.create("migration.abandoned");
   }
   if (status.state === "incompatible") {
     // A rollback past an explicit migration: its records moved on, and
@@ -413,42 +484,68 @@ export const requireStoreSchemaActive = async (
     // of its own, never a rollback).
     throw await rollbackIncompatible(env, app, version, storeId);
   }
-  if (status.state === "unknown") {
-    // A sealed release's schema the store never took: its records and
-    // core's disagree, which no retry mends.
-    throw new Error(
-      "The store doesn't hold the schema its release was sealed on"
-    );
+  if (status.state === "abandoned" || status.state === "unknown") {
+    throw schemaRefusal(status);
   }
   await keepGoingQuietly(env, storeId);
   // Asked again: the store's pending target may have moved on meanwhile
   // (this schema's finished and a newer one began), and only this
   // schema's own state refuses its release.
-  const after = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  const after = await schemaStatus(env, storeId, schemaHash, consumer);
   if (after.state === "active") {
     return;
-  }
-  if (after.state === "abandoned") {
-    throw migrationErrors.create("migration.abandoned");
   }
   if (after.state === "incompatible") {
     throw await rollbackIncompatible(env, app, version, storeId);
   }
-  if (after.state === "failed") {
-    throw migrationErrors.create("migration.backfill_failed", {
-      target: after.target,
-      attempt: after.attempt,
-      failure: after.failure === null ? null : { ...after.failure },
-    });
+  throw schemaRefusal(after);
+};
+
+/**
+ * Puts `stores` back on the schemas of the version of `resourceId` that
+ * D1 has current (`current`), after a version's schema was applied on
+ * them (`activateReady`) and the D1 write making that version current or
+ * publishing it didn't commit: a lost compare-and-set (another version
+ * made current meanwhile, the App archived) or a failure. A store's
+ * contract moves before D1 does, since applying a change can still be
+ * refused (a write since the dry run) and D1's write can't be taken back
+ * once it queued events and webhooks. Applying the current version's
+ * schema again plans the contract back: a rule change or a narrowing is
+ * planned onto it like any (a rollback, store-schema-changes.ts), so no
+ * version reads under rules D1 never made current. Nothing to put back
+ * when no version is current, or it binds none of `stores`. A store that
+ * can't be put back is logged and stays ahead until a version is made
+ * current again; the caller's own error is what it answers.
+ */
+export const activateCurrentSchemas = async (
+  env: Env,
+  resourceId: string,
+  current: number | null,
+  stores: readonly StoreId[]
+): Promise<void> => {
+  if (current === null || stores.length === 0) {
+    return;
   }
-  if (after.state === "unknown") {
-    throw new Error(
-      "The store doesn't hold the schema its release was sealed on"
-    );
+  const consumer = { resourceId, resourceVersion: current };
+  const bound = await storeBindings(env, resourceId, current);
+  for (const { storeId, schemaHash } of bound) {
+    if (!stores.includes(storeId)) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await storeObject(env, storeId).activateReady(
+        storeId,
+        schemaHash,
+        consumer
+      );
+    } catch (error) {
+      log.error("store.schema_restore_failed", {
+        storeId,
+        resourceId,
+        version: current,
+        ...errorFields(error),
+      });
+    }
   }
-  throw migrationErrors.create("migration.pending", {
-    retryable: true,
-    scanned: after.scanned,
-    filled: after.filled,
-  });
 };

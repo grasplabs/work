@@ -633,7 +633,7 @@ export const compatibleVersionsMax = 100;
 
 export const migrationErrors = defineErrorFamily({
   "migration.required":
-    "This schema change can't be applied on its own. Each change it lists needs a migration; each question names records that don't fit a field it checks, and is answered with a value for that field or by a migration.",
+    "This schema change can't be applied on its own. Each change it lists needs a migration; each question names records that don't fit a field it checks, and is answered by a migration or, where records lack the field, a value for it.",
   "migration.preference_changed":
     "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
@@ -655,7 +655,7 @@ export const migrationErrors = defineErrorFamily({
   "migration.invalid":
     "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
   "migration.incompatible_write":
-    "This version's schema no longer fits the store: a migration moved its records on. Make the migrated version current.",
+    "This version's schema no longer fits the store: a newer version's schema change or migration moved its records on. Make that version current, or make this one current again.",
   "migration.not_current":
     "This version's schema change is applied to the store's records as the version is made current. Until then it can't write to the store.",
   "migration.rollback_incompatible":
@@ -724,11 +724,12 @@ export const schemaAnswerSchema = z.strictObject({
 export const schemaAnswersMax = 64;
 
 /**
- * Why a record doesn't fit a field a schema change checks: the field is
- * `missing` where it's required, holds a value that is `invalid` for it
- * with no value given for it, or the value given doesn't fit it either
- * (`unfit`); or the record would grow past what a record holds
- * (`too_large`). Never what the record holds.
+ * Why a record doesn't fit a field a schema change checks: it lacks the
+ * field where it's required and no value was given for it (`missing`),
+ * the value given for it doesn't fit (`unfit`), it holds a value that
+ * doesn't fit (`invalid`, which only a migration reshapes), or it would
+ * grow past what a record holds (`too_large`). Never what the record
+ * holds.
  */
 export type SchemaCheckReason = "missing" | "invalid" | "unfit" | "too_large";
 
@@ -736,7 +737,9 @@ export type SchemaCheckReason = "missing" | "invalid" | "unfit" | "too_large";
  * A field a schema change checks that records don't fit, as the store
  * asks about it (`migration.required`, `details.questions`): how many
  * records don't, the first of them by ID with why, and what may answer
- * it: a value the App gives the field for them, or an explicit migration.
+ * it: an explicit migration, and a value the App gives the field where
+ * one would settle the records (`missing`, `unfit`) and the change isn't
+ * a rollback, whose answers are the old release's.
  */
 export interface SchemaQuestion {
   table: string;

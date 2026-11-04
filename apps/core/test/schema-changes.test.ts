@@ -1,5 +1,5 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { ValueShape } from "@grasp-os/sdk";
+import type { SchemaDefinition, ValueShape } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { SchemaAccess, SchemaAnswer } from "@grasp-os/sdk/host";
@@ -10,19 +10,24 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { racingDb } from "./apps.ts";
+import { v1Schema } from "./migrated-apps.ts";
 import {
   codeOf,
   commit,
   consumer,
   contractHash,
+  fillAll,
   insertAll,
   newStore,
   notes,
   notesOf,
   objectOf,
 } from "./pending-stores.ts";
+import { appWith, failure, seal } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
 // A schema change the store checks every record for before its contract
@@ -34,7 +39,9 @@ import { newRecordId } from "./store-schemas.ts";
 // Durable Object. The cases follow the threat model: no value overwritten
 // or guessed, no partial migration (a failure, a crash, a write between
 // the dry run and the activation), no rule bypassed by an older version,
-// and no hidden row's value in a dry run's answer.
+// by a backfill pending meanwhile, or by a version D1 never made current,
+// no live query left showing rows a rule now hides, and no hidden row's
+// value in a dry run's answer.
 
 /** Notes with a title and, as `priority` declares it, a priority. */
 const prioritised = (priority: ValueShape[string]) =>
@@ -81,6 +88,23 @@ const questionsOf = (refused: { details: unknown }) =>
       ),
     })
     .parse(refused.details).questions;
+
+/** Notes and tags whose title and name are at most `max` long. */
+const tagged = (max: number, extra: ValueShape = {}) =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable({ title: v.string().max(max), ...extra }),
+        tags: defineTable({ name: v.string().max(max) }),
+      }),
+      {
+        tables: {
+          notes: { read: "appMembers", write: "appMembers" },
+          tags: { read: "appMembers", write: "appMembers" },
+        },
+      }
+    )
+  );
 
 /** Notes whose `size` is `size`. */
 const sizes = (size: ValueShape[string]) => notes({ title: v.string(), size });
@@ -206,7 +230,7 @@ describe("a dry run", () => {
             field: "title",
             rows: 1,
             records: [{ id: ids[0], reason: "invalid" }],
-            answers: ["value", "migration"],
+            answers: ["migration"],
           },
         ],
       },
@@ -252,7 +276,7 @@ describe("a dry run", () => {
     expect(JSON.stringify(refused)).not.toMatch(/grace@|private/u);
   });
 
-  it("counts every record that doesn't fit, and lists the first twenty", async () => {
+  it("counts every record that doesn't fit, lists the first twenty, and takes a value for those that lack the field", async () => {
     const { store } = await storeOf(
       notes({ title: v.string() }),
       Array.from({ length: 30 }, (_, index) => ({ title: `Note ${index}` }))
@@ -265,7 +289,11 @@ describe("a dry run", () => {
     );
     expect(refused).toMatchObject({
       code: "migration.required",
-      details: { questions: [{ field: "size", rows: 30 }] },
+      details: {
+        questions: [
+          { field: "size", rows: 30, answers: ["value", "migration"] },
+        ],
+      },
     });
     expect(questionsOf(refused)[0]?.records).toHaveLength(20);
   });
@@ -324,7 +352,7 @@ describe("an answer", () => {
             field: "priority",
             rows: 1,
             records: [{ id: ids[0], reason: "invalid" }],
-            answers: ["value", "migration"],
+            answers: ["migration"],
           },
         ],
       },
@@ -485,14 +513,16 @@ describe("a rollback", () => {
   });
 
   it("checks every table it narrows, not only those the change checked, and is refused while a record doesn't fit", async () => {
-    // Version 2 widens the title as it is sealed, and adds a required
-    // priority, which leaves version 1 behind as it is made current.
-    const { store, first } = await storeOf(
-      notes({ title: v.string().max(20) }),
-      [{ title: "Short" }]
-    );
+    // Version 2 widens the title and the tags' name as it is sealed, drops
+    // the required size (kept, optional), and adds a required priority to
+    // notes alone, which leaves version 1 behind as it is made current:
+    // the tags table the change never checked is narrowed back by the
+    // rollback all the same.
+    const { store, first } = await storeOf(tagged(20, { size: v.number() }), [
+      { title: "Short", size: 1 },
+    ]);
     const second = await store.defineTables(
-      notes({ title: v.string().max(200), priority: v.number() }),
+      tagged(200, { priority: v.number() }),
       consumer(2),
       [],
       [zeroPriority]
@@ -502,6 +532,15 @@ describe("a rollback", () => {
       title: "A title past twenty characters",
       priority: 1,
     });
+    const tag = newRecordId();
+    await commit(store, second.schemaHash, [
+      {
+        op: "insert",
+        table: "tags",
+        id: tag,
+        fields: { name: "A name past twenty characters" },
+      },
+    ]);
     const before = await notesOf(store);
     const contract = await contractHash(store);
 
@@ -515,13 +554,29 @@ describe("a rollback", () => {
         code: "migration.required",
         details: {
           changes: [],
+          // A rollback's answers are the old release's, sealed with it: a
+          // migration answers each, even a record that lacks the field.
           questions: [
+            {
+              table: "notes",
+              field: "size",
+              rows: 1,
+              records: [{ id: long, reason: "missing" }],
+              answers: ["migration"],
+            },
             {
               table: "notes",
               field: "title",
               rows: 1,
               records: [{ id: long, reason: "invalid" }],
-              answers: ["value", "migration"],
+              answers: ["migration"],
+            },
+            {
+              table: "tags",
+              field: "name",
+              rows: 1,
+              records: [{ id: tag, reason: "invalid" }],
+              answers: ["migration"],
             },
           ],
         },
@@ -553,60 +608,254 @@ describe("a nested default", () => {
   });
 });
 
-describe("a changed access mode", () => {
-  const fields = { title: v.string() };
-  const schema = defineSchema({ notes: defineTable(fields) });
-  const withAccess = (read: "owner" | "appMembers") =>
-    manifestText(
-      schemaManifest(schema, {
-        tables: { notes: { read, write: read } },
-      })
-    );
-  const titles = async (
-    store: OpenStore,
-    schemaHash: string,
-    principal: string
-  ) => {
-    const scope: ReadScope = {
-      schemaHash,
-      principal,
-      appMember: true,
-      appBuilder: false,
-      consumer: consumer(1),
-    };
-    const db = databaseReader(schema, async (request) => {
-      const { value } = await store.read(scope, request);
-      return value;
-    });
-    const read = await db.query("notes").collect();
-    return read.map(({ title }) => title).toSorted();
-  };
+const fields = { title: v.string() };
+const titleOnly = defineSchema({ notes: defineTable(fields) });
 
+/** Who reads and writes the notes. */
+type NotesAccess = "owner" | "appMembers";
+
+/** `of`'s notes, read and written as `read` says. */
+const withAccess = (read: NotesAccess, of: SchemaDefinition = titleOnly) =>
+  manifestText(
+    schemaManifest(of, {
+      tables: { notes: { read, write: read } },
+    })
+  );
+
+/** How `principal`, a member of the App, reads under `schemaHash`. */
+const scopeOf = (schemaHash: string, principal: string): ReadScope => ({
+  schemaHash,
+  principal,
+  appMember: true,
+  appBuilder: false,
+  consumer: consumer(1),
+});
+
+/** The note titles `principal` reads under `schemaHash`. */
+const titles = async (
+  store: OpenStore,
+  schemaHash: string,
+  principal: string
+) => {
+  const db = databaseReader(titleOnly, async (request) => {
+    const { value } = await store.read(scopeOf(schemaHash, principal), request);
+    return value;
+  });
+  const read = await db.query("notes").collect();
+  return read.map(({ title }) => title).toSorted();
+};
+
+/** A store whose notes, shared as `read` says, hold Ada's and Grace's. */
+const twoOwners = async (
+  read: NotesAccess,
+  of: SchemaDefinition = titleOnly
+) => {
+  const store = await newStore();
+  const first = await store.defineTables(withAccess(read, of), consumer(1));
+  await insert(store, first.schemaHash, { title: "Ada's" }, "ada");
+  await insert(store, first.schemaHash, { title: "Grace's" }, "grace");
+  return { store, first: first.schemaHash };
+};
+
+/** The generation of the store's notes table. */
+const notesGeneration = async (store: OpenStore): Promise<number> => {
+  const { notes: generation } = await store.generations(["notes"]);
+  return generation ?? 0;
+};
+
+describe("a changed access mode", () => {
   it("holds for every version pinned to the store once its release is current", async () => {
-    const store = await newStore();
-    const shared = await store.defineTables(
-      withAccess("appMembers"),
-      consumer(1)
-    );
-    await insert(store, shared.schemaHash, { title: "Ada's" }, "ada");
-    await insert(store, shared.schemaHash, { title: "Grace's" }, "grace");
+    const { store, first: shared } = await twoOwners("appMembers");
     const owned = await store.defineTables(withAccess("owner"), consumer(2));
-    const sealed = await titles(store, shared.schemaHash, "ada");
+    const sealed = await titles(store, shared, "ada");
+    const before = await notesGeneration(store);
     await activate(store, owned.schemaHash, 2);
 
     expect({
       sealed,
       // Version 1 declared the table shared; it reads under the
       // contract's mode now, as version 2 does.
-      oldVersion: await titles(store, shared.schemaHash, "ada"),
+      oldVersion: await titles(store, shared, "ada"),
       newVersion: await titles(store, owned.schemaHash, "ada"),
+      // No record was written, yet the table moved on: a live query of it
+      // reads again, under the new mode, and drops Grace's note.
+      moved: (await notesGeneration(store)) > before,
       // The data is the same: version 1 still writes.
-      oldWrites: await codeOf(insert(store, shared.schemaHash, { title: "x" })),
+      oldWrites: await codeOf(insert(store, shared, { title: "x" })),
     }).toStrictEqual({
       sealed: ["Ada's", "Grace's"],
       oldVersion: ["Ada's"],
       newVersion: ["Ada's"],
+      moved: true,
       oldWrites: "ok",
+    });
+  });
+
+  it("waits for a backfill pending as it is sealed, and holds once made current after it", async () => {
+    const { store, first: shared } = await twoOwners("appMembers");
+    // Version 2 adds a defaulted category the notes lack: the store's
+    // pending target while its backfill runs.
+    const filled = await store.defineTables(
+      withAccess(
+        "appMembers",
+        defineSchema({
+          notes: defineTable({
+            ...fields,
+            category: v.string().default("general"),
+          }),
+        })
+      ),
+      consumer(2)
+    );
+    // Version 3 makes the notes their owner's meanwhile: a change its
+    // fields don't show, which the contract in force covers.
+    const owned = await store.defineTables(withAccess("owner"), consumer(3));
+    const { state } = await activate(store, owned.schemaHash, 3);
+    const meanwhile = {
+      awaits: owned.contract.awaits,
+      status: state,
+      read: await titles(store, shared, "ada"),
+    };
+    await fillAll(store, filled.contract.hash);
+    const status = await activate(store, owned.schemaHash, 3);
+
+    expect({
+      meanwhile,
+      status,
+      oldVersion: await titles(store, shared, "ada"),
+    }).toStrictEqual({
+      // It waits to be made current, and can't be until the backfill is
+      // done: never answered as in force while the old rules are.
+      meanwhile: {
+        awaits: true,
+        status: "pending",
+        read: ["Ada's", "Grace's"],
+      },
+      status: { state: "active" },
+      oldVersion: ["Ada's"],
+    });
+  });
+
+  it("loosened, lets an older version's search read past the owner its index was built for", async () => {
+    const searchable = defineSchema({
+      notes: defineTable(fields).searchIndex(["title"]),
+    });
+    const { store, first: owned } = await twoOwners("owner", searchable);
+    const shared = await store.defineTables(
+      withAccess("appMembers", searchable),
+      consumer(2)
+    );
+    const found = async (schemaHash: string): Promise<unknown> => {
+      const { value } = await store.read(scopeOf(schemaHash, "ada"), {
+        kind: "query",
+        query: {
+          descriptorVersion: 1,
+          table: "notes",
+          index: null,
+          range: [],
+          filter: null,
+          order: "asc",
+          terminal: { kind: "collect" },
+          search: "Grace",
+        },
+      });
+      return z
+        .array(z.object({ title: z.string() }))
+        .parse(value)
+        .map(({ title }) => title);
+    };
+    const sealed = await found(owned);
+    await activate(store, shared.schemaHash, 2);
+
+    expect({
+      sealed,
+      // Version 1's search index was built owner by owner; its owner
+      // condition is the contract's now, which shares the notes.
+      oldVersion: await found(owned),
+      newVersion: await found(shared.schemaHash),
+    }).toStrictEqual({
+      sealed: [],
+      oldVersion: ["Grace's"],
+      newVersion: ["Grace's"],
+    });
+  });
+});
+
+/** The Notes App's registration, its notes shared as `read` says. */
+const notesApp = (read: NotesAccess) => `import { app } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "${read}", write: "${read}" } } },
+  operations: {},
+  screens: [],
+  uses: [],
+  migrations: [],
+});
+`;
+
+describe("making the release current", { timeout: 180_000 }, () => {
+  it("puts the store back on the version still current when the version isn't made current after all", async () => {
+    const fixture = await appWith({
+      "schema.ts": v1Schema,
+      "app.ts": notesApp("owner"),
+    });
+    const first = await seal(fixture);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "app.ts": notesApp("appMembers") },
+      "Shared notes"
+    );
+    const second = await seal(fixture, 2);
+    const object = env.DATA_STORES.getByName(fixture.store);
+    const statusOf = async (schemaHash: string, version: number) =>
+      await object.schemaStatus(fixture.store, schemaHash, {
+        resourceId: fixture.app,
+        resourceVersion: version,
+      });
+    // The App is archived just before the batch that would make version 2
+    // current, after its store took version 2's shared notes: the batch
+    // matches nothing, and version 1 stays current.
+    const racing = racingDb(
+      async () =>
+        await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
+          .bind(fixture.app)
+          .run(),
+      /update "apps" set "current_version"/iu
+    );
+    const refused = await failure(
+      async () =>
+        await setCurrentVersion(
+          { ...env, DB: racing },
+          fixture.owner,
+          fixture.app,
+          2
+        )
+    );
+    const current = await env.DB.prepare(
+      "SELECT current_version AS version FROM apps WHERE id = ?"
+    )
+      .bind(fixture.app)
+      .first<{ version: number }>();
+    const { state: waiting } = await statusOf(second.manifest.schemaHash, 2);
+
+    expect({
+      refused: refused === "ok",
+      current: current?.version,
+      // Version 1's owner-only notes are the contract's again; version 2's
+      // shared ones wait to be made current.
+      first: await statusOf(first.manifest.schemaHash, 1),
+      second: waiting,
+    }).toStrictEqual({
+      refused: false,
+      current: 1,
+      first: { state: "active" },
+      second: "ready",
     });
   });
 });

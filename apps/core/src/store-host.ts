@@ -808,7 +808,6 @@ const contractOf = async (row: {
   return { hash, manifest };
 };
 
-/** What a plan added and kept, as its receipt records it. */
 /** How a plan's check is answered, as its record names it. */
 const answerOf = (
   answer: SchemaAnswer | null,
@@ -820,6 +819,7 @@ const answerOf = (
   return from === null ? null : `from:${from}`;
 };
 
+/** What a plan added and kept, as its receipt records it. */
 const planRecord = (
   plan: AcceptedPlan,
   identities: { base: string | null; schema: string; contract: string }
@@ -1373,26 +1373,14 @@ export interface SweepOptions {
 }
 
 /**
- * A store's object, as the host's code works on it: the store's
- * operations with what they depend on passed in (who takes outbox
- * entries, the clock, the live-run lookup). The Durable Object
- * (`DataStore`) fixes those to the deployment's registry and the real
- * clock; tests choose them, inside the object. Not a Durable Object
- * itself, so none of this is reachable over RPC.
- */
-/**
- * Whether a schema recorded as `manifest` (its text) no longer fits the
- * store's `contract`: what a migration, or a change that checks records,
- * leaves behind as it takes over (`StoreHost.#supersede`).
- */
-/**
  * What making a release current does when its change checks records
  * (`StoreHost.#checkedStep`): applies `plan` onto the contract whose hash
- * is `baseHash`.
+ * is `baseHash`; a `rollback` when the release's schema was left behind.
  */
 interface CheckedStep {
   readonly baseHash: string;
   readonly plan: AcceptedPlan;
+  readonly rollback: boolean;
 }
 
 /**
@@ -1464,6 +1452,50 @@ const statusOfPending = (
 };
 
 /**
+ * `StoreHost.schemaStatus` of schema `schema` (hash `hash`), in force
+ * and not left behind, on a store whose contract is `contract`, with its
+ * `pending` target, if any; `checked` when making its release current
+ * still applies a change that checks records.
+ */
+const statusInForce = (
+  hash: string,
+  schema: SchemaManifest,
+  {
+    checked,
+    contract,
+    pending,
+    consumer,
+  }: {
+    checked: boolean;
+    contract: SchemaManifest | null;
+    pending: PendingTarget | null;
+    consumer: SchemaConsumer | undefined;
+  }
+): SchemaStatus => {
+  if (checked && pending === null) {
+    // Its change checks records: applied as it is made current.
+    return readyStatus(hash);
+  }
+  if (checked && pending !== null) {
+    // It waits for the pending target to be in force first, even when the
+    // contract covers it (coverage doesn't look at rules): ready with a
+    // target that holds it, an explicit migration found ready, which
+    // `activateReady` activates before applying the change.
+    const waiting = statusOfPending(pending, consumer);
+    return schemaCovered(pending.manifest, schema)
+      ? waiting
+      : { ...waiting, state: "pending" };
+  }
+  if (schemaCovered(contract, schema)) {
+    return { state: "active" };
+  }
+  if (pending !== null && schemaCovered(pending.manifest, schema)) {
+    return statusOfPending(pending, consumer);
+  }
+  return { state: "unknown" };
+};
+
+/**
  * Whether `schema`, recorded on a store whose contract is `contract`,
  * waits for its release to be made current: its change checks records
  * (`AcceptedPlan.activates`), so the contract takes it only then
@@ -1477,9 +1509,22 @@ const awaitsActivation = (
   return plan.accepted && plan.activates;
 };
 
+/**
+ * Whether a schema recorded as `manifest` (its text) no longer fits the
+ * store's `contract`: what a migration, or a change that checks records,
+ * leaves behind as it takes over (`StoreHost.#supersede`).
+ */
 const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
   !schemaCovered(contract, readSchemaManifest(manifest).manifest);
 
+/**
+ * A store's object, as the host's code works on it: the store's
+ * operations with what they depend on passed in (who takes outbox
+ * entries, the clock, the live-run lookup). The Durable Object
+ * (`DataStore`) fixes those to the deployment's registry and the real
+ * clock; tests choose them, inside the object. Not a Durable Object
+ * itself, so none of this is reachable over RPC.
+ */
 export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
@@ -1563,7 +1608,7 @@ export class StoreHost {
    * (new tables, new optional or defaulted fields, widened fields, new or
    * redefined indexes; tables and fields left out are kept) is applied
    * now; one the records must be checked for (a narrowing, a required
-   * field, a conversion, a changed access mode or row rule) is checked
+   * field, a rename, a changed access mode or row rule) is checked
    * against every record now, a dry run that writes nothing, and waits,
    * recorded with the consumer's `answers`, to be applied as its release
    * is made current (`activateReady`, store-schema-changes.ts). Records a
@@ -1772,7 +1817,10 @@ export class StoreHost {
     ) {
       // Covered by the contract in force, an older release's indexes
       // aside: applied without moving the contract, which waits on the
-      // pending target alone.
+      // pending target alone. A change it makes that checks records (a
+      // changed rule, which coverage doesn't look at) waits too, and is
+      // applied once the target is in force, as its release is made
+      // current: `activates` says so, as on the paths below.
       const record = planRecord(plan, {
         base: baseHash,
         schema: schemaHash,
@@ -1793,7 +1841,7 @@ export class StoreHost {
         pendingSeen,
         onto: false,
         migrations: null,
-        activates: false,
+        activates: plan.activates,
         answers: answersText,
       };
     }
@@ -1818,7 +1866,7 @@ export class StoreHost {
         pendingSeen,
         onto: true,
         migrations: null,
-        activates: false,
+        activates: plan.activates,
         answers: answersText,
       };
     }
@@ -3545,8 +3593,8 @@ export class StoreHost {
    * contract covers it, or its pending target does (store-fills.ts fills
    * in what it lacks). One whose change checks records doesn't until its
    * release is made current (`activateReady`): its writes may not fit the
-   * records the contract describes yet (a renamed field, a value an
-   * answer maps), and nothing checks them against it but this. Known per
+   * records the contract describes yet (a renamed field, a field newly
+   * required), and nothing checks them against it but this. Known per
    * contract, pending target and schema; call it inside a transaction.
    */
   #writable(schemaHash: string): boolean {
@@ -5751,10 +5799,11 @@ export class StoreHost {
    * write queued since puts it back to running instead (its run goes on,
    * kept going as any). Activation is `#activate`'s: the contract moves to
    * the target, and the schemas it no longer fits are left behind.
-   * Otherwise, a change the schema makes that checks records is applied
-   * now, a rollback to a schema left behind among them, every record
-   * checked against it again (`#applyChecked`, store-schema-changes.ts).
-   * Answers the schema's status after (`schemaStatus`).
+   * Then, with no target pending, a change the schema makes that checks
+   * records is applied onto the contract in force, a rollback to a schema
+   * left behind among them, every record checked against it again
+   * (`#applyChecked`, store-schema-changes.ts). Answers the schema's
+   * status after (`schemaStatus`).
    */
   async activateReady(
     storeId: StoreId,
@@ -5810,9 +5859,11 @@ export class StoreHost {
     });
     if (activated) {
       this.#forgetSchemas();
-    } else {
-      await this.#applyChecked(storeId, hash, named);
     }
+    // Then the change the schema checks records for, onto the contract in
+    // force now: one the target just activated may still leave some (a
+    // rule the schema changes beside the migration's tables, say).
+    await this.#applyChecked(storeId, hash, named);
     return this.schemaStatus(storeId, hash, named);
   }
 
@@ -5884,7 +5935,7 @@ export class StoreHost {
       answers,
     });
     return plan.accepted && (plan.activates || (superseded && plan.changed))
-      ? { baseHash: row.hash, plan }
+      ? { baseHash: row.hash, plan, rollback: superseded }
       : null;
   }
 
@@ -5999,10 +6050,13 @@ export class StoreHost {
       this.#tableRows().map(({ name, tableId }) => [name, tableId])
     );
     const run = runChange(this.#db, tableStepsOf(step.plan, tableIds), {
-      commit: this.#nextCommit(),
-      schemaHash,
-      now,
-      sensitive: this.#sensitivity(),
+      write: {
+        commit: this.#nextCommit(),
+        schemaHash,
+        now,
+        sensitive: this.#sensitivity(),
+      },
+      rollback: step.rollback,
     });
     if (!run.questions.empty) {
       throw migrationErrors.create("migration.required", {
@@ -6018,7 +6072,14 @@ export class StoreHost {
     // A rollback brings back what the contract covers again.
     this.#reinstate(step.plan.contract);
     this.#supersede(step.plan.contract, now);
-    this.#rewrote(run.changedTables);
+    // A table whose access mode or rules changed shows other rows now,
+    // though none was rewritten: its generation moves on too, so every
+    // live query that read it reads again under the new rules.
+    const ruled = step.plan.ruleChanges.flatMap((table) => {
+      const tableId = tableIds.get(table);
+      return tableId === undefined ? [] : [tableId];
+    });
+    this.#rewrote(new Set([...run.changedTables, ...ruled]));
   }
 
   /**
@@ -7310,22 +7371,12 @@ export class StoreHost {
         row?.text === null || row?.text === undefined
           ? null
           : readSchemaManifest(row.text).manifest;
-      const pending = this.#pendingTarget();
-      if (step !== null && pending === null) {
-        // Its change checks records: applied as it is made current.
-        return readyStatus(hash);
-      }
-      if (schemaCovered(contract, schema)) {
-        return { state: "active" };
-      }
-      if (pending !== null && schemaCovered(pending.manifest, schema)) {
-        return statusOfPending(pending, named);
-      }
-      if (step !== null && pending !== null) {
-        // It waits for the pending target to be in force first.
-        return { ...statusOfPending(pending, named), state: "pending" };
-      }
-      return { state: "unknown" };
+      return statusInForce(hash, schema, {
+        checked: step !== null,
+        contract,
+        pending: this.#pendingTarget(),
+        consumer: named,
+      });
     });
   }
 

@@ -240,17 +240,34 @@ const settledRecord = (steps: TableSteps, fields: StoreFields): Settled => {
   return { fields: settled, changed };
 };
 
+/**
+ * Whether a value the App gives could settle a record that doesn't fit
+ * for `reason`: only one that lacks the field (`missing`), or one the
+ * value given didn't fit (`unfit`). A value never replaces one the record
+ * holds (`invalid`), nor makes a record smaller (`too_large`).
+ */
+const valueSettles = (reason: SchemaCheckReason): boolean =>
+  reason === "missing" || reason === "unfit";
+
 /** The questions a run asks, as it finds records that don't fit. */
 export class Questions {
   readonly #byField = new Map<string, SchemaQuestion>();
+  /**
+   * Whether the App may answer with a value: not on a rollback, whose
+   * answers are the old release's, sealed with it.
+   */
+  readonly #answerable: boolean;
+
+  constructor(answerable: boolean) {
+    this.#answerable = answerable;
+  }
 
   /** Notes that record `id` doesn't fit `field` of `table`, and why. */
   add(
     table: string,
     field: string,
     id: string,
-    reason: SchemaCheckReason,
-    answers: readonly "value"[]
+    reason: SchemaCheckReason
   ): void {
     const key = canonicalJson([table, field]);
     const question = this.#byField.get(key) ?? {
@@ -258,11 +275,14 @@ export class Questions {
       field,
       rows: 0,
       records: [],
-      answers: [...answers, "migration"],
+      answers: ["migration"],
     };
     question.rows += 1;
     if (question.records.length < schemaQuestionRecordsMax) {
       question.records.push({ id, reason });
+    }
+    if (this.#answerable && valueSettles(reason)) {
+      question.answers = ["value", "migration"];
     }
     this.#byField.set(key, question);
   }
@@ -400,17 +420,18 @@ const rewrite = (
  * writes nothing, or, with `write`, one that rewrites each record the
  * change settles differently (its revision moved on) and records it in
  * the change history. Either way it answers the questions the records
- * that don't fit ask. A run that writes must be inside the transaction
- * that moves the contract, and that transaction must be thrown out when
- * any question is asked: the run itself goes on past a record that
- * fails, to count them all.
+ * that don't fit ask, offering a value only where one could settle them
+ * and the change isn't a `rollback`. A run that writes must be inside the
+ * transaction that moves the contract, and that transaction must be
+ * thrown out when any question is asked: the run itself goes on past a
+ * record that fails, to count them all.
  */
 export const runChange = (
   db: Db,
   steps: readonly TableSteps[],
-  write?: ChangeWrite
+  { write, rollback = false }: { write?: ChangeWrite; rollback?: boolean } = {}
 ): ChangeRun => {
-  const questions = new Questions();
+  const questions = new Questions(!rollback);
   const changedTables = new Set<string>();
   const tally = { rewritten: 0 };
   for (const table of steps) {
@@ -421,7 +442,7 @@ export const runChange = (
       );
       if ("failures" in settled) {
         for (const { field, reason } of settled.failures) {
-          questions.add(table.table, field, record.recordId, reason, ["value"]);
+          questions.add(table.table, field, record.recordId, reason);
         }
         return;
       }
