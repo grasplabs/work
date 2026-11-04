@@ -991,7 +991,11 @@ class SealedRun implements SealedRunKind {
       return { retries: sealedRetries };
     }
     const limits = [
-      ...(task.timeoutMs === undefined ? [] : [task.timeoutMs]),
+      // A listen's timeout is how long it waits for its events, never
+      // how long an attempt of its steps may take.
+      ...(task.timeoutMs === undefined || task.kind === "listen"
+        ? []
+        : [task.timeoutMs]),
       ...triesAround(this.run.build, task).flatMap((around) =>
         around.catch.retry?.attemptMs === undefined
           ? []
