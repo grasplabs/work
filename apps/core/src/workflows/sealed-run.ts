@@ -160,7 +160,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   the run's object across activations (run-object.ts, `modelCallsIn`),
 //   so a replay spends nothing its earlier activations spent; each call is
 //   one of its lineage's host calls; its attempts are admitted as its
-//   workflow's (`sealedAdmission`, `workflow-resource:<id>`).
+//   activation says (resource-runs.ts, `sealedActivation`): an independent
+//   run's as its workflow's (`workflow-resource:<id>`) in its account's
+//   lineage, a test run's as its own.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
 //   record of the failure no catch took yet (`#pending`), mapped by
 //   resource-errors.ts from what it knows. A failure the host made keeps

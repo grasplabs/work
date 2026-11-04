@@ -74,10 +74,12 @@ const roundError = {
 
 /**
  * The journal of a sealed run's step `fetch:task`, failing its first
- * round and retried in a second, which `second` ends: as it completed or
- * failed.
+ * round and retried in a second, as far as `second` says: still backing
+ * off before it, or its run completed or failed.
  */
-const retriedJournal = async (second: "completed" | "failed") => {
+const retriedJournal = async (
+  second: "completed" | "failed" | "backingOff"
+) => {
   const base = "fetch:task";
   const prefix = waitStep(await waitKeyOf(base), "retry", 2);
   const own = stepOf(1, base);
@@ -99,6 +101,19 @@ const retriedJournal = async (second: "completed" | "failed") => {
     recordOf("attempt_started", decide, { attempt: 1 }),
     recordOf("attempt_completed", decide, { attempt: 1 }),
     recordOf("sleep_started", backoff, { durationMs: 1000 }),
+  ];
+  if (second === "backingOff") {
+    const steps = [
+      identityOf(1, base, "do", 1),
+      identityOf(2, decide.name, "do", 1),
+    ];
+    const waits = [
+      identityOf(2, decide.name, "do", 1),
+      identityOf(3, backoff.name, "sleep", 0),
+    ];
+    return { records, waits, steps };
+  }
+  records.push(
     recordOf("sleep_completed", backoff),
     recordOf("attempt_started", run, { attempt: 1 }),
     ...(second === "completed"
@@ -114,8 +129,8 @@ const retriedJournal = async (second: "completed" | "failed") => {
             final: true,
             error: roundError,
           }),
-        ]),
-  ];
+        ])
+  );
   const doSteps = [
     identityOf(1, base, "do", 1),
     identityOf(2, decide.name, "do", 1),
@@ -148,10 +163,16 @@ const told = async (journal: Awaited<ReturnType<typeof retriedJournal>>) => {
 describe("a step its catch's retry policy runs again", () => {
   it("is told in its run's history as more attempts of its step, retrying after a round failed, waiting while it backs off", async () => {
     const failedText: unknown = expect.any(String);
+    const backingOff = await told(await retriedJournal("backingOff"));
     expect({
+      // Its round's failure is retried from the start of its backoff.
+      backingOff: backingOff.map((entry) =>
+        "state" in entry ? entry.state : entry.kind
+      ),
       completed: await told(await retriedJournal("completed")),
       failed: await told(await retriedJournal("failed")),
     }).toStrictEqual({
+      backingOff: ["started", "retrying", "opened"],
       completed: [
         {
           taskId: "fetch",

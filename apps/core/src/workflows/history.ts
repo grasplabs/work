@@ -135,7 +135,7 @@ interface RoundedStep {
   attempts: number;
   /** Each run again of it, by its ordinal: how many attempts it took. */
   runs: Map<number, number>;
-  /** The ordinals of its retries' runs. */
+  /** The ordinals of its retries' backoffs and runs: each follows a failed round. */
   retries: number[];
 }
 
@@ -551,6 +551,11 @@ const roundsOf = async (
   );
   for (const { key, kind, rest, wait } of ordered) {
     const rounded = roundedByKey.get(key);
+    // A retry's backoff starts it: its round's failure is retried from
+    // then, though its run comes only once the backoff is over.
+    if (rounded !== undefined && kind === "retry" && rest === "wait") {
+      rounded.retries.push(wait.ordinal);
+    }
     if (rounded !== undefined && rest === "run" && wait.kind === "do") {
       rounded.runs.set(wait.ordinal, wait.attempt);
       if (kind === "retry") {
