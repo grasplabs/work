@@ -18,7 +18,6 @@ import {
 import type {
   AgentEvent,
   Conversation,
-  MessageChange,
   EntryId,
   EntryRecord,
   Registry,
@@ -296,11 +295,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
 };
 
 /**
- * Times the thinking of the response streaming in, from its stream's
- * changes as pi commits them: from a thinking part's start to the start
- * of the next part, or the response's end, the parts' times added up. To
- * the grain of pi's commits of the stream; a response a restart cut
- * short has none.
+ * Times the thinking of the response streaming in, from the partial
+ * answer pi keeps live (`pi.live`): from when its latest part is thinking
+ * to when another part follows, or the response ends, the parts' times
+ * added up. pi's events carry no stream changes, so the partial is what
+ * there is: to the grain of its updates; a response a restart cut short
+ * has none.
  */
 const thinkingClock = () => {
   let ms: number | undefined;
@@ -312,14 +312,12 @@ const thinkingClock = () => {
     }
   };
   return {
-    see: (changes: readonly MessageChange[]): void => {
-      for (const { type } of changes) {
-        if (type === "thinking_start") {
-          stop();
-          since = Date.now();
-        } else if (type === "text_start" || type === "toolcall_start") {
-          stop();
-        }
+    see: (partial: AssistantMessage): void => {
+      const thinking = partial.content.at(-1)?.type === "thinking";
+      if (thinking) {
+        since ??= Date.now();
+      } else {
+        stop();
       }
     },
     /** The response's thinking time, now it ended: none if it didn't think. */
@@ -458,9 +456,7 @@ export class ChatHarness {
 
   /** Takes in one of the agent's events (`watchEvents`). */
   #see(event: AgentEvent): void {
-    if (event.type === "message_update") {
-      this.#thinking.see(event.changes);
-    } else if (event.type === "message_end") {
+    if (event.type === "message_end") {
       const ms = this.#thinking.take();
       if (ms !== undefined && event.entry.kind === "pi.assistant") {
         this.#thought.set(event.entry.id, ms);
@@ -891,6 +887,9 @@ export class ChatHarness {
       return;
     }
     this.#shown = json;
+    if (partial !== null) {
+      this.#thinking.see(partial);
+    }
     this.#ctx.waitUntil(this.#showing(partial));
   }
 
