@@ -10,8 +10,23 @@ import { checkpoint, effect, witness } from "./outside.ts";
 /** The most a step's stream may hold in these tests (the host's limit). */
 export const testMaxStreamBytes = 1024 * 1024;
 
-/** How many one-byte chunks "tiny-chunks" streams. */
-export const tinyChunks = 262_144;
+/**
+ * How many one-byte chunks "tiny-chunks" streams, then a stored chunk's
+ * worth in one (the engine stores 256 KiB a row, streams.ts): its first
+ * row is the tiny chunks and the head of the big one, its last the rest.
+ * Each chunk read costs the engine an await or so, which is real time on
+ * a loaded runner: 262,144 tiny chunks, a row of them, took more than the
+ * 10 s a run has to end in CI.
+ */
+export const tinyChunks = 16_384;
+const tinyChunksTail = 256 * 1024;
+
+/** What "tiny-chunks" streams, byte by byte. */
+export const tinyChunksContent = (): Uint8Array =>
+  Uint8Array.from(
+    { length: tinyChunks + tinyChunksTail },
+    (_, index) => index % 251
+  );
 
 /** How long the stalled upload's attempt has. */
 export const stuckStreamTimeoutMs = 500;
@@ -337,16 +352,18 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
       }
     },
   },
-  // A stream of 262,144 one-byte chunks, read back.
+  // A stream of many one-byte chunks and a big one, read back.
   "tiny-chunks": {
     run: async (_event, step) => {
-      const body = await step.do("export", () =>
-        chunkStream(
-          Array.from({ length: tinyChunks }, (_, index) =>
-            Uint8Array.of(index % 256)
-          )
-        )
-      );
+      const body = await step.do("export", () => {
+        const content = tinyChunksContent();
+        return chunkStream([
+          ...Array.from({ length: tinyChunks }, (_, index) =>
+            content.slice(index, index + 1)
+          ),
+          content.slice(tinyChunks),
+        ]);
+      });
       return await digestOf(body);
     },
   },

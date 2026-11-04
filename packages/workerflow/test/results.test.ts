@@ -28,7 +28,7 @@ import {
   slowStreamFirst,
   slowStreamRest,
   testMaxRunStreamBytes,
-  tinyChunks,
+  tinyChunksContent,
 } from "./result-definitions.ts";
 import { TestRuns } from "./worker.ts";
 
@@ -684,17 +684,14 @@ describe("a replayed stream whose storage fails while it is read", () => {
 describe("a stream of many tiny chunks", () => {
   it("is kept whole, chunk after chunk", async () => {
     const id = newId();
-    const content = Uint8Array.from(
-      { length: tinyChunks },
-      (_, index) => index % 256
-    );
+    const content = tinyChunksContent();
     await workflow("tiny-chunks").create({ id });
 
     await expect(ended("tiny-chunks", id)).resolves.toStrictEqual({
       status: "complete",
       output: {
         sha256: await sha256(content),
-        length: tinyChunks,
+        length: content.length,
         fresh: true,
       },
     });
