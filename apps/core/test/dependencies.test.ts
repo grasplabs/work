@@ -1070,7 +1070,7 @@ describe("dependency approval", () => {
     });
   });
 
-  it("decides in one write: leaving the organization, being unshared, a replacement or a policy change just before it lands refuses it", async () => {
+  it("decides in one write: leaving the organization, being unshared or demoted, the App archived, a replacement or a policy change just before it lands refuses it", async () => {
     const admin = await personApi("admin");
     const racedBy = async (
       first: (raced: {
@@ -1118,6 +1118,10 @@ describe("dependency approval", () => {
         decisions: eventsOf(events, request)
           .map(({ action }) => action)
           .filter((action) => action === "dependency.approved"),
+        // Each refusal of who decided, on the record with why.
+        refused: eventsOf(events, request)
+          .filter(({ action }) => action === "dependency.decision_refused")
+          .map(({ detail }) => detail.reason),
       };
     };
     // Another App's approval, retired as the decision runs: the policy
@@ -1136,6 +1140,14 @@ describe("dependency approval", () => {
         id: approver.userId,
       });
     });
+    // Demoted to a role that doesn't build: no longer a builder of it.
+    const demoted = await racedBy(async ({ approver }) => {
+      await admin.api.members.setRole(approver.userId, "user");
+    });
+    // The App archived: read-only, nothing is decided for it.
+    const archived = await racedBy(async ({ builder, app }) => {
+      await builder.api.apps.archive(app);
+    });
     const replaced = await racedBy(async ({ builder, app }) => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
     });
@@ -1152,25 +1164,41 @@ describe("dependency approval", () => {
     });
 
     const nothing = { admitted: "dependency.approval_required", decisions: [] };
-    expect(removedFromOrganization).toStrictEqual({
+    const forbidden = {
       result: "dependency.forbidden",
       status: "pending",
       ...nothing,
-    });
-    expect(unshared).toStrictEqual({
-      result: "dependency.forbidden",
-      status: "pending",
-      ...nothing,
-    });
-    expect(replaced).toStrictEqual({
-      result: "dependency.stale",
-      status: "gone",
-      ...nothing,
-    });
-    expect(policyChanged).toStrictEqual({
-      result: "dependency.stale",
-      status: "pending",
-      ...nothing,
+      refused: ["dependency.forbidden"],
+    };
+    expect({
+      removedFromOrganization,
+      unshared,
+      demoted,
+      archived,
+      replaced,
+      policyChanged,
+    }).toStrictEqual({
+      removedFromOrganization: forbidden,
+      unshared: forbidden,
+      demoted: forbidden,
+      archived: {
+        result: "app.archived",
+        status: "pending",
+        ...nothing,
+        refused: [],
+      },
+      replaced: {
+        result: "dependency.stale",
+        status: "gone",
+        ...nothing,
+        refused: [],
+      },
+      policyChanged: {
+        result: "dependency.stale",
+        status: "pending",
+        ...nothing,
+        refused: [],
+      },
     });
   });
 

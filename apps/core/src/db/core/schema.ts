@@ -2686,12 +2686,16 @@ export const dependencyRequests = sqliteTable(
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
     /**
+     * Read and written by nothing: replaced by `scanned_at`, and dropped,
+     * with its index, by the follow-up of expand then contract.
+     */
+    malwareCheckedAt: timestamp("malware_checked_at"),
+    /**
      * When an approval in force was last re-scanned against OSV.dev and
      * the registry's advisories, by the regular re-scan
      * (`rescanPackages`, requests.ts): null until it was.
      */
-    // Now the last advisory and malware scan; the name is historical.
-    malwareCheckedAt: timestamp("malware_checked_at"),
+    scannedAt: timestamp("scanned_at"),
     /**
      * The advisories that affected an approval's graph as it was approved,
      * and those the re-scan told its builders of since (`rescanPackages`),
@@ -2728,13 +2732,15 @@ export const dependencyRequests = sqliteTable(
       table.graphHash,
       table.status
     ),
-    // The approvals the re-scan is due to read: by when each was last
-    // scanned, never scanned first. Led by that time, not the status, so
-    // the subject index keeps its order for what reads by subject.
+    // `malware_checked_at`'s, read by nothing: dropped with it.
     index("dependency_requests_malware_idx").on(
       table.malwareCheckedAt,
       table.status
     ),
+    // The approvals the re-scan is due to read: by when each was last
+    // scanned, never scanned first. Led by that time, not the status, so
+    // the subject index keeps its order for what reads by subject.
+    index("dependency_requests_scan_idx").on(table.scannedAt, table.status),
   ]
 );
 

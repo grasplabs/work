@@ -339,6 +339,13 @@ export const packageLimits = {
    * sealed under a lower limit always loads under this one.
    */
   workflowPackageChars: 2 * 1024 * 1024,
+  /**
+   * The advisory IDs an approval keeps of what affected its graph as it
+   * was approved and was told since (core's dependencies/requests.ts):
+   * far more than a graph's packages have. Past it, the re-scan tells
+   * nothing more of the graph, and logs that it reached it.
+   */
+  advisoriesNoticed: 2000,
 } as const;
 export type PackageLimits = Record<keyof typeof packageLimits, number>;
 

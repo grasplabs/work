@@ -44,7 +44,11 @@ import {
 } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { graspLockSchema, packageErrors } from "@grasp-os/shared/packages";
+import {
+  graspLockSchema,
+  packageErrors,
+  packageLimitsOf,
+} from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -74,7 +78,7 @@ import {
   outboxedIfChanged,
   storedEvent,
 } from "../audit-outbox.ts";
-import { memberOf, teamsOf } from "../auth/identity.ts";
+import { teamsOf } from "../auth/identity.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
   auditOutbox,
@@ -104,7 +108,11 @@ import {
   policyGeneration,
   policyGenerationSql,
 } from "./policy.ts";
-import { buildsSubjectSql, builtSubject } from "./subject-builders.ts";
+import {
+  archivedSql,
+  buildsSubjectSql,
+  builtSubject,
+} from "./subject-builders.ts";
 import {
   auditTargetOf,
   ofSubject,
@@ -211,13 +219,21 @@ import {
 // What a person approves is the graph by its hash, so what is later
 // fetched must match it byte for byte to be admitted.
 
-type Row = typeof dependencyRequests.$inferSelect;
+/**
+ * A request's row, without `malware_checked_at`, which nothing reads or
+ * writes any more (`scanned_at` replaced it; a later release drops it).
+ */
+type Row = Omit<typeof dependencyRequests.$inferSelect, "malwareCheckedAt">;
 
 /**
  * A request as lists read it: every column but its whole review
  * (`snapshot`, up to {@link dependencyMaxBytes} each).
  */
-const { snapshot: _snapshot, ...listed } = getTableColumns(dependencyRequests);
+const {
+  snapshot: _snapshot,
+  malwareCheckedAt: _malwareCheckedAt,
+  ...listed
+} = getTableColumns(dependencyRequests);
 type Listed = Omit<Row, "snapshot">;
 
 /** What a request keeps of its review, as JSON in `snapshot`. */
@@ -519,7 +535,7 @@ const newRequest = (
   endedAt: null,
   endedGeneration: null,
   endedReason: null,
-  malwareCheckedAt: null,
+  scannedAt: null,
   advisoriesNoticed: null,
 });
 
@@ -1003,7 +1019,7 @@ const findRow = async (env: Env, input: unknown): Promise<Row> => {
   const id = identifierSchema.safeParse(input);
   const row = id.success
     ? await drizzle(env.DB)
-        .select()
+        .select({ ...listed, snapshot: dependencyRequests.snapshot })
         .from(dependencyRequests)
         .where(eq(dependencyRequests.id, id.data))
         .get()
@@ -1085,16 +1101,20 @@ export const dependencyReview = async (
 
 /**
  * Most advisory IDs an approval keeps of what affected its graph
- * (`advisories_noticed`): far more than a graph's packages have, so the
- * list is bounded whatever a source answers.
+ * (`advisories_noticed`, `PackageLimits.advisoriesNoticed`): bounded
+ * whatever a source answers.
  */
-const advisoriesNoticedMax = 2000;
+const advisoriesNoticedMax = (env: Env): number =>
+  packageLimitsOf(env.PACKAGE_LIMITS).advisoriesNoticed;
 
-/** The IDs of `affecting`, each once, sorted, at most {@link advisoriesNoticedMax}. */
-const advisoryIdsOf = (affecting: readonly AffectingAdvisory[]): string[] =>
+/** The IDs of `affecting`, each once, sorted, at most `max`. */
+const advisoryIdsOf = (
+  affecting: readonly AffectingAdvisory[],
+  max: number
+): string[] =>
   [...new Set(affecting.map(({ advisory }) => advisory.id))]
     .toSorted()
-    .slice(0, advisoriesNoticedMax);
+    .slice(0, max);
 
 /**
  * Refuses approving `found`'s graph when a package of it is now known as
@@ -1108,7 +1128,7 @@ const advisoryIdsOf = (affecting: readonly AffectingAdvisory[]): string[] =>
  * with connect's error code, or `internal.unexpected`). Asked only
  * to approve: saying no never waits on either. Answers with the IDs of
  * every advisory that affects the graph now, malware or not, at most
- * {@link advisoriesNoticedMax}: what its approver approved it with, which
+ * `advisoriesNoticedMax`: what its approver approved it with, which
  * the re-scan never tells as new (`rescanPackages`).
  */
 const refuseKnownMalware = async (
@@ -1153,7 +1173,7 @@ const refuseKnownMalware = async (
       at: "approval",
     });
   }
-  return advisoryIdsOf(scan.affecting);
+  return advisoryIdsOf(scan.affecting, advisoriesNoticedMax(env));
 };
 
 /**
@@ -1224,21 +1244,31 @@ const tellChat = async (
 };
 
 /**
- * Why a write of `by`'s on `subject` found nothing to change: they no
- * longer build it (`dependency.forbidden`), or what they reviewed changed
+ * Why a write of `by`'s on `subject` found nothing to change, read from
+ * the database as the write read it: they no longer build it, or were
+ * demoted or removed (`dependency.forbidden`); a decision's App was
+ * archived (`app.archived`); or what they reviewed changed
  * (`dependency.stale`).
  */
 const whyNotWritten = async (
   env: Env,
   by: Identity,
-  subject: DependencySubject
-): Promise<ReturnType<typeof dependencyErrors.create>> =>
-  dependencyErrors.create(
-    (await memberOf(env.DB, by.userId)) === undefined ||
-      !(await builds(env, by, subject))
-      ? "dependency.forbidden"
-      : "dependency.stale"
+  subject: DependencySubject,
+  /** A decision, which an archived App refuses too. */
+  deciding: boolean
+): Promise<Error> => {
+  // As the write read it: the database, never the session's role.
+  const now = await drizzle(env.DB).get<{ builds: number; archived: number }>(
+    sql`SELECT ${buildsSubjectSql(by.userId, subject)} AS builds, ${archivedSql(subject)} AS archived`
   );
+  if (now.builds === 0) {
+    return dependencyErrors.create("dependency.forbidden");
+  }
+  if (deciding && now.archived !== 0) {
+    return appErrors.create("app.archived");
+  }
+  return dependencyErrors.create("dependency.stale");
+};
 
 /** Approves or denies a pending request for `by`: see `decideDependency`. */
 const decide = async (
@@ -1285,7 +1315,8 @@ const decide = async (
           sql`${policyGenerationSql} = ${reviewed.policyGeneration}`,
           // Read as it lands: the registry and OSV.dev take seconds, and
           // someone unshared meanwhile decides nothing.
-          buildsSubjectSql(by.userId, subject)
+          buildsSubjectSql(by.userId, subject),
+          sql`NOT ${archivedSql(subject)}`
         )
       )
       .returning(listed),
@@ -1302,7 +1333,7 @@ const decide = async (
     ...unusedLockStatements(db, subject),
   ]);
   if (!decided) {
-    throw await whyNotWritten(env, by, subject);
+    throw await whyNotWritten(env, by, subject, true);
   }
   await tellChat(env, decided, status);
   return await toRequest(env, decided);
@@ -1315,8 +1346,9 @@ const decide = async (
  * an agent acting for them, nor Grasp staff. Known malware is refused
  * whoever approves (`refuseKnownMalware`). One conditional update is the
  * decision: it lands only while the request is pending, its graph is the
- * one reviewed, the policy generation is the one reviewed and `by` still
- * builds its subject (`buildsSubjectSql`), in the batch that records it.
+ * one reviewed, the policy generation is the one reviewed, `by` still
+ * builds its subject (`buildsSubjectSql`) and an App is not archived, in
+ * the batch that records it.
  * The chat that asked is told (`tellChat`). A refusal of who decides is
  * audited (`dependency.decision_refused`), with why, for a request that
  * is there; one of an ID nobody has is only logged, so asking with made-up
@@ -1942,7 +1974,7 @@ const end = async (
     ...unusedLockStatements(db, subject),
   ]);
   if (ended.length !== ids.length) {
-    throw await whyNotWritten(env, by, subject);
+    throw await whyNotWritten(env, by, subject, false);
   }
   // Landed: the answer is what the batch returned, and reading names
   // can't turn it into a failure.
@@ -2187,6 +2219,9 @@ const unchangedSince = (
   inForce: SQL | undefined,
   read: readonly ReadApproval[]
 ): SQL => {
+  if (read.length === 0) {
+    return sql`0`;
+  }
   const each = read.map(
     ({ id, advisoriesNoticed }) =>
       sql`(${dependencyRequests.id} = ${id} AND ${dependencyRequests.advisoriesNoticed} IS ${
@@ -2224,21 +2259,38 @@ const noticeAdvisories = async (
   at: Date
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const fresh = found.filter(({ advisory }) => !known.has(advisory.id));
+  // What its approvals keep, and the room left for more: past the cap,
+  // nothing more is told, rather than told again on every run.
+  const max = advisoriesNoticedMax(env);
+  const told = new Set(
+    read.flatMap(({ advisoriesNoticed }) => advisoriesNoticed ?? [])
+  );
+  const unknown = [
+    ...new Map(
+      found
+        .filter(({ advisory }) => !known.has(advisory.id))
+        .map((each) => [each.advisory.id, each] as const)
+    ).values(),
+  ].toSorted((a, b) => a.advisory.id.localeCompare(b.advisory.id));
+  const fresh = unknown.slice(0, Math.max(0, max - told.size));
+  if (fresh.length < unknown.length) {
+    log.warn("dependencies.advisories_capped", {
+      [subject.type]: subject.id,
+      graphHash,
+      max,
+      untold: unknown.length - fresh.length,
+    });
+  }
   const [first] = fresh;
   if (first === undefined) {
-    await db
-      .update(dependencyRequests)
-      .set({ malwareCheckedAt: at })
-      .where(inForce);
+    await db.update(dependencyRequests).set({ scannedAt: at }).where(inForce);
     return;
   }
-  // What was known, and what is told now: never told again.
+  // What was told, and what is told now: never told again.
   const noticed = [
-    ...new Set([...known, ...fresh.map(({ advisory }) => advisory.id)]),
-  ]
-    .toSorted()
-    .slice(0, advisoriesNoticedMax);
+    ...told,
+    ...fresh.map(({ advisory }) => advisory.id),
+  ].toSorted();
   const concerned = await concernedWith(
     env,
     subject,
@@ -2276,7 +2328,7 @@ const noticeAdvisories = async (
     ),
     db
       .update(dependencyRequests)
-      .set({ malwareCheckedAt: at, advisoriesNoticed: noticed })
+      .set({ scannedAt: at, advisoriesNoticed: noticed })
       .where(and(inForce, storedEvent(recorded.id))),
     ...packageNoticed(db, {
       type: "package_advisory",
@@ -2310,23 +2362,27 @@ const recheckGraph = async (
     eq(dependencyRequests.graphHash, due.graphHash),
     inArray(dependencyRequests.status, ["approved", "retired"])
   );
-  const [row, read] = await Promise.all([
-    db
-      .select({ snapshot: dependencyRequests.snapshot })
-      .from(dependencyRequests)
-      .where(inForce)
-      .limit(1)
-      .get(),
-    db
-      .select({
-        id: dependencyRequests.id,
-        advisoriesNoticed: dependencyRequests.advisoriesNoticed,
-      })
-      .from(dependencyRequests)
-      .where(inForce),
-  ]);
-  if (row === undefined) {
+  const read = await db
+    .select({
+      id: dependencyRequests.id,
+      advisoriesNoticed: dependencyRequests.advisoriesNoticed,
+    })
+    .from(dependencyRequests)
+    .where(inForce);
+  const [named] = read;
+  if (named === undefined) {
     // Ended since it was listed: nothing to check.
+    return true;
+  }
+  // Its graph, from an approval just read: a row is never deleted, so it
+  // is there however the graph's approvals changed since, which the batch
+  // that tells checks again (`unchangedSince`).
+  const row = await db
+    .select({ snapshot: dependencyRequests.snapshot })
+    .from(dependencyRequests)
+    .where(eq(dependencyRequests.id, named.id))
+    .get();
+  if (row === undefined) {
     return true;
   }
   const { graph, findings } = snapshotSchema.parse(JSON.parse(row.snapshot));
@@ -2399,9 +2455,9 @@ export const rescanPackages = async (
       and(
         inArray(dependencyRequests.status, ["approved", "retired"]),
         or(
-          isNull(dependencyRequests.malwareCheckedAt),
+          isNull(dependencyRequests.scannedAt),
           lt(
-            dependencyRequests.malwareCheckedAt,
+            dependencyRequests.scannedAt,
             new Date(at.getTime() - malwareRecheckMs)
           )
         )
@@ -2412,7 +2468,7 @@ export const rescanPackages = async (
       dependencyRequests.subjectId,
       dependencyRequests.graphHash
     )
-    .orderBy(sql`MIN(coalesce(${dependencyRequests.malwareCheckedAt}, 0))`)
+    .orderBy(sql`MIN(coalesce(${dependencyRequests.scannedAt}, 0))`)
     .limit(malwareRecheckGraphs);
   for (const graph of due) {
     // oxlint-disable-next-line no-await-in-loop -- one graph at a time, bounded

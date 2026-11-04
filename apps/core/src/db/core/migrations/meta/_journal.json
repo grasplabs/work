@@ -1499,6 +1499,13 @@
       "when": 1793800327811,
       "tag": "0213_boring_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "6",
+      "when": 1793804052850,
+      "tag": "0214_black_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

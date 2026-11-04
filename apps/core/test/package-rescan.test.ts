@@ -536,4 +536,143 @@ describe("an advisory published after an approval", () => {
       toldAfterEnding: [],
     });
   });
+
+  it("tells nothing, and fails nothing, when the graph ends between its reads", async () => {
+    const ended = await approvedApp();
+    await advise(ended.dep, advisoryOf("GHSA-mmmm-pppp-qqqq"));
+    /** Revokes the graph, once, just before the run reads its packages. */
+    let revoked = false;
+    const revoke = async (): Promise<void> => {
+      if (revoked) {
+        return;
+      }
+      revoked = true;
+      const { policyGeneration, endings } =
+        await ended.admin.api.dependencies.impact(ended.request.id);
+      await ended.admin.api.dependencies.revoke(ended.request.id, {
+        reviewed: {
+          graphHash: ended.request.graphHash,
+          policyGeneration,
+          approvalsDigest: endings.revoke.digest,
+        },
+        reason: "Not needed.",
+      });
+    };
+    /** `statement`, bound: it revokes first when it is run. */
+    const revokingFirst = (
+      statement: D1PreparedStatement
+    ): D1PreparedStatement =>
+      new Proxy(statement, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? async (...args: unknown[]): Promise<unknown> => {
+                await revoke();
+                return await Promise.resolve(
+                  Reflect.apply(value, target, args)
+                );
+              }
+            : value;
+        },
+      });
+    /** `statement`, whose read of `ended`'s graph by its approval revokes first. */
+    const racing = (
+      statement: D1PreparedStatement,
+      query: string
+    ): D1PreparedStatement =>
+      new Proxy(statement, {
+        get: (target, property): unknown => {
+          if (property === "bind") {
+            return (...values: unknown[]): D1PreparedStatement => {
+              const bound = target.bind(...values);
+              return query.includes('select "snapshot"') &&
+                values.includes(ended.request.id)
+                ? revokingFirst(bound)
+                : bound;
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+    const db = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        if (property === "prepare") {
+          return (query: string): D1PreparedStatement =>
+            racing(target.prepare(query), query);
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const events = await auditedDuring(async () => {
+      await rescanPackages(
+        { ...env, DB: db },
+        new Date(Date.now() + 6 * malwareRecheckMs)
+      );
+    });
+
+    expect({
+      revoked,
+      found: advisoriesFound(events, ended.request.graphHash),
+      told: await advisedOf(ended.builder),
+    }).toStrictEqual({ revoked: true, found: [], told: [] });
+  });
+
+  it("tells advisories up to the approval's cap, then nothing more, and logs that it reached it", async () => {
+    const app = await approvedApp();
+    // The tests' cap is two (vite.config.ts): the third is never told.
+    for (const ghsa of [
+      "GHSA-aaaa-cccc-2222",
+      "GHSA-aaaa-cccc-3333",
+      "GHSA-aaaa-cccc-4444",
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one advisory at a time
+      await advise(app.dep, {
+        ...advisoryOf(ghsa),
+        id: Math.trunc(Number(ghsa.slice(-4))),
+      });
+    }
+    const warn = vi.spyOn(console, "warn");
+    let first: Awaited<ReturnType<typeof auditedDuring>> = [];
+    let next: Awaited<ReturnType<typeof auditedDuring>> = [];
+    let capped = 0;
+    try {
+      first = await auditedDuring(async () => {
+        await rescanPackages(env, new Date(Date.now() + 8 * malwareRecheckMs));
+      });
+      next = await auditedDuring(async () => {
+        await rescanPackages(env, new Date(Date.now() + 10 * malwareRecheckMs));
+      });
+      capped = warn.mock.calls.filter(([entry]) => {
+        const logged = JSON.stringify(entry);
+        return (
+          logged.includes("dependencies.advisories_capped") &&
+          logged.includes(app.request.graphHash)
+        );
+      }).length;
+    } finally {
+      warn.mockRestore();
+    }
+
+    const told = await advisedOf(app.builder);
+
+    expect({
+      first: advisoriesFound(first, app.request.graphHash),
+      next: advisoriesFound(next, app.request.graphHash),
+      told: told.length,
+      capped,
+    }).toStrictEqual({
+      first: ["GHSA-aaaa-cccc-2222", "GHSA-aaaa-cccc-3333"],
+      next: [],
+      told: 1,
+      capped: 2,
+    });
+  });
 });

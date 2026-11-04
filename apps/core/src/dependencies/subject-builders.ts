@@ -58,6 +58,16 @@ export const builtSubject = async (
 };
 
 /**
+ * That `subject` is archived when the statement runs, as SQL: an App
+ * archived is read-only (app-status.ts), and nothing is decided for it. A
+ * workflow is never archived.
+ */
+export const archivedSql = (subject: DependencySubject): SQL =>
+  subject.type === "app"
+    ? sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${subject.id} AND ${apps.status} = 'archived')`
+    : sql`0`;
+
+/**
  * That `person` builds `subject` when the statement runs, as SQL: as
  * `builtSubject` decides it (app-access.ts, workflow-resources.ts), for the
  * write that acts on it to check again in its own statement, so someone
