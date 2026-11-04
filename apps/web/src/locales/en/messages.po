@@ -8235,6 +8235,10 @@ msgstr "No"
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "No {onlySignIn}? A staff list works too."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No admin has been asked to let it start this workflow: it starts nothing until one allows it."
+msgstr "No admin has been asked to let it start this workflow: it starts nothing until one allows it."
+
 #: src/settings/ai-providers.tsx
 msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
 msgstr "No AI provider is connected yet, so Grasp's AI features can't answer."
@@ -8831,6 +8835,10 @@ msgstr "Not read: connect it again"
 #: src/onboarding/setup-steps.tsx
 msgid "Not read: no connection"
 msgstr "Not read: no connection"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Not requested yet"
+msgstr "Not requested yet"
 
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
@@ -10858,6 +10866,11 @@ msgstr "Replaced a request for packages"
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Report"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "ask an admin to let a trigger start"
+msgid "Request"
+msgstr "Request"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Request again"

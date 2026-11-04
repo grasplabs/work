@@ -709,6 +709,36 @@ describe("a workflow's Triggers tab", () => {
     });
   });
 
+  it("says a trigger that never asked to start isn't requested yet, not refused, and asks for it", async () => {
+    const asked = await shown(true, false, false, [
+      { ...ownMail, start: null },
+    ]);
+    const text = document.body.textContent;
+    const again = buttons("Request again").length;
+    await press("Request");
+
+    expect({
+      notYet: text.includes("Not requested yet"),
+      refused: text.includes("refused"),
+      again,
+      asked,
+    }).toStrictEqual({
+      notYet: true,
+      refused: false,
+      again: 0,
+      asked: [
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-email" },
+            object: { type: "workflow", workflowId: "workflow-1" },
+            actions: ["start"],
+            binding: "START",
+          },
+        },
+      ],
+    });
+  });
+
   it("says a stopped trigger someone turned off is off", async () => {
     stoppedSchedule.enabled = false;
     try {

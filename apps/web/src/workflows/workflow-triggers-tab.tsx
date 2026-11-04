@@ -396,8 +396,9 @@ const WebhookDetails = ({
 /**
  * Whether an admin let `trigger` start its workflow, which it asked for as
  * it was created: nothing once they did; that it waits while they
- * haven't decided; and, once refused or taken back, that it starts
- * nothing, with a way to ask again for whoever manages it.
+ * haven't decided; once refused or taken back, that it starts nothing;
+ * and if it never asked, that no admin was asked. Whoever manages it may
+ * ask in either of the last two.
  */
 const TriggerStart = ({
   trigger,
@@ -422,6 +423,26 @@ const TriggerStart = ({
         <Trans>
           It starts nothing until an admin allows it to start this workflow.
         </Trans>
+      </span>
+    );
+  }
+  // Never asked (a trigger made before triggers asked as they were
+  // created): nobody refused it, so it isn't said to be refused.
+  if (trigger.start === null) {
+    return (
+      <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+        <Badge variant="attention">
+          <Trans>Not requested yet</Trans>
+        </Badge>
+        <Trans>
+          No admin has been asked to let it start this workflow: it starts
+          nothing until one allows it.
+        </Trans>
+        {manages ? (
+          <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
+            <Trans context="ask an admin to let a trigger start">Request</Trans>
+          </Button>
+        ) : null}
       </span>
     );
   }
