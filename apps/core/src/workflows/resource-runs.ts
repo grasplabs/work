@@ -814,7 +814,7 @@ const lineageStartOf = async (env: Env, row: RunRow): Promise<number> => {
  * the pin: its row, its receipt's input and frozen parameters, its
  * version's sealed build (the identity it was admitted for) and contract.
  */
-const loadedRun = async (
+export const loadedRun = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
@@ -1206,54 +1206,6 @@ export const sealedActivation = async (
     throw namedError(failed.name, failed.message, failed.code);
   }
   return acceptedOutput(output, result.ok ? result.value : undefined);
-};
-
-/**
- * Run `runId` as its activation runs it, from its row and its start's
- * receipt: its sealed build loaded against the manifest the receipt pins,
- * every artifact and the build's identity checked against it, before any
- * of its code can run (`workflow.version_corrupt`). A run that has ended
- * runs nothing (`workflow.run_ended`).
- */
-export const sealedRunOf = async (
-  env: Env,
-  runId: string
-): Promise<HostedSealedRun> => {
-  const row = await runOf(env, runId);
-  const receipt = row === undefined ? undefined : await receiptOf(env, runId);
-  if (
-    row === undefined ||
-    receipt?.manifestHash !== row.manifestHash ||
-    receipt.input === null ||
-    receipt.params === null
-  ) {
-    throw new Error(`Run ${runId}'s receipt doesn't admit it`);
-  }
-  // The receipt pins the manifest, and the row the build hash the start
-  // read from that same manifest, both immutable: so the build's identity,
-  // checked against the manifest's, is the row's too.
-  const build = await loadWorkflowBuild(
-    env,
-    row.workflowResourceId,
-    row.version,
-    row.manifestHash
-  );
-  const calling = await callingRunOf(env, row.workflowResourceId, runId);
-  if (calling === undefined) {
-    throw workflowResourceErrors.create("workflow.run_ended");
-  }
-  const ceiling = modelCallLimitOf(env);
-  return sealedRunFrom({
-    runId,
-    workflowId: row.workflowResourceId,
-    version: row.version,
-    build,
-    params: z.record(z.string(), z.json()).parse(JSON.parse(receipt.params)),
-    input: z.json().parse(JSON.parse(receipt.input)),
-    createdAt: row.createdAt.getTime(),
-    calling,
-    maxModelCalls: Math.min(ceiling, build.limits.maxModelCalls ?? ceiling),
-  });
 };
 
 /**

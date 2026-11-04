@@ -96,12 +96,13 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 // anything.
 //
 // - Code that isn't the build's. A run loads only its sealed build
-//   (`sealedRunOf`): the build its start's receipt pins, every artifact
+//   (resource-runs.ts, `loadedRun`, or a test run's `loadedCandidateRun`,
+//   then `sealedRunFrom`): the build its start's receipt pins, every artifact
 //   checked against the manifest and the manifest against the pin
 //   (workflow-builds.ts, `loadWorkflowBuild`), and the build's identity
 //   against the manifest's, which is the hash its row pins, before its
 //   isolate can be loaded with exactly that build's modules
-//   (`sealedRunModules`, which takes only the run `sealedRunOf` made). A
+//   (`sealedRunModules`, which takes only a run so loaded). A
 //   tampered build never runs (`workflow.version_corrupt`), and nor does
 //   one generated for another SDK than the run's main module runs
 //   (`generatedForRunHost`): until GRA-1514, every stored build's.
@@ -258,7 +259,7 @@ const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
 export const generatedForRunHost = (build: LoadedBuild): boolean =>
   build.generator === generatorVersion && isRunHostSdk(generatedImport);
 
-/** A run of a sealed build, as its activation loaded it (`sealedRunOf`). */
+/** A run of a sealed build, as its activation loaded it (`sealedRunFrom`). */
 export interface HostedSealedRun extends HostedRun {
   readonly workflowId: string;
   readonly version: number;
@@ -2287,7 +2288,7 @@ export const sealedRunFrom = (
 
 /**
  * The modules a sealed run's isolate loads: its verified build's SDK and
- * generated module (`sealedRunOf`), and the main module that runs it
+ * generated module (`sealedRunFrom`), and the main module that runs it
  * (code.ts, `runMain`). Only a build generated for the run host
  * (`generatedForRunHost`): any other's module would be run on an engine
  * it wasn't written for.

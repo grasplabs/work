@@ -253,7 +253,7 @@ export interface RunMemory {
   triedOnce?: TriedOnceMarks;
   /** The settled scopes of its JSON workflow's items and branches (resource-host.ts). */
   fences?: ScopeFences;
-  /** The model calls its JSON workflow's actions made (resource-host.ts). */
+  /** The model calls its JSON workflow and its actions made (resource-host.ts, sealed-run.ts). */
   modelCalls?: ActionModelCalls;
   /** Its sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;

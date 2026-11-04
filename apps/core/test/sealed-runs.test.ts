@@ -4,6 +4,7 @@ import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
@@ -59,13 +60,15 @@ import type { HostHooks, RunStep } from "../src/workflows/host.ts";
 import { admitAttempt as admittedAs } from "../src/workflows/quotas.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import {
+  loadedRun,
+  runOf,
   sealedActivation,
-  sealedRunOf,
   workflowOwnerOf,
 } from "../src/workflows/resource-runs.ts";
 import { modelCallsIn, sentCallsIn } from "../src/workflows/run-object.ts";
 import {
   sealedRun,
+  sealedRunFrom,
   sealedRunModules,
   sealedRunStart,
 } from "../src/workflows/sealed-run.ts";
@@ -468,6 +471,28 @@ const waitingRun = async ({ by, workflow }: Sealed): Promise<string> => {
   return runId;
 };
 
+/**
+ * Run `runId` as its activation loads it (resource-runs.ts, `loadedRun`,
+ * through the pin its row has) and serves it on the run host
+ * (`sealedRunFrom`).
+ */
+const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
+  const row = await runOf(serving, runId);
+  if (row === undefined) {
+    throw new Error(`Run ${runId} has no row`);
+  }
+  const { run } = await loadedRun(
+    serving,
+    {
+      workflow: workflowResourceIdSchema.parse(row.workflowResourceId),
+      version: row.version,
+      manifest: row.manifestHash,
+    },
+    runId
+  );
+  return sealedRunFrom(run);
+};
+
 /** The workflow SDK, by the flat name the sealed build has it. */
 const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 
@@ -742,7 +767,7 @@ const ranAs = async (
     maxSleepMs?: number;
   } = {}
 ) => {
-  const loaded = await sealedRunOf(serving, runId);
+  const loaded = await sealedRunOf(runId);
   const run = {
     ...loaded,
     ...(maxModelCalls === undefined ? {} : { maxModelCalls }),
@@ -932,7 +957,7 @@ describe("a sealed build's run on the run host", () => {
   });
 
   it("hands the isolate only the parameters that aren't sensitive", async () => {
-    const run = await sealedRunOf(serving, await waitingRun(sealed));
+    const run = await sealedRunOf(await waitingRun(sealed));
     expect({
       frozen: Object.keys(run.params),
       handed: sealedRunStart(run).params,
@@ -1291,7 +1316,7 @@ return { before, after: await late };
   });
 
   it("loads no build generated for another SDK than the run host's: today's published build, unchanged", async () => {
-    const run = await sealedRunOf(serving, await waitingRun(sealed));
+    const run = await sealedRunOf(await waitingRun(sealed));
     expect(run.build.source).toContain("@grasp-os/sdk/open-workflow");
     expect(() => sealedRunModules(run)).toThrow(
       "generated for another SDK than the run host's"
@@ -1328,7 +1353,7 @@ return { before, after: await late };
       tampered.workflow.id,
       { version: 1, input: { who: "Ada" }, key: unique() }
     );
-    await expect(sealedRunOf(serving, runId ?? "")).rejects.toMatchObject({
+    await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
     });
   });
@@ -1988,7 +2013,7 @@ const activated = async (
   maxModelCalls?: number
 ): Promise<unknown> =>
   await runInDurableObject(runObjectOf(env, runId), async (_object, state) => {
-    const loaded = await sealedRunOf(serving, runId);
+    const loaded = await sealedRunOf(runId);
     const run =
       maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
     const contract = await versionContract(env, run.workflowId, run.version);
