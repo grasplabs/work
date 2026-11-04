@@ -401,6 +401,20 @@ const reapIfAbandoned = async (
 };
 
 /**
+ * Reaps provisional App `app` now, as `reapAbandonedApps` reaps one, if
+ * nothing of it was made current or committed and its chat holds no
+ * draft of it: for one whose chat never came to be (`ChatsApi.newApp`).
+ * Whether it was.
+ */
+export const reapProvisionalApp = async (
+  env: Env,
+  app: { id: string; name: string; workspaceId: string; chatId: string }
+): Promise<boolean> => {
+  const now = new Date();
+  return await reapIfAbandoned(env, drizzle(env.DB), app, now);
+};
+
+/**
  * Reaps the Apps chats created that nobody accepted and nobody works on
  * (GRA-161): provisional, never made current, created before
  * `abandonedAfterMs` ago, and their chat's draft unwritten as long (or

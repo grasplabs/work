@@ -1090,6 +1090,8 @@ export const appErrors = defineErrorFamily({
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.no_draft": "This chat has no draft of that App to preview.",
+  "app.draft_failed":
+    "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_superseded":

@@ -590,6 +590,93 @@ export interface Proposal {
 }
 
 /**
+ * Proposes the chat's draft of `app` for review, by `by`: checks it over
+ * the App's latest version (`checkFiles`, through `counted` when its
+ * checks are counted), and once it passes commits it as the App's next
+ * version, pending, with `message`, and drops the draft. A draft that
+ * fails isn't proposed: what fails comes back instead. The chat's agent
+ * proposes this way (`env.build.propose`), and so does its person, as
+ * themselves, from the App's workspace (`ChatsApi.proposeDraft`).
+ */
+export const proposeChatDraft = async (
+  env: Env,
+  by: Acting,
+  scope: Pick<AgentScope, "workspaceId" | "chatId">,
+  app: AppId,
+  message: unknown,
+  {
+    counted = async (_app, run) => ({
+      result: await run(),
+      failedInARow: 0,
+    }),
+    admit,
+  }: {
+    /** Runs the check as one of the draft's counted checks. */
+    counted?: <T extends Pick<DraftCheck, "passed">>(
+      app: AppId,
+      run: () => Promise<T>
+    ) => Promise<{ result: T; failedInARow: number }>;
+    /** Admits the commit: before it starts, and right before it is written. */
+    admit?: () => Promise<void>;
+  } = {}
+): Promise<Proposal> => {
+  const draft = await draftOf(env, scope, app);
+  if (Object.keys(draft.changes).length === 0) {
+    throw appErrors.create("app.nothing_to_commit");
+  }
+  const over = await draftOverLatest(env, app, draft);
+  const checked = await counted(
+    app,
+    async () =>
+      await checkFiles(env, scope, app, draft, Object.fromEntries(over.files))
+  );
+  const check = {
+    ...checked.result,
+    failedInARow: checked.failedInARow,
+    maxFailedChecks,
+  };
+  if (!check.passed) {
+    return { version: null, check, review: null, reviewUnavailable: false };
+  }
+  await admit?.();
+  const proposed = await proposeDraft(
+    env,
+    by,
+    app,
+    over,
+    message,
+    admit,
+    // Proposed by the person, the version names no agent: its audit says
+    // which chat's draft it was, whose agent wrote it.
+    by.via === undefined ? scope.chatId : undefined
+  );
+  // Committed and up for review: from here on it is proposed, however the
+  // rest goes, and says so, so nobody tries again (and meets nothing to
+  // commit). What follows is logged when it fails.
+  const { version, tree } = proposed;
+  // The check ran the tests of exactly these files: the review takes its
+  // result rather than running them again.
+  if (check.tests.status !== "not_run") {
+    await keepTests(env, app, tree, check.tests).catch(
+      afterProposal("keep_tests", app, version)
+    );
+  }
+  // Only the revision committed: a write since stays a draft.
+  await workspace(env, scope.workspaceId)
+    .dropDraft(scope.chatId, app, { revision: draft.revision })
+    .catch(afterProposal("drop_draft", app, version));
+  const review = await reviewVersion(env, by, app, version).catch(
+    afterProposal("review", app, version)
+  );
+  return {
+    version,
+    check,
+    review: review ?? null,
+    reviewUnavailable: review === undefined,
+  };
+};
+
+/**
  * The chat's person as an App build acts for them: refused from a chat
  * that read restricted data, and with the chat's agent as the actor the
  * audit log records for what it changes, in this chat.
@@ -948,73 +1035,19 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async propose(app: unknown, message: unknown): Promise<Proposal> {
     return await this.#build(
       "build.propose",
-      async (by) => {
-        const id = await this.#buildable(by, app);
-        const { workspaceId, chatId } = this.ctx.props;
-        const draft = await draftOf(this.env, this.ctx.props, id);
-        if (Object.keys(draft.changes).length === 0) {
-          throw appErrors.create("app.nothing_to_commit");
-        }
-        const over = await draftOverLatest(this.env, id, draft);
-        const counted = await this.#counted(
-          id,
-          async () =>
-            await checkFiles(
-              this.env,
-              this.ctx.props,
-              id,
-              draft,
-              Object.fromEntries(over.files)
-            )
-        );
-        const check = {
-          ...counted.result,
-          failedInARow: counted.failedInARow,
-          maxFailedChecks,
-        };
-        if (!check.passed) {
-          return {
-            version: null,
-            check,
-            review: null,
-            reviewUnavailable: false,
-          };
-        }
-        // The commit is admitted only while the run is still open.
-        await admitEffect(this.env, this.ctx.props);
-        const proposed = await proposeDraft(
+      async (by) =>
+        await proposeChatDraft(
           this.env,
           by,
-          id,
-          over,
+          this.ctx.props,
+          await this.#buildable(by, app),
           message,
-          this.#admit
-        );
-        // Committed and up for review: from here on it is proposed, however
-        // the rest goes, and says so, so the agent doesn't try again (and
-        // meet nothing to commit). What follows is logged when it fails.
-        const { version, tree } = proposed;
-        // The check ran the tests of exactly these files: the review takes
-        // its result rather than running them again.
-        if (check.tests.status !== "not_run") {
-          await keepTests(this.env, id, tree, check.tests).catch(
-            afterProposal("keep_tests", id, version)
-          );
-        }
-        // Only the revision committed: a write since stays a draft.
-        await workspace(this.env, workspaceId)
-          .dropDraft(chatId, id, { revision: draft.revision })
-          .catch(afterProposal("drop_draft", id, version));
-        const review = await reviewVersion(this.env, by, id, version).catch(
-          afterProposal("review", id, version)
-        );
-        return {
-          version,
-          check,
-          review: review ?? null,
-          reviewUnavailable: review === undefined,
-        };
-      },
+          {
+            counted: async (id, run) => await this.#counted(id, run),
+            // The commit is admitted only while the run is still open.
+            admit: this.#admit,
+          }
+        ),
       (proposal) => ({
         app: typeof app === "string" ? app : null,
         version: proposal.version,

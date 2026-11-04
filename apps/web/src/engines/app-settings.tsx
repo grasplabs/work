@@ -29,9 +29,13 @@ import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { HttpConnectionItem } from "../connections/http-connections.tsx";
 import { IntegrationRow } from "../connections/integration-row.tsx";
-import { integrationsOf } from "../connections/integrations.ts";
-import type { Integration } from "../connections/integrations.ts";
+import {
+  httpConnectionsOf,
+  integrationsOf,
+} from "../connections/integrations.ts";
+import type { HttpListed, Integration } from "../connections/integrations.ts";
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
@@ -700,37 +704,6 @@ const Workflows = ({
 
 // --- Connections ---------------------------------------------------------
 
-/**
- * The integrations the App uses: those of the connections it asked to use
- * or may use now (its permissions), each with only those connections, so
- * its state is the App's, not the viewer's. A connection the App holds
- * that the viewer can't see (someone else's personal one, or one since
- * disconnected) isn't listed: core has no read of it for them.
- */
-const readUsed = async (
-  session: Session,
-  app: string
-): Promise<Integration[]> => {
-  const [permissions, connections, catalog] = await Promise.all([
-    session.permissions.list({ type: "app", appId: app }),
-    session.connections.list(),
-    session.connections.catalog(),
-  ]);
-  const used = new Set<string>(
-    permissions.flatMap(({ object, status }) =>
-      object.type === "connection" && status !== "revoked"
-        ? [object.connectionId]
-        : []
-    )
-  );
-  return integrationsOf(catalog.entries, connections)
-    .map((integration) => ({
-      ...integration,
-      connections: integration.connections.filter(({ id }) => used.has(id)),
-    }))
-    .filter(({ connections: held }) => held.length > 0);
-};
-
 /** The catalog's entries, or null when it can't be read in time. */
 const catalogOrNone = async (
   session: Session
@@ -744,6 +717,45 @@ const catalogOrNone = async (
   } catch {
     return null;
   }
+};
+
+/**
+ * The integrations the App uses: those of the connections it asked to use
+ * or may use now (its permissions), each with only those connections, so
+ * its state is the App's, not the viewer's; and the HTTP connections it
+ * uses, which no integration lists (`http`). A connection the App holds
+ * that the viewer can't see (someone else's personal one, or one since
+ * disconnected) isn't listed: core has no read of it for them.
+ */
+const readUsed = async (
+  session: Session,
+  app: string
+): Promise<{ integrations: Integration[]; http: HttpListed[] }> => {
+  const [permissions, connections, catalog] = await Promise.all([
+    session.permissions.list({ type: "app", appId: app }),
+    session.connections.list(),
+    // Only for names: a catalog slow to answer, or refused, leaves the
+    // integrations by their IDs, and the HTTP connections, which no entry
+    // lists, as they are.
+    catalogOrNone(session),
+  ]);
+  const used = new Set<string>(
+    permissions.flatMap(({ object, status }) =>
+      object.type === "connection" && status !== "revoked"
+        ? [object.connectionId]
+        : []
+    )
+  );
+  const integrations = integrationsOf(catalog ?? [], connections)
+    .map((integration) => ({
+      ...integration,
+      connections: integration.connections.filter(({ id }) => used.has(id)),
+    }))
+    .filter(({ connections: held }) => held.length > 0);
+  const http = httpConnectionsOf(connections).filter(({ connection }) =>
+    used.has(connection.id)
+  );
+  return { integrations, http };
 };
 
 const readDeclared = async (session: Session, app: string) => {
@@ -803,23 +815,40 @@ const Connections = ({
           <Trans>Connections in use</Trans>
         </h3>
         <Read read={used}>
-          {(integrations) =>
-            integrations.length === 0 ? (
+          {({ integrations, http }) =>
+            integrations.length === 0 && http.length === 0 ? (
               <p className="text-muted-foreground">
                 <Trans>This App doesn&apos;t use a connection yet.</Trans>
               </p>
             ) : (
-              <div className="@container">
-                <ul className="grid grid-cols-1 gap-x-10 @2xl:grid-cols-2">
-                  {integrations.map((integration) => (
-                    <IntegrationRow
-                      identity={identity}
-                      integration={integration}
-                      key={integration.key}
-                    />
-                  ))}
-                </ul>
-              </div>
+              <>
+                {integrations.length === 0 ? null : (
+                  <div className="@container">
+                    <ul className="grid grid-cols-1 gap-x-10 @2xl:grid-cols-2">
+                      {integrations.map((integration) => (
+                        <IntegrationRow
+                          identity={identity}
+                          integration={integration}
+                          key={integration.key}
+                        />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {http.length === 0 ? null : (
+                  <ul className="flex flex-col gap-3">
+                    {http.map((listed) => (
+                      // Revoked from Integrations, never from an App.
+                      <HttpConnectionItem
+                        heading="h4"
+                        key={listed.connection.id}
+                        listed={listed}
+                        manages={false}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </>
             )
           }
         </Read>

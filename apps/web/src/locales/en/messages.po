@@ -3645,6 +3645,11 @@ msgstr "Changes"
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 
+#: src/engines/app-workspace.tsx
+msgctxt "a version's message"
+msgid "Changes published from the App's workspace"
+msgstr "Changes published from the App's workspace"
+
 #: src/brain/since-last-look.tsx
 msgid "Changes since {when}"
 msgstr "Changes since {when}"
@@ -3749,6 +3754,10 @@ msgstr "Check sound and microphone"
 #: src/settings/audit-chain.tsx
 msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
 msgstr "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+
+#: src/engines/app-workspace.tsx
+msgid "Check what the chat built, then review it"
+msgstr "Check what the chat built, then review it"
 
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
@@ -10180,6 +10189,10 @@ msgstr "Publish a version of {contract}"
 #: src/engines/resource-bindings.tsx
 msgid "Publish as"
 msgstr "Publish as"
+
+#: src/engines/app-workspace.tsx
+msgid "Publish changes"
+msgstr "Publish changes"
 
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx

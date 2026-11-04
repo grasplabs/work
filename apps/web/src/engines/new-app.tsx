@@ -12,8 +12,8 @@ import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
 
 // A new App: one big box, "What do you want to build?". What the person
-// writes makes the App (named after its first line), opens the App's own
-// chat (`chats.forApp`) with it as the first question, and lands in the
+// writes makes the App (named after its first line) with its own chat
+// (`chats.newApp`), asks it there as the first question, and lands in the
 // App's workspace (app-workspace.tsx), where the chat on the right builds
 // it and the preview shows it as it comes. Below the box, other ways to
 // start (`children`), such as from a blueprint.
@@ -42,22 +42,20 @@ export const NewApp = ({
   const navigate = useNavigate();
   // The App made for the question: asking again after a send that failed
   // asks in its chat, rather than making another App.
-  const made = useRef<{ app: string; chat?: string } | null>(null);
+  const made = useRef<{ app: string; chat: string } | null>(null);
   const textRef = useRef("");
   const { composer } = useAsk(undefined, models, efforts, "here", undefined, {
     chatFor: async (session: Session) => {
-      // Kept as soon as it is made: a retry after its chat or its question
-      // failed asks in this App, never making another.
+      // Made with its chat, provisional there as an App a chat's agent
+      // makes is: one left with nothing built goes in time. Kept as soon
+      // as it is made: a retry after its question failed asks in this
+      // App, never making another.
       if (made.current === null) {
-        const app = await session.apps.create({
+        const chat = await session.chats.newApp({
           name: nameOf(textRef.current),
           description: descriptionOf(textRef.current),
         });
-        made.current = { app: app.id };
-      }
-      if (made.current.chat === undefined) {
-        const chat = await session.chats.forApp(made.current.app);
-        made.current.chat = chat.id;
+        made.current = { app: chat.appId, chat: chat.id };
       }
       return made.current.chat;
     },

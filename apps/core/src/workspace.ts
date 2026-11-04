@@ -1234,7 +1234,12 @@ export class Workspace extends DurableObject<Env> {
     via: ChatChannel = "web",
     thread?: string,
     /** The App the chat is for (`appChat`), if any. */
-    appId?: AppId
+    appId?: AppId,
+    /**
+     * Its ID, picked before it is made: for an App made provisional in it
+     * first (`ChatsApi.newApp`). A new one otherwise.
+     */
+    chatId?: ChatId
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -1250,7 +1255,7 @@ export class Workspace extends DurableObject<Env> {
     if ((kept?.count ?? 0) >= maxChatsPerPerson) {
       throw agentErrors.create("agent.too_many_chats");
     }
-    const id = chatIdSchema.parse(crypto.randomUUID());
+    const id = chatId ?? chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
         this.#outboxed(

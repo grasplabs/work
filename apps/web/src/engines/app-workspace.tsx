@@ -45,6 +45,7 @@ import {
   LinkIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
+  SendIcon,
   SettingsIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -60,6 +61,7 @@ import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useWide } from "../frame/wide.ts";
+import { useCoreAction } from "../use-core-action.ts";
 import {
   AppChat,
   AppChatPending,
@@ -88,8 +90,9 @@ import { useAppRead } from "./use-app-read.ts";
 // Publishing is what makes changes live. The chat's agent proposes its
 // draft as the App's next version once it is done; Publish then reviews
 // that version and makes it current (and, for an App never published,
-// opens it to its people). Before the agent proposes it, the draft is
-// only a preview: core has no way for the person to propose it here.
+// opens it to its people). While the draft isn't proposed yet, Publish
+// proposes it as the person themselves (`chats.proposeDraft`, checked as
+// the agent's proposal is), then reviews the version it became.
 
 /** What the main area shows. */
 export type WorkspaceView = "preview" | "code" | "data" | "settings";
@@ -141,21 +144,64 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
   );
 };
 
+/** The chat's draft of the App, not proposed yet. */
+interface UnproposedDraft {
+  chatId: string;
+  /** Whether the chat's agent is at work, writing it still. */
+  running: boolean;
+}
+
 /**
  * Publish, for an App with no version up for review: a draft is published
  * for the people it is shared with, a published App goes back to a
- * draft. Off while it has no version to publish, as core refuses that.
- * Its link is set from here too.
+ * draft, as core allows only for an App with a version to publish. With
+ * the chat's draft not proposed yet (`draft`), Publish changes proposes
+ * it as the person (core checks it first, and refuses it while its checks
+ * fail: the chat says what fails, once asked to fix it), then
+ * `onProposed` with the version it became, to review; off while the
+ * chat's agent still writes it. Its link is set from here too.
  */
-const PublishMenu = ({ app }: { app: App }) => {
+const PublishMenu = ({
+  app,
+  draft,
+  onProposed,
+}: {
+  app: App;
+  draft?: UnproposedDraft;
+  onProposed?: (version: number) => void;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
   const { busy, failure, move } = useStatusMove(app.id);
+  const proposing = useCoreAction();
+  // One line says why: the action tried last, never an older one's.
+  const [tried, setTried] = useState<"move" | "propose">("move");
   const [linking, setLinking] = useState(false);
   const published = app.status === "published";
+  const versioned = app.currentVersion !== null;
+  const message = t({
+    message: "Changes published from the App's workspace",
+    context: "a version's message",
+  });
+  const moveTo = (transition: "publish" | "unpublish"): void => {
+    setTried("move");
+    move(transition);
+  };
+  const propose = (chatId: string): void => {
+    setTried("propose");
+    void proposing.run(async (session) => {
+      const version = await session.chats.proposeDraft(chatId, app.id, message);
+      onProposed?.(version);
+      await router.invalidate();
+    });
+  };
   return (
     <div className="flex flex-col items-end gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger
-          disabled={busy || app.currentVersion === null}
+          disabled={
+            busy || proposing.busy || (!versioned && draft === undefined)
+          }
           render={<Button size="sm" />}
         >
           <GlobeIcon data-icon="inline-start" />
@@ -166,7 +212,7 @@ const PublishMenu = ({ app }: { app: App }) => {
           {published ? (
             <DropdownMenuItem
               onClick={() => {
-                move("unpublish");
+                moveTo("unpublish");
               }}
             >
               <ArchiveIcon />
@@ -177,10 +223,27 @@ const PublishMenu = ({ app }: { app: App }) => {
                 </span>
               </span>
             </DropdownMenuItem>
-          ) : (
+          ) : null}
+          {draft === undefined ? null : (
+            <DropdownMenuItem
+              disabled={draft.running}
+              onClick={() => {
+                propose(draft.chatId);
+              }}
+            >
+              <SendIcon />
+              <span className="flex flex-col">
+                <Trans>Publish changes</Trans>
+                <span className="text-muted-foreground text-xs">
+                  <Trans>Check what the chat built, then review it</Trans>
+                </span>
+              </span>
+            </DropdownMenuItem>
+          )}
+          {!published && versioned ? (
             <DropdownMenuItem
               onClick={() => {
-                move("publish");
+                moveTo("publish");
               }}
             >
               <GlobeIcon />
@@ -191,7 +254,7 @@ const PublishMenu = ({ app }: { app: App }) => {
                 </span>
               </span>
             </DropdownMenuItem>
-          )}
+          ) : null}
           <DropdownMenuItem
             onClick={() => {
               setLinking(true);
@@ -211,7 +274,7 @@ const PublishMenu = ({ app }: { app: App }) => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ErrorText>{failure}</ErrorText>
+      <ErrorText>{tried === "move" ? failure : proposing.failure}</ErrorText>
       <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
     </div>
   );
@@ -301,20 +364,48 @@ const ReviewAndPublish = ({
   );
 };
 
-/** Publish: the version up for review, if there is one; otherwise the App's status. */
-const PublishAction = ({ app }: { app: App }) => {
+/**
+ * Publish: the version up for review, if there is one; otherwise the
+ * App's status, and the chat's draft (`draft`), proposed first.
+ */
+const PublishAction = ({
+  app,
+  draft,
+}: {
+  app: App;
+  /** The chat's draft of the App, not proposed yet; none without one. */
+  draft: UnproposedDraft | undefined;
+}) => {
+  // The version just proposed here, reviewed at once: held here, so its
+  // review stays open as the bar moves on to the version up for review.
+  const [proposed, setProposed] = useState<number>();
   const pending = app.pendingVersion;
-  if (pending === null) {
-    return <PublishMenu app={app} />;
-  }
   return (
     <>
-      {/* A published App can still go back to a draft, or get its link. */}
-      {app.status === "published" ? <PublishMenu app={app} /> : null}
-      <ReviewAndPublish app={app} size="sm" version={pending}>
-        <GlobeIcon data-icon="inline-start" />
-        <Trans>Publish version {pending}</Trans>
-      </ReviewAndPublish>
+      {pending === null ? (
+        <PublishMenu app={app} draft={draft} onProposed={setProposed} />
+      ) : (
+        <>
+          {/* A published App can still go back to a draft, or get its link. */}
+          {app.status === "published" ? <PublishMenu app={app} /> : null}
+          <ReviewAndPublish app={app} size="sm" version={pending}>
+            <GlobeIcon data-icon="inline-start" />
+            <Trans>Publish version {pending}</Trans>
+          </ReviewAndPublish>
+        </>
+      )}
+      {proposed === undefined ? null : (
+        <PublishDialog
+          app={app}
+          onOpenChange={(open) => {
+            if (!open) {
+              setProposed(undefined);
+            }
+          }}
+          open
+          version={proposed}
+        />
+      )}
     </>
   );
 };
@@ -367,6 +458,7 @@ const WorkspaceBar = ({
   view,
   identity,
   unpublished,
+  running = false,
   chat,
 }: {
   app: ViewedApp;
@@ -374,6 +466,8 @@ const WorkspaceBar = ({
   identity: Pick<Identity, "staff">;
   /** Whether a draft with changes not yet live is being built. */
   unpublished: boolean;
+  /** Whether the chat's agent is at work, writing it still. */
+  running?: boolean;
   /** The chat's panel and its toggle; none for an archived App. */
   chat:
     | { open: boolean; handleToggle: () => void; chatId: string | undefined }
@@ -417,7 +511,16 @@ const WorkspaceBar = ({
           </Button>
         )}
         {sharesApp(app, identity) ? <ShareOnBar app={app} /> : null}
-        {archived ? null : <PublishAction app={app} />}
+        {archived ? null : (
+          <PublishAction
+            app={app}
+            draft={
+              unpublished && chat?.chatId !== undefined
+                ? { chatId: chat.chatId, running }
+                : undefined
+            }
+          />
+        )}
         <MoreMenu app={app.id} chatId={chat?.chatId} />
       </span>
     </div>
@@ -783,6 +886,7 @@ const Building = ({
           chatId,
         }}
         identity={identity}
+        running={running}
         unpublished={draft !== undefined}
         view={view}
       />
