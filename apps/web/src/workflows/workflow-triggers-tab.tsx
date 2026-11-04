@@ -396,8 +396,8 @@ const WebhookDetails = ({
 /**
  * Whether an admin let `trigger` start its workflow, which it asked for as
  * it was created: nothing once they did; that it waits while they
- * haven't decided; and, once refused or taken back (or never asked), that
- * it starts nothing, with a way to ask again for whoever manages it.
+ * haven't decided; and, once refused or taken back, that it starts
+ * nothing, with a way to ask again for whoever manages it.
  */
 const TriggerStart = ({
   trigger,
@@ -430,20 +430,10 @@ const TriggerStart = ({
       <Badge variant="destructive">
         <Trans>Not allowed</Trans>
       </Badge>
-      {trigger.start === "revoked" ? (
-        <Trans>
-          An admin refused or took back its start: it starts nothing.
-        </Trans>
-      ) : (
-        <Trans>No admin was asked to let it start: it starts nothing.</Trans>
-      )}
+      <Trans>An admin refused or took back its start: it starts nothing.</Trans>
       {manages ? (
         <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
-          {trigger.start === "revoked" ? (
-            <Trans>Request again</Trans>
-          ) : (
-            <Trans>Ask an admin</Trans>
-          )}
+          <Trans>Request again</Trans>
         </Button>
       ) : null}
     </span>

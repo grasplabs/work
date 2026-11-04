@@ -2828,7 +2828,6 @@ msgid "Ask again"
 msgstr "Volver a preguntar"
 
 #: src/engines/app-access-requests.tsx
-#: src/workflows/workflow-triggers-tab.tsx
 msgid "Ask an admin"
 msgstr "Pedir a un administrador"
 
@@ -8235,10 +8234,6 @@ msgstr "No"
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "¿Sin {onlySignIn}? Una lista de personal también sirve."
-
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "No admin was asked to let it start: it starts nothing."
-msgstr "No se ha pedido a ningún administrador que le permita iniciar: no inicia nada."
 
 #: src/settings/ai-providers.tsx
 msgid "No AI provider is connected yet, so Grasp's AI features can't answer."

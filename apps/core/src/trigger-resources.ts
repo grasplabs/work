@@ -22,7 +22,7 @@ import type {
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
 import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -836,18 +836,23 @@ export const revokeWebhookSecret = async (
   ]);
 };
 
-/** Deletes trigger `id` for `by`, who manages it: it starts nothing more. */
+/**
+ * Deletes trigger `id` for `by`, who manages it: it starts nothing more,
+ * and its permissions, asked for or granted, are revoked by `by` with it,
+ * so no request of a trigger that is gone waits for an admin.
+ */
 export const deleteTriggerResource = async (
   env: Env,
   by: Acting,
   id: unknown
 ): Promise<void> => {
   const trigger = await requireTriggerManager(env, by, id);
+  const now = new Date();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
       .update(triggerResources)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: now })
       .where(
         and(
           eq(triggerResources.id, trigger.id),
@@ -855,6 +860,16 @@ export const deleteTriggerResource = async (
         )
       ),
     outboxedIfChanged(db, entry(by, "trigger.deleted", trigger.id)),
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
+      .where(
+        and(
+          eq(permissions.subjectType, "trigger"),
+          eq(permissions.subjectId, trigger.id),
+          ne(permissions.status, "revoked")
+        )
+      ),
   ]);
 };
 
@@ -981,10 +996,11 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
 
 /**
  * Where a trigger's `start` on the workflow its current version pins
- * stands, as SQL for its listing: of its permissions for it, an active
+ * stands, as SQL for a query joining both (`trigger_resources` and that
+ * `trigger_resource_versions` row): of its permissions for it, an active
  * one first, then a requested one, then a revoked one; NULL if none.
  */
-const startStatusSql = sql<string | null>`(SELECT ${permissions.status}
+export const startStatusSql = sql<string | null>`(SELECT ${permissions.status}
   FROM ${permissions}
   WHERE ${permissions.subjectType} = 'trigger'
     AND ${permissions.subjectId} = ${triggerResources.id}
