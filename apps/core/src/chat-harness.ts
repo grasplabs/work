@@ -30,6 +30,7 @@ import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/stora
 import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEffort } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
@@ -122,15 +123,12 @@ const context = BACKGROUND_CONTEXT;
 /** The provider every request of the chat goes through: the model gateway. */
 const gateway = "grasp";
 
-/**
- * The turn under way, or the last, as its Workspace asked it, and whether
- * it has ended: its `run` returned, so a notice for it comes too late.
- */
-const TurnDoc = defineDoc<{ request: string; ended: boolean }>({
+/** The turn under way, or the last, as its Workspace asked it. */
+const TurnDoc = defineDoc<{ request: string }>({
   kind: "grasp.turn",
   version: 1,
   scope: "session",
-  initial: () => ({ request: "", ended: true }),
+  initial: () => ({ request: "" }),
   checkpointWhen: () => true,
 });
 
@@ -392,6 +390,17 @@ const thinkingClock = () => {
   };
 };
 
+/**
+ * pi's `restartLimit`: its own, or fewer where tests set
+ * `CHAT_RESTART_LIMIT`; never set in wrangler.jsonc.
+ */
+const restartLimitOf = (
+  env: Pick<Env, "CHAT_RESTART_LIMIT">
+): { restartLimit?: number } => {
+  const set = Number(env.CHAT_RESTART_LIMIT);
+  return Number.isInteger(set) && set > 0 ? { restartLimit: set } : {};
+};
+
 /** The brain as `personId` may read it now: what a step of thinking may name. */
 const brainOf = async (env: Env, personId: string) => {
   const person = await memberOf(env.DB, personId);
@@ -421,6 +430,10 @@ export class ChatHarness {
   #room: number = DEFAULT_COMPACTION_POLICY.keepRecentTokens;
   /** Why the turn under way was stopped, if it was. */
   #stopped: TurnStop | undefined;
+  /** Whether pi parked the turn's work as the Harness opened. */
+  #parked = false;
+  /** The turn whose notices are taken now: while its `run` waits on pi. */
+  #noticesFor: string | undefined;
   /** The copies to the Workspace under way, one after another. */
   #copying: Promise<void> = Promise.resolve();
   /** The partial answer the Workspace was shown last. */
@@ -470,21 +483,37 @@ export class ChatHarness {
     });
     const registry = createRegistry();
     const pi = createModels();
+    // pi parks a task restarts cut off too often (`restartLimit`) and says
+    // so as it opens: the chat's run would wait on it for ever, so it is
+    // aborted (`setUpStored`), and the turn ends failed.
+    let parked = false;
     const harness = await Harness.open(
       storage,
       {
         models: pi,
         registry,
-        settings: {
+        // Read at each use: tests lower the restart limit as they go.
+        settings: () => ({
           // One code run at a time, as each is an isolate of its own.
           toolExecution: "sequential",
           // The model gateway's provider SDKs retry a request already, and
           // the gateway says why one failed in the end (`model.rate_limited`
           // and so on): pi retrying on top would multiply the attempts.
           retry: { enabled: false },
-        },
+          ...restartLimitOf(env),
+        }),
         identity: { attribution: null },
         onWake,
+        onReport: (error, info) => {
+          if (info.type === "task_parked") {
+            parked = true;
+            log.warn("chat.task_parked", {
+              chatSession: ctx.id.name,
+              task: info.task.kind,
+              ...errorFields(error),
+            });
+          }
+        },
       },
       context
     );
@@ -497,6 +526,7 @@ export class ChatHarness {
       registry,
       pi
     );
+    opened.#parked = parked;
     // Called at once with the view as it is, then at each commit.
     const view = await conversation.viewState(context);
     view.subscribe((value) => {
@@ -607,6 +637,7 @@ export class ChatHarness {
     if (submission === undefined) {
       throw new Error(`Turn ${request.turnId} has no submission`);
     }
+    this.#noticesFor = request.turnId;
     // After the submit: a stop that came before it was kept, and one that
     // comes after it stops the run itself.
     const stopped = await this.#harness.snapshot(StoppedDoc, context);
@@ -615,12 +646,18 @@ export class ChatHarness {
     }
     const asked = await submission.wait(context);
     await this.#conversation.waitForIdle(context);
-    // From the idle commit to this one, nothing else runs: a notice that
-    // reaches the object from now on finds the turn ended.
-    await this.#conversation.commit(async (tx) => {
-      const kept = await tx.doc(TurnDoc);
-      kept.ended = true;
-    }, context);
+    // No notice of this turn is taken from here on. One taken before had
+    // its commit on pi's line already (`notify`), so a read on the line
+    // comes after it, and after the run it started, if it started one:
+    // that run is the turn's too.
+    this.#noticesFor = undefined;
+    let newest = await this.#newest();
+    while (this.#running) {
+      // oxlint-disable-next-line no-await-in-loop -- until pi is idle
+      await this.#conversation.waitForIdle(context);
+      // oxlint-disable-next-line no-await-in-loop -- until pi is idle
+      newest = await this.#newest();
+    }
     // How the turn ended is how pi's last run of it did: the question's, or
     // that of the notice it answered last.
     const lastRun =
@@ -637,16 +674,7 @@ export class ChatHarness {
     await this.#copying;
     // A turn stopped before the model said anything ends in the chat as
     // cancelled all the same: pi keeps no response of it.
-    const newest = await this.#conversation.entries(
-      { order: "descending" },
-      1,
-      undefined,
-      context
-    );
-    if (
-      end.outcome === "cancelled" &&
-      newest.items[0]?.kind !== "pi.assistant"
-    ) {
+    if (end.outcome === "cancelled" && newest?.kind !== "pi.assistant") {
       await this.#host(request.scope).keepTurnMessages(request.scope.chatId, [
         { message: cancelledMessage() },
       ]);
@@ -670,10 +698,10 @@ export class ChatHarness {
       throw agentErrors.create("agent.busy");
     }
     this.#stopped = undefined;
+    this.#parked = false;
     await this.#conversation.commit(async (tx) => {
       const kept = await tx.doc(TurnDoc);
       kept.request = JSON.stringify(request);
-      kept.ended = false;
     }, context);
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
@@ -734,9 +762,13 @@ export class ChatHarness {
 
   /**
    * Sets the turn a restart cut short up again, as its request was: its
-   * request admitted again first, so nothing runs for a person who left,
-   * and its context rebased if it must be. The object does this as it
-   * opens the Harness, before it serves any call, and resumes after.
+   * request admitted again first, so nothing runs for a person who left.
+   * The object does this as it opens the Harness, before it serves any
+   * call, and resumes after, so it only admits and aborts here: a turn
+   * pi parked, or one whose context holds what the chat may no longer
+   * read, is aborted, and the next question rebases (`#submit`), the
+   * guard holding every request meanwhile. A rebase can take longer than
+   * an object may block.
    */
   async setUpStored(): Promise<void> {
     const request = await this.#request();
@@ -748,9 +780,11 @@ export class ChatHarness {
       const { withheld } = await this.#host(request.scope).turnGuard(
         request.scope
       );
-      if (await needsRebase(this.#conversation, new Set(withheld), context)) {
+      if (
+        this.#parked ||
+        (await needsRebase(this.#conversation, new Set(withheld), context))
+      ) {
         await this.#conversation.abort(context);
-        await this.#rebaseIfNeeded(request);
       }
     } catch {
       await this.#conversation.abort(context);
@@ -767,12 +801,11 @@ export class ChatHarness {
    * person's: pi's steer, placed after the tool round under way, or as the
    * run answers, when it starts a run that answers it; on an idle chat it
    * starts that run at once. Once per `key`, however often it is sent.
-   * None once that turn has ended (`TurnDoc`).
+   * None once that turn's `run` stopped taking them. Checked with nothing
+   * awaited before the submit, which puts its commit on pi's line at once.
    */
   async notify(turnId: string, key: string, text: string): Promise<void> {
-    const kept = await this.#harness.snapshot(TurnDoc, context);
-    const request = await this.#request();
-    if (kept?.ended !== false || request?.turnId !== turnId) {
+    if (this.#noticesFor !== turnId) {
       return;
     }
     await this.#conversation.submit(
@@ -822,6 +855,17 @@ export class ChatHarness {
 
   async close(): Promise<void> {
     await this.#harness.close(context);
+  }
+
+  /** The chat's newest entry, read on pi's line. */
+  async #newest(): Promise<EntryRecord | undefined> {
+    const page = await this.#conversation.entries(
+      { order: "descending" },
+      1,
+      undefined,
+      context
+    );
+    return page.items[0];
   }
 
   /** The turn under way, or the last, as `TurnDoc` keeps it. */
@@ -952,6 +996,13 @@ export class ChatHarness {
     const stopped = this.#stopped;
     if (stopped !== undefined) {
       return { outcome: "failed", answer: "", stopped };
+    }
+    if (this.#parked) {
+      return {
+        outcome: "failed",
+        answer: "",
+        error: "Restarts cut the turn off too often for it to go on.",
+      };
     }
     if (settled.type !== "input") {
       return { outcome: "failed", answer: "" };

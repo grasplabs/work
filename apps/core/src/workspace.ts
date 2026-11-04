@@ -1910,15 +1910,15 @@ export class Workspace extends DurableObject<Env> {
    * goes on there, and the same turn ID finds it rather than asking again.
    */
   async #runTurn(request: TurnRequest): Promise<TurnEnd> {
-    const session = chatSession(
-      this.env,
-      request.scope.workspaceId,
-      request.scope.chatId
-    );
     for (let attempt = 1; ; attempt += 1) {
       try {
+        // A stub an attempt: one to an object that restarted stays broken.
         // oxlint-disable-next-line no-await-in-loop -- again only once it broke
-        return await session.run(request);
+        return await chatSession(
+          this.env,
+          request.scope.workspaceId,
+          request.scope.chatId
+        ).run(request);
       } catch (error) {
         if (isExpectedError(error) || attempt >= turnAttempts) {
           throw error;

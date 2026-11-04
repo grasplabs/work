@@ -6,7 +6,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
-import { chatOf, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  model,
+  personalChatsOf,
+  says,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
@@ -151,6 +157,60 @@ describe("a chat's ChatSession", () => {
       afterNote: null,
       afterAlarm: null,
     });
+  });
+
+  it("ends a turn whose step pi parked after restarts cut it off, so the chat can be deleted and its person erased", async () => {
+    const { userId, person: signedIn } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    // The person's own Workspace, which their erasure erases.
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck,
+      stuck
+    );
+    const { chat } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    // pi parks a task a restart cut off this many times without progress.
+    const restore = await setObjectEnv(stub, { CHAT_RESTART_LIMIT: "1" });
+    try {
+      const asked = stub.ask(chat.id, { text: "Hello?", model }).then(
+        ({ outcome }) => outcome,
+        () => "refused"
+      );
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // The model's answer is cut off mid-stream; the object wakes again.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.abort("Cut off by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+      await runDurableObjectAlarm(session());
+      const outcome = await asked;
+      const person = await personOf(env, {
+        userId,
+        role: "user",
+        staff: false,
+        email: String(signedIn.email),
+      });
+      await stub.deleteChat(chat.id, userId, person, {
+        type: "person",
+        userId,
+      });
+      await stub.erasePerson(userId);
+      expect({ outcome, tables: await tablesOf(id, chat.id) }).toStrictEqual({
+        outcome: "failed",
+        tables: [],
+      });
+    } finally {
+      never.resolve(true);
+      await restore();
+    }
   });
 
   it("is erased with its chat", async () => {
