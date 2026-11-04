@@ -142,7 +142,7 @@ const holdDeadline = async (run: string): Promise<number | undefined> =>
     (_object, state) =>
       state.storage.sql
         .exec<{ deadline: number }>(
-          "SELECT deadline FROM steps WHERE type = 'sleep' AND name = 'task:hold'"
+          "SELECT deadline FROM steps WHERE type = 'sleep' AND name = 'hold:task'"
         )
         .toArray()[0]?.deadline
   );

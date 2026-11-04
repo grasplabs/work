@@ -22,7 +22,7 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { withQuotas } from "./quota-limits.ts";
-import { finished, runObject, woken } from "./runs.ts";
+import { finished, liveStatus, runObject, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
@@ -336,8 +336,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       const runId = await startedBy(builder, id);
       // Its wait entered, as the engine journaled it.
       await vi.waitFor(async () => {
-        const trace = await builder.api.workflowResources.runTrace(id, runId);
-        expect(trace.steps.length).toBeGreaterThan(0);
+        await expect(liveStatus(runId)).resolves.toBe("waiting");
       }, settles);
       // Another attempt in the lineage, holding six and a half seconds,
       // more than the lineage's six: the greeting after the wait finds it
