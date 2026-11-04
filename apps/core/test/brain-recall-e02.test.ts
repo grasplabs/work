@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { setUpBrainCompany } from "./brain-harness.ts";
@@ -79,23 +79,17 @@ const lexicalRanking = (requests: readonly SentRequest[]) => {
   };
 };
 
-let report: Promise<BrainRecallReport> | undefined;
+/** How long the file's one run may take, as one test of the file's. */
+const runTimeoutMs = 60_000;
 
-/** The file's one run, shared by its tests: storage lasts the whole file. */
-const run = async (): Promise<BrainRecallReport> => {
-  report ??= (async () => {
-    const company = await setUpBrainCompany(idp);
-    await answeringProvider(lexicalRanking);
-    return await runBrainRecallComparison(company, {
-      repeats,
-      measured: false,
-      identity: {
-        model: "stub: lexical overlap",
-        profile: "workerd (Vitest pool), stub reranker",
-      },
-    });
-  })();
-  return await report;
+let report: BrainRecallReport | undefined;
+
+/** The file's one run, read by each of its tests. */
+const run = (): BrainRecallReport => {
+  if (report === undefined) {
+    throw new Error("The run didn't finish");
+  }
+  return report;
 };
 
 const armOf = (result: BrainRecallReport, arm: string) => {
@@ -109,8 +103,33 @@ const armOf = (result: BrainRecallReport, arm: string) => {
 const expecting = brainRecallCases.filter(({ marker }) => marker !== undefined);
 
 describe("experiment E02, hybrid recall against full-text search", () => {
-  it("pins what its numbers depend on and asks every case under every arm, cold and warm", async () => {
-    const result = await run();
+  // Run once before the tests, so a run that fails or times out fails the
+  // file once, not each test after a wait of its own. Run within a test,
+  // the run went on after the test ended and its IdP stopped answering:
+  // its next sign-in went to Microsoft itself. The IdP answers the run as
+  // `mockIdp` has it answer each test. Storage lasts the whole file. An
+  // update is asked for once (`lagLimitMs: 0`): workerd writes the index
+  // with the document, so an arm that misses it misses it for good, and
+  // asking again for seconds measured nothing.
+  beforeAll(async () => {
+    // Put back before the next file (start-each-file.ts), and spied again
+    // before each test.
+    vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
+    const company = await setUpBrainCompany(idp);
+    await answeringProvider(lexicalRanking);
+    report = await runBrainRecallComparison(company, {
+      repeats,
+      measured: false,
+      lagLimitMs: 0,
+      identity: {
+        model: "stub: lexical overlap",
+        profile: "workerd (Vitest pool), stub reranker",
+      },
+    });
+  }, runTimeoutMs);
+
+  it("pins what its numbers depend on and asks every case under every arm, cold and warm", () => {
+    const result = run();
     const t0 = brainRecallCases.filter(({ window }) => window === "t0").length;
     const t1 = brainRecallCases.length - t0;
 
@@ -131,16 +150,16 @@ describe("experiment E02, hybrid recall against full-text search", () => {
     });
   });
 
-  it("never hands a reader what they may not read, nor an outdated version, under any arm", async () => {
-    const result = await run();
+  it("never hands a reader what they may not read, nor an outdated version, under any arm", () => {
+    const result = run();
 
     expect(result.arms.map(({ arm, leaking }) => [arm, leaking])).toStrictEqual(
       brainRecallArms.map((arm) => [arm, 0])
     );
   });
 
-  it("keeps exact identifiers on a route of their own: hybrid recall ranks each first, however it is asked", async () => {
-    const result = await run();
+  it("keeps exact identifiers on a route of their own: hybrid recall ranks each first, however it is asked", () => {
+    const result = run();
     const exact = result.scores.filter(
       ({ arm, kind, phase }) =>
         arm.startsWith("hybrid:") && kind === "exact" && phase === "cold"
@@ -152,8 +171,8 @@ describe("experiment E02, hybrid recall against full-text search", () => {
     }).toStrictEqual({ some: true, ranks: new Set([1]) });
   });
 
-  it("answers a reader asking again from what it kept, as it ranked it, without paying again", async () => {
-    const result = await run();
+  it("answers a reader asking again from what it kept, as it ranked it, without paying again", () => {
+    const result = run();
     const warmCost = (arm: string) =>
       result.scores
         .filter((score) => score.arm === arm && score.phase === "warm")
@@ -182,8 +201,8 @@ describe("experiment E02, hybrid recall against full-text search", () => {
     );
   });
 
-  it("finds an update as soon as it is saved, kept recalls or not, wherever it found the case before", async () => {
-    const result = await run();
+  it("finds an update as soon as it is saved, kept recalls or not, wherever it found the case before", () => {
+    const result = run();
     const updated = brainRecallCases.filter(({ window }) => window === "t1");
     // Found on the first ask after the write: nothing kept outlived it.
     const caughtUp = { caughtUp: updated.length, never: 0, worstMs: 0 };
@@ -209,8 +228,8 @@ describe("experiment E02, hybrid recall against full-text search", () => {
     });
   });
 
-  it("compares each candidate with full-text search, paired by case, and adopts nothing a stub measured", async () => {
-    const result = await run();
+  it("compares each candidate with full-text search, paired by case, and adopts nothing a stub measured", () => {
+    const result = run();
 
     const candidates = brainRecallArms.filter((arm) =>
       arm.startsWith("hybrid")
