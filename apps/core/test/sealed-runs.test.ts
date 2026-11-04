@@ -32,6 +32,7 @@ import {
   attemptMethods,
   loadRunIsolate,
   runModule,
+  runModules,
 } from "../src/workflows/code.ts";
 import type { StepError } from "../src/workflows/code.ts";
 import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
@@ -510,13 +511,16 @@ const ranAs = async (
   const code = loadRunIsolate(serving, {
     owner: `test:${runId}`,
     mainModule: runModule,
+    // The run host's main module and the build's SDK, as
+    // `sealedRunModules` loads them, with the test's module in place of
+    // the build's generated one, which today's generator writes for
+    // another SDK (`sealedRunModules` refuses it, as tested below).
     modules: async () =>
-      await Promise.resolve(
-        sealedRunModules({
-          ...run,
-          build: { ...run.build, modules: { [generatedModule]: source } },
-        })
-      ),
+      await Promise.resolve({
+        ...run.build.sdk,
+        [generatedModule]: source,
+        ...runModules({ module: generatedModule, refusal: "No workflow." }),
+      }),
     attemptMethods,
   });
   const settled = settledSchema.parse(
@@ -1026,6 +1030,14 @@ return { before, after: await late };
       gone: failedWith("permission.person_inactive"),
       sent: [],
     });
+  });
+
+  it("loads no build generated for another SDK than the run host's: today's published build, unchanged", async () => {
+    const run = await sealedRunOf(serving, await waitingRun(sealed));
+    expect(run.build.source).toContain("@grasp-os/sdk/open-workflow");
+    expect(() => sealedRunModules(run)).toThrow(
+      "generated for another SDK than the run host's"
+    );
   });
 
   it("runs no build whose bytes aren't the ones its hash names", async () => {

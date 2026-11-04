@@ -1,3 +1,7 @@
+import {
+  generatedImport,
+  generatorVersion,
+} from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
@@ -75,7 +79,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   against the manifest's, which is the hash its row pins, before its
 //   isolate can be loaded with exactly that build's modules
 //   (`sealedRunModules`, which takes only the run `sealedRunOf` made). A
-//   tampered build never runs (`workflow.version_corrupt`).
+//   tampered build never runs (`workflow.version_corrupt`), and nor does
+//   one generated for another SDK than the run's main module runs
+//   (`generatedForRunHost`): until GRA-1514, every stored build's.
 // - A step the build doesn't have. Each engine step's name is one of the
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
 //   in no items or branches, `workflow:input` and `workflow:output` where
@@ -124,6 +130,24 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   are held to its ceiling (`maxModelCalls`) as they go out; each call is
 //   one of its lineage's host calls; its attempts are admitted as its
 //   workflow's (`sealedAdmission`, `workflow-resource:<id>`).
+
+/**
+ * Whether `sdk` is the one a sealed build's generated module must import:
+ * the SDK the run's main module runs it on (code.ts, `runMain`).
+ */
+const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
+
+/**
+ * Whether `build` was generated for the run host: by the current
+ * generator, whose modules import the SDK the run's main module runs. A
+ * build of the generator before it (`@grasp-os/sdk/open-workflow`, which
+ * names its steps and calls its host in another way) runs on
+ * resource-host.ts only, until GRA-1514 regenerates every stored version
+ * onto `@grasp-os/sdk/workflow`: so none is ever loaded here, where its
+ * first step would be refused as one the build doesn't seal.
+ */
+const generatedForRunHost = (build: LoadedBuild): boolean =>
+  build.generator === generatorVersion && isRunHostSdk(generatedImport);
 
 /** A run of a sealed build, as its activation loaded it (`sealedRunOf`). */
 export interface HostedSealedRun extends HostedRun {
@@ -980,8 +1004,8 @@ export const sealedRun =
  * Run `runId` as its activation runs it, from its row and its start's
  * receipt: its sealed build loaded against the manifest the receipt pins,
  * every artifact and the build's identity checked against it, before any
- * of its code can run (`workflow.version_corrupt`). A run that has ended runs nothing
- * (`workflow.run_ended`).
+ * of its code can run (`workflow.version_corrupt`). A run that has ended
+ * runs nothing (`workflow.run_ended`).
  */
 export const sealedRunOf = async (
   env: Env,
@@ -1034,18 +1058,28 @@ export const sealedRunOf = async (
 /**
  * The modules a sealed run's isolate loads: its verified build's SDK and
  * generated module (`sealedRunOf`), and the main module that runs it
- * (code.ts, `runMain`).
+ * (code.ts, `runMain`). Only a build generated for the run host
+ * (`generatedForRunHost`): any other's module would be run on an engine
+ * it wasn't written for.
  */
 export const sealedRunModules = ({
+  runId,
   build,
-}: HostedSealedRun): Record<string, string> => ({
-  ...build.sdk,
-  ...build.modules,
-  ...runModules({
-    module: generatedModule,
-    refusal: "The sealed build doesn't export its workflow.",
-  }),
-});
+}: HostedSealedRun): Record<string, string> => {
+  if (!generatedForRunHost(build)) {
+    throw new Error(
+      `Run ${runId}'s build was generated for another SDK than the run host's`
+    );
+  }
+  return {
+    ...build.sdk,
+    ...build.modules,
+    ...runModules({
+      module: generatedModule,
+      refusal: "The sealed build doesn't export its workflow.",
+    }),
+  };
+};
 
 /**
  * What a sealed run's main module starts with: its input, only the
