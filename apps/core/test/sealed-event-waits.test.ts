@@ -134,9 +134,10 @@ const listen = (id: string, to: unknown, binding = "jobEvents") => ({
 /**
  * A workflow on input `{ jobId }` whose run waits out its hour, then has
  * event waits `await-job` (a job's completion or failure through
- * `jobEvents`) and `await-again` (its completion), and listens the run
- * host doesn't run: `one`, one for all of its filters, one by an event's
- * subject.
+ * `jobEvents`), `await-again` (its completion), `await-guarded` (its
+ * completion, in a try whose catch takes anything) and `await-other` (a
+ * completion through `otherEvents`), and listens the run host doesn't
+ * run: `one`, one for all of its filters, one by an event's subject.
  * Its bindings `jobEvents` and `otherEvents` are of one job event
  * contract, each approved.
  */
@@ -548,7 +549,9 @@ describe(
       const asked: Asked[] = [];
       const ran = await ranAs(
         runId,
-        moduleOf(`return [${wait("await-job")}, ${wait("await-again")}];`),
+        moduleOf(
+          `return [${wait("await-job")}, ${wait("await-again")}, ${wait("await-other")}];`
+        ),
         { engine: inboxEngine(runId, keptOfTest(), asked) }
       );
       const time: unknown = expect.stringMatching(/^\d{4}-\d\d-\d\dT/u);
@@ -570,9 +573,14 @@ describe(
       }).toStrictEqual({
         // Its first wait takes the oldest of either of its types; its
         // second, of its one type, finds none left but the other binding's,
-        // which it never matches.
+        // which it never matches, and which the wait through that binding
+        // takes.
         ran: {
-          ended: [event(completed, "ours", "job-1"), { timedOut: true }],
+          ended: [
+            event(completed, "ours", "job-1"),
+            { timedOut: true },
+            event(completed, "another binding's"),
+          ],
           tampered: [],
         },
         asked: [
@@ -586,6 +594,10 @@ describe(
           {
             name: "await-again:task",
             match: [{ type: await eventTypeKey("jobEvents", completed) }],
+          },
+          {
+            name: "await-other:task",
+            match: [{ type: await eventTypeKey("otherEvents", completed) }],
           },
         ],
       });
