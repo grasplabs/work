@@ -196,7 +196,7 @@ describe(evaluate, () => {
     await expect(count()).resolves.toStrictEqual(first);
   });
 
-  it("takes evaluations at once from a budget as it would one after another", async () => {
+  it("ends evaluations started at once on a budget as one after another would", async () => {
     const sources = [
       "[range(0; 1000)] | length",
       "[range(0; 1000)] | length",
