@@ -1,3 +1,4 @@
+import { roleSchema } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Command,
@@ -14,20 +15,23 @@ import {
 } from "@grasp-os/ui/components/popover";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon, UsersIcon } from "lucide-react";
+import { PlusIcon, ShieldIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
+import { roleLabel } from "../labels.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
 import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
-// The organization's people and teams to add one of to a list: who
-// approves packages, who answers a workflow's decision. One button that
-// opens a list to search, people and teams apart, leaving out those the
-// list holds already. Who may be added is core's to decide; the list is
-// whoever the page offers.
+// The organization's people and teams to pick one of: who approves
+// packages, who answers a workflow's decision, whom a workflow's start
+// names. One button that opens a list to search, people and teams apart,
+// and the roles too where what is picked may name one (a decision's
+// deciders, a workflow's person), leaving out those the list holds
+// already. Who may be picked is core's to decide; the list is whoever the
+// page offers.
 
 /** Who can be added: the organization's people and teams. */
 export interface PeopleAndTeams {
@@ -35,14 +39,17 @@ export interface PeopleAndTeams {
   teams: TeamChoice[];
 }
 
-/** One person or team picked, by the key a list holds it under. */
+/** One person, team or role picked, by the key a list holds it under. */
 export interface PickedSubject {
-  type: "person" | "team";
+  type: "person" | "team" | "role";
   id: string;
   name: string;
 }
 
-/** The key a person or team is held under: `person:<id>` or `team:<id>`. */
+/**
+ * The key a person, team or role is held under: `person:<id>`,
+ * `team:<id>` or `role:<role>`, as a decision names its deciders.
+ */
 export const subjectKey = ({ type, id }: Pick<PickedSubject, "type" | "id">) =>
   `${type}:${id}`;
 
@@ -63,22 +70,47 @@ export const readPeopleAndTeams = async (
 };
 
 /**
- * The button that adds someone, and its list of the people and teams not
- * held yet. `candidates` is null while they're read.
+ * Whom `key` (`subjectKey`) names, by name: a person or team among
+ * `candidates`, a role by its label; undefined for one not known.
+ */
+export const subjectNamed = (
+  key: string,
+  candidates: PeopleAndTeams | null
+): string | undefined => {
+  const colon = key.indexOf(":");
+  const type = key.slice(0, colon);
+  const id = key.slice(colon + 1);
+  if (type === "role") {
+    return roleLabel(id);
+  }
+  const among = type === "person" ? candidates?.people : candidates?.teams;
+  return among?.find((each) => each.id === id)?.name;
+};
+
+/**
+ * The button that picks someone, and its list of the people and teams
+ * (and, with `roles`, the roles) not held yet. `candidates` is null while
+ * they're read.
  */
 export const PeopleTeamsPicker = ({
+  buttonId,
   label,
   candidates,
   holding,
   disabled,
+  roles = false,
   onOpen,
   onPick,
 }: {
+  /** The button's ID, for a form's label. */
+  buttonId?: string;
   label: ReactNode;
   candidates: PeopleAndTeams | null;
   /** The keys of everyone held now (`subjectKey`), left out of the list. */
   holding: ReadonlySet<string>;
   disabled: boolean;
+  /** Offer the organization's roles too: everyone who has one. */
+  roles?: boolean;
   onOpen: () => void;
   onPick: (subject: PickedSubject) => void;
 }) => {
@@ -92,6 +124,11 @@ export const PeopleTeamsPicker = ({
     candidates?.teams.filter(
       ({ id }) => !holding.has(subjectKey({ type: "team", id }))
     ) ?? [];
+  const offeredRoles = roles
+    ? roleSchema.options.filter(
+        (role) => !holding.has(subjectKey({ type: "role", id: role }))
+      )
+    : [];
   const pick = (subject: PickedSubject): void => {
     setOpen(false);
     onPick(subject);
@@ -108,6 +145,7 @@ export const PeopleTeamsPicker = ({
     >
       <PopoverTrigger
         disabled={disabled}
+        id={buttonId}
         render={<Button size="sm" variant="outline" />}
       >
         <PlusIcon />
@@ -115,7 +153,13 @@ export const PeopleTeamsPicker = ({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72" variant="flush">
         <Command filter={matchTyped}>
-          <CommandInput placeholder={t`Search people and teams`} />
+          <CommandInput
+            placeholder={
+              roles
+                ? t`Search people, teams and roles`
+                : t`Search people and teams`
+            }
+          />
           <CommandList>
             {candidates === null ? (
               <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
@@ -159,6 +203,28 @@ export const PeopleTeamsPicker = ({
                         <span className="flex-1 truncate">{team.name}</span>
                       </CommandItem>
                     ))}
+                  </CommandGroup>
+                )}
+                {offeredRoles.length === 0 ? null : (
+                  <CommandGroup heading={t`Roles`}>
+                    {offeredRoles.map((role) => {
+                      const name = roleLabel(role);
+                      return (
+                        <CommandItem
+                          key={role}
+                          onSelect={() => {
+                            pick({ type: "role", id: role, name });
+                          }}
+                          keywords={[name]}
+                          value={subjectKey({ type: "role", id: role })}
+                        >
+                          <ShieldIcon className="text-muted-foreground" />
+                          <span className="flex-1 truncate">
+                            {t`Everyone with the ${name} role`}
+                          </span>
+                        </CommandItem>
+                      );
+                    })}
                   </CommandGroup>
                 )}
               </>

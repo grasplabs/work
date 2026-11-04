@@ -172,6 +172,39 @@ describe("starting an independent workflow by hand", () => {
     });
   });
 
+  it("marks a field that takes a person, which a start takes as a person, team or role", async () => {
+    const { ada, uma } = await greetingWorkflow();
+    const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", {
+        approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        note: { type: "string" },
+      }),
+      basedOn: null,
+    });
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    const form = await workflowStartForm(env, uma, workflow.id);
+    const startWith = async (approver: string): Promise<string> =>
+      await started(uma, workflow.id, form.version, { approver, note: "" });
+
+    expect({
+      properties: form.input?.properties,
+      person: await startWith(`person:${ada.userId}`),
+      role: await startWith("role:admin"),
+    }).toStrictEqual({
+      properties: {
+        approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        note: { type: "string" },
+      },
+      person: "ok",
+      role: "ok",
+    });
+  });
+
   it("tells someone with no role in it nothing, and lets them start nothing", async () => {
     const { carl, workflow } = await greetingWorkflow();
 

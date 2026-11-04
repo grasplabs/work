@@ -354,7 +354,7 @@ describe("a workflow's Files and apps tab", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets an admin approve a decision with the people and teams they pick, and a connector with the target offered, until nothing waits, saying once what they did last", async () => {
+  it("lets an admin approve a decision with the people, teams and roles they pick, and a connector with the target offered, until nothing waits, saying once what they did last", async () => {
     const { session, approved, answerFirstCatalog } = fakeCore();
     answerFirstCatalog();
     await shown(session, true);
@@ -362,6 +362,7 @@ describe("a workflow's Files and apps tab", () => {
 
     await pick("Ada Lovelace");
     await pick("Finance");
+    await pick("Everyone with the Admin role");
     await press(button("Approve approval"));
     await press(button("Approve crm"));
     const waits = document.body.textContent.includes(
@@ -387,7 +388,7 @@ describe("a workflow's Files and apps tab", () => {
             alias: "approval",
             target: {
               kind: "decision",
-              deciders: ["person:user-ada", "team:team-finance"],
+              deciders: ["person:user-ada", "team:team-finance", "role:admin"],
             },
             reviewed: { version: 2 },
           },

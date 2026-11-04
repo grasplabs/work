@@ -752,7 +752,9 @@ export interface WorkflowResourceRun {
  * How a workflow is started by hand: the version a start runs, the one
  * approved to go live or else the one published last (null before any is
  * published), and the JSON Schema its input must match exactly (null when
- * it can't be read).
+ * it can't be read). A field of the input that takes a person, team or
+ * role (`person:<id>`, `team:<id>` or `role:<role>`) carries
+ * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it.
  */
 export interface WorkflowStartForm {
   version: number | null;

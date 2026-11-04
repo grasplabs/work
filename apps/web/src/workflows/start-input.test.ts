@@ -15,13 +15,14 @@ const schema = {
     urgent: { type: "boolean" },
     tone: { type: "string", enum: ["warm", "formal"] },
     note: { type: "string" },
+    approver: { type: "string", "x-grasp-value": { kind: "person" } },
   },
-  required: ["who", "times", "urgent", "tone"],
+  required: ["who", "times", "urgent", "tone", "approver"],
   additionalProperties: false,
 };
 
 describe("a workflow's input as a start form", () => {
-  it("asks for each field of an object of text, numbers, yes or no and choices, as its schema says", () => {
+  it("asks for each field of an object of text, numbers, yes or no, choices and people, as its schema says", () => {
     expect(startFieldsOf(schema)).toStrictEqual([
       { name: "who", required: true, kind: "text" },
       { name: "times", required: true, kind: "number", integer: true },
@@ -34,6 +35,7 @@ describe("a workflow's input as a start form", () => {
         choices: ["warm", "formal"],
       },
       { name: "note", required: false, kind: "text" },
+      { name: "approver", required: true, kind: "person" },
     ]);
   });
 
@@ -73,16 +75,28 @@ describe("a workflow's input as a start form", () => {
         urgent: true,
         tone: "warm",
         note: "",
+        approver: "role:admin",
       })
     ).toStrictEqual({
       ok: true,
-      input: { who: "", times: 3, urgent: true, tone: "warm" },
+      input: {
+        who: "",
+        times: 3,
+        urgent: true,
+        tone: "warm",
+        approver: "role:admin",
+      },
     });
   });
 
   it("names the first field it can't send, and why", () => {
     const fields = startFieldsOf(schema) ?? [];
-    const filled = { who: "Ada", times: "3", tone: "warm" };
+    const filled = {
+      who: "Ada",
+      times: "3",
+      tone: "warm",
+      approver: "person:ada",
+    };
 
     expect({
       noTimes: startInputOf(fields, { ...filled, times: " " }),
@@ -90,12 +104,14 @@ describe("a workflow's input as a start form", () => {
       notWhole: startInputOf(fields, { ...filled, times: "2.5" }),
       noChoice: startInputOf(fields, { ...filled, tone: "" }),
       badRatio: startInputOf(fields, { ...filled, ratio: "a lot" }),
+      nobody: startInputOf(fields, { ...filled, approver: "" }),
     }).toStrictEqual({
       noTimes: { ok: false, field: "times", problem: "missing" },
       notNumber: { ok: false, field: "times", problem: "number" },
       notWhole: { ok: false, field: "times", problem: "integer" },
       noChoice: { ok: false, field: "tone", problem: "missing" },
       badRatio: { ok: false, field: "ratio", problem: "number" },
+      nobody: { ok: false, field: "approver", problem: "missing" },
     });
   });
 });

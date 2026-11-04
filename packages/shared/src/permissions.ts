@@ -518,6 +518,12 @@ export interface Permission {
    * any other permission.
    */
   trigger?: TriggerSummary;
+  /**
+   * For a permission on an independent workflow (its object), that
+   * workflow's name, so whoever decides it knows which workflow it reaches.
+   * Absent for any other permission.
+   */
+  workflowName?: string;
 }
 
 /** What one generated operation of a workflow's store reaches. */

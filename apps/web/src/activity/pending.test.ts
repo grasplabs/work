@@ -3,6 +3,7 @@ import {
   appIdSchema,
   permissionIdSchema,
   storeIdSchema,
+  triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Permission, StoreReach } from "@grasp-os/shared/permissions";
@@ -89,5 +90,32 @@ describe("a pending request on a workflow's store", () => {
       `Store ${store}, a workflow's. Whoever owns the records, this can read and change every record of orders`,
       `Store ${store}, a workflow's. Whoever owns the records, this can read every record of orders, read and change every record of orders, and add records to orders`,
     ]);
+  });
+});
+
+const workflow = workflowResourceIdSchema.parse(
+  "44444444-4444-4444-8444-444444444444"
+);
+
+/** A trigger's request to start `workflow`, named `workflowName` where core named it. */
+const startRequest = (workflowName?: string): Permission => ({
+  ...onApp(["start"]),
+  subject: {
+    type: "trigger",
+    triggerId: triggerIdSchema.parse("55555555-5555-4555-8555-555555555555"),
+  },
+  object: { type: "workflow", workflowId: workflow },
+  ...(workflowName === undefined ? {} : { workflowName }),
+});
+
+describe("a trigger's pending request to start a workflow", () => {
+  it("names the workflow it starts, and by its ID only where core couldn't name it", () => {
+    expect({
+      named: objectOf(startRequest("invoice-approval"), directory),
+      unnamed: objectOf(startRequest(), directory),
+    }).toStrictEqual({
+      named: "Workflow invoice-approval",
+      unnamed: `Workflow ${workflow}`,
+    });
   });
 });

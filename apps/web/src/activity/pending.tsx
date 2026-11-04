@@ -148,9 +148,12 @@ const storeObject = (storeId: string, reach: Permission["reach"]): string => {
   return i18n._(msg`Store ${ph({ store: storeId })}`);
 };
 
-/** What it asks for, by ID: connections and collections have no names here. */
+/**
+ * What it asks for: a workflow by its name, connections and collections
+ * by ID, as they have no names here.
+ */
 export const objectOf = (
-  { object, actions, reach }: Permission,
+  { object, actions, reach, workflowName }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -201,7 +204,10 @@ export const objectOf = (
   if (object.type === "store") {
     return storeObject(object.storeId, reach);
   }
-  return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
+  // By its name where core gave it; by its ID for one it couldn't name.
+  return i18n._(
+    msg`Workflow ${ph({ workflow: workflowName ?? object.workflowId })}`
+  );
 };
 
 /**

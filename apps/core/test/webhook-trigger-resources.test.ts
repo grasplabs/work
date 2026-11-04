@@ -130,7 +130,7 @@ const webhookTrigger = async ({ grant = true } = {}) => {
     );
     await grantPermission(env, by, asked?.id ?? "", { version: null });
   }
-  return { builder, admin: by, workflow: id, trigger };
+  return { builder, admin: by, workflow: id, workflowName: name, trigger };
 };
 
 /** How a test sends a delivery, when not as a sender holding the secret does. */
@@ -433,7 +433,7 @@ describe("a workflow's webhook trigger", () => {
   });
 
   it("asks an admin for its start as it is created, starting nothing until they grant it, and asks again once refused", async () => {
-    const { builder, workflow, trigger } = await webhookTrigger({
+    const { builder, workflow, workflowName, trigger } = await webhookTrigger({
       grant: false,
     });
     const decider = await signedInApi(idp, "admin");
@@ -461,6 +461,9 @@ describe("a workflow's webhook trigger", () => {
       standing: await startStanding(),
       shown: first && {
         object: first.object,
+        // Named, so the admin knows what it starts, and by what.
+        workflowName: first.workflowName,
+        kind: first.trigger?.kind,
         actions: first.actions,
         requestedBy: first.requestedBy,
       },
@@ -512,6 +515,8 @@ describe("a workflow's webhook trigger", () => {
         standing: ["requested"],
         shown: {
           object: { type: "workflow", workflowId: workflow },
+          workflowName,
+          kind: "webhook",
           actions: ["start"],
           requestedBy: builder.userId,
         },

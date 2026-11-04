@@ -1,6 +1,8 @@
 // A workflow's input, as a form a person fills in to start it by hand
 // (start-run.tsx): an object whose fields are each text, a number, a yes
-// or no, or one of a few choices becomes a form, one field each; any
+// or no, one of a few choices, or a person (one of the organization's
+// people, teams or roles, picked from them) becomes a form, one field
+// each; any
 // other input (a list, a nested object, a value that may be one of
 // several shapes) is typed as JSON. The form only helps: core checks what
 // is sent against the version's schema exactly, and says what it refuses.
@@ -10,7 +12,8 @@ export type StartField =
   | { name: string; required: boolean; kind: "text" }
   | { name: string; required: boolean; kind: "number"; integer: boolean }
   | { name: string; required: boolean; kind: "yes" }
-  | { name: string; required: boolean; kind: "choice"; choices: string[] };
+  | { name: string; required: boolean; kind: "choice"; choices: string[] }
+  | { name: string; required: boolean; kind: "person" };
 
 /** What a person typed or picked into the fields, by field name. */
 export type StartValues = Record<string, string | boolean>;
@@ -31,6 +34,11 @@ const fieldOf = (
     return undefined;
   }
   const { type } = schema;
+  // A person, team or role, as core marks the field: picked, never typed.
+  const marker = schema["x-grasp-value"];
+  if (type === "string" && isRecord(marker) && marker.kind === "person") {
+    return { name, required, kind: "person" };
+  }
   if (
     type === "string" &&
     Array.isArray(schema.enum) &&
@@ -101,13 +109,13 @@ const valueOf = (
   }
   if (text === "") {
     // Text left empty is sent as empty when the workflow needs it; a
-    // choice needs one picked.
+    // choice or a person needs one picked.
     if (!field.required) {
       return { ok: true, value: undefined };
     }
-    return field.kind === "choice"
-      ? { ok: false, problem: "missing" }
-      : { ok: true, value: "" };
+    return field.kind === "text"
+      ? { ok: true, value: "" }
+      : { ok: false, problem: "missing" };
   }
   return { ok: true, value: text };
 };

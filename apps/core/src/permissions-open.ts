@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { appsFoundBy, appsReadableBy } from "./app-access.ts";
 import type { Member } from "./auth/identity.ts";
 import { requireStoreManager } from "./data-stores.ts";
-import { sdkStoreOwners } from "./db/core/schema.ts";
+import { sdkStoreOwners, workflowResources } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { listPermissions } from "./permissions.ts";
 import {
@@ -161,6 +161,22 @@ const resourcesOpen = async (
   return open.every(Boolean);
 };
 
+/** The names of independent workflows `ids`, by ID. */
+const namesOfWorkflows = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<Map<string, string>> => {
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: workflowResources.id, name: workflowResources.name })
+    .from(workflowResources)
+    .where(inList(workflowResources.id, [...new Set(ids)]))
+    .all();
+  return new Map(rows.map(({ id, name }) => [id, name]));
+};
+
 /**
  * The permissions `by` may see, of `subject` and in `status` when given
  * (`listPermissions`): each naming only Apps they have a role in
@@ -168,8 +184,9 @@ const resourcesOpen = async (
  * (`app.unreadable`) shows none of its permissions either. Each App named
  * is checked once. One naming an independent workflow, store or trigger
  * only if they have a role in it or manage it (`resourcesOpen`). One a
- * live trigger holds carries what the trigger is (`trigger`), so whoever
- * decides it knows which trigger asks.
+ * live trigger holds carries what the trigger is (`trigger`), and one on a
+ * workflow that workflow's name (`workflowName`), so whoever decides it
+ * knows which trigger asks and what it reaches.
  */
 export const permissionsOpenTo = async (
   env: Env,
@@ -228,17 +245,32 @@ export const permissionsOpenTo = async (
       open.push(permission);
     }
   }
-  const triggers = await triggerSummaries(
-    env,
-    open.flatMap(({ subject: of }) =>
-      of.type === "trigger" ? [of.triggerId] : []
-    )
-  );
+  const [triggers, workflowNames] = await Promise.all([
+    triggerSummaries(
+      env,
+      open.flatMap(({ subject: of }) =>
+        of.type === "trigger" ? [of.triggerId] : []
+      )
+    ),
+    namesOfWorkflows(
+      env,
+      open.flatMap(({ object }) =>
+        object.type === "workflow" ? [object.workflowId] : []
+      )
+    ),
+  ]);
   return open.map((permission) => {
+    const { subject: of, object } = permission;
     const trigger =
-      permission.subject.type === "trigger"
-        ? triggers.get(permission.subject.triggerId)
+      of.type === "trigger" ? triggers.get(of.triggerId) : undefined;
+    const workflowName =
+      object.type === "workflow"
+        ? workflowNames.get(object.workflowId)
         : undefined;
-    return trigger === undefined ? permission : { ...permission, trigger };
+    return {
+      ...permission,
+      ...(trigger === undefined ? {} : { trigger }),
+      ...(workflowName === undefined ? {} : { workflowName }),
+    };
   });
 };

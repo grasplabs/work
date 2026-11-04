@@ -92,14 +92,23 @@ const shown = async (
       asked.push({ app, workflow, input });
       return { id: "run-9" };
     },
+    teams: async () =>
+      await Promise.resolve([{ id: "team-finance", name: "Finance" }]),
+  };
+  const members = {
+    list: async () =>
+      await Promise.resolve([
+        { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
+      ]),
   };
   const core = {
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
         workflows: typeof workflows;
+        members: typeof members;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources, workflows }),
+    ): Promise<T> => await action({ workflowResources, workflows, members }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const route = createRoute({
@@ -164,6 +173,16 @@ const type = async (label: string, value: string): Promise<void> => {
   });
 };
 
+/** Picks the option of the open list whose text is `text`. */
+const choose = async (text: string): Promise<void> => {
+  await act(async () => {
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((each) => each.textContent.trim().endsWith(text))
+      ?.click();
+    await settled();
+  });
+};
+
 /** What the dialog says now. */
 const said = (): string => document.body.textContent;
 
@@ -206,6 +225,58 @@ describe("starting a workflow by hand", () => {
         },
       ],
       started: true,
+    });
+  });
+
+  it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
+    const asked = await shown(
+      () => <StartIndependentRun workflow="workflow-1" />,
+      {
+        version: 3,
+        input: {
+          type: "object",
+          properties: {
+            approver: { type: "string", "x-grasp-value": { kind: "person" } },
+          },
+          required: ["approver"],
+          additionalProperties: false,
+        },
+      }
+    );
+    await press("Start");
+    const typed = document.querySelector("input");
+    await press("Start the run");
+    const unpicked = {
+      asked: asked.length,
+      said: said().includes("Fill this in."),
+    };
+    await press("Choose…");
+    const offered = [...document.querySelectorAll('[role="option"]')].map(
+      (each) => each.textContent.trim()
+    );
+    await choose("Everyone with the Admin role");
+    await press("Admin");
+    await choose("Ada Lovelace");
+    await press("Start the run");
+
+    expect({ typed, unpicked, offered, asked }).toStrictEqual({
+      typed: null,
+      unpicked: { asked: 0, said: true },
+      offered: [
+        "ALAda Lovelace",
+        "Finance",
+        "Everyone with the Admin role",
+        "Everyone with the Builder role",
+        "Everyone with the User role",
+      ],
+      asked: [
+        {
+          workflow: "workflow-1",
+          version: 3,
+          input: { approver: "person:user-ada" },
+          keyed: true,
+        },
+      ],
     });
   });
 

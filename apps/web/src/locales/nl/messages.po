@@ -5368,6 +5368,10 @@ msgstr "Iedereen met wie het gedeeld wordt, en hun agents, lezen het als geaccep
 msgid "everyone who uses the App"
 msgstr "iedereen die de App gebruikt"
 
+#: src/people/people-teams-picker.tsx
+msgid "Everyone with the {name} role"
+msgstr "Iedereen met de rol {name}"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Everything"
@@ -11331,6 +11335,7 @@ msgstr "Rol bij het delen"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
+#: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
 msgstr "Rollen"
@@ -11740,6 +11745,10 @@ msgstr "Personen zoeken"
 #: src/people/share-picker.tsx
 msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"
+
+#: src/people/people-teams-picker.tsx
+msgid "Search people, teams and roles"
+msgstr "Mensen, teams en rollen zoeken"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
