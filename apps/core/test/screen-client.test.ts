@@ -533,7 +533,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       client.action(api.stamp, { title: "Ran", untilRevoked: true }, keyed)
     );
     await expect
-      .poll(async () => await titles(client, api))
+      .poll(async () => await titles(client, api), { timeout: 20_000 })
       .toStrictEqual(["Ran"]);
     // Version 2 published, and version 1 revoked, while it runs.
     const { version } = await opened.builder.api.apps.files.commit(

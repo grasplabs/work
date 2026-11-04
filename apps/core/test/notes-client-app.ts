@@ -84,8 +84,8 @@ export const stamp = action({
     pauseMs: v.number().integer().min(0).max(5000).default(0),
     // Once saved, it answers only once a read of its note is refused
     // because its release was revoked: the caller's signal, not a time to
-    // race. Its reads are bounded by an invocation's nested calls (64, half
-    // a second apart, so over 30 s), and any other refusal fails it.
+    // race. Half a second apart, its reads last until an action's 30 s
+    // deadline at most; that, or any other refusal, fails it.
     untilRevoked: v.boolean().default(false),
   },
   returns: v.object({ id: v.id("notes"), token: v.string() }),
