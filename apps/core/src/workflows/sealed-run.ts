@@ -673,7 +673,7 @@ const sleepsUntil = (task: SealedTask): boolean =>
 const maxDeadlineMs = sealedBuildLimits.deadlineMs;
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
-const maxRetryDelayMs = 365 * 86_400_000;
+const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
 
 /** A task's step that records that its `if` skipped it. */
 const skippedSchema = z.strictObject({ skipped: z.literal(true) });

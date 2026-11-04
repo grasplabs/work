@@ -1162,7 +1162,7 @@ const retryDecisionSchema = z.strictObject({
 });
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
-const maxRetryDelayMs = 365 * 86_400_000;
+const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
 
 /**
  * What a catch step journals: its record, and the error its catch took,
