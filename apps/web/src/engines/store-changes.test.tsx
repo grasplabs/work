@@ -579,9 +579,9 @@ describe("why a version wasn't made current", () => {
     });
   });
 
-  it("names each AI step that goes through a model the version doesn't declare, at its file and line", () => {
+  it("names each AI step that goes through an ai permission the version doesn't declare, at its file and line", () => {
     const message =
-      'AI step "extract" of workflow "reader" goes through "missing", which this version declares no resource as.';
+      'AI step "extract" of workflow "reader" goes through "missing", which this version declares no permission as.';
     expect(
       makeCurrentFailure(
         workflowErrors.create("workflow.model_undeclared", {
@@ -593,7 +593,7 @@ describe("why a version wasn't made current", () => {
         })
       )
     ).toStrictEqual({
-      text: "A workflow's AI step goes through a model resource this version doesn't declare as a text model, so it can't be made current.",
+      text: "A workflow's AI step goes through an `ai` permission this version doesn't declare, so it can't be made current.",
       link: undefined,
       // Core's own words, by step; one without a line isn't one core sends.
       issues: [`workflows/reader.ts:4: ${message}`],

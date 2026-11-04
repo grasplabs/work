@@ -310,18 +310,23 @@ const preferencesDeclared = v.object({
 /** `files` with the App declaring those preferences. */
 export const withPreferences = (
   files: Record<string, string>
-): Record<string, string> => ({
-  ...files,
-  "app.ts": (files["app.ts"] ?? "")
-    .replace(
-      'import { app } from "@grasp-os/sdk";',
-      'import { app, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      "  uses: [writer],",
-      `  preferences: ${preferencesSource},\n  uses: [writer],`
-    ),
-});
+): Record<string, string> => {
+  const registration = files["app.ts"] ?? "";
+  const anchor = "  permissions: { ai: writer },";
+  // A fixture that lost its anchor would silently drop the preferences.
+  if (!registration.includes(anchor)) {
+    throw new Error(`app.ts has no "${anchor}" to declare preferences at.`);
+  }
+  return {
+    ...files,
+    "app.ts": registration
+      .replace(
+        'import { app } from "@grasp-os/sdk";',
+        'import { app, v } from "@grasp-os/sdk";'
+      )
+      .replace(anchor, `  preferences: ${preferencesSource},\n${anchor}`),
+  };
+};
 
 /**
  * The reference to the preference operation `name` of a release of `app`

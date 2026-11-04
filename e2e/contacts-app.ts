@@ -38,7 +38,6 @@ export default app({
   operations: { contacts: { add, list } },
   internalOperations: {},
   screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
-  uses: [],
 });
 `,
   "screens/contacts.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
