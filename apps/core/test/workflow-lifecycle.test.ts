@@ -5,7 +5,6 @@ import {
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { maxFailedStarts } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -34,6 +33,7 @@ import {
 } from "../src/workflow-starts.ts";
 import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts";
 import { allEvents } from "./audit-events.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // An independent workflow's lifecycle (workflow-lifecycle.ts), from its
@@ -70,34 +70,6 @@ const person = async (role: Role, staff = false): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A greeting workflow's definition at `version`. */
-const definitionOf = (name: string, version = "1.0.0"): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
-
 /**
  * A workflow `owner` created and published `versions` times, shared with
  * a builder and a user of its own.
@@ -111,7 +83,7 @@ const workflowOf = async (owner: Identity, versions = 1) => {
   for (let version = 1; version <= versions; version += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name, `${version}.0.0`),
+      definition: greetingOf(undefined, `Version ${version}`),
       basedOn: version === 1 ? null : version - 1,
     });
   }
@@ -164,12 +136,12 @@ describe("a workflow's lifecycle", { timeout: 60_000 }, () => {
     const mapped = await workflowLifecycle(env, owner, workflow.id);
     await editWorkflowDraft(env, owner, workflow.id, {
       expectedRevision: 0,
-      source: definitionOf(workflow.name),
+      source: greetingOf(),
       modules: {},
     });
     const designed = await workflowLifecycle(env, owner, workflow.id);
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: greetingOf(),
       basedOn: null,
     });
     const testing = await workflowLifecycle(env, owner, workflow.id);
@@ -366,7 +338,7 @@ describe("a workflow's lifecycle", { timeout: 60_000 }, () => {
       `greet-${unique()}`
     );
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: greetingOf(),
       basedOn: null,
     });
     const admin = await person("admin");
@@ -515,7 +487,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       `greet-${unique()}`
     );
     await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: greetingOf(),
       basedOn: null,
     });
     const trigger = await createTriggerResource(env, admin, {
