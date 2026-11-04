@@ -779,7 +779,7 @@ const openingSchema = z.strictObject({
 });
 
 /** As long as a decision's wait may be: its deadline comes first. */
-const maxDecisionWaitMs = 365 * 86_400_000;
+const maxDecisionWaitMs = sealedBuildLimits.deadlineMs;
 
 /** What a decision asks, as its task's enter step recorded it. */
 interface DecisionAsks {
