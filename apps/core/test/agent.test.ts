@@ -216,7 +216,6 @@ describe("chat agent", () => {
     });
     const messages = await transcript(stub, chat.id);
     expect(messages.map(({ role }) => role)).toStrictEqual([
-      "system",
       "user",
       "assistant",
       "toolResult",
