@@ -1,12 +1,10 @@
 import type { PreviewApplied, PreviewPart } from "@grasp-os/sdk/screen-runtime";
-import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { wait } from "../core.ts";
 import {
   partsOf,
   previewPartChars,
@@ -51,9 +49,18 @@ const following = (
   const handed: number[] = [];
   const healths: PreviewHealth[] = [];
   const moved: number[] = [];
-  const seen = { handed, health: healths, moved, resets: 0, asked: 0 };
+  const askedFor: number[] = [];
+  const seen = {
+    handed,
+    health: healths,
+    moved,
+    askedFor,
+    resets: 0,
+    asked: 0,
+  };
   const updates = new PreviewUpdates(app, refreshAt(1), {
-    fetch: async () => {
+    fetch: async (revision) => {
+      askedFor.push(revision);
       const answer = answers[seen.asked];
       seen.asked += 1;
       if (answer === undefined) {
@@ -98,7 +105,7 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     expect(seen.handed).toStrictEqual([1, 2]);
   });
 
-  it("asks for one update at a time, then only the newest the chat named meanwhile", async () => {
+  it("asks for the revision the chat named, one at a time, then only the newest it named meanwhile", async () => {
     const slow = Promise.withResolvers<PreviewUpdate>();
     const { updates, seen, toFrame } = following([
       async () => await slow.promise,
@@ -106,6 +113,9 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     ]);
     updates.follow(toFrame);
     updates.revise(2);
+    await vi.waitFor(() => {
+      expect(seen.askedFor).toStrictEqual([2]);
+    });
     updates.revise(3);
     updates.revise(4);
     updates.revise(5);
@@ -113,8 +123,8 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     await vi.waitFor(() => {
       expect(seen.moved).toStrictEqual([2, 5]);
     });
-    expect({ asked: seen.asked, handed: seen.handed }).toStrictEqual({
-      asked: 2,
+    expect({ askedFor: seen.askedFor, handed: seen.handed }).toStrictEqual({
+      askedFor: [2, 5],
       handed: [1, 2, 5],
     });
   });
@@ -195,93 +205,6 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
       reportedAt: [1, 2],
       after: 1,
     });
-  });
-
-  it("asks again when another tab's ask took its place in core's line, rather than show an older write", async () => {
-    const { updates, seen, toFrame } = following([
-      async () =>
-        await Promise.reject(appErrors.create("app.preview_superseded")),
-      answered(refreshAt(2)),
-    ]);
-    updates.follow(toFrame);
-    updates.revise(2);
-    await vi.waitFor(() => {
-      expect(seen.moved).toStrictEqual([2]);
-    });
-    expect(seen.asked).toBe(2);
-  });
-
-  it("asks again once a revision when frames take each other's place, never on and on while one build runs", async () => {
-    // Core's line for one chat's preview of an App: one build running,
-    // the newest ask waiting, the one it replaced refused.
-    const held = Promise.withResolvers<null>();
-    let running = false;
-    let waiting: ((go: boolean) => void) | undefined;
-    let asks = 0;
-    const fetch = async (): Promise<PreviewUpdate> => {
-      asks += 1;
-      // Asked on and on: core out of reach from here, so the test ends,
-      // and fails on the count, rather than spin.
-      if (asks > 50) {
-        held.resolve(null);
-        throw new Error("Asked on and on.");
-      }
-      const first = !running && asks === 1;
-      if (running) {
-        waiting?.(false);
-        const turn = Promise.withResolvers<boolean>();
-        waiting = turn.resolve;
-        if (!(await turn.promise)) {
-          throw appErrors.create("app.preview_superseded");
-        }
-      }
-      running = true;
-      try {
-        if (first) {
-          await held.promise;
-        }
-        return { app, refresh: refreshAt(2) };
-      } finally {
-        // Its place goes to the one waiting, or is free.
-        const waited = waiting;
-        waiting = undefined;
-        running = waited !== undefined;
-        waited?.(true);
-      }
-    };
-    const frames = Array.from({ length: 3 }, () => {
-      const moved: number[] = [];
-      const updates = new PreviewUpdates(app, refreshAt(1), {
-        fetch,
-        health: () => {},
-        reset: () => {},
-        moved: (revision) => {
-          moved.push(revision);
-        },
-      });
-      updates.follow(async (part) =>
-        part.part < part.parts - 1
-          ? await Promise.resolve("more")
-          : await Promise.resolve("applied")
-      );
-      return { updates, moved };
-    });
-    // The first frame's build runs, held; the other two take each
-    // other's place behind it.
-    for (const { updates } of frames) {
-      updates.revise(2);
-    }
-    for (let tick = 0; tick < 20; tick += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- lets every ask settle
-      await wait(0);
-    }
-    const whileHeld = asks;
-    held.resolve(null);
-    await vi.waitFor(() => {
-      expect(frames[0]?.moved).toStrictEqual([2]);
-    });
-    // Each frame asked once, and each of the two behind asked once more.
-    expect(whileHeld).toBe(5);
   });
 
   it.each([

@@ -978,16 +978,19 @@ export interface ChatsApi {
     appVersion?: number
   ) => Promise<PreviewBundle>;
   /**
-   * Screen `screen` of the chat's draft of `app` as it is now, built as
-   * one module for the open preview to swap in with React Fast Refresh
-   * (`PreviewRefresh`), at whatever revision the draft is at: nothing is
-   * staged for a frame and nothing sealed, and the build's type check and
-   * lint don't hold it up. For the person while they build the App.
+   * Screen `screen` of the chat's draft of `app` at `revision`, the
+   * newest the preview knows of, built as one module for the open preview
+   * to swap in with React Fast Refresh (`PreviewRefresh`): one build per
+   * revision, shared by every preview that asks for it, and
+   * `app.preview_outdated` once the draft moved past `revision`. Nothing
+   * is staged for a frame and nothing sealed, and the build's type check
+   * and lint don't hold it up. For the person while they build the App.
    */
   previewUpdate: (
     chatId: string,
     app: string,
-    screen: string
+    screen: string,
+    revision: number
   ) => Promise<PreviewUpdate>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a

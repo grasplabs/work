@@ -185,9 +185,6 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.build_failed": "broken",
   "screen.not_sealed": "broken",
   "screen.build_slow": "timed-out",
-  // Newer asks for the same preview took its place in core's line (only
-  // when two more came at once, from other tabs): opened again, it shows.
-  "app.preview_superseded": "timed-out",
   "screen.unreviewed": "unreviewed",
   "screen.revoked": "revoked",
   "auth.principal_changed": "principal-changed",
@@ -1789,11 +1786,16 @@ export const runPreview = (
         }
         const moves: { to?: (revision: number) => void } = {};
         const updates = new PreviewUpdates(bundle.app, opened, {
-          fetch: async () =>
+          fetch: async (revision) =>
             await on(
               link,
               async ({ chats }) =>
-                await chats.previewUpdate(chatId, bundle.app, bundle.screen)
+                await chats.previewUpdate(
+                  chatId,
+                  bundle.app,
+                  bundle.screen,
+                  revision
+                )
             ),
           health: (next) => {
             health = next;

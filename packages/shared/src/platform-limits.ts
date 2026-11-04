@@ -198,10 +198,6 @@ export const platformLimits = {
   codeModeOutputBytes: 64 * kib,
 
   // Previews.
-  /** Builds of one chat's preview of an App running at once. */
-  previewBuildsRunning: 1,
-  /** Asks for a build of one chat's preview of an App waiting; a newer replaces the oldest. */
-  previewBuildsWaiting: 1,
   /** Accepted revisions before a preview's modules are reset. */
   previewResetRevisions: 64,
   /** App JS and CSS loaded in all before a preview's modules are reset. */

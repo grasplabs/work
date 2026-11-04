@@ -715,89 +715,94 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       // As its recheck (`buildsNow`): an archived App has no preview.
       const { id, name } = await editableApp(this.#env, by, app);
-      return await this.#oneBuildAtATime(
-        by,
-        chatId,
+      const load = async (): Promise<PreviewBundle> =>
+        await this.#loadPreview(by, chatId, id, name, {
+          screen,
+          version,
+          appVersion,
+        });
+      // A version opened read-only is one person's click, never asked
+      // for again by a write: it builds as it is asked.
+      if (version !== undefined || appVersion !== undefined) {
+        return await load();
+      }
+      // The draft as it is now: one open per revision and screen, shared
+      // by every preview that opens it at once.
+      const opened = await this.#chatsOf(by.userId).previewBuild(
+        chatIdOf(chatId),
+        by.userId,
         id,
-        async () =>
-          await this.#loadPreview(by, chatId, id, name, {
-            screen,
-            version,
-            appVersion,
-          })
+        `open:${screen ?? ""}`,
+        undefined,
+        load
       );
+      // What `load` answered, shared under a key only it builds (`open:`
+      // and its screen): a bundle, which only a frame's open has.
+      if (!("frameToken" in opened)) {
+        throw new Error("A preview's open was answered with an update.");
+      }
+      return opened;
     });
   }
 
   /**
-   * `build`, a build of `chatId`'s preview of App `id`, run in its place
-   * in that preview's line in the chat's object (preview-builds.ts), so
-   * no tab or caller builds and seals for every ask: what it answered, or
-   * how it failed; `app.preview_superseded` when a newer ask took its
-   * place. The build runs here; the object only holds the place while it
-   * does, and hears nothing of what it answers.
-   */
-  async #oneBuildAtATime<T>(
-    by: Identity,
-    chatId: string,
-    id: AppId,
-    build: () => Promise<T>
-  ): Promise<T> {
-    let outcome: { built: T } | { failed: unknown } | undefined;
-    await this.#chatsOf(by.userId).previewBuild(
-      chatIdOf(chatId),
-      by.userId,
-      id,
-      async () => {
-        try {
-          outcome = { built: await build() };
-        } catch (error) {
-          outcome = { failed: error };
-        }
-      }
-    );
-    if (outcome === undefined) {
-      throw new Error("The preview's build ran and answered nothing.");
-    }
-    if ("failed" in outcome) {
-      throw outcome.failed;
-    }
-    return outcome.built;
-  }
-
-  /**
-   * Screen `screen` of the chat's draft of `app` now, as one module for
-   * its open preview to swap in (`PreviewRefresh`): only while the person
-   * builds the App, as for `preview`. Nothing is staged for a frame,
-   * nothing is sealed when the draft's server code is as it was
-   * (sealed-previews.ts), and its build skips the type check and lint, so
-   * a write reaches the screen at once; the agent's check of the draft
-   * has them.
+   * Screen `screen` of the chat's draft of `app` at `revision`, the
+   * newest the asker knows of, as one module for its open preview to swap
+   * in (`PreviewRefresh`): only while the person builds the App, as for
+   * `preview`. One build per revision and screen, shared by every preview
+   * that asks for it (preview-builds.ts); `app.preview_outdated` once the
+   * draft moved past `revision`, as the asker then hears of a newer one.
+   * Nothing is staged for a frame, nothing is sealed when the draft's
+   * server code is as it was (sealed-previews.ts), and its build skips the
+   * type check and lint, so a write reaches the screen at once; the
+   * agent's check of the draft has them.
    */
   async previewUpdate(
     chatId: string,
     app: string,
-    screen: string
+    screen: string,
+    revision: number
   ): Promise<PreviewUpdate> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
-      return await this.#oneBuildAtATime(by, chatId, id, async () => {
-        const { files, references, revision } = await this.#previewed(
-          by,
-          chatId,
+      if (!Number.isSafeInteger(revision)) {
+        throw screenErrors.create("screen.invalid");
+      }
+      const update = async (): Promise<PreviewUpdate> => {
+        const {
+          files,
+          references,
+          revision: built,
+        } = await this.#previewed(by, chatId, id, {});
+        const screenBuild = await this.#previewBuild(
+          files,
+          references,
           id,
-          {}
+          screen
         );
-        const built = await this.#previewBuild(files, references, id, screen);
-        if (built.refresh === undefined) {
+        if (screenBuild.refresh === undefined) {
           // A preview's build always has its entries: the build is at fault.
           throw new Error("The preview's build has no entry to refresh.");
         }
         return {
           app: id,
-          refresh: await refreshOf(revision, built.screen, built),
+          refresh: await refreshOf(built, screenBuild.screen, screenBuild),
         };
-      });
+      };
+      const updated = await this.#chatsOf(by.userId).previewBuild(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        `update:${screen}`,
+        revision,
+        update
+      );
+      // What `update` answered, shared under a key only it builds
+      // (`update:` and its screen): an update, never a frame's bundle.
+      if ("frameToken" in updated) {
+        throw new Error("A preview's update was answered with a bundle.");
+      }
+      return updated;
     });
   }
 

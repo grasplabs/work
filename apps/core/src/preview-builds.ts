@@ -1,65 +1,65 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
+import type { PreviewBundle, PreviewUpdate } from "@grasp-os/shared/chat";
 
-// The builds of one Workspace object's chats' previews (chats-rpc.ts):
-// spec 18.1 holds each chat's preview of an App to
-// `previewBuildsRunning` builds at once and `previewBuildsWaiting`
-// waiting, so no tab or caller starts a compile and a seal of its own
-// for every ask. A newer ask takes the place of the oldest one waiting,
-// which is refused (`app.preview_superseded`): the newest draft is what
-// gets built.
+/** What a preview's build answers: its frame's bundle, or an update. */
+export type PreviewBuilt = PreviewBundle | PreviewUpdate;
+
+// The builds of one Workspace object's chats' previews (chats-rpc.ts): one
+// build per revision of a chat's draft of an App, shared by everyone who
+// asks for it. Several previews of one draft (two tabs, the dock and the
+// App's workspace) all ask for the revision they know of; the first ask
+// starts its build and every other ask for that revision awaits the same
+// one. An ask for a revision the draft moved past is refused
+// (`app.preview_outdated`) before anything builds: the asker hears of the
+// newer revision from the chat and asks for that. A newer revision's
+// build takes the older one's place, which no ask awaits any more and
+// which stops on its own. So nothing waits in line, and no frame's ask
+// pushes out another's: there is nothing to wait for but the build of
+// the draft as it is.
 //
-// A build runs as the caller's callback, which this object awaits, so
-// its place lasts exactly as long as the build: a caller that goes away
-// ends the call it is in, and with it the callback, and its place is
-// free. No lease, and no clock.
+// A build runs as the asker's callback, which this object awaits, and
+// its answer goes to every ask that shares it. Kept only while it runs:
+// once it settled, however it settled, the next ask builds anew (core's
+// build cache answers the same files at once), so a failed build never
+// stands in for the next.
 
-/** One chat's preview of one App: the builds running, and those waiting their turn. */
-interface Line {
-  running: number;
-  waiting: ((go: boolean) => void)[];
+/** The build running for one preview, and the revision it builds. */
+interface Building {
+  revision: number;
+  built: Promise<PreviewBuilt>;
 }
 
-/** The lines of one Workspace object's chats' previews, by chat and App. */
+/** The builds of one Workspace object's chats' previews, by preview and ask. */
 export class PreviewBuilds {
-  readonly #lines = new Map<string, Line>();
+  readonly #building = new Map<string, Building>();
 
   /**
-   * Runs `build` for the preview `key` names once a place is free;
-   * `app.preview_superseded` when a newer ask took its place first.
+   * The answer of the build `key` names (a chat, an App and what is
+   * built) at `revision`, the draft's revision `now`: shared with every
+   * ask for it while it runs, started by `build` when none does.
+   * `app.preview_outdated` for any other revision.
    */
-  async run(key: string, build: () => Promise<void>): Promise<void> {
-    const line = this.#lines.get(key) ?? { running: 0, waiting: [] };
-    this.#lines.set(key, line);
-    if (line.running >= platformLimits.previewBuildsRunning) {
-      if (line.waiting.length >= platformLimits.previewBuildsWaiting) {
-        line.waiting.shift()?.(false);
-      }
-      const turn = Promise.withResolvers<boolean>();
-      line.waiting.push(turn.resolve);
-      if (!(await turn.promise)) {
-        throw appErrors.create("app.preview_superseded");
-      }
-    } else {
-      line.running += 1;
+  async build(
+    key: string,
+    revision: number,
+    now: number,
+    build: () => Promise<PreviewBuilt>
+  ): Promise<PreviewBuilt> {
+    if (revision !== now) {
+      throw appErrors.create("app.preview_outdated");
     }
+    const running = this.#building.get(key);
+    if (running?.revision === revision) {
+      return await running.built;
+    }
+    const building: Building = { revision, built: build() };
+    this.#building.set(key, building);
     try {
-      await build();
+      return await building.built;
     } finally {
-      this.#pass(key, line);
-    }
-  }
-
-  /** Gives the place a build held to the next waiting, or frees it. */
-  #pass(key: string, line: Line): void {
-    const next = line.waiting.shift();
-    if (next !== undefined) {
-      next(true);
-      return;
-    }
-    line.running -= 1;
-    if (line.running === 0) {
-      this.#lines.delete(key);
+      if (this.#building.get(key) === building) {
+        this.#building.delete(key);
+      }
     }
   }
 }

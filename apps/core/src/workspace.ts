@@ -206,6 +206,7 @@ import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import { PreviewBuilds } from "./preview-builds.ts";
+import type { PreviewBuilt } from "./preview-builds.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import type { WorkContext } from "./restricted.ts";
@@ -4374,20 +4375,29 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Runs `build`, a build of `personId`'s own chat's preview of App
-   * `appId`, once its place in that preview's line is free
-   * (preview-builds.ts): `app.preview_superseded` when a newer ask took
-   * its place first. The caller builds; this only holds the place, for as
-   * long as `build` runs.
+   * What `build` answers, a build of `what` (the kind of ask and its
+   * screen) of `personId`'s own chat's preview of App `appId`, at
+   * `revision` (the draft's now when not named): one build per revision,
+   * shared by every ask for it while it runs (preview-builds.ts);
+   * `app.preview_outdated` for a revision the draft moved past. The
+   * caller builds; this only shares what it answers.
    */
   async previewBuild(
     chatId: unknown,
     personId: string,
     appId: string,
-    build: () => Promise<void>
-  ): Promise<void> {
-    const { id } = this.#ownChat(chatId, personId);
-    await this.#previewBuilds.run(`${id}:${appId}`, build);
+    what: string,
+    revision: number | undefined,
+    build: () => Promise<PreviewBuilt>
+  ): Promise<PreviewBuilt> {
+    // `app.no_draft` for an App the chat builds no draft of.
+    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    return await this.#previewBuilds.build(
+      `${id}:${appId}:${what}`,
+      revision ?? draft.revision,
+      draft.revision,
+      build
+    );
   }
 
   /**

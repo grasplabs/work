@@ -1,8 +1,10 @@
+import type { PreviewBundle, PreviewUpdate } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
@@ -49,6 +51,28 @@ const sealedManifestSchema = z
     artifacts: z.array(z.object({ path: z.string(), sha256: z.string() })),
   })
   .loose();
+
+/** An update of `app`'s preview at `revision`, its code `code`, as a build answers one. */
+const builtAt = (
+  app: AppId,
+  revision: number,
+  code: string
+): PreviewUpdate => ({
+  app,
+  refresh: {
+    revision,
+    screen: "desk",
+    code,
+    bytes: code.length,
+    sha256: "",
+    css: "",
+    kit: [],
+  },
+});
+
+/** The code of what a build answered, an update. */
+const codeBuilt = (built: PreviewBundle | PreviewUpdate): string =>
+  built.refresh?.code ?? "";
 
 /** What the test reads of a staged frame's manifest. */
 const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
@@ -101,14 +125,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await chats.previewUpdate(chatId, app, "desk");
+    const updated = await chats.previewUpdate(chatId, app, "desk", next);
     const updateMs = performance.now() - started;
     const again = await write(
       { "screens/desk.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await chats.previewUpdate(chatId, app, "desk");
+    const second = await chats.previewUpdate(chatId, app, "desk", again);
     const secondMs = performance.now() - secondStarted;
     // What the frame checks before it evaluates anything.
     const { refresh } = updated;
@@ -147,7 +171,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
   });
 
   it("answers only the person's own chat's draft of an App they build, never another App's", async () => {
-    const { builder, app, chatId } = await setUp();
+    const { builder, app, chatId, revision } = await setUp();
     const other = await builder.api.apps.create({ name: "Other" });
     await release(builder, other.id, notesFiles("other"));
     // Another builder of the organization, who doesn't build this App.
@@ -155,14 +179,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     expect({
       // An App this chat builds no draft of.
       otherApp: await codeOf(
-        builder.api.chats.previewUpdate(chatId, other.id, "desk")
+        builder.api.chats.previewUpdate(chatId, other.id, "desk", revision)
       ),
       colleague: await codeOf(
-        colleague.api.chats.previewUpdate(chatId, app, "desk")
+        colleague.api.chats.previewUpdate(chatId, app, "desk", revision)
       ),
       // A screen the draft hasn't.
       noScreen: await codeOf(
-        builder.api.chats.previewUpdate(chatId, app, "nowhere")
+        builder.api.chats.previewUpdate(chatId, app, "nowhere", revision)
       ),
     }).toStrictEqual({
       otherApp: "app.no_draft",
@@ -190,7 +214,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       { "screens/desk.tsx": deskSaying("Changed") },
       revision
     );
-    await chats.previewUpdate(chatId, app, "desk");
+    await chats.previewUpdate(chatId, app, "desk", next);
     const kept = await call(next, "notes.titles");
     const sealedAfter = await sealedAt(builder, chatId);
     const storesAfter = await previewStores(builder, chatId, app);
@@ -446,65 +470,58 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("builds one preview of a chat's App at a time, the newest ask waiting and the one it replaced refused, freeing the place however a build ends", async () => {
-    const { builder, app, chatId } = await setUp();
+  it("builds a preview's revision for its own person alone, and never one the draft moved past", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
     const object = chatsOf(builder);
-    const order: string[] = [];
-    let running = 0;
-    let most = 0;
-    const gate = Promise.withResolvers<null>();
-    const build =
-      (name: string, held?: Promise<null>, fails = false) =>
-      async (): Promise<void> => {
-        running += 1;
-        most = Math.max(most, running);
-        order.push(`${name} builds`);
-        await held;
-        running -= 1;
-        if (fails) {
-          throw new Error(`${name} failed`);
-        }
-      };
-    const first = codeOf(
+    const built: number[] = [];
+    const building = (at: number) => async (): Promise<PreviewUpdate> => {
+      built.push(at);
+      return await Promise.resolve(builtAt(app, at, String(at)));
+    };
+    const next = await write(
+      { "screens/desk.tsx": deskSaying("Newer") },
+      revision
+    );
+    const newer = await object.previewBuild(
+      chatId,
+      builder.userId,
+      app,
+      "update:desk",
+      next,
+      building(next)
+    );
+    // A preview that still knows only the revision before asks for it.
+    const older = await codeOf(
       object.previewBuild(
         chatId,
         builder.userId,
         app,
-        build("first", gate.promise, true)
+        "update:desk",
+        revision,
+        building(revision)
       )
     );
-    // The first holds its place: the next two wait, the newer replacing
-    // the older.
-    await vi.waitFor(() => {
-      expect(order).toStrictEqual(["first builds"]);
-    });
-    const second = codeOf(
-      object.previewBuild(chatId, builder.userId, app, build("second"))
-    );
-    const third = codeOf(
-      object.previewBuild(chatId, builder.userId, app, build("third"))
-    );
-    const replaced = await second;
-    gate.resolve(null);
-    const outcomes = {
-      // A build that failed gives its place up all the same.
-      first: String(await first).includes("first failed"),
-      replaced,
-      third: await third,
-    };
-    // Someone else's chat holds no place in it.
+    // Someone else's chat builds nothing of it, nor shares its build.
     const elsewhere = await codeOf(
-      object.previewBuild(chatId, "someone-else", app, build("elsewhere"))
+      object.previewBuild(
+        chatId,
+        "someone-else",
+        app,
+        "update:desk",
+        next,
+        building(next)
+      )
     );
-    expect({ order, most, outcomes, elsewhere }).toStrictEqual({
-      order: ["first builds", "third builds"],
-      most: 1,
-      outcomes: {
-        first: true,
-        replaced: "app.preview_superseded",
-        third: undefined,
-      },
+    expect({
+      newer: codeBuilt(newer),
+      older,
+      elsewhere,
+      built,
+    }).toStrictEqual({
+      newer: String(next),
+      older: "app.preview_outdated",
       elsewhere: "agent.chat_not_found",
+      built: [next],
     });
   });
 

@@ -1,13 +1,13 @@
 import type { PreviewApplied, PreviewPart } from "@grasp-os/sdk/screen-runtime";
-import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
 
 // The page's side of a chat's preview taking its draft's writes in the
 // frame it has open (spec 19.2.1): each time the chat says the draft is
-// at a newer revision, the page asks core for the previewed screen as it
-// is now (`chats.previewUpdate`) and hands it to the frame over the
+// at a newer revision, the page asks core for the previewed screen at
+// that revision (`chats.previewUpdate`, which builds each revision once,
+// for every preview that asks for it) and hands it to the frame over the
 // frame's own bridge, in parts, which the frame checks, evaluates and
 // swaps in with React Fast Refresh (@grasp-os/sdk's preview-updates.ts).
 // The frame isn't started again, so what the screen holds stays.
@@ -15,8 +15,7 @@ import { screenErrors } from "@grasp-os/shared/screens";
 // The page decides what the frame is handed, never the frame:
 // - only an update core answered for the App the frame was opened for,
 //   and only of a revision past the one the frame shows: one asked at a
-//   time, then the newest the chat named while it was asked (the way
-//   core's own line of loads works, preview-updates.ts in core);
+//   time, then the newest the chat named while it was asked;
 // - each update's size and SHA-256 as core answered them, which the
 //   frame checks the module against before evaluating anything;
 // - nothing the frame couldn't load as it is: an update that needs a kit
@@ -41,8 +40,8 @@ export type PreviewHealth = "working" | "fixing";
 
 /** What the page does for a preview's updates. */
 export interface PreviewUpdatesHost {
-  /** Asks core for the previewed screen of the draft as it is now. */
-  fetch: () => Promise<PreviewUpdate>;
+  /** Asks core for the previewed screen of the draft at `revision`. */
+  fetch: (revision: number) => Promise<PreviewUpdate>;
   /** Says whether a problem of the preview is being fixed. */
   health: (health: PreviewHealth) => void;
   /** Starts the frame afresh: an update can't come in through Refresh. */
@@ -127,8 +126,6 @@ export class PreviewUpdates {
   #trying: number | undefined;
   /** Whether the frame reported a problem while trying the update it is handed. */
   #troubled = false;
-  /** The revision the chat named that an ask was last made again for. */
-  #reasked: number | undefined;
   #health: PreviewHealth = "working";
   /** The update the frame shows: the last that rendered. */
   #applied: PreviewRefresh;
@@ -223,7 +220,7 @@ export class PreviewUpdates {
       while (!this.#closed && this.#wanted > this.#asked) {
         this.#asked = this.#wanted;
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
-        const update = await this.#ask();
+        const update = await this.#ask(this.#asked);
         if (update === undefined) {
           continue;
         }
@@ -237,30 +234,22 @@ export class PreviewUpdates {
     }
   }
 
-  /** Core's answer for the draft now, or undefined when there is none to hand. */
-  async #ask(): Promise<PreviewRefresh | undefined> {
+  /**
+   * Core's answer for the draft at `revision`, the newest the chat named,
+   * or undefined when there is none to hand. Core builds each revision
+   * once, for every preview that asks for it.
+   */
+  async #ask(revision: number): Promise<PreviewRefresh | undefined> {
     let answered: PreviewUpdate;
     try {
-      answered = await this.#host.fetch();
+      answered = await this.#host.fetch(revision);
     } catch (error) {
       // Its code doesn't build: the frame keeps what it shows.
       if (screenErrors.codeOf(error) === "screen.build_failed") {
         this.#say("fixing");
       }
-      // A newer ask (another tab's) took its place in core's line: this
-      // frame still needs the draft, so it asks again, behind that one,
-      // rather than show an older write until the next. Once for each
-      // revision the chat named: frames that keep taking each other's
-      // place would otherwise ask on and on while one build runs, and
-      // the newest ask always gets its build. Anything else (core out of
-      // reach) is asked again at the chat's next write.
-      if (
-        appErrors.codeOf(error) === "app.preview_superseded" &&
-        this.#reasked !== this.#wanted
-      ) {
-        this.#reasked = this.#wanted;
-        this.#asked = this.#shown;
-      }
+      // Anything else (the draft moved past it, core out of reach) is
+      // asked for at the chat's next revision, which it says.
       return undefined;
     }
     // Only the App the frame was opened for, and only a revision past
