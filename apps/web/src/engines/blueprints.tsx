@@ -119,7 +119,7 @@ export const StartFromBlueprint = ({
     if (created !== undefined) {
       setOpen(false);
       await navigate({
-        to: "/apps/$app",
+        to: "/apps/$app/edit",
         params: { app: created.app.id },
       });
     }
@@ -164,7 +164,7 @@ export const StartFromBlueprint = ({
                 </EmptyTitle>
                 <EmptyDescription>
                   <Trans>
-                    Save an App as a blueprint from its details, and it shows
+                    Save an App as a blueprint from its settings, and it shows
                     here.
                   </Trans>
                 </EmptyDescription>

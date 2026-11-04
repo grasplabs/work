@@ -14,6 +14,11 @@ import type { ChatView } from "./follow-chat.ts";
 export interface FollowedChat {
   view: ChatView;
   failure: string | undefined;
+  /**
+   * Whether core refused to follow it (gone, or not the person's), not
+   * merely out of reach: only once following stopped.
+   */
+  refused?: boolean;
 }
 
 interface Watch {
@@ -66,8 +71,8 @@ const subscribe = (
           view: applyUpdate(started.state.view, update),
         });
       },
-      (failure) => {
-        changed(started, { ...started.state, failure });
+      (failure, refused) => {
+        changed(started, { ...started.state, failure, refused });
       }
     );
     watch = started;

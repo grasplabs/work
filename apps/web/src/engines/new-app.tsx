@@ -1,18 +1,33 @@
+import { appLimits } from "@grasp-os/shared/app-limits";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { useNavigate } from "@tanstack/react-router";
+import { useRef } from "react";
 import type { ReactNode } from "react";
 
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
+import { appSlot, setActiveChat } from "../chat/active-chat.ts";
 import { Composer } from "../chat/composer.tsx";
 import { useAsk } from "../chat/use-ask.ts";
+import type { Session } from "../core.ts";
 
-// Making a new app (grasplabs/prototype `components/apps/apps-home.tsx`):
-// Grasp's buddy and the question "What should the App show, and for whom?",
-// centred, over the box to answer in. The answer starts an ordinary chat,
-// which opens at its own address; its agent builds the app there, in the
-// chat's studio. Below it, other ways to start (`children`), such as from
-// a blueprint.
+// A new App: one big box, "What do you want to build?". What the person
+// writes makes the App (named after its first line), opens the App's own
+// chat (`chats.forApp`) with it as the first question, and lands in the
+// App's workspace (app-workspace.tsx), where the chat on the right builds
+// it and the preview shows it as it comes. Below the box, other ways to
+// start (`children`), such as from a blueprint.
+
+/** A new App's name: the first line of what was asked, cut to fit. */
+export const nameOf = (question: string): string => {
+  const line = question.trim().split("\n")[0]?.trim() ?? "";
+  const most = appLimits.nameLength;
+  return line.length > most ? `${line.slice(0, most - 1)}…` : line;
+};
+
+/** A new App's description: what was asked, cut to fit. */
+const descriptionOf = (question: string): string =>
+  question.trim().slice(0, appLimits.descriptionLength);
 
 export const NewApp = ({
   models,
@@ -24,7 +39,37 @@ export const NewApp = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const { composer } = useAsk(undefined, models, efforts, "page");
+  const navigate = useNavigate();
+  // The App made for the question: asking again after a send that failed
+  // asks in its chat, rather than making another App.
+  const made = useRef<{ app: string; chat?: string } | null>(null);
+  const textRef = useRef("");
+  const { composer } = useAsk(undefined, models, efforts, "here", undefined, {
+    chatFor: async (session: Session) => {
+      // Kept as soon as it is made: a retry after its chat or its question
+      // failed asks in this App, never making another.
+      if (made.current === null) {
+        const app = await session.apps.create({
+          name: nameOf(textRef.current),
+          description: descriptionOf(textRef.current),
+        });
+        made.current = { app: app.id };
+      }
+      if (made.current.chat === undefined) {
+        const chat = await session.chats.forApp(made.current.app);
+        made.current.chat = chat.id;
+      }
+      return made.current.chat;
+    },
+    onAsked: (chatId) => {
+      const app = made.current?.app;
+      if (app === undefined) {
+        return;
+      }
+      setActiveChat(chatId, appSlot(app));
+      void navigate({ to: "/apps/$app/edit", params: { app } });
+    },
+  });
   return (
     <section
       aria-labelledby="new-app"
@@ -32,16 +77,18 @@ export const NewApp = ({
     >
       <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-          <div className="flex flex-col items-center gap-6 text-center">
-            <GraspBuddy />
-            <PageHeaderTitle id="new-app">
-              <Trans>What should the App show, and for whom?</Trans>
-            </PageHeaderTitle>
-          </div>
+          <PageHeaderTitle className="text-center" id="new-app">
+            <Trans>What do you want to build?</Trans>
+          </PageHeaderTitle>
           <Composer
-            placeholder={t`Describe the App: what it shows, and for whom`}
-            running={false}
             {...composer}
+            label={t`Describe the App`}
+            onSend={() => {
+              textRef.current = composer.text;
+              composer.onSend();
+            }}
+            placeholder={t`An App that… (what it shows, and for whom)`}
+            running={false}
           />
           {children}
         </div>

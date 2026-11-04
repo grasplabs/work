@@ -49,14 +49,13 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { FolderIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
-import type { Loaded } from "../load-from-core.tsx";
 import { PersonOption } from "../people/person-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
@@ -474,27 +473,3 @@ export const AppMembers = ({
     </div>
   );
 };
-
-/**
- * Share on the App's bar, for whoever may share it: whom it is shared with
- * is left out of its list once the Members tab's read is in.
- */
-export const ShareOnBar = ({
-  app,
-  identity,
-  members,
-}: {
-  app: ViewedApp;
-  identity: Pick<Identity, "staff">;
-  members: Promise<Loaded<AppMember[]>>;
-}) =>
-  sharesApp(app, identity) ? (
-    <Await fallback={<ShareApp app={app} members={[]} />} promise={members}>
-      {(listed) => (
-        <ShareApp
-          app={app}
-          members={listed.state === "ready" ? listed.data : []}
-        />
-      )}
-    </Await>
-  ) : null;

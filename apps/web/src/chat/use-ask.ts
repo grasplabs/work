@@ -59,9 +59,9 @@ const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 /** Where a question goes when there is no chat yet, and what follows it. */
 export interface AskOptions {
   /**
-   * The chat a first question goes into, for a slot whose chat is made
-   * otherwise (an App's own, `chats.forApp`); by default a new chat named
-   * after the question.
+   * The chat a first question goes into, made otherwise (a new App's own,
+   * `chats.forApp`), which the caller opens once asked (`onAsked`); by
+   * default a new chat named after the question.
    */
   chatFor?: (session: Session) => Promise<string>;
   /** Once a question is taken, in the chat it went into. */
@@ -211,7 +211,8 @@ export const useAsk = (
     for (const { id } of carried) {
       attached.current.delete(id);
     }
-    if (chatId === undefined) {
+    // A chat made otherwise (`chatFor`) is the caller's to open.
+    if (chatId === undefined && chatFor === undefined) {
       setActiveChat(sent, slot);
       if (opens === "page") {
         await navigate({ to: "/", search: { chat: sent } });

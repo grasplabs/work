@@ -88,7 +88,7 @@ const NewItemForm = ({ project }: { project: Project }) => {
       return;
     }
     await (kind === "app"
-      ? navigate({ to: "/apps/$app", params: { app: made } })
+      ? navigate({ to: "/apps/$app/edit", params: { app: made } })
       : navigate({ to: "/workflows/$workflow", params: { workflow: made } }));
   };
   return (

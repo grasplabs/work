@@ -1,5 +1,4 @@
-import type { App, AppStatus, ViewedApp } from "@grasp-os/shared/apps";
-import type { Identity } from "@grasp-os/shared/rpc";
+import type { App, AppStatus } from "@grasp-os/shared/apps";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,30 +10,14 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  GlobeIcon,
-  MoreHorizontalIcon,
-} from "lucide-react";
-import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { buildsApp } from "./app-role.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
 // as in the prototype (`components/apps/app-settings.tsx`,
@@ -135,95 +118,6 @@ export const useStatusMove = (app: string) => {
   return { busy, failure, move };
 };
 
-/**
- * A builder's controls for the App's status, as the prototype's bar
- * (`routes/engines/$engineId.tsx`): Publish on the bar while it is a
- * draft, and the rest under one "…" menu, Unpublish and Archive; Restore
- * on the bar once archived, the one thing left to do with it.
- */
-export const StatusActions = ({ app }: { app: App }) => {
-  const { t } = useLingui();
-  const { busy, failure, move } = useStatusMove(app.id);
-  const [archiving, setArchiving] = useState(false);
-  const { name, status } = app;
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {status === "draft" ? (
-          <Button
-            disabled={busy || app.currentVersion === null}
-            onClick={() => {
-              move("publish");
-            }}
-            size="sm"
-          >
-            <GlobeIcon data-icon="inline-start" />
-            <Trans>Publish</Trans>
-          </Button>
-        ) : null}
-        {status === "archived" ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              move("restore");
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <ArchiveRestoreIcon data-icon="inline-start" />
-            <Trans>Restore</Trans>
-          </Button>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={busy}
-              render={
-                <Button
-                  aria-label={t`More for this App`}
-                  size="icon-sm"
-                  variant="ghost"
-                />
-              }
-            >
-              <MoreHorizontalIcon />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {status === "published" ? (
-                <DropdownMenuItem
-                  onClick={() => {
-                    move("unpublish");
-                  }}
-                >
-                  <GlobeIcon />
-                  <Trans>Unpublish</Trans>
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem
-                onClick={() => {
-                  setArchiving(true);
-                }}
-              >
-                <ArchiveIcon />
-                <Trans>Archive</Trans>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-      <ErrorText>{failure}</ErrorText>
-      <ArchiveDialog
-        name={name}
-        onArchive={() => {
-          setArchiving(false);
-          move("archive");
-        }}
-        onOpenChange={setArchiving}
-        open={archiving}
-      />
-    </div>
-  );
-};
-
 /** What the page says under the name of an App that isn't published. */
 export const StatusNote = ({ status }: { status: AppStatus }) => {
   const { t } = useLingui();
@@ -243,15 +137,3 @@ export const StatusNote = ({ status }: { status: AppStatus }) => {
   }
   return null;
 };
-
-/**
- * The App's status controls for `identity`: only for one who builds it
- * (`buildsApp`), by their role in this App; nothing for anyone else.
- */
-export const AppStatusControls = ({
-  app,
-  identity,
-}: {
-  app: ViewedApp;
-  identity: Pick<Identity, "staff">;
-}) => (buildsApp(app, identity) ? <StatusActions app={app} /> : null);
