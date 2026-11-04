@@ -55,9 +55,9 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   templates, files, actions and events. It holds no binding, approval or
 //   grant, and none is read or written. Its decisions ask its fixture's
 //   principals alone (fixture-decisions.ts; on the run host too,
-//   `openFixtureDecision`); its model calls are answered by its fixture, and its store calls
-//   run on its test's own fixture store, never a real model or store
-//   (fixture-calls.ts).
+//   `openFixtureDecision`); its model calls are answered by its fixture,
+//   and its store calls run on its test's own fixture store, never a real
+//   model or store (fixture-calls.ts).
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the slots (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
