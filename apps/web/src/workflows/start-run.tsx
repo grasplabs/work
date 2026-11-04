@@ -32,6 +32,7 @@ import type {
   StartFieldProblem,
   StartValues,
 } from "./start-input.ts";
+import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 
 // Starting a workflow by hand from its page (GRA-1305), as the person
 // who presses Start: a run of an independent workflow at the version
@@ -183,11 +184,14 @@ const StartDialog = ({
   fields,
   jsonOptional,
   start,
+  onFiles,
 }: {
   description: ReactNode;
   fields: StartField[] | undefined;
   jsonOptional: boolean;
   start: (input: unknown, key: string) => Promise<Started>;
+  /** Shows the workflow's Files and apps, where a refused binding is approved. */
+  onFiles?: (() => void) | undefined;
 }) => {
   const { t } = useLingui();
   const ids = useId();
@@ -199,6 +203,7 @@ const StartDialog = ({
     problem: StartFieldProblem;
   }>();
   const [failure, setFailure] = useState<string>();
+  const [unapproved, setUnapproved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<Started>();
   const [key, setKey] = useState(() => crypto.randomUUID());
@@ -228,6 +233,7 @@ const StartDialog = ({
   const submit = async (): Promise<void> => {
     setProblem(undefined);
     setFailure(undefined);
+    setUnapproved(false);
     const taken = inputOf();
     if (!taken.ok) {
       setFailure(taken.failure);
@@ -240,6 +246,7 @@ const StartDialog = ({
       setKey(crypto.randomUUID());
     } catch (error) {
       setFailure(failureText(error));
+      setUnapproved(isUnapprovedStart(error));
     }
     setBusy(false);
   };
@@ -251,6 +258,7 @@ const StartDialog = ({
         if (next) {
           setStarted(undefined);
           setFailure(undefined);
+          setUnapproved(false);
           setProblem(undefined);
         }
       }}
@@ -320,6 +328,14 @@ const StartDialog = ({
             })
           )}
           <ErrorText>{failure}</ErrorText>
+          {unapproved && onFiles !== undefined ? (
+            <ToApprovals
+              onFiles={() => {
+                setOpen(false);
+                onFiles();
+              }}
+            />
+          ) : null}
           {started === undefined ? null : (
             <output className="flex flex-col gap-1">
               <StartedText started={started} />
@@ -336,11 +352,22 @@ const StartDialog = ({
   );
 };
 
-/** Start for independent workflow `workflow`, once core says how it starts. */
-export const StartIndependentRun = ({ workflow }: { workflow: string }) => {
+/**
+ * Start for independent workflow `workflow`, once core says how it starts;
+ * why it can't when core couldn't say. `onFiles` shows its Files and apps.
+ */
+export const StartIndependentRun = ({
+  workflow,
+  onFiles,
+}: {
+  workflow: string;
+  onFiles?: () => void;
+}) => {
   const core = useCore();
   const router = useRouter();
+  const { t } = useLingui();
   const [form, setForm] = useState<WorkflowStartForm>();
+  const [unread, setUnread] = useState<string>();
 
   useEffect(() => {
     let stopped = false;
@@ -351,9 +378,12 @@ export const StartIndependentRun = ({ workflow }: { workflow: string }) => {
         );
         if (!stopped) {
           setForm(given);
+          setUnread(undefined);
         }
-      } catch {
-        // Not offered then: core would refuse the start anyway.
+      } catch (error) {
+        if (!stopped) {
+          setUnread(failureText(error));
+        }
       }
     };
     void read();
@@ -362,6 +392,9 @@ export const StartIndependentRun = ({ workflow }: { workflow: string }) => {
     };
   }, [core, workflow]);
 
+  if (unread !== undefined) {
+    return <ErrorText>{t`Can't offer Start: ${unread}`}</ErrorText>;
+  }
   const version = form?.version ?? null;
   if (version === null) {
     return null;
@@ -375,6 +408,7 @@ export const StartIndependentRun = ({ workflow }: { workflow: string }) => {
       }
       fields={startFieldsOf(form?.input)}
       jsonOptional={false}
+      onFiles={onFiles}
       start={async (input, key) => {
         const started = await core.withSession(
           async (session) =>

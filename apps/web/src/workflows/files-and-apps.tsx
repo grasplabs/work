@@ -1,4 +1,6 @@
 import type {
+  PendingWorkflowBindings,
+  WorkflowBindingTarget,
   WorkflowFile,
   WorkflowKnowledge,
   WorkflowResourceVersion,
@@ -21,18 +23,23 @@ import { AppLogo } from "../connections/app-logo.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
 import { formatBytes, formatDateTime, formatList } from "../format.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { PendingBindingList } from "./binding-approvals.tsx";
 import { workflowAppsOf } from "./workflow-apps.ts";
 import type { WorkflowApps } from "./workflow-apps.ts";
 
 // A workflow's Files and apps (prototype `inside-files.tsx`,
-// `inside-connectors.tsx`): the apps it works in, each with whether it is
-// connected; the Knowledge it reads, with the names its bindings give it;
-// and the files its runs wrote, what they are and never what they hold.
+// `inside-connectors.tsx`): for the organization's admins, what it reaches
+// that waits for their approval, approved here, as a start refused for it
+// says; the apps it works in, each with whether it is connected; the
+// Knowledge it reads, with the names its bindings give it; and the files
+// its runs wrote, what they are and never what they hold.
 // Each part is read on its own, each time the tab opens, and says on its
 // own why it failed: the apps read the catalog and connections from
 // connect (a cold catalog can take seconds), which no other tab needs, so
@@ -195,6 +202,69 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
   );
 };
 
+/**
+ * The versions of workflow `workflow` whose bindings wait, each binding
+ * approved for its version; `onApproved` once one is.
+ */
+const Waiting = ({
+  workflow,
+  pending,
+  onApproved,
+}: {
+  workflow: string;
+  pending: readonly PendingWorkflowBindings[];
+  onApproved: () => void;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [said, setSaid] = useState<string>();
+  const approve =
+    (version: number) =>
+    async (alias: string, target: WorkflowBindingTarget): Promise<void> => {
+      setSaid(undefined);
+      const approved = await run(async (session) => {
+        await session.workflowResources.approveBinding(workflow, {
+          alias,
+          target,
+          reviewed: { version },
+        });
+        return true;
+      });
+      if (approved === true) {
+        setSaid(t`Approved: ${alias}.`);
+        onApproved();
+      }
+    };
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-muted-foreground">
+        <Trans>
+          It can&apos;t start until you approve what each binding reaches, for
+          the version it runs.
+        </Trans>
+      </p>
+      {pending.map(({ version, live, bindings }) => (
+        <div className="flex flex-col gap-2" key={version}>
+          <h3 className="font-medium">
+            {live ? (
+              <Trans>Version {version}, which runs now</Trans>
+            ) : (
+              <Trans>Version {version}, asked to go live</Trans>
+            )}
+          </h3>
+          <PendingBindingList
+            bindings={bindings}
+            busy={busy}
+            onApprove={approve(version)}
+          />
+        </div>
+      ))}
+      <ErrorText>{failure}</ErrorText>
+      {said === undefined ? null : <output>{said}</output>}
+    </div>
+  );
+};
+
 /** A part of the tab: loading until read, then its content or why not. */
 const Part = <T,>({
   loaded,
@@ -242,18 +312,22 @@ const readApps = async (
 
 /**
  * Files and apps of workflow `workflow`, read each time it is shown;
- * `versions` and `currentVersion` as the page read them.
+ * `versions` and `currentVersion` as the page read them. `approves` for
+ * one of the organization's admins, who approve its bindings here.
  */
 export const FilesAndApps = ({
   workflow,
   currentVersion,
   versions,
+  approves,
 }: {
   workflow: string;
   currentVersion: number | null;
   versions: Loaded<WorkflowResourceVersion[]>;
+  approves: boolean;
 }) => {
   const core = useCore();
+  const [pending, setPending] = useState<Loaded<PendingWorkflowBindings[]>>();
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
   const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
   const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
@@ -300,13 +374,62 @@ export const FilesAndApps = ({
         setApps
       );
     }
+    if (approves) {
+      void read(
+        async (session) =>
+          await session.workflowResources.pendingBindingsOf(workflow),
+        setPending
+      );
+    }
     return () => {
       left.abort();
     };
-  }, [core, workflow, currentVersion, versionsRead]);
+  }, [core, workflow, currentVersion, versionsRead, approves]);
+
+  // Once a binding is approved: what still waits, and the apps its
+  // approvals connect, read again.
+  const approved = async (): Promise<void> => {
+    const [waiting, connected] = await Promise.all([
+      loadFromCore(
+        core,
+        async (session) =>
+          await session.workflowResources.pendingBindingsOf(workflow)
+      ),
+      versionsRead
+        ? loadFromCore(
+            core,
+            async (session) =>
+              await readApps(session, workflow, currentVersion, current)
+          )
+        : undefined,
+    ]);
+    setPending(waiting);
+    if (connected !== undefined) {
+      setApps(connected);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-8">
+      {pending === undefined ||
+      (pending.state === "ready" && pending.data.length === 0) ? null : (
+        <Section
+          id="workflow-waiting"
+          title={<Trans>Waiting for your approval</Trans>}
+        >
+          <Part loaded={pending}>
+            {(data) => (
+              <Waiting
+                onApproved={() => {
+                  void approved();
+                }}
+                pending={data}
+                workflow={workflow}
+              />
+            )}
+          </Part>
+        </Section>
+      )}
       <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
         <Part loaded={appsOf}>{(data) => <Apps apps={data} />}</Part>
       </Section>

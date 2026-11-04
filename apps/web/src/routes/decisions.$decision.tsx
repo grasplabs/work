@@ -297,6 +297,28 @@ const OnItsOwn = ({ children }: { children: ReactNode }) => (
   </main>
 );
 
+/**
+ * The crumb of the workflow whose run asks: its App's workflow, or an
+ * independent workflow's own page; only its name when it has neither.
+ */
+const sourceOf = (decision: DecisionView): Crumb => {
+  if (decision.app !== undefined) {
+    return {
+      label: decision.workflow,
+      to: "/workflows/$app/$workflow",
+      params: { app: decision.app.id, workflow: decision.workflow },
+    };
+  }
+  if (decision.workflowResource !== undefined) {
+    return {
+      label: decision.workflowResource.name,
+      to: "/workflows/$workflow",
+      params: { workflow: decision.workflowResource.id },
+    };
+  }
+  return { label: decision.workflow };
+};
+
 /** The decision in the app's frame, under the crumbs to its workflow. */
 const DecisionInFrame = ({
   identity,
@@ -399,15 +421,8 @@ const Decision = () => {
     );
   }
   const { decision } = page;
-  // An independent workflow's decision has no App page to lead to.
-  const source: Crumb =
-    decision.app === undefined
-      ? { label: decision.workflow }
-      : {
-          label: decision.workflow,
-          to: "/workflows/$app/$workflow",
-          params: { app: decision.app.id, workflow: decision.workflow },
-        };
+  // From the App's workflow, or the independent workflow's own page.
+  const source = sourceOf(decision);
   return (
     <DecisionInFrame
       crumbs={[workflows, source, { label: t`Decision` }]}

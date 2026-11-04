@@ -683,7 +683,7 @@ msgstr "{invited, plural, one {Stakeholders van {interviewed} van # uitgenodigd 
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
@@ -2071,6 +2071,10 @@ msgstr "Toevoegen aan {projectName}"
 msgid "Add webhook"
 msgstr "Webhook toevoegen"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Add who answers"
+msgstr "Wie antwoordt toevoegen"
+
 #: src/chat/builds.tsx
 #: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
@@ -2616,6 +2620,7 @@ msgstr "Goedkeuringen"
 #: src/engines/app-webhooks.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Goedkeuren"
 
@@ -2624,7 +2629,7 @@ msgctxt "let a waiting item go ahead"
 msgid "Approve"
 msgstr "Goedkeuren"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Approve {alias}"
 msgstr "{alias} goedkeuren"
 
@@ -2688,6 +2693,10 @@ msgstr "Pakketten goedgekeurd"
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Goedgekeurd: {alias} van {name}."
+
+#: src/workflows/files-and-apps.tsx
+msgid "Approved: {alias}."
+msgstr "Goedgekeurd: {alias}."
 
 #: src/dashboard/report.ts
 msgid "Approved: {approved}"
@@ -3358,6 +3367,10 @@ msgstr "Kwam naar voren in {source}"
 #: src/onboarding/place-picker.tsx
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
+
+#: src/workflows/start-run.tsx
+msgid "Can't offer Start: {unread}"
+msgstr "Starten kan niet worden aangeboden: {unread}"
 
 #: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
@@ -6736,6 +6749,10 @@ msgstr "Hij kan worden verwijderd zodra niets hem gebruikt: geen andere workflow
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "Het kan nog één keer worden verstuurd, precies zoals eerder. Niets wordt ongedaan gemaakt."
 
+#: src/workflows/files-and-apps.tsx
+msgid "It can't start until you approve what each binding reaches, for the version it runs."
+msgstr "Hij kan pas starten als je goedkeurt wat elke koppeling bereikt, voor de versie die hij draait."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "Hij declareert geen taken."
@@ -7002,7 +7019,7 @@ msgstr "De apps en workflows erin worden niet verwijderd, en niets erin is met h
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "De apps en workflows erin worden niet verwijderd, maar niet meer met iedereen erin gedeeld: {who} verliezen er toegang toe, tenzij ze op een andere manier met hen gedeeld zijn."
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Its bindings"
 msgstr "Zijn koppelingen"
 
@@ -7130,10 +7147,6 @@ msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan all
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings."
 msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan alles doen wat de code doet, zonder een koppeling van de app aan te roepen."
-
-#: src/inbox/item-detail.tsx
-msgid "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
-msgstr "Het doel vraagt keuzes die de inbox nog niet biedt: keur het goed op de pagina van de workflow."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -9041,6 +9054,10 @@ msgstr "Nog niets start hem vanzelf."
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Niets start hem vanzelf: hij draait wanneer iemand hem start."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Nothing the workflow may use serves it yet: grant the workflow what it needs first."
+msgstr "Nog niets wat de workflow mag gebruiken bedient hem: geef de workflow eerst wat hij nodig heeft."
+
 #: src/engines/app-access-requests.tsx
 msgid "Nothing this App asked for is waiting."
 msgstr "Niets wat deze app vroeg, wacht nog."
@@ -9438,6 +9455,10 @@ msgstr "Chat openen"
 #: src/chat/answer-markdown.tsx
 msgid "Open external link?"
 msgstr "Externe link openen?"
+
+#: src/workflows/unapproved-start.tsx
+msgid "Open Files and apps"
+msgstr "Bestanden en apps openen"
 
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
@@ -9909,7 +9930,6 @@ msgstr "In afwachting"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
-#: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Mensen"
@@ -10713,6 +10733,7 @@ msgstr "{label} verwijderen?"
 
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Remove {name}"
 msgstr "{name} verwijderen"
 
@@ -12920,7 +12941,6 @@ msgstr "Team: {name}"
 #: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
-#: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Teams"
@@ -13392,7 +13412,7 @@ msgstr "De wijzigingen van het concept verdwijnen, en de volgende wijziging van 
 msgid "The earlier wording stays in the goal's history."
 msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "De gebeurtenissen die zijn contract toelaat"
 
@@ -13683,7 +13703,7 @@ msgstr "De invoervelden van de run, elk uit de gebeurtenis als JSON Pointer, als
 msgid "The run's input fields, each from the message as a JSON Pointer, as JSON"
 msgstr "De invoervelden van de run, elk uit het bericht als JSON Pointer, als JSON"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "The run's own files"
 msgstr "De eigen bestanden van de run"
 
@@ -14892,6 +14912,14 @@ msgstr "Versie {version} van {name} is gevraagd om live te gaan. Zodra dat zo is
 msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
 msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
 
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version}, asked to go live"
+msgstr "Versie {version}, gevraagd om live te gaan"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version}, which runs now"
+msgstr "Versie {version}, die nu draait"
+
 #: src/screens/screen-frame.tsx
 msgid "Version {version}: read-only preview"
 msgstr "Versie {version}: voorbeeld, alleen lezen"
@@ -15072,6 +15100,10 @@ msgstr "Wachten tot jij ze live zet"
 msgid "Waiting for you: {title}"
 msgstr "Wacht op jou: {title}"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Waiting for your approval"
+msgstr "Wacht op je goedkeuring"
+
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
 msgid "Waiting on a person"
@@ -15216,7 +15248,7 @@ msgstr "Welkom bij Grasp. Zal ik je even rondleiden? Het duurt maar een minuutje
 msgid "went to people"
 msgstr "ging naar mensen"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "What {alias} reaches"
 msgstr "Wat {alias} bereikt"
 
@@ -15740,6 +15772,10 @@ msgstr "Wie"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "who answers"
 msgstr "wie antwoordt"
+
+#: src/workflows/binding-approvals.tsx
+msgid "Who answers {alias}"
+msgstr "Wie {alias} beantwoordt"
 
 #: src/engines/app-settings.tsx
 msgid "Who answers for the App: who is asked about it and decides what changes."

@@ -10,6 +10,7 @@ import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { followedTrace } from "./followed-trace.ts";
+import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A run of a workflow's current version, started with input the builder
@@ -32,18 +33,22 @@ const ended = (trace: WorkflowRunTrace): boolean =>
 const settled = (trace: WorkflowRunTrace): boolean =>
   ended(trace) || trace.detailsRemoved;
 
+/** A run of `version`; `onFiles` shows the workflow's Files and apps. */
 export const TracedRun = ({
   workflow,
   version,
+  onFiles,
 }: {
   workflow: string;
   version: number;
+  onFiles: () => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const [input, setInput] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [unapproved, setUnapproved] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [trace, setTrace] = useState<WorkflowRunTrace>();
   // Started, and admitted with no run: the version has no build that runs.
@@ -103,6 +108,7 @@ export const TracedRun = ({
 
   const start = async (): Promise<void> => {
     setFailure(undefined);
+    setUnapproved(false);
     setUnrunnable(false);
     let parsed: unknown;
     try {
@@ -129,6 +135,7 @@ export const TracedRun = ({
       setUnrunnable(started.runId === null);
     } catch (error) {
       setFailure(failureText(error));
+      setUnapproved(isUnapprovedStart(error));
     }
     setBusy(false);
   };
@@ -174,6 +181,7 @@ export const TracedRun = ({
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
+      {unapproved ? <ToApprovals onFiles={onFiles} /> : null}
       {unrunnable ? (
         <output>
           <Trans>

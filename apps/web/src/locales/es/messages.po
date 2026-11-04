@@ -683,7 +683,7 @@ msgstr "{invited, plural, one {Responsables de {interviewed} de # equipo invitad
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
@@ -2071,6 +2071,10 @@ msgstr "Añadir a {projectName}"
 msgid "Add webhook"
 msgstr "Añadir webhook"
 
+#: src/workflows/binding-approvals.tsx
+msgid "Add who answers"
+msgstr "Añadir quién responde"
+
 #: src/chat/builds.tsx
 #: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
@@ -2616,6 +2620,7 @@ msgstr "Aprobaciones"
 #: src/engines/app-webhooks.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Aprobar"
 
@@ -2624,7 +2629,7 @@ msgctxt "let a waiting item go ahead"
 msgid "Approve"
 msgstr "Aprobar"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Approve {alias}"
 msgstr "Aprobar {alias}"
 
@@ -2688,6 +2693,10 @@ msgstr "Aprobó paquetes"
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Aprobado: {alias} de {name}."
+
+#: src/workflows/files-and-apps.tsx
+msgid "Approved: {alias}."
+msgstr "Aprobado: {alias}."
 
 #: src/dashboard/report.ts
 msgid "Approved: {approved}"
@@ -3358,6 +3367,10 @@ msgstr "Surgió en {source}"
 #: src/onboarding/place-picker.tsx
 msgid "Can’t be read"
 msgstr "No se puede leer"
+
+#: src/workflows/start-run.tsx
+msgid "Can't offer Start: {unread}"
+msgstr "No se puede ofrecer Iniciar: {unread}"
 
 #: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
@@ -6736,6 +6749,10 @@ msgstr "Se puede eliminar cuando nada lo usa: ningún otro flujo de trabajo lo l
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "Se puede enviar una vez más, exactamente igual que antes. No se deshace nada."
 
+#: src/workflows/files-and-apps.tsx
+msgid "It can't start until you approve what each binding reaches, for the version it runs."
+msgstr "No puede iniciarse hasta que apruebes lo que alcanza cada vínculo, para la versión que ejecuta."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "No declara ninguna tarea."
@@ -7002,7 +7019,7 @@ msgstr "Sus apps y flujos de trabajo no se eliminan, y nada en él está compart
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Sus apps y flujos de trabajo no se eliminan, pero dejan de compartirse con todos sus miembros: {who} pierden el acceso, salvo que se compartan con ellos de otra forma."
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Its bindings"
 msgstr "Sus vínculos"
 
@@ -7130,10 +7147,6 @@ msgstr "Sus pasos no se pueden leer de su código, así que cualquier paso puede
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings."
 msgstr "Sus pasos no se pueden leer de su código, así que cualquier paso puede hacer todo lo que hace su código, sin llamar a ninguna conexión de la aplicación."
-
-#: src/inbox/item-detail.tsx
-msgid "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
-msgstr "Su destino necesita opciones que la bandeja de entrada aún no ofrece: apruébalo en la página del flujo de trabajo."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -9041,6 +9054,10 @@ msgstr "Todavía nada lo inicia por sí solo."
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Nada lo inicia por sí solo: se ejecuta cuando alguien lo inicia."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Nothing the workflow may use serves it yet: grant the workflow what it needs first."
+msgstr "Todavía nada de lo que el flujo puede usar le sirve: concede primero al flujo lo que necesita."
+
 #: src/engines/app-access-requests.tsx
 msgid "Nothing this App asked for is waiting."
 msgstr "No hay nada pendiente de lo que pidió esta aplicación."
@@ -9438,6 +9455,10 @@ msgstr "Abrir el chat"
 #: src/chat/answer-markdown.tsx
 msgid "Open external link?"
 msgstr "¿Abrir enlace externo?"
+
+#: src/workflows/unapproved-start.tsx
+msgid "Open Files and apps"
+msgstr "Abrir Archivos y apps"
 
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
@@ -9909,7 +9930,6 @@ msgstr "Pendiente"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
-#: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personas"
@@ -10713,6 +10733,7 @@ msgstr "¿Quitar {label}?"
 
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "Remove {name}"
 msgstr "Quitar {name}"
 
@@ -12920,7 +12941,6 @@ msgstr "Equipo: {name}"
 #: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
-#: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Teams"
@@ -13392,7 +13412,7 @@ msgstr "Los cambios del borrador se pierden, y el próximo cambio del agente emp
 msgid "The earlier wording stays in the goal's history."
 msgstr "La redacción anterior queda en el historial del objetivo."
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "Los eventos que admite su contrato"
 
@@ -13683,7 +13703,7 @@ msgstr "Los campos de entrada de la ejecución, cada uno del evento como JSON Po
 msgid "The run's input fields, each from the message as a JSON Pointer, as JSON"
 msgstr "Los campos de entrada de la ejecución, cada uno del mensaje como JSON Pointer, en JSON"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "The run's own files"
 msgstr "Los archivos propios de la ejecución"
 
@@ -14892,6 +14912,14 @@ msgstr "Se ha pedido que la versión {version} de {name} pase a producción. Una
 msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
 msgstr "La versión {version} de {name} está en producción, pero nada la inicia hasta que un administrador apruebe a qué accede: cada modelo, conexión, almacén o colección que llama."
 
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version}, asked to go live"
+msgstr "Versión {version}, pendiente de pasar a producción"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Version {version}, which runs now"
+msgstr "Versión {version}, la que se ejecuta ahora"
+
 #: src/screens/screen-frame.tsx
 msgid "Version {version}: read-only preview"
 msgstr "Versión {version}: vista previa de solo lectura"
@@ -15072,6 +15100,10 @@ msgstr "Esperan a que usted los publique"
 msgid "Waiting for you: {title}"
 msgstr "Esperando por ti: {title}"
 
+#: src/workflows/files-and-apps.tsx
+msgid "Waiting for your approval"
+msgstr "Esperando tu aprobación"
+
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
 msgid "Waiting on a person"
@@ -15216,7 +15248,7 @@ msgstr "Hola, te doy la bienvenida a Grasp. ¿Quieres que te lo enseñe? Es solo
 msgid "went to people"
 msgstr "pasó a personas"
 
-#: src/inbox/item-detail.tsx
+#: src/workflows/binding-approvals.tsx
 msgid "What {alias} reaches"
 msgstr "A qué accede {alias}"
 
@@ -15740,6 +15772,10 @@ msgstr "Quién"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "who answers"
 msgstr "quién responde"
+
+#: src/workflows/binding-approvals.tsx
+msgid "Who answers {alias}"
+msgstr "Quién responde {alias}"
 
 #: src/engines/app-settings.tsx
 msgid "Who answers for the App: who is asked about it and decides what changes."
