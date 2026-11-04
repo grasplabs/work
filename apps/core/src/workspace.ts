@@ -2182,7 +2182,9 @@ export class Workspace extends DurableObject<Env> {
     const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
-    return { memory, skills, channel };
+    // An App's own chat: the App its builds change.
+    const app = this.chatApp(work.chatId);
+    return { memory, skills, channel, ...(app === null ? {} : { app }) };
   }
 
   /**

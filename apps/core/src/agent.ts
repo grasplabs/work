@@ -307,10 +307,25 @@ export interface TurnContext {
    * mark (channels/stephen-rules.ts); none in Grasp's own app.
    */
   channel?: ChannelText;
+  /** The App the chat is its own chat of (`ChatsApi.forApp`); none for any other chat. */
+  app?: string;
 }
 
 /** The sections of the system prompt, in the order they first come. */
-const sectionNames = ["apis", "memory", "skills", "channel"] as const;
+const sectionNames = ["apis", "memory", "skills", "channel", "app"] as const;
+
+/**
+ * What an App's own chat tells the model: which App the person builds
+ * here, so a build asked for changes it rather than making another.
+ */
+const appSection = (app: string | undefined): string | null =>
+  app === undefined
+    ? null
+    : [
+        `<app id="${app}">`,
+        `This chat is the App ${app}'s own chat: its builder opened it to build that App. Whatever they ask to build, add, change or fix here is a change to this App: read it with \`env.build.files("${app}")\`, write it with \`env.build.write("${app}", …)\`, check and propose it as any App. Never create another App here: \`env.build.create\` is refused in this chat.`,
+        "</app>",
+      ].join("\n");
 
 /** The sections of the system prompt, `null` for one that is empty. */
 type Sections = Record<(typeof sectionNames)[number], string | null>;
@@ -357,6 +372,7 @@ const systemUpdates = (
             context.channel.text,
             "</channel>",
           ].join("\n"),
+    app: appSection(context.app),
   };
   const timestamp = Date.now();
   const changed: Partial<Sections> = {};
