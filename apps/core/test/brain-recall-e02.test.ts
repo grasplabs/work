@@ -112,24 +112,20 @@ describe("experiment E02, hybrid recall against full-text search", () => {
   // with the document, so an arm that misses it misses it for good, and
   // asking again for seconds measured nothing.
   beforeAll(async () => {
-    const answering = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(idp.fetch);
-    try {
-      const company = await setUpBrainCompany(idp);
-      await answeringProvider(lexicalRanking);
-      report = await runBrainRecallComparison(company, {
-        repeats,
-        measured: false,
-        lagLimitMs: 0,
-        identity: {
-          model: "stub: lexical overlap",
-          profile: "workerd (Vitest pool), stub reranker",
-        },
-      });
-    } finally {
-      answering.mockRestore();
-    }
+    // Put back before the next file (start-each-file.ts), and spied again
+    // before each test.
+    vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
+    const company = await setUpBrainCompany(idp);
+    await answeringProvider(lexicalRanking);
+    report = await runBrainRecallComparison(company, {
+      repeats,
+      measured: false,
+      lagLimitMs: 0,
+      identity: {
+        model: "stub: lexical overlap",
+        profile: "workerd (Vitest pool), stub reranker",
+      },
+    });
   }, runTimeoutMs);
 
   it("pins what its numbers depend on and asks every case under every arm, cold and warm", () => {

@@ -130,54 +130,8 @@ const startEmpty = async (): Promise<void> => {
 
 countBackgroundCalls();
 await startEmpty();
-/** How long the built-ins' audit events may take to leave the outboxes. */
-const installDrainedWithinMs = 30_000;
-
-/** How often the outboxes are read again while events are left in them. */
-const installDrainPollMs = 50;
-
-/** How many audit events wait in core's and Knowledge's outboxes. */
-const outboxed = async (): Promise<number> => {
-  const counts = await Promise.all(
-    [env.DB, env.KNOWLEDGE].map(
-      async (database) =>
-        (await database
-          .prepare("SELECT count(*) AS left FROM audit_outbox")
-          .first<number>("left")) ?? 0
-    )
-  );
-  return counts.reduce((total, count) => total + count, 0);
-};
-
-/**
- * Waits until the built-ins' audit events have left the outboxes, then
- * for the calls that drained them to go quiet. The install's events drain
- * in the background (`waitUntil`), each drain reading the outbox, calling
- * the AuditLog object and settling the rows, after the install's request
- * ended. A reset that aborts an object mid-call leaves the module
- * runner's import for it pending for good (see the imports above), and
- * every request after it waited until its test timed out. On a loaded CI
- * runner the drains were still going when the reset came: experiment
- * E02, first on its shard, hung on its first sign-in for all its tests.
- * Fails, rather than resetting under them, if they never finish.
- */
-const installDrained = async (): Promise<void> => {
-  const deadline = Date.now() + installDrainedWithinMs;
-  // oxlint-disable-next-line no-await-in-loop -- read until empty
-  while ((await outboxed()) > 0) {
-    if (Date.now() > deadline) {
-      throw new Error("The built-ins' audit events never left the outboxes");
-    }
-    // oxlint-disable-next-line no-await-in-loop -- read again after a pause
-    await scheduler.wait(installDrainPollMs);
-  }
-  await backgroundCallsQuiet();
-};
-
-// The built-ins' install, once per runtime, then empty storage again once
-// what it left going is done.
+// The built-ins' install, once per runtime, then empty storage again.
 if (await installBuiltinsFirst()) {
-  await installDrained();
   await startEmpty();
 }
 
