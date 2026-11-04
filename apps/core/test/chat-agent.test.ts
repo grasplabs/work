@@ -8,6 +8,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import type { FauxResponseStep } from "@earendil-works/pi-ai/providers/faux";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
   createRegistry,
   Harness,
@@ -293,6 +294,12 @@ const openChat = async (
   };
 };
 
+/** What a request holds of the chat, as pi estimates it, its system prompt aside. */
+const sizeOf = (messages: readonly Message[]): number =>
+  messages
+    .filter(({ role }) => role !== "system")
+    .reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+
 /** The text of every tool result `messages` hold, in order. */
 const resultsIn = (messages: readonly Message[]): string[] =>
   messages.flatMap((message) =>
@@ -559,6 +566,31 @@ describe("what a chat can no longer read", () => {
       kept: false,
       noted: true,
       summarized: chat.summaries.map(() => false),
+    });
+  });
+
+  it("rebases a history whose next entry fits the room alone but not with what pi kept, every summary within the room and the next request within the window", async () => {
+    const chat = await openChat(
+      {},
+      { contextWindow: 4000, settings: compacting }
+    );
+    // Two answers of about 1,950 tokens each: each fits the room of 2,000
+    // on its own, but not with what is left once pi compacted what
+    // precedes it.
+    for (const turn of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn after another
+      await chat.ask(`Turn ${turn}`, [chat.reply(says("a".repeat(6800)))]);
+    }
+    const before = chat.summaries.length;
+    await chat.rebased(2000);
+    await chat.ask("Again?", [chat.reply(says("ok"))]);
+    const summaries = chat.summaries.slice(before).map(sizeOf);
+    const asked = sizeOf(chat.requests.at(-1) ?? []);
+    // Each summary takes at most the room; the next question's request
+    // fits the window, the room and pi's reserve for its answer.
+    expect({ summaries, fits: asked <= 4000 }).toStrictEqual({
+      summaries: summaries.map((size) => Math.min(size, 2000)),
+      fits: true,
     });
   });
 

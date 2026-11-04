@@ -361,14 +361,32 @@ const tokensOf = (copied: Copied): number =>
 export const tooLargeResult =
   "[This result was too large to keep in the chat's context, so it was left out when the context was rebuilt.]";
 
-/** `copied` with each of its results read as {@link tooLargeResult}. */
+/** What a rebased context keeps of a response too large for the model's window. */
+export const tooLargeResponse =
+  "[This response was too large to keep in the chat's context, so it was left out when the context was rebuilt.]";
+
+/**
+ * `copied` with each of its results read as {@link tooLargeResult}, and
+ * what each response wrote or thought as {@link tooLargeResponse}, its
+ * calls kept.
+ */
 const tooLargeNoted = (copied: Copied): Copied => ({
   ...copied,
-  model: copied.model.map((message) =>
-    message.role === "toolResult"
-      ? { ...message, content: [{ type: "text", text: tooLargeResult }] }
-      : message
-  ),
+  model: copied.model.map((message): Message => {
+    if (message.role === "toolResult") {
+      return { ...message, content: [{ type: "text", text: tooLargeResult }] };
+    }
+    if (message.role !== "assistant") {
+      return message;
+    }
+    const calls = message.content.filter(({ type }) => type === "toolCall");
+    return calls.length === message.content.length
+      ? message
+      : {
+          ...message,
+          content: [{ type: "text", text: tooLargeResponse }, ...calls],
+        };
+  }),
 });
 
 /**
@@ -424,8 +442,8 @@ export const rebase = async (
   for (const entry of history) {
     // An entry the room can't hold on its own keeps its results as a note:
     // nothing appended is past what pi's summarizer takes.
-    const copied = tokensOf(entry) > room ? tooLargeNoted(entry) : entry;
-    const size = tokensOf(copied);
+    let copied = tokensOf(entry) > room ? tooLargeNoted(entry) : entry;
+    let size = tokensOf(copied);
     // The context so far compacted first when this entry would take it
     // past the room, so the prefix pi summarizes always fits.
     if (tokens + size > room && tokens > 0) {
@@ -438,6 +456,12 @@ export const rebase = async (
       // oxlint-disable-next-line no-await-in-loop -- what is left of the context
       const view = await conversation.context(context);
       ({ tokens } = estimateContextTokens(view.messages));
+      // pi keeps the most recent turns as they are: an entry that still
+      // can't join what is left keeps its results as a note.
+      if (tokens + size > room) {
+        copied = tooLargeNoted(copied);
+        size = tokensOf(copied);
+      }
     }
     pending.push(copied);
     tokens += size;
