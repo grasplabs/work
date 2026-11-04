@@ -11,7 +11,6 @@ import {
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -19,14 +18,13 @@ import type {
 } from "@grasp-os/shared/apps";
 import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
-import { withDraftReferences } from "./draft-references.ts";
+import { inspectDraft, withDraftReferences } from "./draft-references.ts";
+import type { DraftInspection } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
 import {
   buildScreens,
@@ -101,7 +99,11 @@ const savedBuild = async (
   kind: keyof SavedBuilds | "server",
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
   select: (files: Record<string, string>) => Record<string, string>,
-  build: () => Promise<{ ok: boolean; diagnostics?: Diagnostic[] }>,
+  build: () => Promise<{
+    ok: boolean;
+    diagnostics?: Diagnostic[];
+    standIn?: true;
+  }>,
   env: Env,
   signal?: AbortSignal
 ): Promise<SavedBuild> => {
@@ -117,6 +119,7 @@ const savedBuild = async (
     return {
       status: built.ok ? "ok" : "failed",
       diagnostics: (built.diagnostics ?? []).map((item) => toDiagnostic(item)),
+      ...(built.standIn === true ? { standIn: true } : {}),
     };
   } catch (error) {
     // Given up on, not failed: whoever gave up on it hears why.
@@ -182,9 +185,16 @@ export const buildOnSave = async (
   {
     profile,
     signal,
+    inspection,
   }: {
     /** `preview` for a chat's draft, `production` for a saved version. */
     readonly profile: BuildProfile;
+    /**
+     * The inspection of its server code the references its screens import
+     * are generated from (`inspectDraft`), when its caller shares one with
+     * the server check: its own otherwise.
+     */
+    readonly inspection?: () => Promise<DraftInspection>;
     /**
      * Aborted once the build is no one's (a build job's lease lost): no
      * build starts the compiler after, and it throws its reason, rather
@@ -209,7 +219,8 @@ export const buildOnSave = async (
           source.app,
           source.version,
           files,
-          options
+          options,
+          inspection
         );
         const built = await buildScreens(
           env,
@@ -217,7 +228,9 @@ export const buildOnSave = async (
           source.app,
           options
         );
-        return standIn ? withoutStandInNoise(built) : built;
+        return standIn
+          ? { ...withoutStandInNoise(built), standIn: true as const }
+          : built;
       },
       env,
       signal
@@ -278,7 +291,8 @@ const inspectionProblem = (
  * generates: from what its registration answers, inspected in the sandbox
  * as a save inspects it for its screens (`filesManifest`), with the
  * workflows it declares as the App binds them now. So what a check passes,
- * the seal's type check passes too.
+ * the seal's type check passes too. `inspection` is the one its screens'
+ * references come from too, when its caller shares one (`inspectDraft`).
  *
  * Server code that doesn't build or register is type-checked all the same,
  * against the stand-ins inspection loads (`symbolicModules`, typed `any`):
@@ -289,6 +303,7 @@ const inspectionProblem = (
 const checkedDraftCode = async (
   env: Env,
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
+  inspection: () => Promise<DraftInspection>,
   signal?: AbortSignal
 ): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
   // Whatever the draft holds under `.grasp/` is the host's to generate.
@@ -296,13 +311,9 @@ const checkedDraftCode = async (
     Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
   );
   const options = { profile: "preview", signal } as const;
-  let manifest: AppManifest;
-  try {
-    manifest = await filesManifest(env, code, app, options);
-  } catch (error) {
-    if (!isExpectedError(error)) {
-      throw error;
-    }
+  const inspected = await inspection();
+  if ("failed" in inspected) {
+    const { failed: error } = inspected;
     const checked = withoutStandInNoise(
       await checkAppCode(
         env,
@@ -327,6 +338,7 @@ const checkedDraftCode = async (
           ],
         };
   }
+  const { manifest } = inspected;
   const generated = await generateModules(
     manifest,
     { resourceId: app, resourceVersion: version },
@@ -344,12 +356,18 @@ const checkedDraftCode = async (
  * no app.ts and schema.ts fails there, saying so). Failed too when it
  * holds files under `app/`, which no commit takes (`app.v1_server`), each
  * named; `none` when it has no server code. Never throws, unless `signal`
- * gave up on it, as `buildOnSave`.
+ * gave up on it, as `buildOnSave`. `inspection` is the one its caller
+ * shares with the screens' build (`inspectDraft`), its own otherwise.
  */
 export const draftServerBuild = async (
   env: Env,
   source: Pick<SavedSource, "app" | "version" | "files">,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  inspection: () => Promise<DraftInspection> = async () =>
+    await inspectDraft(env, source.app, source.files, {
+      profile: "preview",
+      signal,
+    })
 ): Promise<SavedBuild> => {
   const { files } = source;
   const leftovers = Object.keys(files)
@@ -368,7 +386,7 @@ export const draftServerBuild = async (
     "server",
     source,
     appCodeFiles,
-    async () => await checkedDraftCode(env, source, signal),
+    async () => await checkedDraftCode(env, source, inspection, signal),
     env,
     signal
   );

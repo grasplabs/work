@@ -1,4 +1,4 @@
-import { isAppLayout } from "@grasp-os/compiler";
+import { generatedFolder, isAppLayout } from "@grasp-os/compiler";
 import {
   generatedPaths,
   generateModules,
@@ -116,16 +116,55 @@ export const withReferencesOf = async (
   );
 
 /**
+ * How inspecting a draft's server code went (`inspectDraft`): what it
+ * registers, or the expected error it was refused with (it doesn't
+ * build, its registration threw, or the sandbox ended it).
+ */
+export type DraftInspection =
+  | { readonly manifest: AppManifest }
+  | { readonly failed: Error };
+
+/**
+ * Inspects the server code of `files` once (`filesManifest`, without
+ * whatever they hold under `.grasp/`, which is the host's to generate).
+ * A draft's screens and its server check read the same inspection
+ * (agent-builds.ts, `draftBuilds`), so they can never disagree on whether
+ * the server code registered: a sandbox ending one of two inspections
+ * would otherwise check the screens against stand-ins while the server
+ * passed. Throws what isn't an expected error.
+ */
+export const inspectDraft = async (
+  env: Env,
+  app: AppId,
+  files: Readonly<Record<string, string>>,
+  options?: BuildOptions
+): Promise<DraftInspection> => {
+  const code = Object.fromEntries(
+    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
+  );
+  try {
+    return { manifest: await filesManifest(env, code, app, options) };
+  } catch (error) {
+    if (error instanceof Error && isExpectedError(error)) {
+      return { failed: error };
+    }
+    throw error;
+  }
+};
+
+/**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with
- * the references their own server code generates: inspected as they are,
- * never read from a sealed release, which may hold other code, with the
- * workflows they declare as the App binds them now.
+ * the references their own server code generates, from `inspection`
+ * (`inspectDraft`, run only when a screen imports them): never read from
+ * a sealed release, which may hold other code, with the workflows they
+ * declare as the App binds them now.
  *
  * While that server code doesn't build or register (an expected error),
- * its screens import the symbolic stand-ins inspection loads, typed `any`
- * (`symbolicModules`), and `standIn` says so: the server build names the
- * one reason, and a screen is checked for everything else rather than
- * failing on each import of `#grasp`.
+ * its screens import the symbolic stand-ins inspection loads, typed
+ * permissively (`symbolicModules`), and `standIn` says so: the server
+ * build names the one reason, and a screen is checked for everything else
+ * rather than failing on each import of `#grasp`. Checked against
+ * stand-ins, a screen is never passed (agent-builds.ts, `buildPassed`).
  */
 export const withDraftReferences = async (
   env: Env,
@@ -137,23 +176,27 @@ export const withDraftReferences = async (
    * up on (a build job's lease lost): generating them starts no compile
    * nor inspection, and it throws its reason.
    */
-  options?: BuildOptions
+  options?: BuildOptions,
+  inspection: () => Promise<DraftInspection> = async () =>
+    await inspectDraft(env, app, files, options)
 ): Promise<{ files: Record<string, string>; standIn: boolean }> => {
   let standIn = false;
   const withReferences = await withReferencesText(files, async () => {
-    try {
-      const manifest = await filesManifest(env, files, app, options);
-      return await referencesOf(app, version, {
-        manifest,
-        workflows: await boundWorkflowsOf(env, app, manifest),
-      });
-    } catch (error) {
-      if (!isExpectedError(error)) {
-        throw error;
+    const inspected = await inspection();
+    if ("manifest" in inspected) {
+      try {
+        return await referencesOf(app, version, {
+          manifest: inspected.manifest,
+          workflows: await boundWorkflowsOf(env, app, inspected.manifest),
+        });
+      } catch (error) {
+        if (!isExpectedError(error)) {
+          throw error;
+        }
       }
-      standIn = true;
-      return symbolicModules()[generatedPaths.references];
     }
+    standIn = true;
+    return symbolicModules()[generatedPaths.references];
   });
   return { files: withReferences, standIn };
 };

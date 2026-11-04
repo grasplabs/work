@@ -14,6 +14,7 @@ import {
   chatOf,
   codeResults,
   codeStep,
+  openTestRun,
   says,
   setObjectEnv,
   testRunOpening,
@@ -597,6 +598,95 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       // Its compile error, and nothing of the screens that import it.
       unparsed: { errors: 1, files: ["operations/notes.ts"] },
     });
+  });
+
+  it("never proposes screens checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
+    // The attack, under load: the sandbox ends one inspection of the
+    // server code (its deadline), so the screens fall back to the
+    // permissive stand-ins, while another inspection of the same code
+    // registers and passes the server check. Proposed then, a screen with
+    // calls that don't exist would be committed. The draft's builds
+    // inspect once, for both, and a stand-in check never passes.
+    const { person, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${findApp}
+        const proposal = await env.build.propose(app.id, "Notes");
+        return {
+          version: proposal.version,
+          passed: proposal.check.passed,
+          standIn: proposal.check.screens.standIn ?? false,
+          server: proposal.check.server.status,
+        };
+      };`),
+      says("It doesn't pass yet."),
+    ]);
+    await grant();
+    const { id: app } = await person.api.apps.create({ name: appName });
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    // Never inspected before, so no kept registration serves it.
+    const files = {
+      ...notesFiles,
+      "app.ts": `${notesFiles["app.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
+    };
+    await chat.stub.saveDraft(
+      chatId,
+      app,
+      null,
+      files,
+      [],
+      0,
+      await openTestRun(chat.stub, chatId)
+    );
+    // The sandbox ends the first inspection only, as its deadline would.
+    const { LOADER: loader } = env;
+    let inspections = 0;
+    const ending: WorkerLoader = {
+      // Unnamed: an isolate of the sandbox's, whose code is read when it
+      // starts, wrapped (shared/quiet-loader.ts) around its own main.
+      get: (name, code) =>
+        loader.get(
+          name,
+          name === null
+            ? async () => {
+                const worker = await code();
+                if (!Object.hasOwn(worker.modules, "grasp-inspect.js")) {
+                  return worker;
+                }
+                inspections += 1;
+                return inspections === 1
+                  ? {
+                      ...worker,
+                      modules: {
+                        ...worker.modules,
+                        "grasp-inspect.js":
+                          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class Inspect extends WorkerEntrypoint { manifest() { throw new Error("The sandbox ended it: past its deadline."); } }\n',
+                      },
+                    }
+                  : worker;
+              }
+            : code
+        ),
+      load: (code) => loader.load(code),
+    };
+    try {
+      env.LOADER = ending;
+      await chat.ask("Propose the notes App");
+    } finally {
+      env.LOADER = loader;
+    }
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect({ inspections, proposal: returned(result?.text) }).toStrictEqual({
+      // One inspection, read by the screens and the server check alike.
+      inspections: 1,
+      proposal: {
+        version: null,
+        passed: false,
+        standIn: true,
+        server: "failed",
+      },
+    });
+    await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
   });
 
   it("caps the Apps a turn creates, counting none that wasn't created", async () => {

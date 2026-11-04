@@ -38,6 +38,8 @@ import type { Acting, Member } from "./auth/identity.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
+import { inspectDraft } from "./draft-references.ts";
+import type { DraftInspection } from "./draft-references.ts";
 import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
@@ -393,9 +395,17 @@ export const draftOf = async (
     : draft;
 };
 
-/** Whether a build lets a draft through: it built, or had nothing to. */
-const buildPassed = ({ status }: SavedBuild): boolean =>
-  status === "ok" || status === "none";
+/**
+ * Whether a build lets a draft through: it built, or had nothing to, and
+ * never against stand-ins for references its server code didn't generate
+ * (`standIn`): screens checked against those accept any call.
+ */
+const buildPassed = ({ status, standIn }: SavedBuild): boolean =>
+  (status === "ok" || status === "none") && standIn !== true;
+
+/** What a write says of screens checked against stand-ins (`standIn`). */
+const standInNote =
+  "Checked without the references the server code generates, as it doesn't register yet: fix the server code and write again before proposing.";
 
 /** A build as a check answers it: its first diagnostics only. */
 const reported = (build: SavedBuild): SavedBuild => ({
@@ -444,9 +454,12 @@ export const afterProposal =
     return undefined;
   };
 
-/** Logs a turn's count that couldn't be settled; the call's own error goes on. */
-const logCountFailure = (failure: unknown): void => {
-  log.warn("agent.check_settle_failed", errorFields(failure));
+/**
+ * Logs what this turn took that couldn't be given back (an App it may
+ * create, a build job's place); the call's own error goes on.
+ */
+const logReleaseFailure = (failure: unknown): void => {
+  log.warn("agent.turn_release_failed", errorFields(failure));
 };
 
 /**
@@ -489,7 +502,10 @@ export type DraftBuilds = Pick<DraftCheck, "screens" | "server" | "workflows">;
  * workflows) and its server code as its seal type-checks it
  * (`draftServerBuild`), all at once: every gate of each, none hiding
  * another. Typed by the App's permissions now, as a version committed
- * from it would be.
+ * from it would be. Its server code is inspected once, at most, for both
+ * (`inspectDraft`): the screens' references and the server check read the
+ * same registration, so a sandbox that ends one inspection can't check
+ * the screens against stand-ins while the server passes.
  */
 const draftBuilds = async (
   env: Env,
@@ -499,13 +515,23 @@ const draftBuilds = async (
   signal?: AbortSignal
 ): Promise<DraftBuilds> => {
   const version = base ?? 0;
+  let inspecting: Promise<DraftInspection> | undefined;
+  // Only once something reads it: a draft with no server code nor screens
+  // that import its references inspects nothing.
+  const inspection = async (): Promise<DraftInspection> => {
+    inspecting ??= inspectDraft(env, app, files, {
+      profile: "preview",
+      signal,
+    });
+    return await inspecting;
+  };
   const [saved, server] = await Promise.all([
     buildOnSave(
       env,
       { app, version, files, bindings: await appBindingKinds(env, app) },
-      { profile: "preview", signal }
+      { profile: "preview", signal, inspection }
     ),
-    draftServerBuild(env, { app, version, files }, signal),
+    draftServerBuild(env, { app, version, files }, signal, inspection),
   ]);
   return { screens: saved.screens, server, workflows: saved.workflows };
 };
@@ -928,7 +954,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       // Refused (the person's role, say): it created nothing.
       await workspace(this.env, workspaceId)
         .releaseCreate(chatId)
-        .catch(logCountFailure);
+        .catch(logReleaseFailure);
       throw error;
     }
   }
@@ -1032,9 +1058,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         );
         const notChecked: DraftWrite["notChecked"] = {};
         for (const kind of ["screens", "server", "workflows"] as const) {
-          const { status, error } = builds[kind];
+          const { status, error, standIn } = builds[kind];
           if (status === "error") {
             notChecked[kind] = error ?? "The build couldn't run now.";
+          } else if (standIn === true) {
+            notChecked[kind] = standInNote;
           }
         }
         return {
@@ -1215,7 +1243,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           });
           await chats
             .endBuildJob(chatId, opened.id, brokenOff(null))
-            .catch(logCountFailure);
+            .catch(logReleaseFailure);
           throw error;
         }
         return { job: opened.id, status: "running", revision: opened.revision };
@@ -1341,6 +1369,8 @@ interface Build {
   }[];
   /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. */
   error?: string;
+  /** Screens checked without the references the server code generates, as it doesn't register: never passes; fix the server code and write again. */
+  standIn?: true;
 }`;
 
 /** What the model reads of `env.build`. */
@@ -1505,7 +1535,9 @@ build: {
    * Answers with what fails in the whole draft now, its screens, server code
    * and workflows checked at once (compile, types, lint, React Compiler),
    * sorted by file, each once: fix the errors and write again; proposing
-   * needs none. A build that couldn't run now is in \`notChecked\`.
+   * needs none. A build that couldn't run now, or screens checked without
+   * the server code's references while it doesn't register, is in
+   * \`notChecked\`: proposing refuses it until a write checks it.
    */
   write(app: string, changes: Record<string, string | null>, over?: { revision: number }): Promise<{
     base: number | null;

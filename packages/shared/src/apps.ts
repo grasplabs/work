@@ -511,6 +511,13 @@ export interface SavedBuild {
   diagnostics: BuildDiagnostic[];
   /** Why a build couldn't run, with `error`. */
   error?: string;
+  /**
+   * Screens checked against stand-ins for the references their server code
+   * generates, because it doesn't build or register: never passes a check,
+   * however few diagnostics it has. Check again once the server code
+   * registers.
+   */
+  standIn?: true;
 }
 
 /** A committed version, with how its builds went (`AppFilesApi.commit`). */
