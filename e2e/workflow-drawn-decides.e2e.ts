@@ -142,13 +142,15 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await start.getByLabel("invoice").fill("INV-42");
   // Picked from the organization's people, never typed as an ID. Everyone
   // the stack signs in is called Person, and a starter sees names, not
-  // emails: told apart by the ID each option goes by.
+  // emails: told apart by the end of the ID each goes by.
   await start.getByLabel("approver").click();
   await page
     .getByRole("option", { name: "Person" })
     .and(page.locator(`[data-value="person:${decider.userId}"]`))
     .click();
-  await expect(start.getByLabel("approver")).toHaveText("Person");
+  await expect(start.getByLabel("approver")).toHaveText(
+    `Person (ID …${decider.userId.slice(-6)})`
+  );
   await start.getByRole("button", { name: "Start the run" }).click();
   await expect(start.getByRole("status")).toHaveText(
     "The run started. It is listed with the workflow's runs.",
