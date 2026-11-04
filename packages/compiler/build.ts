@@ -892,7 +892,7 @@ const emitOwnDeclarations = (
  * of `@grasp-os/sdk/react`), so a diagnostic that names a module
  * (`typeof import("/node_modules/@grasp-os/sdk/src/react")`) names it as
  * a check of the sources did, with no hash that changes from release to
- * release.
+ * release. A chunk the entries share takes `.shared.d.ts` there.
  */
 const chunkPathOf = (declarationFile: string): string => {
   const own = Object.entries(ownPackages).find(([, dir]) =>
@@ -971,6 +971,9 @@ const rollUpTypes = async (
       [...entries.values()].map((file) => [chunkPathOf(file), file])
     ),
     cwd: root,
+    // The declarations plugin is this build's work by design: its timings
+    // aren't worth a warning at every release.
+    checks: { bundlerTimings: false },
     external: (id) =>
       !id.startsWith(".") &&
       !path.isAbsolute(id) &&
@@ -985,15 +988,17 @@ const rollUpTypes = async (
     const { output } = await bundle.generate({
       format: "es",
       entryFileNames: "[name].d.ts",
-      // A shared chunk's name is its main module's file name; a chunk with
-      // no module has nothing but its name to go by.
+      // A shared chunk goes beside its main module (rolldown names it by
+      // that module's file), as `.shared.d.ts`: never an entry's name,
+      // which the module may have (`index`, `workflow`). A chunk with no
+      // module has nothing but its name to go by.
       chunkFileNames: ({ name, moduleIds }) => {
         const main =
           moduleIds.find((id) => path.basename(id) === `${name}.ts`) ??
           moduleIds[0];
         return main === undefined
-          ? "@grasp-os/sdk/src/[name].d.ts"
-          : `${chunkPathOf(main)}.d.ts`;
+          ? "@grasp-os/sdk/src/[name].shared.d.ts"
+          : `${chunkPathOf(main)}.shared.d.ts`;
       },
     });
     for (const file of output) {

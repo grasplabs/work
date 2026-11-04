@@ -1,10 +1,10 @@
 import { referenceFiles } from "@grasp-os/compiler";
 
 // What a chat's agent reads to write an App that checks: the SDK's and the
-// UI kit's sources exactly as App code is type-checked against them (the
-// compiler's `reference.json`, cut from the kit's types), and the built-in
-// blueprints' files (apps/core/blueprints/), complete Apps that pass every
-// check, as examples. Read with `readFile` and `searchFiles` without an
+// UI kit's sources (the compiler's `reference.json`, built from the very
+// sources the check's type chunks are rolled up from, in the same
+// release), and the built-in blueprints' files (apps/core/blueprints/),
+// complete Apps that pass every check, as examples. Read with `readFile` and `searchFiles` without an
 // App (agent-tools.ts). Nothing here is written by hand, so it can't drift
 // from what every `env.build.write` holds code to.
 
