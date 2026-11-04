@@ -31,6 +31,7 @@ import {
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
+import { policyOf } from "../src/data-policy.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -38,7 +39,6 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { standingOf } from "../src/screen-trust.ts";
 import { pendingWorkflowBindings } from "../src/workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
@@ -2025,7 +2025,7 @@ describe("an App binding a workflow", () => {
     ).resolves.toBe("ok");
   });
 
-  it("makes the screens of an App that starts a workflow sensitive again when the workflow is granted more", async () => {
+  it("makes the data of an App that starts a workflow sensitive again when the workflow is granted more", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
@@ -2043,14 +2043,14 @@ describe("an App binding a workflow", () => {
     )
       .bind(app)
       .run();
-    const before = await standingOf(env, appIdSchema.parse(app));
+    const before = await policyOf(env, appIdSchema.parse(app));
     await granted(ada, admin, {
       subject: { type: "workflow", workflowId: workflow.id },
       object: { type: "connection", connectionId: `connection-${unique()}` },
       actions: ["mail.send"],
       binding: `MAIL_${unique().toUpperCase()}`,
     });
-    const after = await standingOf(env, appIdSchema.parse(app));
+    const after = await policyOf(env, appIdSchema.parse(app));
     expect({
       output: after.output,
       moved: after.generation - before.generation,
@@ -2058,10 +2058,10 @@ describe("an App binding a workflow", () => {
   });
 });
 
-describe("screen trust through workflows", () => {
+describe("an App's data policy through workflows", () => {
   beforeAll(chooseModel);
 
-  it("makes the screens of an App sensitive again when a workflow it starts is granted more", async () => {
+  it("makes the data of an App sensitive again when a workflow it starts is granted more", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
@@ -2079,14 +2079,14 @@ describe("screen trust through workflows", () => {
     )
       .bind(starter)
       .run();
-    const before = await standingOf(env, appIdSchema.parse(starter));
+    const before = await policyOf(env, appIdSchema.parse(starter));
     await granted(ada, admin, {
       subject: { type: "workflow", workflowId: workflow.id },
       object: { type: "connection", connectionId: `connection-${unique()}` },
       actions: ["mail.send"],
       binding: `MAIL_${unique().toUpperCase()}`,
     });
-    const after = await standingOf(env, appIdSchema.parse(starter));
+    const after = await policyOf(env, appIdSchema.parse(starter));
     expect({
       output: after.output,
       moved: after.generation - before.generation,

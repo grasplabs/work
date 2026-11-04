@@ -61,8 +61,8 @@ import type { LiveReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
-import type { LeasedBuild } from "./screen-trust.ts";
 import {
   admitPreviewCall,
   admitWindow,
@@ -732,8 +732,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       id,
       "preview"
     );
-    // A preview reads no real data, so no approval decides it; its
-    // frame still runs exactly this build and nothing else.
+    // A preview reads no real data; its frame still runs exactly this
+    // build and nothing else.
     signal.throwIfAborted();
     await stageFrame(this.#env, built.artifact, built.code);
     signal.throwIfAborted();

@@ -13,7 +13,6 @@ import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -274,7 +273,7 @@ const granted = async (
 };
 
 /**
- * The Invoices App sealed and current, its screen approved, `review` bound
+ * The Invoices App sealed and current, `review` bound
  * to a workflow waiting for its job's completion through `jobEvents`
  * (approved), with the App's grants of `actions` on it, each its own.
  */
@@ -314,12 +313,6 @@ const invoicesApp = async (actions: readonly string[][]) => {
     // oxlint-disable-next-line no-await-in-loop -- one grant after the other
     grants.push(await granted(admin, builder, fixture.app, workflow.id, each));
   }
-  const review = await admin.api.screenTrust.review(fixture.app);
-  await admin.api.screenTrust.approve(fixture.app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const release = await loadRelease(env, fixture.app, 1);
   return {
     admin,

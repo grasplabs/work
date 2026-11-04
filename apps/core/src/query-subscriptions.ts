@@ -26,8 +26,8 @@ import type { EvaluatedQuery } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
 import { RunSubscription } from "./run-subscription.ts";
-import { delivering } from "./screen-trust.ts";
-import type { LeasedBuild } from "./screen-trust.ts";
+import { delivering } from "./screen-delivery.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // Live queries (spec 11): what one page's connection to core (one browser
@@ -69,8 +69,8 @@ import type { SessionCheck } from "./session-check.ts";
 //   pushed goes out after the refusal.
 // - A snapshot stays on screen after access is lost, because nothing
 //   commits to what it read (spec 11.4): every write that can take a role
-//   in an App away, or its data from a build (an approval taken back, its
-//   data sensitive again, its release revoked), tells the App's host once
+//   in an App away, or its data from code (its data sensitive again, its
+//   release revoked), tells the App's host once
 //   it committed (access-revocations.ts), and the host tells every
 //   connection of those people that follows the App (`#follow`), on every
 //   tab and isolate.

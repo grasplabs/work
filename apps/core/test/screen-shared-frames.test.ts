@@ -2,8 +2,8 @@ import type { OperationReference, ReferenceKind } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -14,10 +14,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { approvalApp } from "./approval-app.ts";
 import { pastAccessRecheck, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, outcome, routed, signedInApi } from "./sign-in.ts";
 
@@ -27,12 +29,12 @@ import { auditedDuring, outcome, routed, signedInApi } from "./sign-in.ts";
 // connection:
 //
 // - Frame A decided on frame B's build: two frames of one App on one
-//   connection, each its own build; one build's approval taken back
-//   stops that frame only, and a frame with no lease of core's never
-//   borrows another frame's approval.
+//   connection, each on its own version's build; the older version's
+//   release revoked stops that frame only, and a frame with no lease of
+//   core's never borrows another frame's.
 // - One frame's revocation reaching another's pushes: each frame follows
-//   the App's notes (`watchQuery`); after one build's approval is taken
-//   back, only the other frame is pushed the App's changes.
+//   the App's notes (`watchQuery`); after one frame's release is revoked,
+//   only the other frame is pushed the App's changes.
 // - A closed frame following on: two frames follow the same live query
 //   (one read shared between them); closing one lets go of its callback
 //   at once, and the other is still pushed every change.
@@ -48,42 +50,53 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
 
 type Person = Awaited<ReturnType<typeof personApi>>;
 
-/** Approves the App's current screens as `admin`, exactly as reviewed. */
-const approveCurrent = async (admin: Person, app: string): Promise<void> => {
-  const { version, generation, screens } =
-    await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version,
-    generation,
-    artifacts: builtArtifacts(screens),
-  });
-};
-
-/** A new App with `files` as its current version, its screens approved. */
-const approvedApp = async (
-  builder: Person,
-  admin: Person,
-  files: Record<string, string>
-) => {
+/** A new App with `files` as its current version: nobody approves its screens. */
+const currentApp = async (builder: Person, files: Record<string, string>) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
-  await approveCurrent(admin, id);
   return { app: id, version };
 };
 
 /**
- * Two screens, so two builds, each approved on its own; and the App's
- * `api`, as they call it.
+ * Two screens, so two builds; and the App's `api`, as they call it.
  */
-const twoScreenApp = async (builder: Person, admin: Person) => {
+const twoScreenApp = async (builder: Person) => {
   const notesScreen = notesFiles["screens/notes.tsx"] ?? "";
-  const { app, version } = await approvedApp(builder, admin, {
+  const { app, version } = await currentApp(builder, {
     ...notesFiles,
     "screens/other.tsx": notesScreen.replace(">Add<", ">Other<"),
   });
-  return { app, api: apiOf(await loadRelease(env, app, version)) };
+  return { app, version, api: apiOf(await loadRelease(env, app, version)) };
+};
+
+/**
+ * The Notes App's next version, its screen changed, made current; and the
+ * App's `api` at it.
+ */
+const nextVersion = async (builder: Person, app: string) => {
+  const notesScreen = notesFiles["screens/notes.tsx"] ?? "";
+  const { version } = await builder.api.apps.files.commit(
+    app,
+    { "screens/notes.tsx": notesScreen.replace(">Add<", ">Add a note<") },
+    "Second"
+  );
+  await builder.api.apps.versions.setCurrent(app, version);
+  return {
+    version,
+    api: apiOf(await loadRelease(env, appIdSchema.parse(app), version)),
+  };
+};
+
+/** Revokes the release of `version` of `app`, as an admin. */
+const revoked = async (app: string, version: number): Promise<void> => {
+  await revokeRelease(
+    env,
+    await actingPerson("admin"),
+    { app: appIdSchema.parse(app), version },
+    "Leaks data"
+  );
 };
 
 /** A page's callback that is never pushed to, and whether core let go of it. */
@@ -118,9 +131,9 @@ const refusalsOf = (
     .toSorted();
 
 /**
- * A live query's refusal of a build taken back, recorded by whichever
- * check meets it first: its read (`admission`) or the push of what it
- * read (`push`).
+ * A live query's refusal of a build whose release was revoked, recorded
+ * by whichever check meets it first: its read (`admission`) or the push
+ * of what it read (`push`).
  */
 const liveRefusal = /^watchQuery\/(?:admission|push): revoked$/u;
 
@@ -215,26 +228,29 @@ const pushWait = { timeout: 20_000, interval: 50 };
 describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
   it("decides each frame on its own build, whatever another frame of the App on the connection runs", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const { app, api } = await twoScreenApp(builder, admin);
+    const { app, version, api } = await twoScreenApp(builder);
     const request = requestOf(api.list, { pagination: { pageSize: 10 } });
     const { screens } = builder.api;
     const notes = await screens.open(app, "notes");
-    const other = await screens.open(app, "other");
     const notesFrame = await screens.frame(app, notes.lease);
-    // Made last: the one a connection-wide build would have followed.
-    const otherFrame = await screens.frame(app, other.lease);
-    const unleased = await screens.frame(app, `${notes.artifact}.forged`);
     const beforeFollower = follower();
     const before = await outcome(
       notesFrame.watchQuery(request, beforeFollower.callback)
     );
-
     await vi.waitFor(() => {
       expect(beforeFollower.titles).toStrictEqual([[]]);
     }, pushWait);
+    // The next version current, and a frame of it: made last, the one a
+    // connection-wide build would have followed.
+    const second = await nextVersion(builder, app);
+    const otherRequest = requestOf(second.api.list, {
+      pagination: { pageSize: 10 },
+    });
+    const other = await screens.open(app, "notes");
+    const otherFrame = await screens.frame(app, other.lease);
+    const unleased = await screens.frame(app, `${notes.artifact}.forged`);
 
-    await admin.api.screenTrust.revoke(app, notes.artifact);
+    await revoked(app, version);
     // The revocation ends the live query it already had, once the App's
     // open screens are told to look again (GRA-668), which happens after
     // the revocation answers: refused, and recorded as a push refusal, at
@@ -253,11 +269,11 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
         notesRuns: await outcome(notesFrame.runs("invoices")),
         notesDelivery: await notesFrame.delivery(),
         other: await outcome(
-          otherFrame.watchQuery(request, follower().callback)
+          otherFrame.watchQuery(otherRequest, follower().callback)
         ),
         otherDelivery: await otherFrame.delivery(),
         unleased: await outcome(
-          unleased.watchQuery(request, follower().callback)
+          unleased.watchQuery(otherRequest, follower().callback)
         ),
         unleasedRuns: await outcome(unleased.runs("invoices")),
       };
@@ -265,7 +281,7 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
 
     expect({
       before,
-      // Nothing reached it after its build's approval was taken back.
+      // Nothing reached it after its release was revoked.
       beforePushed: beforeFollower.titles,
       after,
       refused: refusalsOf(events, app),
@@ -281,7 +297,7 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
         unleased: "screen.unreviewed",
         unleasedRuns: "screen.unreviewed",
       },
-      // Each refused by the trust gate, as its own frame's build.
+      // Each refused by the gate, as its own frame's build.
       refused: [
         "runs/admission: revoked",
         "runs/admission: unreviewed",
@@ -291,28 +307,31 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     });
   });
 
-  it("stops the pushes of a frame whose build lost its approval, and only that frame's", async () => {
+  it("stops the pushes of a frame whose release was revoked, and only that frame's", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const { app, api } = await twoScreenApp(builder, admin);
+    const { app, version, api } = await twoScreenApp(builder);
     const request = requestOf(api.list, { pagination: { pageSize: 10 } });
     const { screens } = builder.api;
     const notes = await screens.open(app, "notes");
-    const other = await screens.open(app, "other");
     const notesFrame = await screens.frame(app, notes.lease);
+    const second = await nextVersion(builder, app);
+    const otherRequest = requestOf(second.api.list, {
+      pagination: { pageSize: 10 },
+    });
+    const other = await screens.open(app, "notes");
     const otherFrame = await screens.frame(app, other.lease);
     const toNotes = follower();
     const toOther = follower();
     await notesFrame.watchQuery(request, toNotes.callback);
-    await otherFrame.watchQuery(request, toOther.callback);
+    await otherFrame.watchQuery(otherRequest, toOther.callback);
     // Both first reads in before anything changes, so what each is pushed
     // is known exactly.
     await vi.waitFor(() => {
       expect([toNotes.titles, toOther.titles]).toStrictEqual([[[]], [[]]]);
     }, pushWait);
     const client = callingClient({ app, lease: other.lease }, builder);
-    await client.mutation(api.create, { title: "Before" });
-    // Both frames are pushed the App's change while both are approved.
+    await client.mutation(second.api.create, { title: "Before" });
+    // Both frames are pushed the App's change while neither is revoked.
     await vi.waitFor(() => {
       expect([toNotes.titles.at(-1), toOther.titles.at(-1)]).toStrictEqual([
         ["Before"],
@@ -321,8 +340,8 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     }, pushWait);
 
     const events = await auditedDuring(async () => {
-      await admin.api.screenTrust.revoke(app, notes.artifact);
-      await client.mutation(api.create, { title: "After" });
+      await revoked(app, version);
+      await client.mutation(second.api.create, { title: "After" });
       await vi.waitFor(() => {
         expect([toNotes.refused, toOther.titles.at(-1)]).toStrictEqual([
           ["screen.revoked"],
@@ -338,20 +357,19 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       toOtherRefused: toOther.refused,
       refused: refusalsOf(events, app),
     }).toStrictEqual({
-      // Never the change made after its approval was taken back.
+      // Never the change made after its release was revoked.
       toNotes: [[], ["Before"]],
       toNotesReleased: true,
       toOther: [[], ["Before"], ["After", "Before"]],
       toOtherRefused: [],
-      // Refused by the trust gate, as the frame's build was.
+      // Refused by the gate, as the frame's build was.
       refused: [expect.stringMatching(liveRefusal)],
     });
   });
 
   it("lets go of what a closed frame followed, and refuses it, while the other frame of the same build goes on", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const { app, api } = await twoScreenApp(builder, admin);
+    const { app, api } = await twoScreenApp(builder);
     const request = requestOf(api.list, { pagination: { pageSize: 10 } });
     const { screens } = builder.api;
     const notes = await screens.open(app, "notes");
@@ -398,8 +416,7 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
 
   it("follows nothing for a frame that closed while core admitted its live query", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const { app, api } = await twoScreenApp(builder, admin);
+    const { app, api } = await twoScreenApp(builder);
     const request = requestOf(api.list, { pagination: { pageSize: 10 } });
     const { screens } = builder.api;
     const notes = await screens.open(app, "notes");
@@ -458,9 +475,8 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
 
   it("answers a frame's delivery only to someone who still has a role in the App", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
     const member = await personApi("builder");
-    const { app } = await twoScreenApp(builder, admin);
+    const { app } = await twoScreenApp(builder);
     const them = { type: "person", id: member.userId } as const;
     await builder.api.apps.members.add(app, { ...them, role: "user" });
     const notes = await member.api.screens.open(app, "notes");
@@ -484,8 +500,7 @@ describe(
   () => {
     it("lets go of a closed frame's live query at once, and keeps pushing the other frame's", async () => {
       const builder = await personApi("builder");
-      const admin = await personApi("admin");
-      const { app, version } = await approvedApp(builder, admin, notesFiles);
+      const { app, version } = await currentApp(builder, notesFiles);
       const api = apiOf(await loadRelease(env, app, version));
       const { screens } = builder.api;
       const first = await screens.open(app, "notes");

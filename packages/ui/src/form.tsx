@@ -1259,6 +1259,38 @@ const FileUpload = <Reference extends FilesReference>({
     };
     void stop();
   };
+  /** Uploads `file`, picked or dropped, and holds its reference. */
+  const take = (file: File): void => {
+    setFailure(undefined);
+    // The form doesn't submit until the upload ends; discarding the
+    // draft cancels it.
+    const hold = bindingOf(form).startUpload(stopUpload);
+    const send = async (): Promise<void> => {
+      try {
+        const ref = await upload.upload(file);
+        // A draft discarded meanwhile: the file isn't the new one's.
+        if (hold.current()) {
+          setUploaded({ id: ref.id, name: file.name });
+          control.handleChange(ref);
+        }
+      } catch (error) {
+        // Cancelled by the person: nothing went wrong to say.
+        const cancelled =
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "file.cancelled";
+        if (!cancelled) {
+          setFailure(error instanceof Error ? error.message : text.failed);
+        }
+      }
+      const current = hold.current();
+      hold.end();
+      if (current) {
+        control.handleBlur();
+      }
+    };
+    void send();
+  };
   if (held !== undefined) {
     return (
       <div className="flex items-center gap-2">
@@ -1296,40 +1328,19 @@ const FileUpload = <Reference extends FilesReference>({
           const [file] = event.currentTarget.files ?? [];
           // Picking the same file again, after a failure, is a change too.
           event.currentTarget.value = "";
-          if (file === undefined) {
-            return;
+          if (file !== undefined) {
+            take(file);
           }
-          setFailure(undefined);
-          // The form doesn't submit until the upload ends; discarding the
-          // draft cancels it.
-          const hold = bindingOf(form).startUpload(stopUpload);
-          const send = async (): Promise<void> => {
-            try {
-              const ref = await upload.upload(file);
-              // A draft discarded meanwhile: the file isn't the new one's.
-              if (hold.current()) {
-                setUploaded({ id: ref.id, name: file.name });
-                control.handleChange(ref);
-              }
-            } catch (error) {
-              // Cancelled by the person: nothing went wrong to say.
-              const cancelled =
-                error instanceof Error &&
-                "code" in error &&
-                error.code === "file.cancelled";
-              if (!cancelled) {
-                setFailure(
-                  error instanceof Error ? error.message : text.failed
-                );
-              }
-            }
-            const current = hold.current();
-            hold.end();
-            if (current) {
-              control.handleBlur();
-            }
-          };
-          void send();
+        }}
+        // A file dropped on the field is taken here: a page's frame
+        // cancels the browser's own handling of every drop (core's
+        // screen-frame.ts), which is what would otherwise hand it over.
+        onDrop={(event) => {
+          event.preventDefault();
+          const [file] = event.dataTransfer.files;
+          if (file !== undefined && !(control.disabled || busy)) {
+            take(file);
+          }
         }}
         type="file"
       />

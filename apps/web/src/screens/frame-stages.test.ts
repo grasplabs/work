@@ -11,6 +11,7 @@ import {
 import {
   isMounted,
   isReady,
+  readyOf,
   stage,
   StageTimeoutError,
 } from "./frame-stages.ts";
@@ -34,7 +35,7 @@ const expected = {
 const ready = (changes: Partial<FrameMessage> = {}): FrameMessage => ({
   source: frameWindow,
   origin: "null",
-  data: { type: screenFrameReady, load: expected.load },
+  data: { type: screenFrameReady, load: expected.load, supported: true },
   ...changes,
 });
 
@@ -97,15 +98,27 @@ describe("ready", () => {
       anOriginOfItsOwn: ready({ origin: "https://attacker.example" }),
       thePagesOrigin: ready({ origin: "https://grasp.example" }),
       anEarlierLoad: ready({
-        data: { type: screenFrameReady, load: "load-0" },
+        data: { type: screenFrameReady, load: "load-0", supported: true },
       }),
-      noLoad: ready({ data: { type: screenFrameReady } }),
+      noLoad: ready({ data: { type: screenFrameReady, supported: true } }),
       aLoadThatIsNoText: ready({
-        data: { type: screenFrameReady, load: { toString: () => "load-1" } },
+        data: {
+          type: screenFrameReady,
+          load: { toString: () => "load-1" },
+          supported: true,
+        },
+      }),
+      noWordOnTheBrowser: ready({
+        data: { type: screenFrameReady, load: expected.load },
       }),
       mountedInstead: ready({ data: mounted().data }),
       moreThanReady: ready({
-        data: { type: screenFrameReady, load: expected.load, trusted: true },
+        data: {
+          type: screenFrameReady,
+          load: expected.load,
+          supported: true,
+          trusted: true,
+        },
       }),
       notAnObject: ready({ data: `${screenFrameReady}:${expected.load}` }),
       nothing: ready({ data: null }),
@@ -115,6 +128,26 @@ describe("ready", () => {
         .filter(([, message]) => isReady(message, frame, expected.load))
         .map(([name]) => name)
     ).toStrictEqual([]);
+  });
+
+  it("says when the frame's browser can't run a screen", () => {
+    expect(
+      readyOf(
+        ready({
+          data: {
+            type: screenFrameReady,
+            load: expected.load,
+            supported: false,
+          },
+        }),
+        frame,
+        expected.load
+      )
+    ).toStrictEqual({
+      type: screenFrameReady,
+      load: expected.load,
+      supported: false,
+    });
   });
 
   it("counts for nothing once the frame is off the page", () => {

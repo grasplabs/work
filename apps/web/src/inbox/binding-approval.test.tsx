@@ -102,7 +102,6 @@ const shown = async () => {
       state: "ready",
       data: { policyGeneration: 1, requests: [] },
     },
-    screens: undefined,
     decisions: { state: "ready", data: [] },
     workflowGoLives: { state: "ready", data: [] },
     heldStarts: { state: "ready", data: [] },

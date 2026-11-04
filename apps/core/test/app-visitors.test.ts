@@ -4,7 +4,6 @@ import {
   appVisitorCodesPerAppPerHour,
 } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -134,21 +133,14 @@ const routedNotesFiles: Record<string, string> = {
 `,
 };
 
-/** Makes `files` the App's current version, its screens approved. */
+/** Makes `files` the App's current version. */
 const releasedNotes = async (
   builder: Person,
   app: string,
   files: Record<string, string> = notesFiles
 ): Promise<void> => {
-  const admin = await signedInApi(idp, "admin");
   const { version } = await builder.api.apps.files.commit(app, files, "First");
   await builder.api.apps.versions.setCurrent(app, version);
-  const review = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
 };
 
 /** Posts a visitor's request, as their page does. */
@@ -612,7 +604,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
         // No member's session: refused before anything is read.
         { status: 401, code: "auth.unauthenticated" },
         // A member, with the visitor's lease: it isn't theirs, so the
-        // screen is unreviewed code to them, and refused.
+        // screen is code core didn't serve them, and refused.
         { status: 403, code: "screen.unreviewed" },
       ],
     });

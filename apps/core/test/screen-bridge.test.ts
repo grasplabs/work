@@ -364,6 +364,27 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("serves a build's frame so no markup its screen writes is parsed, and no name looked up ahead of time", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const served = await frameDocument(
+      await builder.api.screens.open(app, "notes")
+    );
+    const policy = policyOf(served);
+
+    expect({
+      status: served.status,
+      trustedTypes: policy.get("require-trusted-types-for"),
+      policies: policy.get("trusted-types"),
+      prefetch: served.headers.get("x-dns-prefetch-control"),
+    }).toStrictEqual({
+      status: 200,
+      trustedTypes: ["'script'"],
+      policies: ["'none'"],
+      prefetch: "off",
+    });
+  });
+
   it("serves a frame and its modules only with core's unexpired token for exactly them", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);

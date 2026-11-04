@@ -9,7 +9,6 @@ import type {
   TriggerStoppedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
-import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type {
   BindingApprovalItem,
   GoLiveItem,
@@ -35,8 +34,8 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, packages proposed for an engine, an engine's apps
-// whose code nobody approved, a version of an App the person answers for
+// or agent asked for, packages proposed for an engine, a version of an
+// App the person answers for
 // up for review, a workflow that failed while acting for the person. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
@@ -56,7 +55,6 @@ export type InboxKind =
   | "unknownOutcome"
   | "permissionRequest"
   | "packages"
-  | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
   | "revokedPackage"
@@ -88,7 +86,6 @@ export type InboxSource =
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
-  | { type: "screens"; waiting: ScreensWaiting }
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
@@ -148,7 +145,6 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   unknownOutcome: "apps",
   permissionRequest: "apps",
   packages: "apps",
-  appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
@@ -367,37 +363,6 @@ const packageItems = (
       date: request.requestedAt,
       urgent: false,
       source: { type: "packages", request, policyGeneration },
-    };
-  });
-
-/** An App whose current pages run code nobody approved: approved in its details. */
-const screenItems = (
-  engines: readonly ScreensWaiting[],
-  readAt: string
-): InboxItem[] =>
-  engines.map((waiting) => {
-    const { name, screens, version } = waiting;
-    const count = screens.length;
-    return {
-      id: `screens:${waiting.app}`,
-      kind: "appApproval",
-      title: plural(count, {
-        one: `${name} has # page whose code nobody approved`,
-        other: `${name} has # pages whose code nobody approved`,
-      }),
-      context: name,
-      body: [
-        t`A page runs only once an admin approved its code. That happens in the App's details.`,
-      ],
-      facts: [
-        { label: t`Version`, value: String(version) },
-        { label: t`Pages`, value: formatList(screens) },
-      ],
-      about: { kind: "engine", engine: waiting.app, place: "details" },
-      // Core says what waits now, not since when: as of the read.
-      date: readAt,
-      urgent: false,
-      source: { type: "screens", waiting },
     };
   });
 
@@ -797,7 +762,6 @@ export const inboxItems = (
     ? readyOf(waiting.requests)
     : undefined;
   const dependencies = readyOf(waiting.dependencies);
-  const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
@@ -845,7 +809,6 @@ export const inboxItems = (
     ...(dependencies === undefined
       ? []
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
-    ...screenItems(screens, readAt),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
@@ -866,7 +829,6 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.outcomes,
     waiting.requests,
     waiting.dependencies,
-    waiting.screens,
     waiting.failed,
     waiting.reconnect,
     waiting.versions,

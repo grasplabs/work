@@ -32,7 +32,7 @@ import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
 import type { RunSubscription } from "./run-subscription.ts";
-import { deliveryAt, requireDelivery } from "./screen-trust.ts";
+import { deliveryAt, requireDelivery } from "./screen-delivery.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
@@ -47,7 +47,7 @@ import { auditStaffRoute, staffAudited } from "./staff-audit.ts";
 // (auth/app-tokens.ts) comes in the connection's first call
 // (`PortableLiveApi.connect`). What it then reaches is the frame's live
 // queries: the same `QuerySubscriptions` manager and `screenReads`, with
-// no build core approved (as the portable function route: only when the
+// no build core leased (as the portable function route: only when the
 // App's data is `ordinary`, never once its release is revoked). Threat
 // model, and how each is closed:
 //
@@ -383,7 +383,7 @@ export class PortableQueriesRpc
     ) {
       throw screenErrors.create("screen.invalid");
     }
-    // No build core approved: the host's code isn't core's to deliver.
+    // No build core leased: the host's code isn't core's to deliver.
     await requireDelivery(env, by, id, undefined, {
       operation: "portable.watchQuery",
       stage: "admission",

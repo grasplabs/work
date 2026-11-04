@@ -7,7 +7,6 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { actionMaxRunning } from "@grasp-os/shared/operation-limits";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -34,7 +33,7 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
 
 // Foreground streaming actions (spec 10.7.6), through core's real routes
-// and the invocation's own Durable Object, as an approved screen's page
+// and the invocation's own Durable Object, as a screen's page
 // relays them: progress then the validated result; a lost connection
 // attached to the same invocation, never run again; a cancelled stream
 // that keeps what it committed and commits nothing more; a stream no one
@@ -296,7 +295,7 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
 /**
- * A builder's Writer App, current, its screen approved by an admin and
+ * A builder's Writer App, current, its screen
  * opened by both: `builder` and `admin` when given, new people otherwise.
  */
 const openedApp = async (people: { builder?: Person; admin?: Person } = {}) => {
@@ -306,20 +305,12 @@ const openedApp = async (people: { builder?: Person; admin?: Person } = {}) => {
   await publishedApp(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
-  const review = await admin.api.screenTrust.review(id);
-  const artifacts = builtArtifacts(review.screens);
-  await admin.api.screenTrust.approve(id, {
-    version: review.version,
-    generation: review.generation,
-    artifacts,
-  });
   const { lease } = await builder.api.screens.open(id, "writer");
   const { lease: adminLease } = await admin.api.screens.open(id, "writer");
   const release = await loadRelease(env, id, version);
   return {
     app: id,
     release,
-    artifacts,
     admin,
     builderApi: builder,
     builderId: builder.userId,
@@ -715,30 +706,6 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     await expect(titles(client, opened)).resolves.toStrictEqual(["Alone"]);
   });
 
-  it("stops relaying once the screen's build loses its approval", async () => {
-    const opened = await openedApp();
-    const api = apiOf(opened.release);
-    const { client } = clientFor(opened);
-    let steps = 0;
-    const running = client.stream(
-      api.slow,
-      { title: "Revoked" },
-      {
-        onProgress: () => {
-          steps += 1;
-        },
-      }
-    );
-    await until(() => steps >= 1);
-    for (const artifact of opened.artifacts) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await opened.admin.api.screenTrust.revoke(opened.app, artifact);
-    }
-    await expect(failureOf(running)).resolves.toMatchObject({
-      code: "screen.revoked",
-    });
-  });
-
   it("fails on progress its schema refuses, and refuses oversized progress to the handler", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
@@ -1096,7 +1063,7 @@ describe("a streaming action's bounds and access", { timeout: 120_000 }, () => {
     );
   });
 
-  it("refuses a stream to a frame without a lease on an approved build", async () => {
+  it("refuses a stream to a frame without a lease, as code core didn't serve", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const response = await post(
@@ -1552,14 +1519,8 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       { app: appIdSchema.parse(opened.app), version: 1 },
       "Leaks data"
     );
-    // A screen opened on version 2, with its own lease, its build approved:
-    // the same contract, the same invocation, made under 1.
-    const review = await opened.admin.api.screenTrust.review(opened.app);
-    await opened.admin.api.screenTrust.approve(opened.app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
+    // A screen opened on version 2, with its own lease: the same contract,
+    // the same invocation, made under 1.
     const { lease } = await opened.builderApi.api.screens.open(
       opened.app,
       "writer"

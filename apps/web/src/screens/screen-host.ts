@@ -38,7 +38,7 @@ import { frameActs } from "./frame-acts.ts";
 import {
   inTime,
   isMounted,
-  isReady,
+  readyOf,
   stage,
   StageTimeoutError,
 } from "./frame-stages.ts";
@@ -78,11 +78,11 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // the frame is emptied. Which App, version and screen a frame runs is
 // what the page opened, never what the frame says.
 //
-// Core hands an App's data only to code an admin approved, unless an
-// admin classified that data as fine for any code (core's
-// screen-trust.ts). So a screen nobody approved isn't started at all
-// (`open` refuses it), and one whose approval is taken back is stopped:
-// the page gives core's lease on the frame's build back on the frame's
+// Core hands an App's data to the build it leased the page, as the
+// person viewing it, and to nothing once that build's release was revoked
+// (core's screen-delivery.ts). So a screen of a revoked release isn't
+// started at all (`open` refuses it), and one whose release is revoked
+// while it runs is stopped: the page gives core's lease on the frame's build back on the frame's
 // connection when it opens the frame (`frame`), core decides every call
 // on that build, and
 // when it says the build no longer gets the data (as a refused call, or
@@ -105,8 +105,8 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // in core of everything the frame followed. The frames never see the
 // connection or each other. What ends the connection for its person
 // (signed out, or someone else's session) stops every frame on it before
-// the page loads again; what stops one frame (its build's approval taken
-// back, a broken channel, a timeout, the page leaving) stops that frame
+// the page loads again; what stops one frame (its build's release
+// revoked, a broken channel, a timeout, the page leaving) stops that frame
 // alone.
 //
 // A frame keeps the version it opened (spec 11.5). When another is made
@@ -137,9 +137,9 @@ export type FailureReason =
   | "left"
   /** The frame's channel to the page ended: over a limit, or closed. */
   | "disconnected"
-  /** Nobody approved the screen's code for the App's data. */
+  /** Core didn't confirm the frame's build: it leased it none. */
   | "unreviewed"
-  /** The approval of the screen's code was taken back. */
+  /** The release the screen's build runs was revoked. */
   | "revoked"
   /** Someone else signed in on the browser since the frame was opened. */
   | "principal-changed"
@@ -151,6 +151,8 @@ export type FailureReason =
   | "not-sealed"
   /** The version running was revoked, and no longer runs. */
   | "version-revoked"
+  /** The browser doesn't enforce what keeps a screen in its frame. */
+  | "unsupported"
   | "unknown";
 
 /**
@@ -578,7 +580,7 @@ export interface ScreenOpening {
  */
 /**
  * Asks the person whether to open a link to `link.origin` (ASCII; the
- * whole URL too, for an App that read restricted data), in the page's own
+ * whole URL too, when core wants it confirmed), in the page's own
  * dialog; rejects while another question waits.
  */
 export type ConfirmLink = (link: {
@@ -1136,9 +1138,17 @@ const runFrame = <Bundle extends FrameCode>(
     if (stopped.signal.aborted) {
       return;
     }
+    // Whether the frame's browser enforces what keeps a screen from making
+    // a document of its own (core's screen-frame.ts): one that doesn't
+    // starts nothing, and the page says the browser is too old.
+    let supported = true;
     const ready = stage(
       "ready",
-      (message) => isReady(message, frameWindow, load),
+      (message) => {
+        const said = readyOf(message, frameWindow, load);
+        supported = said?.supported ?? supported;
+        return said !== undefined;
+      },
       window,
       stopped.signal
     );
@@ -1152,6 +1162,10 @@ const runFrame = <Bundle extends FrameCode>(
     })}`;
     await ready;
     if (stopped.signal.aborted) {
+      return;
+    }
+    if (!supported) {
+      fail({ status: "failed", reason: "unsupported" });
       return;
     }
     const expected: ExpectedStart = {
@@ -1401,7 +1415,7 @@ export const appScreen = (
             }
             return;
           }
-          // Someone's access, or a build's approval, may have dropped: a
+          // Someone's access, or a build's release, may have dropped: a
           // screen that asks for nothing more still holds what it was
           // handed, so this is when the page asks about its build.
           if (push.recheck) {
@@ -1424,7 +1438,7 @@ export const appScreen = (
 
 /**
  * Why a screen was stopped that means its drafts were read under access
- * now gone: its build's approval. A refusal to open it is looked at by
+ * now gone: its build's release, or its lease. A refusal to open it is looked at by
  * its code (`appScreen`), as a screen not found isn't the App.
  */
 const dropsDrafts: ReadonlySet<FailureReason> = new Set([
@@ -1534,7 +1548,7 @@ export const runPreview = (
       // let go of them, so only closing the connection when the preview
       // stops releases them (GRA-623).
       join: ownLink,
-      // A preview reads no real data, so no approval decides it.
+      // A preview reads no real data.
       connect: (link, bundle) => ({
         target: previewTarget(link, chatId, bundle),
       }),

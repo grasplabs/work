@@ -128,7 +128,7 @@ import { claimedFor, claimStore } from "./store-owners.ts";
 //   inspected; and the store must be listed and live before it is
 //   claimed, so no claim is ever written for a store that isn't.
 // - A release vouches for itself: its trust is always `unreviewed` in the
-//   manifest; approval and revocation are the host's records of its hash.
+//   manifest; revocation is the host's record (`sdk_release_manifests`).
 //
 // - Someone seals an App they don't build, or binds a store they may not:
 //   `sealRelease` checks itself that `by` builds the App, then that they

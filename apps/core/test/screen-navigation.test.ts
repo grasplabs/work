@@ -1,18 +1,20 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { revokeRelease } from "../src/release-retention.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // Navigation between an App's screens (spec 10.7.7), as core decides it
 // for the page: the screen a route name names at the App's current
 // version, with its input normalized by the route's own schema, only for
-// someone who may open it now (a role in the App, and a build approved
-// for its data). Opening a screen with that route and input checks all of
+// someone who may open it now (a role in the App, and a build whose
+// release isn't revoked). Opening a screen with that route and input checks all of
 // it again, so an address the page carries can't hand a screen input its
 // route refuses. The page's side, which navigates only to what core
 // resolved, is the web's screen-bridge tests.
@@ -68,12 +70,11 @@ export default function Note({ input }: ScreenProps<typeof screens.note>) {
 });
 
 /**
- * A builder's Notes App with routed screens, made current, and its
- * screens approved by an admin unless `approved` is false.
+ * A builder's Notes App with routed screens, made current: its screens
+ * need nobody's approval.
  */
-const routedApp = async (approved = true) => {
+const routedApp = async () => {
   const builder = await personApi("builder");
-  const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const { version } = await builder.api.apps.files.commit(
     id,
@@ -81,17 +82,7 @@ const routedApp = async (approved = true) => {
     "First"
   );
   await builder.api.apps.versions.setCurrent(id, version);
-  let artifacts: string[] = [];
-  if (approved) {
-    const review = await admin.api.screenTrust.review(id);
-    artifacts = builtArtifacts(review.screens);
-    await admin.api.screenTrust.approve(id, {
-      version: review.version,
-      generation: review.generation,
-      artifacts,
-    });
-  }
-  return { app: id, builder, admin, artifacts };
+  return { app: id, builder, version };
 };
 
 /** The code refusing `person`'s navigation of `app` (`ok` if none). */
@@ -238,33 +229,25 @@ describe("navigating between an App's screens", () => {
     });
   });
 
-  it("refuses someone who can't open the target now: no access to the App, or a build nobody approved for its data", async () => {
-    const { app } = await routedApp();
+  it("refuses someone with no access to the App, and navigating once its current release was revoked", async () => {
+    const { app, builder, version } = await routedApp();
     const stranger = await personApi("builder");
-    const unapproved = await routedApp(false);
-    expect({
-      stranger: await navigated(stranger, app, "note", { id: "n1" }),
-      unapproved: await navigated(unapproved.builder, unapproved.app, "note", {
-        id: "n1",
-      }),
-    }).toStrictEqual({
-      stranger: "app.not_found",
-      unapproved: "screen.unreviewed",
-    });
-  });
-
-  it("refuses navigating to a build revoked since it was approved", async () => {
-    const { app, builder, admin, artifacts } = await routedApp();
     const before = await navigated(builder, app, "note", { id: "n1" });
-    await Promise.all(
-      artifacts.map(async (artifact) => {
-        await admin.api.screenTrust.revoke(app, artifact);
-      })
+    await revokeRelease(
+      env,
+      await actingPerson("admin"),
+      { app: appIdSchema.parse(app), version },
+      "Leaks data"
     );
     expect({
+      stranger: await navigated(stranger, app, "note", { id: "n1" }),
       before,
       after: await navigated(builder, app, "note", { id: "n1" }),
-    }).toStrictEqual({ before: "ok", after: "screen.revoked" });
+    }).toStrictEqual({
+      stranger: "app.not_found",
+      before: "ok",
+      after: "version.revoked",
+    });
   });
 
   it("counts each navigation as one of the person's requests of the App, refused past their budget", async () => {

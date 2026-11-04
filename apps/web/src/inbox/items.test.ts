@@ -296,10 +296,6 @@ const waiting = (ranOut = true) =>
         requests: [packages("packages-1", "2026-10-11T08:00:00.000Z")],
       },
     },
-    screens: {
-      state: "ready",
-      data: [{ app, name: "Invoices", version: 3, screens: ["Overview"] }],
-    },
     heldStarts: {
       state: "ready",
       data: [
@@ -359,7 +355,6 @@ describe(inboxItems, () => {
         "packages:packages-1",
         "request:request-1",
         "revoked:revoked-1",
-        "screens:app-invoices",
         "signIn:connection-1",
         "stopped:stopped-1",
         "stoppedEvents:deaf-1",
@@ -474,13 +469,12 @@ describe(inboxItems, () => {
 describe(inInbox, () => {
   it("leads the dashboard to every item it has no card or row of its own for", () => {
     // The pile settles changes, lost answers, requests and packages; rows
-    // under it lead to engines, failed workflows and connections.
+    // under it lead to failed workflows and connections.
     const onDashboard = new Set([
       "held",
       "outcome",
       "request",
       "packages",
-      "screens",
       "failed",
       "reconnect",
     ]);
@@ -604,13 +598,11 @@ describe(TargetLink, () => {
       // An approver with no role in the App still reads its packages there.
       packages: await hrefOf(about("packages:packages-1")),
       revoked: await hrefOf(about("revoked:revoked-1")),
-      pages: await hrefOf(about("screens:app-invoices")),
       goLive: await hrefOf(about("goLive:app-invoices:4")),
       app: await hrefOf({ kind: "engine", engine: app }),
     }).toStrictEqual({
       packages: `/apps/${app}/details`,
       revoked: `/apps/${app}/details`,
-      pages: `/apps/${app}/details`,
       goLive: `/apps/${app}/details?tab=versions`,
       app: `/apps/${app}`,
     });

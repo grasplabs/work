@@ -5,7 +5,7 @@ import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, ordinaryData, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // A chat builds an App in a studio: the chat alone until its agent writes
@@ -219,7 +219,6 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Published, for the people it is shared with (a draft is its
     // builders' alone).
     await api.apps.publish(app.id);
-    await ordinaryData(app.id);
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
 

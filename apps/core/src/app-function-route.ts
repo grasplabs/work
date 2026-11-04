@@ -51,8 +51,8 @@ import {
   leasedBuild,
   personRefusal,
   requireDelivery,
-} from "./screen-trust.ts";
-import type { LeasedBuild } from "./screen-trust.ts";
+} from "./screen-delivery.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 import { auditStaffRoute, routeMember } from "./staff-audit.ts";
@@ -80,10 +80,12 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 //   session is anyone else's is refused before it is counted or read
 //   (`personRefusal`), so what the frame sends again, such as a save
 //   under an idempotency key whose answer was lost, never runs as them.
-// - Code nobody approved gets the App's data: the frame's lease, signed
+// - Code core didn't serve gets the App's data: the frame's lease, signed
 //   by core for exactly this person and App, says which build calls; the
-//   call runs only inside `delivering`, which checks that build's trust
-//   before the call and again before its answer. No lease is unreviewed.
+//   call runs only inside `delivering`, which checks that build's delivery
+//   (its release not revoked) before the call and again before its
+//   answer. No lease is code core didn't serve: refused unless the App's
+//   data is `ordinary` (data-policy.ts).
 // - A flood: each request counts against the person's requests of the
 //   App's screens (`admitted`), before its body is read; a paginated
 //   list's window counts one more for every page past its first
@@ -106,12 +108,13 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 //   nothing; CORS answers without credentials, so a browser never sends
 //   the person's cookies along. The cookie route still answers no
 //   preflight.
-// - Which code gets the data: no build core approved, since core doesn't
-//   deliver the host's code. It runs as a screen without a lease does:
-//   only when an admin classified the App's data `ordinary` (accepting
-//   that it goes to code nobody approved), never once the release of the
+// - Which code gets the data: no build core leased, since core doesn't
+//   deliver the host's code, which has all the network its browser or app
+//   gives it. It runs as a screen without a lease does: only when an admin
+//   classified the App's data `ordinary` (accepting that it goes to code
+//   Grasp didn't serve, data-policy.ts), never once the release of the
 //   App's current version is revoked; checked before the call and again
-//   before its answer, and a refusal recorded (screen-trust.ts).
+//   before its answer, and a refusal recorded (screen-delivery.ts).
 // - The budget: the same as the person's screens of that App, so a token
 //   adds no requests to it.
 //
@@ -119,8 +122,8 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 // `<path>/<app>/<stream | attach | cancel>`, and runs in an object of its
 // own (action-invocation.ts), which keeps its latest progress and its
 // receipt. Its frames outlive the request that started them, so:
-// - Progress reaches someone who lost access, or code that lost its
-//   approval: the relay checks again, at most every `streamRecheckMs`
+// - Progress reaches someone who lost access, or code whose release was
+//   revoked: the relay checks again, at most every `streamRecheckMs`
 //   before progress and always before the result, that the session is
 //   still the person's, their role in the App and the build's delivery;
 //   checked on a timer, frames or not, so a silent action is checked too;
@@ -294,7 +297,7 @@ export const recordPortableUse = async (
   );
 };
 
-/** Who calls, and as which build (`undefined`: none core approved). */
+/** Who calls, and as which build (`undefined`: none core leased). */
 interface Caller {
   person: Identity;
   /** The lease the call came with, or `undefined` for none. */
@@ -453,7 +456,7 @@ const keyedAnswer = async (
 ): Promise<KeyedAnswer> => {
   const { person, operation } = caller;
   const { id, build } = target;
-  // Nothing ran yet: a build nobody approved is refused as any call is.
+  // Nothing ran yet: a build refused is refused as any call is.
   await requireDelivery(env, person, id, build, {
     operation,
     stage: "admission",
@@ -493,8 +496,8 @@ const keyedAnswer = async (
   };
   // Checked again before the answer is handed over, as a stream's relay
   // checks before its result: someone signed out, whose access changed,
-  // whose build lost its approval, or whose answer's release was revoked
-  // while it ran gets nothing of it. The
+  // or whose build's or answer's release was revoked while it ran gets
+  // nothing of it. The
   // run settles on its own receipt whatever happens here, and may have
   // changed something: the refusal is no answer to what it did, so it
   // goes back as an outcome withheld, with its key, never as a failure
@@ -567,7 +570,7 @@ const boundedCall = async (
     }
     const text = new TextDecoder().decode(body);
     // A portable host's App token, from any origin and with no build core
-    // approved, starts and controls no run (screen-workflows.ts): refused
+    // leased, starts and controls no run (screen-workflows.ts): refused
     // until that is decided on its own (GRA-626).
     if (portableSession !== undefined && isWorkflowRequest(text)) {
       return Response.json({
@@ -707,7 +710,7 @@ export const appFunctionResponse = async (
     app,
     {
       person,
-      // A missing lease is no build: unreviewed.
+      // A missing lease is no build: code core didn't serve.
       lease: request.headers.get(screenLeaseHeader),
       operation: "call",
       current: async () => await identifyFull(env, request.headers),
