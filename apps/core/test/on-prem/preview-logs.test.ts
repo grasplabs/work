@@ -51,7 +51,6 @@ export default app({
   operations: { notes: { create } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

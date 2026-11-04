@@ -73,7 +73,6 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
     "screens/desk.tsx": "export default () => <p>Desk</p>;\n",

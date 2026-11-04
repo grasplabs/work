@@ -13,12 +13,16 @@ import type {
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
 import {
-  isBrowserResource,
-  isResource,
-  isWorkflowResource,
-  readResourceDeclaration,
-} from "./resources.ts";
-import type { AnyResource, WorkflowResource } from "./resources.ts";
+  isBrowserPermission,
+  isPermission,
+  isWorkflowPermission,
+  readPermissionDeclaration,
+} from "./permissions.ts";
+import type {
+  AnyPermission,
+  BrowserPermission,
+  WorkflowPermission,
+} from "./permissions.ts";
 import { readSchemaManifest } from "./schema-manifest.ts";
 import type { TableAccess } from "./schema-manifest.ts";
 import { serverModule } from "./server.ts";
@@ -38,7 +42,7 @@ import type { AnySchema } from "./value-schema.ts";
 // again, through the same constructors App code uses: its schema through
 // `readSchemaManifest`, each function through `serverModule(schema)` with
 // schemas rebuilt from its descriptors and a handler that runs nothing,
-// each resource through `resource`, each migration through `migration`
+// each permission through `permission`, each migration through `migration`
 // (its handler running nothing too), and the App through `app`. What that
 // registration's inspection makes must then be exactly the manifest read,
 // canonically: anything a declaration couldn't have made (a widened verb,
@@ -129,8 +133,8 @@ const useFrom = (
   use: unknown,
   path: string,
   operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyResource>,
-  workflows: ReadonlyMap<string, WorkflowResource>
+  resources: ReadonlyMap<string, AnyPermission>,
+  workflows: ReadonlyMap<string, WorkflowPermission>
 ): unknown => {
   if (hasExactly(use, ["type", "path", "kind"]) && use.type === "function") {
     const target =
@@ -145,8 +149,8 @@ const useFrom = (
   if (hasExactly(use, ["type", "kind", "alias"]) && use.type === "resource") {
     const declared =
       typeof use.alias === "string" ? resources.get(use.alias) : undefined;
-    if (declared === undefined || declared["~resource"] !== use.kind) {
-      return refuse(`\`${path}\` uses a resource the App doesn't declare.`);
+    if (declared === undefined || declared["~permission"] !== use.kind) {
+      return refuse(`\`${path}\` uses a permission the App doesn't declare.`);
     }
     return declared;
   }
@@ -189,8 +193,8 @@ const functionFrom = (
   path: string,
   input: unknown,
   operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyResource>,
-  workflows: ReadonlyMap<string, WorkflowResource>
+  resources: ReadonlyMap<string, AnyPermission>,
+  workflows: ReadonlyMap<string, WorkflowPermission>
 ): ReadFunction => {
   if (
     !hasExactly(input, [
@@ -373,8 +377,8 @@ const migrationsFrom = (input: unknown): Migration[] =>
 
 /**
  * The declarations map `input` (the manifest's `what`) files, each read
- * back through `resource`: of the kind `is` accepts (`kind`, as a refusal
- * names it) and filed under its own alias, or refused.
+ * back through `permission`: of the kind `is` accepts (`kind`, as a
+ * refusal names it) and filed under its own alias, or refused.
  */
 const declaredFrom = <Declaration extends { readonly alias: string }>(
   input: unknown,
@@ -384,14 +388,52 @@ const declaredFrom = <Declaration extends { readonly alias: string }>(
 ): Map<string, Declaration> => {
   const declarations = new Map<string, Declaration>();
   for (const [alias, entry] of entriesOf(input, what)) {
-    const declared = readResourceDeclaration(entry);
+    const declared = readPermissionDeclaration(entry);
     if (!is(declared) || declared.alias !== alias) {
-      refuse(`Resource \`${alias}\` isn't ${kind} filed under its alias.`);
+      refuse(`Permission \`${alias}\` isn't ${kind} filed under its alias.`);
     } else {
       declarations.set(alias, declared);
     }
   }
   return declarations;
+};
+
+/**
+ * The App's `permissions` the manifest's maps hold, by kind, as a
+ * registration lists them: `app` refuses any declaration filed under a
+ * key that isn't its kind.
+ */
+const permissionsFrom = (
+  resources: ReadonlyMap<string, AnyPermission>,
+  browser: ReadonlyMap<string, BrowserPermission>,
+  workflows: ReadonlyMap<string, WorkflowPermission>,
+  people: boolean
+): Record<string, unknown> => {
+  const permissions: Record<string, unknown> = {};
+  const listed: Record<"connections" | "apps", unknown[]> = {
+    connections: [],
+    apps: [],
+  };
+  for (const declared of [...resources.values(), ...browser.values()]) {
+    const kind = declared["~permission"];
+    if (kind === "connections" || kind === "apps") {
+      listed[kind].push(declared);
+    } else {
+      permissions[kind] = declared;
+    }
+  }
+  for (const [kind, held] of Object.entries(listed)) {
+    if (held.length > 0) {
+      permissions[kind] = held;
+    }
+  }
+  if (workflows.size > 0) {
+    permissions.workflows = [...workflows.values()];
+  }
+  if (people) {
+    permissions.people = true;
+  }
+  return permissions;
 };
 
 /** Whether two verb maps grant the same verbs on every table. */
@@ -446,19 +488,19 @@ export const readAppManifest = (text: string): AppManifest => {
   const resources = declaredFrom(
     data.resources,
     "resources",
-    isResource,
-    "an action's resource"
+    isPermission,
+    "an action's permission"
   );
   const browser = declaredFrom(
     data.browserResources,
     "browser resources",
-    isBrowserResource,
-    "a screens' resource"
+    isBrowserPermission,
+    "a screens' permission"
   );
   const workflows = declaredFrom(
     data.workflows,
     "workflows",
-    isWorkflowResource,
+    isWorkflowPermission,
     "a workflow"
   );
 
@@ -515,8 +557,7 @@ export const readAppManifest = (text: string): AppManifest => {
       ...(data.preferences === null
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
-      ...(readsPeople ? { people: true } : {}),
-      uses: [...resources.values(), ...browser.values(), ...workflows.values()],
+      permissions: permissionsFrom(resources, browser, workflows, readsPeople),
       migrations: migrationsFrom(data.migrations),
     } as Parameters<typeof app>[0];
     return inspectApp(app(definition)).manifest;

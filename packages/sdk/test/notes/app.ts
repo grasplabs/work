@@ -1,4 +1,4 @@
-import { app, resource, v } from "@grasp-os/sdk";
+import { app, permission, v } from "@grasp-os/sdk";
 
 import {
   count,
@@ -13,16 +13,16 @@ import {
 } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
-export const attachments = resource.files("attachments", {
+export const files = permission.files({
   operations: ["upload", "read", "attach"],
 });
 
-export const help = resource.links("help", {
+export const links = permission.links({
   origins: ["https://help.example.com"],
 });
 
 /** Summarizes a note: takes its ID, gives its summary. */
-export const summarizeNote = resource.workflow("summarizeNote", {
+export const summarizeNote = permission.workflow("summarizeNote", {
   input: v.object({
     noteId: v.id("notes"),
     style: v.enum(["short", "long"]).default("short"),
@@ -31,7 +31,7 @@ export const summarizeNote = resource.workflow("summarizeNote", {
 });
 
 /** Archives the notes: takes nothing, gives nothing. */
-export const archiveNotes = resource.workflow("archiveNotes", {
+export const archiveNotes = permission.workflow("archiveNotes", {
   input: v.object({}),
   output: v.null(),
 });
@@ -86,5 +86,9 @@ export default app({
       input: v.object({ id: v.id("notes") }),
     },
   ],
-  uses: [attachments, help, summarizeNote, archiveNotes],
+  permissions: {
+    files,
+    links,
+    workflows: [summarizeNote, archiveNotes],
+  },
 });

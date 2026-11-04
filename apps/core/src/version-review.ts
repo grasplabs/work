@@ -202,7 +202,8 @@ const handsFilesOf = async (
   }
   const readsFiles = Object.values(manifest.browserResources).some(
     (resource) =>
-      resource["~resource"] === "files" && resource.operations.includes("read")
+      resource["~permission"] === "files" &&
+      resource.operations.includes("read")
   );
   if (!readsFiles) {
     return false;

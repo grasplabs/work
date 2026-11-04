@@ -463,7 +463,6 @@ export default app({
   operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   preferences: v.object({ theme: v.enum(["light", "dark"]).default("light") }),
-  uses: [],
 });
 `,
       "screens/desk.tsx": `export default function Desk() {

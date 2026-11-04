@@ -197,12 +197,6 @@ export interface StepAttempt {
    */
   functionCalls: number;
   /**
-   * Whether a function of its App it called kept a statistics point by it
-   * (`BindingCaller.step`): added up, as an App method's, if it completes
-   * the step.
-   */
-  recorded: boolean;
-  /**
    * The first of its calls refused as one its review doesn't show, or
    * made from another attempt's code that had one refused: the attempt
    * fails with it, whatever its code made of the refusal.
@@ -1370,12 +1364,6 @@ export interface RunKind {
     admission: AttemptAdmission
   ) => AttemptHost;
   /**
-   * What `attempt` completing its step records, before the engine
-   * journals the step's result: once, as a step run again after it
-   * records nothing.
-   */
-  stepCompleted: (attempt: StepAttempt) => Promise<void>;
-  /**
    * Hears what `attempt` failed with, as its code reported it, while it
    * still held: a sealed run keeps it for a later attempt of a step whose
    * call goes out once (sealed-run.ts). None of an App's.
@@ -2202,13 +2190,10 @@ export class RunHost extends RpcTarget {
           };
           throw toStepError(failed);
         }
-        // Recorded here, before the engine stores the result, so a stop
+        // Audited here, before the engine stores the result, so a stop
         // between the two can't lose it: at least once, as a stop before
-        // the result is stored runs the step, and records it, again.
+        // the result is stored runs the step, and audits it, again.
         if (current) {
-          // The step completes with this attempt: what its kind records
-          // of that (an App run's statistics points), once.
-          await this.#kind.stepCompleted(attempt);
           await this.#audited(step, "completed", { sideEffect });
         }
         return result.value;

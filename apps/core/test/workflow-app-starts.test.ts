@@ -4,7 +4,7 @@ import {
   app as registerApp,
   defineSchema,
   defineTable,
-  resource,
+  permission,
   v,
 } from "@grasp-os/sdk";
 import { inspectApp, manifestText, schemaHash } from "@grasp-os/sdk/host";
@@ -93,7 +93,7 @@ const schema = defineSchema({ requests: defineTable({ title: v.string() }) });
 const { query, mutation, action } = serverModule(schema);
 
 /** The workflow the App declares, by the alias its builders bind. */
-const followUp = resource.workflow("followUp", {
+const followUp = permission.workflow("followUp", {
   // Started with no input, it takes its declared default.
   input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
   output: v.object({ status: v.string() }),
@@ -121,7 +121,7 @@ const submit = mutation({
   uses: [followUp],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { title: args.who });
-    await ctx.afterCommit.start(followUp, { who: args.who });
+    await ctx.afterCommit.workflows.followUp.start({ who: args.who });
     if (args.fail) {
       throw new AppError("desk.refused", "The request was refused.");
     }
@@ -135,7 +135,7 @@ const guarded = mutation({
   returns: v.null(),
   uses: [followUp],
   handler: async (ctx, args) => {
-    await ctx.afterCommit.start(followUp, { who: "Guarded" });
+    await ctx.afterCommit.workflows.followUp.start({ who: "Guarded" });
     await ctx.db.patch(
       "requests",
       args.id,
@@ -152,7 +152,7 @@ const kickOff = action({
   returns: handleSchema,
   uses: [followUp],
   handler: async (ctx, args) =>
-    await ctx.startWorkflow(followUp, { who: args.who }),
+    await ctx.workflows.followUp.start({ who: args.who }),
 });
 
 /**
@@ -168,7 +168,7 @@ const retrying = mutation({
     for (let index = 0; index < 40; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.start(followUp, {
+        await ctx.afterCommit.workflows.followUp.start({
           who: `${index}`.padEnd(120 * 1024, "x"),
         });
       } catch {
@@ -184,7 +184,7 @@ const kickOffPlain = action({
   args: {},
   returns: handleSchema,
   uses: [followUp],
-  handler: async (ctx) => await ctx.startWorkflow(followUp),
+  handler: async (ctx) => await ctx.workflows.followUp.start(),
 });
 
 /** Has the follow-up started once it commits, with no input. */
@@ -193,7 +193,7 @@ const submitPlain = mutation({
   returns: v.null(),
   uses: [followUp],
   handler: async (ctx) => {
-    await ctx.afterCommit.start(followUp);
+    await ctx.afterCommit.workflows.followUp.start();
     return null;
   },
 });
@@ -214,7 +214,7 @@ const flood = mutation({
     for (let index = 0; index < 40; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.start(followUp, { who: `n${index}` });
+        await ctx.afterCommit.workflows.followUp.start({ who: `n${index}` });
       } catch {
         refused += 1;
       }
@@ -236,7 +236,7 @@ const bulky = mutation({
     for (let index = 0; index < 9; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.start(followUp, {
+        await ctx.afterCommit.workflows.followUp.start({
           who: `${index}`.padEnd(120 * 1024, "x"),
         });
       } catch {
@@ -273,7 +273,7 @@ const startsApp = registerApp({
     },
   },
   screens: [],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 
 const { manifest } = inspectApp(startsApp);

@@ -6,9 +6,9 @@ import {
   figures,
   finish,
   get,
+  grasp,
   list,
   map,
-  statistics,
   take,
   write,
 } from "./operations/snapshots.ts";
@@ -22,9 +22,10 @@ import schema from "./schema.ts";
 //
 // It reads the workflow map through `map`, which an admin binds to the
 // map App on the engine's Resources tab, and the platform's counts of
-// runs through `statistics`, bound to the `PLATFORM` permission an admin
-// grants. Until `map` is bound, taking a snapshot fails with
-// `resource.unavailable`; until `statistics` is, what runs is unavailable.
+// runs through `grasp`, the platform's own read-only functions, bound to
+// the `PLATFORM` permission an admin grants. Until `map` is bound, taking
+// a snapshot fails with `resource.unavailable`; until `grasp` is, what
+// runs is unavailable.
 
 const members = { read: "appMembers", write: "appBuilders" } as const;
 
@@ -47,5 +48,5 @@ export default app({
     snapshots: { addFigures, finish },
   },
   screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
-  uses: [map, statistics],
+  permissions: { apps: [map, grasp] },
 });

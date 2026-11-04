@@ -42,7 +42,6 @@ export const count = query({
 export const hold = action({
   args: { ms: v.number().integer().min(0).max(10000) },
   returns: v.number(),
-  uses: [],
   handler: async (_ctx, args) => {
     await new Promise((resolve) => setTimeout(resolve, args.ms));
     return args.ms;
@@ -71,7 +70,6 @@ export default app({
   operations: { notes: { count, create, createAndCount, hold } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

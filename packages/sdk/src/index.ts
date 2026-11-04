@@ -1,5 +1,5 @@
 // The SDK's root module (`@grasp-os/sdk`): values and schemas (values.ts),
-// and how an App registers itself, the resources it needs and the error
+// and how an App registers itself, the permissions it needs and the error
 // it fails with on purpose. Server code and schemas import these; the
 // server constructors come from the generated `#grasp/server` module.
 
@@ -8,6 +8,7 @@ export { app } from "./app.ts";
 export type {
   App,
   AppDefinition,
+  AppPermissions,
   OperationAccess,
   OperationTree,
   ScreenDefinition,
@@ -20,30 +21,43 @@ export type {
   MigrationContext,
   MigrationDefinition,
 } from "./migration.ts";
-export { httpContract, resource } from "./resources.ts";
+export {
+  graspAlias,
+  graspFunctions,
+  httpContract,
+  permission,
+} from "./permissions.ts";
 export type {
-  AnyResource,
-  BrowserResource,
+  AiClient,
+  AiPermission,
+  AnyPermission,
+  AppClient,
+  AppPermission,
+  BrainClient,
+  BrainHit,
+  BrainOperation,
+  BrainPermission,
+  BrowserPermission,
   ComposioCall,
   ComposioContract,
+  ConnectionClient,
+  ConnectionPermission,
   ConnectorAction,
   ConnectorContract,
-  ConnectorResource,
-  FilesResource,
+  FilesPermission,
+  GraspFunctions,
+  GuestsClient,
+  GuestsOperation,
+  GuestsPermission,
   HttpAnswer,
   HttpClient,
   HttpContract,
   HttpRequestInit,
-  LinksResource,
-  KnowledgeHit,
-  KnowledgeOperation,
-  KnowledgeResource,
-  ModelResource,
-  ResourceKind,
-  TemplateResource,
+  LinksPermission,
+  PermissionKind,
   WorkflowConfig,
-  WorkflowResource,
-} from "./resources.ts";
+  WorkflowPermission,
+} from "./permissions.ts";
 // References (spec 8, 32.1): what the generated `#grasp` modules hold.
 export type {
   AnyOperationReference,

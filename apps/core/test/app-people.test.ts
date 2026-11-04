@@ -146,8 +146,7 @@ export default app({
   operations: { dir: { me, meToo, meAgain, note, noted, search, team, twice } },
   internalOperations: {},
   screens: [],
-  ${people ? "people: true," : ""}
-  uses: [],
+  ${people ? "permissions: { people: true }," : ""}
 });
 `,
 });

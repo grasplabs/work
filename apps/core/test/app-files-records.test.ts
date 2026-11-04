@@ -20,7 +20,7 @@ import {
   gatedReads,
   png,
   rawChannel,
-  resources,
+  permissions,
   sha256,
   statusOf,
   storedObjects,
@@ -52,12 +52,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await runInDurableObject(
       env.DATA_STORES.getByName(storeId),
       async (instance: DataStore) => {
-        await instance.publishable(
-          storeId,
-          builder.userId,
-          "attachments",
-          file
-        );
+        await instance.publishable(storeId, builder.userId, "files", file);
       }
     );
     const started = Date.now();
@@ -189,17 +184,17 @@ describe("an App's files", { timeout: 120_000 }, () => {
         const host = new StoreHost(state, { ...env, FILES: failingDeletes });
         const storeId = storeIdSchema.parse(release.store?.storeId);
         const principal = `person-${crypto.randomUUID()}`;
-        const { file } = host.files.begin(storeId, principal, "attachments", {
+        const { file } = host.files.begin(storeId, principal, "files", {
           ...declaration(),
           size: 64,
         });
         // A write never recorded, due for removal; and an audit event,
         // of its publication.
-        host.files.admitChunk(storeId, principal, "attachments", file, 0, 64);
+        host.files.admitChunk(storeId, principal, "files", file, 0, 64);
         host.files.publish(
           storeId,
           principal,
-          "attachments",
+          "files",
           file,
           true,
           crypto.randomUUID()
@@ -281,7 +276,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         await instance.admitChunk(
           storeId,
           builder.userId,
-          "attachments",
+          "files",
           file,
           0,
           bytes.length
@@ -311,7 +306,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         admitted.key = await instance.admitChunk(
           storeId,
           builder.userId,
-          "attachments",
+          "files",
           file,
           0,
           bytes.length
@@ -408,7 +403,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         const key = await instance.admitChunk(
           storeId,
           builder.userId,
-          "attachments",
+          "files",
           file,
           0,
           100
@@ -436,12 +431,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
       blobOf(png(), "image/png")
     );
     await expect(
-      colleague.screen.channel.describe("attachments", id)
+      colleague.screen.channel.describe("files", id)
     ).resolves.toMatchObject({ id });
     // In the vault, which only builders read: not even its uploader reads it.
     await colleague.client.mutation(api.stash, { file: { id } });
     await expect(
-      codeOf(colleague.screen.channel.describe("attachments", id))
+      codeOf(colleague.screen.channel.describe("files", id))
     ).resolves.toBe("file.not_found");
   });
 
@@ -461,7 +456,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     expect({
       renewed: typeof renewed,
-      read: await screen.channel.describe("attachments", id),
+      read: await screen.channel.describe("files", id),
     }).toMatchObject({ renewed: "string", read: { id } });
   });
 
@@ -478,7 +473,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         vaultFirst,
       });
       // Readable through the board, whatever the vault says.
-      const read = await colleague.screen.channel.describe("attachments", id);
+      const read = await colleague.screen.channel.describe("files", id);
       return read.id === id;
     };
     expect([await kept(true), await kept(false)]).toStrictEqual([true, true]);
@@ -505,9 +500,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       loose: typeof (await colleague.client.mutation(api.pinById, {
         fileId: loose,
       })),
-      read: await codeOf(
-        colleague.screen.channel.describe("attachments", held)
-      ),
+      read: await codeOf(colleague.screen.channel.describe("files", held)),
     }).toStrictEqual({
       held: "file.not_found",
       loose: "string",
@@ -524,28 +517,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await client.mutation(api.stashMany, { file: { id }, count: 80 });
     await client.mutation(api.pin, { file: { id } });
     await expect(
-      colleague.screen.channel.describe("attachments", id)
+      colleague.screen.channel.describe("files", id)
     ).resolves.toMatchObject({ id });
-  });
-
-  it("attaches only a file uploaded through a resource that declares attach", async () => {
-    const { client, api, screen } = await openedApp();
-    const id = await upload(
-      screen.channel,
-      blobOf(png(), "image/png"),
-      "me.png",
-      "avatars"
-    );
-    const note = await client.mutation(api.create, { title: "Profile" });
-    await expect(
-      codeOf(
-        client.mutation(api.attachFile, {
-          id: note,
-          expectedRevision: 1,
-          file: { id },
-        })
-      )
-    ).resolves.toBe("file.not_found");
   });
 
   it("audits someone else's preview as a preview and their download as a download, and previews only an image", async () => {
@@ -567,15 +540,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
       expectedRevision: 2,
       file: { id: text },
     });
-    const previewed = await colleague.screen.channel.preview(
-      "attachments",
-      image
-    );
+    const previewed = await colleague.screen.channel.preview("files", image);
     await previewed.arrayBuffer();
     const refused = await codeOf(
-      colleague.screen.channel.preview("attachments", text)
+      colleague.screen.channel.preview("files", text)
     );
-    await colleague.client.files.download(resources.attachments, {
+    await colleague.client.files.download(permissions.files, {
       id: image,
     });
     const events = await fileEvents();
@@ -605,10 +575,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
       expectedRevision: 1,
       file: { id: kept },
     });
-    await colleague.client.files.download(resources.attachments, { id: kept });
+    await colleague.client.files.download(permissions.files, { id: kept });
     // Logged, its outbox row gone, before the next download that day.
     const before = await gaps();
-    await colleague.client.files.download(resources.attachments, { id: kept });
+    await colleague.client.files.download(permissions.files, { id: kept });
     const after = await gaps();
     const events = await fileEvents();
     expect({
@@ -631,11 +601,11 @@ describe("an App's files", { timeout: 120_000 }, () => {
       file: { id: kept },
     });
     // Downloaded twice by a colleague, once by its uploader.
-    await colleague.client.files.download(resources.attachments, { id: kept });
-    await colleague.client.files.download(resources.attachments, { id: kept });
-    await client.files.download(resources.attachments, { id: kept });
+    await colleague.client.files.download(permissions.files, { id: kept });
+    await colleague.client.files.download(permissions.files, { id: kept });
+    await client.files.download(permissions.files, { id: kept });
     const deleted = await upload(screen.channel, blobOf(png(), "image/png"));
-    await client.files.delete(resources.attachments, { id: deleted });
+    await client.files.delete(permissions.files, { id: deleted });
     const orphan = await upload(screen.channel, blobOf(png(), "image/png"));
     await sweepIn(release, fileLimits.orphanMs + 1);
     await codeOf(

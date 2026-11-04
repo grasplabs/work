@@ -48,7 +48,6 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

@@ -20,7 +20,7 @@ import {
   onStore,
   png,
   rawChannel,
-  resources,
+  permissions,
   screenOf,
   sha256,
   statusOf,
@@ -51,7 +51,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const progress: unknown[] = [];
     const bytes = png(fileLimits.chunkBytes + 100);
     const id = await screen.channel.upload(
-      "attachments",
+      "files",
       blobOf(bytes, "image/png"),
       "Plan.png",
       {
@@ -74,9 +74,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         bytesTotal: bytes.length,
       },
     ]);
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toStrictEqual({
+    await expect(screen.channel.describe("files", id)).resolves.toStrictEqual({
       id,
       name: "Plan.png",
       mimeType: "image/png",
@@ -105,9 +103,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
         })
       )
     ).resolves.toBe("data.conflict");
-    await client.files.download(resources.attachments, { id });
+    await client.files.download(permissions.files, { id });
     expect(downloads.get(id)).toStrictEqual(png());
-    const response = await screen.channel.content("attachments", id);
+    const response = await screen.channel.content("files", id);
     await response.body?.cancel();
     expect({
       disposition: response.headers.get("content-disposition"),
@@ -130,11 +128,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // The same answer for their upload as for an ID that doesn't exist.
     await expect(
       Promise.all([
-        codeOf(colleague.screen.channel.describe("attachments", id)),
-        codeOf(
-          colleague.screen.channel.describe("attachments", crypto.randomUUID())
-        ),
-        codeOf(colleague.screen.channel.delete("attachments", id)),
+        codeOf(colleague.screen.channel.describe("files", id)),
+        codeOf(colleague.screen.channel.describe("files", crypto.randomUUID())),
+        codeOf(colleague.screen.channel.delete("files", id)),
         codeOf(
           colleague.client.mutation(api.attachFile, {
             id: theirNote,
@@ -161,10 +157,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
       expectedRevision: 1,
       file: { id },
     });
-    await colleague.client.files.download(resources.attachments, { id });
+    await colleague.client.files.download(permissions.files, { id });
     expect(colleague.downloads.get(id)).toStrictEqual(png());
     await expect(
-      codeOf(colleague.screen.channel.delete("attachments", id))
+      codeOf(colleague.screen.channel.delete("files", id))
     ).resolves.toBe("file.not_found");
     // Detached again: theirs to read no longer.
     await client.mutation(api.detachFile, {
@@ -173,7 +169,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       file: { id },
     });
     await expect(
-      codeOf(colleague.screen.channel.describe("attachments", id))
+      codeOf(colleague.screen.channel.describe("files", id))
     ).resolves.toBe("file.not_found");
   });
 
@@ -191,8 +187,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
             file: { id },
           })
         ),
-        codeOf(one.screen.channel.describe("attachments", id)),
-        // `photos` declares only `read`, `nothing` nothing at all.
+        codeOf(one.screen.channel.describe("files", id)),
+        // Neither `photos` nor `nothing` is the App's files permission.
         codeOf(
           upload(
             one.screen.channel,
@@ -214,7 +210,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
   it("refuses a request without the screen's lease, or from another site", async () => {
     const { app, builder } = await openedApp();
     const { lease } = await builder.api.screens.open(app, "notes");
-    const path = `${appFilesPath}/${app}/attachments/files/${crypto.randomUUID()}`;
+    const path = `${appFilesPath}/${app}/files/files/${crypto.randomUUID()}`;
     const statuses = await Promise.all(
       [
         new Headers({ cookie: builder.session }),
@@ -231,7 +227,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
   it("refuses a change from no Origin or another site's, though its lease and session are the screen's", async () => {
     const { builder, app, screen } = await openedApp();
     const id = await upload(screen.channel, blobOf(png(), "image/png"));
-    const base = `${appFilesPath}/${app}/attachments`;
+    const base = `${appFilesPath}/${app}/files`;
     const sent = async (path: string, body: unknown, origin?: string) => {
       const headers = new Headers({
         cookie: builder.session,
@@ -257,9 +253,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
       await sent(deletion, deleting, "https://elsewhere.example"),
     ]).toStrictEqual([403, 403, 403, 403]);
     // The file is still there: nothing of either reached the store.
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toMatchObject({ id });
+    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+      id,
+    });
   });
 
   it("serves a new screen's file requests with nobody approving its build, and refuses them once its release is revoked", async () => {
@@ -275,9 +271,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // Made current, its App's data sensitive, and no admin looked at it.
     const screen = await screenOf(builder, app);
     const id = await upload(screen.channel, blobOf(png(), "image/png"));
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toMatchObject({ id });
+    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+      id,
+    });
     await revokeRelease(
       env,
       await actingPerson("admin"),
@@ -285,7 +281,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     expect([
-      await codeOf(screen.channel.describe("attachments", id)),
+      await codeOf(screen.channel.describe("files", id)),
       await codeOf(upload(screen.channel, blobOf(png(), "image/png"))),
     ]).toStrictEqual(["screen.revoked", "screen.revoked"]);
   });
@@ -300,7 +296,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await admin.api.dataPolicy.classify(app, "ordinary", generation);
     const colleague = await colleagueOf(builder, app);
     const described = async (lease: string) =>
-      await screen.fetch(`${appFilesPath}/${app}/attachments/files/${id}`, {
+      await screen.fetch(`${appFilesPath}/${app}/files/files/${id}`, {
         headers: { [screenLeaseHeader]: lease },
       });
     const refused = await Promise.all(
@@ -323,7 +319,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const { builder, app, release, screen } = await openedApp();
     const colleague = await colleagueOf(builder, app);
     const begin = async (named?: string) =>
-      await routed(`${appFilesPath}/${app}/attachments/uploads`, {
+      await routed(`${appFilesPath}/${app}/files/uploads`, {
         method: "POST",
         headers: {
           origin: clientOrigin,
@@ -504,9 +500,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const id = await upload(channel, blobOf(bytes, "image/png"));
     // Each chunk sent once: core said it held the one whose answer was lost.
     expect(sent).toStrictEqual({ begins: 2, chunks: 3, finishes: 2 });
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+      size: bytes.length,
+    });
     // One upload, its three chunks, nothing else: the start sent again
     // under its key was the same upload.
     await expect(storedObjects(release)).resolves.toHaveLength(3);
@@ -551,9 +547,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const bytes = png(6 * fileLimits.chunkBytes);
     const id = await upload(channel, blobOf(bytes, "image/png"));
     expect(lostOnce.size).toBe(5);
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+      size: bytes.length,
+    });
   });
 
   it("sends a chunk again whose body core took too long to read, and finishes the upload", async () => {
@@ -579,9 +575,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     const bytes = png(100);
     const id = await upload(channel, blobOf(bytes, "image/png"));
-    await expect(
-      screen.channel.describe("attachments", id)
-    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+      size: bytes.length,
+    });
     await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
   });
 
@@ -594,7 +590,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       },
     });
     const response = await screen.fetch(
-      `${appFilesPath}/${app}/attachments/uploads`,
+      `${appFilesPath}/${app}/files/uploads`,
       {
         method: "POST",
         headers: {

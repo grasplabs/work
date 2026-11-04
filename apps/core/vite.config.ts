@@ -222,7 +222,6 @@ export const coreProject = (
             // The client's Slack app, so its door is open too.
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
             // Few enough statistics points to reach each bound in a test.
-            STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
             // Package limits a test can reach with packages it publishes
             // on the fake npm registry (test/packages.test.ts).

@@ -1,11 +1,9 @@
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { Json } from "@grasp-os/shared/json";
 import type { BindingTargetInput } from "@grasp-os/shared/resource-bindings";
 import {
-  statisticLimitsOf,
   statisticMaxApps,
-  statisticRowsPerDay,
+  statisticReadLimitsOf,
 } from "@grasp-os/shared/statistics";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -16,11 +14,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { requestPermission } from "../src/permissions.ts";
-import {
-  readStatistics,
-  recordStatistic,
-  sweepStatistics,
-} from "../src/statistics.ts";
+import { readPlatformStatistics } from "../src/statistics.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -28,21 +22,16 @@ import { endLiveRuns, finished, seedResourceRun } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
-// Statistics (src/statistics.ts) through an App's sealed functions: a
-// statistics resource its actions declare (`resource.statistics`), which
-// reaches nothing until an admin binds it (resource-statistics.ts). An
-// App records measures of its own and reads them back added up, and reads
-// the measures the platform publishes it declares, under a permission the
-// binding names. These tests start from the ways it can fail: a
-// declaration that grants itself, or a binding that serves a version
-// declaring more than was approved; an App reading another App's
-// measures, or the platform's without a binding naming a live grant, or
-// of an App whose runs the person it acts for may not see; a read or a
-// point past its bounds (names, dimensions, days, groups, rows a day, a
-// call's or a minute's uses); a point outside the window counted; a run's
-// step counting its points more than once, or for an attempt that didn't
-// complete it; a platform read that isn't audited; and a read or the
-// sweep reading a table whole.
+// The platform's statistics (src/statistics.ts) through an App's sealed
+// functions: the platform's own read-only functions its actions declare
+// (`permission.grasp`, `ctx.apps.grasp`), which reach nothing until an
+// admin binds them to the App's permission to read the platform's
+// statistics (resource-grasp.ts). These tests start from the ways it can
+// fail: a declaration that grants itself, or a binding that serves
+// without a live grant, or names another App's; a read of an App whose
+// runs the person it acts for may not see; a read past its bounds (days,
+// groups, Apps, a call's or a minute's reads); a read that isn't
+// audited; and a read reading a table whole.
 
 const idp = mockIdp();
 
@@ -51,52 +40,24 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const dayMs = 24 * 60 * 60 * 1000;
 
 /**
- * An App whose actions record and read statistics through `stats`, its
- * own measures with `operations`, and read the platform's runs and
- * signals through `platform`; each answers what it got, or the error's
- * code and details, as JSON text.
+ * An App whose actions read the platform's runs and signals through
+ * `grasp`; each answers what it got, or the error's code and details, as
+ * JSON text.
  */
-const statsFiles = (
-  operations = '["record", "read"]'
-): Record<string, string> => ({
+const statsFiles = (): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({ marks: defineTable({ at: v.number() }) });
 `,
-  "operations/stats.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "operations/stats.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
 
-// A mark a run's step leaves, once per call key, and how many there are:
-// how a step's attempt tells whether one ran before it.
-export const mark = mutation({
-  args: {},
-  returns: v.id("marks"),
-  handler: async (ctx) => await ctx.db.insert("marks", { at: 1 }),
-});
-
-export const marks = query({
-  args: {},
-  returns: v.number(),
-  handler: async (ctx) => (await ctx.db.query("marks").take(100)).length,
-});
-
-export const stats = resource.statistics("stats", { operations: ${operations} });
+export const grasp = permission.grasp();
 
 // What the declaration may leave out, called past its types on purpose:
 // the call is what refuses it.
 const loose = (client: object) =>
   client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
-
-export const platform = resource.statistics("platform", {
-  operations: ["read"],
-  platform: ["platform.workflow_runs", "platform.improvement_signals"],
-});
-
-// The runs only: no other platform measure.
-export const runs = resource.statistics("runs", {
-  operations: ["read"],
-  platform: ["platform.workflow_runs"],
-});
 
 const outcome = async (run: () => Promise<unknown>): Promise<string> => {
   try {
@@ -113,89 +74,61 @@ const outcome = async (run: () => Promise<unknown>): Promise<string> => {
 const json = { json: v.string() };
 const many = { json: v.string(), count: v.number() };
 
-export const record = action({
-  args: json,
-  returns: v.string(),
-  uses: [stats],
-  handler: async (ctx, args) =>
-    await outcome(async () => {
-      for (const point of JSON.parse(args.json)) {
-        await loose(ctx.resources.stats).record(point);
-      }
-    }),
-});
-
-export const read = action({
-  args: json,
-  returns: v.string(),
-  uses: [stats],
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.stats).read(JSON.parse(args.json))),
-});
-
-export const readMany = action({
-  args: many,
-  returns: v.string(),
-  uses: [stats],
-  handler: async (ctx, args) =>
-    await outcome(async () => {
-      for (let read = 0; read < args.count; read += 1) {
-        await loose(ctx.resources.stats).read(JSON.parse(args.json));
-      }
-    }),
-});
-
-export const runsRead = action({
-  args: json,
-  returns: v.string(),
-  uses: [runs],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.runs.read(JSON.parse(args.json))),
-});
-
-// \`count\` reads of its own measures at once.
-export const readBurst = action({
-  args: many,
-  returns: v.string(),
-  uses: [stats],
-  handler: async (ctx, args) =>
-    await outcome(async () => {
-      await Promise.all(
-        Array.from({ length: args.count }, async () => await loose(ctx.resources.stats).read(JSON.parse(args.json)))
-      );
-    }),
-});
-
 export const platformRead = action({
   args: json,
   returns: v.string(),
-  uses: [platform],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.platform.read(JSON.parse(args.json))),
+  uses: [grasp],
+  handler: async (ctx, args) =>
+    await outcome(async () => await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json))),
+});
+
+// A function the platform doesn't serve, called past the types.
+export const platformWrite = action({
+  args: json,
+  returns: v.string(),
+  uses: [grasp],
+  handler: async (ctx, args) =>
+    await outcome(async () => await loose(ctx.apps.grasp).call("statistics.write", JSON.parse(args.json))),
 });
 
 export const platformReadMany = action({
   args: many,
   returns: v.string(),
-  uses: [platform],
+  uses: [grasp],
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
-        await ctx.resources.platform.read(JSON.parse(args.json));
+        await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json));
       }
+    }),
+});
+
+// \`count\` reads at once.
+export const platformReadBurst = action({
+  args: many,
+  returns: v.string(),
+  uses: [grasp],
+  handler: async (ctx, args) =>
+    await outcome(async () => {
+      await Promise.all(
+        Array.from({ length: args.count }, async () => await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json)))
+      );
     }),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 
-import { mark, marks, platform, platformRead, platformReadMany, read, readBurst, readMany, record, runs, runsRead, stats } from "./operations/stats.ts";
+import { grasp, platformRead, platformReadBurst, platformReadMany, platformWrite } from "./operations/stats.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Stats",
   schema,
   access: { tables: { marks: { read: "owner", write: "owner" } } },
-  operations: { stats: { record, read, readMany, readBurst, platformRead, platformReadMany, runsRead, mark, marks } },
+  operations: { stats: { platformRead, platformReadMany, platformReadBurst, platformWrite } },
   internalOperations: {},
   screens: [],
-  uses: [stats, platform, runs],
+  permissions: { apps: [grasp] },
 });
 `,
 });
@@ -226,48 +159,34 @@ const currentVersion = async (app: AppId): Promise<number> => {
   return found?.version ?? 0;
 };
 
-/** Statistics of the App's own measures, as a binding targets them. */
-const ownStatistics: BindingTargetInput = { kind: "statistics" };
-
-/** `admin`'s binding of the App's `alias` to `target`, for its current version. */
-const bind = async (
-  admin: Person,
-  app: AppId,
-  alias = "stats",
-  target = ownStatistics
-) =>
+/** `admin`'s binding of the App's `grasp` to `target`, for its current version. */
+const bind = async (admin: Person, app: AppId, target: BindingTargetInput) =>
   await admin.api.resourceBindings.approve({
     app,
-    alias,
+    alias: "grasp",
     target,
     reviewed: { version: await currentVersion(app) },
   });
 
-/** A new App of `owner`'s, its own statistics bound by an admin. */
-const boundApp = async (owner: Person): Promise<AppId> => {
-  const app = await statsApp(owner);
-  const admin = await signedInApi(idp, "admin");
-  await bind(admin, app);
-  return app;
-};
-
-/**
- * `app`'s permission to read the platform's statistics, asked for by
- * `builder` and granted, and its `platform` and `runs` resources bound to it: the
- * permission's ID.
- */
-const grantPlatform = async (builder: Person, app: AppId): Promise<string> => {
-  const permissionId = await requestGranted(idp, builder, {
+/** `app`'s permission to read the platform's statistics, asked for by `builder` and granted: its ID. */
+const grantedPlatform = async (builder: Person, app: AppId): Promise<string> =>
+  await requestGranted(idp, builder, {
     subject: { type: "app", appId: app },
     object: { type: "platform" },
     actions: ["statistics"],
     binding: "PLATFORM",
   });
-  const admin = await signedInApi(idp, "admin");
-  for (const alias of ["platform", "runs"]) {
-    // oxlint-disable-next-line no-await-in-loop -- one approval after another
-    await bind(admin, app, alias, { kind: "statistics", permissionId });
-  }
+
+/**
+ * `app`'s permission to read the platform's statistics, asked for by
+ * `builder` and granted, and its `grasp` bound to it: the permission's ID.
+ */
+const grantPlatform = async (builder: Person, app: AppId): Promise<string> => {
+  const permissionId = await grantedPlatform(builder, app);
+  await bind(await signedInApi(idp, "admin"), app, {
+    kind: "grasp",
+    permissionId,
+  });
   return permissionId;
 };
 
@@ -320,15 +239,7 @@ const callAs = async (
   return { refused: result.ok ? result.value : result.error.code };
 };
 
-/** Records `points` through `app`'s `stats`, as `userId`. */
-const record = async (app: AppId, userId: string, points: unknown[]) =>
-  await callAs(app, userId, "stats.record", { json: JSON.stringify(points) });
-
-/** Reads `query` through `app`'s `stats`, as `userId`. */
-const read = async (app: AppId, userId: string, query: unknown) =>
-  await callAs(app, userId, "stats.read", { json: JSON.stringify(query) });
-
-/** Reads `query` through `app`'s `platform`, as `userId`. */
+/** Reads `query` through `app`'s `grasp`, as `userId`. */
 const platformRead = async (app: AppId, userId: string, query: unknown) =>
   await callAs(app, userId, "stats.platformRead", {
     json: JSON.stringify(query),
@@ -351,13 +262,6 @@ const answerSchema = z.object({
     truncated: z.boolean(),
   }),
 });
-
-/** `count` points of the measure `ticks`. */
-const ticks = (count: number) =>
-  Array.from({ length: count }, (_, index) => ({
-    measure: "ticks",
-    value: index,
-  }));
 
 /** What a refused use of a resource answers: its code, and which bound. */
 const limited = (limit: "call" | "minute" | "day", at?: number) => ({
@@ -394,337 +298,117 @@ const holdClock = (): number => {
   return at;
 };
 
-describe("an App's own statistics", { timeout: 60_000 }, () => {
+describe("the platform's functions", { timeout: 60_000 }, () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("reach nothing until an admin binds them, and nothing more than was approved", async () => {
+  it("reach nothing until an admin binds them to a live grant of the App's own, and serve only the platform's read", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    // Recording only, as version 1 declares it: bound.
-    const app = await statsApp(builder, statsFiles('["record"]'));
-    const point = [{ measure: "seen", value: 1 }];
-    const unbound = await record(app, admin.userId, point);
-    // What an admin reviews: what each declares, and what it may be bound
-    // to: nothing to choose for its own measures, a permission for the
-    // platform's, of which it has none yet.
+    const app = await statsApp(builder);
+    const watched = await countedApp(admin);
+    const query = {
+      measure: "platform.workflow_runs",
+      days: 7,
+      where: { app: watched },
+    };
+    const unbound = await platformRead(app, admin.userId, query);
+    const permissionId = await grantedPlatform(builder, app);
+    // What an admin reviews: what it declares, and the App's grants it may
+    // be bound to.
     const { resources } = await admin.api.resourceBindings.review(app);
     const reviewed = resources.map(
-      ({ alias, kind, operations, measures, state, choices }) => ({
+      ({ alias, kind, operations, state, choices }) => ({
         alias,
         kind,
         operations,
-        measures,
         state,
         choices,
       })
     );
-    const binding = await bind(admin, app);
-    const bound = await record(app, admin.userId, point);
-    // A binding of its own measures names no permission, and the platform's
-    // resource none without one.
-    const withPermission = await failure(
+    // No binding without a permission, nor with one that isn't the App's.
+    const unnamed = await failure(
       async () =>
-        await bind(admin, app, "stats", {
-          kind: "statistics",
-          permissionId: crypto.randomUUID(),
+        await bind(admin, app, {
+          kind: "grasp",
+          permissionId: permissionIdSchema.parse(crypto.randomUUID()),
         })
     );
-    const platformUnnamed = await failure(
-      async () => await bind(admin, app, "platform")
+    // As another App: the target of another kind serves it nothing.
+    const asApp = await failure(
+      async () => await bind(admin, app, { kind: "app", appId: watched })
     );
     // A builder may not approve one.
-    const byBuilder = await failure(async () => await bind(builder, app));
-    // Version 2 reads too: what was approved serves it no more.
-    await release(builder, app, statsFiles());
-    const widened = await record(app, admin.userId, point);
-    await bind(admin, app);
-    const approvedAgain = await read(app, admin.userId, {
-      measure: "seen",
-      days: 1,
+    const byBuilder = await failure(
+      async () => await bind(builder, app, { kind: "grasp", permissionId })
+    );
+    await bind(admin, app, { kind: "grasp", permissionId });
+    const bound = await platformRead(app, admin.userId, query);
+    // A function the platform doesn't serve: refused before it reaches it.
+    const write = await callAs(app, admin.userId, "stats.platformWrite", {
+      json: JSON.stringify(query),
     });
     // Revoked: the next request is refused.
     const listed = await admin.api.resourceBindings.list(app);
     const active = listed.find(
-      ({ alias, status }) => alias === "stats" && status === "active"
+      ({ alias, status }) => alias === "grasp" && status === "active"
     );
-    await admin.api.resourceBindings.revoke(active?.id ?? binding.id);
-    const revoked = await record(app, admin.userId, point);
-    const seen = await env.DB.prepare(
-      "SELECT sum(count) AS count FROM app_statistics WHERE app_id = ? AND measure = 'seen'"
-    )
-      .bind(app)
-      .first<{ count: number }>();
+    await admin.api.resourceBindings.revoke(active?.id ?? "");
+    const revoked = await platformRead(app, admin.userId, query);
     expect({
       reviewed,
       unbound,
-      bound,
-      withPermission,
-      platformUnnamed,
+      unnamed,
+      asApp,
       byBuilder,
-      widened,
-      approvedAgain: answerSchema.parse(approvedAgain).ok.groups,
+      bound: answerSchema.parse(bound).ok.groups,
+      write,
       revoked,
-      seen: seen?.count,
     }).toStrictEqual({
       reviewed: [
         {
-          alias: "platform",
-          kind: "statistics",
-          operations: ["read"],
-          measures: ["platform.workflow_runs", "platform.improvement_signals"],
+          alias: "grasp",
+          kind: "grasp",
+          operations: ["statistics.read"],
           state: "unbound",
           choices: {
-            kind: "statistics",
-            platform: true,
-            permissions: [],
-            truncated: false,
-          },
-        },
-        {
-          alias: "runs",
-          kind: "statistics",
-          operations: ["read"],
-          measures: ["platform.workflow_runs"],
-          state: "unbound",
-          choices: {
-            kind: "statistics",
-            platform: true,
-            permissions: [],
-            truncated: false,
-          },
-        },
-        {
-          alias: "stats",
-          kind: "statistics",
-          operations: ["record"],
-          measures: [],
-          state: "unbound",
-          choices: {
-            kind: "statistics",
-            platform: false,
-            permissions: [],
+            kind: "grasp",
+            permissions: [{ permissionId }],
             truncated: false,
           },
         },
       ],
       unbound: { error: "resource.unavailable" },
-      bound: { ok: null },
-      withPermission: "resource.target_invalid",
-      platformUnnamed: "resource.target_invalid",
+      unnamed: "resource.target_invalid",
+      asApp: "resource.undeclared",
       byBuilder: "role.forbidden",
-      widened: { error: "resource.unavailable" },
-      approvedAgain: [{ dimensions: {}, count: 1, sum: 1, min: 1, max: 1 }],
+      bound: [],
+      write: { error: "resource.not_allowed" },
       revoked: { error: "resource.unavailable" },
-      // Only the point recorded while a binding served it.
-      seen: 1,
-    });
-  });
-
-  it("are recorded as they come and read back added up, by the dimensions asked, over the days asked", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
-    const other = await boundApp(admin);
-    holdClock();
-    const recorded = await record(app, admin.userId, [
-      { measure: "invoices", value: 120, dimensions: { supplier: "acme" } },
-      { measure: "invoices", value: 80, dimensions: { supplier: "acme" } },
-      { measure: "invoices", value: 40, dimensions: { supplier: "globex" } },
-      { measure: "invoices", value: 5 },
-    ]);
-    // Eight days ago: outside a week, inside a month.
-    await recordStatistic(
-      env,
-      app,
-      { measure: "invoices", value: 1000, dimensions: { supplier: "acme" } },
-      { now: new Date(Date.now() - 8 * dayMs) }
-    );
-    const bySupplier = answerSchema.parse(
-      await read(app, admin.userId, {
-        measure: "invoices",
-        days: 7,
-        groupBy: ["supplier"],
-      })
-    );
-    const month = answerSchema.parse(
-      await read(app, admin.userId, {
-        measure: "invoices",
-        days: 30,
-        where: { supplier: "acme" },
-      })
-    );
-    const theirs = answerSchema.parse(
-      await read(other, admin.userId, { measure: "invoices", days: 30 })
-    );
-    expect({
-      recorded,
-      // Most points first; `globex` and none tie, so by name here.
-      bySupplier: bySupplier.ok.groups.toSorted(
-        (a, b) =>
-          b.count - a.count ||
-          String(a.dimensions.supplier).localeCompare(
-            String(b.dimensions.supplier)
-          )
-      ),
-      truncated: bySupplier.ok.truncated,
-      days: bySupplier.ok.to > bySupplier.ok.from,
-      month: month.ok.groups,
-      theirs: theirs.ok.groups,
-    }).toStrictEqual({
-      recorded: { ok: null },
-      bySupplier: [
-        {
-          dimensions: { supplier: "acme" },
-          count: 2,
-          sum: 200,
-          min: 80,
-          max: 120,
-        },
-        {
-          dimensions: { supplier: "globex" },
-          count: 1,
-          sum: 40,
-          min: 40,
-          max: 40,
-        },
-        {
-          dimensions: { supplier: null },
-          count: 1,
-          sum: 5,
-          min: 5,
-          max: 5,
-        },
-      ],
-      truncated: false,
-      days: true,
-      month: [
-        {
-          dimensions: {},
-          count: 3,
-          sum: 1200,
-          min: 80,
-          max: 1000,
-        },
-      ],
-      theirs: [],
-    });
-  });
-
-  it("stay within their bounds, refused in the host's words before anything is written", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
-    holdClock();
-    const one = async (point: unknown) =>
-      await record(app, admin.userId, [point]);
-    const query = async (input: unknown) =>
-      await read(app, admin.userId, input);
-    // A day's rows filled, but for one, by another App's points as much.
-    const day = new Date().toISOString().slice(0, 10);
-    await env.DB.batch(
-      Array.from({ length: statisticRowsPerDay - 1 }, (_, index) =>
-        env.DB.prepare(
-          "INSERT INTO app_statistics (app_id, measure, day, dimensions, count, sum, min, max) VALUES (?, 'filled', ?, ?, 1, 1, 1, 1)"
-        ).bind(app, day, JSON.stringify({ n: String(index) }))
-      )
-    );
-    const last = await one({ measure: "late", value: 1 });
-    const pastBound = await one({ measure: "later", value: 1 });
-    const existing = await one({ measure: "late", value: 2 });
-    expect({
-      last,
-      pastBound,
-      existing,
-      name: await one({ measure: "Invoices!", value: 1 }),
-      platformName: await one({
-        measure: "platform.workflow_runs",
-        value: 1,
-      }),
-      dimensions: await one({
-        measure: "m",
-        value: 1,
-        dimensions: { a: "1", b: "2", c: "3", d: "4" },
-      }),
-      value: await one({ measure: "m", value: 1e13 }),
-      tooManyDays: await query({ measure: "m", days: 367 }),
-      noDays: await query({ measure: "m", days: 0 }),
-      groupTwice: await query({ measure: "m", days: 1, groupBy: ["a", "a"] }),
-      // A platform measure its own measures' resource doesn't declare.
-      platform: await query({
-        measure: "platform.workflow_runs",
-        days: 1,
-        where: { app },
-      }),
-    }).toStrictEqual({
-      last: { ok: null },
-      pastBound: limited("day"),
-      existing: { ok: null },
-      name: { error: "resource.invalid_args" },
-      platformName: { error: "resource.invalid_args" },
-      dimensions: { error: "resource.invalid_args" },
-      value: { error: "resource.invalid_args" },
-      tooManyDays: { error: "resource.invalid_args" },
-      noDays: { error: "resource.invalid_args" },
-      groupTwice: { error: "resource.invalid_args" },
-      platform: { error: "resource.not_allowed" },
-    });
-  });
-
-  it("are recorded no faster than a call or a minute allows", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
-    const at = holdClock();
-    // Lowered for tests (vite.config.ts).
-    const {
-      perCall: statisticPointsPerCall,
-      perMinute: statisticPointsPerMinute,
-    } = statisticLimitsOf("point", env.STATISTICS_POINT_LIMITS);
-    const call = async (count: number) =>
-      await record(app, admin.userId, ticks(count));
-    const tooManyInOneCall = await call(statisticPointsPerCall + 1);
-    // The rest of the minute's points: that call's first ones count too.
-    const calls: unknown[] = [];
-    for (
-      let recorded = statisticPointsPerCall;
-      recorded < statisticPointsPerMinute;
-      recorded += statisticPointsPerCall
-    ) {
-      const count = Math.min(
-        statisticPointsPerCall,
-        statisticPointsPerMinute - recorded
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one call after another, as they count
-      calls.push(await call(count));
-    }
-    const overTheMinute = await call(1);
-    const counted = answerSchema.parse(
-      await read(app, admin.userId, { measure: "ticks", days: 1 })
-    );
-    expect({
-      tooManyInOneCall,
-      calls: new Set(calls.map((answer) => JSON.stringify(answer))),
-      overTheMinute,
-      counted: counted.ok.groups[0]?.count,
-    }).toStrictEqual({
-      tooManyInOneCall: limited("call"),
-      calls: new Set([JSON.stringify({ ok: null })]),
-      overTheMinute: limited("minute", at),
-      counted: statisticPointsPerMinute,
     });
   });
 
   it("are read no more often than a call or a minute allows", async () => {
     const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
+    const app = await statsApp(admin);
+    await grantPlatform(admin, app);
+    const watched = await countedApp(admin);
     const at = holdClock();
     // Lowered for tests (vite.config.ts).
-    const { perCall, perMinute } = statisticLimitsOf(
-      "read",
+    const { perCall, perMinute } = statisticReadLimitsOf(
       env.STATISTICS_READ_LIMITS
     );
-    const query = JSON.stringify({ measure: "ticks", days: 1 });
+    const query = JSON.stringify({
+      measure: "platform.workflow_runs",
+      days: 1,
+      where: { app: watched },
+    });
     const readMany = async (count: number) =>
-      await callAs(app, admin.userId, "stats.readMany", { json: query, count });
+      await callAs(app, admin.userId, "stats.platformReadMany", {
+        json: query,
+        count,
+      });
     const tooManyInOneCall = await readMany(perCall + 1);
     const calls: unknown[] = [];
     for (let reads = perCall; reads < perMinute; reads += perCall) {
@@ -744,78 +428,21 @@ describe("an App's own statistics", { timeout: 60_000 }, () => {
 
   it("are read no more often than a call allows, however many of its reads run at once", async () => {
     const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
+    const app = await statsApp(admin);
+    await grantPlatform(admin, app);
+    const watched = await countedApp(admin);
     holdClock();
-    const { perCall } = statisticLimitsOf("read", env.STATISTICS_READ_LIMITS);
+    const { perCall } = statisticReadLimitsOf(env.STATISTICS_READ_LIMITS);
     await expect(
-      callAs(app, admin.userId, "stats.readBurst", {
-        json: JSON.stringify({ measure: "ticks", days: 1 }),
+      callAs(app, admin.userId, "stats.platformReadBurst", {
+        json: JSON.stringify({
+          measure: "platform.workflow_runs",
+          days: 1,
+          where: { app: watched },
+        }),
         count: perCall + 1,
       })
     ).resolves.toStrictEqual(limited("call"));
-  });
-
-  it("are swept past their retention, however many rows, in one run", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await countedApp(admin);
-    holdClock();
-    const old = new Date(Date.now() - 500 * dayMs).toISOString().slice(0, 10);
-    await env.DB.prepare(
-      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2500)
-       INSERT INTO app_statistics (app_id, measure, day, dimensions, count, sum, min, max)
-       SELECT ?, 'old', ?, json_object('n', CAST(i AS TEXT)), 1, 1, 1, 1 FROM n`
-    )
-      .bind(app, old)
-      .run();
-    await sweepStatistics(env);
-    const left = await env.DB.prepare(
-      "SELECT count(*) AS count FROM app_statistics WHERE app_id = ?"
-    )
-      .bind(app)
-      .first<{ count: number }>();
-    expect(left?.count).toBe(0);
-  });
-
-  it("are read, bounded and swept by their indexes, never a table whole", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await boundApp(admin);
-    holdClock();
-    // Past the retention: swept.
-    await recordStatistic(
-      env,
-      app,
-      { measure: "old", value: 1 },
-      { now: new Date(Date.now() - 500 * dayMs) }
-    );
-    const recorded = await recordedQueries(async () => {
-      await record(app, admin.userId, [
-        { measure: "plan", value: 1, dimensions: { kind: "a" } },
-      ]);
-      await read(app, admin.userId, {
-        measure: "plan",
-        days: 366,
-        where: { kind: "a" },
-        groupBy: ["kind"],
-      });
-      await sweepStatistics(env);
-    });
-    const statements = recorded.filter(({ query }) =>
-      query.includes("app_statistics")
-    );
-    const plans = await Promise.all(statements.map(planOf));
-    const left = await env.DB.prepare(
-      "SELECT count(*) AS count FROM app_statistics WHERE app_id = ? AND measure = 'old'"
-    )
-      .bind(app)
-      .first<{ count: number }>();
-    expect({
-      statements: statements.length,
-      // The bound's `SELECT` of the point's values is one constant row.
-      scans: plans
-        .flat()
-        .filter((step) => fullScan.test(step) && step !== "SCAN CONSTANT ROW"),
-      left: left?.count,
-    }).toStrictEqual({ statements: 3, scans: [], left: 0 });
   });
 });
 
@@ -827,7 +454,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
   it("are read at the platform only under a live permission, refused and audited otherwise", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const reader = await boundApp(builder);
+    const reader = await statsApp(builder);
     const watched = await countedApp(admin);
     const permissionId = await grantPlatform(builder, reader);
     await admin.api.permissions.revoke(permissionId);
@@ -842,7 +469,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       refused = await failure(
         async () =>
-          await readStatistics(
+          await readPlatformStatistics(
             env,
             {
               subject: { type: "app", appId: reader },
@@ -871,7 +498,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
   it("count an App's runs and signals for whoever may see its runs, under a binding naming a live grant, audited, and nobody else", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const reader = await boundApp(builder);
+    const reader = await statsApp(builder);
     const watched = await countedApp(admin);
     const query = {
       measure: "platform.workflow_runs",
@@ -903,13 +530,13 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     );
     const permissionId = await grantPlatform(builder, reader);
     // Another App's permission to read them serves this one nothing.
-    const another = await boundApp(builder);
+    const another = await statsApp(builder);
     const theirs = await grantPlatform(builder, another);
     const othersGrant = await failure(
       async () =>
-        await bind(admin, reader, "platform", {
-          kind: "statistics",
-          permissionId: theirs,
+        await bind(admin, reader, {
+          kind: "grasp",
+          permissionId: permissionIdSchema.parse(theirs),
         })
     );
     holdClock();
@@ -924,23 +551,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       byWorkflow = await runs(admin.userId);
     });
-    // Through the resource that declares the runs only: the signals are
-    // refused before anything is read, and nothing is audited.
-    let narrowSignals: unknown;
-    const narrowEvents = await auditedDuring(async () => {
-      narrowSignals = await callAs(reader, admin.userId, "stats.runsRead", {
-        json: JSON.stringify({
-          measure: "platform.improvement_signals",
-          days: 7,
-          where: { app: watched },
-        }),
-      });
-    });
-    const narrowRuns = answerSchema.parse(
-      await callAs(reader, admin.userId, "stats.runsRead", {
-        json: JSON.stringify({ ...query, groupBy: [] }),
-      })
-    ).ok.groups;
     const answers = {
       byWorkflow: answerSchema.parse(byWorkflow).ok.groups,
       one: answerSchema.parse(
@@ -957,17 +567,10 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       }),
       unbound,
       reservedName,
-      // Its own statistics' resource reads no platform measure.
-      ownResource: await read(reader, admin.userId, query),
       unknownDimension: await runs(admin.userId, { groupBy: ["startedBy"] }),
       audited: events
         .filter(({ action }) => action === "statistics.read")
         .map(({ actor, target, detail }) => ({ actor, target, detail })),
-      narrowSignals,
-      narrowAudited: narrowEvents.filter(
-        ({ action }) => action === "statistics.read"
-      ).length,
-      narrowRuns,
     };
     // The permission the binding names, revoked: the next read is refused.
     await admin.api.permissions.revoke(permissionId);
@@ -994,7 +597,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       noApp: { error: "resource.invalid_args" },
       unbound: { error: "resource.unavailable" },
       reservedName: "permission.invalid",
-      ownResource: { error: "resource.not_allowed" },
       unknownDimension: { error: "resource.invalid_args" },
       audited: [
         {
@@ -1007,9 +609,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           },
         },
       ],
-      narrowSignals: { error: "resource.not_allowed" },
-      narrowAudited: 0,
-      narrowRuns: [{ dimensions: {}, count: 3, sum: 3, min: 1, max: 1 }],
       othersGrant: "resource.target_invalid",
       revoked: { error: "resource.unavailable" },
     });
@@ -1018,7 +617,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
   it("count an independent workflow's runs under each App's alias for it, never through a binding removed", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const reader = await boundApp(builder);
+    const reader = await statsApp(builder);
     await grantPlatform(builder, reader);
     const watched = await countedApp(admin);
     // Two independent workflows: `intake` bound to the App now, `old` once.
@@ -1104,7 +703,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
   it("count many Apps' runs in one read, grouped by App, the ones it can't read listed unavailable, audited once with every App asked for", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const reader = await boundApp(builder);
+    const reader = await statsApp(builder);
     await grantPlatform(builder, reader);
     // The builder builds `theirs`, not `watched`; `gone` is no App at all.
     const watched = await countedApp(admin);
@@ -1158,11 +757,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           apps: detail.apps,
           unavailable: detail.unavailable,
         })),
-      ownWithApps: await read(reader, admin.userId, {
-        measure: "ticks",
-        days: 1,
-        apps: [watched],
-      }),
       oneAndApps: await platformRead(reader, admin.userId, {
         ...all,
         where: { app: watched },
@@ -1188,7 +782,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           unavailable: 1,
         },
       ],
-      ownWithApps: { error: "resource.invalid_args" },
       oneAndApps: { error: "resource.invalid_args" },
       oneGone: { error: "resource.item_not_found" },
     });
@@ -1196,7 +789,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
   it("count the runs and signals of as many Apps as one read takes, by index", async () => {
     const admin = await signedInApi(idp, "admin");
-    const reader = await boundApp(admin);
+    const reader = await statsApp(admin);
     await grantPlatform(admin, reader);
     holdClock();
     // As many Apps as a read names, none of them built: only counted.
@@ -1284,7 +877,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
   it("page by the groups' values over a window held at `until`, so runs starting between pages neither repeat nor skip a group", async () => {
     const admin = await signedInApi(idp, "admin");
-    const reader = await boundApp(admin);
+    const reader = await statsApp(admin);
     await grantPlatform(admin, reader);
     const watched = await countedApp(admin);
     holdClock();
@@ -1334,7 +927,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
   it("give the latest improvement signals of an App's workflows by kind, and plan their reads by index", async () => {
     const admin = await signedInApi(idp, "admin");
-    const reader = await boundApp(admin);
+    const reader = await statsApp(admin);
     await grantPlatform(admin, reader);
     const watched = await countedApp(admin);
     holdClock();
@@ -1481,7 +1074,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
   it("read one signal computation on every page held at `until`, kept while a newer one finishes, and say which", async () => {
     const admin = await signedInApi(idp, "admin");
-    const reader = await boundApp(admin);
+    const reader = await statsApp(admin);
     await grantPlatform(admin, reader);
     const watched = await countedApp(admin);
     const held = holdClock();
@@ -1530,7 +1123,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
   it("audit every platform read refused once it reaches the platform, and why: invalid, or past their bounds, those once a minute", async () => {
     const admin = await signedInApi(idp, "admin");
-    const reader = await boundApp(admin);
+    const reader = await statsApp(admin);
     await grantPlatform(admin, reader);
     const watched = await countedApp(admin);
     const held = holdClock();
@@ -1539,7 +1132,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       days: 7,
       where: { app: watched },
     };
-    const { perCall } = statisticLimitsOf("read", env.STATISTICS_READ_LIMITS);
+    const { perCall } = statisticReadLimitsOf(env.STATISTICS_READ_LIMITS);
     const readMany = async () =>
       await callAs(reader, admin.userId, "stats.platformReadMany", {
         json: JSON.stringify(query),
@@ -1580,9 +1173,9 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       results: {
         invalid: { error: "resource.invalid_args" },
-        // A platform measure the resource doesn't declare: refused by the
-        // host before anything is read.
-        unknown: { error: "resource.not_allowed" },
+        // A measure the platform doesn't publish: refused as it is read,
+        // and audited as every refused read is.
+        unknown: { error: "resource.invalid_args" },
         limited: limited("call"),
         limitedAgain: limited("call"),
         nextMinute: limited("call"),
@@ -1591,6 +1184,11 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         {
           app: watched,
           measure: "platform.workflow_runs",
+          refused: "statistics.invalid",
+        },
+        {
+          app: undefined,
+          measure: "platform.unknown",
           refused: "statistics.invalid",
         },
         {
@@ -1612,68 +1210,9 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 const statsFunction = (name: string, kind = "action") =>
   JSON.stringify({ contractId: `stats.${name}`, kind });
 
-/** The input of `stats.record` or `stats.read`, as a step passes it. */
+/** The input of `stats.platformRead`, as a step passes it. */
 const statsInput = (value: unknown) =>
   JSON.stringify({ json: JSON.stringify(value) });
-
-/**
- * A workflow `id` whose step `count` reads how many marks there are
- * (`seen`) and leaves one, its receipt the same on every attempt, records
- * a point of `measure` and reads it back in the same step, then runs
- * `afterwards`, under `options`; and whose next step `after` reads it
- * again. Its test mocks every step.
- */
-const countingWorkflow = (
-  id: string,
-  measure: string,
-  { afterwards = "", options = "retries: { limit: 0 }" } = {}
-): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  const during = await step.do("count", { description: "Count", sideEffect: true, input: null, ${options} }, async () => {
-    const seen = await env.APP.callFunction(${statsFunction("marks", "query")}, {});
-    await env.APP.callFunction(${statsFunction("mark", "mutation")}, {});
-    await env.APP.callFunction(${statsFunction("record")}, ${statsInput([{ measure, value: 1 }])});
-    const read = await env.APP.callFunction(${statsFunction("read")}, ${statsInput({ measure, days: 2 })});
-    ${afterwards}
-    return read as Json;
-  });
-  const after = await step.do("after", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${statsFunction("read")}, ${statsInput({ measure, days: 2 })})) as Json
-  );
-  return { during, after };
-});
-`,
-  [`workflows/${id}.workflow-tests.ts`]: `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./${id}.ts";
-
-export default workflowTests(definition, [
-  { name: "runs", mocks: { count: null, after: null }, expect: {} },
-]);
-`,
-});
-
-/** How many points of `measure` a read as `userId` counts now. */
-const pointsOf = async (
-  app: AppId,
-  userId: string,
-  measure: string
-): Promise<number> =>
-  answerSchema.parse(await read(app, userId, { measure, days: 2 })).ok.groups[0]
-    ?.count ?? 0;
-
-/** The count a function's answer, as a step got it, holds. */
-const countIn = (answer: Json | undefined): number => {
-  const parsed = z
-    .object({ ok: z.literal(true), value: z.string() })
-    .safeParse(answer);
-  return parsed.success
-    ? (answerSchema.parse(JSON.parse(parsed.data.value)).ok.groups[0]?.count ??
-        0)
-    : -1;
-};
 
 describe("a run's statistics", { timeout: 90_000 }, () => {
   afterEach(async () => {
@@ -1752,65 +1291,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { read: null },
         },
       ],
       byBuilder: { error: "resource.item_not_found" },
-    });
-  });
-
-  it("count a step's points once it completes, once however often it ran, and never for an attempt that didn't", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    const app = await statsApp(builder, {
-      ...statsFiles(),
-      ...countingWorkflow("counts", "counted"),
-      // Its first attempt fails after its point; the second completes.
-      ...countingWorkflow("retried", "retried", {
-        afterwards: `const marked = seen as { ok: boolean; value?: unknown }; if (marked.ok && marked.value === 0) { throw new Error("Once more"); }`,
-        options: `retries: { limit: 1, delay: "1 second" }`,
-      }),
-      // Every attempt runs out of time after its point.
-      ...countingWorkflow("failing", "failed", {
-        afterwards:
-          "await new Promise((resolve) => setTimeout(resolve, 3000));",
-        options: `timeout: "1 second", retries: { limit: 1, delay: "1 second" }`,
-      }),
-    });
-    await bind(admin, app);
-    const outcomes: Record<string, unknown> = {};
-    for (const workflow of ["counts", "retried", "failing"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one run after another
-      const run = await builder.api.workflows.start(app, workflow);
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await finished(run.id);
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const ended = await builder.api.workflows.status(run.id);
-      const output = z
-        .object({ during: z.json(), after: z.json() })
-        .safeParse(ended.output);
-      outcomes[workflow] = {
-        status: ended.status,
-        ...(output.success
-          ? {
-              during: countIn(output.data.during),
-              after: countIn(output.data.after),
-            }
-          : {}),
-      };
-    }
-    expect({
-      outcomes,
-      counted: await pointsOf(app, admin.userId, "counted"),
-      retried: await pointsOf(app, admin.userId, "retried"),
-      failed: await pointsOf(app, admin.userId, "failed"),
-    }).toStrictEqual({
-      outcomes: {
-        // Not added up while the step runs; added up once it completed.
-        counts: { status: "completed", during: 0, after: 1 },
-        retried: { status: "completed", during: 0, after: 1 },
-        failing: { status: "failed" },
-      },
-      counted: 1,
-      // Two attempts recorded a point each: the one that completed counts.
-      retried: 1,
-      failed: 0,
     });
   });
 });

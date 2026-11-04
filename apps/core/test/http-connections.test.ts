@@ -44,10 +44,10 @@ const billingFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/billing.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/billing.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const billing = resource.connector("billing", {
+export const billing = permission.connection("billing", {
   contract: "http.request@1",
   actions: ["get", "send"],
 });
@@ -57,7 +57,7 @@ export const open = action({
   returns: v.object({ status: v.number(), count: v.number() }),
   uses: [billing],
   handler: async (ctx) => {
-    const response = await ctx.resources.billing.fetch("/v1/invoices?status=open", {
+    const response = await ctx.connections.billing.fetch("/v1/invoices?status=open", {
       headers: { accept: "application/json" },
     });
     const listed: { invoices: unknown[] } = await response.json();
@@ -70,7 +70,7 @@ export const create = action({
   returns: v.number(),
   uses: [billing],
   handler: async (ctx, args) => {
-    const response = await ctx.resources.billing.fetch("/v1/invoices", {
+    const response = await ctx.connections.billing.fetch("/v1/invoices", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ amount: args.amount }),
@@ -86,7 +86,7 @@ export const stray = action({
   uses: [billing],
   handler: async (ctx, args) => {
     try {
-      const response = await ctx.resources.billing.fetch(args.path);
+      const response = await ctx.connections.billing.fetch(args.path);
       return String(response.status);
     } catch (error) {
       return String(Reflect.get(Object(error), "code"));
@@ -105,7 +105,7 @@ export default app({
   operations: { billing: { open, create, stray } },
   internalOperations: {},
   screens: [],
-  uses: [billing],
+  permissions: { connections: [billing] },
 });
 `,
 });

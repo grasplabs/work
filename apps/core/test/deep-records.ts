@@ -69,7 +69,6 @@ export default app({
   operations: { deep: { put, read } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

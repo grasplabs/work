@@ -45,29 +45,29 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: ${workflowShape},
   output: v.object({ status: v.string() }),
 });
-export const remind = resource.workflow("remind", {
+export const remind = permission.workflow("remind", {
   input: ${workflowShape},
   output: v.object({ status: v.string() }),
 });
-export const later = resource.workflow("later", {
+export const later = permission.workflow("later", {
   input: ${workflowShape},
   output: v.object({ status: v.string() }),
 });
-export const writer = resource.model("writer", { maxOutputTokens: 100 });
+export const writer = permission.ai({ maxOutputTokens: 100 });
 
 export const kickOff = action({
   args: { who: v.string() },
   returns: v.string(),
   uses: [followUp, remind, later, writer],
   handler: async (ctx, args) => {
-    const started = await ctx.startWorkflow(followUp, { who: args.who });
+    const started = await ctx.workflows.followUp.start({ who: args.who });
     return started.startId;
   },
 });
@@ -82,7 +82,7 @@ export default app({
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
   operations: { requests: { kickOff } },
   screens: [],
-  uses: [followUp, remind, later, writer],
+  permissions: { ai: writer, workflows: [followUp, remind, later] },
 });
 `,
 });
@@ -415,7 +415,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       version: 1,
       manifestHash: release.manifestHash,
-      bindings: { writer: "model" },
+      bindings: { ai: "ai" },
       workflows: { followUp: key, later: null, remind: key },
       // What the references type of each packaged one, never of the
       // unbound alias.

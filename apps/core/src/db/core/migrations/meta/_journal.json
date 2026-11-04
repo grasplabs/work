@@ -1492,6 +1492,13 @@
       "when": 1793778704190,
       "tag": "0212_apps_never_reaped",
       "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "6",
+      "when": 1793801650367,
+      "tag": "0213_app_permissions",
+      "breakpoints": true
     }
   ]
 }

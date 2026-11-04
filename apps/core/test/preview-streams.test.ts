@@ -36,14 +36,14 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/notes.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "#grasp/server";
 
 // ${marker}
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const writer = resource.model("writer", { maxOutputTokens: 100 });
+export const writer = permission.ai({ maxOutputTokens: 100 });
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -118,7 +118,7 @@ export const consult = action({
   uses: [writer],
   handler: async (ctx) => {
     await ctx.emit({ step: 1 });
-    return await ctx.resources.writer.generate({ prompt: "Hi" });
+    return await ctx.ai.generate({ prompt: "Hi" });
   },
 });
 `,
@@ -133,7 +133,7 @@ export default app({
   operations: { notes: { create, titles, draft, slow, consult, big, once } },
   internalOperations: {},
   screens: [],
-  uses: [writer],
+  permissions: { ai: writer },
 });
 `,
 });

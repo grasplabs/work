@@ -66,7 +66,6 @@ export default app({
   operations: { invoices: { list, setStatus } },
   internalOperations: {},
   screens: [{ name: "intake", path: "/", source: "screens/intake.tsx" }],
-  uses: [],
 });
 `;
 

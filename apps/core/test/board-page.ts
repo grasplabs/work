@@ -98,8 +98,9 @@ const fromBuiltin = async (admin: Person, blueprint: string) => {
 export const boardPageOf = (idp: Idp) => ({
   /**
    * An admin's board page and workflow map: the page's `map` bound to the
-   * map unless `bindMap` is false, and its `statistics` to the statistics
-   * permission it asks for, granted, unless `bindStatistics` is false.
+   * map unless `bindMap` is false, and its `grasp` (the platform's
+   * statistics) to the statistics permission it asks for, granted, unless
+   * `bindStatistics` is false.
    */
   setUp: async ({
     bindMap = true,
@@ -121,8 +122,8 @@ export const boardPageOf = (idp: Idp) => ({
       await grantReviewed(admin.api, permission.id);
       await admin.api.resourceBindings.approve({
         app: board.app,
-        alias: "statistics",
-        target: { kind: "statistics", permissionId: permission.id },
+        alias: "grasp",
+        target: { kind: "grasp", permissionId: permission.id },
         reviewed: { version: 1 },
       });
     }

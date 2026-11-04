@@ -36,15 +36,16 @@ type Builder = Parameters<typeof release>[0];
  * - `ledger.book` keeps an entry for whoever the call acts for, and
  *   answers whose it is; `ledger.purchaseOrder` finds a purchase order.
  *
- * It declares a text model resource for each of `models`' aliases, which
- * its workflows' AI steps go through (`step.llm`'s `binding`), each with
- * that bound on the answer. A step may ask twice, so each ask gets half.
- * A binding holds the whole bound to what its model can answer, as an
+ * With `ai`, it declares the `ai` permission with that bound on the
+ * answer, which its workflows' AI steps go through (`step.llm`'s
+ * `binding`, `"ai"`). A step may ask twice, so each ask gets half. A
+ * binding holds the whole bound to what its model can answer, as an
  * action would ask for all of it: at most 6,000 tokens on Llama 3.3.
  */
-export const sampleApp = ({
-  models = {},
-}: { models?: Record<string, number> } = {}): Record<string, string> => ({
+export const sampleApp = ({ ai }: { ai?: number } = {}): Record<
+  string,
+  string
+> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
@@ -99,16 +100,10 @@ export const book = mutation({
   },
 });
 `,
-  "operations/effects.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/effects.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-import { bump } from "./sample.ts";
-
-export const stats = resource.statistics("stats", { operations: ["record", "read"] });
-
-export const send = resource.connector("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] });
-
-export const search = resource.connector("search", { contract: "composio.mail@1", actions: ["MAIL_SEARCH"] });
+export const send = permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] });
 
 const invoice = { to: "ben@acme.test", subject: "Invoice INV-7" };
 
@@ -121,61 +116,13 @@ const outcome = async (work: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
-export const point = action({
-  args: { measures: v.array(v.string()) },
-  returns: v.null(),
-  uses: [stats],
-  handler: async (ctx, args) => {
-    for (const measure of args.measures) {
-      await ctx.resources.stats.record({ measure, value: 1 });
-    }
-    return null;
-  },
-});
-
-// How many points of measure the App's statistics hold of today and
-// yesterday: a run that crosses midnight counts the same.
-export const points = action({
-  args: { measure: v.string() },
-  returns: v.number(),
-  uses: [stats],
-  handler: async (ctx, args) => {
-    const { groups } = await ctx.resources.stats.read({ measure: args.measure, days: 2 });
-    return groups[0]?.count ?? 0;
-  },
-});
-
-// Waits at the mail server, which holds the search until the test lets it
-// go, then records a point of measure, and counts whether it was
-// taken (measure:recorded) or refused, the search or the point.
-export const pointAfter = action({
-  args: { measure: v.string(), execution: v.string() },
-  returns: v.null(),
-  uses: [search, stats, bump],
-  handler: async (ctx, args) => {
-    try {
-      await ctx.resources.search.call("MAIL_SEARCH", { query: "hold " + args.measure });
-    } catch {
-      await ctx.runMutation(bump, { name: args.measure + ":refused" });
-      return null;
-    }
-    try {
-      await ctx.resources.stats.record({ measure: args.measure, value: 1 });
-      await ctx.runMutation(bump, { name: args.measure + ":recorded" });
-    } catch {
-      await ctx.runMutation(bump, { name: args.measure + ":refused" });
-    }
-    return null;
-  },
-});
-
 // Mails the invoice, under the call's own key: what the connector
 // answered, or its refusal, as JSON.
 export const mail = action({
   args: {},
   returns: v.string(),
   uses: [send],
-  handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.resources.send.call("MAIL_SEND", invoice))),
+  handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.connections.send.call("MAIL_SEND", invoice))),
 });
 
 // As mail, naming a key of its own past the client's types: refused, as
@@ -187,44 +134,22 @@ export const mailOwnKey = action({
   handler: async (ctx) =>
     JSON.stringify(
       await outcome(async () => {
-        const call: unknown = Reflect.get(ctx.resources.send, "call");
+        const call: unknown = Reflect.get(ctx.connections.send, "call");
         if (typeof call !== "function") {
           throw new TypeError("The client has no call");
         }
-        return await Reflect.apply(call, ctx.resources.send, ["MAIL_SEND", invoice, { idempotencyKey: crypto.randomUUID() }]);
+        return await Reflect.apply(call, ctx.connections.send, ["MAIL_SEND", invoice, { idempotencyKey: crypto.randomUUID() }]);
       })
     ),
 });
 
-// Records two points alike, mails the invoice, and records a third once
-// the mail was sent.
-export const mailCounted = action({
-  args: {},
-  returns: v.string(),
-  uses: [send, stats],
-  handler: async (ctx) => {
-    await ctx.resources.stats.record({ measure: "mails", value: 1 });
-    await ctx.resources.stats.record({ measure: "mails", value: 1 });
-    const sent = await outcome(async () => await ctx.resources.send.call("MAIL_SEND", invoice));
-    if (!("refused" in Object(sent))) {
-      await ctx.resources.stats.record({ measure: "sent", value: 1 });
-    }
-    return JSON.stringify(sent);
-  },
-});
 `,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 
-import { mail, mailCounted, mailOwnKey, point, pointAfter, points, search, send, stats } from "./operations/effects.ts";
+import { mail, mailOwnKey, send } from "./operations/effects.ts";
 import { book, bump, hit, hits, purchaseOrder } from "./operations/sample.ts";
 import schema from "./schema.ts";
 
-${Object.entries(models)
-  .map(
-    ([alias, tokens]) =>
-      `export const ${alias} = resource.model("${alias}", { maxOutputTokens: ${tokens} });\n`
-  )
-  .join("")}
 export default app({
   name: "Invoices",
   schema,
@@ -237,25 +162,24 @@ export default app({
   operations: {
     counter: { hit, hits, bump },
     ledger: { book, purchaseOrder },
-    stats: { point, points, pointAfter },
-    mail: { mail, mailOwnKey, mailCounted },
+    mail: { mail, mailOwnKey },
   },
   internalOperations: {},
   screens: [],
-  uses: [stats, send, search${Object.keys(models)
-    .map((alias) => `, ${alias}`)
-    .join("")}],
+  permissions: {
+    connections: [send],${ai === undefined ? "" : `\n    ai: permission.ai({ maxOutputTokens: ${ai} }),`}
+  },
 });
 `,
 });
 
 /**
- * The sample App (`sampleApp`), declaring a text model resource for each
- * of `bounds`' aliases.
+ * The sample App (`sampleApp`), declaring the `ai` permission with
+ * `maxOutputTokens` as its bound.
  */
 export const modelRegistration = (
-  bounds: Record<string, number>
-): Record<string, string> => sampleApp({ models: bounds });
+  maxOutputTokens: number
+): Record<string, string> => sampleApp({ ai: maxOutputTokens });
 
 /**
  * Workflow code calling the sample App's function `path`, of `kind`, with
@@ -334,21 +258,6 @@ export const hitsOf = async (
   return hits;
 };
 
-/** How many points of `measure` the sample App's statistics hold, as `by` reads them. */
-export const pointsOf = async (
-  by: Builder,
-  app: string,
-  measure: string
-): Promise<number> => {
-  const points = await sampleCall(by, app, "stats.points", "action", {
-    measure,
-  });
-  if (typeof points !== "number") {
-    throw new TypeError(`The statistics didn't read: ${String(points)}`);
-  }
-  return points;
-};
-
 /** Opens the gate `name` of the sample App (`counter.bump`), as `by`. */
 export const openGate = async (
   by: Builder,
@@ -370,7 +279,7 @@ export const openGate = async (
 const bindSample = async (
   app: string,
   alias: string,
-  target: { kind: "statistics" } | { kind: "connector"; permissionId: string }
+  target: { kind: "connector"; permissionId: string }
 ) => {
   const { currentVersion } = await findApp(env, appIdSchema.parse(app));
   return await approveResourceBinding(env, await person("admin"), {
@@ -381,42 +290,37 @@ const bindSample = async (
   });
 };
 
-/** Binds the sample App's statistics (`stats`) to its own measures. */
-export const bindStats = async (app: string) =>
-  await bindSample(app, "stats", { kind: "statistics" });
-
 /**
- * Gives the sample App's mail connector `alias` (`send`, or `search`) the
- * connection `connectionId` (allowing `mailForApps`): a permission on its
- * tool (`MAIL_SEND`, or `MAIL_SEARCH`) `requester` asks for and an admin
- * grants, and the admin's binding to it.
+ * Gives the sample App's mail connection `send` the connection
+ * `connectionId` (allowing `mailForApps`): a permission on its tool
+ * (`MAIL_SEND`) `requester` asks for and an admin grants, and the admin's
+ * binding to it.
  */
 export const bindMail = async (
   idp: Idp,
   requester: Builder,
   app: string,
-  connectionId: string,
-  alias: "send" | "search"
+  connectionId: string
 ) => {
   const permissionId = await requestGranted(idp, requester, {
     subject: { type: "app", appId: app },
     object: { type: "connection", connectionId },
-    actions: [alias === "send" ? "MAIL_SEND" : "MAIL_SEARCH"],
-    binding: alias.toUpperCase(),
+    actions: ["MAIL_SEND"],
+    binding: "SEND",
   });
-  return await bindSample(app, alias, { kind: "connector", permissionId });
+  return await bindSample(app, "send", { kind: "connector", permissionId });
 };
 
 /**
- * An admin's binding of App `app`'s model resource `alias` to `model`,
- * for the version current now: the model must be one the deployment
- * allows as it is approved.
+ * An admin's binding of App `app`'s `ai` permission to `model`, for the
+ * version current now: the model must be one the deployment allows as it
+ * is approved.
  */
-export const bindModel = async (app: string, alias: string, model: string) => {
+export const bindModel = async (app: string, model: string) => {
   const { currentVersion } = await findApp(env, appIdSchema.parse(app));
   return await approveResourceBinding(env, await person("admin"), {
     app,
-    alias,
+    alias: "ai",
     target: { kind: "model", model },
     reviewed: { version: currentVersion ?? 0 },
   });

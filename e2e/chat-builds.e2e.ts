@@ -59,7 +59,6 @@ export default app({
   operations: { invoices: { book } },
   internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [],
 });
 `,
 };

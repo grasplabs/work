@@ -128,7 +128,6 @@ export default app({
   operations: { notes: { list, get, create, update, remove, echo, stamp, big } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/notes.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";

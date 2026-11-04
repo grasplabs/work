@@ -80,7 +80,6 @@ export default app({
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: { notes: { label, touch, touchTwice } },
   screens: [],
-  uses: [],
 });
 `,
 });

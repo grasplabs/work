@@ -2,7 +2,6 @@ import type {
   BindingChoices,
   BindingTargetInput,
   DeclaredResource,
-  PublishedTemplate,
 } from "@grasp-os/shared/resource-bindings";
 
 // What an admin's bind form of an engine's resource (resource-bindings.tsx)
@@ -16,35 +15,16 @@ export const noChoice = (choices: BindingChoices): boolean => {
   if (choices.kind === "model") {
     return choices.models.length === 0;
   }
-  if (choices.kind === "template") {
-    return choices.versions.length === 0;
-  }
   if (choices.kind === "app") {
     return choices.apps.length === 0;
   }
-  // Statistics of the App's own measures only: nothing to choose, the
-  // approval is the grant.
-  if (choices.kind === "statistics" && !choices.platform) {
-    return false;
-  }
   return choices.permissions.length === 0;
 };
-
-/** A template version as a choice names it: its template and version. */
-export const templateKey = ({
-  templateId,
-  version,
-}: Pick<PublishedTemplate, "templateId" | "version">): string =>
-  `${templateId}@${version}`;
 
 /** The first of each choice, as a form starts. */
 export const firstChoice = (choices: BindingChoices): string => {
   if (choices.kind === "model") {
     return choices.models[0] ?? "";
-  }
-  if (choices.kind === "template") {
-    const [newest] = choices.versions;
-    return newest === undefined ? "" : templateKey(newest);
   }
   if (choices.kind === "app") {
     return choices.apps[0]?.appId ?? "";
@@ -94,7 +74,7 @@ export const targetOf = (
   }
   if (
     choices.kind === "connector" ||
-    choices.kind === "store" ||
+    choices.kind === "grasp" ||
     choices.kind === "guests"
   ) {
     return choices.permissions.some(
@@ -108,34 +88,12 @@ export const targetOf = (
       ? { kind: "app", appId: picked }
       : undefined;
   }
-  if (choices.kind === "statistics") {
-    if (!choices.platform) {
-      return { kind: "statistics" };
-    }
-    return choices.permissions.some(
-      ({ permissionId }) => permissionId === picked
-    )
-      ? { kind: "statistics", permissionId: picked }
-      : undefined;
-  }
-  if (choices.kind === "knowledge") {
-    return allChosen(resource.collections, chosen)
-      ? {
-          kind: "knowledge",
-          collections: collectionsOf(resource.collections, chosen),
-        }
-      : undefined;
-  }
-  const version = choices.versions.find(
-    (published) => templateKey(published) === picked
-  );
-  return version === undefined
-    ? undefined
-    : {
-        kind: "template",
-        templateId: version.templateId,
-        version: version.version,
-      };
+  return allChosen(resource.collections, chosen)
+    ? {
+        kind: "knowledge",
+        collections: collectionsOf(resource.collections, chosen),
+      }
+    : undefined;
 };
 
 /** What a choice is, by kind: what tells one offer from another. */
@@ -145,9 +103,6 @@ const choiceIds = (choices: BindingChoices | null): string[] => {
   }
   if (choices.kind === "model") {
     return choices.models;
-  }
-  if (choices.kind === "template") {
-    return choices.versions.map(templateKey);
   }
   if (choices.kind === "app") {
     return choices.apps.map(({ appId }) => appId);
@@ -173,7 +128,6 @@ export const formKey = (
     resource.actions,
     resource.operations,
     resource.collections,
-    resource.measures,
     resource.binding?.id ?? null,
     choiceIds(resource.choices),
   ]);

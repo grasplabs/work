@@ -472,7 +472,7 @@ const profileCallLines = Object.entries(profileCalls).map(
 const workflowBuildDeclaration = `/**
  * Independent JSON workflows (a workflow.json in the grasp-open-workflow/1
  * profile, and its modules), which an App binds under the alias its app.ts
- * declares (\`resource.workflow("alias", { input, output })\`). Nothing here
+ * declares (\`permissions: { workflows: [permission.workflow("alias", { input, output })] }\`). Nothing here
  * grants or approves anything: each call a workflow makes outside itself
  * waits for an admin to approve its binding for that exact version, and an
  * App starts it only once an admin grants the App \`start\` on it (ask with

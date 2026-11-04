@@ -1,4 +1,4 @@
-// Compile-time guarantees of a workflow declaration (`resource.workflow`,
+// Compile-time guarantees of a workflow declaration (`permission.workflow`,
 // spec 7.4, 10.4.1) and the reference generated from it: the App declares
 // the output a run gives beside the input it takes, both required; and the
 // reference its screens get (`workflows.<alias>` in `#grasp`, generated
@@ -7,11 +7,11 @@
 // `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { resource, v } from "../src/index.ts";
+import { permission, v } from "../src/index.ts";
 import type {
   WorkflowInputOf,
   WorkflowOutputOf,
-  WorkflowResource,
+  WorkflowPermission,
 } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
 import { workflows } from "./notes/.grasp/references.ts";
@@ -20,11 +20,11 @@ import { summarizeNote } from "./notes/app.ts";
 
 /** The input a declaration takes, as a caller passes it. */
 type DeclaredInput<Declared> =
-  Declared extends WorkflowResource<string, infer Input> ? Input : never;
+  Declared extends WorkflowPermission<string, infer Input> ? Input : never;
 
 /** The output a declaration's completed run gives. */
 type DeclaredOutput<Declared> =
-  Declared extends WorkflowResource<string, unknown, infer Output>
+  Declared extends WorkflowPermission<string, unknown, infer Output>
     ? Output
     : never;
 
@@ -47,11 +47,11 @@ expectTypeOf(workflows.summarizeNote.alias).toEqualTypeOf<"summarizeNote">();
 
 // A declaration names its output as well as its input: neither is optional.
 // @ts-expect-error -- no output
-resource.workflow("followUp", { input: v.object({}) });
+permission.workflow("followUp", { input: v.object({}) });
 // @ts-expect-error -- no input
-resource.workflow("followUp", { output: v.null() });
+permission.workflow("followUp", { output: v.null() });
 // @ts-expect-error -- an output is a value schema, not a descriptor or a type
-resource.workflow("followUp", { input: v.object({}), output: "null" });
+permission.workflow("followUp", { input: v.object({}), output: "null" });
 
 // A screen follows the generated reference, never the declaration itself.
 export const UseDeclaration = (): null => {

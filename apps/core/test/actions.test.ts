@@ -3,7 +3,7 @@ import {
   app,
   defineSchema,
   defineTable,
-  resource,
+  permission,
   v,
 } from "@grasp-os/sdk";
 import { inspectApp, manifestText } from "@grasp-os/sdk/host";
@@ -189,7 +189,7 @@ const level0 = action({
   handler: async (ctx) => await ctx.runAction(level1, {}),
 });
 
-const mail = resource.connector("mail", {
+const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
@@ -201,22 +201,16 @@ const mailTo = (to: string) => ({
   body: "Hi.",
   to: [to],
 });
-const summarizer = resource.model("summarizer", {
-  structuredOutput: v.object({ summary: v.string() }),
-  maxOutputTokens: 200,
-});
-const help = resource.knowledge("help", {
+const ai = permission.ai({ maxOutputTokens: 200 });
+const brain = permission.brain({
   operations: ["search"],
   collections: ["handbook"],
 });
-const letter = resource.template("letter", { contract: "grasp.letter@1" });
 // Guest chats it lists and reads, and never invites.
-const guestbook = resource.guests("guestbook", {
-  operations: ["list", "read"],
-});
+const guests = permission.guests({ operations: ["list", "read"] });
 
 /** A workflow the App declares, which no function here lists. */
-const followUp = resource.workflow("followUp", {
+const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string() }),
   output: v.object({ status: v.string() }),
 });
@@ -226,7 +220,7 @@ const sendMail = action({
   returns: v.object({ mailbox: v.string() }),
   uses: [mail],
   handler: async (ctx, args) => {
-    const sent = await ctx.resources.mail.call("send", mailTo(args.to));
+    const sent = await ctx.connections.mail.call("send", mailTo(args.to));
     return { mailbox: sent.mailbox };
   },
 });
@@ -234,9 +228,12 @@ const sendMail = action({
 const summarize = action({
   args: { text: v.string() },
   returns: v.object({ summary: v.string() }),
-  uses: [summarizer],
+  uses: [ai],
   handler: async (ctx, args) =>
-    await ctx.resources.summarizer.generate({ prompt: args.text }),
+    await ctx.ai.generate({
+      prompt: args.text,
+      output: v.object({ summary: v.string() }),
+    }),
 });
 
 const searchHelp = action({
@@ -244,28 +241,18 @@ const searchHelp = action({
   returns: v
     .array(v.object({ title: v.string(), excerpt: v.string() }))
     .max(20),
-  uses: [help],
+  uses: [brain],
   handler: async (ctx, args) =>
-    await ctx.resources.help.search({ text: args.text, limit: 5 }),
+    await ctx.brain.search({ text: args.text, limit: 5 }),
 });
 
 const listGuests = action({
   args: {},
   returns: v.number(),
-  uses: [guestbook],
+  uses: [guests],
   handler: async (ctx) => {
-    const chats = await ctx.resources.guestbook.list();
+    const chats = await ctx.guests.list();
     return chats.length;
-  },
-});
-
-const readLetter = action({
-  args: {},
-  returns: v.number(),
-  uses: [letter],
-  handler: async (ctx) => {
-    const template = await ctx.resources.letter.read();
-    return template.version;
   },
 });
 
@@ -318,7 +305,7 @@ const sendMany = action({
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
-      await ctx.resources.mail.call("send", mailTo("ada@acme.test"));
+      await ctx.connections.mail.call("send", mailTo("ada@acme.test"));
     }
     return args.count;
   },
@@ -330,7 +317,7 @@ const sendMailToo = action({
   returns: v.null(),
   uses: [mail],
   handler: async (ctx, args) => {
-    await ctx.resources.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.call("send", mailTo(args.to));
     return null;
   },
 });
@@ -513,7 +500,7 @@ const sendsWhileStreaming = action({
   uses: [mail],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    await ctx.resources.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.call("send", mailTo(args.to));
     return null;
   },
 });
@@ -526,7 +513,7 @@ const sendsAndLeaves = action({
   uses: [mail],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    void ctx.resources.mail.call("send", mailTo(args.to));
+    void ctx.connections.mail.call("send", mailTo(args.to));
     return null;
   },
 });
@@ -565,7 +552,7 @@ const savesThenSends = action({
   uses: [create, mail],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
-    await ctx.resources.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.call("send", mailTo(args.to));
     return null;
   },
 });
@@ -600,7 +587,6 @@ const notesApp = app({
       sendMail,
       summarize,
       searchHelp,
-      readLetter,
       streaming,
       nestsStreaming,
       emitsAnyway,
@@ -629,7 +615,13 @@ const notesApp = app({
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
   screens: [],
-  uses: [mail, summarizer, help, letter, guestbook, followUp],
+  permissions: {
+    connections: [mail],
+    ai,
+    brain,
+    guests,
+    workflows: [followUp],
+  },
 });
 
 const { manifest } = inspectApp(notesApp);
@@ -814,7 +806,7 @@ describe("the one admission", () => {
     };
     let provided = 0;
     const resources = bindingsOf({
-      summarizer: bound("model", null, async () => {
+      ai: bound("ai", null, async () => {
         provided += 1;
         return await Promise.resolve({ summary: "short" });
       }),
@@ -1076,7 +1068,7 @@ describe("resources", () => {
   ) =>
     bindingsOf({
       mail: bound(
-        "connector",
+        "connections",
         "microsoft-365.mail@1",
         async (_method, args, context) => await answer(args, context)
       ),
@@ -1182,11 +1174,11 @@ describe("resources", () => {
       none: await send(),
       otherContract: await send(
         bindingsOf({
-          mail: bound("connector", "microsoft-365.mail@2", messageSent),
+          mail: bound("connections", "microsoft-365.mail@2", messageSent),
         })
       ),
       otherKind: await send(
-        bindingsOf({ mail: bound("model", null, messageSent) })
+        bindingsOf({ mail: bound("ai", null, messageSent) })
       ),
     }).toStrictEqual({
       none: "resource.unavailable",
@@ -1221,8 +1213,8 @@ describe("resources", () => {
     // before its binding hears of it, so no chat is made and nothing is
     // audited.
     let invited = false;
-    const guests = bindingsOf({
-      guestbook: bound("guests", null, async () => {
+    const guestBindings = bindingsOf({
+      guests: bound("guests", null, async () => {
         invited = true;
         return await Promise.resolve([]);
       }),
@@ -1234,11 +1226,11 @@ describe("resources", () => {
         "actions.listGuests",
         {},
         {
-          resources: guests,
+          resources: guestBindings,
           run: misusing(
             "actions.listGuests",
             async (channel) =>
-              await channel.resource("guestbook", "invite", [
+              await channel.resource("guests", "invite", [
                 { name: "Anna", skill: "interview-a-stakeholder" },
               ])
           ),
@@ -1252,7 +1244,7 @@ describe("resources", () => {
       ),
       undeclaredAlias: await attempt(
         async (channel) =>
-          await channel.resource("help", "search", [{ text: "a" }])
+          await channel.resource("brain", "search", [{ text: "a" }])
       ),
       reached,
       invite,
@@ -1302,7 +1294,7 @@ describe("resources", () => {
     });
   });
 
-  it("check what a model, knowledge and a template answer against their contracts", async () => {
+  it("check what AI and the Brain answer against their contracts", async () => {
     const fixture = await notes();
     const summarizeWith = async (answer: unknown) =>
       await call(
@@ -1312,11 +1304,7 @@ describe("resources", () => {
         { text: "long" },
         {
           resources: bindingsOf({
-            summarizer: bound(
-              "model",
-              null,
-              async () => await Promise.resolve(answer)
-            ),
+            ai: bound("ai", null, async () => await Promise.resolve(answer)),
           }),
         }
       );
@@ -1328,25 +1316,9 @@ describe("resources", () => {
         { text: "leave" },
         {
           resources: bindingsOf({
-            help: bound(
-              "knowledge",
+            brain: bound(
+              "brain",
               null,
-              async () => await Promise.resolve(answer)
-            ),
-          }),
-        }
-      );
-    const readWith = async (answer: unknown) =>
-      await call(
-        fixture,
-        "action",
-        "actions.readLetter",
-        {},
-        {
-          resources: bindingsOf({
-            letter: bound(
-              "template",
-              "grasp.letter@1",
               async () => await Promise.resolve(answer)
             ),
           }),
@@ -1361,19 +1333,11 @@ describe("resources", () => {
       hitsWithMore: codeOf(
         await searchWith([{ title: "Leave", excerpt: "Days off", secret: "x" }])
       ),
-      template: valueOf(
-        await readWith({ contract: "grasp.letter@1", version: 3, content: {} })
-      ),
-      otherTemplate: codeOf(
-        await readWith({ contract: "grasp.other@1", version: 3, content: {} })
-      ),
     }).toStrictEqual({
       summary: { summary: "Short" },
       summaryWrong: "contract.invalid_resource_result",
       hits: [{ title: "Leave", excerpt: "Days off" }],
       hitsWithMore: "contract.invalid_resource_result",
-      template: 3,
-      otherTemplate: "contract.invalid_resource_result",
     });
   });
 });
@@ -1397,7 +1361,7 @@ const cancellable = () => {
 describe("what an action's invocation keeps", () => {
   /** Mail refused for a busy model budget, before anything was sent. */
   const busy = bindingsOf({
-    mail: bound("connector", "microsoft-365.mail@1", async () => {
+    mail: bound("connections", "microsoft-365.mail@1", async () => {
       await Promise.resolve();
       throw operationErrors.create("resource.budget_busy");
     }),
@@ -1552,7 +1516,7 @@ describe("cancelling a streaming action", () => {
     const fixture = await notes();
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
-    const mailBound = bound("connector", "microsoft-365.mail@1", async () => {
+    const mailBound = bound("connections", "microsoft-365.mail@1", async () => {
       sent += 1;
       return await Promise.resolve({ mailbox: "m-1", sent: true });
     });
@@ -1579,7 +1543,7 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.mail@1", async () => {
         sent += 1;
         cancel();
         await scheduler.wait(50);
@@ -1604,7 +1568,7 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.mail@1", async () => {
         sent += 1;
         cancel();
         await scheduler.wait(100);
@@ -1630,7 +1594,7 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.mail@1", async () => {
         cancel();
         await scheduler.wait(300);
         settled = true;
@@ -1685,7 +1649,7 @@ describe("cancelling a streaming action", () => {
     const fixture = await notes();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.mail@1", async () => {
         await scheduler.wait(800);
         settled = true;
         return { mailbox: "m-1", sent: true };
@@ -1710,7 +1674,7 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.mail@1", async () => {
         cancel();
         await scheduler.wait(5000);
         settled = true;
@@ -1780,7 +1744,7 @@ describe("one call's budget", () => {
   it("bounds the resource requests one call makes", async () => {
     const fixture = await notes();
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", messageSent),
+      mail: bound("connections", "microsoft-365.mail@1", messageSent),
     });
     const send = async (requests: number) =>
       codeOf(
@@ -1812,7 +1776,7 @@ describe("derived keys", () => {
         idempotencyKey: "same",
         resources: bindingsOf({
           mail: bound(
-            "connector",
+            "connections",
             "microsoft-365.mail@1",
             async (_method, _args, context) => {
               seen.push(context.idempotencyKey);
@@ -1992,7 +1956,7 @@ describe("failures across the host's boundary", () => {
           {
             resources: bindingsOf({
               mail: bound(
-                "connector",
+                "connections",
                 "microsoft-365.mail@1",
                 async () => await Promise.reject(failure)
               ),
@@ -2199,7 +2163,7 @@ describe("evidence of a refused use", () => {
   it("is kept once per call, for the first use refused, before App code hears of it, naming only what the manifest has", async () => {
     const fixture = await notes();
     const resources = bindingsOf({
-      mail: bound("connector", "microsoft-365.mail@1", messageSent),
+      mail: bound("connections", "microsoft-365.mail@1", messageSent),
     });
     /** What a call of sendMail kept, its code asking `asks` and swallowing each refusal. */
     const kept = async (
@@ -2242,11 +2206,11 @@ describe("evidence of a refused use", () => {
     const loop = await kept(
       async (channel) => await channel.resource("nope", "search", [{}]),
       async (channel) =>
-        await channel.resource("help", "search", [{ text: "a" }])
+        await channel.resource("brain", "search", [{ text: "a" }])
     );
     const appResource = await kept(
       async (channel) =>
-        await channel.resource("help", "search", [{ text: "a" }])
+        await channel.resource("brain", "search", [{ text: "a" }])
     );
     // A function sendMail doesn't list, and one the App doesn't have.
     const fn = await kept(
@@ -2289,7 +2253,7 @@ describe("evidence of a refused use", () => {
       appResource: [
         {
           function: "actions.sendMail",
-          use: { kind: "resource", name: "help" },
+          use: { kind: "resource", name: "brain" },
           reason: "use_undeclared",
           errorCode: "resource.not_allowed",
         },
@@ -2379,7 +2343,7 @@ describe("evidence of a refused use", () => {
       {
         within: 20_000,
         resources: bindingsOf({
-          mail: bound("connector", "microsoft-365.mail@1", messageSent),
+          mail: bound("connections", "microsoft-365.mail@1", messageSent),
         }),
         refusedUse: async () => {
           await Promise.withResolvers<null>().promise;
@@ -2465,7 +2429,6 @@ export default app({
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: { notes: { label, probe } },
   screens: [],
-  uses: [],
 });
 `,
     });

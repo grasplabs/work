@@ -55,10 +55,10 @@ export default defineSchema({
   secrets: defineTable({ text: v.string() }),
 });
 `,
-  "operations/portal.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/portal.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "#grasp/server";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string() }),
   output: v.object({ status: v.string() }),
 });
@@ -100,7 +100,7 @@ export const kick = mutation({
   uses: [followUp],
   handler: async (ctx) => {
     await ctx.db.insert("notes", { text: "kicked" });
-    await ctx.afterCommit.start(followUp, { who: "Ada" });
+    await ctx.afterCommit.workflows.followUp.start({ who: "Ada" });
     return null;
   },
 });
@@ -147,7 +147,7 @@ export default app({
   operations: { portal: { add, mine, keep, secrets, look, who, kick, shout } },
   internalOperations: {},
   screens: [],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 `,
   "screens/portal.tsx": `export default function Portal() {

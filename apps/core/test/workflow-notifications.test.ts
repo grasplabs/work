@@ -4,7 +4,7 @@ import {
   app as registerApp,
   defineSchema,
   defineTable,
-  resource,
+  permission,
   v,
 } from "@grasp-os/sdk";
 import type { WorkflowEventReference } from "@grasp-os/sdk";
@@ -107,7 +107,7 @@ const jobEvents = Object.freeze({
 const schema = defineSchema({ jobs: defineTable({ jobId: v.string() }) });
 const { mutation } = serverModule(schema);
 
-const review = resource.workflow("review", {
+const review = permission.workflow("review", {
   input: v.object({ jobId: v.string() }),
   output: v.object({ status: v.string() }),
 });
@@ -157,7 +157,7 @@ const jobsApp = registerApp({
   access: { tables: { jobs: { read: "appMembers", write: "appMembers" } } },
   operations: { jobs: { markDone, markThenFail, rawNotify, unlisted } },
   screens: [],
-  uses: [review],
+  permissions: { workflows: [review] },
 });
 
 const { manifest } = inspectApp(jobsApp);

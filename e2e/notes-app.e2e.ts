@@ -661,32 +661,6 @@ const openFiles = async (page: Page, app: string): Promise<FrameLocator> => {
   return screen;
 };
 
-test("a file shown through another resource is loading until that read answers, never the last view", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesApp");
-  const app = await notesApp(builder, undefined, fileViewFiles());
-  const page = await pageOf(builder);
-  const screen = await openFiles(page, app);
-  await screen
-    .getByLabel("Upload a file")
-    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(screen.getByText("Showing photo.png")).toBeVisible();
-  // The read through photos is held back a moment on its way to core.
-  const { promise: released, resolve: letThrough } =
-    Promise.withResolvers<null>();
-  await page.route("**/api/app-files/*/photos/**", async (route) => {
-    await released;
-    await route.continue();
-  });
-  await screen.getByRole("button", { name: "Through photos" }).click();
-  await expect(screen.getByText("Loading the file…")).toBeVisible();
-  await expect(screen.getByText("Showing photo.png")).toHaveCount(0);
-  letThrough(null);
-  // The read through photos answers, and the file is loading no more.
-  await expect(screen.getByText("Loading the file…")).toHaveCount(0);
-});
-
 test("a file shown is read once, however often its screen renders", async ({
   pageOf,
 }) => {
@@ -700,7 +674,7 @@ test("a file shown is read once, however often its screen renders", async ({
   await expect(screen.getByText("Showing photo.png, rendered 0")).toBeVisible();
   let reads = 0;
   page.on("request", (request) => {
-    if (request.url().includes("/attachments/files/")) {
+    if (request.url().includes("/files/files/")) {
       reads += 1;
     }
   });
@@ -729,7 +703,7 @@ test("a file hidden, then shown again, loads afresh instead of its last view", a
   // The next read is held back a moment on its way to core.
   const { promise: released, resolve: letThrough } =
     Promise.withResolvers<null>();
-  await page.route("**/api/app-files/*/attachments/files/**", async (route) => {
+  await page.route("**/api/app-files/*/files/files/**", async (route) => {
     await released;
     await route.continue();
   });
@@ -797,7 +771,7 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
   await revokeNewestRelease(app);
   let reads = 0;
   page.on("request", (request) => {
-    if (request.url().includes("/attachments/files/")) {
+    if (request.url().includes("/files/files/")) {
       reads += 1;
     }
   });

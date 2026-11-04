@@ -32,8 +32,8 @@ import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
 import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
-// action's `ctx.startWorkflow`, made as it runs, and a mutation's
-// `ctx.afterCommit.start`, staged in its store's outbox with its commit
+// action's `ctx.workflows.<alias>.start`, made as it runs, and a
+// mutation's `ctx.afterCommit.workflows.<alias>.start`, staged in its store's outbox with its commit
 // and made from there by this dispatch. Both are App starts of the
 // workflow version the App binds under an alias (app-workflow-bindings.ts),
 // decided and admitted as every start is (workflow-starts.ts). Threat

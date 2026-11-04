@@ -91,7 +91,6 @@ export default app({
   internalOperations: {},
   screens: [],
   preferences: v.object({ compact: v.boolean().default(false) }),
-  uses: [],
 });
 `,
 };

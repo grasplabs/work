@@ -40,7 +40,6 @@ import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
-import { sweepStatistics } from "./statistics.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -218,7 +217,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await indexApps(env);
     },
   },
-  { name: "statistics.sweep", period: "quarterHour", run: sweepStatistics },
   // Brain command receipts past their retention (src/knowledge/memories.ts).
   {
     name: "knowledge.brain_receipts",

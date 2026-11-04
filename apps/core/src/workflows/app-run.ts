@@ -56,7 +56,6 @@ import { models } from "../models.ts";
 import { authorize, requireActivePerson } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
 import { tokensOfBound } from "../resource-model.ts";
-import { commitStepStatistics } from "../statistic-steps.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled } from "./code.ts";
 import {
@@ -246,16 +245,6 @@ const brainCalls: Record<
 };
 
 /**
- * Whether `attempt` may have kept statistics points to add up as it
- * completes its step: it called its App's sealed functions. Then the step
- * gets its marker as it completes, whether or not a point was kept, so a
- * run of the step the engine makes again after that adds up nothing, also
- * when the first recorded nothing (`commitStepStatistics`).
- */
-const keptStatistics = (attempt: StepAttempt): boolean =>
-  attempt.recorded || attempt.functionCalls > 0;
-
-/**
  * Fails a call of an attempt that had a call refused, with that refusal:
  * every later call of a refused attempt fails at once, whatever it calls.
  */
@@ -433,22 +422,6 @@ class AppRun implements RunKind {
       return error;
     }
     return undefined;
-  }
-
-  /**
-   * The statistics points `attempt`'s App calls recorded, added up as it
-   * completes its step: once (a step run again after this adds nothing),
-   * and no other attempt's.
-   */
-  async stepCompleted(attempt: StepAttempt): Promise<void> {
-    if (keptStatistics(attempt)) {
-      await commitStepStatistics(
-        this.#env,
-        this.run.runId,
-        stepIdempotencyKey(this.run.runId, attempt.step),
-        attempt.leaseId
-      );
-    }
   }
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
@@ -933,13 +906,6 @@ class AppRun implements RunKind {
             ) {
               attempt.heldKeys.push(key);
             }
-          },
-          step: {
-            key: stepKey,
-            attempt: attempt.leaseId,
-            recording: () => {
-              attempt.recorded = true;
-            },
           },
         },
         reference,

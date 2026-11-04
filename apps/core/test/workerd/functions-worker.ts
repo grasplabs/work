@@ -65,7 +65,6 @@ const { manifest } = inspectApp(
       },
     },
     screens: [],
-    uses: [],
   })
 );
 

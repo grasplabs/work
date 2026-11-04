@@ -306,9 +306,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // src/channels.ts).
   "SLACK_BOT_TOKEN",
   "SLACK_SIGNING_SECRET",
-  // An App's statistics (core's src/statistics.ts), next to its permissions.
+  // The platform's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
-  "STATISTICS_POINT_LIMITS",
   "STATISTICS_READ_LIMITS",
   // The client's own Teams bot (connect's src/channels.ts).
   "TEAMS_BOT_ID",

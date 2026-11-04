@@ -1,8 +1,8 @@
 // Compile-time guarantees of the file hooks and `client.files` (spec
 // 10.7.5, 32.3), against the Notes fixture's generated references: its
-// `attachments` resource declares `upload`, `read` and `attach`, and not
-// `delete`; `help` is a links resource. A resource the App didn't
-// declare, an operation its resource doesn't list, or anything but a
+// `files` permission declares `upload`, `read` and `attach`, and not
+// `delete`; `links` is a links permission. A permission the App didn't
+// declare, an operation its permission doesn't list, or anything but a
 // generated files reference fails, and a file reference stays exactly
 // `{ id }`. This file is type-checked by `vp check` and never run: every
 // `@ts-expect-error` below must stay an error.
@@ -16,14 +16,14 @@ import type {
   GraspError,
   UploadView,
 } from "../src/react.ts";
-import { resources } from "./notes/.grasp/references.ts";
+import { permissions } from "./notes/.grasp/references.ts";
 
 declare const client: GraspClient;
 declare const picked: File;
 declare const file: FileRef;
 
 export const useChecks = (): void => {
-  const upload = useUpload(resources.attachments);
+  const upload = useUpload(permissions.files);
   expectTypeOf(upload.upload(picked)).toEqualTypeOf<Promise<FileRef>>();
   expectTypeOf(upload.cancel()).toEqualTypeOf<Promise<void>>();
   // The view is flat and discriminated by its status.
@@ -45,34 +45,34 @@ export const useChecks = (): void => {
   // @ts-expect-error -- no options but a signal
   void upload.upload(picked, { idempotencyKey: "x" });
 
-  expectTypeOf(useFile(resources.attachments, file)).toEqualTypeOf<
+  expectTypeOf(useFile(permissions.files, file)).toEqualTypeOf<
     FileView | null | undefined
   >();
-  expectTypeOf(useFile(resources.attachments, "skip")).toEqualTypeOf<
+  expectTypeOf(useFile(permissions.files, "skip")).toEqualTypeOf<
     FileView | null | undefined
   >();
   // @ts-expect-error -- null doesn't skip; only "skip" does
-  void useFile(resources.attachments, null);
+  void useFile(permissions.files, null);
 
-  // @ts-expect-error -- a links resource isn't a files resource
-  void useUpload(resources.help);
-  // @ts-expect-error -- a resource the App didn't declare
-  void useUpload(resources.photos);
+  // @ts-expect-error -- a links permission isn't a files permission
+  void useUpload(permissions.links);
+  // @ts-expect-error -- a permission the App didn't declare
+  void useUpload(permissions.photos);
   // @ts-expect-error -- a hand-made reference isn't a generated one's type
   void useFile({ kind: "files", alias: "attachments" }, file);
 };
 
 export const clientChecks = async (): Promise<void> => {
-  expectTypeOf(
-    client.files.download(resources.attachments, file)
-  ).toEqualTypeOf<Promise<void>>();
-  // @ts-expect-error -- `attachments` doesn't declare `delete`
-  await client.files.delete(resources.attachments, file);
-  await client.files.download(resources.attachments, file, {
+  expectTypeOf(client.files.download(permissions.files, file)).toEqualTypeOf<
+    Promise<void>
+  >();
+  // @ts-expect-error -- `files` doesn't declare `delete`
+  await client.files.delete(permissions.files, file);
+  await client.files.download(permissions.files, file, {
     // @ts-expect-error -- a download takes no idempotency key
     idempotencyKey: "x",
   });
   // @ts-expect-error -- a file reference is exactly `{ id }`
-  await client.files.download(resources.attachments, "file-id");
+  await client.files.download(permissions.files, "file-id");
   expectTypeOf<FileRef>().toEqualTypeOf<{ id: string }>();
 };

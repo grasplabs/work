@@ -109,7 +109,6 @@ export default app({
   access: { tables: { ${access} } },
   operations: {},
   screens: [],
-  uses: [],
   migrations: [${registered ? names.map((_name, index) => `m${index}`).join(", ") : ""}],
 });
 `;
@@ -482,7 +481,6 @@ export default app({
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {},
   screens: [],
-  uses: [],
   migrations: [
     migration({
       name: "inline-category",

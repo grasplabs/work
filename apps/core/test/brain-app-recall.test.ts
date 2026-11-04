@@ -43,10 +43,10 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/brain.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/brain.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const help = resource.knowledge("help", {
+export const help = permission.brain({
   operations: ["recall"],
   collections: ["handbook", "salaries"],
 });
@@ -57,7 +57,7 @@ export const ask = action({
   returns: v.object({ cited: v.array(v.string()), coverage: v.string() }),
   uses: [help],
   handler: async (ctx, args) => {
-    const pack = await ctx.resources.help.recall({
+    const pack = await ctx.brain.recall({
       query: args.query,
       ...(args.collections === undefined ? {} : { collections: args.collections }),
     });
@@ -79,7 +79,7 @@ export default app({
   operations: { brain: { ask } },
   internalOperations: {},
   screens: [],
-  uses: [help],
+  permissions: { brain: help },
 });
 `,
 });
@@ -191,7 +191,7 @@ const brainApp = async () => {
   );
   await approveResourceBinding(env, admin, {
     app: sealed.app,
-    alias: "help",
+    alias: "brain",
     target: { kind: "knowledge", collections },
     reviewed: { version: 1 },
   });

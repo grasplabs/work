@@ -1,13 +1,10 @@
 import type { ListedConnection } from "@grasp-os/shared/connect";
-import { templatePublicationSchema } from "@grasp-os/shared/resource-bindings";
 import type {
   BindingChoices,
   BindingState,
   DeclaredResource,
-  PublishedTemplate,
   ResourceBinding,
   ResourceBindingsReview,
-  TemplatePublication,
 } from "@grasp-os/shared/resource-bindings";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -33,9 +30,8 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -52,15 +48,13 @@ import {
   formKey,
   noChoice,
   targetOf,
-  templateKey,
 } from "./binding-form.ts";
 
 // What an engine's actions reach through its declared resources (core's
 // resource-bindings.ts): the models, integrations, knowledge and templates
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
-// serve it, replaces or revokes a binding, and publishes template
-// versions. Core decides who may (the organization's own admins, never
+// serve it, and replaces or revokes a binding. Core decides who may (the organization's own admins, never
 // Grasp staff or builders) and checks every choice again; the page only
 // offers the controls to those core gives choices to.
 
@@ -74,12 +68,10 @@ export interface ResourcesPage {
 const kindLabels: Readonly<
   Record<DeclaredResource["kind"], MessageDescriptor>
 > = {
-  model: msg`Model`,
+  model: msg`AI`,
   connector: msg`Integration`,
-  knowledge: msg`Knowledge`,
-  template: msg`Template`,
-  store: msg`Store`,
-  statistics: msg`Statistics`,
+  knowledge: msg`Brain`,
+  grasp: msg`The platform's statistics`,
   guests: msg`Guests`,
   app: msg`Another App`,
 };
@@ -99,7 +91,7 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     unbound: msg`The App's actions can't use it until an admin binds it.`,
     declaration_changed: msg`The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now.`,
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
-    grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
+    grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, or the model is no longer allowed.`,
     unchecked: msg`The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
   };
 
@@ -114,32 +106,6 @@ const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
 /** A change to what core holds, then the page read again. */
 type Decide = (change: (session: Session) => Promise<unknown>) => Promise<void>;
 
-/** `text` read as JSON, or undefined when it isn't JSON. */
-const parsedJson = (
-  text: string
-): { value: TemplatePublication["content"] } | undefined => {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    const content = templatePublicationSchema.shape.content.safeParse(parsed);
-    return content.success ? { value: content.data } : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-/** A template version, as the page names it. */
-const TemplateName = ({
-  templateId,
-  version,
-}: {
-  templateId: string;
-  version: number;
-}) => (
-  <Trans>
-    Template {templateId}, version {version}
-  </Trans>
-);
-
 /** What a resource's binding binds it to, named as far as the page can. */
 const BoundTo = ({
   binding,
@@ -150,33 +116,13 @@ const BoundTo = ({
   if (target.kind === "model") {
     return <span className="font-mono">{target.model}</span>;
   }
-  if (target.kind === "template") {
-    return (
-      <TemplateName templateId={target.templateId} version={target.version} />
-    );
-  }
-  if (target.kind === "store") {
-    const { permissionId: permission } = target;
-    return <Trans>Permission {permission}</Trans>;
-  }
-  if (target.kind === "guests") {
+  if (target.kind === "guests" || target.kind === "grasp") {
     const { permissionId: permission } = target;
     return <Trans>Permission {permission}</Trans>;
   }
   if (target.kind === "app") {
     const { appId: app } = target;
     return <Trans>App {app}</Trans>;
-  }
-  if (target.kind === "statistics") {
-    const { permissionId: permission } = target;
-    return permission === undefined ? (
-      <Trans>The App&apos;s own statistics</Trans>
-    ) : (
-      <Trans>
-        The App&apos;s own statistics, and the platform&apos;s under permission{" "}
-        {permission}
-      </Trans>
-    );
   }
   if (target.kind === "connector") {
     // Core names the bound connection for everyone who reads the review,
@@ -271,16 +217,7 @@ const NothingToChoose = ({
         The App has no permission to read a collection. Grant one first.
       </Trans>
     ),
-    template: (
-      <Trans>Nothing is published for {contract} yet. Publish it first.</Trans>
-    ),
-    store: (
-      <Trans>
-        None of the App&apos;s store permissions serves every operation it
-        declares, exactly as declared. Grant one first.
-      </Trans>
-    ),
-    statistics: (
+    grasp: (
       <Trans>
         The App has no permission to read the platform&apos;s statistics. Grant
         one first.
@@ -389,16 +326,7 @@ const BindForm = ({
           ))}
         </Choice>
       ) : null}
-      {choices.kind === "store" ? (
-        <Choice label={t`Store`} onChange={setPicked} value={picked}>
-          {choices.permissions.map(({ permissionId, storeId: store }) => (
-            <NativeSelectOption key={permissionId} value={permissionId}>
-              {t`Store ${store}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
-      ) : null}
-      {choices.kind === "statistics" && choices.platform ? (
+      {choices.kind === "grasp" ? (
         <Choice
           label={t`Permission for the platform's statistics`}
           onChange={setPicked}
@@ -434,21 +362,6 @@ const BindForm = ({
           ))}
         </Choice>
       ) : null}
-      {choices.kind === "template" ? (
-        <Choice label={t`Template version`} onChange={setPicked} value={picked}>
-          {choices.versions.map((published) => {
-            const { templateId } = published;
-            return (
-              <NativeSelectOption
-                key={templateKey(published)}
-                value={templateKey(published)}
-              >
-                {t`Template ${templateId}, version ${ph({ version: published.version })}`}
-              </NativeSelectOption>
-            );
-          })}
-        </Choice>
-      ) : null}
       {choices.kind === "knowledge"
         ? resource.collections.map((collection) => (
             <Choice
@@ -482,84 +395,6 @@ const BindForm = ({
         ) : (
           <Trans>Replace the binding of {alias}</Trans>
         )}
-      </Button>
-    </form>
-  );
-};
-
-/** An admin's publication of a template version of `contract`. */
-const PublishTemplate = ({
-  contract,
-  versions,
-  busy,
-  decide,
-}: {
-  contract: string;
-  versions: PublishedTemplate[];
-  busy: boolean;
-  decide: Decide;
-}) => {
-  const { t } = useLingui();
-  const contentId = useId();
-  const templates = [...new Set(versions.map(({ templateId }) => templateId))];
-  const [templateId, setTemplateId] = useState(templates[0] ?? "");
-  const [content, setContent] = useState("");
-  const [invalid, setInvalid] = useState(false);
-  const submit = () => {
-    const parsed = parsedJson(content);
-    setInvalid(parsed === undefined);
-    if (parsed === undefined) {
-      return;
-    }
-    void decide(
-      async (session) =>
-        await session.templates.publish({
-          ...(templateId === "" ? {} : { templateId }),
-          contract,
-          content: parsed.value,
-        })
-    );
-  };
-  return (
-    <form
-      aria-label={t`Publish a version of ${contract}`}
-      className="flex flex-col items-start gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      {templates.length === 0 ? null : (
-        <Choice
-          label={t`Publish as`}
-          onChange={setTemplateId}
-          value={templateId}
-        >
-          {templates.map((id) => (
-            <NativeSelectOption key={id} value={id}>
-              {t`The next version of template ${id}`}
-            </NativeSelectOption>
-          ))}
-          <NativeSelectOption value="">{t`A new template`}</NativeSelectOption>
-        </Choice>
-      )}
-      <Field>
-        <FieldLabel htmlFor={contentId}>
-          <Trans>Content, as JSON</Trans>
-        </FieldLabel>
-        <Textarea
-          aria-invalid={invalid}
-          id={contentId}
-          onChange={(event) => {
-            setContent(event.target.value);
-          }}
-          rows={4}
-          value={content}
-        />
-      </Field>
-      {invalid ? <ErrorText>{t`That isn't valid JSON.`}</ErrorText> : null}
-      <Button disabled={busy} size="sm" type="submit" variant="outline">
-        <Trans>Publish a version of {contract}</Trans>
       </Button>
     </form>
   );
@@ -627,8 +462,7 @@ const Revoke = ({
 
 /** What `resource` declares, as a list of terms. */
 const Declared = ({ resource }: { resource: DeclaredResource }) => {
-  const { contract, actions, operations, collections, measures, usedBy } =
-    resource;
+  const { contract, actions, operations, collections, usedBy } = resource;
   const tokens = resource.maxOutputTokens;
   return (
     <dl className="flex flex-col gap-1">
@@ -646,18 +480,9 @@ const Declared = ({ resource }: { resource: DeclaredResource }) => {
       {collections.length === 0 ? null : (
         <Term term={<Trans>Collections</Trans>}>{formatList(collections)}</Term>
       )}
-      {measures.length === 0 ? null : (
-        <Term term={<Trans>Platform measures</Trans>}>
-          <span className="font-mono">{formatList(measures)}</span>
-        </Term>
-      )}
       {tokens === null ? null : (
         <Term term={<Trans>Output</Trans>}>
-          {resource.structuredOutput ? (
-            <Trans>Structured, at most {tokens} tokens</Trans>
-          ) : (
-            <Trans>Text, at most {tokens} tokens</Trans>
-          )}
+          <Trans>At most {tokens} tokens an answer</Trans>
         </Term>
       )}
       <Term term={<Trans>Used by</Trans>}>
@@ -734,14 +559,6 @@ const ResourceCard = ({
           version={version}
         />
       )}
-      {choices?.kind === "template" && resource.contract !== null ? (
-        <PublishTemplate
-          busy={busy}
-          contract={resource.contract}
-          decide={decide}
-          versions={choices.versions}
-        />
-      ) : null}
     </article>
   );
 };

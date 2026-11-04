@@ -86,7 +86,6 @@ export default app({
   operations: { desk: { total } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 });
@@ -254,7 +253,6 @@ export default app({
   operations: { notes: { create, titles } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

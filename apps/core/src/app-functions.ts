@@ -72,7 +72,6 @@ import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
   AppFunctionCall,
-  BindingCaller,
   InvocationProvenance,
   InvocationSources,
   RunOrigin,
@@ -427,11 +426,6 @@ export interface RunCaller {
   readonly requireHolds: () => void;
   /** Hears each side effect connect held for the person (`BindingCaller.held`). */
   readonly held: (key: string) => void;
-  /**
-   * The step the call comes from, and its attempt, which the statistics
-   * points it records are kept by (`BindingCaller.step`).
-   */
-  readonly step?: NonNullable<BindingCaller["step"]>;
 }
 
 /**
@@ -482,15 +476,7 @@ const keyedUnderRun =
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  {
-    run,
-    requestId,
-    deadline,
-    stillCurrent,
-    requireHolds,
-    held,
-    step,
-  }: RunCaller,
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
   operation: string,
   callApp?: AppFunctionCall
 ): Promise<Invocation> => {
@@ -561,7 +547,6 @@ export const runInvocationFor = async (
     shareSubject: run.shareSubject,
     requireHolds,
     admit: authorize,
-    ...(step === undefined ? {} : { step }),
     chain: [app],
     ...(callApp === undefined ? {} : { callApp }),
     fromRun: true,

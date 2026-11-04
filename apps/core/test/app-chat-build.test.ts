@@ -77,7 +77,6 @@ export default app({
   access: { tables: { cards: { read: "appMembers", write: "appMembers" } } },
   operations: { cards: { list, create, move } },
   screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
-  uses: [],
 });
 `;
 

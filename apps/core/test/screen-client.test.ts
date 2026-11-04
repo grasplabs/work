@@ -923,13 +923,13 @@ export const rename = mutation({
   },
 });
 `,
-      "app.ts": `import { app, resource } from "@grasp-os/sdk";
+      "app.ts": `import { app, permission } from "@grasp-os/sdk";
 import { create, list, people, person, rename } from "./operations/tasks.ts";
 import schema from "./schema.ts";
 
-export const briefs = resource.files("briefs", { operations: ["upload", "read"] });
+export const briefs = permission.files({ operations: ["upload", "read"] });
 
-export const site = resource.links("site", { origins: ["https://example.com"] });
+export const site = permission.links({ origins: ["https://example.com"] });
 
 export default app({
   name: "Tasks",
@@ -938,7 +938,7 @@ export default app({
   operations: { tasks: { list, people, person, create, rename } },
   internalOperations: {},
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-  uses: [briefs, site],
+  permissions: { files: briefs, links: site },
 });
 `,
     };
@@ -946,7 +946,7 @@ export default app({
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import { RichText } from "@grasp-os/ui/components/rich-text";
 import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
-import { api, resources } from "#grasp";
+import { api, permissions } from "#grasp";
 
 export default function Tasks() {
   const rename = useMutation(api.tasks.rename);
@@ -979,11 +979,11 @@ export default function Tasks() {
         <CheckboxField form={form} label="Urgent" name="urgent" />
         <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} lookup={{ query: api.tasks.person, args: (id) => ({ id }) }} optionLabel={(person) => person.name} />
         <RichTextField form={form} label="Notes" name="notes" />
-        <FileField form={form} label="Brief" name="brief" resource={resources.briefs} />
+        <FileField form={form} label="Brief" name="brief" resource={permissions.files} />
         <FormError form={form} />
         <SubmitButton form={form}>Add task</SubmitButton>
       </Form>
-      <RichText links={resources.site} value="See [the plan](https://example.com/plan)." />
+      <RichText links={permissions.links} value="See [the plan](https://example.com/plan)." />
     </main>
   );
 }

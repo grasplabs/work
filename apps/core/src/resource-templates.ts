@@ -3,7 +3,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import { jsonOf } from "@grasp-os/shared/operations";
 import {
   resourceBindingErrors,
   templateContentMaxBytes,
@@ -15,11 +15,7 @@ import { and, asc, desc, eq, gt, notExists, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import {
-  auditedBatch,
-  keepAuditEvent,
-  outboxedIfChanged,
-} from "./audit-outbox.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { resourceTemplates } from "./db/core/schema.ts";
 import {
@@ -27,10 +23,11 @@ import {
   requireStillAdmin,
   stillAdminSql,
 } from "./permissions.ts";
-import type { ResourceAdapter } from "./resource-adapter.ts";
 
-// Published templates (spec 32.3): content an admin publishes for Apps to
-// read through a template resource, one immutable version at a time. A
+// Published templates (spec 32.3): content an admin publishes for
+// workflows to read through a template binding (GRA-700), one immutable
+// version at a time. An App reads none: its own tables and the Brain hold
+// what it keeps. A
 // version is written once, by an insert that numbers it, and nothing ever
 // updates it, so a binding pinned to a version reads exactly what was
 // approved, and its fingerprint is the content's own hash: content that no
@@ -158,37 +155,6 @@ export const publishTemplate = async (
 };
 
 /**
- * The published versions of `contract` (every contract's when undefined),
- * newest first, at most `limit`, without their content: what a template
- * resource of that contract may be bound to. The caller checks who asks.
- */
-export const templateVersionsOf = async (
-  env: Env,
-  contract: string | undefined,
-  limit: number
-): Promise<PublishedTemplate[]> => {
-  // Everything but the content, which a listing never returns.
-  const rows = await drizzle(env.DB)
-    .select({
-      id: resourceTemplates.id,
-      version: resourceTemplates.version,
-      contract: resourceTemplates.contract,
-      contentHash: resourceTemplates.contentHash,
-      publishedBy: resourceTemplates.publishedBy,
-      publishedAt: resourceTemplates.publishedAt,
-    })
-    .from(resourceTemplates)
-    .where(
-      contract === undefined
-        ? undefined
-        : eq(resourceTemplates.contract, contract)
-    )
-    .orderBy(desc(resourceTemplates.publishedAt))
-    .limit(limit);
-  return rows.map(toPublished);
-};
-
-/**
  * The latest published version of each of the `limit` templates published
  * to most recently, newest first, without their content: what a workflow's
  * template binding may be approved with (any contract: its binding pins
@@ -292,46 +258,3 @@ export interface TemplateContent {
   readonly version: number;
   readonly content: Json;
 }
-
-/**
- * A template resource: the one version its binding pins, of the declared
- * contract, read as it was published, each time it is read.
- */
-export const templateAdapter: ResourceAdapter<"template"> = {
-  bind: async (env, _app, declaration, target) => {
-    const row = await versionOf(env, target.templateId, target.version);
-    const content = await intactContent(row, declaration.contract);
-    return row === undefined || content === undefined
-      ? undefined
-      : {
-          contractId: declaration.contract,
-          fingerprint: row.contentHash,
-          call: async (caller, _request, context, pin) => {
-            // Held to the approved hash, not the row's own: a row changed
-            // with its hash after the binding resolved serves nothing.
-            const read = await intactContent(
-              await versionOf(env, target.templateId, target.version),
-              declaration.contract,
-              pin.fingerprint
-            );
-            if (read === undefined) {
-              throw operationErrors.create("resource.unavailable");
-            }
-            // Recorded as Knowledge records an App's reads, through the
-            // outbox, which never fails the read.
-            await keepAuditEvent(env, drizzle(env.DB), {
-              actor: caller.actor,
-              action: "resource.template.read",
-              target: { type: "template", id: target.templateId },
-              requestId: context.requestId,
-              detail: {
-                version: target.version,
-                binding: pin.id,
-                contentHash: pin.fingerprint,
-              },
-            });
-            return read;
-          },
-        };
-  },
-};

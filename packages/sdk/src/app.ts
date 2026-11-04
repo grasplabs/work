@@ -1,4 +1,3 @@
-import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 import {
   appMaxOperations,
@@ -10,18 +9,26 @@ import {
 import { assignable } from "./descriptor-assignable.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
-import { eventReferenceData, referenceData } from "./references.ts";
 import {
-  isBrowserResource,
-  isResource,
-  isWorkflowResource,
-} from "./resources.ts";
+  isBrowserPermission,
+  isPermission,
+  isWorkflowPermission,
+  permissionAliases,
+} from "./permissions.ts";
 import type {
-  AnyResource,
-  BrowserResource,
-  ResourceKind,
-  WorkflowResource,
-} from "./resources.ts";
+  AiPermission,
+  AnyPermission,
+  AppPermission,
+  BrainPermission,
+  BrowserPermission,
+  ConnectionPermission,
+  FilesPermission,
+  GuestsPermission,
+  LinksPermission,
+  PermissionKind,
+  WorkflowPermission,
+} from "./permissions.ts";
+import { eventReferenceData, referenceData } from "./references.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type {
   AccessMode,
@@ -40,7 +47,7 @@ import type { AnySchema } from "./value-schema.ts";
 // `app`: how an App registers itself (spec 7.1, 7.5): its schema, the
 // access its tables need, its public and internal server functions by
 // path, how particular functions narrow that access, its screens and the
-// resources it needs. Registering grants nothing: every requirement here
+// permissions it needs. Registering grants nothing: every requirement here
 // becomes usable only once the host authorizes it, and the host
 // intersects it with the caller, the App's grants and current revocations
 // on every read, commit and call.
@@ -54,8 +61,11 @@ import type { AnySchema } from "./value-schema.ts";
 //   internal tree (`internalOperations`) only internal ones, no path is
 //   in both and no function is registered twice;
 // - every function was declared for this App's schema, and what it `uses`
-//   is registered here too: a mutation only the App's queries, an action
-//   any of its functions and resources the App lists in its own `uses`;
+//   is registered here too: a mutation only the App's queries and the
+//   workflows its `permissions` list, an action any of its functions and
+//   any permission the App lists in its own `permissions`;
+// - `permissions` lists each kind under its own key, each declaration of
+//   that kind, under an alias no other of the App's permissions has;
 // - `access.tables` modes default to `none`, and `operationAccess` only
 //   narrows them: a path, table or verb that doesn't exist, a verb the
 //   App's mode doesn't allow or one a function of its kind can't use (a
@@ -160,24 +170,49 @@ export interface AppDefinition<
   /** Where the host places its screens besides their routes (spec 34.1). */
   readonly surfaces?: readonly SurfaceDefinition[];
   /**
-   * Whether it reads the organization's people (`ctx.people`,
-   * `usePeople`): names, emails and teams of every member. Shown to whoever
-   * reviews its versions; no admin approves it. Without it, every read is
-   * refused. Who calls (`ctx.caller`) needs nothing.
+   * Everything it can reach outside itself, by kind; none unless listed.
+   * Each needs an admin's binding or grant before it serves anything.
    */
-  readonly people?: boolean;
-  /**
-   * The resources it needs, each by a distinct alias: those its actions
-   * use, those its screens use (files, links), and the workflows its
-   * actions start and its mutations start after they commit.
-   */
-  readonly uses: readonly (AnyResource | BrowserResource | WorkflowResource)[];
+  readonly permissions?: AppPermissions;
   /**
    * Its explicit migrations (spec 17.2), each a `migration` declared in
    * `migrations/`: transforms of one of its tables' records to this
    * schema, which only the host runs.
    */
   readonly migrations?: readonly Migration[];
+}
+
+/**
+ * An App's permissions, by kind (permissions.ts): what its actions reach
+ * through `ctx`, the workflows its functions start, what its screens may
+ * do with files and link to, and whether it reads the organization's
+ * people.
+ */
+export interface AppPermissions {
+  /** Answers from the workspace's model (`ctx.ai`). */
+  readonly ai?: AiPermission;
+  /** Connections' actions, each under its alias (`ctx.connections.<alias>`). */
+  readonly connections?: readonly ConnectionPermission[];
+  /** The Brain's collections (`ctx.brain`). */
+  readonly brain?: BrainPermission;
+  /** The workflows it starts, each under its alias (`ctx.workflows.<alias>`). */
+  // oxlint-disable-next-line typescript/no-explicit-any -- any workflow's input and output
+  readonly workflows?: readonly WorkflowPermission<string, any, any>[];
+  /** Other Apps' public functions, each under its alias (`ctx.apps.<alias>`). */
+  readonly apps?: readonly AppPermission[];
+  /**
+   * Whether it reads the organization's people (`ctx.people`,
+   * `usePeople`): names, emails and teams of every member. Shown to whoever
+   * reviews its versions; no admin approves it. Without it, every read is
+   * refused. Who calls (`ctx.caller`) needs nothing.
+   */
+  readonly people?: boolean;
+  /** What its screens may do with files. */
+  readonly files?: FilesPermission;
+  /** Guest chats (`ctx.guests`). */
+  readonly guests?: GuestsPermission;
+  /** The exact HTTPS origins its screens may link to; no network access. */
+  readonly links?: LinksPermission;
 }
 
 /** A registered App, as `app` answers it. */
@@ -195,7 +230,7 @@ export type UseManifest =
     }
   | {
       readonly type: "resource";
-      readonly kind: ResourceKind;
+      readonly kind: PermissionKind;
       readonly alias: string;
     }
   | {
@@ -259,19 +294,19 @@ export interface AppManifest {
   readonly schema: SchemaManifest;
   /** Every function, public and internal, by path. */
   readonly operations: Readonly<Record<string, OperationManifest>>;
-  /** The resources its actions use, by alias. */
-  readonly resources: Readonly<Record<string, AnyResource>>;
-  /** The resources its screens use (files, links), by alias. */
-  readonly browserResources: Readonly<Record<string, BrowserResource>>;
+  /** The permissions its actions reach, by alias. */
+  readonly resources: Readonly<Record<string, AnyPermission>>;
+  /** The permissions its screens use (files, links), by alias. */
+  readonly browserResources: Readonly<Record<string, BrowserPermission>>;
   /** The workflows its functions start, by alias. */
-  readonly workflows: Readonly<Record<string, WorkflowResource>>;
+  readonly workflows: Readonly<Record<string, WorkflowPermission>>;
   /** Its screens, by name, in the order declared. */
   readonly screens: Readonly<Record<string, ScreenManifest>>;
   /** Its surfaces, by name, in the order declared. */
   readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
-  /** Present when it reads the organization's people (`people: true`). */
+  /** Present when it reads the organization's people (`permissions.people`). */
   readonly people?: true;
   /** Its migrations, by name, in the order declared. */
   readonly migrations: Readonly<Record<string, MigrationManifest>>;
@@ -324,8 +359,7 @@ const appKeys: ReadonlySet<string> = new Set([
   "screens",
   "surfaces",
   "preferences",
-  "people",
-  "uses",
+  "permissions",
   "migrations",
 ]);
 
@@ -363,7 +397,6 @@ const requiredKeys = [
   "access",
   "operations",
   "screens",
-  "uses",
 ] as const;
 
 /**
@@ -426,52 +459,140 @@ const walk = (
   }
 };
 
-/** The App's resources by alias, each declared once, across every kind. */
-const resourcesOf = (
-  uses: unknown
-): {
-  actions: Map<string, AnyResource>;
-  browser: Map<string, BrowserResource>;
-  workflows: Map<string, WorkflowResource>;
-} => {
-  if (!Array.isArray(uses)) {
-    return refuse("An App's `uses` lists `resource` declarations.");
+/** The keys of an App's `permissions`, and what each holds. */
+const permissionKeys: ReadonlyMap<string, string> = new Map([
+  ["ai", "one `permission.ai`"],
+  ["connections", "a list of `permission.connection`"],
+  ["brain", "one `permission.brain`"],
+  ["workflows", "a list of `permission.workflow`"],
+  ["apps", "a list of `permission.app` or `permission.grasp`"],
+  ["people", "`true` when it reads the organization's people"],
+  ["files", "one `permission.files`"],
+  ["guests", "one `permission.guests`"],
+  ["links", "one `permission.links`"],
+]);
+
+/** The keys of an App's `permissions` that hold a list. */
+const listedKeys: ReadonlySet<string> = new Set([
+  "connections",
+  "workflows",
+  "apps",
+]);
+
+/** The App's permissions, by what reaches them and by alias, each once. */
+interface PermissionsOf {
+  readonly actions: Map<string, AnyPermission>;
+  readonly browser: Map<string, BrowserPermission>;
+  readonly workflows: Map<string, WorkflowPermission>;
+  readonly people: boolean;
+}
+
+/** The declarations `permissions[key]` holds: one, or a list. */
+const declarationsUnder = (
+  permissions: Readonly<Record<string, unknown>>,
+  key: string
+): readonly unknown[] => {
+  const held = permissions[key];
+  if (held === undefined) {
+    return [];
   }
-  const actions = new Map<string, AnyResource>();
-  const browser = new Map<string, BrowserResource>();
-  const workflows = new Map<string, WorkflowResource>();
-  const listed: readonly unknown[] = uses;
-  for (const use of listed) {
-    if (
-      !isResource(use) &&
-      !isBrowserResource(use) &&
-      !isWorkflowResource(use)
-    ) {
-      refuse("An App's `uses` lists `resource` declarations only.");
-      continue;
-    }
-    if (
-      actions.has(use.alias) ||
-      browser.has(use.alias) ||
-      workflows.has(use.alias)
-    ) {
-      refuse(`Two of the App's resources have alias \`${use.alias}\`.`);
-    }
-    if (isResource(use)) {
-      actions.set(use.alias, use);
-    } else if (isWorkflowResource(use)) {
-      workflows.set(use.alias, use);
-    } else {
-      browser.set(use.alias, use);
+  if (listedKeys.has(key) !== Array.isArray(held)) {
+    return refuse(
+      `An App's \`permissions.${key}\` is ${permissionKeys.get(key) ?? "a permission"}.`
+    );
+  }
+  const listed: readonly unknown[] = Array.isArray(held) ? held : [held];
+  return listed;
+};
+
+/** The alias of `declaration`, if `permissions[key]` may hold it. */
+const aliasUnder = (declaration: unknown, key: string): string | undefined => {
+  if (isWorkflowPermission(declaration)) {
+    return key === "workflows" ? declaration.alias : undefined;
+  }
+  if (isPermission(declaration) || isBrowserPermission(declaration)) {
+    return declaration["~permission"] === key ? declaration.alias : undefined;
+  }
+  return undefined;
+};
+
+/** `permissions`, refused unless an object of the kinds there are. */
+const checkedKeys = (
+  permissions: unknown
+): Readonly<Record<string, unknown>> => {
+  if (!isPlainObject(permissions)) {
+    return refuse(
+      "An App's `permissions` is an object of its permissions by kind."
+    );
+  }
+  for (const key of Object.keys(permissions)) {
+    if (!permissionKeys.has(key)) {
+      refuse(
+        `An App's \`permissions\` has no \`${key}\`: its kinds are ${[...permissionKeys.keys()].join(", ")}.`
+      );
     }
   }
-  const files = [...browser.values()].filter(
-    (use) => use["~resource"] === "files"
-  ).length;
-  if (files > fileLimits.resources) {
-    refuse(`An App declares at most ${fileLimits.resources} files resources.`);
+  const { people } = permissions;
+  if (people !== undefined && typeof people !== "boolean") {
+    refuse(
+      "An App's `permissions.people` is `true` when it reads the organization's people."
+    );
   }
-  return { actions, browser, workflows };
+  return permissions;
+};
+
+/**
+ * Refuses a fixed alias held by another kind: no connection, App or
+ * workflow takes one, so the host never mistakes `ai` for a connection.
+ */
+const requireFixedAliases = ({
+  actions,
+  browser,
+  workflows,
+}: Omit<PermissionsOf, "people">): void => {
+  for (const [kind, alias] of Object.entries(permissionAliases)) {
+    const held =
+      actions.get(alias) ?? browser.get(alias) ?? workflows.get(alias);
+    if (held !== undefined && held["~permission"] !== kind) {
+      refuse(`\`${alias}\` is the alias of the App's \`${kind}\` permission.`);
+    }
+  }
+};
+
+/** The App's permissions (see `PermissionsOf`), each kind under its key. */
+const permissionsOf = (given: unknown): PermissionsOf => {
+  const actions = new Map<string, AnyPermission>();
+  const browser = new Map<string, BrowserPermission>();
+  const workflows = new Map<string, WorkflowPermission>();
+  if (given === undefined) {
+    return { actions, browser, workflows, people: false };
+  }
+  const permissions = checkedKeys(given);
+  for (const key of permissionKeys.keys()) {
+    for (const declaration of key === "people"
+      ? []
+      : declarationsUnder(permissions, key)) {
+      const alias = aliasUnder(declaration, key);
+      if (alias === undefined) {
+        refuse(
+          `An App's \`permissions.${key}\` is ${permissionKeys.get(key) ?? "a permission"}.`
+        );
+        continue;
+      }
+      if (actions.has(alias) || browser.has(alias) || workflows.has(alias)) {
+        refuse(`Two of the App's permissions have alias \`${alias}\`.`);
+      }
+      if (isWorkflowPermission(declaration)) {
+        workflows.set(alias, declaration);
+      } else if (isPermission(declaration)) {
+        actions.set(alias, declaration);
+      } else if (isBrowserPermission(declaration)) {
+        browser.set(alias, declaration);
+      }
+    }
+  }
+  requireFixedAliases({ actions, browser, workflows });
+  return { actions, browser, workflows, people: permissions.people === true };
 };
 
 /** A screen's or a route parameter's name: an identifier. */
@@ -1008,8 +1129,8 @@ const usesOf = (
   path: string,
   paths: ReadonlyMap<unknown, string>,
   functions: ReadonlyMap<string, AnyFunction>,
-  resources: ReadonlyMap<string, AnyResource>,
-  workflows: ReadonlyMap<string, WorkflowResource>
+  resources: ReadonlyMap<string, AnyPermission>,
+  workflows: ReadonlyMap<string, WorkflowPermission>
 ): UseManifest[] => {
   const seen = new Set<unknown>();
   return fn.uses.map((use): UseManifest => {
@@ -1017,22 +1138,23 @@ const usesOf = (
       refuse(`\`${path}\` lists the same reference twice in \`uses\`.`);
     }
     seen.add(use);
-    if (isResource(use)) {
-      // Every resource reaches outside the App: a model, a connection,
-      // knowledge or a template. Only an action may.
+    if (isPermission(use)) {
+      // Every permission an action reaches goes outside the App: AI, a
+      // connection, the Brain, another App, guest chats. Only an action
+      // may.
       if (fn.kind !== "action") {
         refuse(
-          `\`${path}\` is a ${fn.kind}: only an action uses resources, and queries and mutations never call models, connections, knowledge or templates.`
+          `\`${path}\` is a ${fn.kind}: only an action reaches \`${use["~permission"]}\`, and queries and mutations never call AI, connections, the Brain, other Apps or guests.`
         );
       }
       if (resources.get(use.alias) !== use) {
         refuse(
-          `\`${path}\` uses resource \`${use.alias}\`, which the App's \`uses\` doesn't list.`
+          `\`${path}\` uses permission \`${use.alias}\`, which the App's \`permissions\` don't list.`
         );
       }
-      return { type: "resource", kind: use["~resource"], alias: use.alias };
+      return { type: "resource", kind: use["~permission"], alias: use.alias };
     }
-    if (isWorkflowResource(use)) {
+    if (isWorkflowPermission(use)) {
       // A start is a change, never a read: an action makes one, a mutation
       // stages one with its commit. A query lists nothing.
       if (fn.kind === "query") {
@@ -1040,7 +1162,7 @@ const usesOf = (
       }
       if (workflows.get(use.alias) !== use) {
         refuse(
-          `\`${path}\` starts workflow \`${use.alias}\`, which the App's \`uses\` doesn't list.`
+          `\`${path}\` starts workflow \`${use.alias}\`, which the App's \`permissions.workflows\` don't list.`
         );
       }
       return { type: "workflow", alias: use.alias };
@@ -1056,7 +1178,7 @@ const usesOf = (
       }
       if (!workflows.has(event.workflow)) {
         refuse(
-          `\`${path}\` notifies workflow \`${event.workflow}\`, which the App's \`uses\` doesn't list.`
+          `\`${path}\` notifies workflow \`${event.workflow}\`, which the App's \`permissions.workflows\` don't list.`
         );
       }
       return {
@@ -1092,14 +1214,6 @@ const checkRegistration = (definition: unknown): void => {
     if (definition[key] === undefined) {
       refuse(`An App's registration declares \`${key}\`.`);
     }
-  }
-  if (
-    definition.people !== undefined &&
-    typeof definition.people !== "boolean"
-  ) {
-    refuse(
-      "An App's `people` is `true` when it reads the organization's people."
-    );
   }
   const { name } = definition;
   if (typeof name !== "string" || name.length === 0 || name.length > 100) {
@@ -1175,7 +1289,8 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
     actions: resources,
     browser,
     workflows,
-  } = resourcesOf(definition.uses);
+    people,
+  } = permissionsOf(definition.permissions);
   const screens = screensOf(definition.screens);
   const surfaces = surfacesOf(definition.surfaces, screens);
   const preferences = preferencesOf(definition.preferences);
@@ -1251,7 +1366,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       screens,
       surfaces,
       preferences,
-      ...(definition.people === true ? { people: true } : {}),
+      ...(people ? { people: true } : {}),
       migrations,
     }),
     functions,

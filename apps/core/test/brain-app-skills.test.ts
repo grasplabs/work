@@ -46,10 +46,10 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/skills.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/skills.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const how = resource.knowledge("how", {
+export const how = permission.brain({
   operations: ["skillsSelect", "skillsRead"],
   collections: ["company", "secret"],
 });
@@ -60,11 +60,11 @@ export const pick = action({
   returns: v.object({ picked: v.string(), text: v.string().nullable() }),
   uses: [how],
   handler: async (ctx, args) => {
-    const selection = await ctx.resources.how.skillsSelect({ task: { type: args.type } });
+    const selection = await ctx.brain.skillsSelect({ task: { type: args.type } });
     if (selection.result.kind === "none") {
       return { picked: selection.result.reason, text: null };
     }
-    const read = await ctx.resources.how.skillsRead({
+    const read = await ctx.brain.skillsRead({
       documentId: selection.result.skill.documentId,
       version: selection.result.skill.version,
     });
@@ -78,7 +78,7 @@ export const open = action({
   returns: v.string(),
   uses: [how],
   handler: async (ctx, args) => {
-    const read = await ctx.resources.how.skillsRead(args);
+    const read = await ctx.brain.skillsRead(args);
     return read.skill.name;
   },
 });
@@ -94,7 +94,7 @@ export default app({
   operations: { skills: { pick, open } },
   internalOperations: {},
   screens: [],
-  uses: [how],
+  permissions: { brain: how },
 });
 `,
 });
@@ -217,7 +217,7 @@ const skillsApp = async () => {
   );
   await approveResourceBinding(env, admin, {
     app: sealed.app,
-    alias: "how",
+    alias: "brain",
     target: { kind: "knowledge", collections },
     reviewed: { version: 1 },
   });

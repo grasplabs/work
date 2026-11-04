@@ -17,9 +17,7 @@ const knowledge = (
   actions: [],
   operations: ["search"],
   collections,
-  measures: [],
   maxOutputTokens: null,
-  structuredOutput: false,
   usedBy: ["help.find"],
   state: "unbound",
   binding: null,
@@ -75,13 +73,13 @@ describe("a resource's bind form", () => {
     };
     expect({
       model: targetOf(resource, model, "c/d", {}),
-      template: targetOf(
+      grasp: targetOf(
         resource,
-        { kind: "template", versions: [], truncated: false },
-        "letter@1",
+        { kind: "grasp", permissions: [], truncated: false },
+        "p-statistics",
         {}
       ),
-    }).toStrictEqual({ model: undefined, template: undefined });
+    }).toStrictEqual({ model: undefined, grasp: undefined });
   });
 
   it("starts afresh when the declaration, the version or the offers change", () => {

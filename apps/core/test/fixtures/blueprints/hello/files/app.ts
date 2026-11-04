@@ -13,5 +13,4 @@ export default app({
   operations: { greetings: { hello } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });

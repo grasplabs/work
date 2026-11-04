@@ -3,18 +3,17 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction } from "../../src/app-functions.ts";
 import type { Release } from "../../src/app-releases.ts";
-import { appFor, setCurrentVersion } from "../../src/apps.ts";
-import { grantPermission, requestPermission } from "../../src/permissions.ts";
+import { setCurrentVersion } from "../../src/apps.ts";
 import { approveResourceBinding } from "../../src/resource-bindings.ts";
 import { deepFiles, fieldDepth } from "../deep-records.ts";
 import { appWith, person, seal } from "../sealed-apps.ts";
 import type { Fixture } from "../sealed-apps.ts";
 
-// A shared store's operations on-prem (store-operations.ts): the calling
-// App's action runs in a sandbox session, and the store App's operation
-// it calls in a child of that session, through the real supervisor this
+// Another App's functions on-prem (resource-apps.ts): the calling App's
+// action runs in a sandbox session, and the function of the App it calls
+// in a child of that session, through the real supervisor this
 // project starts. The supervisor has two processes: two consumers' actions
-// waiting on their store calls hold both, and each call still runs.
+// waiting on their calls hold both, and each call still runs.
 
 const crmFiles: Record<string, string> = {
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -43,7 +42,6 @@ export default app({
   operations: { contacts: { list } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };
@@ -55,11 +53,11 @@ export default defineSchema({
   marks: defineTable({ label: v.string() }),
 });
 `,
-  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const crm = resource.store("crm", {
-  operations: {
+export const crm = permission.app("crm", {
+  functions: {
     "contacts.list": { kind: "query", args: {}, returns: v.array(v.string()) },
   },
 });
@@ -71,7 +69,7 @@ export const list = action({
   uses: [crm],
   handler: async (ctx) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
-    return await ctx.resources.crm.call("contacts.list", {});
+    return await ctx.apps.crm.call("contacts.list", {});
   },
 });
 `,
@@ -86,7 +84,7 @@ export default app({
   operations: { desk: { list } },
   internalOperations: {},
   screens: [],
-  uses: [crm],
+  permissions: { apps: [crm] },
 });
 `,
 };
@@ -106,28 +104,20 @@ const sealedApp = async (
 
 type Person = Awaited<ReturnType<typeof person>>;
 
-/** `desk`'s store resource, granted CRM's store and bound by `admin`. */
+/**
+ * `desk`'s `crm` bound by `admin` to the CRM, whose user `desk`'s owner
+ * is: a call through another App runs under that App's own roles.
+ */
 const bound = async (admin: Person, desk: Sealed, crm: Sealed) => {
-  const asked = await requestPermission(
-    env,
-    admin,
-    {
-      subject: { type: "app", appId: desk.app },
-      object: { type: "store", storeId: crm.store },
-      actions: ["contacts.list"],
-      binding: `STORE_${crypto.randomUUID().slice(0, 8).toUpperCase().replaceAll("-", "_")}`,
-    },
-    {
-      app: async (app, role) => await appFor(env, admin, app, role),
-      resource: async () =>
-        await Promise.reject(new Error("No independent resource here")),
-    }
-  );
-  await grantPermission(env, admin, asked.id, { version: 1 });
+  await env.DB.prepare(
+    "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+  )
+    .bind(crm.app, desk.owner.userId, admin.userId, Date.now())
+    .run();
   await approveResourceBinding(env, admin, {
     app: desk.app,
     alias: "crm",
-    target: { kind: "store", permissionId: asked.id },
+    target: { kind: "app", appId: crm.app },
     reviewed: { version: 1 },
   });
 };
@@ -153,7 +143,7 @@ const list = async (sealed: Sealed): Promise<unknown> => {
   return answer.result.ok ? answer.result.value : answer.result.error.code;
 };
 
-describe("a shared store's operation on-prem", () => {
+describe("another App's function on-prem", () => {
   it("runs in a child of the calling action's session, so consumers waiting on it never starve it", async () => {
     const admin = await person("admin");
     const crm = await sealedApp(crmFiles, "CRM");

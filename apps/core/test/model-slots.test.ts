@@ -201,15 +201,15 @@ const answer = async (
     : JSON.stringify(admitted);
 };
 
-/** A workflow whose one step asks Mistral Large through its `reader` binding. */
+/** A workflow whose one step asks Mistral Large through its App's `ai`. */
 const readerApp = async (builder: Awaited<ReturnType<typeof signedInApi>>) => {
   const app = await serverAppWith(builder, {
-    ...modelRegistration({ reader: 6000 }),
+    ...modelRegistration(6000),
     ...workflowFiles(
       "reader",
       `  return await step.llm("extract", {
     description: "Read the total",
-    binding: "reader",
+    binding: "ai",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -217,7 +217,7 @@ const readerApp = async (builder: Awaited<ReturnType<typeof signedInApi>>) => {
       { extract: { total: 1234 } }
     ),
   });
-  await bindModel(app, "reader", mistral);
+  await bindModel(app, mistral);
   return app;
 };
 

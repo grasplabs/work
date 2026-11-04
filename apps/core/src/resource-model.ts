@@ -1,5 +1,9 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import {
+  descriptorFromText,
+  jsonSchemaOf,
+  schemaFromDescriptor,
+} from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -18,17 +22,17 @@ import type {
   TargetOf,
 } from "./resource-adapter.ts";
 
-// A model resource (spec 12, 32.3): one answer per request, from the model
-// its binding names, through the model gateway, never straight to a
-// provider and with no key anywhere near App code. The gateway applies the
-// organization's models, counts the call's spend (the deployment's, the
-// person's it acts for, the binding's, and for a workflow run's call its
-// workflow's and its run lineage's, model-spend.ts), and audits it as
-// metadata only. The declaration
-// bounds the answer's tokens, and a structured output is the descriptor's:
-// the model is told its JSON Schema, asked once more when an answer
-// doesn't fit, and the operation host checks the answer against the
-// descriptor again.
+// An App's `ai` permission (spec 12, 32.3): one answer per request, from
+// the model its binding names, through the model gateway, never straight
+// to a provider and with no key anywhere near App code. The gateway
+// applies the organization's models, counts the call's spend (the
+// deployment's, the person's it acts for, the binding's, and for a
+// workflow run's call its workflow's and its run lineage's,
+// model-spend.ts), and audits it as metadata only. The declaration bounds
+// the answer's tokens. A request that asks for a value sends its
+// descriptor: the model is told its JSON Schema, asked once more when an
+// answer doesn't fit, and the operation host checks the answer against
+// the descriptor again.
 
 /** What every model binding serves: a prompt in, text or the declared value out. */
 const modelContract = {
@@ -37,7 +41,7 @@ const modelContract = {
     prompt: "string, 1 to 100000 code units",
     instructions: "string, at most 20000 code units, optional",
   },
-  answer: "text, or a value of the declaration's structured output",
+  answer: "text, or a value of the request's output descriptor",
 } as const;
 
 /** The model contract's fingerprint, computed once. */
@@ -157,13 +161,6 @@ export const tokensOfBound = (
     ? { maxTokens: maxOutputTokens, askAgain: false }
     : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
 
-/** How an App's request spends the declaration's bound. */
-const tokensFor = ({
-  maxOutputTokens,
-  structuredOutput,
-}: DeclarationOf<"model">): { maxTokens: number; askAgain: boolean } =>
-  tokensOfBound(maxOutputTokens, structuredOutput !== null);
-
 /**
  * Whether `model` can give the longest ask `maxTokens` of a request
  * through a binding, by the gateway's own measure (`usableAnswerTokens`),
@@ -183,7 +180,11 @@ const generate = async (
   context: ResourceContext
 ): Promise<unknown> => {
   const { prompt, instructions } = requestSchema.parse(args[0]);
-  const { structuredOutput } = declaration;
+  // The value asked for, as the operation host read it already.
+  const output =
+    args[1] === undefined
+      ? undefined
+      : descriptorFromText(JSON.stringify(args[1]));
   const { runOrigin } = caller;
   const shareSubject = caller.shareSubject ?? runOrigin?.shareSubject;
   try {
@@ -191,7 +192,8 @@ const generate = async (
       model: target.model,
       ...(instructions === undefined ? {} : { system: instructions }),
       input: prompt,
-      ...tokensFor(declaration),
+      // A request that may ask once more gives each ask half.
+      ...tokensOfBound(declaration.maxOutputTokens, output !== undefined),
       timeoutMs: Math.min(
         maxTimeoutMs,
         Math.max(1, Math.floor(context.deadline - Date.now()))
@@ -213,11 +215,9 @@ const generate = async (
       ...(caller.requireHolds === undefined
         ? {}
         : { beforeSend: caller.requireHolds }),
-      ...(structuredOutput === null
-        ? {}
-        : { schema: answerSchema(structuredOutput) }),
+      ...(output === undefined ? {} : { schema: answerSchema(output) }),
     });
-    return structuredOutput === null ? answer.text : answer.output;
+    return output === undefined ? answer.text : answer.output;
   } catch (error) {
     // Stopped before it was sent, as a run's attempt was let go of: said
     // so, whatever the gateway made of the stop.

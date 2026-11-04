@@ -118,7 +118,7 @@ export const appMaxOperations = 256;
 export const usesMaxEntries = 64;
 
 /**
- * A resource's alias, as `ctx.resources.<alias>` names it: a letter, then
+ * A permission's alias, as `ctx.connections.<alias>` names it: a letter, then
  * letters, digits or underscores, at most 64 code units.
  */
 export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;

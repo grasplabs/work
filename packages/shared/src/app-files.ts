@@ -10,7 +10,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { platformLimits } from "./platform-limits.ts";
 
 // An App's files (spec 9.6, 10.7.5, 32.5): what a screen uploads through
-// its App's `resource.files` declaration, attaches to records by reference
+// its App's `permission.files` declaration, attaches to records by reference
 // (`{ id }`) and reads, downloads or deletes again. Core keeps them in the
 // App's store: their record in the store's database (core's
 // file-host.ts), their bytes in the deployment's private R2, in chunks.

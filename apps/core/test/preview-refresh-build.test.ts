@@ -36,7 +36,6 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/small.tsx": `import { Button } from "@grasp-os/ui/components/button";

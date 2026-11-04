@@ -1407,12 +1407,12 @@ const buildDeclaration = `/**
  *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`,
  *   \`optionLabel\`, and optionally \`lookup={{ query: api.people.get, args: (id) => ({ id }) }}\`,
  *   a query of one record that names the value it starts with, shown as
- *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, a files
- *   resource declaring \`upload\`; the form doesn't submit while it
+ *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, the App's
+ *   files permission declaring \`upload\`, \`permissions.files\` from \`#grasp\`; the form doesn't submit while it
  *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
  *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
  *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; given
- *   \`links={resources.site}\` (a links resource the App declares), its
+ *   \`links={permissions.links}\` (the App's links permission, from \`#grasp\`), its
  *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
  *   \`FormError\` and \`SubmitButton\`.
  * - The grid's and the fields' own words follow the page's language
@@ -1424,7 +1424,8 @@ const buildDeclaration = `/**
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, declare it in app.ts
- * (\`resource.workflow("alias", { input, output })\`) and bind it to the App
+ * (\`permissions: { workflows: [permission.workflow("alias", { input, output })] }\`,
+ * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
  * under that alias. A workflow already in the App, which a builder wrote,
  * you may delete but not change.
  *
@@ -1462,7 +1463,7 @@ const buildDeclaration = `/**
  * changes each session: key a visitor's records by \`email\`. Decide who
  * may see or do what with it, on the server (\`ctx.caller.id\` for "my
  * requests", "assigned to me"). Reading other members needs the App to
- * declare it, \`app({ ..., people: true })\`, which its reviewer sees;
+ * declare it, \`app({ ..., permissions: { people: true } })\`, which its reviewer sees;
  * only then \`ctx.people\` reads them: \`find(ids)\`,
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
@@ -1491,10 +1492,10 @@ const buildDeclaration = `/**
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
  * and methods it allows; its credential is connect's and never yours).
  * Never write a URL, key or token into code: declare it in app.ts as
- * \`resource.connector("billing", { contract: "http.request@1", actions: ["get", "send"] })\`
- * (only the actions you use; \`get\` reads, \`send\` changes), list it in
- * the action's \`uses\`, and call
- * \`await ctx.resources.billing.fetch("/v1/invoices?status=open")\` or
+ * \`const billing = permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`
+ * under \`permissions: { connections: [billing] }\` (only the actions you
+ * use; \`get\` reads, \`send\` changes), list it in the action's \`uses\`,
+ * and call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
  * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
  * a \`Response\` from the connection's own origin (512 KiB at most, a
  * redirect elsewhere refused). A \`send\` a person makes waits for them to
@@ -1625,7 +1626,7 @@ build: {
         sideEffect: boolean;
       }[];
       permissions: { id: string; object: Record<string, unknown>; actions: string[]; binding: string }[];
-      /** It reads the organization's people (\`people: true\`); null when that can't be read. */
+      /** It reads the organization's people (\`permissions.people\`); null when that can't be read. */
       readsPeople: boolean | null;
       /** What the App holds, and which making it current asks an admin for again. */
       grants: { permission: { id: string; binding: string; actions: string[] }; askedAgain: boolean }[];

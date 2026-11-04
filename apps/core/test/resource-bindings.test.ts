@@ -1,5 +1,4 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -29,14 +28,13 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { invocationSources } from "../src/resource-adapter.ts";
 import {
   approveResourceBinding,
   listResourceBindings,
   reviewResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import { publishTemplate, templateAdapter } from "../src/resource-templates.ts";
+import { publishTemplate } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -56,61 +54,59 @@ import { openRpc, signedInWithRole } from "./sign-in.ts";
 /** The model the organization chose, which answers at most 65,536 tokens. */
 const chosenModel = "mistral/mistral-large-latest";
 
-/** An App whose actions use a text model and a structured one. */
-const modelFiles = (
-  maxOutputTokens = 300,
-  taggerTokens = 200
-): Record<string, string> => ({
+/**
+ * An App whose actions ask its `ai` for text and for values, each within
+ * `maxOutputTokens`.
+ */
+const modelFiles = (maxOutputTokens = 300): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/assist.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/assist.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const writer = resource.model("writer", { maxOutputTokens: ${maxOutputTokens} });
-
-export const tagger = resource.model("tagger", {
-  structuredOutput: v.object({ tags: v.array(v.string().trim().min(1)).max(5) }),
-  maxOutputTokens: ${taggerTokens},
-});
-
-export const labeler = resource.model("labeler", {
-  structuredOutput: v.object({ label: v.string(), status: v.string().default("draft") }),
-  maxOutputTokens: 200,
-});
+export const ai = permission.ai({ maxOutputTokens: ${maxOutputTokens} });
 
 export const label = action({
   args: { text: v.string().min(1) },
   returns: v.object({ label: v.string(), status: v.string() }),
-  uses: [labeler],
-  handler: async (ctx, args) => await ctx.resources.labeler.generate({ prompt: args.text }),
+  uses: [ai],
+  handler: async (ctx, args) =>
+    await ctx.ai.generate({
+      prompt: args.text,
+      output: v.object({ label: v.string(), status: v.string().default("draft") }),
+    }),
 });
 
 export const draft = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [writer],
+  uses: [ai],
   handler: async (ctx, args) =>
-    await ctx.resources.writer.generate({ prompt: args.prompt, instructions: "Be brief." }),
+    await ctx.ai.generate({ prompt: args.prompt, instructions: "Be brief." }),
 });
 
 export const tag = action({
   args: { text: v.string().min(1) },
   returns: v.object({ tags: v.array(v.string()) }),
-  uses: [tagger],
-  handler: async (ctx, args) => await ctx.resources.tagger.generate({ prompt: args.text }),
+  uses: [ai],
+  handler: async (ctx, args) =>
+    await ctx.ai.generate({
+      prompt: args.text,
+      output: v.object({ tags: v.array(v.string().trim().min(1)).max(5) }),
+    }),
 });
 
 /** Everything App code can see of its model client, and what it answered. */
 export const probe = action({
   args: {},
   returns: v.string(),
-  uses: [writer],
+  uses: [ai],
   handler: async (ctx) => {
-    const client = ctx.resources.writer;
+    const client = ctx.ai;
     const answer = await client.generate({ prompt: "Hi" });
     const prototype = Object.getPrototypeOf(client) ?? {};
     return [
@@ -128,11 +124,11 @@ export const probe = action({
 export const twice = action({
   args: {},
   returns: v.string(),
-  uses: [writer],
+  uses: [ai],
   handler: async (ctx) => {
-    const first = await ctx.resources.writer.generate({ prompt: "one" });
+    const first = await ctx.ai.generate({ prompt: "one" });
     try {
-      await ctx.resources.writer.generate({ prompt: "two" });
+      await ctx.ai.generate({ prompt: "two" });
       return \`\${first}|ran\`;
     } catch (error) {
       // A platform refusal reaches App code as an error with its code.
@@ -145,10 +141,10 @@ export const twice = action({
 export const attempt = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [writer],
+  uses: [ai],
   handler: async (ctx) => {
     try {
-      return await ctx.resources.writer.generate({ prompt: "Hi" });
+      return await ctx.ai.generate({ prompt: "Hi" });
     } catch (error) {
       const details = Object(Reflect.get(Object(error), "details"));
       return [
@@ -160,7 +156,7 @@ export const attempt = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { attempt, draft, label, labeler, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
+import { ai, attempt, draft, label, probe, tag, twice } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -170,7 +166,7 @@ export default app({
   operations: { assist: { draft, tag, twice, probe, label, attempt } },
   internalOperations: {},
   screens: [],
-  uses: [writer, tagger, labeler],
+  permissions: { ai },
 });
 `,
 });
@@ -274,15 +270,14 @@ const hitsSchema = z.array(
 const outcomeOf = (result: OperationResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
 
-/** An admin's approval of `alias` of the App to the chosen model. */
+/** An admin's approval of the App's `ai` to the chosen model. */
 const approveModel = async (
   sealed: Sealed,
-  alias: string,
   version = sealed.release.manifest.resourceVersion
 ) =>
   await approveResourceBinding(env, await person("admin"), {
     app: sealed.app,
-    alias,
+    alias: "ai",
     target: { kind: "model", model: chosenModel },
     reviewed: { version },
   });
@@ -305,21 +300,21 @@ const auditedFor = async (
 const sentText = (provider: FakeProvider, index: number): string =>
   JSON.stringify(provider.requests[index]?.body ?? null);
 
-/** An approval of the App's `writer` to the chosen model, as a client sends it. */
+/** An approval of the App's `ai` to the chosen model, as a client sends it. */
 const writerApproval = (sealed: Sealed) => ({
   app: sealed.app,
-  alias: "writer",
+  alias: "ai",
   target: { kind: "model", model: chosenModel },
   reviewed: { version: 1 },
 });
 
-/** An App whose actions search and read two Knowledge collections. */
+/** An App whose actions search and read two of the Brain's collections. */
 const knowledgeFiles = (): Record<string, string> => ({
   "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "operations/help.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/help.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const help = resource.knowledge("help", {
+export const brain = permission.brain({
   operations: ["search", "read"],
   collections: ["handbook", "salaries"],
 });
@@ -327,32 +322,32 @@ export const help = resource.knowledge("help", {
 export const find = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [help],
-  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text, limit: 5 }),
+  uses: [brain],
+  handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
 });
 
 export const open = action({
   args: { id: v.string().min(1) },
   returns: v.object({ title: v.string(), text: v.string() }),
-  uses: [help],
-  handler: async (ctx, args) => await ctx.resources.help.read({ id: args.id }),
+  uses: [brain],
+  handler: async (ctx, args) => await ctx.brain.read({ id: args.id }),
 });
 
-export const writer = resource.model("writer", { maxOutputTokens: 300 });
+export const ai = permission.ai({ maxOutputTokens: 300 });
 
 /** Reads a document, then has the model summarize it. */
 export const summarize = action({
   args: { id: v.string().min(1) },
   returns: v.string(),
-  uses: [help, writer],
+  uses: [brain, ai],
   handler: async (ctx, args) => {
-    const document = await ctx.resources.help.read({ id: args.id });
-    return await ctx.resources.writer.generate({ prompt: document.text });
+    const document = await ctx.brain.read({ id: args.id });
+    return await ctx.ai.generate({ prompt: document.text });
   },
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { find, help, open, summarize, writer } from "./operations/help.ts";
+import { ai, brain, find, open, summarize } from "./operations/help.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -362,7 +357,7 @@ export default app({
   operations: { help: { find, open, summarize } },
   internalOperations: {},
   screens: [],
-  uses: [help, writer],
+  permissions: { brain, ai },
 });
 `,
 });
@@ -455,7 +450,7 @@ const knowledgeApp = async () => {
   };
   const binding = await approveResourceBinding(env, admin, {
     app: sealed.app,
-    alias: "help",
+    alias: "brain",
     target: { kind: "knowledge", collections: permissions },
     reviewed: { version: 1 },
   });
@@ -486,45 +481,6 @@ const answerOf = async (
 const searchTextOf = (length: number): string =>
   "leave ".repeat(length).slice(0, length);
 
-/** An App whose action reads a letter template. */
-const letterFiles = (): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "operations/letters.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
-
-export const letter = resource.template("letter", { contract: "grasp.letter@1" });
-
-export const read = action({
-  args: {},
-  returns: v.object({ version: v.number(), greeting: v.string() }),
-  uses: [letter],
-  handler: async (ctx) => {
-    const template = await ctx.resources.letter.read();
-    const { content } = template;
-    const greeting =
-      typeof content === "object" && content !== null && !Array.isArray(content)
-        ? String(content.greeting)
-        : "";
-    return { version: template.version, greeting };
-  },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { letter, read } from "./operations/letters.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Letters",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { letters: { read } },
-  internalOperations: {},
-  screens: [],
-  uses: [letter],
-});
-`,
-});
-
 /** The error code publishing `publication` as `by` fails with. */
 const publishRefusal = async (
   by: Awaited<ReturnType<typeof person>>,
@@ -541,31 +497,6 @@ const deepLetter = (depth: number): Json => {
   return { greeting: "Deep", rest };
 };
 
-/** Overwrites version 1 of `templateId` behind the platform's back. */
-const tamperTemplate = async (
-  templateId: string,
-  content: string,
-  contentHash?: string
-): Promise<void> => {
-  await env.DB.prepare(
-    "UPDATE resource_templates SET content = ?, content_hash = COALESCE(?, content_hash) WHERE id = ? AND version = 1"
-  )
-    .bind(content, contentHash ?? null, templateId)
-    .run();
-};
-
-/** An approval of the Letters App's `letter` to `version` of `templateId`. */
-const letterApproval = (
-  sealed: Sealed,
-  templateId: string,
-  version: number
-) => ({
-  app: sealed.app,
-  alias: "letter",
-  target: { kind: "template", templateId, version },
-  reviewed: { version: 1 },
-});
-
 describe("resource bindings", { timeout: 120_000 }, () => {
   beforeEach(chooseModel);
 
@@ -578,7 +509,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       prompt: "Hi",
     });
     const sentUnbound = provider.requests.length;
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const bound = await call(withProvider, sealed, "assist.draft", {
       prompt: "Hi",
     });
@@ -595,7 +526,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
 
   it("call a bound model through the gateway, accounted", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer("A short draft."),
     ]);
@@ -619,60 +550,39 @@ describe("resource bindings", { timeout: 120_000 }, () => {
 
   it("bind a model only when it can give each request's share of the declared bound", async () => {
     // Mistral Large answers at most a quarter of its 262,144-token window,
-    // 65,536 tokens. The text writer asks for its whole bound at once; the
-    // structured tagger for half of the most an App may declare, as it may
-    // ask again.
-    const sealed = await sealedApp(modelFiles(65_537, 100_000));
+    // 65,536 tokens. A request for text asks for the whole bound at once;
+    // one for a value for half of it each time, as it may ask again.
+    const tooLong = await sealedApp(modelFiles(65_537));
     const admin = await person("admin");
     const refused = await failure(
       async () =>
-        await approveResourceBinding(env, admin, writerApproval(sealed))
+        await approveResourceBinding(env, admin, writerApproval(tooLong))
     );
-    await approveModel(sealed, "tagger");
+    const sealed = await sealedApp(modelFiles(65_536));
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer('{"tags": ["launch"]}'),
     ]);
     const tagged = await call(withProvider, sealed, "assist.tag", {
       text: "Notes",
     });
-    const writers = await listResourceBindings(env, admin, sealed.app);
+    const bindings = await listResourceBindings(env, admin, tooLong.app);
     expect({
       refused,
-      bound: writers.filter(({ alias }) => alias === "writer").length,
+      bound: bindings.length,
       tagged: outcomeOf(tagged),
       sent: provider.requests.map(({ body }) => body),
     }).toStrictEqual({
       refused: "resource.model_too_small",
       bound: 0,
       tagged: { tags: ["launch"] },
-      sent: [expect.objectContaining({ max_completion_tokens: 50_000 })],
+      sent: [expect.objectContaining({ max_completion_tokens: 32_768 })],
     });
-  });
-
-  it("hold a resource no action uses yet to what an action would ask", async () => {
-    // A later version may add an action using the alias, and the binding
-    // would serve it while the declaration stays the same.
-    const files = modelFiles();
-    const sealed = await sealedApp({
-      ...files,
-      "operations/assist.ts": `${files["operations/assist.ts"] ?? ""}
-export const idle = resource.model("idle", { maxOutputTokens: 65537 });
-`,
-      "app.ts": (files["app.ts"] ?? "")
-        .replace("twice, writer }", "twice, writer, idle }")
-        .replace(
-          "uses: [writer, tagger, labeler]",
-          "uses: [writer, tagger, labeler, idle]"
-        ),
-    });
-    await expect(
-      failure(async () => await approveModel(sealed, "idle"))
-    ).resolves.toBe("resource.model_too_small");
   });
 
   it("send an App's request the whole bound a model can answer", async () => {
     const sealed = await sealedApp(modelFiles(65_536));
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer("A long draft."),
     ]);
@@ -688,9 +598,9 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
     });
   });
 
-  it("enforce a model's structured output, asking again once", async () => {
+  it("enforce the value a request asks for, asking again once", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "tagger");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer('{"tags": ["  padded  "]}'),
       answer('{"tags": ["launch", "plans"]}'),
@@ -711,7 +621,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
       // Two answers that never fit: the contract the provider broke.
       neverFitted: { failed: "contract.invalid_resource_result" },
     });
-    // The declared 200 tokens bound the App's request as a whole: each of
+    // The declared 300 tokens bound the App's request as a whole: each of
     // its two attempts may take half.
     const ceilings = provider.requests
       .slice(0, 2)
@@ -720,7 +630,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
           z.object({ max_completion_tokens: z.number() }).parse(body)
             .max_completion_tokens
       );
-    expect(ceilings).toStrictEqual([100, 100]);
+    expect(ceilings).toStrictEqual([150, 150]);
     // The model was told the descriptor's JSON Schema, and why its first
     // answer didn't fit: not in its exact form.
     expect([sentText(provider, 0), sentText(provider, 1)]).toStrictEqual([
@@ -731,7 +641,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("stop a binding revoked between two requests of one call", async () => {
     const sealed = await sealedApp(modelFiles());
-    const binding = await approveModel(sealed, "writer");
+    const binding = await approveModel(sealed);
     const gate = Promise.withResolvers<unknown>();
     const { provider, providerEnv: withProvider } = await providerEnv([
       { ...answer("first"), pause: { at: 2, until: gate.promise } },
@@ -753,7 +663,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("serve only the declaration an admin approved", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     // The next version asks for longer answers: the binding no longer
     // matches what was reviewed.
     const widened = await nextVersion(sealed, modelFiles(5000), 2);
@@ -764,7 +674,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
       prompt: "Hi",
     });
     const sentBefore = provider.requests.length;
-    await approveModel(widened, "writer", 2);
+    await approveModel(widened, 2);
     const after = await call(withProvider, widened, "assist.draft", {
       prompt: "Hi",
     });
@@ -781,7 +691,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("stop a model the organization no longer chooses", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv(
       [answer("Hidden.")],
       ["openai/gpt-5.4"]
@@ -825,7 +735,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
     expect({
       undeclared: await refusal({ alias: "mailer" }),
       otherKind: await refusal({
-        target: { kind: "template", templateId: "letter", version: 1 },
+        target: { kind: "guests", permissionId: crypto.randomUUID() },
       }),
       notAllowed: await refusal({
         target: { kind: "model", model: "openai/gpt-5.4" },
@@ -908,7 +818,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("hand App code no key, token or gateway detail", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer("Plain text."),
     ]);
@@ -932,7 +842,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
   it("serve one App's binding to that App only", async () => {
     const sealed = await sealedApp(modelFiles());
     const other = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer("Mine."),
     ]);
@@ -949,8 +859,8 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
   it("keep one active binding when two approvals of an alias race", async () => {
     const sealed = await sealedApp(modelFiles());
     const [one, two] = await Promise.allSettled([
-      approveModel(sealed, "writer"),
-      approveModel(sealed, "writer"),
+      approveModel(sealed),
+      approveModel(sealed),
     ]);
     const active = await drizzle(env.DB)
       .select({ id: appResourceBindings.id })
@@ -997,7 +907,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("tell the model a defaulted field must be given, as the exact form is checked", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "labeler");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer('{"label": "Launch", "status": "draft"}'),
     ]);
@@ -1019,7 +929,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("stop a release revoked between two requests of one call", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const gate = Promise.withResolvers<unknown>();
     const { provider, providerEnv: withProvider } = await providerEnv([
       { ...answer("first"), pause: { at: 2, until: gate.promise } },
@@ -1046,7 +956,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("stop a screen caller whose App role is removed between two requests", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const user = await person("user");
     await drizzle(env.DB).insert(appMembers).values({
       appId: sealed.app,
@@ -1091,7 +1001,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("stop a call once what admitted its caller no longer holds, between two requests", async () => {
     const sealed = await sealedApp(modelFiles());
-    await approveModel(sealed, "writer");
+    await approveModel(sealed);
     const { provider, providerEnv: withProvider } = await providerEnv([
       answer("first"),
       answer("never sent"),
@@ -1122,7 +1032,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
 
   it("answer two racing revocations with the binding as it is", async () => {
     const sealed = await sealedApp(modelFiles());
-    const binding = await approveModel(sealed, "writer");
+    const binding = await approveModel(sealed);
     const admins = [await person("admin"), await person("admin")];
     // Both read it active before either writes.
     const [one, two] = await Promise.all(
@@ -1278,7 +1188,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
         async () =>
           await approveResourceBinding(env, admin, {
             app: app.app,
-            alias: "help",
+            alias: "brain",
             target: { kind: "knowledge", collections },
             reviewed: { version: 1 },
           })
@@ -1292,49 +1202,6 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
       extra: "resource.target_invalid",
       anotherApps: "resource.target_invalid",
     });
-  });
-
-  it("read the template version a binding pins, whatever is published later", async () => {
-    const sealed = await sealedApp(letterFiles());
-    const admin = await person("admin");
-    const first = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Dear" },
-    });
-    await approveResourceBinding(
-      env,
-      admin,
-      letterApproval(sealed, first.templateId, 1)
-    );
-    const second = await publishTemplate(env, admin, {
-      templateId: first.templateId,
-      contract: "grasp.letter@1",
-      content: { greeting: "Hello" },
-    });
-    const pinned = await call(env, sealed, "letters.read", {});
-    await approveResourceBinding(
-      env,
-      admin,
-      letterApproval(sealed, first.templateId, second.version)
-    );
-    const moved = await call(env, sealed, "letters.read", {});
-    expect({
-      pinned: outcomeOf(pinned),
-      moved: outcomeOf(moved),
-    }).toStrictEqual({
-      pinned: { version: 1, greeting: "Dear" },
-      moved: { version: 2, greeting: "Hello" },
-    });
-    // Each read is recorded, by the App, of the version it read.
-    const reads = await auditedFor("resource.template.read", sealed.app);
-    const published = await auditedFor(
-      "resource.template.published",
-      first.templateId
-    );
-    expect({
-      reads: reads.map(({ detail }) => detail?.version),
-      published: published.map(({ detail }) => detail?.version),
-    }).toStrictEqual({ reads: [1, 2], published: [1, 2] });
   });
 
   it("number a template's versions one at a time, even published at once", async () => {
@@ -1433,123 +1300,6 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
       refused: "role.forbidden",
       published: 0,
     });
-  });
-
-  it("bind only a template of the declared contract, and stop one changed in storage", async () => {
-    const sealed = await sealedApp(letterFiles());
-    const admin = await person("admin");
-    const invoice = await publishTemplate(env, admin, {
-      contract: "grasp.invoice@1",
-      content: { total: 1 },
-    });
-    const letter = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Dear" },
-    });
-    const otherContract = await failure(
-      async () =>
-        await approveResourceBinding(
-          env,
-          admin,
-          letterApproval(sealed, invoice.templateId, 1)
-        )
-    );
-    await approveResourceBinding(
-      env,
-      admin,
-      letterApproval(sealed, letter.templateId, 1)
-    );
-    // A version is never changed; one changed behind the platform's back
-    // no longer hashes to what was approved, and serves nothing: changed
-    // content, content that isn't JSON, or content changed with its hash.
-    const gotcha = JSON.stringify({ greeting: "Gotcha" });
-    await tamperTemplate(letter.templateId, gotcha);
-    const tampered = await call(env, sealed, "letters.read", {});
-    await tamperTemplate(letter.templateId, "{not json");
-    const notJson = await call(env, sealed, "letters.read", {});
-    await tamperTemplate(letter.templateId, gotcha, await sha256Hex(gotcha));
-    const rehashed = await call(env, sealed, "letters.read", {});
-    expect({
-      otherContract,
-      tampered: outcomeOf(tampered),
-      notJson: outcomeOf(notJson),
-      rehashed: outcomeOf(rehashed),
-    }).toStrictEqual({
-      otherContract: "resource.target_invalid",
-      tampered: { failed: "resource.unavailable" },
-      notJson: { failed: "resource.unavailable" },
-      rehashed: { failed: "resource.unavailable" },
-    });
-  });
-
-  it("serve only the approved content, even when storage changes after the binding resolved", async () => {
-    const sealed = await sealedApp(letterFiles());
-    const admin = await person("admin");
-    const letter = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Dear" },
-    });
-    const declaration = {
-      "~resource": "template",
-      alias: "letter",
-      contract: "grasp.letter@1",
-    } as const;
-    const bound = await templateAdapter.bind(env, sealed.app, declaration, {
-      kind: "template",
-      templateId: letter.templateId,
-      version: 1,
-    });
-    const served = typeof bound === "object" ? bound : undefined;
-    // Between the request resolving its binding and reading it, the row
-    // and its hash are both replaced: the read must not serve the new row.
-    const gotcha = JSON.stringify({ greeting: "Gotcha" });
-    await tamperTemplate(letter.templateId, gotcha, await sha256Hex(gotcha));
-    const read = await failure(
-      async () =>
-        await served?.call(
-          {
-            app: sealed.app,
-            authority: {
-              subject: { type: "app", appId: sealed.app },
-              onBehalfOf: sealed.owner.userId,
-              mode: "interactive",
-              appVersion: 1,
-            },
-            context: { type: "app", appId: sealed.app },
-            sources: invocationSources(),
-            actor: { type: "app", appId: sealed.app, part: "server" },
-          },
-          { method: "read", args: [] },
-          {
-            requestId: crypto.randomUUID(),
-            deadline: Date.now() + 10_000,
-            idempotencyKey: crypto.randomUUID(),
-          },
-          {
-            id: crypto.randomUUID(),
-            declarationHash: "0".repeat(64),
-            fingerprint: letter.contentHash,
-          },
-          { alias: "letter" }
-        )
-    );
-    expect(read).toBe("resource.unavailable");
-  });
-
-  it("serve the deepest content its answer can carry", async () => {
-    const sealed = await sealedApp(letterFiles());
-    const admin = await person("admin");
-    const deepest = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: deepLetter(valueDepth - 1),
-    });
-    await approveResourceBinding(
-      env,
-      admin,
-      letterApproval(sealed, deepest.templateId, 1)
-    );
-    const read = await call(env, sealed, "letters.read", {});
-    expect(outcomeOf(read)).toStrictEqual({ version: 1, greeting: "Deep" });
   });
 });
 
@@ -1652,19 +1402,19 @@ describe("model binding spend", { timeout: 120_000 }, () => {
         {
           appId: one.app,
           appName: "0 A One",
-          alias: "writer",
+          alias: "ai",
           model: chosenModel,
         },
         {
           appId: other.app,
           appName: "0 B Other",
-          alias: "writer",
+          alias: "ai",
           model: chosenModel,
         },
         {
           appId: idle.app,
           appName: "0 C Idle",
-          alias: "writer",
+          alias: "ai",
           model: chosenModel,
         },
       ],
@@ -1697,33 +1447,39 @@ describe("model binding spend", { timeout: 120_000 }, () => {
 });
 
 /**
- * An App whose actions use a model (unless `withWriter` is false), two
- * Knowledge collections and a template of `contract`.
+ * An App whose actions use its `ai` (unless `withWriter` is false), with
+ * `maxOutputTokens`, and the Brain's `collections`; with `sneak`, one more
+ * action that reaches for the Brain past its types without listing it.
  */
-const deskFiles = (
-  contract: string,
-  withWriter = true
-): Record<string, string> => ({
+const deskFiles = ({
+  withWriter = true,
+  maxOutputTokens = 300,
+  collections = ["handbook", "salaries"],
+  sneak = false,
+}: {
+  withWriter?: boolean;
+  maxOutputTokens?: number;
+  collections?: readonly string[];
+  sneak?: boolean;
+} = {}): Record<string, string> => ({
   "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-${withWriter ? `export const writer = resource.model("writer", { maxOutputTokens: 300 });` : ""}
+${withWriter ? `export const ai = permission.ai({ maxOutputTokens: ${maxOutputTokens} });` : ""}
 
-export const help = resource.knowledge("help", {
+export const brain = permission.brain({
   operations: ["search"],
-  collections: ["handbook", "salaries"],
+  collections: ${JSON.stringify(collections)},
 });
-
-export const letter = resource.template("letter", { contract: ${JSON.stringify(contract)} });
 
 ${
   withWriter
     ? `export const draft = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [writer],
-  handler: async (ctx, args) => await ctx.resources.writer.generate({ prompt: args.prompt }),
+  uses: [ai],
+  handler: async (ctx, args) => await ctx.ai.generate({ prompt: args.prompt }),
 });`
     : ""
 }
@@ -1731,88 +1487,38 @@ ${
 export const find = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [help],
-  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text }),
+  uses: [brain],
+  handler: async (ctx, args) => await ctx.brain.search({ text: args.text }),
 });
 
-export const read = action({
+export const sneak = action({
   args: {},
-  returns: v.number(),
-  uses: [letter],
+  returns: v.string(),
   handler: async (ctx) => {
-    const template = await ctx.resources.letter.read();
-    return template.version;
+    const client: unknown = Reflect.get(ctx, "brain");
+    return client === undefined ? "absent" : JSON.stringify(Object.keys(Object(client)));
   },
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { ${withWriter ? "draft, writer, " : ""}find, help, letter, read } from "./operations/desk.ts";
+import { ${withWriter ? "ai, draft, " : ""}brain, find, sneak } from "./operations/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { desk: { ${withWriter ? "draft, " : ""}find, read } },
+  operations: { desk: { ${withWriter ? "draft, " : ""}find${sneak ? ", sneak" : ""} } },
   internalOperations: {},
   screens: [],
-  uses: [${withWriter ? "writer, " : ""}help, letter],
+  permissions: { ${withWriter ? "ai, " : ""}brain },
 });
 `,
 });
 
-/** An App whose actions search knowledge `aliases`, each of `names`. */
-const manyCollectionFiles = (
-  aliases: readonly string[],
-  names: readonly string[]
-): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "operations/shelves.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
-
-${aliases
-  .map(
-    (alias) => `export const ${alias} = resource.knowledge("${alias}", {
-  operations: ["search"],
-  collections: ${JSON.stringify(names)},
-});
-
-export const find_${alias} = action({
-  args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [${alias}],
-  handler: async (ctx, args) => await ctx.resources.${alias}.search({ text: args.text }),
-});
-`
-  )
-  .join("\n")}`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { ${aliases.flatMap((alias) => [alias, `find_${alias}`]).join(", ")} } from "./operations/shelves.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Shelves",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { shelves: { ${aliases.map((alias) => `find_${alias}`).join(", ")} } },
-  internalOperations: {},
-  screens: [],
-  uses: [${aliases.join(", ")}],
-});
-`,
-});
-
-/** A template contract of the test's own: templates are the organization's. */
-const ownContract = (): string =>
-  `grasp.desk-${crypto.randomUUID().slice(0, 8)}@1`;
-
-/**
- * The Desk App, sealed and current, granted to read one collection, with a
- * version of its template's contract and one of another contract published.
- */
+/** The Desk App, sealed and current, granted to read one collection. */
 const deskApp = async () => {
-  const contract = ownContract();
-  const sealed = await sealedApp(deskFiles(contract));
+  const sealed = await sealedApp(deskFiles());
   const admin = await person("admin");
   const handbook = await createCollection(env, admin, {
     name: "Handbook",
@@ -1824,21 +1530,13 @@ const deskApp = async () => {
     handbook.id,
     "HANDBOOK"
   );
-  const template = await publishTemplate(env, admin, {
-    contract,
-    content: { greeting: "Dear" },
-  });
-  await publishTemplate(env, admin, {
-    contract: ownContract(),
-    content: { greeting: "Other" },
-  });
-  return { contract, sealed, admin, handbook, permission, template };
+  return { sealed, admin, handbook, permission };
 };
 
 type Desk = Awaited<ReturnType<typeof deskApp>>;
 
-/** Binds each of the Desk's resources, as its admin, to what it is offered. */
-const bindDesk = async ({ sealed, admin, permission, template }: Desk) => {
+/** Binds each of the Desk's permissions, as its admin, to what it is offered. */
+const bindDesk = async ({ sealed, admin, permission }: Desk) => {
   const approve = async (alias: string, target: object) =>
     await approveResourceBinding(env, admin, {
       app: sealed.app,
@@ -1846,15 +1544,10 @@ const bindDesk = async ({ sealed, admin, permission, template }: Desk) => {
       target,
       reviewed: { version: 1 },
     });
-  await approve("writer", { kind: "model", model: chosenModel });
-  await approve("help", {
+  await approve("ai", { kind: "model", model: chosenModel });
+  await approve("brain", {
     kind: "knowledge",
     collections: { handbook: permission, salaries: permission },
-  });
-  await approve("letter", {
-    kind: "template",
-    templateId: template.templateId,
-    version: template.version,
   });
 };
 
@@ -1887,8 +1580,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
   beforeEach(chooseModel);
 
   it("lists what the current version declares, and offers an admin only what may serve it", async () => {
-    const { sealed, admin, contract, handbook, permission, template } =
-      await deskApp();
+    const { sealed, admin, handbook, permission } = await deskApp();
     // Neither another App's grant nor one held in a chat only is offered.
     await deskApp();
     await chatScopedCopy(permission);
@@ -1900,15 +1592,30 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       truncated: false,
       resources: [
         {
-          alias: "help",
+          alias: "ai",
+          kind: "model",
+          contract: null,
+          actions: [],
+          operations: [],
+          collections: [],
+          maxOutputTokens: 300,
+          usedBy: ["desk.draft"],
+          state: "unbound",
+          binding: null,
+          choices: {
+            kind: "model",
+            models: [chosenModel],
+            truncated: false,
+          },
+        },
+        {
+          alias: "brain",
           kind: "knowledge",
           contract: null,
           actions: [],
           operations: ["search"],
           collections: ["handbook", "salaries"],
-          measures: [],
           maxOutputTokens: null,
-          structuredOutput: false,
           usedBy: ["desk.find"],
           state: "unbound",
           binding: null,
@@ -1925,54 +1632,14 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
             truncated: false,
           },
         },
-        {
-          alias: "letter",
-          kind: "template",
-          contract,
-          actions: [],
-          operations: [],
-          collections: [],
-          measures: [],
-          maxOutputTokens: null,
-          structuredOutput: false,
-          usedBy: ["desk.read"],
-          state: "unbound",
-          binding: null,
-          // Versions of the declared contract only.
-          choices: {
-            kind: "template",
-            versions: [template],
-            truncated: false,
-          },
-        },
-        {
-          alias: "writer",
-          kind: "model",
-          contract: null,
-          actions: [],
-          operations: [],
-          collections: [],
-          measures: [],
-          maxOutputTokens: 300,
-          structuredOutput: false,
-          usedBy: ["desk.draft"],
-          state: "unbound",
-          binding: null,
-          choices: {
-            kind: "model",
-            models: [chosenModel],
-            truncated: false,
-          },
-        },
       ],
     });
   });
 
-  it("offers an admin only the models that can give a model resource's longest request", async () => {
-    // Mistral Large answers at most 65,536 tokens; GPT-5.4 68,000. The
-    // text writer asks for all 65,537 at once, the structured tagger for
-    // half of its 100,000.
-    const sealed = await sealedApp(modelFiles(65_537, 100_000));
+  it("offers an admin only the models that can give the longest request", async () => {
+    // Mistral Large answers at most 65,536 tokens; GPT-5.4 68,000. A
+    // request for text asks for all 65,537 at once.
+    const sealed = await sealedApp(modelFiles(65_537));
     const { providerEnv: withProvider } = await providerEnv(
       [],
       [chosenModel, "openai/gpt-5.4"]
@@ -1983,52 +1650,47 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       sealed.app
     );
     expect(
-      Object.fromEntries(
-        review.resources.map(({ alias, choices }) => [alias, choices])
-      )
-    ).toMatchObject({
-      writer: { kind: "model", models: ["openai/gpt-5.4"] },
-      tagger: { kind: "model", models: [chosenModel, "openai/gpt-5.4"] },
-    });
+      review.resources.map(({ alias, choices }) => [alias, choices])
+    ).toStrictEqual([
+      ["ai", { kind: "model", models: ["openai/gpt-5.4"], truncated: false }],
+    ]);
   });
 
-  it("says a resource is served exactly when its next request is", async () => {
+  it("says a permission is served exactly when its next request is", async () => {
     const desk = await deskApp();
-    const unbound = await call(env, desk.sealed, "desk.read", {});
+    const unbound = await call(env, desk.sealed, "desk.find", {
+      text: "leave",
+    });
     await bindDesk(desk);
     const review = await reviewResourceBindings(
       env,
       desk.admin,
       desk.sealed.app
     );
-    const bound = await call(env, desk.sealed, "desk.read", {});
-    const letter = review.resources.find(({ alias }) => alias === "letter");
+    const bound = await call(env, desk.sealed, "desk.find", { text: "leave" });
+    const brain = review.resources.find(({ alias }) => alias === "brain");
     // Revoked: unbound again, and the next request is refused.
-    await revokeResourceBinding(env, desk.admin, letter?.binding?.id);
+    await revokeResourceBinding(env, desk.admin, brain?.binding?.id);
     const revoked = await reviewResourceBindings(
       env,
       desk.admin,
       desk.sealed.app
     );
-    const afterRevoke = await call(env, desk.sealed, "desk.read", {});
+    const afterRevoke = await call(env, desk.sealed, "desk.find", {
+      text: "leave",
+    });
     expect({
       unbound: outcomeOf(unbound),
       states: statesOf(review),
       bound: outcomeOf(bound),
       revoked: statesOf(revoked),
       afterRevoke: outcomeOf(afterRevoke),
-      letter: letter?.binding?.target,
     }).toStrictEqual({
       unbound: { failed: "resource.unavailable" },
-      states: { help: "served", letter: "served", writer: "served" },
-      bound: 1,
-      revoked: { help: "served", letter: "unbound", writer: "served" },
+      states: { ai: "served", brain: "served" },
+      bound: [],
+      revoked: { ai: "served", brain: "unbound" },
       afterRevoke: { failed: "resource.unavailable" },
-      letter: {
-        kind: "template",
-        templateId: desk.template.templateId,
-        version: 1,
-      },
     });
   });
 
@@ -2042,11 +1704,14 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     const { providerEnv: narrowed } = await providerEnv([], ["openai/gpt-5.4"]);
     const lost = await reviewResourceBindings(narrowed, admin, sealed.app);
     const found = await call(env, sealed, "desk.find", { text: "leave" });
-    // A version that declares a template of another contract, and no
-    // model at all.
-    const next = await nextVersion(sealed, deskFiles(ownContract(), false), 2);
+    // A version that reads one collection less, and no AI at all.
+    const next = await nextVersion(
+      sealed,
+      deskFiles({ withWriter: false, collections: ["handbook"] }),
+      2
+    );
     const changed = await reviewResourceBindings(env, admin, sealed.app);
-    const read = await call(env, next, "desk.read", {});
+    const read = await call(env, next, "desk.find", { text: "leave" });
     expect({
       lost: statesOf(lost),
       found: outcomeOf(found),
@@ -2054,78 +1719,55 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       undeclared: changed.undeclared.map(({ alias }) => alias),
       read: outcomeOf(read),
     }).toStrictEqual({
-      lost: { help: "grant_lost", letter: "served", writer: "grant_lost" },
+      lost: { ai: "grant_lost", brain: "grant_lost" },
       found: { failed: "resource.unavailable" },
-      changed: { help: "grant_lost", letter: "declaration_changed" },
-      undeclared: ["writer"],
+      changed: { brain: "declaration_changed" },
+      undeclared: ["ai"],
       read: { failed: "resource.unavailable" },
     });
   });
 
-  it("names bound collections past D1's 100 bound parameters", async () => {
-    // Four knowledge resources of 26 collections each, every one bound to
-    // a collection of its own: 104 permissions and collections to name.
-    const aliases = ["k1", "k2", "k3", "k4"];
-    const names = Array.from({ length: 26 }, (_, index) => `c${index}`);
-    const sealed = await sealedApp(manyCollectionFiles(aliases, names));
-    const admin = await person("admin");
-    const first = await createCollection(env, admin, {
-      name: "Shelf 0",
-      access: "everyone",
-    });
-    const granted = await grantedCollection(sealed, admin, first.id, "SHELF");
-    const db = drizzle(env.DB);
-    const row = await db
-      .select()
-      .from(permissionRows)
-      .where(eq(permissionRows.id, granted))
-      .get();
-    if (row === undefined) {
-      throw new Error("Expected the grant");
-    }
-    const bound: Record<string, Record<string, string>> = {};
-    for (const [aliasIndex, alias] of aliases.entries()) {
-      const collectionsOf: Record<string, string> = {};
-      for (const [nameIndex, name] of names.entries()) {
-        const number = aliasIndex * names.length + nameIndex;
-        // oxlint-disable-next-line no-await-in-loop -- one shelf at a time
-        const shelf = await createCollection(env, admin, {
-          name: `Shelf ${number}`,
-          access: "everyone",
-        });
-        const id = crypto.randomUUID();
-        // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-        await db.insert(permissionRows).values({
-          ...row,
-          id,
-          objectId: shelf.id,
-          binding: `SHELF_${number}`,
-        });
-        collectionsOf[name] = id;
-      }
-      bound[alias] = collectionsOf;
-      // oxlint-disable-next-line no-await-in-loop -- one alias at a time
-      await approveResourceBinding(env, admin, {
-        app: sealed.app,
-        alias,
-        target: { kind: "knowledge", collections: collectionsOf },
-        reviewed: { version: 1 },
-      });
-    }
-    const review = await reviewResourceBindings(env, sealed.owner, sealed.app);
-    const labelled = review.resources.flatMap(({ binding }) =>
-      Object.values(binding?.label.collections ?? {})
+  it("lists every binding a version can reach, and refuses a request through any it doesn't list as served", async () => {
+    // The attack: a binding an admin approved for one version reaches a
+    // later one the review shows otherwise. Version 2 widens `ai` and
+    // drops `brain`, keeping code that reaches for it.
+    const desk = await deskApp();
+    const { sealed, admin } = desk;
+    await bindDesk(desk);
+    const next = await nextVersion(
+      sealed,
+      deskFiles({ withWriter: true, maxOutputTokens: 400, sneak: true }),
+      2
     );
+    const { provider, providerEnv: withProvider } = await providerEnv([
+      answer("Never sent."),
+    ]);
+    // Its `ai` widened past what was approved: a request reaches nothing.
+    const widened = await call(withProvider, next, "desk.draft", {
+      prompt: "Hi",
+    });
+    const dropped = await nextVersion(
+      next,
+      deskFiles({ withWriter: false, sneak: true }),
+      3
+    );
+    const review = await reviewResourceBindings(env, admin, sealed.app);
     expect({
-      states: statesOf(review),
-      labelled: labelled.length,
-      unnamed: labelled.filter((name) => name === null).length,
-      first: review.resources[0]?.binding?.label.collections.c0,
+      // Version 3: its own declarations, each with how it is bound, and
+      // every other active binding listed as serving nothing.
+      declared: review.resources.map(({ alias, state }) => [alias, state]),
+      undeclared: review.undeclared.map(({ alias }) => alias),
+      widened: outcomeOf(widened),
+      sent: provider.requests.length,
+      // Code that reaches for a permission its version doesn't list has
+      // nothing to reach it with.
+      sneak: outcomeOf(await call(env, dropped, "desk.sneak", {})),
     }).toStrictEqual({
-      states: { k1: "served", k2: "served", k3: "served", k4: "served" },
-      labelled: 104,
-      unnamed: 0,
-      first: "Shelf 0",
+      declared: [["brain", "served"]],
+      undeclared: ["ai"],
+      widened: { failed: "resource.unavailable" },
+      sent: 0,
+      sneak: "absent",
     });
   });
 
@@ -2145,7 +1787,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     );
     const member = await person("user");
     // A builder, of an App of their own, but not of this one.
-    const { owner: otherBuilder } = await appWith(deskFiles(ownContract()));
+    const { owner: otherBuilder } = await appWith(deskFiles());
     expect({
       states: statesOf(builders),
       choices: builders.resources.map(({ choices }) => choices),
@@ -2160,17 +1802,16 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           await reviewResourceBindings(env, otherBuilder, desk.sealed.app)
       ),
     }).toStrictEqual({
-      states: { help: "served", letter: "served", writer: "served" },
-      choices: [null, null, null],
+      states: { ai: "served", brain: "served" },
+      choices: [null, null],
       labels: [
+        { connection: null, collections: {} },
         {
           connection: null,
           collections: { handbook: "Handbook", salaries: "Handbook" },
         },
-        { connection: null, collections: {} },
-        { connection: null, collections: {} },
       ],
-      staff: [null, null, null],
+      staff: [null, null],
       member: "app.not_found",
       otherBuilder: "app.not_found",
     });

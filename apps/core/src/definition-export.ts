@@ -482,7 +482,7 @@ export const exportAppDefinition = async (
     ...Object.values(release.app.resources),
     ...Object.values(release.app.browserResources),
   ]) {
-    bindings[resource.alias] = resource["~resource"];
+    bindings[resource.alias] = resource["~permission"];
   }
   const graph = new WorkflowGraph(env, by, budget);
   const workflows: DefinitionPackage["app"]["workflows"] = {};

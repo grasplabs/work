@@ -61,7 +61,6 @@ export default app({
   operations: { notes: { list, add, lookLikeThePlatform, platformShaped } },
   internalOperations: {},
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-  uses: [],
 });
 `;
 

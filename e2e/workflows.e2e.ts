@@ -45,7 +45,7 @@ export default workflowTests(approval, [
 `;
 
 /**
- * Reads an invoice's total with a model, through its App's `reader`
+ * Reads an invoice's total with a model, through its App's `ai`
  * binding, asks a reviewer above a limit, and books it. Its runs here are
  * Tests, which mock the model step, so no binding is approved.
  */
@@ -63,7 +63,7 @@ export default workflow(
   async (step, { input, params }) => {
     const extracted = await step.llm("extract", {
       description: "Read the invoice's total",
-      binding: "reader",
+      binding: "ai",
       instructions: "Read the total in cents.",
       input: input.text,
       schema: z.object({ total: z.int() }),
@@ -95,11 +95,11 @@ const registration = {
 
 export default defineSchema({});
 `,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 
 import schema from "./schema.ts";
 
-export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+export const reader = permission.ai({ maxOutputTokens: 6000 });
 
 export default app({
   name: "Invoices",
@@ -108,7 +108,7 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [reader],
+  permissions: { ai: reader },
 });
 `,
 };

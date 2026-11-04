@@ -197,7 +197,6 @@ export default app({
   operations: { notes: { read, live, mark, released, slow, failing, big } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

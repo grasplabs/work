@@ -1710,7 +1710,7 @@ export const bindingsOf = async (
   const byVersion = new Map<number, PinnedBinding[]>();
   for (const row of rows) {
     // Filtered above: an App's store binding is never a workflow's.
-    if (row.kind === "store" || row.kind === "storeResource") {
+    if (row.kind === "store") {
       continue;
     }
     const list = byVersion.get(row.resourceVersion) ?? [];

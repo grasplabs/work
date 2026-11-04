@@ -46,10 +46,10 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
   output: v.object({ status: v.string() }),
 });
@@ -62,7 +62,7 @@ export const kickOff = action({
     version: v.number().integer(),
   }),
   uses: [followUp],
-  handler: async (ctx, args) => await ctx.startWorkflow(followUp, { who: args.who }),
+  handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -75,7 +75,7 @@ export default app({
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
   operations: { requests: { kickOff } },
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

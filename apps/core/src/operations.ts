@@ -7,12 +7,13 @@ import {
 } from "@grasp-os/brain/contract";
 import { AppError } from "@grasp-os/sdk";
 import type {
-  AnyResource,
+  AnyPermission,
   JsonValue,
-  ResourceKind,
+  PermissionKind,
   ValueSchema,
 } from "@grasp-os/sdk";
 import {
+  descriptorFromText,
   schemaFromDescriptor,
   schemaHash,
   appErrorDetailsOf,
@@ -59,7 +60,6 @@ import type {
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import { runFileErrors } from "@grasp-os/shared/run-files";
-import { statisticMaxGroups } from "@grasp-os/shared/statistics";
 import {
   readRequestSchema,
   writeRequestSchema,
@@ -1556,8 +1556,8 @@ export interface ResourceContext {
  * hands App code a key, token or unrestricted fetch.
  */
 export interface BoundResource {
-  readonly kind: ResourceKind;
-  /** The contract a connector's or a template's binding serves; null otherwise. */
+  readonly kind: PermissionKind;
+  /** The contract a connection's binding serves; null otherwise. */
   readonly contract: string | null;
   readonly call: (
     method: string,
@@ -1572,7 +1572,7 @@ export interface BoundResource {
  * binding. A declaration alone grants nothing.
  */
 export type ResourceBindings = (
-  declaration: AnyResource
+  declaration: AnyPermission
 ) => Promise<BoundResource | undefined>;
 
 /** A knowledge search's request, as the declaration's client sends it. */
@@ -1633,50 +1633,12 @@ const knowledgeResults = {
 } as const;
 
 /**
- * Whether a statistics read of `query` reads one of the App's own measures,
- * or a platform measure `declaration` lists. Anything else it names, a
- * measure that isn't one or none, is left to the read's own check.
- */
-const readsDeclaredMeasure = (
-  declaration: Extract<AnyResource, { "~resource": "statistics" }>,
-  query: JsonObject
-): boolean => {
-  const { measure } = query;
-  return (
-    typeof measure !== "string" ||
-    !measure.startsWith("platform.") ||
-    declaration.platform.some((declared) => declared === measure)
-  );
-};
-
-/**
- * Whether `method` with `args` is one of the operations a statistics
- * `declaration` declares, with one object: a point, or a query of the
- * App's own measures or of a platform measure (any `platform.` one: an
- * App's own has no dot) it lists.
- */
-const allowsStatistics = (
-  declaration: Extract<AnyResource, { "~resource": "statistics" }>,
-  method: unknown,
-  args: readonly Json[]
-): boolean => {
-  const [first] = args;
-  return (
-    (method === "record" || method === "read") &&
-    declaration.operations.some((operation) => operation === method) &&
-    args.length === 1 &&
-    isJsonObject(first) &&
-    (method === "record" || readsDeclaredMeasure(declaration, first))
-  );
-};
-
-/**
  * Whether `method` with `args` is one of the operations a guests
  * `declaration` declares, with what it takes: an invitation's object, a
  * chat's ID, or nothing for a list.
  */
 const allowsGuests = (
-  declaration: Extract<AnyResource, { "~resource": "guests" }>,
+  declaration: Extract<AnyPermission, { "~permission": "guests" }>,
   method: unknown,
   args: readonly Json[]
 ): boolean => {
@@ -1722,28 +1684,9 @@ const guestResults = {
   revoke: guestChatSchema,
 } as const;
 
-/** What a statistics read answers, checked as the contract allows it. */
-const statisticGroupSchema = z.strictObject({
-  dimensions: z.record(z.string(), z.string().nullable()),
-  count: z.number(),
-  sum: z.number(),
-  min: z.number(),
-  max: z.number(),
-});
-
-const statisticAnswerSchema = z.strictObject({
-  measure: z.string(),
-  from: z.string(),
-  to: z.string(),
-  groups: z.array(statisticGroupSchema).max(statisticMaxGroups),
-  truncated: z.boolean(),
-  unavailable: z.array(z.string()).optional(),
-  computation: z.string().nullable().optional(),
-});
-
 /**
  * Whether `method` with `args` is a `call` of one name `declares`, with an
- * object of arguments: a connector's action, a store's operation.
+ * object of arguments: a connection's action, another App's function.
  */
 const isNamedCall = (
   method: unknown,
@@ -1768,7 +1711,7 @@ const isNamedCall = (
  * as arguments that don't fit.
  */
 const allowsKnowledge = (
-  declaration: Extract<AnyResource, { "~resource": "knowledge" }>,
+  declaration: Extract<AnyPermission, { "~permission": "brain" }>,
   method: unknown,
   args: readonly Json[]
 ): boolean => {
@@ -1795,45 +1738,57 @@ const allowsKnowledge = (
 };
 
 /**
+ * Whether `args` is an AI request: the request, and the descriptor of the
+ * value its answer must be, when it asks for one, which must read as one
+ * (`descriptorFromText`, its bounds included).
+ */
+const isAiRequest = (args: readonly Json[]): boolean => {
+  const [request, output] = args;
+  if (
+    args.length < 1 ||
+    args.length > 2 ||
+    !modelRequestSchema.safeParse(request).success
+  ) {
+    return false;
+  }
+  if (args.length === 1) {
+    return true;
+  }
+  try {
+    descriptorFromText(JSON.stringify(output));
+    return true;
+  } catch {
+    throw operationErrors.create("contract.invalid_args");
+  }
+};
+
+/**
  * The request `method` with `args` makes of `declaration`, if the
- * declaration allows it: a connector one of its declared actions with an
- * object of arguments, knowledge one of its declared operations, a model
- * a prompt, a template a read. `resource.not_allowed` otherwise.
+ * declaration allows it: a connection one of its declared actions with an
+ * object of arguments, the Brain one of its declared operations, AI a
+ * prompt, another App one of its declared functions, guests one of its
+ * operations. `resource.not_allowed` otherwise.
  */
 const allowedRequest = (
-  declaration: AnyResource,
+  declaration: AnyPermission,
   method: unknown,
   args: readonly Json[]
 ): void => {
-  const [first] = args;
-  const kind = declaration["~resource"];
   let allowed: boolean;
-  if (declaration["~resource"] === "connector") {
+  if (declaration["~permission"] === "connections") {
     const { actions } = declaration;
     allowed = isNamedCall(method, args, (name) => actions.includes(name));
-  } else if (declaration["~resource"] === "knowledge") {
+  } else if (declaration["~permission"] === "brain") {
     allowed = allowsKnowledge(declaration, method, args);
-  } else if (kind === "model") {
-    allowed =
-      method === "generate" &&
-      args.length === 1 &&
-      modelRequestSchema.safeParse(first).success;
-  } else if (declaration["~resource"] === "store") {
-    const { operations } = declaration;
-    allowed = isNamedCall(method, args, (path) =>
-      Object.hasOwn(operations, path)
-    );
-  } else if (declaration["~resource"] === "statistics") {
-    allowed = allowsStatistics(declaration, method, args);
-  } else if (declaration["~resource"] === "guests") {
+  } else if (declaration["~permission"] === "ai") {
+    allowed = method === "generate" && isAiRequest(args);
+  } else if (declaration["~permission"] === "guests") {
     allowed = allowsGuests(declaration, method, args);
-  } else if (declaration["~resource"] === "app") {
+  } else {
     const { functions } = declaration;
     allowed = isNamedCall(method, args, (path) =>
       Object.hasOwn(functions, path)
     );
-  } else {
-    allowed = method === "read" && args.length === 0;
   }
   if (!allowed) {
     throw notAllowed();
@@ -1870,55 +1825,40 @@ const returnsDeclared = (
 };
 
 /**
- * What a resource answered, if its contract allows it: a model's structured
- * output (or text), knowledge's hits or document, a template's pinned
- * version of the declared contract. A connector's answer is checked as JSON
- * here; its action's own descriptor comes with generated connector
- * contracts.
+ * What a permission answered, if its contract allows it: AI's text, or the
+ * value the request asked for; the Brain's hits or document; a guest
+ * chat; another App's function's return, as it declares it. A
+ * connection's answer is checked as JSON here; its action's own descriptor
+ * comes with generated connector contracts.
  */
 const checkedResourceResult = (
-  declaration: AnyResource,
+  declaration: AnyPermission,
   method: string,
   args: readonly Json[],
   result: Json
 ): Json => {
   let valid: boolean;
-  if (declaration["~resource"] === "model") {
-    const { structuredOutput } = declaration;
+  if (declaration["~permission"] === "ai") {
+    const [, output] = args;
     valid =
-      structuredOutput === null
+      output === undefined
         ? typeof result === "string"
-        : isNormalized(structuredOutput, result);
-  } else if (declaration["~resource"] === "store") {
-    valid = returnsDeclared(declaration.operations, args, result);
-  } else if (declaration["~resource"] === "knowledge") {
+        : isNormalized(output, result);
+  } else if (declaration["~permission"] === "brain") {
     valid = (
       isKnowledgeOperation(method)
         ? knowledgeResults[method]
         : knowledgeDocumentSchema
     ).safeParse(result).success;
-  } else if (declaration["~resource"] === "guests") {
+  } else if (declaration["~permission"] === "guests") {
     valid =
       (method === "invite" ||
         method === "list" ||
         method === "read" ||
         method === "revoke") &&
       guestResults[method].safeParse(result).success;
-  } else if (declaration["~resource"] === "app") {
+  } else if (declaration["~permission"] === "apps") {
     valid = returnsDeclared(declaration.functions, args, result);
-  } else if (declaration["~resource"] === "statistics") {
-    valid =
-      method === "record"
-        ? result === null
-        : statisticAnswerSchema.safeParse(result).success;
-  } else if (declaration["~resource"] === "template") {
-    valid = z
-      .strictObject({
-        contract: z.literal(declaration.contract),
-        version: z.number().int().min(1),
-        content: z.json(),
-      })
-      .safeParse(result).success;
   } else {
     valid = true;
   }
@@ -2152,13 +2092,10 @@ const resourceCall = async (
     async () => await run.invocation.resources?.(declaration)
   );
   const contract =
-    declaration["~resource"] === "connector" ||
-    declaration["~resource"] === "template"
-      ? declaration.contract
-      : null;
+    declaration["~permission"] === "connections" ? declaration.contract : null;
   if (
     bound === undefined ||
-    bound.kind !== declaration["~resource"] ||
+    bound.kind !== declaration["~permission"] ||
     bound.contract !== contract
   ) {
     throw operationErrors.create("resource.unavailable");
@@ -3360,7 +3297,7 @@ const resourcesDeclaring = (
   use: "attach" | "read"
 ): string[] =>
   Object.values(manifest.browserResources).flatMap((resource) =>
-    resource["~resource"] === "files" && resource.operations.includes(use)
+    resource["~permission"] === "files" && resource.operations.includes(use)
       ? [resource.alias]
       : []
   );

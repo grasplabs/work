@@ -425,7 +425,7 @@ export type UploadHandle = UploadView & {
  * `bytesTotal`) and `upload` and `cancel`.
  *
  * ```tsx
- * const upload = useUpload(resources.attachments);
+ * const upload = useUpload(permissions.files);
  * const attach = useMutation(api.notes.attachFile);
  * // In a handler:
  * const file = await upload.upload(picked);

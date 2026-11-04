@@ -1,4 +1,3 @@
-import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
@@ -18,7 +17,7 @@ import type {
   WorkflowBindingExtras,
 } from "../src/host.ts";
 import type { AnyOperationReference } from "../src/index.ts";
-import { app, resource, v } from "../src/index.ts";
+import { app, permission, v } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
@@ -34,7 +33,7 @@ import referencesText from "./notes/.grasp/references.ts?raw";
 import {
   api,
   preferences,
-  resources,
+  permissions,
   screens,
   workflows,
 } from "./notes/.grasp/references.ts";
@@ -189,7 +188,7 @@ describe("generated modules", () => {
       Object.isFrozen(api),
       Object.isFrozen(api.notes),
       Object.isFrozen(api.notes.create.args),
-      Object.isFrozen(resources.attachments.operations),
+      Object.isFrozen(permissions.files.operations),
       Object.isFrozen(screens.note.input),
     ]).toStrictEqual([true, true, true, true, true]);
     expect(
@@ -242,16 +241,16 @@ describe("generated modules", () => {
     }
   });
 
-  test("expose the screens' resources with their literal operations and origins, and only those", () => {
-    expect(resources).toStrictEqual({
-      attachments: {
+  test("expose the screens' permissions with their literal operations and origins, and only those", () => {
+    expect(permissions).toStrictEqual({
+      files: {
         kind: "files",
-        alias: "attachments",
+        alias: "files",
         operations: ["upload", "read", "attach"],
       },
-      help: {
+      links: {
         kind: "links",
-        alias: "help",
+        alias: "links",
         origins: ["https://help.example.com"],
       },
     });
@@ -1014,18 +1013,12 @@ const looseAction = server.action as (declaration: unknown) => unknown;
 const looseMutation = server.mutation as (declaration: unknown) => unknown;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseResource = resource as Record<
+const loosePermission = permission as Record<
   "files" | "links",
-  (alias: unknown, config: unknown) => unknown
+  (config: unknown) => unknown
 >;
 
 /** A small App, with `changes` to its registration. */
-/** `count` files resources that may be attached. */
-const attachables = (count: number) =>
-  Array.from({ length: count }, (_, index) =>
-    resource.files(`files${index}`, { operations: ["read", "attach"] })
-  );
-
 const small = (changes: Record<string, unknown> = {}) =>
   looseApp({
     name: "Small",
@@ -1034,7 +1027,6 @@ const small = (changes: Record<string, unknown> = {}) =>
     operations: { notes: { list, send } },
     internalOperations: { notes: { secret } },
     screens: [],
-    uses: [],
     ...changes,
   });
 
@@ -1499,7 +1491,7 @@ describe("surfaces", () => {
   });
 });
 
-describe("browser resources", () => {
+describe("browser permissions", () => {
   test.each([
     ["plain HTTP", ["http://help.example.com"]],
     ["a path", ["https://help.example.com/docs"]],
@@ -1509,13 +1501,12 @@ describe("browser resources", () => {
     ["a trailing slash", ["https://help.example.com/"]],
     ["no origin at all", []],
   ])("links with %s are refused", (_case, origins) => {
-    expect(() => looseResource.links("help", { origins })).toThrow(/origin/u);
+    expect(() => loosePermission.links({ origins })).toThrow(/origin/u);
   });
 
   test("links accept a host name and a port as an exact origin", () => {
     expect(
-      resource.links("help", { origins: ["https://help.example.com:8443"] })
-        .origins
+      permission.links({ origins: ["https://help.example.com:8443"] }).origins
     ).toStrictEqual(["https://help.example.com:8443"]);
   });
 
@@ -1537,42 +1528,35 @@ describe("browser resources", () => {
     ["a private-use name", "https://wiki.internal"],
     ["a name of one label", "https://intranet"],
   ])("links with %s are refused too", (_case, origin) => {
-    expect(() => looseResource.links("help", { origins: [origin] })).toThrow(
+    expect(() => loosePermission.links({ origins: [origin] })).toThrow(
       /origin/u
     );
   });
 
   test("files list only the operations there are, each once", () => {
     expect(() =>
-      looseResource.files("attachments", { operations: ["upload", "share"] })
+      loosePermission.files({ operations: ["upload", "share"] })
     ).toThrow(/can't have/u);
     expect(() =>
-      looseResource.files("attachments", { operations: ["read", "read"] })
+      loosePermission.files({ operations: ["read", "read"] })
     ).toThrow(/twice/u);
   });
 
-  test("share one namespace of aliases with the actions' resources", () => {
-    const files = resource.files("help", { operations: ["read"] });
-    const knowledge = resource.knowledge("help", {
-      operations: ["search"],
-      collections: ["handbook"],
+  test("share one namespace of aliases with the actions' permissions", () => {
+    const files = permission.files({ operations: ["read"] });
+    const connection = permission.connection("files", {
+      contract: "microsoft-365.mail@1",
+      actions: ["send"],
     });
-    expect(refusal(() => small({ uses: [files, knowledge] }))).toContain(
-      "Two of the App's resources have alias `help`"
-    );
-  });
-
-  test("number at most what a mutation hands core as attachable", () => {
-    expect(() =>
-      small({ uses: attachables(fileLimits.resources) })
-    ).not.toThrow();
     expect(
-      refusal(() => small({ uses: attachables(fileLimits.resources + 1) }))
-    ).toContain(`at most ${fileLimits.resources} files resources`);
+      refusal(() =>
+        small({ permissions: { files, connections: [connection] } })
+      )
+    ).toContain("Two of the App's permissions have alias `files`");
   });
 
   test("are never listed by a function", () => {
-    const files = resource.files("attachments", { operations: ["read"] });
+    const files = permission.files({ operations: ["read"] });
     expect(() =>
       looseAction({
         args: {},
@@ -1704,26 +1688,26 @@ describe("reading a manifest back", () => {
       "clashes with another registered path",
     ],
     [
-      "an action's resource filed as a screens' one",
+      "an action's permission filed as a screens' one",
       (data: unknown) => {
         setAt(
           data,
-          ["resources", "help"],
-          at(data, ["browserResources", "help"])
+          ["resources", "links"],
+          at(data, ["browserResources", "links"])
         );
-        removeAt(data, ["browserResources", "help"]);
+        removeAt(data, ["browserResources", "links"]);
       },
-      "isn't an action's resource",
+      "isn't an action's permission",
     ],
     [
-      "a resource filed under another alias",
+      "a permission filed under another alias",
       (data: unknown) => {
         setAt(
           data,
           ["browserResources", "manual"],
-          at(data, ["browserResources", "help"])
+          at(data, ["browserResources", "links"])
         );
-        removeAt(data, ["browserResources", "help"]);
+        removeAt(data, ["browserResources", "links"]);
       },
       "filed under its alias",
     ],
@@ -1732,7 +1716,7 @@ describe("reading a manifest back", () => {
       (data: unknown) => {
         setAt(
           data,
-          ["browserResources", "help", "origins"],
+          ["browserResources", "links", "origins"],
           ["https://example.com/a"]
         );
       },

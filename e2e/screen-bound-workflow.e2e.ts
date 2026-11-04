@@ -65,9 +65,9 @@ const appFiles = (): Record<string, string> => ({
 
 export default defineSchema({ requests: defineTable({ who: v.string() }) });
 `,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
   output: v.object({ status: v.string() }),
 });
@@ -83,7 +83,7 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 `,
   "screens/desk.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";

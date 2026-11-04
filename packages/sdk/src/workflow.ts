@@ -380,9 +380,9 @@ export interface SideEffectContext {
 export interface LlmOptions<Output extends z.ZodType>
   extends StepOptions, AttemptOptions {
   /**
-   * The alias of one of the App's model resources (`resource.model(alias,
-   * …)`, without a structured output: the step brings its own schema),
-   * written as a literal. The model is the one an admin approved for it,
+   * The alias of the App's `ai` permission (`permission.ai(…)`), `"ai"`,
+   * written as a literal: the step brings its own schema. The model is
+   * the one an admin approved for it,
    * and the call falls under that binding's caps and the run's budgets.
    * Until an admin binds it, the step fails with `resource.unavailable`.
    */

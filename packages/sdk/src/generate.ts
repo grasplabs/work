@@ -22,7 +22,8 @@ import type { WorkflowQueryName } from "./workflow-queries.ts";
 // - `.grasp/server-references.ts` (`#grasp/server-references`): the
 //   `internal` tree, for the App's own server code only.
 // - `.grasp/references.ts` (`#grasp`): the public `api`, `workflows`, the
-//   resources its screens use, its `screens`, and `preferences` when it
+//   permissions its screens use (`permissions.files`, `permissions.links`),
+//   its `screens`, and `preferences` when it
 //   declares them. What a browser gets: data and types, extracted from
 //   descriptors, with no handler, schema or server code in it.
 // - `.grasp/contracts.json`: the App's manifest, each function's
@@ -104,7 +105,7 @@ export interface BoundWorkflowDecision {
 /**
  * A workflow the App declares (spec 3, 10.4.1, 10.4.5, 10.4.6), as its
  * reference is generated: the App's alias for it and the input and output
- * the App declared (`resource.workflow`), the contract its reference pins;
+ * the App declared (`permission.workflow`), the contract its reference pins;
  * and, as the host resolved the App's binding against the approved
  * records, the events it declares by their binding's alias, its listen
  * tasks, by path, with the aliases of the events each listens for, and its
@@ -972,19 +973,21 @@ const referencesText = async (
   );
   const resourceTypes = resources.map((declared) => {
     const literals = (
-      declared["~resource"] === "files" ? declared.operations : declared.origins
+      declared["~permission"] === "files"
+        ? declared.operations
+        : declared.origins
     )
       .map((item) => JSON.stringify(item))
       .join(", ");
     const type =
-      declared["~resource"] === "files"
+      declared["~permission"] === "files"
         ? `FilesReference<${JSON.stringify(declared.alias)}, readonly [${literals}]>`
         : `LinksReference<${JSON.stringify(declared.alias)}, readonly [${literals}]>`;
     return `  readonly ${key(declared.alias)}: ${type};`;
   });
   const resourceValues = resources.map((declared) => {
     const data =
-      declared["~resource"] === "files"
+      declared["~permission"] === "files"
         ? {
             kind: "files",
             alias: declared.alias,
@@ -995,8 +998,8 @@ const referencesText = async (
   });
   parts.push(
     resources.length === 0
-      ? "export const resources: Readonly<Record<never, never>> = frozen({});\n"
-      : `export const resources: {\n${resourceTypes.join("\n")}\n} = frozen({\n${resourceValues.join("\n")}\n});\n`
+      ? "export const permissions: Readonly<Record<never, never>> = frozen({});\n"
+      : `export const permissions: {\n${resourceTypes.join("\n")}\n} = frozen({\n${resourceValues.join("\n")}\n});\n`
   );
 
   const screens = Object.values(manifest.screens).toSorted((a, b) =>
@@ -1242,6 +1245,6 @@ export const symbolicModules = (): Record<string, string> => {
 `;
   return {
     [generatedPaths.serverReferences]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree("internal")} as unknown as StandIn;\n`,
-    [generatedPaths.references]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const resources: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
+    [generatedPaths.references]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
   };
 };

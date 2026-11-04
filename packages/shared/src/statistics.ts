@@ -2,36 +2,18 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema } from "./ids.ts";
-import { isPlatformMeasure, platformMeasures } from "./platform-measures.ts";
+import { platformMeasures } from "./platform-measures.ts";
 
-// Statistics: named measures an App records from its server code, with a
-// few dimensions, and reads back as aggregates over the last days, by the
-// UTC day. Each App reads only its own, and, once an admin grants it the
-// platform's statistics (a `{ type: "platform" }` permission), the
-// measures the platform publishes (`platform.` ones, such as the runs its
-// workflows start) of an App whose runs the person it acts for may see:
-// counts and sums, never one run in detail. What an App keeps for itself stays in the App (its
-// own storage); what the company should remember goes in Knowledge. The
-// points a method records for a workflow run's step are added up when
-// the step completes, once however often the step runs: a read sees them
-// from then, a step that fails adds none, and one that would make a row
-// past the day's bound is left out then, not refused when recorded.
+// The platform's statistics: the measures the platform publishes
+// (`platform.` ones, such as the runs Apps' workflows start), read back as
+// aggregates over the last days, by an App's code through the platform's
+// own functions (`permission.grasp`, `statistics.read`), once an admin
+// grants it the platform's statistics (a `{ type: "platform" }`
+// permission), for Apps whose runs the person it acts for may see: counts
+// and sums, never one run in detail. What an App keeps for itself stays in
+// its own tables; what the company should remember goes in the Brain.
 
-/** A measure's name: `invoices_booked`. `platform.` ones are the platform's. */
-export const measureNameSchema = z
-  .string()
-  .regex(
-    /^[a-z][a-z0-9_]{0,63}$/u,
-    "Lowercase letters, digits and _, starting with a letter"
-  );
-
-/** Most dimensions one point has. */
-export const statisticMaxDimensions = 3;
-
-/** Longest value of one dimension. */
-export const dimensionValueMaxLength = 128;
-
-/** A dimension's name: `supplier`. */
+/** A dimension's name: `app`. */
 export const dimensionNameSchema = z
   .string()
   .regex(
@@ -39,7 +21,13 @@ export const dimensionNameSchema = z
     "A letter, then up to 31 letters, digits and _"
   );
 
-/** What one point is recorded against: at most three names and values. */
+/** Most dimensions a read groups by. */
+export const statisticMaxDimensions = 3;
+
+/** Longest value of one dimension. */
+export const dimensionValueMaxLength = 128;
+
+/** What a read is narrowed to: at most three names and values. */
 export const dimensionsSchema = z
   .record(dimensionNameSchema, z.string().min(1).max(dimensionValueMaxLength))
   .refine(
@@ -48,30 +36,6 @@ export const dimensionsSchema = z
   )
   .default({});
 export type Dimensions = z.infer<typeof dimensionsSchema>;
-
-/** Largest value one point has, either way. */
-export const statisticValueMax = 1e12;
-
-/** One point to record: a measure, its value, and its dimensions. */
-export const statisticPointSchema = z.strictObject({
-  measure: measureNameSchema,
-  value: z.number().min(-statisticValueMax).max(statisticValueMax),
-  dimensions: dimensionsSchema,
-});
-export type StatisticPoint = z.input<typeof statisticPointSchema>;
-
-/**
- * Most rows an App's points make in one UTC day: one per measure and
- * distinct dimensions. A point of a new one past it is refused
- * (`statistics.too_many`); points of the day's existing ones still count.
- */
-export const statisticRowsPerDay = 1000;
-
-/** Most points one call of an App's method records. */
-export const statisticPointsPerCall = 100;
-
-/** Most points an App records in one minute, all its calls together. */
-export const statisticPointsPerMinute = 1000;
 
 /** `set` if it is a bound lower than `most`, else `most`. */
 const lower = (set: number | undefined, most: number): number =>
@@ -88,30 +52,19 @@ export const statisticReadsPerCall = 100;
 /** Most reads an App makes in one minute, all its calls together. */
 export const statisticReadsPerMinute = 500;
 
-/** What a statistics stub call is: a point recorded, or a read. */
-export type StatisticUse = "point" | "read";
-
 /**
- * The bounds on points or reads (`statisticPointsPerCall`,
- * `statisticPointsPerMinute`, `statisticReadsPerCall`,
+ * The bounds on reads (`statisticReadsPerCall`,
  * `statisticReadsPerMinute`), or lower ones a test sets as `perCall/
- * perMinute` (core's `STATISTICS_POINT_LIMITS` and
- * `STATISTICS_READ_LIMITS`); never higher.
+ * perMinute` (core's `STATISTICS_READ_LIMITS`); never higher.
  */
-export const statisticLimitsOf = (
-  use: StatisticUse,
+export const statisticReadLimitsOf = (
   value: string | undefined
 ): { perCall: number; perMinute: number } => {
   const [perCall, perMinute] = (value ?? "").split("/").map(Number);
-  return use === "point"
-    ? {
-        perCall: lower(perCall, statisticPointsPerCall),
-        perMinute: lower(perMinute, statisticPointsPerMinute),
-      }
-    : {
-        perCall: lower(perCall, statisticReadsPerCall),
-        perMinute: lower(perMinute, statisticReadsPerMinute),
-      };
+  return {
+    perCall: lower(perCall, statisticReadsPerCall),
+    perMinute: lower(perMinute, statisticReadsPerMinute),
+  };
 };
 
 /** Most days one read looks back over, today included. */
@@ -130,22 +83,18 @@ export const statisticMaxApps = 100;
 export const statisticMaxOffset = 10_000;
 
 /**
- * What to read: a measure, over the last `days` UTC days up to `until`
- * (now when not given, and never later; that day included; a platform
- * measure over exactly the last `days` × 24 hours before it), only points
- * whose dimensions are `where`, added up by the dimensions in `groupBy`
- * (all together without), the page of groups from `offset` on. Groups are
- * ordered by their values, never by count, so with a fixed `until` pages
- * neither overlap nor skip one as points arrive. A platform measure is
- * read for one App (`where.app`), or for up to `statisticMaxApps` in one
- * read (`apps`, grouped by `app` to tell them apart).
+ * What to read: a measure the platform publishes, over exactly the last
+ * `days` × 24 hours before `until` (now when not given, and never later),
+ * only points whose dimensions are `where`, added up by the dimensions in
+ * `groupBy` (all together without), the page of groups from `offset` on.
+ * Groups are ordered by their values, never by count, so with a fixed
+ * `until` pages neither overlap nor skip one as points arrive. It is read
+ * for one App (`where.app`), or for up to `statisticMaxApps` in one read
+ * (`apps`, grouped by `app` to tell them apart).
  */
 export const statisticQuerySchema = z
   .strictObject({
-    measure: z.union([
-      measureNameSchema,
-      z.enum(["platform.workflow_runs", "platform.improvement_signals"]),
-    ]),
+    measure: z.enum(["platform.workflow_runs", "platform.improvement_signals"]),
     days: z.int().min(1).max(statisticMaxDays),
     where: dimensionsSchema,
     apps: z
@@ -167,16 +116,6 @@ export const statisticQuerySchema = z
       }),
   })
   .superRefine(({ measure, where, apps, groupBy }, context) => {
-    if (!isPlatformMeasure(measure)) {
-      if (apps !== undefined) {
-        context.addIssue({
-          code: "custom",
-          path: ["apps"],
-          message: "Only a platform measure is read for Apps",
-        });
-      }
-      return;
-    }
     const known: readonly string[] = platformMeasures[measure];
     const oneApp =
       where.app !== undefined && appIdSchema.safeParse(where.app).success;
@@ -231,11 +170,9 @@ export interface StatisticAnswer {
   computation?: string | null;
 }
 
-/** Why recording or reading statistics was refused. */
+/** Why reading statistics was refused. */
 export const statisticErrors = defineErrorFamily({
-  "statistics.invalid": "That isn't a valid statistic or read of one.",
-  "statistics.too_many":
-    "The App recorded as many different statistics today as a day holds.",
+  "statistics.invalid": "That isn't a valid read of the platform's statistics.",
   "statistics.rate_limited":
-    "The App recorded or read more statistics than it may in one call or one minute. Try again in a minute.",
+    "The App read more statistics than it may in one call or one minute. Try again in a minute.",
 });

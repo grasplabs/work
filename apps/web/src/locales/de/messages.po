@@ -1641,10 +1641,6 @@ msgstr "Eine neue Datei in Google Drive"
 msgid "A new file in Microsoft 365"
 msgstr "Eine neue Datei in Microsoft 365"
 
-#: src/engines/resource-bindings.tsx
-msgid "A new template"
-msgstr "Eine neue Vorlage"
-
 #: src/engines/app-webhooks.tsx
 msgctxt "a webhook event: a version of the App was made current"
 msgid "A new version goes live"
@@ -2218,6 +2214,7 @@ msgid "Agreed"
 msgstr "Abgestimmt"
 
 #: src/brain/brain.ts
+#: src/engines/resource-bindings.tsx
 #: src/interview/words.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
@@ -3034,6 +3031,10 @@ msgstr "Bei {step}: {error}"
 msgid "At least {shortest} characters. Grasp keeps it sealed and never shows it again, not even to you. To change it, add another connection and revoke this one."
 msgstr "Mindestens {shortest} Zeichen. Grasp hält es versiegelt und zeigt es nie wieder, auch Ihnen nicht. Um es zu ändern, fügen Sie eine weitere Verbindung hinzu und widerrufen diese."
 
+#: src/engines/resource-bindings.tsx
+msgid "At most {tokens} tokens an answer"
+msgstr "Höchstens {tokens} Tokens pro Antwort"
+
 #: src/workflows/requests/request-plan.tsx
 msgid "At this pace"
 msgstr "In diesem Tempo"
@@ -3259,6 +3260,7 @@ msgid "Bound to"
 msgstr "Gebunden an"
 
 #: src/brain/brain-nav.tsx
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4361,10 +4363,6 @@ msgstr "Zustimmen und verbinden"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
 msgstr "Zustimmen und anmelden"
-
-#: src/engines/resource-bindings.tsx
-msgid "Content, as JSON"
-msgstr "Inhalt, als JSON"
 
 #: src/brain/brain-transcript.tsx
 msgctxt "heading: the headings of a document, as a table of contents"
@@ -7318,7 +7316,6 @@ msgstr "Art"
 msgid "Kind of statement"
 msgstr "Art der Aussage"
 
-#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -8773,10 +8770,6 @@ msgstr "Keine aktuell"
 msgid "None of the App's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "Keine Integrationsberechtigung der App bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
 
-#: src/engines/resource-bindings.tsx
-msgid "None of the App's store permissions serves every operation it declares, exactly as declared. Grant one first."
-msgstr "Keine Speicherberechtigung der App bedient jede deklarierte Operation genau wie deklariert. Erteile zuerst eine."
-
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Davon stimmt nichts"
@@ -9075,10 +9068,6 @@ msgstr "Noch ist nichts gezeichnet. Erzählen Sie Grasp im Chat, wie diese Arbei
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
 msgstr "Solange der Tarif nicht läuft, ist nichts fällig."
-
-#: src/engines/resource-bindings.tsx
-msgid "Nothing is published for {contract} yet. Publish it first."
-msgstr "Für {contract} ist noch nichts veröffentlicht. Veröffentliche zuerst eine Version."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Nothing is published yet."
@@ -10141,10 +10130,6 @@ msgstr "Tarif"
 msgid "Plans and goals"
 msgstr "Pläne und Ziele"
 
-#: src/engines/resource-bindings.tsx
-msgid "Platform measures"
-msgstr "Plattformkennzahlen"
-
 #: src/activity/pending.tsx
 msgid "Platform statistics. This App can read run and signal counts for every App, and may show them to anyone who uses it"
 msgstr "Plattformstatistiken. Diese App kann die Anzahl der Läufe und Signale jeder App lesen und sie allen zeigen, die sie nutzen"
@@ -10298,14 +10283,6 @@ msgstr "Anbieter"
 #: src/engines/app-workspace.tsx
 msgid "Publish"
 msgstr "Veröffentlichen"
-
-#: src/engines/resource-bindings.tsx
-msgid "Publish a version of {contract}"
-msgstr "Eine Version von {contract} veröffentlichen"
-
-#: src/engines/resource-bindings.tsx
-msgid "Publish as"
-msgstr "Veröffentlichen als"
 
 #: src/engines/app-workspace.tsx
 msgid "Publish changes"
@@ -12655,10 +12632,6 @@ msgstr "Aussage"
 msgid "Statements"
 msgstr "Aussagen"
 
-#: src/engines/resource-bindings.tsx
-msgid "Statistics"
-msgstr "Statistiken"
-
 #: src/connections/connection-list.tsx
 #: src/engines/app-settings.tsx
 #: src/engines/package-approvals.tsx
@@ -12855,12 +12828,7 @@ msgstr "Jemandem den Besuch einer App entzogen"
 msgid "Stopped."
 msgstr "Gestoppt."
 
-#: src/engines/resource-bindings.tsx
-msgid "Store"
-msgstr "Speicher"
-
 #: src/activity/pending.tsx
-#: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Speicher {store}"
 
@@ -12883,10 +12851,6 @@ msgstr "Speicher-ID: {store}"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe is not linked yet"
 msgstr "Stripe ist noch nicht verknüpft"
-
-#: src/engines/resource-bindings.tsx
-msgid "Structured, at most {tokens} tokens"
-msgstr "Strukturiert, höchstens {tokens} Tokens"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: an interview written up short"
@@ -13096,18 +13060,9 @@ msgstr "Teams mit KI"
 msgid "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
 msgstr "Erzählen Sie mir, wie diese Arbeit heute abläuft, Schritt für Schritt: wer was macht, in welcher App und wie oft. Ich zeichne es, während Sie erzählen."
 
-#: src/engines/resource-bindings.tsx
-msgid "Template"
-msgstr "Vorlage"
-
-#: src/engines/resource-bindings.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Template {templateId}, version {version}"
 msgstr "Vorlage {templateId}, Version {version}"
-
-#: src/engines/resource-bindings.tsx
-msgid "Template version"
-msgstr "Vorlagenversion"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/settings/ai-providers.tsx
@@ -13157,10 +13112,6 @@ msgstr "Tests"
 #: src/knowledge/document.tsx
 msgid "Text"
 msgstr "Text"
-
-#: src/engines/resource-bindings.tsx
-msgid "Text, at most {tokens} tokens"
-msgstr "Text, höchstens {tokens} Tokens"
 
 #: src/interview/closed.tsx
 msgid "Thank you for telling me."
@@ -13239,10 +13190,6 @@ msgstr "Das ist kein Link, der geöffnet werden kann."
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "Diesen Wert nimmt dieser Parameter nicht an."
-
-#: src/engines/resource-bindings.tsx
-msgid "That isn't valid JSON."
-msgstr "Das ist kein gültiges JSON."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -13361,14 +13308,6 @@ msgstr "Die aktive Version der App speichert keine Daten."
 #: src/engines/resource-bindings.tsx
 msgid "The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
 msgstr "Die nächste Anfrage der App darüber wird abgelehnt, und Aktionen, die darauf warten, werden verworfen. Binde sie erneut, um sie wieder zu nutzen."
-
-#: src/engines/resource-bindings.tsx
-msgid "The App's own statistics"
-msgstr "Die eigenen Statistiken der App"
-
-#: src/engines/resource-bindings.tsx
-msgid "The App's own statistics, and the platform's under permission {permission}"
-msgstr "Die eigenen Statistiken der App und die der Plattform unter Berechtigung {permission}"
 
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
@@ -13662,10 +13601,6 @@ msgstr "Das neue Feld {field} der Tabelle {table} lässt sich nicht ausfüllen: 
 msgid "The next one"
 msgstr "Die nächste"
 
-#: src/engines/resource-bindings.tsx
-msgid "The next version of template {id}"
-msgstr "Die nächste Version der Vorlage {id}"
-
 #: src/engines/app-settings.tsx
 msgid "The npm packages approved for the App, and taking an approval back."
 msgstr "Die für die App genehmigten npm-Pakete, und das Zurücknehmen einer Genehmigung."
@@ -13717,6 +13652,10 @@ msgstr "der Person in {field}"
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
 msgstr "Die Person, für die der Lauf handelt, sagt auf ihrem Dashboard, was geschehen ist"
+
+#: src/engines/resource-bindings.tsx
+msgid "The platform's statistics"
+msgstr "Die Statistiken der Plattform"
 
 #: src/engines/app-workspace.tsx
 msgid "The preview shows here as soon as there is something to see."
@@ -15513,8 +15452,8 @@ msgid "What it is bound to can't be read, so it serves nothing."
 msgstr "Woran sie gebunden ist, kann nicht gelesen werden, daher bedient sie nichts."
 
 #: src/engines/resource-bindings.tsx
-msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
-msgstr "Woran sie gebunden ist, kann sie nicht mehr bedienen: Die Berechtigung wurde widerrufen, das Modell ist nicht mehr erlaubt oder die Vorlage kann nicht gelesen werden."
+msgid "What it is bound to can't serve it any more: its permission was revoked, or the model is no longer allowed."
+msgstr "Woran es gebunden ist, kann es nicht mehr bedienen: Seine Berechtigung wurde widerrufen, oder das Modell ist nicht mehr erlaubt."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."

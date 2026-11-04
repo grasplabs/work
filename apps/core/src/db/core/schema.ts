@@ -1288,7 +1288,6 @@ export const sdkResourceBindings = sqliteTable(
         "store",
         "workflow",
         "operation",
-        "storeResource",
         "connector",
         "model",
         "decision",
@@ -1621,7 +1620,7 @@ export const resourceTemplates = sqliteTable(
  * exact declaration they reviewed (`declaration_hash`) and the contract it
  * serves as it was then (`contract_id`, `fingerprint`). `target` is the
  * provider (JSON, `BindingTarget`): a model, one of the App's permissions
- * or a template version. At most one active binding per alias; approving
+ * or another App. At most one active binding per alias; approving
  * another revokes it in the same batch. Revoked rows stay, for the audit
  * log's references.
  */
@@ -1634,16 +1633,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: [
-        "model",
-        "connector",
-        "knowledge",
-        "template",
-        "store",
-        "statistics",
-        "guests",
-        "app",
-      ],
+      enum: ["model", "connector", "knowledge", "grasp", "guests", "app"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -3228,12 +3218,12 @@ export const improvementSignals = sqliteTable(
 );
 
 /**
- * The statistics Apps record (src/statistics.ts), added up by the UTC day:
- * one row per App, measure, day and dimensions (canonical JSON), holding
- * how many points, their sum, lowest and highest. So a read over a year
- * reads at most a day's rows (`statisticRowsPerDay`) for each day, and a
- * point is one upsert. Rows past the retention (`statisticRetentionDays`)
- * are swept.
+ * The statistics Apps recorded, added up by the UTC day: one row per App,
+ * measure, day and dimensions (canonical JSON), holding how many points,
+ * their sum, lowest and highest. Read and written by nothing since an
+ * App's own measures became its own tables (GRA-1533): kept for this
+ * release, as the schema expands before it contracts, and dropped in the
+ * next.
  */
 export const appStatistics = sqliteTable(
   "app_statistics",
@@ -3262,14 +3252,9 @@ export const appStatistics = sqliteTable(
 
 /**
  * The statistics points the attempts of a workflow run's steps recorded
- * through Apps' methods, not yet added up (src/statistics.ts): one row
- * per step (its idempotency key), attempt, App, measure, day and
- * dimensions, holding what `app_statistics` holds of them. When a step
- * that called an App completes, the points of the attempt that completed
- * it are added to `app_statistics`, and the step gets its marker (a row
- * of no App and no measure, `committed`), in one batch; no other
- * attempt's ever are, and a step with its marker adds nothing again.
- * Kept only while the run hasn't ended, and deleted when it ends.
+ * through Apps' methods, not yet added up into `app_statistics`. Read and
+ * written by nothing since GRA-1533, like `app_statistics`: dropped with
+ * it in the next release.
  */
 export const appStatisticSteps = sqliteTable(
   "app_statistic_steps",

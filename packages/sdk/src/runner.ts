@@ -12,13 +12,18 @@ import {
 import type { MigrationContext } from "./migration.ts";
 import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
+import {
+  httpContract,
+  isPermission,
+  isWorkflowPermission,
+} from "./permissions.ts";
+import type { AnyPermission } from "./permissions.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
-import { httpContract, isResource, isWorkflowResource } from "./resources.ts";
-import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
+import { descriptorOf } from "./value-schema.ts";
 
 // How an App's server functions run where its code runs: the runner looks
 // a registered function up by path, builds the context of its kind over
@@ -134,21 +139,6 @@ const usedPath = (
 };
 
 /**
- * The alias of `workflow` among `fn`'s `uses`, or a refusal: only a
- * workflow declaration it lists, by identity.
- */
-const usedWorkflow = (fn: AnyFunction, workflow: unknown): string => {
-  const used = fn.uses.find((use) => use === workflow);
-  if (used === undefined || !isWorkflowResource(used)) {
-    throw Object.assign(
-      new Error("A function starts only the workflows it lists in `uses`."),
-      { code: "operation.not_found" }
-    );
-  }
-  return used.alias;
-};
-
-/**
  * The event reference `event` is among `fn`'s `uses`, read as data, or a
  * refusal: only one it lists, by identity.
  */
@@ -206,20 +196,32 @@ const notificationsOf = (fn: AnyFunction, channel: OperationChannel) => {
 };
 
 /**
- * A start of a workflow `fn` uses, over `channel`: for an action, the
- * start itself; for a mutation, its start staged with the commit. The
- * host tells them apart by the function it runs, never by this call.
+ * `ctx.workflows`: each workflow `fn` uses, by alias, whose `start` is,
+ * over `channel`, for an action the start itself and for a mutation its
+ * start staged with the commit. The host tells them apart by the function
+ * it runs, never by this call.
  */
-const startOf =
-  (fn: AnyFunction, channel: OperationChannel) =>
-  async (workflow: unknown, input: unknown): Promise<unknown> =>
-    await channel.resource(
-      usedWorkflow(fn, workflow),
-      "start",
-      // No input travels as no argument, which JSON can carry: the host
-      // applies the workflow's declared default.
-      input === undefined ? [] : [input]
-    );
+const workflowsOf = (
+  fn: AnyFunction,
+  channel: OperationChannel
+): Readonly<Record<string, unknown>> => {
+  const workflows: Record<string, unknown> = {};
+  for (const use of fn.uses) {
+    if (isWorkflowPermission(use)) {
+      workflows[use.alias] = Object.freeze({
+        start: async (input?: unknown): Promise<unknown> =>
+          await channel.resource(
+            use.alias,
+            "start",
+            // No input travels as no argument, which JSON can carry: the
+            // host applies the workflow's declared default.
+            input === undefined ? [] : [input]
+          ),
+      });
+    }
+  }
+  return Object.freeze(workflows);
+};
 
 /**
  * A send to people (`ctx.notifyPeople` of an action, `ctx.afterCommit.notifyPeople` of
@@ -232,16 +234,18 @@ const notifyPeopleOf =
     await channel.resource(peopleAlias, "notify", [to, notification]);
 
 /**
- * The one method of each kind of resource's client but knowledge's,
- * statistics' and guests', whose methods are the operations they declare.
+ * `ctx.ai.generate`, over `call`: the request, and the descriptor of its
+ * `output` when it asks for one, as data the host checks the answer
+ * against.
  */
-const clientMethods = {
-  connector: "call",
-  model: "generate",
-  template: "read",
-  store: "call",
-  app: "call",
-} as const;
+const generateOf =
+  (call: (...args: unknown[]) => Promise<unknown>) =>
+  async (request: unknown): Promise<unknown> => {
+    const { output, ...rest } = isPlainObject(request) ? request : {};
+    return output === undefined
+      ? await call(rest)
+      : await call(rest, descriptorOf(output));
+  };
 
 /** Statuses whose response has no body, as `Response` requires. */
 const bodilessStatuses: ReadonlySet<number> = new Set([
@@ -298,36 +302,65 @@ const httpFetchOf =
     );
   };
 
-/** The client of each resource `fn` uses, over `channel`. */
-const resourcesOf = (
-  fn: AnyFunction,
+/** The client of `permission`, over `channel`. */
+const clientOf = (
+  permission: AnyPermission,
   channel: OperationChannel
 ): Readonly<Record<string, unknown>> => {
-  const clients: Record<string, unknown> = {};
-  const declared: AnyResource[] = fn.uses.filter((use) => isResource(use));
-  for (const resource of declared) {
-    const call =
-      (method: string) =>
-      async (...args: unknown[]): Promise<unknown> =>
-        await channel.resource(resource.alias, method, args);
-    const methods =
-      resource["~resource"] === "knowledge" ||
-      resource["~resource"] === "statistics" ||
-      resource["~resource"] === "guests"
-        ? [...resource.operations]
-        : [clientMethods[resource["~resource"]]];
-    const client: Record<string, unknown> = Object.fromEntries(
-      methods.map((method) => [method, call(method)])
-    );
-    if (
-      resource["~resource"] === "connector" &&
-      resource.contract === httpContract
-    ) {
-      client.fetch = httpFetchOf(call("call"));
-    }
-    clients[resource.alias] = Object.freeze(client);
+  const call =
+    (method: string) =>
+    async (...args: unknown[]): Promise<unknown> =>
+      await channel.resource(permission.alias, method, args);
+  const kind = permission["~permission"];
+  if (kind === "ai") {
+    return Object.freeze({ generate: generateOf(call("generate")) });
   }
-  return Object.freeze(clients);
+  if (kind === "brain" || kind === "guests") {
+    return Object.freeze(
+      Object.fromEntries(
+        permission.operations.map((method) => [method, call(method)])
+      )
+    );
+  }
+  if (kind === "connections" && permission.contract === httpContract) {
+    return Object.freeze({
+      call: call("call"),
+      fetch: httpFetchOf(call("call")),
+    });
+  }
+  return Object.freeze({ call: call("call") });
+};
+
+/**
+ * The permissions `fn` uses, as its context holds them: `ai`, `brain` and
+ * `guests` when listed, and the connections and other Apps by alias.
+ */
+const permissionsOf = (
+  fn: AnyFunction,
+  channel: OperationChannel
+): Record<string, unknown> => {
+  const connections: Record<string, unknown> = {};
+  const apps: Record<string, unknown> = {};
+  const clients: Record<string, unknown> = {};
+  for (const use of fn.uses) {
+    if (!isPermission(use)) {
+      continue;
+    }
+    const kind = use["~permission"];
+    const client = clientOf(use, channel);
+    if (kind === "connections") {
+      connections[use.alias] = client;
+    } else if (kind === "apps") {
+      apps[use.alias] = client;
+    } else {
+      clients[kind] = client;
+    }
+  }
+  return {
+    ...clients,
+    connections: Object.freeze(connections),
+    apps: Object.freeze(apps),
+  };
 };
 
 /** `read`'s answer, or its failure, as data. */
@@ -402,9 +435,7 @@ export const runFunction = async (
       ),
       runQuery: caller("query"),
       afterCommit: Object.freeze({
-        start: async (workflow: unknown, input: unknown): Promise<void> => {
-          await startOf(fn, channel)(workflow, input);
-        },
+        workflows: workflowsOf(fn, channel),
         notifyPeople: async (
           to: unknown,
           notification: unknown
@@ -420,7 +451,8 @@ export const runFunction = async (
       runQuery: caller("query"),
       runMutation: caller("mutation"),
       runAction: caller("action"),
-      resources: resourcesOf(fn, channel),
+      ...permissionsOf(fn, channel),
+      workflows: workflowsOf(fn, channel),
       // Only a streaming action has `emit`; the host refuses any other's
       // use of the channel's `emit` all the same (`operation.no_stream`).
       ...(fn.stream === null
@@ -430,7 +462,6 @@ export const runFunction = async (
               await channel.emit(progress);
             },
           }),
-      startWorkflow: startOf(fn, channel),
       notifyPeople: notifyPeopleOf(channel),
     };
   }

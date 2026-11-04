@@ -59,7 +59,6 @@ export default app({
   operations: { approvals: { remember, asks } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

@@ -43,16 +43,13 @@ const workflowKeySchema = z.string().min(1).max(256);
 /** Text files by path. */
 const filesSchema = z.record(z.string().min(1).max(512), z.string());
 
-/** The resource kinds an App declares, by `~resource`. */
+/** The permission kinds an App declares, by `~permission`. */
 export const appBindingKinds = [
-  "model",
-  "connector",
-  "knowledge",
-  "template",
-  "store",
-  "statistics",
+  "ai",
+  "connections",
+  "brain",
+  "apps",
   "guests",
-  "app",
   "files",
   "links",
 ] as const;

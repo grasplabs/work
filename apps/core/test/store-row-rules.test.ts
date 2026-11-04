@@ -396,7 +396,6 @@ const ruledApp = app({
   },
   operations,
   screens: [],
-  uses: [],
 });
 
 const { manifest } = inspectApp(ruledApp);
@@ -1097,7 +1096,6 @@ export default app({
   operations: { requests: { add, move, retitle } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
     "screens/requests.tsx": `export default function Requests() {
@@ -1765,7 +1763,6 @@ export default app({
   },
   operations: {},
   screens: [],
-  uses: [],
 });
 `,
     });

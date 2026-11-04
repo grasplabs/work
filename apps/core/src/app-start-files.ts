@@ -58,7 +58,7 @@ export const appStartFiles = (
       const { app: declared, store } = await releaseOf();
       const readable = Object.entries(declared.browserResources).flatMap(
         ([alias, resource]) =>
-          resource["~resource"] === "files" &&
+          resource["~permission"] === "files" &&
           resource.operations.includes("read")
             ? [alias]
             : []
