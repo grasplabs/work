@@ -32,9 +32,10 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 // The model and store calls of a run an App's test started (fixture-runs.ts,
 // `workflowTest`): the run's host builds each as it builds a real one, holds
 // it to the run's limits, then hands it here in place of `makeCall`
-// (resource-host.ts, `#made`; sealed-run.ts, `#madeOrServed`). A test's run never reaches a real model, a
-// real store, the organization's data or its budget. Threat model, and how
-// each is closed (workflow-test-calls.test.ts tries each):
+// (resource-host.ts, `#made`; sealed-run.ts, `#madeOrServed`). A test's
+// run never reaches a real model, a real store, the organization's data or
+// its budget. Threat model, and how each is closed
+// (workflow-test-calls.test.ts tries each):
 //
 // - A test's model call reaches a model, or spends budget: it is answered
 //   with the answer its fixture gives the binding
