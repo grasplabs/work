@@ -227,6 +227,15 @@ const liveSchema = z.object({
     .optional(),
 });
 
+/**
+ * Whether the agent is still at work once `message` is the chat's latest:
+ * after a question, a call or a tool's result, it goes on; after a
+ * response that calls nothing, its turn is over. The chat's own copy, so
+ * it holds through a restart of either object.
+ */
+const atWorkAfter = (message: Message): boolean =>
+  message.role !== "assistant" || message.stopReason === "toolUse";
+
 /** What pi keeps of a tool result's diagnostics, beside the rendered block. */
 const diagnosticsDataSchema = z.object({
   diagnostics: z.array(z.object({ message: z.string() })),
@@ -354,7 +363,7 @@ export class ChatHarness {
   #copying: Promise<void> = Promise.resolve();
   /** The partial answer the Workspace was shown last. */
   #shown = "null";
-  /** Whether the Workspace was told the agent's run is under way. */
+  /** Whether the Workspace was told the agent is at work. */
   #told: boolean | undefined;
   /** The thinking of the response streaming in, as `thinkingClock` times it. */
   readonly #thinking = thinkingClock();
@@ -416,10 +425,8 @@ export class ChatHarness {
     view.subscribe((value) => {
       opened.#showPartial(value.docs["pi.live"]);
     });
-    // The agent's own events: when its run starts and ends, which the
-    // chat shows as running, and its thinking as it streams.
+    // The agent's own events: its thinking as it streams.
     const events = await watchEvents(harness, conversation.id, context);
-    opened.#see(events.snapshot);
     events.start(async (batch) => {
       for (const event of batch) {
         opened.#see(event);
@@ -432,13 +439,26 @@ export class ChatHarness {
     return opened;
   }
 
+  /** Whether the agent is at work, as the chat's latest message says. */
+  async #atWork(): Promise<boolean> {
+    const page = await this.#conversation.entries(
+      { order: "descending" },
+      8,
+      undefined,
+      context
+    );
+    for (const entry of page.items) {
+      const latest = shownOf(entry).at(-1);
+      if (latest !== undefined) {
+        return atWorkAfter(latest.message);
+      }
+    }
+    return false;
+  }
+
   /** Takes in one of the agent's events (`watchEvents`). */
   #see(event: AgentEvent): void {
-    if (event.type === "snapshot") {
-      this.#tell(event.run !== undefined);
-    } else if (event.type === "run_start" || event.type === "run_end") {
-      this.#tell(event.type === "run_start");
-    } else if (event.type === "message_update") {
+    if (event.type === "message_update") {
       this.#thinking.see(event.changes);
     } else if (event.type === "message_end") {
       const ms = this.#thinking.take();
@@ -449,9 +469,10 @@ export class ChatHarness {
   }
 
   /**
-   * Tells the chat's Workspace whether the agent's run is under way, once
-   * each time that changes: this object's state is what the chat shows,
-   * so a restart of the Workspace mid-turn still shows it running.
+   * Tells the chat's Workspace whether its agent is at work, once each time
+   * that changes, as the Harness says (`Wake.active`, which also keeps the
+   * object's alarm armed): through a restart of either object, until the
+   * turn ends, the chat shows it running.
    */
   #tell(running: boolean): void {
     if (this.#told === running) {
@@ -549,6 +570,9 @@ export class ChatHarness {
       await this.#conversation.waitForIdle(context);
       await this.#rebaseIfNeeded(request, room);
     }
+    // A turn that ended without a last word of the model's (cancelled,
+    // failed, stopped) is over too.
+    this.#tell(end.outcome === "answered" && (await this.#atWork()));
     return end;
   }
 
@@ -843,6 +867,8 @@ export class ChatHarness {
     }
     if (shown.length > 0) {
       await this.#host(scope).keepTurnMessages(scope.chatId, shown);
+      const latest = shown.at(-1);
+      this.#tell(latest !== undefined && atWorkAfter(latest.message));
     }
     const through = last;
     await this.#conversation.commit(async (tx) => {

@@ -8,7 +8,11 @@ import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -21,7 +25,7 @@ import {
   sourceHash,
   utf8Bytes,
 } from "../src/code-mode.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import { endedRunsKept } from "../src/workspace.ts";
 import {
   chatOf,
@@ -1228,41 +1232,66 @@ describe("chat agent after a restart", () => {
     }
   });
 
-  it("goes on from a turn a restart cut short", async () => {
-    const { stub, ask } = await newChat(
-      codeStep("export default async () => 6 * 7;"),
-      says("42.")
-    );
-    await ask("What is 6 * 7?");
-    // The object died while the step ran: the step's call was kept, as the
-    // loop keeps each message it finishes, but its result and the answer
-    // weren't. A message is kept with what it said for searches, so
-    // neither row of the last two exists.
-    await runInDurableObject(stub, (_instance, state) => {
-      const lastTwo = "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2";
-      state.storage.sql.exec(
-        `DELETE FROM chat_search_text WHERE message_id IN (${lastTwo})`
-      );
-      state.storage.sql.exec(
-        `DELETE FROM chat_messages WHERE id IN (${lastTwo})`
-      );
-    });
-
-    await evictDurableObject(stub);
-    const after = await fakeProvider(says("It was 42."));
-    const reply = await ask("So?");
-
-    const sent = JSON.stringify(after.requests[0]?.body);
-    expect({
-      answer: reply.answer,
-      // The first question, its step's call (closed as having no result)
-      // and the new question.
-      sent: ["What is 6 * 7?", "6 * 7;", "No result provided", "So?"].map(
-        (text) => sent.includes(text)
+  it("goes on from a turn a restart of its ChatSession cut short, the chat shown running throughout", async () => {
+    // The answer after the restart pauses, so the turn is still under way
+    // when the chat is read.
+    const answer = pausedReply(says("42."), 1);
+    const { id, stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
       ),
+      answer.reply
+    );
+    // The question's call breaks with the restarts: the turn goes on.
+    const reply = ask("What is 6 * 7?").then(
+      () => "settled",
+      () => "settled"
+    );
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // The chat's object restarts mid-step, as a crash would cut it short.
+    const session = chatSession(env, id, chat.id);
+    await runInDurableObject(session, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The Workspace restarts too: the chat still shows its turn running,
+    // as the ChatSession says.
+    const woken = await restart(id);
+    const { running } = await woken.chatSummary(chat.id, personId);
+    // Its heartbeat alarm picks the turn up again, if it hasn't yet.
+    await runDurableObjectAlarm(chatSession(env, id, chat.id));
+    answer.release();
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(woken, chat.id)).resolves.toHaveLength(4);
+      },
+      { timeout: 15_000 }
+    );
+    const results = await codeResults(woken, chat.id);
+    const messages = await transcript(woken, chat.id);
+    expect({
+      running,
+      answered: messages.at(-1)?.role,
+      results: results.length,
+      settled: await reply,
     }).toStrictEqual({
-      answer: "It was 42.",
-      sent: [true, true, true, true],
+      running: true,
+      answered: "assistant",
+      results: 1,
+      settled: "settled",
+    });
+    await vi.waitFor(async () => {
+      await expect(woken.chatSummary(chat.id, personId)).resolves.toMatchObject(
+        {
+          running: false,
+        }
+      );
     });
   });
 });
