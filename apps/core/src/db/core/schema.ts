@@ -11,11 +11,7 @@ import type {
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
 import { signalKinds } from "@grasp-os/shared/signals";
-import type {
-  EventFilter,
-  ParamValue,
-  RunFailure,
-} from "@grasp-os/shared/workflows";
+import type { RunFailure } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
  *
@@ -2409,52 +2405,6 @@ export const workflowRunWakes = sqliteTable(
 );
 
 /**
- * The triggers of the workflows in each App's current version
- * (src/workflows/trigger-registry.ts), written when a version is made
- * current and removed when another is. `position` is the trigger's place
- * among its workflow's. A schedule keeps its cron expression as its
- * parameter holds it now (`cron`), in its time zone, when it next
- * fires (`next_run_at`), and how many starts of its run have failed in a
- * row (`failed_starts`): at `maxFailedStarts` it stops, with no next time
- * (src/workflows/triggers.ts). An email trigger keeps the address it receives
- * mail at (`address`, the part before the `@`); an event trigger its event
- * type (`event`) and filter (`filter`, JSON).
- */
-export const workflowTriggers = sqliteTable(
-  "workflow_triggers",
-  {
-    id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    version: integer().notNull(),
-    workflowId: text("workflow_id").notNull(),
-    position: integer().notNull(),
-    type: text({ enum: ["schedule", "email", "event"] }).notNull(),
-    param: text(),
-    cron: text(),
-    timeZone: text("time_zone"),
-    nextRunAt: timestamp("next_run_at"),
-    createdAt: timestamp("created_at").notNull(),
-    address: text(),
-    event: text(),
-    filter: text({ mode: "json" }).$type<EventFilter>(),
-    failedStarts: integer("failed_starts").notNull().default(0),
-  },
-  (table) => [
-    uniqueIndex("workflow_triggers_position_idx").on(
-      table.appId,
-      table.version,
-      table.workflowId,
-      table.position
-    ),
-    index("workflow_triggers_next_run_idx").on(table.nextRunAt),
-    index("workflow_triggers_address_idx").on(table.address),
-    index("workflow_triggers_event_idx").on(table.event),
-  ]
-);
-
-/**
  * Every decision a workflow run waits for (`step.decision`, src/decisions/),
  * one per run and step: who answers it (`deciders`: `person:<id>`,
  * `role:<role>` or `team:<id>`), until when (`expires_at`), and how it
@@ -2930,28 +2880,6 @@ export const dependencyAdmissionRefusals = sqliteTable(
         table.reason,
       ],
     }),
-  ]
-);
-
-/**
- * The values people set for workflows' parameters, one per App, workflow
- * and parameter; a parameter without one has its code's default. `set_by`
- * set it directly.
- */
-export const workflowParamValues = sqliteTable(
-  "workflow_param_values",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    param: text().notNull(),
-    value: text({ mode: "json" }).$type<ParamValue>().notNull(),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.appId, table.workflowId, table.param] }),
   ]
 );
 

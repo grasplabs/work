@@ -2,11 +2,6 @@ import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { sha256Hex, sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   runFileLimits,
@@ -20,31 +15,22 @@ import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
-  workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Address, Attachment, Email } from "postal-mime";
 
-import { keepAuditEvent, outboxedWhere } from "../audit-outbox.ts";
+import { outboxedWhere } from "../audit-outbox.ts";
 import {
-  apps,
   triggerResources,
   triggerResourceVersions,
-  workflowTriggers,
 } from "../db/core/schema.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
-import {
-  isWorthKeeping,
-  keepMessage,
-  parsedOf,
-  stagedAttachmentKey,
-} from "./kept-email.ts";
+import { parsedOf, stagedAttachmentKey } from "./kept-email.ts";
 import {
   learnMailDomain,
-  lineageRefusals,
   mailRecipient,
   runsOwnMail,
   stampedMessageRun,
@@ -52,112 +38,60 @@ import {
 import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import { isRunFileText } from "./run-files.ts";
-import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
+import { jsonBytes, maxInputBytes } from "./runs.ts";
 import type { StartFiles } from "./start-files.ts";
 
-// Mail to workflows' email triggers (trigger-registry.ts). Email Routing
-// sends every message for the deployment's mail domain to core's email
-// handler, which routes it by the part of its envelope recipient before
-// the `@`: to the workflows of Apps' current versions that receive mail
-// there. The address is looked up first, so mail nobody receives is never
-// read: mail to an address nobody receives at bounces (a permanent
+// Mail to independent workflows' email triggers (trigger-resources.ts).
+// Email Routing hands each message to the Worker's `email` handler, which
+// routes it by the part of its envelope recipient before the `@`: each
+// trigger receives at an address of its own, the name its builder chose,
+// or `trigger-<token>` (128 random bits, never its ID). The address is
+// looked up first, exactly as stored, among live, enabled email triggers,
+// so mail nobody receives is never read: it bounces (a permanent
 // failure). Only then is the message read and parsed: one too large, or
 // that doesn't parse, bounces.
 //
-// A run gets the message parsed (`InboundEmail`), bounded to fit a run's
-// input: at most 100 each of To and Cc, names, subject and file names
-// cut, attachments listed (never their content), and as much plain text
-// as fits (a message with only HTML, its text). Its `id` is the SHA-256
-// of its bytes.
-//
-// A message with an attachment that isn't inline is kept for its runs to
-// read its attachments (kept-email.ts); its input names it (`stored`), or says `stored: null`. It is kept only
-// for the Apps it may start a run of: one delivered again, whose runs
-// started, is not kept again, whatever its bytes are this time.
-//
-// The same message delivered again starts no second run: its key, per
-// App and workflow, is the SHA-256 of its Message-ID, or of its bytes
-// when it has none, or one without an `@` (such as `<>`). A redelivery
-// keeps its Message-ID but can differ in its bytes (new Received or ARC
-// headers), so the Message-ID is what makes it the same. Its sender
-// writes the Message-ID, though: a message that reuses another's, sent
-// first, keeps that one from starting a run.
-//
-// Mail starts at most `triggeredRunsPerHour` runs of a workflow an hour
-// (runs.ts). A
-// message goes to each receiving workflow with room; if one is at its
-// limit, the delivery fails for now once the others started, so its
-// sender tries again later, and only the workflows that didn't start it
-// start it then.
+// A run gets the message parsed (`InboundEmail`, mapped into its input as
+// a connector trigger maps its event), bounded to fit a run's input: at
+// most 100 each of To and Cc, names, subject and file names cut,
+// attachments listed, and as much plain text as fits (a message with
+// only HTML, its text). Its `id` is the SHA-256 of its bytes.
 //
 // Anyone can send mail, and its headers say what its sender wrote: the
-// message is untrusted data for the run, its From address included. A
-// start that fails fails the delivery, so the sending server can try
-// again, starting only what didn't start.
+// message is untrusted data for the run, its From address included.
 //
 // Mail loops. A run can send mail (through a connection), and mail can
-// start a run: a workflow that mails its own App's address, or two that
-// mail each other, or an auto-reply answering a run's mail, would start
-// runs without end, each a new run lineage with quotas of its own. So a
-// message that says it was sent automatically (`Auto-Submitted` other
-// than `no`, RFC 3834), or that comes from the deployment's own mail
-// domain (its From or its envelope sender), starts nothing: it is
-// accepted and dropped, never bounced, as a bounce is mail that can loop
-// too, and the refusal is audited (`workflow.email.refused`). The mail
-// domain is the recipient's own, as Email Routing hands the message over:
-// every message here was sent to the deployment's domain, so it needs no
-// setting of its own, and can't be set wrong. A message from a person's
-// mailbox at the client's own domain still starts runs: people forward
-// mail to their workflows.
-//
-// A run's own mail to the domain carries its token: core put it on the
-// recipient as the run's send left (`local+<token>@domain`,
-// mail-stamps.ts). Mail to a tokened address goes to the address without
-// the token. It is the run's own mail, and starts its runs under the run,
-// admitted against its lineage (quotas.ts, `admitChild`), only when it
-// goes to the address the token was put on and its envelope sender (which
-// SPF vouches for, unlike its From) is the run's; its key is then the
-// token's and its Message-ID's, so the same message delivered again is
-// one run, and a new one from that mailbox another run in the lineage.
-// Anything else to a tokened address (a customer's reply to all, the
-// token on another address) is mail like any other: a root, keyed by its
-// Message-ID. A token core didn't record is part of the address, which
-// no one receives at. Past the lineage's limits the run is refused and
-// audited (`workflow.email.refused`, `lineage_limit`): the message
-// bounces when every workflow it would start is refused so, and fails for
-// now when another started or is only at its hourly limit, so a delivery
-// tried again starts only what it didn't (and its sender hears of it once
-// it gives up). Each message also tells core its mail domain, from
-// the envelope recipient Email Routing sets, which no sender chooses: a
-// run's mail to it is what core stamps, from the first message on, so a
-// fresh deployment's first hop is a root.
-//
-// Independent workflows' email triggers (trigger-resources.ts) receive
-// mail the same way, each at an address of its own: the name its builder
-// chose, or `trigger-<token>` (128 random bits, never its ID): the same
-// ingress, size limit, parser, loop refusal and input (`InboundEmail`,
-// mapped into the run's input as a connector trigger maps its event). An
-// address is looked up among live, enabled email triggers first, exactly
-// as stored, and only then among Apps' addresses: Apps and triggers take
-// addresses from one namespace (email-addresses.ts), so one is never
-// both.
+// start a run: a workflow that mails its own trigger's address, or two
+// that mail each other, or an auto-reply answering a run's mail, would
+// start runs without end. So a message that says it was sent
+// automatically (`Auto-Submitted` other than `no`, RFC 3834), or that
+// comes from the deployment's own mail domain (its From or its envelope
+// sender), starts nothing: it is accepted and dropped, never bounced, as
+// a bounce is mail that can loop too, and the refusal is audited
+// (`workflow.email.refused`). The mail domain is the recipient's own, as
+// Email Routing hands the message over, so it needs no setting of its
+// own, and can't be set wrong. A message from a person's mailbox at the
+// client's own domain still starts runs: people forward mail to their
+// workflows. Each message also tells core its mail domain, from the
+// envelope recipient Email Routing sets, which no sender chooses
+// (mail-stamps.ts).
 // Each message then takes the steps a connector event does
 // (connector-triggers.ts, `startOnce`): its start, its refusals and its
 // drops once each, by the message. Threat model, and how each is closed:
 //
 // - Forged delivery: mail reaches here only from Email Routing or the
-//   router-signed raw-mail ingress (mail-ingress.ts), as App mail does.
+//   router-signed raw-mail ingress (mail-ingress.ts).
 // - Mail to a trigger that is disabled, deleted or doesn't exist bounces,
 //   as mail nobody receives does, before it is read. Its ID names no
 //   address: knowing it mails nothing. Nothing on this path logs its
 //   address or its ID.
 // - Mail loops: mail sent automatically or from the deployment's own
 //   domain is dropped, audited, as above. A run's own mail joins its
-//   lineage: an independent run's by the stamp its message carries
-//   (`stampHeader`, `stampedMessageRun`), one level deeper (`causeOf`),
-//   until the lineage's limits refuse it; an App run's (its token, or its
-//   stamp) can't join an independent lineage and is refused, audited with
-//   the run, never started as a new root. A recorded stamp counts for at
+//   lineage by the stamp its message carries (`stampHeader`,
+//   `stampedMessageRun`), one level deeper (`causeOf`), until the
+//   lineage's limits refuse it; a token or stamp of a run that isn't
+//   independent can't join an independent lineage and is refused, audited
+//   with the run, never started as a new root. A recorded stamp counts for at
 //   most a few messages at the address (`maxClaimsPerSource`). Besides, a
 //   trigger starts and refuses at most `triggeredRunsPerHour` messages an
 //   hour, loop drops included, so mail can't write the audit log without
@@ -485,36 +419,6 @@ const inputOf = (
   });
 };
 
-/**
- * The workflows of Apps' current versions with an email trigger at
- * `address`, each once however many of its triggers are there: a message
- * starts a workflow's run once, and two starts of it at once would find
- * each other's run still starting.
- */
-const receiversAt = async (env: Env, address: string) =>
-  await drizzle(env.DB)
-    .selectDistinct({
-      appId: workflowTriggers.appId,
-      version: workflowTriggers.version,
-      workflowId: workflowTriggers.workflowId,
-    })
-    .from(workflowTriggers)
-    .innerJoin(
-      apps,
-      and(
-        eq(apps.id, workflowTriggers.appId),
-        eq(apps.currentVersion, workflowTriggers.version),
-        // Only a published App's triggers fire (app-status.ts).
-        eq(apps.status, "published")
-      )
-    )
-    .where(
-      and(
-        eq(workflowTriggers.type, "email"),
-        eq(workflowTriggers.address, address)
-      )
-    );
-
 /** Why a message may loop, and so starts nothing (see above). */
 type LoopReason = "auto_submitted" | "own_domain";
 
@@ -805,10 +709,9 @@ const receiveForTrigger = async (
 };
 
 /**
- * Takes a message Email Routing delivers: starts a run of each workflow
- * that receives mail at its recipient's address, with the message as
- * input, bounces it, or fails it for now. A message that may loop
- * (`loopOf`) is dropped, and its refusal audited.
+ * Takes a message Email Routing delivers: to the email trigger at its
+ * recipient's address (`receiveForTrigger`), or bounces it when no
+ * trigger receives mail there.
  */
 export const receiveEmail = async (
   message: InboundMessage,
@@ -828,174 +731,5 @@ export const receiveEmail = async (
     await receiveForTrigger(message, env, address, taker, recorded);
     return;
   }
-  const receivers = address === "" ? [] : await receiversAt(env, address);
-  if (receivers.length === 0) {
-    message.setReject("No such address.");
-    return;
-  }
-  const read = await readMessage(message, env);
-  if (read === undefined) {
-    return;
-  }
-  const { raw, parsed, id, domain } = read;
-  // The run's own mail only to the address it mailed, from its sender.
-  const stamp = runsOwnMail(
-    recorded,
-    `${address}@${domain ?? ""}`,
-    message.from
-  );
-  const loop = loopOf(message.to, message.from, parsed);
-  if (loop !== undefined) {
-    // Once for each App it would have started a run of. Identifiers only:
-    // the address it was sent to, why, and the hash of its bytes; never
-    // who sent it or what it says.
-    const db = drizzle(env.DB);
-    await Promise.all(
-      [...new Set(receivers.map(({ appId }) => appId))].map(async (appId) => {
-        await keepAuditEvent(env, db, {
-          actor: { type: "system" },
-          action: "workflow.email.refused",
-          target: { type: "app", id: appId },
-          detail: { address, reason: loop, message: id },
-        });
-      })
-    );
-    return;
-  }
-  // A run's own mail is keyed by its token too, so it is never taken for
-  // mail to another.
-  const messageKey = await messageKeyOf(parsed, id);
-  const same =
-    stamp === undefined
-      ? messageKey
-      : await sha256Hex(`stamp:${stamp.token}:${messageKey}`);
-  // By workflow, not by trigger row: the rows are written anew each time
-  // a version is made current.
-  const keyOf = ({
-    appId,
-    workflowId,
-  }: {
-    appId: string;
-    workflowId: string;
-  }) => `email:${appId}:${workflowId}:${same}`;
-  // Each workflow's limit is its own: the message goes to those with room
-  // now or its run already, and the others get it when the sender tries
-  // again.
-  const rooms = await Promise.all(
-    receivers.map(
-      async (receiver) =>
-        await deliveryRoom(
-          env,
-          receiver.appId,
-          receiver.workflowId,
-          keyOf(receiver),
-          "email"
-        )
-    )
-  );
-  const withRoom = receivers.filter((_, index) => rooms[index] !== "capped");
-  // Kept before any run starts, so each finds it, and only for the Apps
-  // it may start a run of now: a workflow that has its run already, past
-  // `starting`, runs on the delivery that started it, which kept its own.
-  // So mail sent again under one Message-ID with other bytes each time
-  // keeps nothing more, and what is kept stays within the hourly limit.
-  // Failing to keep it fails the delivery for now: its sender tries again.
-  const stored = isWorthKeeping(parsed.attachments)
-    ? await keepMessage(
-        env,
-        receivers
-          .filter((_, index) => rooms[index] === "new")
-          .map(({ appId }) => appId),
-        id,
-        raw
-      )
-    : null;
-  const input = inputOf(id, stored, message.from, parsed);
-  const started = await Promise.allSettled(
-    withRoom.map(
-      async (receiver) =>
-        await startRun(env, {
-          app: appIdSchema.parse(receiver.appId),
-          workflow: workflowIdSchema.parse(receiver.workflowId),
-          input,
-          startedBy: null,
-          actor: { type: "system" },
-          trigger: {
-            type: "email",
-            key: keyOf(receiver),
-            version: receiver.version,
-          },
-          ...(stamp === undefined
-            ? {}
-            : { parent: runIdSchema.parse(stamp.run) }),
-        })
-    )
-  );
-  const refused = lineageRefusals(started, withRoom);
-  if (refused.length > 0) {
-    // Refused for good: the lineage's limits would refuse it again.
-    const db = drizzle(env.DB);
-    await Promise.all(
-      refused.map(async ({ receiver, limit }) => {
-        await keepAuditEvent(env, db, {
-          actor: { type: "system" },
-          action: "workflow.email.refused",
-          target: { type: "app", id: receiver.appId },
-          detail: {
-            address,
-            workflow: receiver.workflowId,
-            reason: "lineage_limit",
-            limit,
-            message: id,
-          },
-        });
-      })
-    );
-  }
-  const failures = started.flatMap((result): unknown[] =>
-    result.status === "rejected" &&
-    workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
-      ? [result.reason]
-      : []
-  );
-  for (const failure of failures) {
-    log.error("workflow.trigger_failed", {
-      type: "email",
-      message: id,
-      ...errorFields(failure),
-    });
-  }
-  if (failures.length > 0) {
-    throw new Error(`Message ${id} didn't start every run it should`);
-  }
-  if (refused.length > 0 && refused.length === receivers.length) {
-    // Bounced, so its sender hears of it: every workflow it would start
-    // is past the limits of the run that sent it.
-    message.setReject(
-      "This message would start a workflow run past the limits of the run that sent it."
-    );
-    return;
-  }
-  if (withRoom.length < receivers.length) {
-    // Fails for now, so its sender tries again once the hour allows: the
-    // runs started now are the same runs then (their keys), and the
-    // workflows at their limit start theirs.
-    log.warn("workflow.trigger_rate_limited", {
-      type: "email",
-      message: id,
-      capped: receivers.length - withRoom.length,
-    });
-    throw new Error(`Message ${id} is over a workflow's hourly limit`);
-  }
-  if (refused.length > 0) {
-    // Started some, refused others: fails for now, as for a workflow at
-    // its hourly limit, so the runs started are the same runs when its
-    // sender tries again, and a sender who gives up hears of it.
-    log.warn("workflow.trigger_lineage_refused", {
-      type: "email",
-      message: id,
-      refused: refused.length,
-    });
-    throw new Error(`Message ${id} is past a lineage's limits for a workflow`);
-  }
+  message.setReject("No such address.");
 };

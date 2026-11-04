@@ -96,8 +96,6 @@ export const screenTests = [
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
   "test/workflow-ai-steps.test.ts",
-  "test/reviewed-calls.test.ts",
-  "test/held-wakes.test.ts",
   "test/unknown-outcome-resolutions.test.ts",
   "test/unknown-outcome-holds.test.ts",
   "test/decisions.test.ts",
@@ -105,11 +103,8 @@ export const screenTests = [
   "test/decision-deadlines.test.ts",
   "test/build-on-save.test.ts",
   "test/workflow-overview.test.ts",
-  "test/email-triggers.test.ts",
   "test/email-trigger-messages.test.ts",
-  "test/email-attachments.test.ts",
   "test/mail-ingress.test.ts",
-  "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
   "test/run-controls.test.ts",
   "test/run-summary.test.ts",
@@ -119,7 +114,6 @@ export const screenTests = [
   "test/statistics.test.ts",
   "test/guests.test.ts",
   "test/app-function-calls.test.ts",
-  "test/workflow-type-check.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */

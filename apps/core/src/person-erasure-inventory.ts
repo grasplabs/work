@@ -107,7 +107,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.dependency_admission_refusals": {
     none: "subject is an App or workflow",
   },
-  "core.workflow_param_values": { company: "parameters they set" },
   "core.workflow_owners": { company: "workflows they own" },
   "core.hidden_connectors": { company: "connectors an admin hid" },
   "core.tool_class_settings": { company: "settings an admin changed" },
@@ -257,7 +256,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_run_control_keys": noPerson,
   "core.workflow_resource_run_terminations": noPerson,
   "core.workflow_run_wakes": noPerson,
-  "core.workflow_triggers": noPerson,
   "core.admin_commands": noPerson,
   "core.brain_team_group_saves": noPerson,
   "core.brain_team_groups": noPerson,
@@ -587,7 +585,6 @@ export const reviewedPersonColumns: Readonly<
   "core.workflow_item_tests": ["principal_id"],
   "core.workflow_model_waits": ["owner"],
   "core.workflow_owners": ["owner_id", "set_by"],
-  "core.workflow_param_values": ["set_by"],
   "core.workflow_resource_drafts": ["edited_by"],
   "core.workflow_resource_lifecycles": [
     "go_live_requested_by",

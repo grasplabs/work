@@ -1,3 +1,12 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import {
   createExecutionContext,
   waitOnExecutionContext,
@@ -6,58 +15,23 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
-import { finished } from "./runs.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import { unique } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
 
 // Email triggers: Email Routing hands core's email handler each message
-// for the deployment's domain, which starts the workflow that receives
-// mail at its address, with the message as input. Tests deliver messages
-// to the handler as Email Routing does. What the tests of email triggers
-// share; each test file signs people in with an IdP of its own
-// (`mockIdp()` registers hooks, so it can't be called here).
+// for the deployment's domain, which starts the run of the independent
+// workflow whose email trigger receives mail at its address, with the
+// message mapped into its input. Tests deliver messages to the handler as
+// Email Routing does. What the tests of email triggers share; each test
+// file signs people in with an IdP of its own (`mockIdp()` registers
+// hooks, so it can't be called here).
 
 /** A signed-in person's API. */
 export type Person = Awaited<ReturnType<typeof signedInApi>>;
-
-/**
- * The invoice intake workflow, receiving mail at `address` (through
- * `times` triggers there): it returns what it read of the message it
- * started with.
- */
-export const intake = (
-  address = "invoices",
-  id = "intake",
-  times = 1
-): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { emailMessage, workflow } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "${id}",
-  { params: {}, input: emailMessage, triggers: [${Array.from({ length: times }, () => `{ type: "email", address: "${address}" }`).join(", ")}] },
-  async (step, { input }) =>
-    await step.do("read", { description: "Read the invoice mail" }, async () => ({
-      id: input.id,
-      stored: input.stored,
-      from: input.from.address,
-      to: input.to.length,
-      subject: input.subject,
-      text: input.text,
-      last: [...input.text].at(-1) ?? "",
-      truncated: input.truncated,
-      attachments: input.attachments.map(({ filename, size }) => filename + ":" + size),
-      size: JSON.stringify(input).length,
-    }))
-);
-`,
-  [`workflows/${id}.workflow-tests.ts`]: `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./${id}.ts";
-
-const input = { id: "m", stored: null, from: { name: "", address: "a@b.test" }, to: [], cc: [], subject: "", date: null, text: "", truncated: false, attachments: [] };
-
-export default workflowTests(definition, [{ name: "runs", input, mocks: { read: null }, expect: { output: null } }]);
-`,
-});
 
 /**
  * A message from Ben, with an attachment, as it goes over the wire: with a
@@ -155,44 +129,6 @@ export const deliver = async (
   return delivery;
 };
 
-/** The App's runs, as its builder sees them. */
-export const runsOf = async (builder: Person, app: string) =>
-  await builder.api.workflows.list(app);
-
-const outputSchema = z.object({
-  id: z.string(),
-  stored: z.string().nullable(),
-  from: z.string(),
-  to: z.number(),
-  subject: z.string(),
-  text: z.string(),
-  last: z.string(),
-  truncated: z.boolean(),
-  attachments: z.array(z.string()),
-  size: z.number(),
-});
-
-/** What each of the App's runs read of the message it started with. */
-export const readByRuns = async (builder: Person, app: string) => {
-  const runs = await runsOf(builder, app);
-  return await Promise.all(
-    runs.map(async ({ id }) => {
-      await finished(id);
-      const { output } = await builder.api.workflows.status(id);
-      return outputSchema.parse(output);
-    })
-  );
-};
-
-/** What the App's only run read of the message it started with. */
-export const readByRun = async (builder: Person, app: string) => {
-  const [read] = await readByRuns(builder, app);
-  if (!read) {
-    throw new Error(`App ${app} has no run`);
-  }
-  return read;
-};
-
 /**
  * Every kept message in R2 (workflows/kept-email.ts), as its key and when
  * it was stored. Kept mail only, not the whole bucket: other parts of core
@@ -224,3 +160,341 @@ export const addedSince = async (
 
 /** A kept message's name: its day, and the SHA-256 of its bytes. */
 export const storedName = /^(?<day>\d{4}-\d{2}-\d{2})\/[0-9a-f]{64}$/u;
+
+/** The deployment's mail domain: its hostname, as the router sorts by. */
+export const own = new URL(clientOrigin).hostname;
+
+/** An admin, straight in the database, to grant triggers their starts. */
+export const admin = async (): Promise<Identity> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Admin', ?, 1, ?, ?)"
+    ).bind(userId, `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'admin', ?)"
+    ).bind(crypto.randomUUID(), userId, Date.now()),
+  ]);
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Admin",
+    role: "admin",
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+export const stringOrNull = { anyOf: [{ type: "string" }, { type: "null" }] };
+
+/**
+ * An attachment, as a message's input lists it: as a file of the run too,
+ * when a run file may be it.
+ */
+export const attachment = {
+  type: "object",
+  properties: {
+    filename: stringOrNull,
+    mimeType: { type: "string" },
+    size: { type: "integer" },
+    file: { type: "object", "x-grasp-value": { kind: "file" } },
+  },
+  required: ["filename", "mimeType", "size"],
+  additionalProperties: false,
+};
+
+/** A workflow taking a message's `subject`, and what else its trigger maps. */
+export const definitionOf = (name: string, version = "1.0.0"): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version,
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: {
+      schema: {
+        format: "json",
+        document: {
+          type: "object",
+          properties: {
+            subject: { type: "string" },
+            from: { type: "string" },
+            stored: stringOrNull,
+            attachments: { type: "array", items: attachment },
+          },
+          required: ["subject", "from", "stored", "attachments"],
+          additionalProperties: false,
+        },
+      },
+    },
+    output: {
+      schema: {
+        format: "json",
+        document: {
+          type: "object",
+          properties: { subject: { type: "string" } },
+          required: ["subject"],
+          additionalProperties: false,
+        },
+      },
+    },
+    do: [{ finish: { set: { subject: "${ $workflow.input.subject }" } } }],
+  });
+
+export const mapping = {
+  fields: {
+    subject: "/subject",
+    from: "/from/address",
+    stored: "/stored",
+    attachments: "/attachments",
+  },
+  defaults: {},
+};
+
+/** `request`, asked for and granted by `by`. */
+export const granted = async (
+  by: Identity,
+  request: Omit<PermissionRequest, "binding">
+): Promise<string> => {
+  const { id } = await requestPermission(
+    env,
+    by,
+    {
+      ...request,
+      binding: `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`,
+    },
+    {
+      app: () => {
+        throw new Error("No App here");
+      },
+      resource: async (ref, needed) => {
+        await requireResourceRole(env, by, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, by, id, { version: null });
+  return id;
+};
+
+/** What a test's email trigger is on, when not the plain `definitionOf`. */
+export interface Starting {
+  /** The workflow's definition, by its name. */
+  definition?: (name: string) => string;
+  /** Its own modules, by path. */
+  modules?: Record<string, string>;
+  /** Its files binding, approved by the admin, for a catalog key of its own. */
+  files?: true;
+  input?: InputMapping;
+  /** The name its address takes, when not a random one of its own. */
+  address?: string;
+}
+
+/**
+ * `builder`'s workflow with an email trigger of theirs on it, made over
+ * `/rpc`, granted `start` by an admin: the trigger as its owner sees it,
+ * and the address it receives at.
+ */
+export const emailTriggerFor = async (
+  builder: Person,
+  {
+    definition = definitionOf,
+    modules,
+    files,
+    input = mapping,
+    address,
+  }: Starting = {}
+) => {
+  const by = await admin();
+  const { id, name } = await builder.api.workflowResources.create(
+    `intake-${unique()}`
+  );
+  await builder.api.workflowResources.publish(id, {
+    definition: definition(name),
+    basedOn: null,
+    ...(modules === undefined ? {} : { modules }),
+  });
+  if (files === true) {
+    await approveWorkflowBinding(env, by, id, {
+      alias: "files",
+      target: { kind: "files" },
+      reviewed: { version: 1 },
+    });
+  }
+  const trigger = await builder.api.workflowResources.triggers.create({
+    kind: "email",
+    workflowId: id,
+    version: 1,
+    config: { input, ...(address === undefined ? {} : { address }) },
+  });
+  const start = await granted(by, {
+    subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
+    object: {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse(id),
+    },
+    actions: ["start"],
+  });
+  return {
+    builder,
+    admin: by,
+    workflow: id,
+    name,
+    trigger,
+    start,
+    address: `${trigger.address ?? ""}@${own}`,
+  };
+};
+
+/** The runs trigger `trigger` started, oldest first. */
+export const runsOf = async (trigger: string) => {
+  const rows = await env.DB.prepare(
+    "SELECT run.id, run.depth, run.root_run_id AS root, receipt.idempotency_key AS key, receipt.principal_id AS principal, receipt.input FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at, run.depth"
+  )
+    .bind(trigger)
+    .all<{
+      id: string;
+      depth: number;
+      root: string | null;
+      key: string;
+      principal: string;
+      input: string | null;
+    }>();
+  return rows.results;
+};
+
+/** A run's input, as its receipt keeps it. */
+export const inputOf = (input: string | null): unknown =>
+  JSON.parse(input ?? "null");
+
+/** What a message trigger's run takes of the message (`messageTriggerFor`). */
+const messageFields = {
+  id: { type: "string" },
+  stored: stringOrNull,
+  from: { type: "string" },
+  to: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: { name: { type: "string" }, address: { type: "string" } },
+      required: ["name", "address"],
+      additionalProperties: false,
+    },
+  },
+  subject: { type: "string" },
+  text: { type: "string" },
+  truncated: { type: "boolean" },
+  attachments: { type: "array", items: attachment },
+};
+
+/** A workflow taking what `messageFields` says of a message. */
+const messageDefinitionOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: {
+      schema: {
+        format: "json",
+        document: {
+          type: "object",
+          properties: messageFields,
+          required: Object.keys(messageFields),
+          additionalProperties: false,
+        },
+      },
+    },
+    output: {
+      schema: {
+        format: "json",
+        document: {
+          type: "object",
+          properties: { subject: { type: "string" } },
+          required: ["subject"],
+          additionalProperties: false,
+        },
+      },
+    },
+    do: [{ finish: { set: { subject: "${ $workflow.input.subject }" } } }],
+  });
+
+/**
+ * `builder`'s email trigger at a name of its own made of `prefix`, whose
+ * runs take the message as `messageFields` says: its name, and its ID.
+ */
+export const messageTriggerFor = async (builder: Person, prefix: string) => {
+  const name = `${prefix}-${unique()}`;
+  const { trigger } = await emailTriggerFor(builder, {
+    definition: messageDefinitionOf,
+    input: {
+      fields: Object.fromEntries(
+        Object.keys(messageFields).map((field) => [
+          field,
+          field === "from" ? "/from/address" : `/${field}`,
+        ])
+      ),
+      defaults: {},
+    },
+    address: name,
+  });
+  return { name, id: trigger.id };
+};
+
+/**
+ * The last character of `text`, whole: a character UTF-16 splits in two
+ * (an emoji) is both its halves.
+ */
+const lastCharacter = (text: string): string => {
+  const last = text.codePointAt(text.length - 1) ?? 0;
+  const split = last >= 0xdc_00 && last <= 0xdf_ff && text.length > 1;
+  return text.slice(text.length - (split ? 2 : 1));
+};
+
+const messageSchema = z.object({
+  id: z.string(),
+  stored: z.string().nullable(),
+  from: z.string(),
+  to: z.array(z.unknown()),
+  subject: z.string(),
+  text: z.string(),
+  truncated: z.boolean(),
+  attachments: z.array(
+    z.object({ filename: z.string().nullable(), size: z.number() })
+  ),
+});
+
+/**
+ * What each run trigger `id` started took of its message, oldest first:
+ * as `messageFields` says, with its last character, its attachments as
+ * `name:size`, and how large it is as JSON.
+ */
+export const messagesOf = async (id: string) => {
+  const runs = await runsOf(id);
+  return runs.map(({ input }) => {
+    const message = messageSchema.parse(inputOf(input));
+    return {
+      ...message,
+      to: message.to.length,
+      last: lastCharacter(message.text),
+      attachments: message.attachments.map(
+        ({ filename, size }) => `${filename ?? ""}:${String(size)}`
+      ),
+      size: JSON.stringify(message).length,
+    };
+  });
+};

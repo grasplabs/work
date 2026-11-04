@@ -10,8 +10,8 @@ import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/wor
 
 /**
  * Where a workflow stands, as the board sorts it, the most pressing
- * first: it needs attention (runs failed lately, or its schedule
- * stopped), a run waits on a person, it ran, or it hasn't run yet.
+ * first: it needs attention (runs failed lately), a run waits on a
+ * person, it ran, or it hasn't run yet.
  */
 export const workflowStates = [
   "attention",
@@ -24,7 +24,7 @@ export type WorkflowState = (typeof workflowStates)[number];
 
 /** Where a workflow stands: the first of {@link workflowStates} that holds for it. */
 export const stateOf = (workflow: WorkflowSummary): WorkflowState => {
-  if (workflow.failed > 0 || workflow.scheduleStopped) {
+  if (workflow.failed > 0) {
     return "attention";
   }
   if (workflow.waiting > 0) {

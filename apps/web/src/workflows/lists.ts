@@ -6,11 +6,9 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 // (workflows-table.tsx): at work and on the way, and those that need a
 // person now; and the business processes they serve, to filter by.
 
-/** Whether a workflow needs a person now: runs wait for a decision, failed lately, or its schedule stopped. */
+/** Whether a workflow needs a person now: runs wait for a decision, or failed lately. */
 export const needsAttention = (workflow: WorkflowSummary): boolean =>
-  workflow.waiting > 0 ||
-  workflow.failed > 0 ||
-  (workflow.type === "app" && workflow.scheduleStopped);
+  workflow.waiting > 0 || workflow.failed > 0;
 
 /** A workflow's name, as the lists show it: an App's ID, or an independent one's name. */
 export const workflowName = (

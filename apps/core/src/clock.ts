@@ -55,7 +55,6 @@ import { sweepRunDetails } from "./workflows/retention.ts";
 import { sweepRunFiles } from "./workflows/run-files.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueScheduleTriggers } from "./workflows/schedule-triggers.ts";
-import { startDueSchedules } from "./workflows/triggers.ts";
 import { repairWakes } from "./workflows/wakes.ts";
 
 // The client's clock for core (spec 43.5, @grasp-os/workerflow/clock):
@@ -134,11 +133,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "platform.updates",
     period: "minute",
     run: recordPlatformUpdate,
-  },
-  {
-    name: "workflows.schedules",
-    period: "minute",
-    run: startDueSchedules,
   },
   // Independent schedule triggers' due occurrences
   // (src/workflows/schedule-triggers.ts).

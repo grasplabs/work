@@ -30,9 +30,7 @@ import {
   inArray,
   isNotNull,
   isNull,
-  like,
   lt,
-  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -55,7 +53,6 @@ import {
 import { currentMembership } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
 import { deliverRunCapturesSoon, runCaptured } from "../brain-capture.ts";
-import type { workflowTriggers } from "../db/core/schema.ts";
 import {
   apps,
   members,
@@ -68,8 +65,7 @@ import type { RunWait } from "./admission.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { ownerOf } from "./owners.ts";
-import { accountClaimed, admitChild, lineageCreated } from "./quotas.ts";
-import type { ChildPlace } from "./quotas.ts";
+import { lineageCreated } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
 
@@ -302,11 +298,8 @@ export interface RunRequest {
   app: AppId;
   workflow: WorkflowId;
   input: Json | undefined;
-  /**
-   * The person who started it, whom it acts for; null for a trigger, and
-   * the run acts for the App's owner (decision Q10).
-   */
-  startedBy: string | null;
+  /** The person who started it, whom it acts for. */
+  startedBy: string;
   /** Who started it, for the audit log. */
   actor: AuditActor;
   /**
@@ -321,24 +314,6 @@ export interface RunRequest {
    * (its status changed, their role went) starts nothing.
    */
   starter?: Person;
-  /**
-   * The trigger that started it, with the key of what it started it for
-   * (triggers.ts): while a run has that key, it is the run, and no other
-   * starts. `version` is the App version that registered it: it starts a
-   * run only of that version, while it is current.
-   */
-  trigger?: {
-    type: (typeof workflowTriggers.$inferSelect)["type"];
-    key: string;
-    version: number;
-  };
-  /**
-   * The run that started it, for a run another run starts: core's own,
-   * from the engine's record of that run, never from anything an App or a
-   * run's code passes in. The new run joins its lineage (`root_run_id`),
-   * whose model calls and spend are counted together.
-   */
-  parent?: RunId;
 }
 
 /** What core sends the engine to start `row`'s run (engine.ts). */
@@ -557,95 +532,6 @@ const engineHas = async (env: Env, run: string): Promise<boolean | null> => {
   }
 };
 
-/** Where a root sits: its own lineage's root, at its top. */
-const rootPlace = { rootRunId: null, depth: 0 } as const;
-
-/**
- * Where a run started by `parent` sits: in the lineage of the parent's own
- * root (or the parent itself, when it is a root), one deeper than it. Read
- * from the parent's row, so a lineage holds however deep its runs nest,
- * and admitted against the lineage's quotas (quotas.ts, `admitChild`),
- * which takes one of its descendant runs, once for a `trigger`'s key
- * however often its delivery is admitted. A run started by no other is a
- * root (`rootPlace`).
- */
-const placeUnder = async (
-  env: Env,
-  parent: RunId | undefined,
-  trigger: RunRequest["trigger"]
-): Promise<ChildPlace | typeof rootPlace> => {
-  if (parent === undefined) {
-    return rootPlace;
-  }
-  const row = await findRun(env, parent);
-  if (row === undefined) {
-    throw new Error(`No run ${parent} to start a run under`);
-  }
-  return await admitChild(env, row, trigger?.key);
-};
-
-/**
- * The statements that place a run whose row is written: a root's lineage,
- * its age counting from now (nothing for a trigger's key a run has); a
- * run started under another joins its parent's, charged to its account
- * there (quotas.ts, `accountClaimed`).
- */
-const placed = (
-  db: DrizzleD1Database,
-  row: { id: string; appId: string; createdAt: Date },
-  rootRunId: string | null,
-  parent: RunId | undefined
-) =>
-  rootRunId === null
-    ? [lineageCreated(db, row.id)]
-    : accountClaimed(db, row, rootRunId, parent ?? rootRunId);
-
-/**
- * The run a trigger's key `key` already started, its start sent again
- * while the engine is still to confirm it: the engine takes it as the
- * start it has, so a key delivered twice is one run.
- */
-const deliveredBefore = async (
-  env: Env,
-  key: string,
-  run: string
-): Promise<WorkflowRun> => {
-  const started = await drizzle(env.DB)
-    .select()
-    .from(workflowRuns)
-    .where(eq(workflowRuns.triggerKey, key))
-    .get();
-  if (!started) {
-    throw new Error(`No run has the trigger key of run ${run}`);
-  }
-  await resendStart(env, started);
-  return toRun(env, started);
-};
-
-/**
- * The run a trigger's key already started, for a delivery tried again of
- * a run started under another (mail-stamps.ts): found before the start
- * is admitted, so it takes no other slot of the lineage, which a delivery
- * tried again until it fits could use up. None for any other start.
- */
-const deliveredUnder = async (
-  env: Env,
-  trigger: RunRequest["trigger"],
-  parent: RunId | undefined
-): Promise<WorkflowRun | undefined> => {
-  if (trigger === undefined || parent === undefined) {
-    return undefined;
-  }
-  const before = await drizzle(env.DB)
-    .select({ id: workflowRuns.id })
-    .from(workflowRuns)
-    .where(eq(workflowRuns.triggerKey, trigger.key))
-    .get();
-  return before === undefined
-    ? undefined
-    : await deliveredBefore(env, trigger.key, before.id);
-};
-
 /**
  * What a start whose call to the engine failed with `error` leaves
  * (`startRun`): returns when the engine has the run after all, and throws
@@ -684,21 +570,12 @@ const startFailed = async (
 
 /**
  * The version of `app` a run would start on: its current one. Refused for
- * an archived App (`app.archived`); for a trigger, unless the App is
- * published (`workflow.trigger_gone`: its builders start a draft's runs
- * by hand, app-status.ts); and while no version is current.
+ * an archived App (`app.archived`), and while no version is current.
  */
-const versionToStart = async (
-  env: Env,
-  app: AppId,
-  trigger: RunRequest["trigger"]
-): Promise<number> => {
+const versionToStart = async (env: Env, app: AppId): Promise<number> => {
   const { currentVersion, status } = await appRecord(env, app);
   if (status === "archived") {
     throw appErrors.create("app.archived");
-  }
-  if (trigger !== undefined && status !== "published") {
-    throw workflowErrors.create("workflow.trigger_gone");
   }
   if (currentVersion === null) {
     throw appErrors.create("app.not_running");
@@ -708,15 +585,15 @@ const versionToStart = async (
 
 /**
  * Refuses `row`'s start, its row written, if its App's status refuses it
- * now, as `versionToStart` would: an archive (or, for a trigger, an
- * unpublish) that committed since that read is caught here, and ends the
- * run as one that never started; an archive committing after this read
- * finds the row and cancels it (app-status.ts).
+ * now, as `versionToStart` would: an archive that committed since that
+ * read is caught here, and ends the run as one that never started; an
+ * archive committing after this read finds the row and cancels it
+ * (app-status.ts).
  */
 const requireStillStartable = async (
   env: Env,
   row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
-  { trigger, starter }: Pick<RunRequest, "trigger" | "starter">
+  { starter }: Pick<RunRequest, "starter">
 ): Promise<void> => {
   const app = appIdSchema.parse(row.appId);
   if (starter !== undefined) {
@@ -734,10 +611,6 @@ const requireStillStartable = async (
     await failStart(env, row, "app_archived");
     throw appErrors.create("app.archived");
   }
-  if (trigger !== undefined && status !== "published") {
-    await failStart(env, row, "app_unpublished");
-    throw workflowErrors.create("workflow.trigger_gone");
-  }
 };
 
 /**
@@ -748,56 +621,24 @@ const requireStillStartable = async (
  * `starting` until the engine's first notification; a start that failed,
  * and that the engine then says it has no record of, is marked failed,
  * audited as a failed run (one it can't say of stays pending, for the
- * repair). A trigger's key
- * already taken returns the run that took it, whatever became of it
- * since, its start sent again while the engine is still to confirm it (a
- * start sent twice is one run); a run whose start failed gives its key up,
- * so the delivery tried again starts it anew. A trigger of a
- * version that is no longer current starts nothing
- * (`workflow.trigger_gone`): the version that replaced it may not declare
- * it. The run is pinned to the version checked, so at worst a trigger
- * starts its own version's run as that version is being replaced, as a
- * person starting it by hand then would. Input over
- * {@link maxInputBytes} is refused (`workflow.invalid`), whoever starts it.
- * A run started under another (`parent`) is admitted against its
- * lineage's quotas first (quotas.ts, `admitChild`), and refused past them
- * (`workflow.lineage_limit`).
+ * repair). The run is pinned to the version checked. Input over
+ * {@link maxInputBytes} is refused (`workflow.invalid`).
  */
 export const startRun = async (
   env: Env,
-  {
-    app,
-    workflow,
-    input,
-    startedBy,
-    actor,
-    via,
-    trigger,
-    parent,
-    starter,
-  }: RunRequest
+  { app, workflow, input, startedBy, actor, via, starter }: RunRequest
 ): Promise<WorkflowRun> => {
   if (input !== undefined && jsonBytes(input) > maxInputBytes) {
     throw invalid();
   }
   const db = drizzle(env.DB);
-  const version = await versionToStart(env, app, trigger);
-  if (trigger && trigger.version !== version) {
-    throw workflowErrors.create("workflow.trigger_gone");
-  }
+  const version = await versionToStart(env, app);
   // As the version's row keeps its workflows: none since Apps hold no
   // workflows of their own (app-no-workflows.ts).
   const { workflows } = await findVersion(env, app, version);
   if (!workflows.includes(workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
   }
-  const again = await deliveredUnder(env, trigger, parent);
-  if (again !== undefined) {
-    return again;
-  }
-  // Admitted last, once nothing else refuses the start: the slot it takes
-  // in its lineage is never given back.
-  const { rootRunId, depth } = await placeUnder(env, parent, trigger);
   const row = {
     id: crypto.randomUUID(),
     appId: app,
@@ -808,39 +649,24 @@ export const startRun = async (
     createdAt: new Date(),
     endedAt: null,
     failure: null,
-    triggerKey: trigger?.key ?? null,
+    triggerKey: null,
     detailsRemovedAt: null,
-    rootRunId,
-    depth,
+    rootRunId: null,
+    depth: 0,
     pendingStart: input === undefined ? {} : { input },
   } satisfies RunFields & typeof workflowRuns.$inferInsert;
-  // Nothing is written, audit event included, for a key a run has.
-  const [inserted] = await auditedBatch(env, db, [
-    db
-      .insert(workflowRuns)
-      .values(row)
-      .onConflictDoNothing({ target: workflowRuns.triggerKey })
-      .returning({ id: workflowRuns.id }),
+  await auditedBatch(env, db, [
+    db.insert(workflowRuns).values(row),
     outboxedIfChanged(
       db,
       runEntry(actor, "workflow.run.started", row, {
-        startedBy: startedBy === null ? "trigger" : "person",
+        startedBy: "person",
         ...(via === undefined ? {} : { via }),
-        // The key names what started it: a time, a hash, an ID; never
-        // what a message or event says.
-        ...(trigger ? { trigger: trigger.type, key: trigger.key } : {}),
-        // The lineage it joins, for a run another run started.
-        ...(parent === undefined || rootRunId === null
-          ? {}
-          : { parent, root: rootRunId }),
       })
     ),
-    ...placed(db, row, rootRunId, parent),
+    lineageCreated(db, row.id),
   ]);
-  if (inserted.length === 0) {
-    return await deliveredBefore(env, row.triggerKey ?? "", row.id);
-  }
-  await requireStillStartable(env, row, { trigger, starter });
+  await requireStillStartable(env, row, { starter });
   try {
     await sendStart(env, row, input);
   } catch (error) {
@@ -1648,62 +1474,3 @@ export const recordWaiting = async (
  * hour, each counted on its own.
  */
 export const triggeredRunsPerHour = 60;
-
-const hourMs = 60 * 60 * 1000;
-
-/**
- * Where a message or event stands for a workflow it would start a run of:
- * `capped` while the workflow is at its hourly limit, `started` when the
- * workflow has its run already, its start confirmed, and `new` otherwise.
- */
-export type DeliveryRoom = "capped" | "started" | "new";
-
-/**
- * Where the message or event whose run has trigger key `key` stands for
- * App `app`'s workflow `workflow`. It is `capped` when triggers of `type`
- * started `triggeredRunsPerHour` of the workflow's runs in the past hour
- * (counted on its index by App, workflow and time), and none of them is
- * this one's. A workflow that has this one's run already is never capped
- * for it, so a delivery tried again because another workflow was capped
- * isn't refused by the run it started itself: it is `started` once the
- * engine has confirmed that run's start, and `new` while it hasn't, as the
- * delivery goes on to send the start again (`startRun`). Checked before the
- * starts, not with them, so what's delivered at the same moment can go a
- * few over.
- */
-export const deliveryRoom = async (
-  env: Env,
-  app: string,
-  workflow: string,
-  key: string,
-  type: "email" | "event"
-): Promise<DeliveryRoom> => {
-  const recent = and(
-    gte(workflowRuns.createdAt, new Date(Date.now() - hourMs)),
-    like(workflowRuns.triggerKey, `${type}:%`)
-  );
-  const mine = eq(workflowRuns.triggerKey, key);
-  const past = and(mine, isNull(workflowRuns.pendingStart));
-  const counted = await drizzle(env.DB)
-    .select({
-      runs: sql<number | null>`sum(case when ${recent} then 1 else 0 end)`,
-      delivered: sql<number | null>`max(case when ${mine} then 1 else 0 end)`,
-      started: sql<number | null>`max(case when ${past} then 1 else 0 end)`,
-    })
-    .from(workflowRuns)
-    .where(
-      and(
-        eq(workflowRuns.appId, app),
-        eq(workflowRuns.workflowId, workflow),
-        or(recent, mine)
-      )
-    )
-    .get();
-  if (counted?.started === 1) {
-    return "started";
-  }
-  return counted?.delivered !== 1 &&
-    (counted?.runs ?? 0) >= triggeredRunsPerHour
-    ? "capped"
-    : "new";
-};

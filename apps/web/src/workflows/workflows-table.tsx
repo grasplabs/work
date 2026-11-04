@@ -4,7 +4,6 @@ import type {
   RunFilterStatus,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -307,11 +306,6 @@ const WorkflowRow = ({
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 items-center gap-2">
               <WorkflowLink workflow={workflow} />
-              {workflow.type === "app" && workflow.scheduleStopped ? (
-                <Badge variant="attention">
-                  <Trans>Schedule stopped</Trans>
-                </Badge>
-              ) : null}
             </span>
             {/* Narrow, the engine's cell is hidden: its name and version here. */}
             {withEngine && place !== null ? (

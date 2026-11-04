@@ -4,17 +4,15 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   addedSince,
   deliver,
-  intake,
   invoiceMail,
-  readByRun,
-  readByRuns,
-  runsOf,
+  messagesOf,
+  messageTriggerFor,
+  own,
   storedObjects,
 } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import { appWith } from "./workflow-apps.ts";
 
 // Email triggers (email-triggers.ts): what of a message reaches the run it
 // starts, and which messages are bounced as unreadable or too large.
@@ -23,7 +21,25 @@ const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
-/** An HTML-only message to `unclosed@`, with `subject` and `body`. */
+/** A builder's email trigger at a name made of `prefix`, and its address. */
+const triggerAt = async (prefix: string) => {
+  const { name, id } = await messageTriggerFor(
+    await personApi("builder"),
+    prefix
+  );
+  return { id, to: `${name}@${own}` };
+};
+
+/** What the only run trigger `id` started took of its message. */
+const messageOf = async (id: string) => {
+  const [message] = await messagesOf(id);
+  if (message === undefined) {
+    throw new Error(`Trigger ${id} started no run`);
+  }
+  return message;
+};
+
+/** An HTML-only message, with `subject` and `body`. */
 const unclosed = (subject: string, body: string): string =>
   [
     "From: Ben <ben@acme.test>",
@@ -81,14 +97,13 @@ describe("email triggers", () => {
   afterEach(endLiveRuns);
 
   it("keep nothing of a message without attachments, or with inline ones only", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("unkept"));
+    const { id, to } = await triggerAt("unkept");
     const before = await storedObjects();
 
-    await deliver("unkept@grasp.test", unclosed("Plain", "<p>No files.</p>"));
-    await deliver("unkept@grasp.test", inlineOnly);
+    await deliver(to, unclosed("Plain", "<p>No files.</p>"));
+    await deliver(to, inlineOnly);
 
-    const read = await readByRuns(builder, app);
+    const read = await messagesOf(id);
     expect(
       read
         .map(({ subject, stored, attachments }) => ({
@@ -105,8 +120,7 @@ describe("email triggers", () => {
   });
 
   it("pass the text of a message that has only HTML", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("html"));
+    const { id, to } = await triggerAt("html");
     const html = [
       "From: Ben <ben@acme.test>",
       "To: html@grasp.test",
@@ -118,30 +132,29 @@ describe("email triggers", () => {
       "",
     ].join("\r\n");
 
-    await deliver("html@grasp.test", html);
+    await deliver(to, html);
 
-    await expect(readByRun(builder, app)).resolves.toMatchObject({
+    await expect(messageOf(id)).resolves.toMatchObject({
       text: "Pay INV-7 & thanks\nBen",
     });
   });
 
   it("read the text of HTML that never closes its tags in time that grows with its length alone", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("unclosed"));
+    const { id, to } = await triggerAt("unclosed");
     // Scripts and tags opened and never closed, over 2 MB each: a scan
     // from each to the end, as a lazy pattern does, takes over a minute
     // here; one pass, a few milliseconds.
     const startedAt = performance.now();
     await deliver(
-      "unclosed@grasp.test",
+      to,
       unclosed("scripts", `<p>Pay INV-7</p>${"<script".repeat(300_000)}`)
     );
     await deliver(
-      "unclosed@grasp.test",
+      to,
       unclosed("tags", `<p>Pay INV-7</p>${"<a <b".repeat(500_000)}`)
     );
     const took = performance.now() - startedAt;
-    const reads = await readByRuns(builder, app);
+    const reads = await messagesOf(id);
 
     expect(took).toBeLessThan(5000);
     expect(
@@ -157,8 +170,7 @@ describe("email triggers", () => {
   });
 
   it("keep a < that starts no tag as text", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("math"));
+    const { id, to } = await triggerAt("math");
     const html = [
       "From: Ben <ben@acme.test>",
       "To: math@grasp.test",
@@ -170,17 +182,15 @@ describe("email triggers", () => {
       "",
     ].join("\r\n");
 
-    await deliver("math@grasp.test", html);
+    await deliver(to, html);
 
-    await expect(readByRun(builder, app)).resolves.toMatchObject({
+    await expect(messageOf(id)).resolves.toMatchObject({
       text: "5 < 10 and 10 > 5\nx <3 y",
     });
   });
 
   it("cut text of characters UTF-16 splits in two on a character's edge, to fit", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("emoji"));
-    const to = "emoji@grasp.test";
+    const { id, to } = await triggerAt("emoji");
     // Quotes JSON escapes and characters UTF-16 splits in two, shifted by
     // up to five: whatever the size of the rest of the input, at least one
     // of these first cuts falls between the halves of a character, and
@@ -194,7 +204,7 @@ describe("email triggers", () => {
       // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
       await deliver(to, invoiceMail({ to, subject: `shift ${shift}`, text }));
     }
-    const reads = await readByRuns(builder, app);
+    const reads = await messagesOf(id);
 
     expect(
       reads.map(({ last, truncated, size }) => ({
@@ -208,25 +218,23 @@ describe("email triggers", () => {
   });
 
   it("bounce a message that can't be read, such as one nested too deep", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("nested"));
+    const { id, to } = await triggerAt("nested");
 
-    const delivery = await deliver("nested@grasp.test", nestedMail(300));
+    const delivery = await deliver(to, nestedMail(300));
 
     expect(delivery.rejected).toBe("The message can't be read.");
-    await expect(runsOf(builder, app)).resolves.toHaveLength(0);
+    await expect(messagesOf(id)).resolves.toHaveLength(0);
   });
 
   it("fit a hostile message into a run's input", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("hostile"));
+    const trigger = await triggerAt("hostile");
     const to = Array.from(
       { length: 500 },
       (_, index) => `"${"N".repeat(300)}" <r${index}@acme.test>`
     ).join(", ");
 
     await deliver(
-      "hostile@grasp.test",
+      trigger.to,
       invoiceMail({
         to,
         subject: "S".repeat(5000),
@@ -235,7 +243,7 @@ describe("email triggers", () => {
         text: '"\\'.repeat(200_000),
       })
     );
-    const read = await readByRun(builder, app);
+    const read = await messageOf(trigger.id);
 
     expect({
       to: read.to,
@@ -253,13 +261,12 @@ describe("email triggers", () => {
   });
 
   it("bounce a message over 10 MiB, whatever size it says it is", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, intake("large"));
+    const { id, to } = await triggerAt("large");
     const large = `${invoiceMail()}${"x".repeat(10 * 1024 * 1024)}`;
 
-    const delivery = await deliver("large@grasp.test", large, { rawSize: 1 });
+    const delivery = await deliver(to, large, { rawSize: 1 });
 
     expect(delivery.rejected).toBe("The message is too large.");
-    await expect(runsOf(builder, app)).resolves.toHaveLength(0);
+    await expect(messagesOf(id)).resolves.toHaveLength(0);
   });
 });
