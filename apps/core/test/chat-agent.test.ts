@@ -567,6 +567,32 @@ describe("what a chat can no longer read", () => {
     expect(request).toContain("Find it");
   });
 
+  it("stops a turn whose question's recall is revoked mid-turn, and the next request carries only the person's words", async () => {
+    const chat = await openChat();
+    await chat.ask(
+      questionContent("Find it", [], {
+        runId: "recall-1",
+        text: "Returned:\nthe secret plan",
+      }),
+      [
+        chat.reply(call("executeCode", { code: returnsTwo })),
+        (request) => {
+          chat.revoked.add("recall-1");
+          chat.requests.push(structuredClone(request.messages));
+          return call("executeCode", { code: returnsTwo });
+        },
+        chat.reply(says("Stopped")),
+      ]
+    );
+    // The request after the revocation: the question's own words only.
+    const sent = JSON.stringify(chat.requests.at(-1));
+    expect({
+      stopped: chat.stopped.length,
+      secret: sent.includes("secret"),
+      words: sent.includes("Find it"),
+    }).toStrictEqual({ stopped: 1, secret: false, words: true });
+  });
+
   it("stops a turn whose own result was revoked, and the request carries none of it", async () => {
     const chat = await openChat();
     await chat.ask("Read", [

@@ -456,11 +456,19 @@ const guarded = async (
   } catch (error) {
     stop = unreadable(error);
   }
-  const asked = messages.findLast(({ role }) => role === "user");
+  // The latest sections only, and the person's own words alone: the last
+  // user message may carry a recall that was withheld meanwhile, which no
+  // request sends, whether or not `stop` takes.
+  const kept = latestSections(messages);
+  const asked = kept.findLast(
+    (message): message is UserMessage => message.role === "user"
+  );
   return {
     messages: [
-      ...messages.filter(({ role }) => role === "system"),
-      ...(asked === undefined ? [] : [asked]),
+      ...kept.filter(({ role }) => role === "system"),
+      ...(asked === undefined
+        ? []
+        : [{ ...asked, content: questionText(asked) }]),
     ],
     stop,
   };
