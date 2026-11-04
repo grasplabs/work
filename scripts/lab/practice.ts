@@ -23,8 +23,9 @@ import {
 import type { InterviewLocale, Roster } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
+import { localAdmin } from "../../apps/core/test/sign-in-config.ts";
 import { adminCommand, adminSnapshot } from "../seed/admin-command.ts";
-import { origin } from "../seed/local.ts";
+import { origin, sessionOf } from "../seed/local.ts";
 import { ask, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
 import { eventKinds } from "./events.ts";
@@ -317,7 +318,15 @@ export const makePractice = async (
       ? `Making a hidden practice company (${id}), in ${locale}`
       : `Making ${key.company.name} (practice ${id}), in ${locale}`
   );
-  await api.organization.update({ name: key.company.name.slice(0, 80) });
+  // The company's name is the admin's to change: a staff sign-in reaches the onboarding alone.
+  const admin = await sessionOf(localAdmin);
+  try {
+    await admin.api.organization.update({
+      name: key.company.name.slice(0, 80),
+    });
+  } finally {
+    admin.close();
+  }
   await api.onboarding.confirmRoster(roster);
   await api.onboarding.savePlan({
     start: new Date().toISOString().slice(0, 10),

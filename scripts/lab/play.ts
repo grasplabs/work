@@ -170,6 +170,8 @@ const opened = async (
   if (issued === undefined) {
     throw new Error("The link gave this device no key.");
   }
+  // They read what it is for and agree to take part, as their page asks; agreeing again changes nothing.
+  await link.participate(issued);
   return { key: issued, version: session.version };
 };
 

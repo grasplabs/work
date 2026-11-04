@@ -41,6 +41,8 @@ const step = (text: string) => ({
 const scriptedLink = (turns: StephenTurn[]) => {
   const saved: InterviewProgress[] = [];
   const asked: Asked[] = [];
+  /** What the link was asked, in order: `participate:<key>`, `save` and `turn`. */
+  const calls: string[] = [];
   const link: Link = {
     open: async () =>
       await Promise.resolve({
@@ -51,11 +53,17 @@ const scriptedLink = (turns: StephenTurn[]) => {
         progress: null,
         version: 0,
       }),
+    participate: async (key) => {
+      calls.push(`participate:${key}`);
+      await Promise.resolve();
+    },
     save: async (_key, version, progress) => {
+      calls.push("save");
       saved.push(progress);
       return await Promise.resolve(version + 1);
     },
     turn: async (request) => {
+      calls.push("turn");
       asked.push(request);
       const next = turns.shift();
       if (next === undefined) {
@@ -64,7 +72,7 @@ const scriptedLink = (turns: StephenTurn[]) => {
       return await Promise.resolve(next);
     },
   };
-  return { link, saved, asked };
+  return { link, saved, asked, calls };
 };
 
 /** Someone who says `answers` in order, and `readBack` to each part read back. */
@@ -118,6 +126,30 @@ describe("an interview played on a link", () => {
         ["You upload it to Exact.", true],
       ],
     });
+  });
+
+  it("agrees to take part with the key the link gave, before anything is said or kept", async () => {
+    const { link, calls } = scriptedLink([
+      stephen({ say: "I'll read back what I wrote down.", wants: "readback" }),
+    ]);
+    await playInterview(link, scriptedPlayer([], ["Yes."]), { locale: "en" });
+
+    expect(calls[0]).toBe("participate:device-key");
+  });
+
+  it("says nothing and keeps nothing when taking part is refused", async () => {
+    const { link, calls } = scriptedLink([stephen({ say: "Hello." })]);
+    const refused: Link = {
+      ...link,
+      participate: async () => {
+        await Promise.reject(new Error("interview.withdrawn"));
+      },
+    };
+
+    await expect(
+      playInterview(refused, scriptedPlayer([], []), { locale: "en" })
+    ).rejects.toThrow("interview.withdrawn");
+    expect(calls).toStrictEqual([]);
   });
 
   it("puts a line right in the read-back, through a turn of Stephen's", async () => {
