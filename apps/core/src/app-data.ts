@@ -858,64 +858,88 @@ const exportStream = (
       await keep(reached);
     }
   };
+  // A cancel can land while a pull is under way, its page being read: no
+  // pull starts once the client let go, and the cancel waits for the one
+  // under way to settle before keeping, so a page it read is counted
+  // rather than read after the record was kept.
+  let cancelled = false;
+  let pulling: Promise<void> = Promise.resolve();
+  const step = async (
+    controller: ReadableStreamDefaultController<Uint8Array>
+  ): Promise<void> => {
+    if (cancelled) {
+      return;
+    }
+    try {
+      // Every page of the version its header named, or none: one made
+      // current meanwhile stops it rather than mixing two.
+      const now = await recheck();
+      if (now.version !== open.version) {
+        throw appDataErrors.create("app_data.version_changed");
+      }
+      // Their teams too: a page is read under the teams they are in
+      // now, and a team lost or joined meanwhile stops the export
+      // rather than go on through rows chosen under the old ones.
+      requireSameTeams(open, now, table);
+      if (!started) {
+        started = true;
+        controller.enqueue(
+          encoder.encode(csvLine([idColumn, ...fields].map(quotedText)))
+        );
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+      const page = await readPage(now, table, queryMaxResults, cursor, reached);
+      if (cancelled) {
+        // Let go of meanwhile: the cancel keeps what this page read,
+        // once this settles, and nothing more is sent.
+        return;
+      }
+      count += page.records.length;
+      if (count > appDataExportMaxRecords) {
+        throw appDataErrors.create("app_data.export_too_large");
+      }
+      const lines = page.records.map((record) =>
+        csvLine([
+          quotedText(record.id),
+          ...fields.map((field) =>
+            fieldCell(
+              declared.fields[field],
+              Object.hasOwn(record.fields, field)
+                ? record.fields[field]
+                : undefined
+            )
+          ),
+        ])
+      );
+      if (lines.length > 0) {
+        controller.enqueue(encoder.encode(lines.join("")));
+      }
+      ({ cursor } = page);
+      if (cursor === null) {
+        await end();
+        controller.close();
+      }
+    } catch (error) {
+      if (cancelled) {
+        return;
+      }
+      await end();
+      controller.error(error);
+    }
+  };
   return new ReadableStream<Uint8Array>(
     {
-      cancel: end,
+      cancel: async () => {
+        cancelled = true;
+        await pulling;
+        await end();
+      },
       pull: async (controller) => {
-        try {
-          // Every page of the version its header named, or none: one made
-          // current meanwhile stops it rather than mixing two.
-          const now = await recheck();
-          if (now.version !== open.version) {
-            throw appDataErrors.create("app_data.version_changed");
-          }
-          // Their teams too: a page is read under the teams they are in
-          // now, and a team lost or joined meanwhile stops the export
-          // rather than go on through rows chosen under the old ones.
-          requireSameTeams(open, now, table);
-          if (!started) {
-            started = true;
-            controller.enqueue(
-              encoder.encode(csvLine([idColumn, ...fields].map(quotedText)))
-            );
-            return;
-          }
-          const page = await readPage(
-            now,
-            table,
-            queryMaxResults,
-            cursor,
-            reached
-          );
-          count += page.records.length;
-          if (count > appDataExportMaxRecords) {
-            throw appDataErrors.create("app_data.export_too_large");
-          }
-          const lines = page.records.map((record) =>
-            csvLine([
-              quotedText(record.id),
-              ...fields.map((field) =>
-                fieldCell(
-                  declared.fields[field],
-                  Object.hasOwn(record.fields, field)
-                    ? record.fields[field]
-                    : undefined
-                )
-              ),
-            ])
-          );
-          if (lines.length > 0) {
-            controller.enqueue(encoder.encode(lines.join("")));
-          }
-          ({ cursor } = page);
-          if (cursor === null) {
-            await end();
-            controller.close();
-          }
-        } catch (error) {
-          await end();
-          controller.error(error);
-        }
+        pulling = step(controller);
+        await pulling;
       },
     },
     // Nothing is read ahead: a page is read only when the client asks.

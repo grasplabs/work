@@ -231,6 +231,108 @@ const payroll = async (payrollFixture: Payroll, count: number) => {
   }
 };
 
+/** Imports `count` salaries through the data page. */
+const importSalaries = async (
+  { builder, app, version }: Payroll,
+  count: number
+): Promise<void> => {
+  const people = Array.from(
+    { length: count },
+    (_person, at) => `Person ${at},${1000 + at}`
+  );
+  const imported = await builder.api.apps.data.import(app, "salaries", {
+    version,
+    csv: ["person,amount", ...people].join("\n"),
+    mapping: { person: "person", amount: "amount" },
+  });
+  expect(imported).toStrictEqual({ ok: true, inserted: count });
+};
+
+/**
+ * The App's data over `/rpc` for its builder, on `on`: read here a pull at
+ * a time, as a client takes a page in, where a connection's transport may
+ * read ahead of the client.
+ */
+const exportRpc = ({ builder }: Payroll, on: Env = env): AppDataRpc => {
+  const headers = new Headers({ cookie: builder.session });
+  return new AppDataRpc(on, async () => {
+    const identity = await identify(env, headers);
+    if (!identity) {
+      throw new Error("Session ended");
+    }
+    return identity;
+  });
+};
+
+/**
+ * `env`, whose stores' reads wait while held: `hold` holds the next ones
+ * and resolves once one waits; `release` lets them go.
+ */
+const heldStoreReads = () => {
+  let gate: Promise<null> | undefined;
+  let open: ((value: null) => void) | undefined;
+  let entered: ((value: null) => void) | undefined;
+  const holding = <Stub extends object>(stub: Stub): Stub =>
+    new Proxy(stub, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property !== "read") {
+          const bound: unknown = value.bind(target);
+          return bound;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          entered?.(null);
+          await gate;
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+  const namespace = <Namespace extends object>(target: Namespace): Namespace =>
+    new Proxy(target, {
+      get: (inner, property) => {
+        const value: unknown = Reflect.get(inner, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "jurisdiction") {
+          return (...args: unknown[]): unknown => {
+            const scoped: unknown = Reflect.apply(value, inner, args);
+            return typeof scoped === "object" && scoped !== null
+              ? namespace(scoped)
+              : scoped;
+          };
+        }
+        if (property === "getByName") {
+          return (...args: unknown[]): unknown => {
+            const stub: unknown = Reflect.apply(value, inner, args);
+            return typeof stub === "object" && stub !== null
+              ? holding(stub)
+              : stub;
+          };
+        }
+        const bound: unknown = value.bind(inner);
+        return bound;
+      },
+    });
+  return {
+    env: { ...env, DATA_STORES: namespace(env.DATA_STORES) },
+    hold: async (): Promise<void> => {
+      const held = Promise.withResolvers<null>();
+      gate = held.promise;
+      open = held.resolve;
+      const waiting = Promise.withResolvers<null>();
+      entered = waiting.resolve;
+      await waiting.promise;
+    },
+    release: () => {
+      open?.(null);
+    },
+  };
+};
+
 describe("reads of a sensitive table", { timeout: 120_000 }, () => {
   it("are recorded once a call, with who read, through which function and how many records", async () => {
     const fixture = await payrollApp();
@@ -329,6 +431,25 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
     });
   });
 
+  it("records no read of a sensitive table whose related records were never looked up", async () => {
+    // `with("salary")` names the salaries, yet a read whose notes name no
+    // salary (none at all, or none that holds one) reads none of them.
+    const fixture = await payrollApp();
+    await payroll(fixture, 1);
+    const after = await logHead();
+
+    const none = await call(fixture, "pay.notes", { related: true });
+    await call(fixture, "pay.note", { text: "No salary" });
+    const unrelated = await call(fixture, "pay.notes", { related: true });
+    const recorded = await recordedOf(fixture.app, after);
+
+    expect({
+      none: valueOf(none),
+      unrelated: valueOf(unrelated),
+      recorded,
+    }).toStrictEqual({ none: 0, unrelated: 1, recorded: [] });
+  });
+
   it("can't be kept off the record by App code failing, or catching what a read failed with", async () => {
     const fixture = await payrollApp();
     await payroll(fixture, 2);
@@ -421,33 +542,10 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
   it("records an export the client lets go of after its first page", async () => {
     const fixture = await payrollApp();
     // More than one export page: one page read, and more to come.
-    const people = Array.from(
-      { length: 150 },
-      (_person, at) => `Person ${at},${1000 + at}`
-    );
-    const imported = await fixture.builder.api.apps.data.import(
-      fixture.app,
-      "salaries",
-      {
-        version: fixture.version,
-        csv: ["person,amount", ...people].join("\n"),
-        mapping: { person: "person", amount: "amount" },
-      }
-    );
-    expect(imported).toStrictEqual({ ok: true, inserted: 150 });
+    await importSalaries(fixture, 150);
     const after = await logHead();
 
-    // Read here a pull at a time, as a client takes a page in: over a
-    // connection the transport may read ahead of the client.
-    const headers = new Headers({ cookie: fixture.builder.session });
-    const rpc = new AppDataRpc(env, async () => {
-      const identity = await identify(env, headers);
-      if (!identity) {
-        throw new Error("Session ended");
-      }
-      return identity;
-    });
-    const stream = await rpc.export(fixture.app, "salaries");
+    const stream = await exportRpc(fixture).export(fixture.app, "salaries");
     const reader = stream.getReader();
     // The header, then the first page.
     await reader.read();
@@ -464,6 +562,41 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
       ]),
     }).toStrictEqual({
       page: 100,
+      recorded: [{ via: "export", table: "salaries", reads: 1, rows: 100 }],
+    });
+  });
+
+  it("records the page a pull is reading when the client lets go", async () => {
+    const fixture = await payrollApp();
+    await importSalaries(fixture, 150);
+    const after = await logHead();
+    const held = heldStoreReads();
+    const stream = await exportRpc(fixture, held.env).export(
+      fixture.app,
+      "salaries"
+    );
+    const reader = stream.getReader();
+    await reader.read();
+
+    // The first page's read held in the store while the client lets go.
+    const entered = held.hold();
+    const pending = reader.read();
+    await entered;
+    const cancelling = reader.cancel();
+    held.release();
+    await cancelling;
+    const ended = await pending;
+
+    expect({
+      ended: ended.done,
+      recorded: await readsOf(fixture.app, after, [
+        "via",
+        "table",
+        "reads",
+        "rows",
+      ]),
+    }).toStrictEqual({
+      ended: true,
       recorded: [{ via: "export", table: "salaries", reads: 1, rows: 100 }],
     });
   });

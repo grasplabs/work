@@ -557,12 +557,12 @@ export const readRecord = (
       ...scoped.params
     )
     .toArray();
+  // Read, found or not; and answered even when its revision conflicts:
+  // the failure says the record is there.
+  sql.answered(table.name, row === undefined ? 0 : 1);
   if (row === undefined) {
     return null;
   }
-  // Answered even when its revision conflicts: the failure says the
-  // record is there.
-  sql.answered(table.name, 1);
   if (
     request.expectedRevision !== null &&
     row.revision !== request.expectedRevision
@@ -802,12 +802,15 @@ const aggregateOf = (
  * as it is read: a count, an aggregate or a group reads through its
  * matches and tells what they hold (an exact value under a narrow filter,
  * a field's distinct values) as much as the records themselves would.
+ * `matches` ran its statement already: the table was read, matching
+ * nothing or not.
  */
 const disclosed = (
   sql: ReadSql,
   table: ReadTable,
   matches: Iterator<Match>
 ): IterableIterator<Match, undefined> => {
+  sql.answered(table.name, 0);
   const iterator: IterableIterator<Match, undefined> = {
     next: () => {
       const next = matches.next();
@@ -1601,6 +1604,9 @@ const withDocuments = (
   limit: number,
   scan: Scan
 ): ReadDocument[] => {
+  // `matches` ran its statement already: read, whatever it answers or
+  // however it fails.
+  sql.answered(table.name, 0);
   const documents = documentsOf(table, matches, limit);
   sql.answered(table.name, documents.length);
   withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
@@ -1629,6 +1635,9 @@ export const readPage = (
     throw new Error("Not a page");
   }
   const table = readableTable(pinned, scope, query.table);
+  // Read by every page, whatever it answers or however it fails (a page
+  // refused before any statement ran is told apart by the host).
+  sql.answered(table.name, 0);
   const scan: Scan = { entries: 0, bytes: 0 };
   const found: Match[] = [];
   let anchorFields: number;

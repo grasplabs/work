@@ -2526,9 +2526,10 @@ export class StoreHost {
    * answered.
    *
    * Handed back the same way (`sensitive`, and `details.sensitive` on a
-   * failure): how many records the read answered of each table of
-   * `names` the store holds sensitive (`#sensitivity`), for core to audit
-   * (store-reader.ts). A sensitive table the read looked at is named
+   * failure): how many records the read answered of each table it ran a
+   * statement on that the store holds sensitive (`#sensitivity`), for
+   * core to audit (store-reader.ts). A sensitive table the read looked at
+   * is named
    * even when it answered none of its records, or failed: a filter on its
    * fields that matched nothing, or a `unique` that found two, still
    * tells something of what they hold. A read that ran no statement
@@ -2557,9 +2558,11 @@ export class StoreHost {
       const generations = this.#generationsOf(pinned, names);
       let readRecords = false;
       const isSensitive = this.#sensitivity();
-      const answered = new Map(
-        names.filter((name) => isSensitive(name)).map((name) => [name, 0])
-      );
+      // The sensitive tables a statement actually read, as the read tells
+      // them (`ReadSql.answered`): never every table of `names`, which
+      // holds those its `with` names whether or not their records were
+      // ever looked up (an empty root reads none of them).
+      const answered = new Map<string, number>();
       const sensitiveRead = (): Record<string, number> =>
         readRecords ? Object.fromEntries(answered) : {};
       try {
@@ -2597,9 +2600,8 @@ export class StoreHost {
             return cursor;
           },
           answered: (table, answeredNow) => {
-            const sofar = answered.get(table);
-            if (sofar !== undefined) {
-              answered.set(table, sofar + answeredNow);
+            if (isSensitive(table)) {
+              answered.set(table, (answered.get(table) ?? 0) + answeredNow);
             }
           },
         };
