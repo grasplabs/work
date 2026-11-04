@@ -1,15 +1,12 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  workflowNamespace,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowCandidateRun,
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -32,6 +29,7 @@ import {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { consentCode, graphAttachmentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -186,56 +184,31 @@ const refusal = async (promise: Promise<unknown>) => {
   }
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A definition of `name` reading an attachment through binding `mail`. */
-const definitionOf = (name: string, mail: string): string =>
+/** A definition reading an attachment through binding `mail`. */
+const definitionOf = (mail: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { mail: { kind: "connector", contract: mail } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({
+      mailbox: { type: "string" },
+      message: { type: "string" },
+      attachment: { type: "string" },
+    }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: "steps.read.output.content" } },
     },
-    input: {
-      schema: objectSchema({
-        mailbox: { type: "string" },
-        message: { type: "string" },
-        attachment: { type: "string" },
-      }),
-    },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { mail: { kind: "connector", contract: mail } },
+    steps: [
       {
-        read: {
-          call: "grasp.connector",
-          with: {
-            binding: "mail",
-            operation: "mail.readAttachment",
-            arguments: {
-              mailbox: "${ $workflow.input.mailbox }",
-              message: "${ $workflow.input.message }",
-              attachment: "${ $workflow.input.attachment }",
-              as: "text",
-            },
-          },
-          output: { as: "${ { status: .content } }" },
+        id: "read",
+        type: "do",
+        binding: "mail",
+        operation: "mail.readAttachment",
+        arguments: {
+          mailbox: { $expr: "input.mailbox" },
+          message: { $expr: "input.message" },
+          attachment: { $expr: "input.attachment" },
+          as: "text",
         },
       },
     ],
@@ -280,7 +253,7 @@ const readingWorkflow = async () => {
     `native-${unique()}`
   );
   await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(workflow.name, key),
+    definition: definitionOf(key),
     basedOn: null,
     modules: {},
   });
@@ -507,7 +480,7 @@ describe("a workflow binding a native connector's operation", () => {
     const { revision: base } = await workflowDraft(env, builder, workflow.id);
     const saved = await editWorkflowDraft(env, builder, workflow.id, {
       expectedRevision: base,
-      source: definitionOf(workflow.name, key),
+      source: definitionOf(key),
       modules: {},
     });
     expect(saved.problems).toStrictEqual([]);
