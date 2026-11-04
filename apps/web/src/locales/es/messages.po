@@ -3911,7 +3911,7 @@ msgstr "Borrar"
 #. placeholder {0}: field.name
 #: src/workflows/start-run.tsx
 msgid "Clear {0}"
-msgstr ""
+msgstr "Borrar {0}"
 
 #: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
