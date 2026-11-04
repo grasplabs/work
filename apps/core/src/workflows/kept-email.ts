@@ -1,33 +1,18 @@
-import { readAtMost } from "@grasp-os/shared/http";
 import { log } from "@grasp-os/shared/log";
-import {
-  inboundEmailMaxBytes,
-  workflowErrors,
-} from "@grasp-os/shared/workflows";
-import type { Attachment, Email } from "postal-mime";
+import type { Email } from "postal-mime";
 
-// A message with attachments that an email trigger received
-// (inbound-email.ts) is kept, so its runs can read them (`keptMessage` and `attachmentOf`, through
-// workflows/host.ts): its bytes as they arrived, in R2 (`FILES`, in the
-// EU), for the App whose runs it starts, before any starts, under the UTC
-// day it was kept, the App and its ID. The run's input names it by day and
-// ID (`stored`), never the App: a run reads only what its own App
-// received, so a name another App's run passes finds nothing. A message
-// with no attachment but inline ones (images in its HTML, say), or one
-// received while the feature is off, isn't kept (`stored: null`). Only its
-// day's name says when a message goes: the 15-minute clock deletes
-// a day's messages once 30 days have passed since that day ended
-// (`deleteExpiredEmail`), so a message is kept 30 to 31 days.
-//
-// An attachment is read by its index in the run's input, which lists the
-// message's attachments in the order postal-mime gives them when the
-// message arrives; a read parses the kept bytes again with the same
-// parser, so the order is the same as long as postal-mime's is.
+// What of the mail an email trigger received (inbound-email.ts) waits in
+// R2 (`FILES`, in the EU): an attachment a delivery's start copies into
+// its run (`stagedAttachmentKey`), under the UTC day it was staged. Only
+// its day's name says when it goes: the 15-minute clock deletes a day's
+// objects once 30 days have passed since that day ended
+// (`deleteExpiredEmail`), so a copy its start never deleted is gone 30 to
+// 31 days on.
 
-/** Where kept messages are, in `FILES`: by day, then App, then ID. */
+/** Where staged attachments are, in `FILES`: by day, then trigger. */
 const keptPrefix = "inbound-email/";
 
-/** How many days a kept message is kept, at least (see above). */
+/** How many days a staged attachment is kept, at least (see above). */
 const emailRetentionDays = 30;
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -39,20 +24,13 @@ const dayOf = (time: Date): string => time.toISOString().slice(0, 10);
 const firstKeptDay = (now: Date): string =>
   dayOf(new Date(now.getTime() - emailRetentionDays * dayMs));
 
-/** The key of message `stored` (`day/id`) kept for `app`. */
-const keptKey = (app: string, stored: string): string => {
-  const [day, id] = stored.split("/");
-  return `${keptPrefix}${day}/${app}/${id}`;
-};
-
 /**
  * Where attachment `index` of message `id`, to email trigger `triggerId`,
  * waits while one delivery's start copies it into the run
  * (inbound-email.ts): a key of that delivery's own, so another delivery
  * of the message deleting its copy never takes this one; under today's
  * day, so a copy its start never deleted goes with that day's kept
- * messages (`deleteExpiredEmail`). No App's ID is `triggers`, so no App's
- * run reads it as a message of its own.
+ * messages (`deleteExpiredEmail`).
  */
 export const stagedAttachmentKey = (
   triggerId: string,
@@ -73,81 +51,6 @@ export const parsedOf = async (raw: Uint8Array): Promise<Email | undefined> => {
   } catch {
     return undefined;
   }
-};
-
-/**
- * Whether a message with these attachments is kept: it has one that isn't
- * inline. Its runs' input lists them all, inline ones too, so an index
- * means the same whether or not it's kept.
- */
-export const isWorthKeeping = (attachments: readonly Attachment[]): boolean =>
-  attachments.some(({ disposition }) => disposition !== "inline");
-
-/**
- * Keeps message `id` (`raw`, its bytes) for each of `appIds`, today, and
- * returns what its runs' input names it by; null when there are no Apps
- * to keep it for.
- */
-export const keepMessage = async (
-  env: Env,
-  appIds: readonly string[],
-  id: string,
-  raw: Uint8Array
-): Promise<string | null> => {
-  if (appIds.length === 0) {
-    return null;
-  }
-  const stored = `${dayOf(new Date())}/${id}`;
-  await Promise.all(
-    [...new Set(appIds)].map(
-      async (appId) => await env.FILES.put(keptKey(appId, stored), raw)
-    )
-  );
-  return stored;
-};
-
-/**
- * Message `stored` (`day/id`) as `app` received it, parsed from the kept
- * bytes, counted as they're read (never by the size R2 reports). Refuses
- * with `workflow.attachment_not_found` when `app` has no such message
- * (never kept for it, or deleted), and with `workflow.attachment_unreadable`
- * when what's kept is over the limit or doesn't parse any more (a newer
- * parser, say): trying again wouldn't change either.
- */
-export const keptMessage = async (
-  env: Env,
-  app: string,
-  stored: string
-): Promise<Email> => {
-  const object = await env.FILES.get(keptKey(app, stored));
-  if (object === null) {
-    throw workflowErrors.create("workflow.attachment_not_found");
-  }
-  const body = object.body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>()
-  );
-  const raw = await readAtMost(body, inboundEmailMaxBytes);
-  const parsed = raw === undefined ? undefined : await parsedOf(raw);
-  if (parsed === undefined) {
-    log.error("workflow.email_unreadable", { app, stored });
-    throw workflowErrors.create("workflow.attachment_unreadable");
-  }
-  return parsed;
-};
-
-/**
- * The content of attachment `index` of `message`, as bytes; refuses with
- * `workflow.attachment_not_found` for an index it has no attachment at.
- */
-export const attachmentOf = (message: Email, index: number): Uint8Array => {
-  const attachment = message.attachments[index];
-  if (attachment === undefined) {
-    throw workflowErrors.create("workflow.attachment_not_found");
-  }
-  const { content } = attachment;
-  return typeof content === "string"
-    ? new TextEncoder().encode(content)
-    : new Uint8Array(content);
 };
 
 /**

@@ -34,7 +34,6 @@ const workflow = (
   waiting: 0,
   failed: 0,
   handled: 0,
-  scheduleStopped: false,
   ...change,
 });
 
@@ -59,13 +58,10 @@ const names = (rows: readonly WorkflowSummary[]): string[] =>
   rows.map(({ workflow: name }) => name);
 
 describe("where a workflow stands", () => {
-  it("needs attention once a run failed lately or its schedule stopped, even with runs waiting", () => {
+  it("needs attention once a run failed lately, even with runs waiting", () => {
     expect(stateOf(workflow("failed", { failed: 1, waiting: 2 }))).toBe(
       "attention"
     );
-    expect(
-      stateOf(workflow("stopped", { scheduleStopped: true, lastRun: null }))
-    ).toBe("attention");
   });
 
   it("waits on a person while a run waits, ran once it did, and hasn't run before its first", () => {

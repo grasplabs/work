@@ -2,7 +2,6 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { DeliveredConnectorEvent } from "@grasp-os/shared/workflows";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -901,43 +900,3 @@ export const runsOwnMail = (
   stamp.senders.includes(from.toLowerCase())
     ? stamp
     : undefined;
-
-/**
- * The lineage limit a refusal names (`workflow.lineage_limit`'s `limit`),
- * for the audit log; null for any other error.
- */
-const lineageLimitOf = (error: unknown): string | null => {
-  if (workflowErrors.codeOf(error) !== "workflow.lineage_limit") {
-    return null;
-  }
-  const details =
-    typeof error === "object" && error !== null && "details" in error
-      ? error.details
-      : undefined;
-  return typeof details === "object" &&
-    details !== null &&
-    "limit" in details &&
-    typeof details.limit === "string"
-    ? details.limit
-    : null;
-};
-
-/**
- * The receivers of a delivery whose start (`started`, in their order)
- * their lineage refused (`workflow.lineage_limit`), each with the limit
- * it names, for the audit log.
- */
-export const lineageRefusals = <Receiver>(
-  started: readonly PromiseSettledResult<unknown>[],
-  receivers: readonly Receiver[]
-): { receiver: Receiver; limit: string | null }[] =>
-  started.flatMap((result, index) => {
-    const receiver = receivers[index];
-    if (result.status !== "rejected" || receiver === undefined) {
-      return [];
-    }
-    const reason: unknown = result.reason;
-    return workflowErrors.codeOf(reason) === "workflow.lineage_limit"
-      ? [{ receiver, limit: lineageLimitOf(reason) }]
-      : [];
-  });

@@ -41,14 +41,12 @@ const workflow = (
   waiting: 0,
   failed: 0,
   handled: 0,
-  scheduleStopped: false,
   ...change,
 });
 
 const healthy = workflow("healthy");
 const waiting = workflow("waiting", { waiting: 1 });
 const failed = workflow("failed", { failed: 2 });
-const stopped = workflow("stopped", { scheduleStopped: true });
 const never = workflow("never", { lastRun: null });
 
 /** An independent workflow that ran and needs nobody, changed by `change`. */
@@ -76,10 +74,10 @@ const names = (rows: readonly WorkflowSummary[]): string[] =>
   rows.map((row) => workflowName(row));
 
 describe("the Workflows page's lists", () => {
-  it("needs a person for a run waiting, a recent failure or a stopped schedule, and not otherwise", () => {
-    expect(
-      [healthy, waiting, failed, stopped, never].map(needsAttention)
-    ).toStrictEqual([false, true, true, true, false]);
+  it("needs a person for a run waiting or a recent failure, and not otherwise", () => {
+    expect([healthy, waiting, failed, never].map(needsAttention)).toStrictEqual(
+      [false, true, true, false]
+    );
   });
 
   it("has those that ran at work, the ones that need a person first, and the rest on the way, independent ones among them", () => {
@@ -90,21 +88,13 @@ describe("the Workflows page's lists", () => {
       waiting,
       failed,
       independent("alone-failed", { failed: 1 }),
-      stopped,
       independent("alone-new", { version: null, lastRun: null }),
     ]);
     expect({
       atWork: names(atWork),
       onTheWay: names(onTheWay),
     }).toStrictEqual({
-      atWork: [
-        "waiting",
-        "failed",
-        "alone-failed",
-        "stopped",
-        "healthy",
-        "alone",
-      ],
+      atWork: ["waiting", "failed", "alone-failed", "healthy", "alone"],
       onTheWay: ["never", "alone-new"],
     });
   });

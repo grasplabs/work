@@ -34,7 +34,6 @@ const workflow = (name: string, handled: number): WorkflowSummary => ({
   waiting: 0,
   failed: 0,
   handled,
-  scheduleStopped: false,
 });
 
 const goal: Goal = {

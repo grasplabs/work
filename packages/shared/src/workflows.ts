@@ -1067,12 +1067,6 @@ export interface AppWorkflowSummary extends WorkflowRunCounts {
   changesOwner: boolean;
   /** The organization's team that owns it (`setTeam`); null for none. */
   team: { id: string; name: string } | null;
-  /**
-   * A schedule of it stopped: its run failed to start
-   * {@link maxFailedStarts} times in a row. It starts again once its
-   * schedule parameter is set, or a new version is made current.
-   */
-  scheduleStopped: boolean;
 }
 
 /**

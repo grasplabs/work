@@ -10,7 +10,6 @@ import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   failedRunDays,
   handledRunDays,
-  maxFailedStarts,
   runFilterStatuses,
   runsPageSize,
   workflowErrors,
@@ -27,17 +26,7 @@ import type {
   RunStatus,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
-import {
-  and,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  notExists,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, gt, inArray, notExists, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -52,7 +41,6 @@ import {
   workflowDecisions,
   workflowResourceRuns,
   workflowRuns,
-  workflowTriggers,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
@@ -355,35 +343,19 @@ const waitingByWorkflow = async (
 };
 
 /**
- * What an App's workflows show besides their runs: the schedules that
- * stopped (by key and version), their owners (owners.ts), their teams
+ * What an App's workflows show besides their runs: their owners
+ * (owners.ts), their teams
  * (teams.ts), and the Apps `by` builds, who may change them.
  */
 const appExtrasOf = async (env: Env, by: Member, appIds: readonly string[]) => {
   if (appIds.length === 0) {
     return {
-      stopped: new Set<string>(),
       owners: new Map<string, { userId: string; name: string | null }>(),
       built: new Set<string>(),
       teams: new Map<string, { id: string; name: string }>(),
     };
   }
-  const [stopped, owners, built, teams] = await Promise.all([
-    // The Apps' triggers, by the index that starts with their App.
-    drizzle(env.DB)
-      .select({
-        app: workflowTriggers.appId,
-        workflow: workflowTriggers.workflowId,
-        version: workflowTriggers.version,
-      })
-      .from(workflowTriggers)
-      .where(
-        and(
-          sql`${workflowTriggers.appId} IN ${listOf(appIds)}`,
-          eq(workflowTriggers.type, "schedule"),
-          gte(workflowTriggers.failedStarts, maxFailedStarts)
-        )
-      ),
+  const [owners, built, teams] = await Promise.all([
     ownersSet(env, appIds),
     // Staff change no owner (owners.ts), so whether they build is moot.
     by.staff ? new Set<string>() : appsBuiltBy(env, by, appIds),
@@ -391,9 +363,6 @@ const appExtrasOf = async (env: Env, by: Member, appIds: readonly string[]) => {
   ]);
   return {
     teams,
-    stopped: new Set(
-      stopped.map((row) => `${keyOf(row.app, row.workflow)}@${row.version}`)
-    ),
     owners,
     built,
   };
@@ -427,7 +396,7 @@ interface SummaryCounts {
  * for `by`: each one's owner (owners.ts for an App's), latest run, its
  * runs waiting now (counted from the open decisions), those failed lately
  * and those it handled this week (from the runs ended since), and, for an
- * App's, whether a schedule of it stopped (triggers.ts), the team that owns
+ * App's, the team that owns
  * it (teams.ts) and whether `by` may change its owner: a fixed number of queries, whatever the number of
  * workflows.
  */
@@ -495,10 +464,6 @@ const summariesOf = async (
       changesOwner: appExtras.built.has(app.id),
       team: appExtras.teams.get(teamKey(app.id, workflow)) ?? null,
       ...countsOf(keyOf(app.id, workflow)),
-      // Of the current version: only its triggers start runs.
-      scheduleStopped: appExtras.stopped.has(
-        `${keyOf(app.id, workflow)}@${app.currentVersion}`
-      ),
     })),
     resources: resources.map((resource) => ({
       type: "resource",
