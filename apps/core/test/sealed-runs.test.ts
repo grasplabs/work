@@ -2351,6 +2351,22 @@ describe("a sealed run's decisions on the run host", () => {
     });
   });
 
+  it("asks a decision's people once: a step that fails after asking them fails for good", async () => {
+    const { reviewer } = reviewed;
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const ran = await ranAs(
+      runId,
+      reviewModuleOf(
+        `${enterReview(reviewAsks)} return await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async () => { throw new Error("The mail server is down"); } });`
+      ),
+      { engine: retryingEngine() }
+    );
+    expect({ ran, asked: await asksAudited(runId) }).toStrictEqual({
+      ran: failedWith("workflow.failed_after_effect"),
+      asked: 1,
+    });
+  });
+
   it("opens no decision, and tells nobody, for a test's run: a draft's or one an App's test started", async () => {
     const { reviewer } = reviewed;
     const run = async (calling: (frozen: CallingRun) => CallingRun) => {

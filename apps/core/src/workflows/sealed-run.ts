@@ -204,33 +204,37 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   anyone else, or taken otherwise than it was answered. A decision task
 //   (`grasp.decision`) runs as the SDK's `step.decision` does: its enter
 //   step records what it asks, its task step opens it, a step of its own
-//   asks its people, and a wait takes the answer. The enter step's record
-//   is held to the build's templates as a call's arguments are (`matched`):
-//   every literal exact, a slot any JSON, never a sensitive parameter; its
-//   recipients each named as deciders (`person:`, `team:` or
-//   `role:`), the first of them its code's `from`. The
-//   host opens the decision from that record alone, on the binding the
-//   build seals (resource-decisions.ts, `openRunDecision`): each recipient
-//   one the binding's frozen deciders cover now, never the run's own
-//   person, who can't answer it as a member of a team or role either; its
-//   authority decided again; its prompt the recorded one and its deadline
-//   the sealed timeout's (else what is left of the run's age), whatever
-//   its code asks. A test's run (a draft's or an App test's) opens none. Its task step must
-//   record exactly the decision the host opened in it, its asking step
-//   asks only that one, by the host's own notice (`askDeciders`: the
-//   isolate learns nobody's address), its authority decided again first,
-//   once (a failure after it fails the step for good), never reminding;
-//   and its wait is
-//   for that decision only, until its deadline (`decisionWait`). The
-//   outcome is read from the decision's row, never from the event that
-//   wakes the run nor from the isolate, and taken only as the binding
-//   still allows it (`takeDecision`: authority decided again, whoever
-//   answered still covered and never the run's person, what they answered
-//   held to the contract's response schema), in the step that records it,
-//   so a replay takes it alike. A decision nobody answered before its
-//   deadline closes as timed out, and an answer after that is refused by
-//   the decision service. A step run again opens the decision it opened
-//   (one per run and step). A test run of a draft opens none here yet.
+//   asks its people, and a wait takes the answer.
+//   - The enter step's record is held to the build's templates as a
+//     call's arguments are (`matched`): every literal exact, a slot any
+//     JSON, never a sensitive parameter; its recipients each named as
+//     deciders (`person:`, `team:` or `role:`), the first its code's
+//     `from`.
+//   - The host opens the decision from that record alone, on the binding
+//     the build seals (resource-decisions.ts, `openRunDecision`): each
+//     recipient one the binding's frozen deciders cover now, never the
+//     run's own person, who can't answer it as a member of a team or role
+//     either; its authority decided again; its prompt the recorded one,
+//     its deadline the sealed timeout's (else what is left of the run's
+//     age), whatever its code asks. A step run again opens the decision
+//     it opened (one per run and step). A test's run (a draft's, or one
+//     an App's test started) opens none, and reaches nobody.
+//   - Its task step must record exactly the decision the host opened in
+//     it. Its asking step asks only that one, by the host's own notice
+//     (`askDeciders`: the isolate learns nobody's address), its authority
+//     decided again first, never reminding; once it asked, a failure of
+//     the step the host hears of fails it for good, so a retry doesn't
+//     ask again (one cut off unheard, its activation lost, may ask once
+//     more: a second notice, never a second decision).
+//   - Its wait is for that decision only, until its deadline
+//     (`decisionWait`). The outcome is read from the decision's row,
+//     never from the event that wakes the run nor from the isolate, and
+//     taken only as the binding still allows it (`takeDecision`:
+//     authority decided again, whoever answered still covered and never
+//     the run's person, what they answered held to the contract's
+//     response schema), in the step that records it, so a replay takes it
+//     alike. A decision nobody answered before its deadline closes as
+//     timed out, and the decision service refuses an answer after that.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.
@@ -1107,8 +1111,8 @@ class SealedRun implements SealedRunKind {
     }
     const limits = [
       // A listen's timeout is how long it waits for its events, and a
-      // decision's how long it takes answers, never how long an attempt
-      // of its steps may take.
+      // decision's (where a generator seals it on the task) how long it
+      // takes answers, never how long an attempt of its steps may take.
       ...(task.timeoutMs === undefined ||
       task.kind === "listen" ||
       isDecisionTask(task)
@@ -1762,8 +1766,8 @@ class SealedRun implements SealedRunKind {
       await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
       await askDeciders(this.#env, calling, opened);
-      // Its people were told: a later failure of the step fails it for
-      // good, never asking them again.
+      // Its people were told: a later failure of the step the host hears
+      // of fails it for good, so no retry asks them again.
       this.#effected.add(attempt);
       return [];
     });
