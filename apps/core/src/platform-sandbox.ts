@@ -5,6 +5,8 @@ import {
   appCompilerCode,
   startPackageBuilder,
   startAppCompiler,
+  startTypeChecker,
+  typeCheckerCode,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -261,7 +263,7 @@ export const runPlatformCode = async (
 };
 
 /** The platform programs a runner runs, by name. */
-export type PlatformProgram = "compiler" | "package-builder";
+export type PlatformProgram = "compiler" | "type-checker" | "package-builder";
 
 /**
  * The wall-clock time a call of each program may take on the sandbox host,
@@ -272,6 +274,7 @@ export type PlatformProgram = "compiler" | "package-builder";
  */
 const programWallMs: Record<PlatformProgram, number> = {
   compiler: 75_000,
+  "type-checker": 75_000,
   "package-builder": 90_000,
 };
 
@@ -337,7 +340,10 @@ const loaderCall = async (
  * App's builds share one. A stop in the warm isolate is tried once more in a fresh
  * isolate of the build's own (`loadAppCompiler`), whose stop is the
  * build's alone, and only that is answered: a build is never kept as
- * failed for what another did. The builder runs in a fresh isolate per
+ * failed for what another did. The type checker runs in its one isolate
+ * of the release (`startTypeChecker`), shared too: a stop there is tried
+ * once more, by then in the isolate that replaced the stopped one, which
+ * keeps nothing of it. The builder runs in a fresh isolate per
  * runner, so nothing one App's packages leave in memory is there for the
  * next, and its stops are its own already.
  */
@@ -375,6 +381,22 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
       if (program === "compiler") {
         return await compile(method, args, options?.once === true);
       }
+      if (program === "type-checker") {
+        const check = async (): Promise<unknown> =>
+          await loaderCall(
+            startTypeChecker(quietLoader(env.LOADER), env.ASSETS),
+            method,
+            args
+          );
+        try {
+          return await check();
+        } catch (error) {
+          if (!(error instanceof PlatformBoundError)) {
+            throw error;
+          }
+          return await check();
+        }
+      }
       builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);
       return await loaderCall(await builder, method, args);
     },
@@ -398,6 +420,7 @@ const programCode: Record<
   (assets: Fetcher) => Promise<PlatformCode>
 > = {
   compiler: appCompilerCode,
+  "type-checker": typeCheckerCode,
   "package-builder": packageBuilderCode,
 };
 

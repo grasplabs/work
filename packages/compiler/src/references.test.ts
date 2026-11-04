@@ -19,12 +19,18 @@ const references = path.resolve(
 
 /** The errors TypeScript reports in `file`, as `TS<code>: <message>`. */
 const errorsIn = (file: string): string[] => {
-  const program = ts.createProgram([file], {
-    ...compilerOptions,
-    // Its declarations aren't App code: only the module's own errors count.
-    skipLibCheck: true,
-    paths: {},
-  });
+  const { paths: _paths, ...options } = compilerOptions;
+  const program = ts.createProgram(
+    [file],
+    ts.convertCompilerOptionsFromJson(
+      {
+        ...options,
+        // Its declarations aren't App code: only the module's own errors count.
+        skipLibCheck: true,
+      },
+      "/"
+    ).options
+  );
   return ts
     .getPreEmitDiagnostics(program)
     .filter((diagnostic) => diagnostic.file?.fileName === file)

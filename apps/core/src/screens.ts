@@ -22,6 +22,7 @@ import {
   screenSources,
   workflowBindingsPath,
   workflowBuildFiles,
+  withTypeCheck,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
@@ -34,6 +35,7 @@ import type {
   Increments,
   OpenWorkflowBuild,
   ScreenBuild,
+  Unchecked,
   WorkflowBuild,
 } from "@grasp-os/compiler";
 import { symbolicModules } from "@grasp-os/sdk/host";
@@ -243,6 +245,45 @@ const isBuildShaped = (value: unknown): boolean =>
       Array.isArray(value.diagnostics)));
 
 /**
+ * The build the compiler answered (`Unchecked`), with its type check put
+ * in: run in the type checker's isolate (the compiler's `checker.ts`),
+ * once the compiler has answered, never inside its call, and put
+ * together with the build as the build would have (`withTypeCheck`). A
+ * build that waits on no check (one that failed before it) is as it came.
+ */
+const withItsCheck = async (
+  runner: PlatformRunner,
+  answer: unknown
+): Promise<unknown> => {
+  if (
+    typeof answer !== "object" ||
+    answer === null ||
+    !("built" in answer) ||
+    !isBuildShaped(answer.built)
+  ) {
+    throw new TypeError("The compiler answered something else than a build.");
+  }
+  // SAFETY: shaped as a build, checked above; its plan is the compiler's
+  // own, which core trusts as it trusts the build.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const unchecked = answer as Unchecked<{ ok: boolean }>;
+  if (unchecked.typeCheck === undefined) {
+    return unchecked.built;
+  }
+  const diagnostics = await runner.run("type-checker", "check", [
+    unchecked.typeCheck.request,
+  ]);
+  if (!Array.isArray(diagnostics)) {
+    throw new TypeError(
+      "The type checker answered something else than diagnostics."
+    );
+  }
+  // SAFETY: the checker's answer, core's own code, checked an array.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return withTypeCheck(unchecked, diagnostics as Diagnostic[]);
+};
+
+/**
  * A build of `files` by the compiler, wherever the runner runs it, and
  * whether to cache it: the compiler's answer, or a failed build when it
  * was stopped at a bound (a type built to recurse, say). A stop the files
@@ -266,7 +307,9 @@ const compiled = async (
   /** The compiler call, when not the kind's own: what it answers as the build. */
   call: () => Promise<unknown> = async () => {
     const [method, target] = compilerCallOf(kind, profile);
-    return await runner.run("compiler", method, [target, files]);
+    const answer = await runner.run("compiler", method, [target, files]);
+    // Inspection checks no types: its build is as it came.
+    return method === "build" ? await withItsCheck(runner, answer) : answer;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
@@ -469,7 +512,7 @@ const transformInBatches = async (
       await transform(Object.fromEntries(entries.slice(half)));
       return;
     }
-    const fresh: Increments = { modules: {}, checks: {} };
+    const fresh: Increments = { modules: {} };
     for (const [key, value] of Object.entries(
       typeof answer === "object" && answer !== null ? answer : {}
     )) {
@@ -531,7 +574,6 @@ const compiledIncrementally = async (
   });
   const reuse: Increments = {
     modules: { ...earlier.modules, ...batched.made },
-    checks: earlier.checks,
   };
   if (batched.calls > 0) {
     // A lease's time for the build's own call, after its batches.
@@ -550,7 +592,7 @@ const compiledIncrementally = async (
         "The compiler answered something else than an incremental build."
       );
     }
-    return answer.built;
+    return await withItsCheck(runner, answer.built);
   });
   const ran = Date.now();
   const kept = incrementalShaped(answer)

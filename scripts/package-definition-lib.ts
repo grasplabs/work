@@ -84,7 +84,6 @@ import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 import { screenReferences } from "../packages/compiler/src/kit.ts";
-import { tsconfigOptions } from "../packages/compiler/src/tsconfig.ts";
 import {
   appCodeTarget,
   compilerOptions,
@@ -741,7 +740,7 @@ const serverCodeIncludes = [
 
 /**
  * A tsconfig for one kind of code: the compiler's options for it
- * (type-check.ts, as a tsconfig writes them), the files it checks, and
+ * (type-check.ts, written as a tsconfig writes them), the files it checks, and
  * under `grasp` what the project's check holds them to besides: their
  * kind, and the modules they may resolve by name (`TypeTarget.allowed`).
  */
@@ -750,7 +749,7 @@ const kindConfig = (
   target: TypeTarget,
   files: { include: string[]; exclude?: string[] }
 ) => ({
-  compilerOptions: tsconfigOptions(target.options),
+  compilerOptions: target.options,
   ...files,
   grasp: {
     kind,

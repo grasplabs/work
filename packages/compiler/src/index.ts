@@ -16,12 +16,16 @@ import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 import { version } from "#version";
 
-import { compilerAssets, kitModule } from "./kit.ts";
+import type TypeChecker from "./checker.ts";
+import { compilerAssets, kitModule, typesModule } from "./kit.ts";
 import type { KitModules } from "./kit.ts";
 import type PackageBuilder from "./packages/worker.ts";
 import type AppCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
+export { withTypeCheck } from "./checked-build.ts";
+export type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
+export type { TypeCheckRequest } from "./type-check.ts";
 export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
@@ -75,7 +79,6 @@ export {
   screenRuntime,
 } from "./kit.ts";
 export {
-  checkRecordOf,
   incrementSchema,
   moduleRecordOf,
   screenIncrementKeys,
@@ -83,7 +86,6 @@ export {
 } from "./increments.ts";
 export type {
   BuildMetrics,
-  CheckRecord,
   IncrementalBuild,
   Increments,
   ModuleRecord,
@@ -436,6 +438,90 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,
+    };
+  });
+
+/**
+ * How the type checker's isolate runs: no bindings, no importable env, no
+ * network, no Node.js compatibility, and at most one build task's CPU per
+ * call (spec 18.1, `compilerTaskCpuMs`), as the compiler's.
+ */
+export const checkerSettings = {
+  ...isolateBase,
+  env: {},
+  globalOutbound: null,
+  limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
+} satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * The name the type checker's isolate has in the Loader: its release's
+ * version and nothing else, never an App's ID or code, so every App's
+ * checks share one isolate (a Dynamic Worker is billed per name a day,
+ * and an unnamed one is a new name each time). It is safe to share: tsrs
+ * keeps nothing between checks (checker.ts), and the isolate has no
+ * bindings and no network.
+ */
+export const typeCheckerName = `check:${version}`;
+
+/** The type checker's code as a Loader takes it, read from the assets. */
+const typeCheckerWorker = async (
+  assets: Fetcher
+): Promise<WorkerLoaderWorkerCode> =>
+  await workerCodeRead(assets, typeCheckerName, async () => {
+    const [source, typesJson, wasm] = await Promise.all([
+      readCompilerFile(assets, compilerAssets.checker, "javascript"),
+      readCompilerFile(assets, compilerAssets.types, "json"),
+      readCompilerBytes(assets, compilerAssets.tsrsWasm, "wasm"),
+    ]);
+    const types: unknown = JSON.parse(typesJson);
+    return {
+      ...checkerSettings,
+      mainModule: compilerAssets.checker,
+      modules: {
+        [compilerAssets.checker]: source,
+        [typesModule]: { json: types },
+        // Compiled as the isolate loads; the isolate itself can't.
+        [compilerAssets.tsrsWasm]: { wasm },
+      },
+    };
+  });
+
+/**
+ * The type checker (src/checker.ts), in the one isolate of its release
+ * (`typeCheckerName`), its code read from core's static assets only when
+ * the Loader has no isolate of that name warm.
+ */
+export const startTypeChecker = (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Service<TypeChecker> =>
+  loader
+    .get(typeCheckerName, async () => await typeCheckerWorker(assets))
+    .getEntrypoint<TypeChecker>();
+
+/**
+ * The type checker's code, for the on-prem sandbox host, as
+ * `appCompilerCode` gives the compiler's.
+ */
+export const typeCheckerCode = async (assets: Fetcher): Promise<PlatformCode> =>
+  await platformCodeRead(assets, typeCheckerName, async () => {
+    const [source, types, wasm] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.checker, "javascript"),
+      readCompilerBytes(assets, compilerAssets.types, "json"),
+      readCompilerBytes(assets, compilerAssets.tsrsWasm, "wasm"),
+    ]);
+    return {
+      mainModule: compilerAssets.checker,
+      modules: {
+        [compilerAssets.checker]: { type: "js", bytes: new Uint8Array(source) },
+        [typesModule]: { type: "json", bytes: new Uint8Array(types) },
+        [compilerAssets.tsrsWasm]: {
+          type: "wasm",
+          bytes: new Uint8Array(wasm),
+        },
+      },
+      nodejsCompat: false,
+      cpuMs: checkerSettings.limits.cpuMs,
     };
   });
 

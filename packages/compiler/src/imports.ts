@@ -415,6 +415,79 @@ const resolveTypeFile = (
     .find((candidate) => files.has(candidate));
 };
 
+/** A specifier TypeScript resolves as a path rather than by name: relative, or absolute. */
+const pathSpecifier = /^(?:\.\.?(?:\/|$)|\/)/u;
+
+/**
+ * Why a type import of App code that isn't a screen's names a path that
+ * isn't one of the App's files (`files`, everything the build was given),
+ * or undefined when it names a module or one of them. By name, a type
+ * reaches only the modules its check gives its kind (type-check.ts);
+ * by path, it would reach the kit's files the check holds out of reach.
+ */
+export const typeFileError = (
+  file: string,
+  specifier: string | undefined,
+  files: ReadonlySet<string>
+): string | undefined =>
+  specifier !== undefined &&
+  pathSpecifier.test(specifier) &&
+  (specifier.startsWith("/") ||
+    resolveTypeFile(file, specifier, files) === undefined)
+    ? `"${specifier}" is not one of the App's files: a type names the App's own files by a relative path, and modules by name.`
+    : undefined;
+
+/** A triple-slash reference TypeScript obeys, as it reads one: its kind and what it names. */
+const referenceDirective =
+  /^\/\/\/\s*<reference\s+(?<kind>path|types|lib)\s*=\s*(?<quote>["'])(?<name>.*?)\k<quote>/u;
+
+/** Where `/// <reference path>` in `file` points: a path from the App's root. */
+const referencedPath = (file: string, reference: string): string => {
+  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
+  for (const part of reference.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return parts.join("/");
+};
+
+/**
+ * Why a screen's or a declaration's triple-slash directive (`directive`,
+ * as `collectDirectives` lists it) reaches beyond the App's `files`, or
+ * undefined when it doesn't: a `/// <reference path>` names only another
+ * App file, never the kit's, and no `/// <reference types>` or
+ * `/// <reference lib>` at all. The import checks hold every import a file
+ * writes; these are how it would name a module without one.
+ */
+export const referenceError = (
+  directive: string,
+  file: string,
+  files: ReadonlySet<string>
+): string | undefined => {
+  const groups = referenceDirective.exec(directive)?.groups;
+  const name = groups?.name ?? "";
+  switch (groups?.kind ?? "") {
+    case "path": {
+      return files.has(referencedPath(file, name))
+        ? undefined
+        : `"${name}" is not one of the App's files: a reference path names only those.`;
+    }
+    case "types": {
+      return `"${name}": App files reference no type packages; import what the kit has instead.`;
+    }
+    // Its lib is its target's: a `/// <reference lib>` would add one.
+    case "lib": {
+      return `"${name}": App files reference no libs; their target's lib is the one they run with.`;
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
 /**
  * Why a type-only import in a screen, component or declaration file isn't
  * allowed, or undefined when it is: held to what its values may import,
@@ -799,7 +872,9 @@ export const codeImportError = (
     ambient,
   }: Pick<ImportSite, "specifier" | "typeOnly" | "ambient">,
   file: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  /** What its types may name by path: every file the build was given. */
+  typeFiles: ReadonlySet<string> = files
 ): string | undefined => {
   // An ambient module would declare, or shadow, a module by name in the
   // type check, or `declare global` give every file globals its isolate
@@ -814,7 +889,10 @@ export const codeImportError = (
       : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
   }
   if (typeOnly) {
-    return typeImportError(file, specifier, false);
+    return (
+      typeImportError(file, specifier, false) ??
+      typeFileError(file, specifier, typeFiles)
+    );
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";

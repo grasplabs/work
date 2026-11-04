@@ -1,7 +1,7 @@
 /**
  * Type-checks a workflow's JavaScript expressions (`@grasp-os/sdk/expression-check`)
  * against the types of what they read, with the compiler's own TypeScript
- * check (`typeProgram`): a reference to a field, step or method that isn't
+ * check (`expressionProgram`): a reference to a field, step or method that isn't
  * there is an error at its line and column in the expression, as an
  * author wrote it.
  */
@@ -14,7 +14,87 @@ import {
 import type { ExpressionError, TypeForm } from "@grasp-os/sdk/expression-check";
 import ts from "typescript";
 
-import { serverTarget, typeProgram } from "./type-check.ts";
+import type { Diagnostic } from "./diagnostic.ts";
+import { serverTarget } from "./type-check.ts";
+
+/** Where the expressions are checked, as one module of their own. */
+const modulePath = "expressions.ts";
+
+/** Where TypeScript's own declarations are among `kitTypes`. */
+export const libLocation = "/node_modules/typescript/lib";
+
+/**
+ * The expressions' module as TypeScript 6 checks it, with App server
+ * code's options (a worker's lib, no DOM) and no module to import. A
+ * program of its own, not the App check's (tsrs, type-check.ts), which
+ * answers diagnostics alone: a method read without a call is found by
+ * its type (`methodReads`), which only a checker it can ask answers.
+ */
+const expressionProgram = (
+  code: string,
+  kitTypes: Readonly<Record<string, string>>
+): ts.Program => {
+  const { paths: _paths, ...json } = serverTarget({}, new Set()).options;
+  const { options } = ts.convertCompilerOptionsFromJson(json, "/");
+  const file = `/${modulePath}`;
+  const readFile = (path: string): string | undefined => {
+    if (path === file) {
+      return code;
+    }
+    return Object.hasOwn(kitTypes, path) ? kitTypes[path] : undefined;
+  };
+  const host: ts.CompilerHost = {
+    getSourceFile: (path, languageVersion) => {
+      const text = readFile(path);
+      return text === undefined
+        ? undefined
+        : ts.createSourceFile(path, text, languageVersion);
+    },
+    getDefaultLibFileName: (libOptions) =>
+      `${libLocation}/${ts.getDefaultLibFileName(libOptions)}`,
+    getDefaultLibLocation: () => libLocation,
+    writeFile: () => {
+      // Nothing is emitted.
+    },
+    getCurrentDirectory: () => "/",
+    getCanonicalFileName: (path) => path,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (path) => readFile(path) !== undefined,
+    readFile,
+  };
+  return ts.createProgram([file], options, host);
+};
+
+/** The program's errors and the module's, as diagnostics. */
+const diagnosticsOf = (program: ts.Program): Diagnostic[] => {
+  const file = program.getSourceFile(`/${modulePath}`);
+  return [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...(file === undefined
+      ? []
+      : [
+          ...program.getSyntacticDiagnostics(file),
+          ...program.getSemanticDiagnostics(file),
+        ]),
+  ]
+    .filter(({ category }) => category === ts.DiagnosticCategory.Error)
+    .map((diagnostic) => {
+      const at =
+        diagnostic.file === undefined || diagnostic.start === undefined
+          ? undefined
+          : diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+      return {
+        rule: `TS${diagnostic.code}`,
+        severity: "error",
+        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+        ...(at === undefined
+          ? {}
+          : { line: at.line + 1, column: at.character + 1 }),
+      };
+    });
+};
 
 /**
  * The types of an expression's values, as TypeScript type text the
@@ -62,9 +142,6 @@ export interface ExpressionTypeCheck {
    */
   readonly scope: readonly ExpressionTypeError[];
 }
-
-/** Where the expressions are checked, as one module of their own. */
-const modulePath = "expressions.ts";
 
 /** Type text on lines of its own, so nothing in it reaches past its parentheses. */
 const typeCode = (text: string): string => `(\n${text}\n)`;
@@ -251,15 +328,8 @@ export const checkExpressionTypes = (
   if (placed.length === 0) {
     return { expressions: errors, scope: scopeErrors };
   }
-  const checking = typeProgram(
-    { [modulePath]: code },
-    kitTypes,
-    // A worker's lib, no DOM, and no module to import.
-    serverTarget({}, new Set())
-  );
-  const { global, files } = checking.diagnose();
-  const found = [...global, ...(files.get(modulePath)?.found ?? [])];
-  for (const diagnostic of found) {
+  const checking = expressionProgram(code, kitTypes);
+  for (const diagnostic of diagnosticsOf(checking)) {
     if (diagnostic.severity !== "error") {
       continue;
     }
@@ -291,7 +361,7 @@ export const checkExpressionTypes = (
       });
     }
   }
-  for (const { line, column, name: method } of methodReads(checking.program)) {
+  for (const { line, column, name: method } of methodReads(checking)) {
     const at = placed.find(
       (expression) => line >= expression.first && line <= expression.last
     );
