@@ -4,13 +4,12 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
-import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { asc, eq, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Release } from "../app-releases.ts";
-import { appTestRuns, workflowResourceVersions } from "../db/core/schema.ts";
+import { appTestRuns } from "../db/core/schema.ts";
 import {
   failureOf,
   outputOf,
@@ -279,22 +278,6 @@ export const fixtureActivation = async (
   // Its test is over: nothing more of it runs.
   if (Date.now() > row.deadline.getTime()) {
     throw operationErrors.create("operation.cancelled");
-  }
-  const sealed = await db
-    .select({ evaluatorHash: workflowResourceVersions.evaluatorHash })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, pin.workflow),
-        eq(workflowResourceVersions.version, pin.version)
-      )
-    )
-    .get();
-  if (sealed === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
   }
   const build = await loadWorkflowBuild(
     env,

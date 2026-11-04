@@ -21,7 +21,6 @@ import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import {
   and,
   asc,
@@ -54,7 +53,6 @@ import {
   runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
-  workflowResourceVersions,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
@@ -839,26 +837,6 @@ const loadedRun = async (
     receipt.params === null
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
-  }
-  // The expressions run only under the evaluator the version was published
-  // with: the platform ships one, so a deploy that changed it fails runs of
-  // versions sealed under another, saying so, rather than evaluate them
-  // under rules they weren't published with (or keep old evaluators).
-  const sealed = await drizzle(env.DB)
-    .select({ evaluatorHash: workflowResourceVersions.evaluatorHash })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, pin.workflow),
-        eq(workflowResourceVersions.version, pin.version)
-      )
-    )
-    .get();
-  if (sealed === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
   }
   const build = await loadWorkflowBuild(
     env,

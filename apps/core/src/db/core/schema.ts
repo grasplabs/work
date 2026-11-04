@@ -3712,14 +3712,16 @@ export const workflowResources = sqliteTable(
 /**
  * Each published version of a workflow: written once, by its publication,
  * and never changed. `version` counts publications from 1;
- * `definition_version` is the definition's own semantic version, unique
- * per workflow, so a semantic version always names the same content.
- * `definition` is the workflow.json exactly as published (at most the
- * profile's 1 MiB), `contract` the canonical JSON of its input, output and
- * parameter schemas, and `manifest` the canonical JSON of what the version
- * pins: its definition, profile, evaluator, contract and the exact versions
- * its bindings resolved to (also in `sdk_resource_bindings`), each with
- * its SHA-256.
+ * `definition_version` is the semantic version publication gives it,
+ * unique per workflow, so a semantic version always names the same
+ * content. `definition` is the workflow.json exactly as published (at
+ * most the format's 1 MiB), `profile_version` its format
+ * (`grasp-workflow/1`), `contract` the canonical JSON of its input, output
+ * and parameter schemas, and `manifest` the canonical JSON of what the
+ * version pins: its definition, contract, build and the exact versions its
+ * bindings resolved to (also in `sdk_resource_bindings`), each with its
+ * SHA-256. Expressions are compiled into the build, so its hash covers
+ * them: no evaluator is pinned beside it.
  */
 export const workflowResourceVersions = sqliteTable(
   "workflow_resource_versions",
@@ -3732,7 +3734,6 @@ export const workflowResourceVersions = sqliteTable(
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
-    evaluatorHash: text("evaluator_hash").notNull(),
     contract: text().notNull(),
     contractHash: text("contract_hash").notNull(),
     manifest: text().notNull(),

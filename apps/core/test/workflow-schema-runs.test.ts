@@ -1,6 +1,5 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -17,7 +16,6 @@ import {
   allowedModel,
   checkedCalls,
   hello,
-  objectSchema,
   person,
   ranAs,
   retryingEngine,
@@ -348,15 +346,6 @@ const local = {
   note: { kind: "action", contract: "local:code/note.ts#note" },
 };
 
-/** Task `name`, calling the workflow's own `binding` with `args`. */
-const operationTask = (
-  name: string,
-  binding: string,
-  args: unknown
-): Record<string, unknown> => ({
-  [name]: { call: "grasp.operation", with: { binding, arguments: args } },
-});
-
 /**
  * A workflow of a builder's whose bindings reach its own modules, compute
  * `total` and `broken` and action `note`, published with them: after an
@@ -367,43 +356,23 @@ const localWorkflow = async () => {
   const workflow = await createWorkflowResource(env, by, `local-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              ...local,
-              // The profile has an action as an operation of the
-              // workflow's own module.
-              note: { ...local.note, kind: "operation" },
-            },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      output: {
+        schema: objectOf({ status: { type: "string" } }),
+        value: { status: "done" },
       },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
-        { linger: { wait: "PT1H" } },
+      bindings: local,
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
+        { id: "fail", type: "do", binding: "broken", arguments: 1 },
         {
-          add: {
-            call: "grasp.compute",
-            with: { binding: "total", arguments: [1, 2, 3] },
-          },
+          id: "tell",
+          type: "do",
+          binding: "note",
+          arguments: { to: { $expr: "input.who" } },
         },
-        {
-          fail: {
-            call: "grasp.compute",
-            with: { binding: "broken", arguments: 1 },
-          },
-        },
-        operationTask("tell", "note", { to: "${ $workflow.input.who }" }),
-        { finish: { set: { status: "done" } } },
       ],
     }),
     basedOn: null,

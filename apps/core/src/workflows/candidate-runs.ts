@@ -19,7 +19,7 @@ import type {
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
+import { definitionFormat } from "@grasp-os/workflow-schema/format";
 import {
   and,
   eq,
@@ -257,7 +257,6 @@ const requireUnderLimits = async (
 
 /** What a test run's manifest seals beside its build. */
 const candidateManifestSchema = z.object({
-  evaluatorHash: z.string(),
   contract: z.object({ input: z.json(), output: z.json() }),
   bindings: z.array(
     z.object({
@@ -342,10 +341,8 @@ export const startCandidateRun = async (
     draftRevision: revision,
     namespace: workflowNamespace,
     name: workflow.name,
-    definitionVersion: built.checked.identity.version,
-    profile: built.checked.profile,
+    profile: definitionFormat,
     definitionHash: built.definitionHash,
-    evaluatorHash: jqProvenance.sha256,
     contract: built.contract,
     // What each binding was checked against, by catalog contract: every
     // answer the run is given is checked against it (`makeCall`).
@@ -483,10 +480,6 @@ const loadedCandidateRun = async (
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
   const sealed = candidateManifestSchema.parse(JSON.parse(row.manifest));
-  // As a version's: only under the evaluator it was compiled with.
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
-  }
   const build = await loadCandidateBuild(env, pin.workflow, row, pin.manifest);
   if (build.hash !== row.buildHash) {
     throw workflowResourceErrors.create("workflow.version_corrupt");

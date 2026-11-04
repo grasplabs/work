@@ -384,7 +384,6 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       workflowProvenance: [
         "buildHash",
         "definitionHash",
-        "evaluatorHash",
         "manifestHash",
         "profile",
       ],

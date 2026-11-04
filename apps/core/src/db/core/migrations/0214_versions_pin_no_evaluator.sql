@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_resource_versions` DROP COLUMN `evaluator_hash`;

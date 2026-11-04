@@ -412,7 +412,6 @@ class WorkflowGraph {
           // withheld against it.
           manifestHash: intact ? found.manifestHash : null,
           definitionHash: await sha256Hex(definition.text),
-          evaluatorHash: found.evaluatorHash,
           buildHash: intact ? found.buildHash : null,
           profile: found.profile,
         },

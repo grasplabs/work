@@ -14,7 +14,6 @@ import type {
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -284,26 +283,6 @@ const settledInEngine = async (id: string | null) =>
 
 describe("runs of JSON workflows", () => {
   afterEach(endLiveResourceRuns);
-
-  it("fails a run of a version published for another expression evaluator, evaluating nothing", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: '${ "done" }' } } }])
-    );
-    // A deploy that ships another evaluator than the version was sealed for.
-    const deployed = jqProvenance.sha256;
-    Reflect.set(jqProvenance, "sha256", "0".repeat(64));
-    try {
-      const { runId } = await start(by, workflow.id);
-      const run = await ended(by, workflow.id, runId);
-      expect({ status: run.status, code: run.error?.code }).toStrictEqual({
-        status: "failed",
-        code: "workflow.evaluator_changed",
-      });
-    } finally {
-      Reflect.set(jqProvenance, "sha256", deployed);
-    }
-  });
 
   it("ends with its output as the output schema takes it, defaults filled in", async () => {
     const by = await builder();
