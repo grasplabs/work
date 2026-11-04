@@ -43,7 +43,7 @@ const traceOf = async (
   id: string,
   runId: string
 ): Promise<WorkflowRunTrace> =>
-  await person.api.workflowResources.runTrace(id, runId, { doors: false });
+  await person.api.workflowResources.runTrace(id, runId);
 
 /** A trace's steps: each one's task, state and failure's code. */
 const told = ({ steps }: WorkflowRunTrace) =>

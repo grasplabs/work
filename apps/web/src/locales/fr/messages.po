@@ -514,10 +514,6 @@ msgstr "{days, plural, one {exécutions lancées aujourd’hui} other {exécutio
 msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {Le dernier jour} other {Les # derniers jours}}"
 
-#: src/workflows/diagram-overview.tsx
-msgid "{decisions, plural, one {A person comes in at one step, to decide.} other {People come in at # steps, to decide.}}"
-msgstr "{decisions, plural, one {Une personne intervient à une étape, pour décider.} other {Des personnes interviennent à # étapes, pour décider.}}"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Connecté sur # appareil. Déconnectez tout appareil que vous ne reconnaissez pas.} other {Connecté sur # appareils. Déconnectez tout appareil que vous ne reconnaissez pas.}}"
@@ -753,10 +749,6 @@ msgstr "{live} sur {count} en service"
 #: src/knowledge/purge.tsx
 msgid "{longer, plural, one {A term is still in # longer word or address.} other {A term is still in # longer words or addresses.}}"
 msgstr "{longer, plural, one {Un terme reste dans # mot ou adresse plus long.} other {Un terme reste dans # mots ou adresses plus longs.}}"
-
-#: src/workflows/diagram-overview.tsx
-msgid "{many, plural, one {The work is one part.} other {The work goes through # parts, one after another.}}"
-msgstr "{many, plural, one {Le travail tient en une partie.} other {Le travail passe par # parties, l’une après l’autre.}}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
@@ -1025,14 +1017,6 @@ msgstr "{person}, {date}"
 msgid "{place} of {count}"
 msgstr "{place} sur {count}"
 
-#: src/workflows/diagram-doors.tsx
-msgid "{places, plural, one {In # place} other {In # places}}"
-msgstr "{places, plural, one {À # endroit} other {À # endroits}}"
-
-#: src/workflows/diagram-doors.tsx
-msgid "{places, plural, one {One task of this workflow leads there; it is marked in the drawing.} other {# tasks of this workflow lead there; they are marked in the drawing.}}"
-msgstr "{places, plural, one {Une tâche de ce workflow y mène ; elle est marquée dans le dessin.} other {# tâches de ce workflow y mènent ; elles sont marquées dans le dessin.}}"
-
 #: src/tour/tour-layer.tsx
 msgid "{position} of {count}"
 msgstr "{position} sur {count}"
@@ -1181,10 +1165,6 @@ msgstr "{status, select, drawn {{workflow} (cartographié)} designed {{workflow}
 #: src/brain/brain.ts
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Workflow cartographié} designed {Workflow repensé} testing {Workflow en test} other {Workflow en production}}"
-
-#: src/workflows/diagram-overview.tsx
-msgid "{steps, plural, one {# step} other {# steps}}"
-msgstr "{steps, plural, one {# étape} other {# étapes}}"
 
 #: src/knowledge/purge.tsx
 msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
@@ -1838,10 +1818,6 @@ msgstr "Un workflow avec l’IA est en test."
 msgid "A workflow with AI runs on real work."
 msgstr "Un workflow avec l’IA tourne sur du travail réel."
 
-#: src/workflows/diagram-doors.tsx
-msgid "A workflow you can't see"
-msgstr "Un workflow que vous ne pouvez pas voir"
-
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
 msgstr "Abandonner la modification"
@@ -2330,10 +2306,6 @@ msgstr "Bon, voici le plan."
 #: src/workflows/delete-workflow.tsx
 msgid "Also release its name, so a new workflow can take it."
 msgstr "Libérer aussi son nom, pour qu’un nouveau workflow puisse le prendre."
-
-#: src/workflows/diagram-doors.tsx
-msgid "Also starts it"
-msgstr "Le lance aussi"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -3134,11 +3106,6 @@ msgstr "Avant"
 #: src/onboarding/setup-steps.tsx
 msgid "Before I reach out, let your team know"
 msgstr "Avant que je prenne contact, prévenez votre équipe"
-
-#: src/workflows/diagram-overview.tsx
-#: src/workflows/workflow-diagram.tsx
-msgid "Before the first part"
-msgstr "Avant la première partie"
 
 #: src/interview/words.ts
 msgid "Before the work: what you told me about AI."
@@ -3951,11 +3918,6 @@ msgstr "Fermer"
 #: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "Fermer {name}"
-
-#: src/workflows/diagram-overview.tsx
-msgctxt "shut every part of a workflow's overview"
-msgid "Close all"
-msgstr "Tout fermer"
 
 #: src/brain/gap-actions.tsx
 msgid "Close it"
@@ -4989,11 +4951,6 @@ msgstr "Travail bien fait"
 #: src/workflows/requests/request-table.tsx
 msgid "Done with"
 msgstr "Fait avec"
-
-#: src/workflows/diagram-doors.tsx
-msgctxt "the other workflows a workflow goes on in"
-msgid "Doors"
-msgstr "Portes"
 
 #: src/chat/chat-more.tsx
 msgid "Download"
@@ -6260,10 +6217,6 @@ msgstr "manuel/conges"
 msgid "Handed an email attachment to a run"
 msgstr "A transmis une pièce jointe d’e-mail à une exécution"
 
-#: src/workflows/diagram-doors.tsx
-msgid "Handed over to it"
-msgstr "Transmis à celui-ci"
-
 #: src/workflows/requests/request-table.tsx
 msgid "Handled"
 msgstr "Traités"
@@ -6424,10 +6377,6 @@ msgstr "Ce que je sais de votre organisation, pas votre avancement dans ces éta
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Quelle certitude"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "How the parts stand"
-msgstr "Disposition des parties"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -8678,10 +8627,6 @@ msgstr "Personne de ce nom"
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Personne ne pourra plus l’ouvrir ni le démarrer. Ses versions sont conservées mais jamais servies. C’est irréversible."
 
-#: src/workflows/diagram-overview.tsx
-msgid "Nobody comes in: Grasp does all of it."
-msgstr "Personne n’intervient : Grasp fait tout."
-
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Nobody else to add."
@@ -9480,7 +9425,6 @@ msgstr "Ouvrir"
 #: src/engines/app-workspace.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
-#: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "Ouvrir {name}"
 
@@ -9495,11 +9439,6 @@ msgstr "Ouvrir un lien hors de Grasp ?"
 #: src/workflows/requests/request-needs.tsx
 msgid "Open again"
 msgstr "Rouvrir"
-
-#: src/workflows/diagram-overview.tsx
-msgctxt "open every part of a workflow's overview"
-msgid "Open all"
-msgstr "Tout ouvrir"
 
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
@@ -9752,11 +9691,6 @@ msgstr "Dans les deux prochaines semaines, vous recevrez un court lien personnel
 msgid "Overview"
 msgstr "Vue d’ensemble"
 
-#: src/routes/_shell.workflows.$workflow.tsx
-msgctxt "tab of a workflow"
-msgid "Overview"
-msgstr "Vue d’ensemble"
-
 #: src/interview/words.ts
 msgid "Own list or tool"
 msgstr "Liste ou outil personnel"
@@ -9868,10 +9802,6 @@ msgstr "Partie {n} sur {count}"
 #: src/interview/page.tsx
 msgid "Part {n} of {parts}: {label}"
 msgstr "Partie {n} sur {parts} : {label}"
-
-#: src/workflows/workflow-diagram.tsx
-msgid "Part {n}: {name}"
-msgstr "Partie {n} : {name}"
 
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
@@ -12096,10 +12026,6 @@ msgstr "Partage"
 msgid "Show"
 msgstr "Afficher"
 
-#: src/workflows/diagram-overview.tsx
-msgid "Show {name} in the drawing"
-msgstr "Montrer {name} dans le dessin"
-
 #: src/inbox/inbox-page.tsx
 msgid "Show activity by"
 msgstr "Afficher l’activité de"
@@ -12131,10 +12057,6 @@ msgstr "Afficher moins"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Afficher dans le cerveau"
-
-#: src/workflows/diagram-overview.tsx
-msgid "Show in the drawing"
-msgstr "Montrer dans le dessin"
 
 #: src/brain/brain-log.tsx
 msgid "Show in the log"
@@ -12210,11 +12132,6 @@ msgstr "Affichage de la première partie de cette exécution"
 #: src/engines/app-settings.tsx
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Affiché avec l’application. Cela ne la rend accessible à personne : seules les personnes avec qui elle est partagée peuvent l’utiliser."
-
-#: src/workflows/workflow-diagram.tsx
-msgctxt "parts in a row"
-msgid "Side by side"
-msgstr "Côte à côte"
 
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
@@ -12473,11 +12390,6 @@ msgstr "Sources"
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
 msgstr "Étincelles"
-
-#: src/workflows/workflow-diagram.tsx
-msgctxt "parts one under the other"
-msgid "Stacked"
-msgstr "Empilées"
 
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
@@ -14989,14 +14901,6 @@ msgstr "Version {version}"
 msgid "Version {version} declares no binding to approve."
 msgstr "La version {version} ne déclare aucune liaison à approuver."
 
-#: src/workflows/traced-run.tsx
-msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
-msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est exécuté : l'une de ses tâches utilise quelque chose que Grasp ne sait pas encore exécuter."
-
-#: src/workflows/start-run.tsx
-msgid "Version {version} has no build that runs, so nothing ran."
-msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est exécuté."
-
 #: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish"
 msgstr "La version {version} est prête à être publiée"
@@ -15217,10 +15121,6 @@ msgstr "Attend une personne"
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Vous attend"
-
-#: src/workflows/diagram-doors.tsx
-msgid "Waits for it"
-msgstr "L’attend"
 
 #: src/workflows/today-lanes.tsx
 msgid "waits on someone"
@@ -16386,10 +16286,6 @@ msgstr "Vous avez terminé ce chat. Merci pour votre temps."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "Vous n’avez aucune exécution récente dont l’entrée est encore conservée : il n’y avait rien à tester."
-
-#: src/workflows/diagram-doors.tsx
-msgid "You have no role in the workflow behind this door, so Grasp doesn't name it."
-msgstr "Vous n’avez aucun rôle dans le workflow derrière cette porte : Grasp ne le nomme donc pas."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

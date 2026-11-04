@@ -55,9 +55,6 @@ import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
 import { DeleteWorkflow } from "../workflows/delete-workflow.tsx";
-import { DiagramOverview } from "../workflows/diagram-overview.tsx";
-import { partsOf } from "../workflows/diagram-parts.ts";
-import type { DiagramPart } from "../workflows/diagram-parts.ts";
 import { useDraftFromChat } from "../workflows/draw-in-chat.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
@@ -435,7 +432,6 @@ const WorkflowHeader = ({
 /** The tabs of a workflow's page. */
 type WorkflowTab =
   | "flow"
-  | "overview"
   | "definition"
   | "traces"
   | "runs"
@@ -446,12 +442,10 @@ type WorkflowTab =
 
 /** The tabs of a workflow's page, as the reader has them. */
 const WorkflowTabs = ({
-  overview,
   definition,
   builder,
   runs,
 }: {
-  overview: boolean;
   /** Whether the reader has its draft: its Flow, and the JSON behind it. */
   definition: boolean;
   builder: boolean;
@@ -462,11 +456,6 @@ const WorkflowTabs = ({
     {definition ? (
       <TabsTrigger value="flow">
         <Trans context="tab of a workflow">Flow</Trans>
-      </TabsTrigger>
-    ) : null}
-    {overview ? (
-      <TabsTrigger value="overview">
-        <Trans context="tab of a workflow">Overview</Trans>
       </TabsTrigger>
     ) : null}
     {builder ? (
@@ -515,22 +504,13 @@ const latestDraftOf = (
 };
 
 /**
- * What the page takes from the draft's checkpoint: the revision a test on
- * recent items runs, none before the draft's first edit (revision 0 is
- * the current version's definition); and its named parts, as its
- * builders' drawing has them, for an Overview of a workflow drawn in parts.
+ * The revision of the draft's checkpoint a test on recent items runs:
+ * none before the draft's first edit (revision 0 is the current version's
+ * definition).
  */
-const checkpointOf = (
-  draft: WorkflowDraft | undefined
-): { checkpoint: number | null; parts: DiagramPart[] } => {
-  const saved = draft?.checkpoint ?? null;
-  if (saved === null) {
-    return { checkpoint: null, parts: [] };
-  }
-  return {
-    checkpoint: saved.revision > 0 ? saved.revision : null,
-    parts: partsOf(saved.diagram),
-  };
+const checkpointOf = (draft: WorkflowDraft | undefined): number | null => {
+  const revision = draft?.checkpoint?.revision ?? 0;
+  return revision > 0 ? revision : null;
 };
 
 /**
@@ -674,7 +654,7 @@ const WorkflowResourceView = ({
   // whichever is at the later revision is the draft the page goes by.
   const [edited, setEdited] = useState<WorkflowDraft>();
   const latest = latestDraftOf(draft, edited);
-  const { checkpoint, parts } = checkpointOf(latest);
+  const checkpoint = checkpointOf(latest);
   const took = (next: WorkflowDraft): void => {
     setEdited(next);
     setSavedHere(next.editedAt);
@@ -682,9 +662,6 @@ const WorkflowResourceView = ({
   // As Grasp draws it in its chat, beside the page.
   useDraftFromChat(resource.id, took);
   const { status, onChange } = useStatus(lifecycle);
-  // Its parts gone (a new checkpoint drawn in none), Overview goes too:
-  // the tab it was on shows where the page starts instead.
-  const shown = tab === "overview" && parts.length === 0 ? start : tab;
   return (
     <>
       <Tabs
@@ -692,7 +669,7 @@ const WorkflowResourceView = ({
           setTab(value);
         }}
         spacing="none"
-        value={shown}
+        value={tab}
       >
         <div className="flex flex-col gap-3 border-b px-6 pt-5">
           <WorkflowHeader
@@ -710,7 +687,6 @@ const WorkflowResourceView = ({
             <WorkflowTabs
               builder={builder}
               definition={draft !== undefined}
-              overview={parts.length > 0}
               runs={runs.state === "ready" ? runs.data.length : undefined}
             />
             <WorkflowFacts
@@ -730,24 +706,6 @@ const WorkflowResourceView = ({
             onTab={setTab}
             workflow={resource.id}
           />
-        )}
-        {parts.length === 0 ? null : (
-          <TabsContent value="overview">
-            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-              <DiagramOverview
-                onShow={({ n }) => {
-                  setTab("flow");
-                  // Once the drawing shows again: its frame, in view.
-                  requestAnimationFrame(() => {
-                    document
-                      .querySelector(`[data-ground] #workflow-part-${n}`)
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  });
-                }}
-                parts={parts}
-              />
-            </div>
-          </TabsContent>
         )}
         {builder ? (
           // Kept while another tab shows: a test going on stays followed.

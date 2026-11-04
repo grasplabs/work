@@ -891,8 +891,8 @@ const startOf = (
   inputHash: row.inputHash,
   paramsRevision: row.paramsRevision,
   bindingsHash: row.bindingsHash,
-  // Read with the run's own row, by `startWorkflow`.
-  runId: null,
+  // Every start admits its run, under the start's own ID.
+  runId: row.id,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -1395,7 +1395,7 @@ export const decideWorkflowStart = async (
     env,
     descriptorFromText(inputDescriptor),
     text,
-    { runId, workflowId: id, runs: true },
+    { runId, workflowId: id },
     files
   );
   return {

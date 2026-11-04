@@ -338,9 +338,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       const runId = await startedBy(builder, id);
       // Its wait entered, as the engine journaled it.
       await vi.waitFor(async () => {
-        const trace = await builder.api.workflowResources.runTrace(id, runId, {
-          doors: false,
-        });
+        const trace = await builder.api.workflowResources.runTrace(id, runId);
         expect(trace.steps.length).toBeGreaterThan(0);
       }, settles);
       // Another attempt in the lineage, holding six and a half seconds,

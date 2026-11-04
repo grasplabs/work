@@ -9,7 +9,6 @@ import { useEffect, useState } from "react";
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import { followedTrace } from "./followed-trace.ts";
 import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
@@ -51,16 +50,12 @@ export const TracedRun = ({
   const [unapproved, setUnapproved] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [trace, setTrace] = useState<WorkflowRunTrace>();
-  // Started, and admitted with no run: the version has no build that runs.
-  const [unrunnable, setUnrunnable] = useState(false);
 
   // The run is read again while it goes, and no longer once it ended or
   // the panel is gone.
   useEffect(() => {
     let stopped = runId === null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Its doors are read once: the run's version, so its diagram, stays.
-    let drawn: WorkflowRunTrace["diagram"] | undefined;
     const follow = async (): Promise<void> => {
       try {
         if (runId === null) {
@@ -68,16 +63,12 @@ export const TracedRun = ({
         }
         const read = await core.withSession(
           async (session) =>
-            await session.workflowResources.runTrace(workflow, runId, {
-              doors: drawn === undefined,
-            })
+            await session.workflowResources.runTrace(workflow, runId)
         );
         if (stopped) {
           return;
         }
-        const followed = followedTrace(read, drawn);
-        drawn = followed.diagram;
-        setTrace(followed);
+        setTrace(read);
         setFailure(undefined);
         if (!settled(read)) {
           timer = setTimeout(() => {
@@ -109,7 +100,6 @@ export const TracedRun = ({
   const start = async (): Promise<void> => {
     setFailure(undefined);
     setUnapproved(false);
-    setUnrunnable(false);
     let parsed: unknown;
     try {
       parsed = JSON.parse(input);
@@ -132,7 +122,6 @@ export const TracedRun = ({
           })
       );
       setRunId(started.runId);
-      setUnrunnable(started.runId === null);
     } catch (error) {
       setFailure(failureText(error));
       setUnapproved(isUnapprovedStart(error));
@@ -182,14 +171,6 @@ export const TracedRun = ({
       </div>
       <ErrorText>{failure}</ErrorText>
       {unapproved ? <ToApprovals onFiles={onFiles} /> : null}
-      {unrunnable ? (
-        <output>
-          <Trans>
-            Version {version} has no build that runs, so nothing ran: one of its
-            tasks uses something Grasp can&apos;t run yet.
-          </Trans>
-        </output>
-      ) : null}
       {trace === undefined ? null : (
         <div className="flex flex-col gap-2">
           <output>

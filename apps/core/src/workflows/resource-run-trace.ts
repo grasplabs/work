@@ -4,10 +4,6 @@ import type {
   TraceStep,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
-import {
-  workflowResourceErrors,
-  workflowRunTraceOptionsSchema,
-} from "@grasp-os/shared/workflow-resources";
 import { decisionPollStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   HistoryRecord,
@@ -469,16 +465,8 @@ export const resourceRunTrace = async (
   env: Env,
   by: Acting,
   id: unknown,
-  runId: unknown,
-  options?: unknown
+  runId: unknown
 ): Promise<WorkflowRunTrace> => {
-  // grasp-workflow/1 has no step that leads to another workflow yet (a
-  // child run, an event), so no diagram has doors to draw.
-  workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    workflowRunTraceOptionsSchema,
-    options
-  );
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const run = await resourceRunFor(env, by, workflow.id, runId);
   const definition = await workflowDefinition(

@@ -484,17 +484,17 @@ const sendStart = async (env: Env, row: RunRow): Promise<void> => {
 /**
  * Sends the start of the run receipt `id` admitted to the engine, while
  * its row says it is still starting: the engine takes a start once, so
- * sending it again is safe. Answers the run's ID; null when the receipt
- * admitted no run (its version has no executable build). A start the
- * engine didn't take is left to the repair (`repairResourceStarts`).
+ * sending it again is safe. Answers the run's ID, which every admitted
+ * start has. A start the engine didn't take is left to the repair
+ * (`repairResourceStarts`).
  */
 export const startResourceRun = async (
   env: Env,
   id: string
-): Promise<string | null> => {
+): Promise<string> => {
   const row = await runOf(env, id);
   if (row === undefined) {
-    return null;
+    throw new Error(`Start ${id} admitted no run`);
   }
   if (row.status === "starting") {
     try {

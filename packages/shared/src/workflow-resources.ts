@@ -165,7 +165,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.event_timeout":
     "A listen task's events didn't all arrive before its timeout.",
   "workflow.child_unavailable":
-    "This run can't start that child workflow: the version its binding pins has no executable build, or the run has no child workflows here.",
+    "This run can't start that child workflow: the run has no child workflows here.",
   "workflow.child_failed": "A child workflow this run started didn't complete.",
   "workflow.child_timeout":
     "A child workflow this run started didn't end while its lineage could still run.",
@@ -645,12 +645,8 @@ export interface WorkflowStart {
   paramsRevision: number;
   /** The SHA-256 of the frozen bindings. */
   bindingsHash: string;
-  /**
-   * The run executing it, under its own ID, pinned to the version's sealed
-   * build; null for a version that has no executable build
-   * (`WorkflowVersionBuild`), which is admitted and never runs.
-   */
-  runId: string | null;
+  /** The run executing it, pinned to the version's build. */
+  runId: string;
   createdAt: string;
 }
 
@@ -956,11 +952,6 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
  */
 const stepFieldsSchema = z.record(z.string(), z.json());
 
-/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
-export const workflowRunTraceOptionsSchema = z
-  .strictObject({ doors: z.boolean().default(true) })
-  .default({ doors: true });
-
 /**
  * One step of a draft edited on the canvas or by the agent (`editStep`),
  * as the next revision over `expectedRevision`: `change` replaces the
@@ -1166,7 +1157,7 @@ export interface WorkflowDraft {
     /**
      * Drawn from the checkpoint's own JSON, as it passed. An edit that
      * didn't pass leaves an earlier edit the checkpoint, as the editor
-     * already holds it: its answer draws that diagram without doors.
+     * already holds it.
      */
     diagram: WorkflowDiagram;
   } | null;
@@ -1350,17 +1341,8 @@ export interface WorkflowResourcesApi {
    * gone.
    */
   runFiles: (id: string, runId: string) => Promise<RunFileListing[] | null>;
-  /**
-   * What run `runId` did, over its version's diagram, for builders. With
-   * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
-   * without its doors: a trace followed while the run goes keeps the
-   * diagram its first read drew, as the run's version never changes.
-   */
-  runTrace: (
-    id: string,
-    runId: string,
-    options?: unknown
-  ) => Promise<WorkflowRunTrace>;
+  /** What run `runId` did, over its version's diagram, for builders. */
+  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for

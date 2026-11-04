@@ -55,19 +55,12 @@ import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 
 /** What a start started, as the dialog says it. */
 type Started =
-  | { kind: "unrunnable"; version: number }
   | { kind: "listed" }
   | { kind: "run"; app: string; workflow: string; run: string };
 
 /** What the dialog says once a start went through. */
 const StartedText = ({ started }: { started: Started }) => {
   switch (started.kind) {
-    case "unrunnable": {
-      const { version } = started;
-      return (
-        <Trans>Version {version} has no build that runs, so nothing ran.</Trans>
-      );
-    }
     case "listed": {
       return (
         <Trans>
@@ -458,7 +451,7 @@ export const StartIndependentRun = ({
       jsonOptional={false}
       onFiles={onFiles}
       start={async (input, key) => {
-        const started = await core.withSession(
+        await core.withSession(
           async (session) =>
             await session.workflowResources.start(workflow, {
               version,
@@ -468,9 +461,7 @@ export const StartIndependentRun = ({
         );
         // Its runs, as core lists them now.
         void router.invalidate();
-        return started.runId === null
-          ? { kind: "unrunnable", version }
-          : { kind: "listed" };
+        return { kind: "listed" };
       }}
     />
   );

@@ -645,9 +645,7 @@ export const liveLineage = async (by: Person) => {
   const { id } = await publishedWorkflow(by, greetingTasks("PT1H"));
   const run = await startedBy(by, id);
   await vi.waitFor(async () => {
-    const trace = await by.api.workflowResources.runTrace(id, run, {
-      doors: false,
-    });
+    const trace = await by.api.workflowResources.runTrace(id, run);
     if (trace.steps.length === 0) {
       throw new Error("The engine hasn't journaled the wait yet");
     }

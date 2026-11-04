@@ -1293,8 +1293,7 @@ describe("grasp.model calls of JSON workflows", () => {
       const greetOf = async (id: string, runId: string) => {
         const { steps } = await signedIn.api.workflowResources.runTrace(
           id,
-          runId,
-          { doors: false }
+          runId
         );
         return steps
           .filter(({ task }) => task === "greet")
@@ -1366,8 +1365,7 @@ describe("grasp.model calls of JSON workflows", () => {
     }
     const { steps, tasks } = await signedIn.api.workflowResources.runTrace(
       workflow.id,
-      runId,
-      { doors: false }
+      runId
     );
     const greet = steps.filter(({ task }) => task === "greet");
 
@@ -4217,8 +4215,7 @@ describe("runs started by a restricted App, waiting on a held call", () => {
       const sendOf = async (id: string, runId: string) => {
         const { steps } = await signedIn.api.workflowResources.runTrace(
           id,
-          runId,
-          { doors: false }
+          runId
         );
         return steps
           .filter(({ task }) => task === "send")

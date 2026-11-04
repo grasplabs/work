@@ -615,7 +615,7 @@ describe(
             fields: { doc: { ...field, kind: "file" } },
           },
           JSON.stringify({ doc: { id: file.id } }),
-          { runId, workflowId, runs: true },
+          { runId, workflowId },
           {
             // Readable as it is copied, hidden by the time it is read again.
             read: async () => {
@@ -667,7 +667,6 @@ describe(
           {
             runId: crypto.randomUUID(),
             workflowId: crypto.randomUUID(),
-            runs: true,
           },
           {
             // Nothing is a file to read: a text is handed as it is, and an

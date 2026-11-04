@@ -125,9 +125,6 @@ const startChild = async (
       step: stepName,
     }
   );
-  if (start.runId === null) {
-    throw workflowResourceErrors.create("workflow.child_unavailable");
-  }
   return start.runId;
 };
 

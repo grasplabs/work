@@ -460,8 +460,7 @@ describe("a run's trace, read over the session API", () => {
 
     const whole = await builder.api.workflowResources.runTrace(
       workflow.id,
-      runId,
-      { doors: false }
+      runId
     );
 
     expect({
@@ -535,9 +534,7 @@ describe("a run's trace, read over the session API", () => {
       throw new Error("The start made a run");
     }
     const traceNow = async () =>
-      await builder.api.workflowResources.runTrace(workflow.id, runId, {
-        doors: false,
-      });
+      await builder.api.workflowResources.runTrace(workflow.id, runId);
     const waiting = await vi.waitFor(
       async () => {
         const trace = await traceNow();
@@ -643,9 +640,7 @@ describe("a run's trace, read over the session API", () => {
         basedOn: null,
       });
       const traceOf = async (id: string, runId: string) =>
-        await builder.api.workflowResources.runTrace(id, runId, {
-          doors: false,
-        });
+        await builder.api.workflowResources.runTrace(id, runId);
       // Room for the loop's steps, past the tests' lowered step limit,
       // while the long run journals more than a trace reads: its engine
       // holds a record past the 2,000th. Read then, ended or not.
