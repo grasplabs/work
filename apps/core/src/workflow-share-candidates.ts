@@ -20,6 +20,9 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   may not share it: only whoever may share it (`shareWorkflowResource`)
 //   reads this, a builder of the workflow, never Grasp staff; anyone
 //   without a role is told the workflow doesn't exist, as everywhere.
+// - The same people and teams also reach whoever starts a workflow whose
+//   input names a person (`organizationPeopleAndTeams`): what bounds that
+//   is in workflow-start-form.ts.
 // - Saying more of a person than a share names: their name and ID only,
 //   no address, no organization role, nor a team's members.
 // - Offering a share core then refuses (a builder's role to someone who

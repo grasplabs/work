@@ -12,7 +12,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { workflowStartForm } from "../src/workflow-start-form.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // Starting an independent workflow by hand from its page (GRA-1305): what
 // the page reads to start one (src/workflow-start-form.ts), and that the
@@ -189,7 +189,10 @@ describe("starting an independent workflow by hand", () => {
       id: uma.userId,
       role: "user",
     });
-    const form = await workflowStartForm(env, uma, workflow.id);
+    let form = await workflowStartForm(env, uma, workflow.id);
+    const recorded = await auditedDuring(async () => {
+      form = await workflowStartForm(env, uma, workflow.id);
+    });
     const startWith = async (approver: string): Promise<string> =>
       await started(uma, workflow.id, form.version, { approver, note: "" });
 
@@ -197,6 +200,15 @@ describe("starting an independent workflow by hand", () => {
       properties: form.input?.properties,
       // Uma, a user, picks from everyone, by name and ID alone.
       offersAda: form.people?.people.find(({ id }) => id === ada.userId),
+      // Each read on the record: how many, never whom.
+      recorded: recorded.map(({ action, actor, target, detail }) => ({
+        action,
+        actor,
+        target,
+        counts:
+          detail.people === form.people?.people.length &&
+          detail.teams === form.people?.teams.length,
+      })),
       teams: Array.isArray(form.people?.teams),
       person: await startWith(`person:${ada.userId}`),
       role: await startWith("role:admin"),
@@ -206,6 +218,14 @@ describe("starting an independent workflow by hand", () => {
         note: { type: "string" },
       },
       offersAda: { id: ada.userId, name: "Person" },
+      recorded: [
+        {
+          action: "workflow.people.read",
+          actor: { type: "person", userId: uma.userId },
+          target: { type: "workflow_resource", id: workflow.id },
+          counts: true,
+        },
+      ],
       teams: true,
       person: "ok",
       role: "ok",

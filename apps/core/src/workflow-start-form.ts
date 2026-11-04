@@ -1,10 +1,12 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { descriptorFromText, jsonSchemaOf } from "@grasp-os/sdk/host";
 import type { JsonSchema } from "@grasp-os/sdk/host";
+import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { keepAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { workflowResourceLifecycles } from "./db/core/schema.ts";
 import { requireWorkflowRole, versionContract } from "./workflow-resources.ts";
@@ -25,8 +27,14 @@ import { organizationPeopleAndTeams } from "./workflow-share-candidates.ts";
 // start it may name anyone in such a field (the start checks only that it
 // is a person, team or role, and the run's decision that its binding
 // covers them), so they learn names they need to pick, and no more: no
-// address, role, or a team's members. A form with no such field carries
-// none.
+// address, role, or a team's members. Each such read is recorded
+// (`workflow.people.read`: the workflow, and how many people and teams it
+// answered, never whom), as an App's reads of them are (app-people.ts). A
+// builder decides a workflow's input, and reads these anyway to share it;
+// a binding's deciders still decide who answers its decisions, whoever a
+// start names. A form with no such field carries none. A nullable person
+// field isn't marked: the picker can't send null, so that input is typed
+// as JSON.
 
 /**
  * `descriptor` as the start form's exact JSON Schema, each field of the
@@ -79,11 +87,16 @@ export const workflowStartForm = async (
     return { version, input: null, people: null };
   }
   const descriptor = descriptorFromText(JSON.stringify(contract.input));
-  return {
-    version,
-    input: startSchemaOf(descriptor),
-    people: takesPerson(descriptor)
-      ? await organizationPeopleAndTeams(env)
-      : null,
-  };
+  const input = startSchemaOf(descriptor);
+  if (!takesPerson(descriptor)) {
+    return { version, input, people: null };
+  }
+  const people = await organizationPeopleAndTeams(env);
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: by.actor ?? actorOf(by),
+    action: "workflow.people.read",
+    target: { type: "workflow_resource", id: workflow.id },
+    detail: { people: people.people.length, teams: people.teams.length },
+  });
+  return { version, input, people };
 };
