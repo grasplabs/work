@@ -811,7 +811,6 @@ export default app({
   access: { tables: { notes: { read: "${read}", write: "${read}" } } },
   operations: {},
   screens: [],
-  uses: [],
   migrations: [],
 });
 `;
