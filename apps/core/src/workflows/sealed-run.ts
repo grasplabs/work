@@ -76,6 +76,7 @@ import {
   askDeciders,
   callInvalid,
   candidateDecision,
+  checkCandidateDecision,
   decisionRunOf,
   openRunDecision,
   promptOf,
@@ -2267,6 +2268,14 @@ class SealedRun implements SealedRunKind {
       // is the answer its start gave the binding (`candidateDecision`,
       // checked here), opened nowhere (`decisionsKeptOf`).
       if (calling.candidate !== undefined) {
+        // Asked as a real run's is (its input the contract's, never of the
+        // run's own person), so a draft passes only what a run would.
+        await checkCandidateDecision(
+          this.#env,
+          calling.candidate,
+          built,
+          calling.principal
+        );
         await candidateDecision(this.#env, calling.candidate, call.binding);
         const opened = {
           decision: candidateDecisionOf(call.binding),

@@ -146,6 +146,14 @@ const review = {
   },
 };
 
+/** Asks whom the input's `who` names to approve, through binding `approval`. */
+const reviewWho = {
+  review: {
+    ...review.review,
+    with: { ...review.review.with, recipients: ["${ $workflow.input.who }"] },
+  },
+};
+
 /** Asks the fixture's `approver` about each of two items, in turn. */
 const batch = {
   batch: {
@@ -199,14 +207,17 @@ export default workflow("sealed", { params: {}, input: z.object({ who: z.string(
 
 /**
  * The module the generator for the run host writes for `linger` then
- * `review`: its output the answer, and how many people its code was told
- * of, each time it asked.
+ * `review`, its decision asking `asked` of `recipients` (code): its output the answer, and
+ * how many people its code was told of, each time it asked.
  */
-const reviewModule = `
+const reviewModuleOf = (
+  asked = "{ who: input.who }",
+  recipients = '["person:approver"]'
+): string => `
 import { workflow, z } from ${sdkWorkflow};
 export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { input }) => {
   await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
-  const entered = await step.do("review", { key: "enter", description: "Its ask" }, async () => ({ recipients: ["person:approver"], prompt: "Approve?", input: { who: input.who } }));
+  const entered = await step.do("review", { key: "enter", description: "Its ask" }, async () => ({ recipients: ${recipients}, prompt: "Approve?", input: ${asked} }));
   const told = [];
   const decided = await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
   return { status: \`\${decided.approved ? "approved" : "rejected"} by \${decided.by}, told \${told.join(",")}\` };
@@ -752,41 +763,69 @@ describe(
       });
     });
 
-    it("takes a draft's test run's decision on the run host from its start's fixture, opening none and asking nobody", async () => {
+    it("takes a draft's test run's decision on the run host from its start's fixture, as a real run asks it, opening none and asking nobody", async () => {
       const ada = await person("builder");
-      const { workflow, revision } = await drafted(ada, [linger, review]);
-      const { runId } = await startCandidateRun(env, ada, workflow.id, {
-        revision,
-        input: { who: "Ada" },
-        fixtures: {
-          approval: {
-            output: {
-              answered: true,
-              approved: true,
-              by: "person:pat",
-              value: null,
+      const { workflow, revision } = await drafted(ada, [linger, reviewWho]);
+      /** A test run of the draft for `who`, left waiting by its own engine. */
+      const waiting = async (who = "person:approver") => {
+        const { runId } = await startCandidateRun(env, ada, workflow.id, {
+          revision,
+          input: { who },
+          fixtures: {
+            approval: {
+              output: {
+                answered: true,
+                approved: true,
+                by: "person:pat",
+                value: null,
+              },
             },
           },
-        },
-      });
-      await candidateOnce(
-        ada,
-        workflow.id,
-        runId,
-        (status) => status === "running"
-      );
-      const activation = await candidateActivation(
-        env,
-        await candidatePinOf(workflow.id, runId),
-        runId
-      );
-      // Its engine waits for no event: the answer is there at its first look.
+        });
+        await candidateOnce(
+          ada,
+          workflow.id,
+          runId,
+          (status) => status === "running"
+        );
+        return {
+          runId,
+          activation: await candidateActivation(
+            env,
+            await candidatePinOf(workflow.id, runId),
+            runId
+          ),
+        };
+      };
+      const answered = await waiting();
+      const misasked = await waiting();
+      const own = await waiting(`person:${ada.userId}`);
+      const asking = reviewModuleOf(undefined, "[input.who]");
       expect({
-        ended: await ranOnRunHost(activation, reviewModule),
-        organization: await organizationsOf(runId),
+        // Its engine waits for no event: the answer is there at its first look.
+        ended: await ranOnRunHost(answered.activation, asking),
+        // Asked as a real run's decision is, its fixture notwithstanding:
+        // an input its contract doesn't take fails it, as a real run's.
+        misasked: await ranOnRunHost(
+          misasked.activation,
+          reviewModuleOf("{ who: 5 }", "[input.who]")
+        ),
+        // Nor of the run's own person, who can't answer it.
+        own: await ranOnRunHost(own.activation, asking),
+        organization: [
+          await organizationsOf(answered.runId),
+          await organizationsOf(misasked.runId),
+          await organizationsOf(own.runId),
+        ],
       }).toStrictEqual({
         ended: { status: "approved by person:pat, told 0" },
-        organization: { decisions: 0, asked: 0 },
+        misasked: { failed: "workflow.call_invalid" },
+        own: { failed: "workflow.call_invalid" },
+        organization: [
+          { decisions: 0, asked: 0 },
+          { decisions: 0, asked: 0 },
+          { decisions: 0, asked: 0 },
+        ],
       });
     });
 
@@ -835,7 +874,7 @@ describe(
       };
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId),
-        reviewModule,
+        reviewModuleOf(),
         { engine }
       );
       const kept = await env.DB.prepare(
