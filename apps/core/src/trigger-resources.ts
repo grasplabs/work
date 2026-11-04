@@ -43,11 +43,16 @@ import {
   triggerSchedules,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
-import { inList, notNullFailed } from "./db/d1.ts";
+import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { revokedWith, triggerRequests } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
+import {
+  addressTaken,
+  randomEmailAddress,
+  requireFreeAddresses,
+} from "./workflows/email-addresses.ts";
 import { quotaLimits } from "./workflows/quotas.ts";
 import {
   webhookTokenOf,
@@ -107,14 +112,19 @@ import {
 //   event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
 // - An email trigger taking mail meant for another, or mailed by anyone
-//   who learned its ID: its address is `trigger-` and 128 random bits of
-//   its own (`emailAddressOf`), never derived from its ID (which builders,
+//   who learned its ID: its address is the name its builder chose, as an
+//   App's is, or else `trigger-` and 128 random bits of its own
+//   (`randomEmailAddress`), never derived from its ID (which builders,
 //   admins, staff and the audit log see), shown only to whoever may see
-//   the trigger, never audited or logged. Mail to it reaches the trigger
-//   first (inbound-email.ts); no App's address is that token unless
-//   copied. It is never changed: deleting the trigger and making another is
-//   how it changes. Its input is a fixed mapping as a connector trigger's
-//   is. Its mail starts runs as workflows/inbound-email.ts says.
+//   the trigger; a random one is never audited or logged. Either way it
+//   is one workflow's: Apps and triggers take addresses from one
+//   namespace, first come, checked in the statement that takes one
+//   (workflows/email-addresses.ts).
+//   A chosen name can be guessed, as an App's can: anyone may mail it,
+//   and its mail is held to the same ingress as any other. It is never
+//   changed: deleting the trigger gives it up, and making another is how
+//   it changes. Its input is a fixed mapping as a connector trigger's is.
+//   Its mail starts runs as workflows/inbound-email.ts says.
 // - A webhook trigger started by anyone who learns its URL: its URL ends
 //   in a token of 128 random bits of its own, kept as an email trigger's
 //   address is, and every delivery must be signed with its secret, which
@@ -287,12 +297,17 @@ const kindFieldsOf = async (
   };
 };
 
-/** Random bytes in an email trigger's address: 128 bits. */
-const addressBytes = 16;
-
-/** A new email trigger's address, before the `@`: random, its own. */
-const emailAddressOf = (): string =>
-  `trigger-${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
+/**
+ * The name an email trigger's builder chose for its address in `config`
+ * (checked by `kindFieldsOf` already), if they chose one.
+ */
+const chosenAddressOf = (
+  kind: TriggerKind,
+  config: unknown
+): string | undefined =>
+  kind === "email"
+    ? emailTriggerConfigSchema.safeParse(config).data?.address
+    : undefined;
 
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
@@ -377,6 +392,10 @@ export const createTriggerResource = async (
     version,
     by.userId
   );
+  const chosen = chosenAddressOf(kind, config);
+  if (chosen !== undefined) {
+    await requireFreeAddresses(env, [chosen]);
+  }
   const id = triggerIdSchema.parse(crypto.randomUUID());
   const configHash = await sha256Hex(canonicalJson(config));
   const cap = quotaLimits(env).triggerResourcesPerPerson;
@@ -400,16 +419,19 @@ export const createTriggerResource = async (
   );
   const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
-      // Only while `by` is under the cap, counted in this statement:
-      // otherwise NULL, which fails the batch.
+      // Only while `by` is under the cap, counted in this statement, and
+      // a chosen address is still free (email-addresses.ts): otherwise
+      // NULL, which fails the batch. Another trigger taking it at once
+      // fails it on the address's unique index.
       id: sql`(SELECT ${id} WHERE (SELECT COUNT(*) FROM trigger_resources
-        WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap})`,
+        WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap}
+        ${chosen === undefined ? sql`` : sql`AND NOT ${addressTaken([chosen])}`})`,
       ownerId: by.userId,
       kind,
       currentVersion: 1,
       enabled: true,
       createdAt: now,
-      emailAddress: kind === "email" ? emailAddressOf() : null,
+      emailAddress: kind === "email" ? (chosen ?? randomEmailAddress()) : null,
       webhookToken: kind === "webhook" ? webhookTokenOf() : null,
       webhookSecretGeneration: kind === "webhook" ? 1 : null,
     }),
@@ -449,6 +471,9 @@ export const createTriggerResource = async (
         workflowId: workflow.id,
         workflowVersion: version,
         configHash,
+        // A name chosen is no secret, as an App's address isn't; a random
+        // address is never audited.
+        ...(chosen === undefined ? {} : { address: chosen }),
       })
     ),
     // Asked for as it lands, so the trigger never waits on a request
@@ -459,6 +484,13 @@ export const createTriggerResource = async (
   try {
     await batch;
   } catch (error) {
+    if (
+      chosen !== undefined &&
+      (isUniqueViolation(error) || notNullFailed(error, "trigger_resources.id"))
+    ) {
+      // Taken meanwhile answers as taken; under the cap otherwise.
+      await requireFreeAddresses(env, [chosen]);
+    }
     if (notNullFailed(error, "trigger_resources.id")) {
       throw workflowResourceErrors.create("workflow.trigger_limit");
     }
@@ -871,9 +903,11 @@ export const deleteTriggerResource = async (
   const trigger = await requireTriggerManager(env, by, id);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
+    // Its address goes with it, for another workflow to take
+    // (email-addresses.ts): mail to it bounces from now on.
     db
       .update(triggerResources)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: new Date(), emailAddress: null })
       .where(
         and(
           eq(triggerResources.id, trigger.id),

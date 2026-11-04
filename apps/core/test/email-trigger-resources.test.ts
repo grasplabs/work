@@ -30,6 +30,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { setCurrentVersion } from "../src/apps.ts";
 import worker from "../src/index.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -37,23 +38,28 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
+import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   addedSince,
   deliver,
+  intake,
   invoiceMail,
   storedObjects,
 } from "./email-triggers.ts";
+import type { Person } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { appWith } from "./workflow-apps.ts";
 
 // Independent workflows' email triggers (workflows/inbound-email.ts), from
 // their threat model: mail reaches a trigger only through the signed
@@ -200,6 +206,8 @@ interface Starting {
   /** Its files binding, approved by the admin, for a catalog key of its own. */
   files?: true;
   input?: InputMapping;
+  /** The name its address takes, when not a random one of its own. */
+  address?: string;
 }
 
 /**
@@ -212,6 +220,7 @@ const emailTrigger = async ({
   modules,
   files,
   input = mapping,
+  address,
 }: Starting = {}) => {
   const builder = await signedInApi(idp, "builder");
   const by = await admin();
@@ -234,7 +243,7 @@ const emailTrigger = async ({
     kind: "email",
     workflowId: id,
     version: 1,
-    config: { input },
+    config: { input, ...(address === undefined ? {} : { address }) },
   });
   const start = await granted(by, {
     subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -1275,6 +1284,203 @@ const filedOf = (input: string | null): boolean[] =>
     })
     .parse(inputOf(input))
     .attachments.map(({ file }) => file !== undefined);
+
+/** A workflow of `builder`'s, published, to put a trigger on. */
+const publishedWorkflow = async (builder: Person): Promise<string> => {
+  const { id, name } = await builder.api.workflowResources.create(
+    `named-${unique()}`
+  );
+  await builder.api.workflowResources.publish(id, {
+    definition: definitionOf(name),
+    basedOn: null,
+  });
+  return id;
+};
+
+/** An email trigger on `workflow` for `builder`, at `address` if named. */
+const createEmailTrigger = async (
+  builder: Person,
+  workflow: string,
+  address?: string
+) =>
+  await builder.api.workflowResources.triggers.create({
+    kind: "email",
+    workflowId: workflow,
+    version: 1,
+    config: {
+      input: mapping,
+      ...(address === undefined ? {} : { address }),
+    },
+  });
+
+/** How many live triggers receive at `address`. */
+const holdersOf = async (address: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM trigger_resources WHERE email_address = ? AND deleted_at IS NULL"
+  )
+    .bind(address)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
+describe(
+  "names chosen for independent workflows' email triggers",
+  { timeout: 120_000 },
+  () => {
+    it("receive mail at the name their builder chose, which starts the run, audited with the trigger", async () => {
+      const name = `invoices-${unique()}`;
+      const { trigger, address } = await emailTrigger({ address: name });
+
+      const delivered = await post(
+        address,
+        invoiceMail({ to: address, messageId: `m-${unique()}@acme.test` })
+      );
+      const runs = await runsOf(trigger.id);
+      const created = await auditedOf(trigger.id, "trigger.created");
+
+      expect({
+        address: trigger.address,
+        status: delivered.status,
+        runs: runs.map(({ input }) => inputOf(input)),
+        created: created.map((detail) => detail.address),
+      }).toMatchObject({
+        address: name,
+        status: 202,
+        runs: [{ subject: "Invoice INV-7", from: "ben@acme.test" }],
+        created: [name],
+      });
+    });
+
+    it("refuse a name another workflow receives at, an App's or a trigger's, either way round, or that isn't one; and free it once its trigger is deleted", async () => {
+      const name = `intake-${unique()}`;
+      const appName = `app-${unique()}`;
+      const first = await emailTrigger({ address: name });
+      const random = await emailTrigger();
+      const other = await signedInApi(idp, "builder");
+      const workflow = await publishedWorkflow(other);
+      await appWith(other, intake(appName));
+
+      const outcomes = {
+        trigger: await outcome(createEmailTrigger(other, workflow, name)),
+        app: await outcome(appWith(other, intake(name))),
+        appFirst: await outcome(createEmailTrigger(other, workflow, appName)),
+        copied: await outcome(
+          createEmailTrigger(other, workflow, random.trigger.address ?? "")
+        ),
+        notAName: await outcome(createEmailTrigger(other, workflow, "In@x")),
+      };
+      await first.builder.api.workflowResources.triggers.delete(
+        first.trigger.id
+      );
+      const taken = await createEmailTrigger(other, workflow, name);
+
+      expect({ outcomes, after: taken.address }).toStrictEqual({
+        outcomes: {
+          trigger: "workflow.email_taken",
+          app: "workflow.email_taken",
+          appFirst: "workflow.email_taken",
+          copied: "workflow.email_taken",
+          notAName: "workflow.resource_invalid",
+        },
+        after: name,
+      });
+    });
+
+    it("go to one of two triggers taking a name at once", async () => {
+      const name = `both-${unique()}`;
+      const builder = await signedInApi(idp, "builder");
+      const workflow = await publishedWorkflow(builder);
+
+      const results = await Promise.all([
+        outcome(createEmailTrigger(builder, workflow, name)),
+        outcome(createEmailTrigger(builder, workflow, name)),
+      ]);
+
+      expect({
+        results: results.toSorted(),
+        holders: await holdersOf(name),
+      }).toStrictEqual({
+        results: ["ok", "workflow.email_taken"],
+        holders: 1,
+      });
+    });
+
+    it("refuse a name an App took after the trigger checked it was free, before its batch landed", async () => {
+      const name = `raced-${unique()}`;
+      const builder = await signedInApi(idp, "builder");
+      const workflow = await publishedWorkflow(builder);
+      const app = await appWith(builder, intake(`was-${unique()}`));
+      // The App takes the name just before the trigger's batch lands.
+      const racing = racingDb(
+        async () =>
+          await env.DB.prepare(
+            "UPDATE workflow_triggers SET address = ? WHERE app_id = ?"
+          )
+            .bind(name, app)
+            .run(),
+        /insert into "trigger_resources"/iu
+      );
+
+      const refused = await outcome(
+        createTriggerResource(
+          { ...env, DB: racing },
+          await builder.api.whoami(),
+          {
+            kind: "email",
+            workflowId: workflow,
+            version: 1,
+            config: { input: mapping, address: name },
+          }
+        )
+      );
+
+      expect({ refused, holders: await holdersOf(name) }).toStrictEqual({
+        refused: "workflow.email_taken",
+        holders: 0,
+      });
+    });
+
+    it("keep an App from taking a name a trigger took after the App checked it was free", async () => {
+      const name = `taken-${unique()}`;
+      const builder = await signedInApi(idp, "builder");
+      const { id: app } = await builder.api.apps.create({ name: "Raced" });
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        intake(name),
+        "Raced"
+      );
+      // A trigger takes the name just before the App's batch lands.
+      const racing = racingDb(
+        async () =>
+          await env.DB.prepare(
+            "INSERT INTO trigger_resources (id, owner_id, kind, current_version, enabled, created_at, email_address) VALUES (?, ?, 'email', 1, 1, ?, ?)"
+          )
+            .bind(crypto.randomUUID(), builder.userId, Date.now(), name)
+            .run(),
+        /update "apps" set "current_version"/iu
+      );
+
+      const refused = await outcome(
+        setCurrentVersion(
+          { ...env, DB: racing },
+          await builder.api.whoami(),
+          app,
+          version
+        )
+      );
+      const { results } = await env.DB.prepare(
+        "SELECT app_id FROM workflow_triggers WHERE address = ?"
+      )
+        .bind(name)
+        .all<{ app_id: string }>();
+
+      expect({ refused, receivers: results.length }).toStrictEqual({
+        refused: "app.conflict",
+        receivers: 0,
+      });
+    });
+  }
+);
 
 describe(
   "attachments of mail to independent workflows' email triggers",

@@ -841,9 +841,10 @@ export type Trigger<ScheduleParam extends string = string> =
    * When mail arrives at `address` (the part before the `@`, e.g.
    * `invoices`) on the deployment's mail domain. The run starts with the
    * message as input: declare `input: emailMessage`. Mail to an address no
-   * workflow receives at bounces. Only one App receives at an address:
+   * workflow receives at bounces. Only one workflow receives at an address:
    * making a version current fails with `workflow.email_taken` while
-   * another App's current version does. Anyone can send mail: treat the
+   * another App's current version, or an independent workflow's email
+   * trigger, does. Anyone can send mail: treat the
    * message as untrusted data, its sender (`from`) included: it's
    * whatever the sender wrote, and nothing vouches for it. The same message delivered again starts no second run of
    * the workflow: the same Message-ID is the same message (without one,

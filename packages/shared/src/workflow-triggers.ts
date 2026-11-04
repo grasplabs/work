@@ -6,6 +6,7 @@ import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import { jsonPointerPattern } from "./json.ts";
 import type { Json } from "./json.ts";
 import type { PermissionRequest, PermissionStatus } from "./permissions.ts";
+import { emailLocalPartSchema } from "./workflows.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
 // the session's `workflowResources.triggers` serves them: each a resource
@@ -126,6 +127,13 @@ export const connectorTriggerConfigSchema = z.strictObject({
  */
 export const emailTriggerConfigSchema = z.strictObject({
   input: inputMappingSchema,
+  /**
+   * The part before the `@` of the address it receives mail at, as an
+   * App's email trigger names one (`emailLocalPartSchema`, e.g.
+   * `invoices`), which no other workflow may have; without one, an
+   * address of its own: `trigger-` and 128 random bits.
+   */
+  address: emailLocalPartSchema.optional(),
 });
 
 /**
@@ -201,8 +209,9 @@ export interface WorkflowTrigger {
   nextAt: string | null;
   /**
    * The part before the `@` of the address an email trigger receives mail
-   * at, on the deployment's mail domain: `trigger-` and 128 random bits
-   * of its own, never derived from its ID; null for any other kind.
+   * at, on the deployment's mail domain: the name its builder chose, or
+   * `trigger-` and 128 random bits of its own, never derived from its ID;
+   * null for any other kind.
    */
   address: string | null;
   /**

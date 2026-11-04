@@ -133,13 +133,14 @@ import type { StartFiles } from "./start-files.ts";
 // fresh deployment's first hop is a root.
 //
 // Independent workflows' email triggers (trigger-resources.ts) receive
-// mail the same way, each at an address of its own (`trigger-<token>`,
-// 128 random bits, never its ID): the same
+// mail the same way, each at an address of its own: the name its builder
+// chose, or `trigger-<token>` (128 random bits, never its ID): the same
 // ingress, size limit, parser, loop refusal and input (`InboundEmail`,
 // mapped into the run's input as a connector trigger maps its event). An
 // address is looked up among live, enabled email triggers first, exactly
-// as stored, and only then among Apps' addresses: a trigger's token is
-// random, so it is no App's.
+// as stored, and only then among Apps' addresses: Apps and triggers take
+// addresses from one namespace (email-addresses.ts), so one is never
+// both.
 // Each message then takes the steps a connector event does
 // (connector-triggers.ts, `startOnce`): its start, its refusals and its
 // drops once each, by the message. Threat model, and how each is closed:
