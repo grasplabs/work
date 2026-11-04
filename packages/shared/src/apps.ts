@@ -509,13 +509,16 @@ export interface BuildDiagnostic {
 export interface SavedBuild {
   status: "ok" | "failed" | "none" | "error";
   diagnostics: BuildDiagnostic[];
-  /** Why a build couldn't run, with `error`. */
+  /**
+   * Why a build couldn't run, with `error`; or why screens were checked
+   * only in part (`standIn`).
+   */
   error?: string;
   /**
    * Screens checked against stand-ins for the references their server code
-   * generates, because it doesn't build or register: never passes a check,
-   * however few diagnostics it has. Check again once the server code
-   * registers.
+   * generates, because it doesn't build or register: never `ok` (`error`
+   * when nothing else failed, `failed` when something did), with why in
+   * `error`. Check again once the server code registers.
    */
   standIn?: true;
 }

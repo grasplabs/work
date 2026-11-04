@@ -53,6 +53,14 @@ const maxLeftoversNamed = 20;
  */
 const maxLoggedMessage = 300;
 
+/**
+ * What a save says of screens checked against stand-ins for the references
+ * their server code didn't generate (`standIn`): checked for everything
+ * else, never for their calls, so not checked as a whole.
+ */
+const checkedOnStandIns =
+  "Checked without the references the server code generates, as it doesn't register yet: fix the server code and save again.";
+
 /** What a save says of a build that didn't answer within its wait. */
 const tookTooLong =
   "The build didn't finish in time. It runs again when this is first used.";
@@ -116,11 +124,20 @@ const savedBuild = async (
       log.warn("app.save_build_timed_out", { appId: app, version, kind });
       return { status: "error", diagnostics: [], error: tookTooLong };
     }
-    return {
-      status: built.ok ? "ok" : "failed",
-      diagnostics: (built.diagnostics ?? []).map((item) => toDiagnostic(item)),
-      ...(built.standIn === true ? { standIn: true } : {}),
-    };
+    const diagnostics = (built.diagnostics ?? []).map((item) =>
+      toDiagnostic(item)
+    );
+    // Never `ok` on stand-ins, so whoever reads the status alone isn't
+    // misled: `error` (not checked) with why, or `failed` for what it found.
+    if (built.standIn === true) {
+      return {
+        status: built.ok ? "error" : "failed",
+        diagnostics,
+        error: checkedOnStandIns,
+        standIn: true,
+      };
+    }
+    return { status: built.ok ? "ok" : "failed", diagnostics };
   } catch (error) {
     // Given up on, not failed: whoever gave up on it hears why.
     if (signal?.aborted === true) {

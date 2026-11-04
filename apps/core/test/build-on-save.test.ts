@@ -8,6 +8,7 @@ import { buildOnSave } from "../src/save-builds.ts";
 import { buildScreens, screenCode } from "../src/screens.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
+import { notesFiles } from "./notes-client-app.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // Saving an App's files builds them at once, so the version opens without
@@ -115,6 +116,32 @@ describe("building on save", { timeout: 60_000 }, () => {
     await expect(
       builder.api.apps.versions.get(app, committed.version)
     ).resolves.toMatchObject({ version: committed.version });
+  });
+
+  it("never says screens are ok that were checked without their server code's references, as it doesn't register", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    // Registration throws (never inspected before: no kept manifest).
+    const throwing = (notesFiles["app.ts"] ?? "").replace(
+      "\nexport default app({",
+      `\nif (schema !== undefined) throw new Error("No notes today ${crypto.randomUUID()}");\nexport default app({`
+    );
+
+    const { builds } = await builder.api.apps.files.commit(
+      app,
+      { ...notesFiles, "app.ts": throwing },
+      "Notes"
+    );
+
+    // Checked for everything else, and nothing else failed, but not ok:
+    // whoever reads the status alone isn't told the screens passed.
+    expect(builds.screens).toStrictEqual({
+      status: "error",
+      diagnostics: [],
+      error:
+        "Checked without the references the server code generates, as it doesn't register yet: fix the server code and save again.",
+      standIn: true,
+    });
   });
 
   it("says a build couldn't run when the compiler can't be reached, commits, and leaves it to its first use", async () => {

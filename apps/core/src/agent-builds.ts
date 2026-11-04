@@ -403,10 +403,6 @@ export const draftOf = async (
 const buildPassed = ({ status, standIn }: SavedBuild): boolean =>
   (status === "ok" || status === "none") && standIn !== true;
 
-/** What a write says of screens checked against stand-ins (`standIn`). */
-const standInNote =
-  "Checked without the references the server code generates, as it doesn't register yet: fix the server code and write again before proposing.";
-
 /** A build as a check answers it: its first diagnostics only. */
 const reported = (build: SavedBuild): SavedBuild => ({
   ...build,
@@ -1058,11 +1054,10 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         );
         const notChecked: DraftWrite["notChecked"] = {};
         for (const kind of ["screens", "server", "workflows"] as const) {
-          const { status, error, standIn } = builds[kind];
-          if (status === "error") {
+          const { status, error } = builds[kind];
+          // Couldn't run, or checked on stand-ins (`standIn`): both say why.
+          if (status === "error" || error !== undefined) {
             notChecked[kind] = error ?? "The build couldn't run now.";
-          } else if (standIn === true) {
-            notChecked[kind] = standInNote;
           }
         }
         return {
@@ -1367,7 +1362,7 @@ interface Build {
     /** A change that would fix it, when the check suggests one. */
     fix?: string;
   }[];
-  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. */
+  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. With \`standIn\`, why the screens were checked only in part. */
   error?: string;
   /** Screens checked without the references the server code generates, as it doesn't register: never passes; fix the server code and write again. */
   standIn?: true;
