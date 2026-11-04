@@ -396,12 +396,15 @@ const memoryOfTest = (): SealedRunMemory => {
 /** An engine of the test's own, as `engineOfTest`'s. */
 type Engine = Pick<ReturnType<typeof engineOfTest>, "step" | "leaseOf">;
 
+/** How many attempts an engine ran of each step, by its key. */
+type Tries = Map<string, number>;
+
 /**
  * An engine that tries each step's function again, as the engine does,
  * while its error may be retried and its retries last, and whose waits
  * for an event end at once.
  */
-const retryingEngine = (): Engine => {
+const retryingEngine = (tries: Tries = new Map()): Engine => {
   const leases = new Set<string>();
   const step: RunStep = {
     do: async (name, config, fn) => {
@@ -409,6 +412,7 @@ const retryingEngine = (): Engine => {
       const limit = config.retries?.limit ?? 0;
       for (let attempt = 1; ; attempt += 1) {
         leases.add(`${attempt}:${key}`);
+        tries.set(key, attempt);
         try {
           // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
           return await fn({ attempt, idempotencyKey: key });
@@ -809,8 +813,9 @@ describe("a sealed build's run on the run host", () => {
     const afterAnswered = provider.requests.length;
     // The call went out, then its attempt failed for a reason trying
     // again may fix: the engine tries the step again, and the call doesn't
-    // go out again; the later attempts fail as that one did.
+    // go out again; the next attempt fails as that one did, for good.
     replies.push(hello, hello);
+    const tries: Tries = new Map();
     const retried = await ranAs(
       await waitingRun(sealed),
       moduleOf(`
@@ -821,7 +826,7 @@ return await step.do("greet", { key: "task", description: "Its task", retries: {
   throw failed;
 });
 `),
-      { engine: retryingEngine() }
+      { engine: retryingEngine(tries) }
     );
     const afterRetried = provider.requests.length;
     // Refused for the key, billing nothing: the step waits for a working
@@ -838,6 +843,8 @@ return await step.do("greet", { key: "task", description: "Its task", retries: {
       afterAnswered,
       retried,
       sentByRetried: afterRetried - afterAnswered,
+      // Of the three its retries allow: the refusal ended the step.
+      attemptsOfRetried: tries.get("key:greet:task"),
       unbilled,
       sentByUnbilled: provider.requests.length - afterRetried,
     }).toStrictEqual({
@@ -845,6 +852,7 @@ return await step.do("greet", { key: "task", description: "Its task", retries: {
       afterAnswered: 1,
       retried: failedWith("model.failed"),
       sentByRetried: 1,
+      attemptsOfRetried: 2,
       unbilled: { ended: { line: "Hello Ada" }, tampered: [] },
       sentByUnbilled: 2,
     });

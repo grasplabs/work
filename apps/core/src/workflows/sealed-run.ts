@@ -558,13 +558,18 @@ class SealedRun implements RunKind {
   /**
    * Refuses `attempt` of a step whose call is tried once when an earlier
    * attempt of it sent it (`SentCalls`). It fails as the one that sent it
-   * did.
+   * did, for good (`StepAttempt.final`): its step isn't tried again,
+   * whatever its code, which a retryable one's would otherwise be.
    */
   #requireNoneSent(attempt: StepAttempt): void {
     const marks = this.#memory.sentCalls;
     for (let earlier = 1; earlier < attempt.number; earlier += 1) {
       if (marks.sent(attempt.key, earlier)) {
-        throw triedBefore(marks.failureOf(attempt.key, earlier) ?? leftOpen);
+        const error = triedBefore(
+          marks.failureOf(attempt.key, earlier) ?? leftOpen
+        );
+        attempt.final = error;
+        throw error;
       }
     }
   }

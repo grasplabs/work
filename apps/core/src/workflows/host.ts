@@ -208,6 +208,12 @@ export interface StepAttempt {
    * fails with it, whatever its code made of the refusal.
    */
   refused?: Error;
+  /**
+   * What its kind failed it with for good (a sealed run's later attempt
+   * of a step whose call went out once): the step fails with it, never
+   * retried, whatever its code, and whatever its code made of it.
+   */
+  final?: Error;
   /** Whether a call of it was refused past its lineage's host calls, and audited so. */
   hostCallsAudited?: boolean;
   keptMessages?: Map<string, Email>;
@@ -1941,6 +1947,10 @@ export class RunHost extends RpcTarget {
         if (attempt.refused !== undefined) {
           failed = forIsolate(attempt.refused);
           throw toStepError(failed);
+        }
+        if (attempt.final !== undefined) {
+          failed = forIsolate(attempt.final);
+          throw namedError("NonRetryableError", failed.message, failed.code);
         }
         if (held) {
           return heldMarkerOf(attempt.heldKeys, attempt.unknown);
