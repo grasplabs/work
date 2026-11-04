@@ -39,7 +39,10 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { pendingWorkflowBindings } from "../src/workflow-binding-requests.ts";
+import {
+  pendingWorkflowBindings,
+  workflowPendingBindings,
+} from "../src/workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -1206,6 +1209,205 @@ describe("bindings waiting on an admin", () => {
       revokedSinceOffered: "workflow.binding_invalid",
       approvals: 0,
       after: [[]],
+    });
+  });
+
+  it("offer, on the workflow's own page before it goes live, a connector each contract its own connection grant serves, which approves its start", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const mailKey = `mail-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: mailKey,
+      kind: "connector",
+      operations: {
+        "mail.send": {
+          input: JSON.stringify(emptyObject),
+          output: JSON.stringify(nullValue),
+        },
+      },
+    });
+    const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: JSON.stringify({
+        document: {
+          dsl: "1.0.3",
+          namespace: workflowNamespace,
+          name: workflow.name,
+          version: "1.0.0",
+          title: workflow.name,
+          metadata: {
+            grasp: {
+              profile: "grasp-open-workflow/1",
+              params: {},
+              bindings: {
+                mail: { kind: "connector", contract: mailKey },
+              },
+            },
+          },
+        },
+        input: { schema: objectSchema({ who: { type: "string" } }) },
+        output: { schema: objectSchema({ status: { type: "string" } }) },
+        do: [
+          {
+            send: {
+              call: "grasp.connector",
+              with: { binding: "mail", operation: "mail.send", arguments: {} },
+            },
+          },
+          { finish: { set: { status: "done" } } },
+        ],
+      }),
+      basedOn: null,
+    });
+    const binding = `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`;
+    const permissionId = await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId: "connection-mail" },
+      actions: ["mail.send"],
+      binding,
+    });
+    // Connect lists two contracts for the connection; only one serves.
+    const connecting: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown => {
+          if (name === "connectorContracts") {
+            return async () =>
+              await Promise.resolve(["graph.calendar@1", "graph.mail@1"]);
+          }
+          if (name === "connectorContract") {
+            return async ({ contract }: { contract: string }) => {
+              await Promise.resolve();
+              if (contract !== "graph.mail@1") {
+                throw connectErrors.create("connect.contract_not_found");
+              }
+              return {
+                contract,
+                actions: {
+                  send: {
+                    tool: "mail.send",
+                    readOnly: false,
+                    input: shapeOf(emptyObject),
+                    output: shapeOf(nullValue),
+                  },
+                },
+              } satisfies ConnectorContract;
+            };
+          }
+          return Reflect.get(target, name);
+        },
+      }),
+    };
+    const offeredOf = async () =>
+      await workflowPendingBindings(connecting, admin, workflow.id);
+    const startOf = async () =>
+      await outcome(
+        startWorkflow(
+          connecting,
+          { type: "person", person: ada },
+          workflow.id,
+          { version: 1, input: { who: "Ada" }, key: `key-${unique()}` }
+        )
+      );
+
+    // Asked to go live, it waits in the admins' inbox too, where a
+    // connector, slow to read, is offered nothing.
+    await requestGoLive(env, ada, workflow.id, { version: 1, revision: 0 });
+    const inbox = await pendingWorkflowBindings(connecting, admin);
+    const before = await offeredOf();
+    const refused = await startOf();
+    const [offered] = before[0]?.bindings[0]?.offered ?? [];
+    if (offered === undefined) {
+      throw new Error("Nothing offered");
+    }
+    await approveWorkflowBinding(connecting, admin, workflow.id, {
+      alias: "mail",
+      target: offered.target,
+      reviewed: { version: 1 },
+    });
+
+    expect({
+      inbox: inbox
+        .filter((each) => each.workflow.id === workflow.id)
+        .flatMap(({ bindings }) => bindings.map(({ offered: each }) => each)),
+      before,
+      refused,
+      after: await offeredOf(),
+      started: await startOf(),
+    }).toStrictEqual({
+      inbox: [[]],
+      before: [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          version: 1,
+          live: true,
+          bindings: [
+            {
+              alias: "mail",
+              kind: "connector",
+              contractId: mailKey,
+              offered: [
+                {
+                  target: {
+                    kind: "connector",
+                    permissionId,
+                    contract: "graph.mail@1",
+                  },
+                  label: `${binding}: graph.mail@1`,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      refused: "workflow.binding_unapproved",
+      after: [],
+      started: "ok",
+    });
+  });
+
+  it("list on the workflow's own read its newest version, which a test run starts, beside the live one it approved", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const asked = await requestGoLive(env, ada, workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    await decideGoLive(env, admin, workflow.id, {
+      version: 1,
+      verdict: "approve",
+      revision: asked.revision,
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "summary",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({
+        name: workflow.name,
+        version: "1.1.0",
+        model: key,
+      }),
+      basedOn: 1,
+    });
+
+    const own = await workflowPendingBindings(env, admin, workflow.id);
+    const inbox = await pendingWorkflowBindings(env, admin);
+
+    expect({
+      own: own.map(({ version, live, bindings }) => ({
+        version,
+        live,
+        aliases: bindings.map(({ alias }) => alias),
+      })),
+      inbox: inbox.filter((each) => each.workflow.id === workflow.id),
+    }).toStrictEqual({
+      own: [{ version: 2, live: false, aliases: ["summary"] }],
+      // Neither live nor asked to go live: not the inbox's.
+      inbox: [],
     });
   });
 

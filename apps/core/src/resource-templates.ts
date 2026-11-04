@@ -11,8 +11,9 @@ import {
 } from "@grasp-os/shared/resource-bindings";
 import type { PublishedTemplate } from "@grasp-os/shared/resource-bindings";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, notExists, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import {
   auditedBatch,
@@ -183,6 +184,46 @@ export const templateVersionsOf = async (
         : eq(resourceTemplates.contract, contract)
     )
     .orderBy(desc(resourceTemplates.publishedAt))
+    .limit(limit);
+  return rows.map(toPublished);
+};
+
+/**
+ * The latest published version of each of the `limit` templates published
+ * to most recently, newest first, without their content: what a workflow's
+ * template binding may be approved with (any contract: its binding pins
+ * the version). The caller checks who asks.
+ */
+export const latestTemplateVersions = async (
+  env: Env,
+  limit: number
+): Promise<PublishedTemplate[]> => {
+  const newer = alias(resourceTemplates, "newer");
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      id: resourceTemplates.id,
+      version: resourceTemplates.version,
+      contract: resourceTemplates.contract,
+      contentHash: resourceTemplates.contentHash,
+      publishedBy: resourceTemplates.publishedBy,
+      publishedAt: resourceTemplates.publishedAt,
+    })
+    .from(resourceTemplates)
+    .where(
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(newer)
+          .where(
+            and(
+              eq(newer.id, resourceTemplates.id),
+              gt(newer.version, resourceTemplates.version)
+            )
+          )
+      )
+    )
+    .orderBy(desc(resourceTemplates.publishedAt), desc(resourceTemplates.id))
     .limit(limit);
   return rows.map(toPublished);
 };

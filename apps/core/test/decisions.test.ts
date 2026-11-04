@@ -165,6 +165,31 @@ const owed = async (runId: string): Promise<number> => {
 describe("decisions", { timeout: 60_000 }, () => {
   afterEach(endLiveResourceRuns);
 
+  it("say on their page whether the person answering may open the workflow that asks", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { workflow, decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`
+    );
+    const unshared = await decider.api.decisions.get(decision);
+    await people.builder.api.workflowResources.share(workflow.id, {
+      type: "person",
+      id: decider.userId,
+      role: "user",
+    });
+    const shared = await decider.api.decisions.get(decision);
+
+    expect({
+      unshared: unshared.workflowResource,
+      shared: shared.workflowResource,
+    }).toStrictEqual({
+      unshared: { id: workflow.id, name: workflow.name },
+      shared: { id: workflow.id, name: workflow.name, opens: true },
+    });
+  });
+
   it("wait durably across a restart and go on with the real answer and what it carries, audited under the person who decided", async () => {
     const people = await owners();
     const decider = await signedIn("user");

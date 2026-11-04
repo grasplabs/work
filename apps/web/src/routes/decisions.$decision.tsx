@@ -24,6 +24,7 @@ import {
   DecisionConfirmDialog,
 } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { decisionSource } from "../decision-source.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -399,15 +400,8 @@ const Decision = () => {
     );
   }
   const { decision } = page;
-  // An independent workflow's decision has no App page to lead to.
-  const source: Crumb =
-    decision.app === undefined
-      ? { label: decision.workflow }
-      : {
-          label: decision.workflow,
-          to: "/workflows/$app/$workflow",
-          params: { app: decision.app.id, workflow: decision.workflow },
-        };
+  // From the App's workflow, or the independent workflow's own page.
+  const source = decisionSource(decision);
   return (
     <DecisionInFrame
       crumbs={[workflows, source, { label: t`Decision` }]}

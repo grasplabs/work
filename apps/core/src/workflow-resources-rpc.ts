@@ -35,7 +35,10 @@ import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { pendingWorkflowBindings } from "./workflow-binding-requests.ts";
+import {
+  pendingWorkflowBindings,
+  workflowPendingBindings,
+} from "./workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   listWorkflowBindings,
@@ -440,6 +443,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await pendingWorkflowBindings(this.#env, person)
+    );
+  }
+
+  async pendingBindingsOf(id: string): Promise<PendingWorkflowBindings[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowPendingBindings(this.#env, person, id)
     );
   }
 

@@ -5,20 +5,6 @@ import type {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/ui/components/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
   Table,
   TableBody,
   TableCell,
@@ -28,16 +14,18 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { PlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { matchTyped, PersonOption } from "../people/person-picker.tsx";
-import type { Pickable } from "../people/person-picker.tsx";
+import {
+  PeopleTeamsPicker,
+  readPeopleAndTeams,
+  subjectKey,
+} from "../people/people-teams-picker.tsx";
+import type { PeopleAndTeams } from "../people/people-teams-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import type { TeamChoice } from "../workflows/team-picker.tsx";
 import { SettingsSection } from "./settings-parts.tsx";
 
 // Settings › Packages › Who approves packages: the members and
@@ -49,119 +37,13 @@ import { SettingsSection } from "./settings-parts.tsx";
 // still an admin, never staff; that the member or team is there) and
 // records each grant and revoke in the audit log; the page only offers.
 
-/** Who can be given the permission: the organization's people and teams. */
-interface Candidates {
-  people: Pickable[];
-  teams: TeamChoice[];
-}
-
 /** The key of a member or team, the same for a grant and a candidate. */
 const keyOf = (subject: DependencyApproverSubject): string =>
-  subject.type === "person"
-    ? `person:${subject.userId}`
-    : `team:${subject.teamId}`;
-
-/**
- * The button that gives the permission, and its list of the people and
- * teams who don't hold it yet. `candidates` is null while they're read.
- */
-const GrantPicker = ({
-  candidates,
-  holding,
-  disabled,
-  onOpen,
-  onPick,
-}: {
-  candidates: Candidates | null;
-  /** The keys of everyone who holds it now, left out of the list. */
-  holding: ReadonlySet<string>;
-  disabled: boolean;
-  onOpen: () => void;
-  onPick: (subject: DependencyApproverSubject) => void;
-}) => {
-  const { t } = useLingui();
-  const [open, setOpen] = useState(false);
-  const people =
-    candidates?.people.filter(
-      ({ id }) => !holding.has(keyOf({ type: "person", userId: id }))
-    ) ?? [];
-  const teams =
-    candidates?.teams.filter(
-      ({ id }) => !holding.has(keyOf({ type: "team", teamId: id }))
-    ) ?? [];
-  const pick = (subject: DependencyApproverSubject): void => {
-    setOpen(false);
-    onPick(subject);
-  };
-  return (
-    <Popover
-      onOpenChange={(next: boolean) => {
-        setOpen(next);
-        if (next) {
-          onOpen();
-        }
-      }}
-      open={open}
-    >
-      <PopoverTrigger
-        disabled={disabled}
-        render={<Button size="sm" variant="outline" />}
-      >
-        <PlusIcon />
-        <Trans>Add approver</Trans>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72" variant="flush">
-        <Command filter={matchTyped}>
-          <CommandInput placeholder={t`Search people and teams`} />
-          <CommandList>
-            {candidates === null ? (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-                <Spinner />
-                <Trans>Reading people and teams…</Trans>
-              </div>
-            ) : (
-              <>
-                <CommandEmpty>
-                  <Trans>Nobody else to add.</Trans>
-                </CommandEmpty>
-                {people.length === 0 ? null : (
-                  <CommandGroup heading={t`People`}>
-                    {people.map((person) => (
-                      <PersonOption
-                        key={person.id}
-                        onSelect={() => {
-                          pick({ type: "person", userId: person.id });
-                        }}
-                        person={person}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
-                {teams.length === 0 ? null : (
-                  <CommandGroup heading={t`Teams`}>
-                    {teams.map((team) => (
-                      <CommandItem
-                        key={team.id}
-                        onSelect={() => {
-                          pick({ type: "team", teamId: team.id });
-                        }}
-                        keywords={[team.name]}
-                        value={`team:${team.id}`}
-                      >
-                        <UsersIcon className="text-muted-foreground" />
-                        <span className="flex-1 truncate">{team.name}</span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                )}
-              </>
-            )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+  subjectKey(
+    subject.type === "person"
+      ? { type: "person", id: subject.userId }
+      : { type: "team", id: subject.teamId }
   );
-};
 
 /** Who approves packages, for an admin; `editable` for one who isn't Grasp staff. */
 export const PackageApprovers = ({
@@ -175,27 +57,16 @@ export const PackageApprovers = ({
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [candidates, setCandidates] = useState<Candidates | null>(null);
+  const [candidates, setCandidates] = useState<PeopleAndTeams | null>(null);
   const active = approvers.filter(({ status }) => status === "active");
   const holding = new Set(active.map(({ subject }) => keyOf(subject)));
   const readCandidates = async (): Promise<void> => {
     if (candidates !== null) {
       return;
     }
-    const read = await run(async (session) => {
-      const [members, teams] = await Promise.all([
-        session.members.list(),
-        session.workflows.teams(),
-      ]);
-      return { members, teams };
-    });
+    const read = await run(readPeopleAndTeams);
     if (read !== undefined) {
-      setCandidates({
-        people: read.members
-          .map(({ userId, name, email }) => ({ id: userId, name, email }))
-          .toSorted((a, b) => a.name.localeCompare(b.name)),
-        teams: read.teams.toSorted((a, b) => a.name.localeCompare(b.name)),
-      });
+      setCandidates(read);
     }
   };
   const refresh = async (): Promise<void> => {
@@ -221,15 +92,20 @@ export const PackageApprovers = ({
     <SettingsSection
       action={
         editable ? (
-          <GrantPicker
+          <PeopleTeamsPicker
             candidates={candidates}
             disabled={busy}
             holding={holding}
+            label={<Trans>Add approver</Trans>}
             onOpen={() => {
               void readCandidates();
             }}
-            onPick={(subject) => {
-              void grant(subject);
+            onPick={({ type, id }) => {
+              void grant(
+                type === "person"
+                  ? { type: "person", userId: id }
+                  : { type: "team", teamId: id }
+              );
             }}
           />
         ) : undefined
