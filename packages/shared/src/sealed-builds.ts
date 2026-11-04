@@ -18,6 +18,13 @@ export const sealedBuildLimits = {
   templateItems: 1024,
   /** Characters of one key of such an object. */
   templateKeyLength: 1024,
+  /**
+   * Characters of a JSON Pointer a build seals (its task and expression
+   * tables, and what it reports unsupported). A definition may hold
+   * longer ones: a generator refuses a construct at one, so nothing
+   * sealed fails to load.
+   */
+  pointerLength: 2048,
   /** Characters of one expression's code, as generated. */
   expressionLength: 8192,
   /** The furthest ahead a deadline may be, as the engine sleeps: a year. */

@@ -48,8 +48,8 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // - lists nested at most `formatLimits.depth` deep, and at most
 //   `formatLimits.steps` steps in all;
 // - what it generates within what a sealed build holds
-//   (`sealedBuildLimits`): each expression's code, their number, and
-//   every duration at most a year.
+//   (`sealedBuildLimits`): each expression's code and pointer, their
+//   number, and every duration at most a year.
 //
 // What it answers is what the generator needs (generate.ts): the document,
 // each expression's code, each sensitive placeholder and each agent's
@@ -89,6 +89,7 @@ export type ProblemCode =
   | "workflow.sensitive"
   | "workflow.invalid_default"
   | "workflow.expression_too_long"
+  | "workflow.pointer_too_long"
   | "workflow.too_many_expressions"
   | "workflow.duration_too_long";
 
@@ -499,6 +500,17 @@ const checkExpressionAt = (
   place: Place
 ): void => {
   const at = join(pointer, "$expr");
+  // Its pointer, as the host seals it: long keys around it make it long.
+  if (pointer.length > sealedBuildLimits.pointerLength) {
+    problem(
+      walk,
+      at,
+      "workflow.pointer_too_long",
+      `Its place is further in than the ${sealedBuildLimits.pointerLength} characters of pointer a sealed expression has.`,
+      "Shorten the keys of the objects around it."
+    );
+    return;
+  }
   const checked = checkExpression(
     expression.$expr,
     place.error ? { roots: ["error"] } : {}

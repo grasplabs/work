@@ -9,7 +9,6 @@ import {
   generatedPath,
   generateWorkflow,
   generatorVersion,
-  maxSealedPointerLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
@@ -147,7 +146,7 @@ export const sealedBuildSchema = z.discriminatedUnion("executable", [
     unsupported: z
       .array(
         z.strictObject({
-          pointer: z.string().max(maxSealedPointerLength),
+          pointer: z.string().max(sealedBuildLimits.pointerLength),
           taskId: z.string().max(64).nullable(),
           feature: z.string().max(128),
         })
@@ -176,7 +175,7 @@ export const maxTaskScopes = 8;
 
 const taskBase = {
   id: z.string().min(1).max(64),
-  pointer: z.string().max(maxSealedPointerLength),
+  pointer: z.string().max(sealedBuildLimits.pointerLength),
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
   steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
   /**
@@ -391,7 +390,7 @@ const sealedCatchSchema = z.strictObject({
       status: z.int().optional(),
       title: z.string().max(2000).optional(),
       detail: z.string().max(2000).optional(),
-      instance: z.string().max(maxSealedPointerLength).optional(),
+      instance: z.string().max(sealedBuildLimits.pointerLength).optional(),
     })
     .optional(),
   when: z.int().min(0).optional(),
@@ -520,7 +519,7 @@ const workflowLimitsSchema = z.strictObject({
 /** One expression of the sealed table. */
 const sealedExpressionSchema = z.strictObject({
   slot: z.int().min(0),
-  pointer: z.string().max(maxSealedPointerLength),
+  pointer: z.string().max(sealedBuildLimits.pointerLength),
   /** Its task; null for the workflow's own input.from and output.as. */
   taskId: z.string().min(1).max(64).nullable(),
   stage: z.enum([

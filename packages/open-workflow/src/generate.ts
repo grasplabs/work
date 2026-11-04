@@ -718,22 +718,14 @@ const literal = (value: string | number | boolean | null): string =>
 
 /** Collects what can't be lowered, bounded. */
 /**
- * The longest JSON Pointer a build seals (the task and expression tables,
- * and what it reports unsupported). A definition may hold longer ones, its
- * keys being as long as it likes: a construct at one isn't lowered
- * (`pointer:too_long`), so nothing sealed fails to load.
- */
-export const maxSealedPointerLength = 2048;
-
-/**
  * `pointer`, or its longest prefix of whole segments within
- * `maxSealedPointerLength`: where a too-long one is reported.
+ * `sealedBuildLimits.pointerLength`: where a too-long one is reported.
  */
 const sealablePointer = (pointer: string): string => {
-  if (pointer.length <= maxSealedPointerLength) {
+  if (pointer.length <= sealedBuildLimits.pointerLength) {
     return pointer;
   }
-  const cut = pointer.lastIndexOf("/", maxSealedPointerLength);
+  const cut = pointer.lastIndexOf("/", sealedBuildLimits.pointerLength);
   return cut <= 0 ? "" : pointer.slice(0, cut);
 };
 
@@ -3695,7 +3687,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     ...emitter.expressions.map(({ taskId, pointer }) => ({ taskId, pointer })),
   ];
   for (const { pointer, taskId } of sealed) {
-    if (pointer.length > maxSealedPointerLength) {
+    if (pointer.length > sealedBuildLimits.pointerLength) {
       refusals.add(pointer, "pointer:too_long", taskId ?? undefined);
     }
   }

@@ -453,6 +453,15 @@ describe("checking a workflow", () => {
           ),
         ])
       ),
+      // Each key within its bound, but the place they make longer than a
+      // sealed pointer.
+      deep: codesAt(
+        withKey([
+          send({
+            ["k".repeat(1024)]: { ["k".repeat(1024)]: { $expr: "input" } },
+          }),
+        ])
+      ),
       // Within the source's length, but longer as the code it lowers to.
       lowered: codesAt(
         withSteps((steps) => [
@@ -464,6 +473,10 @@ describe("checking a workflow", () => {
       key: { [`/steps/0/arguments/to/${longKey}`]: "workflow.out_of_bounds" },
       items: { "/steps/0/arguments/to": "workflow.out_of_bounds" },
       fields: { "/steps/0/arguments/to": "workflow.out_of_bounds" },
+      deep: {
+        [`/steps/0/arguments/to/${"k".repeat(1024)}/${"k".repeat(1024)}/$expr`]:
+          "workflow.pointer_too_long",
+      },
       lowered: { "/steps/5/until/$expr": "workflow.expression_too_long" },
     });
   });
