@@ -24,7 +24,6 @@ import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
-import type { ProvisionalOrigin } from "./apps.ts";
 import {
   appFor,
   applyChanges,
@@ -763,8 +762,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.create",
       async (by) =>
         await this.#creating(
-          async () =>
-            await createApp(this.env, by, input, this.#admit, this.#origin())
+          async () => await createApp(this.env, by, input, this.#admit)
         ),
       (created) => ({ app: created.id })
     );
@@ -805,7 +803,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
               blueprint,
               input,
               this.#admit,
-              this.#origin()
+              true
             )
         ),
       (created) => ({
@@ -813,12 +811,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         blueprint: created.app.blueprint,
       })
     );
-  }
-
-  /** Where this chat's agent creates an App: provisional there. */
-  #origin(): ProvisionalOrigin {
-    const { workspaceId, chatId } = this.ctx.props;
-    return { workspaceId, chatId };
   }
 
   /**

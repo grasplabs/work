@@ -20,10 +20,9 @@ import { NewApp } from "./new-app.tsx";
 
 // The New App page against core's Apps and chats as the page reaches them
 // over RPC (the boundary from the web app), faked: what is asked makes the
-// App, named after its first line, with its own chat (`chats.newApp`, which
-// makes it provisional there), asks it in that chat, and opens the App's
-// workspace with it; a send that failed, sent again, asks in the same App
-// rather than making another.
+// App, named after its first line, with its own chat (`chats.newApp`), asks
+// it in that chat, and opens the App's workspace with it; a send that
+// failed, sent again, asks in the same App rather than making another.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 

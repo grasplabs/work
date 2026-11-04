@@ -827,13 +827,9 @@ export interface ChatsApi {
   forApp: (app: string) => Promise<ChatSummary>;
   /**
    * A new App (`apps.create`'s input), owned by the person, with its own
-   * chat (`forApp`), made together: the App is provisional in that chat,
-   * as an App a chat's agent creates is, until a version of it is made
-   * current. Until then it is removed, by the platform, once a week
-   * passed with nothing committed to it and that chat's draft of it
-   * unwritten: a draft in another builder's chat doesn't keep it, and a
-   * version up for review goes with it. Refused, making nothing, when
-   * its chat is refused. Only for a builder.
+   * chat (`forApp`), made together. Like every App, it stays until a
+   * person removes it. Refused before anything is made when the person
+   * has no room for another chat. Only for a builder.
    */
   newApp: (input: {
     name: string;
