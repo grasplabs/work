@@ -261,8 +261,23 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     response schema), in the step that records it, so a replay takes it
 //     alike. A decision nobody answered before its deadline closes as
 //     timed out, and the decision service refuses an answer after that.
+// - An event wait taking an event the isolate made up, one sent to
+//   another run, or through a binding the run may not use. An event wait
+//   (`isEventWait`: the first event of any of its sealed types) runs only
+//   as the host's own step (`RunHost.listen`), never as a step its code
+//   records: its outcome is the event the engine took and journaled, or
+//   that none came by its deadline (`{ timedOut: true }`). What it takes
+//   is the build's alone (`eventWait`): the engine's types of its sealed
+//   binding and types (`eventTypeKey`, so no other binding's event
+//   matches), from the run's own inbox, which takes only events admitted
+//   to this run through a binding its start froze (run-events.ts). Before
+//   every wait, a replay's too, the binding must be one the start froze
+//   and its authority must hold (`workflow.event_denied`). Its deadline is
+//   its sealed timeout from when it was first reached, as recorded, so a
+//   replay waits alike; the engine takes each event once.
 // - A test run sitting waiting. Its sleeps, its deadlines (from its start,
-//   as recorded) and its retries' backoffs are held to its `maxSleepMs`
+//   as recorded), its event waits' deadlines and its retries' backoffs are
+//   held to its `maxSleepMs`
 //   (`requireWait`): one past it fails the run, and no catch takes it.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
@@ -388,14 +403,16 @@ type ListenTask = Extract<SealedTask, { kind: "listen" }>;
 
 /**
  * Whether `task` is an event wait the run host runs: one that takes the
- * first event of any of its sealed types, through its sealed binding,
- * until its timeout of at most a year. A listen for all of its filters,
- * or matching or correlating on an event's attributes, has no steps here,
- * so it never runs: no format sealing for the run host writes one.
+ * first event of any of its sealed types (`any`), through its sealed
+ * binding, until its timeout of at most a year. The sealed listen's other
+ * fields (`one` and `all`, filters by an event's attributes, correlations)
+ * are resource-host.ts's until GRA-1366 removes it: such a listen has no
+ * steps here, so it never runs, and `read` is never read (the wait always
+ * answers the host's `EventWait`).
  */
 const isEventWait = (task: SealedTask | undefined): task is ListenTask =>
   task?.kind === "listen" &&
-  task.listen.strategy !== "all" &&
+  task.listen.strategy === "any" &&
   task.timeoutMs <= maxDeadlineMs &&
   task.listen.filters.every(
     (filter) => filter.attributes.length === 0 && filter.correlate === undefined
@@ -1244,8 +1261,8 @@ class SealedRun implements SealedRunKind {
   /**
    * Refuses a step the sealed table doesn't have, or not as it runs: a
    * task's step as a `do`, but a sleeping task's own as its sleep (of
-   * exactly its sealed length, or until exactly its recorded deadline)
-   * and a try's catch as a catch; in an item its loops don't have, or out
+   * exactly its sealed length, or until exactly its recorded deadline),
+   * an event wait's own as its wait, and a try's catch as a catch; in an item its loops don't have, or out
    * of their order (`#loopRefusal`). While a failure no catch took is
    * pending, any step but a catch; while another step runs, any step; a
    * step that started already, again. A step it lets start runs until it

@@ -1454,7 +1454,7 @@ export interface RunKind {
   ) => Promise<DecisionOutcome>;
   /**
    * Refuses a durable wait the run may not wait, before it starts: a
-   * sleep, a sleep until a deadline, or a retry's backoff. A test run's
+   * sleep, a sleep until a deadline, an event wait, or a retry's backoff. A test run's
    * are held to its limit (sealed-run.ts); an App's run waits any.
    */
   requireWait?: (wait: WaitLength) => void;
@@ -2720,12 +2720,12 @@ export class RunHost extends RpcTarget {
       step = checked(stepNameSchema, name);
       await this.#requireStep(step, "listen");
       started = true;
-      const { eventWait } = this.#kind;
-      if (eventWait === undefined) {
+      await this.#kind.requirePerson();
+      const plan = await this.#kind.eventWait?.(step);
+      if (plan === undefined) {
         throw new Error(`Step "${step}" waits for events its run has none of`);
       }
-      await this.#kind.requirePerson();
-      const { match, timeoutMs } = await eventWait(step);
+      const { match, timeoutMs } = plan;
       const reached = reachedAtSchema.parse(
         await this.#step.do(
           `${waitStepPrefix}${await waitKeyOf(step)}:reached`,

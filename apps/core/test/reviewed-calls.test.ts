@@ -724,7 +724,7 @@ queueMicrotask(() => {
     });
   });
 
-  it("refuse a sealed run's own steps, a catch and a sleep until a deadline, as tampering", async () => {
+  it("refuse a sealed run's own steps, a catch, a sleep until a deadline and an event wait, as tampering", async () => {
     const steps: WorkflowCalls = {
       steps: { send: ["APP"] },
       kinds: { send: "exact" },
@@ -740,18 +740,24 @@ queueMicrotask(() => {
     });
     const sleeping = await hostHeldTo(steps);
     const slept = await sleeping.host.sleepUntil("send", Date.now());
+    const listening = await hostHeldTo(steps);
+    const listened = await listening.host.listen("send");
     expect({
       catching: codeOf(catching),
       asked,
       caughtTampered: caught.tampered,
       slept: codeOf(slept),
       sleptTampered: sleeping.tampered,
+      listened: codeOf(listened),
+      listenedTampered: listening.tampered,
     }).toStrictEqual({
       catching: "workflow.step_not_reviewed",
       asked: false,
       caughtTampered: ["workflow.step_not_reviewed"],
       slept: "workflow.step_not_reviewed",
       sleptTampered: ["workflow.step_not_reviewed"],
+      listened: "workflow.step_not_reviewed",
+      listenedTampered: ["workflow.step_not_reviewed"],
     });
   });
 
