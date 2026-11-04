@@ -7,6 +7,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   decisionPollStepPrefix,
@@ -1721,7 +1722,7 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
 };
 
 /** The furthest a deadline may be, as the engine sleeps: 365 days. */
-const maxDeadlineMs = 365 * 86_400_000;
+const maxDeadlineMs = sealedBuildLimits.deadlineMs;
 
 /** The longest value a listen's filter matches an attribute by. */
 const maxAttributeLength = 1024;

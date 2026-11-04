@@ -527,7 +527,10 @@ export const sealedWorkflow = async () => {
 export type Sealed = Awaited<ReturnType<typeof sealedWorkflow>>;
 
 /** A run of `sealed` started by its builder, once it waits out its hour. */
-export const waitingRun = async ({ by, workflow }: Sealed): Promise<string> => {
+export const waitingRun = async ({
+  by,
+  workflow,
+}: Pick<Sealed, "by" | "workflow">): Promise<string> => {
   const { runId } = await startWorkflow(
     serving,
     { type: "person", person: by },

@@ -1226,6 +1226,9 @@ importers:
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@babel/parser':
         specifier: 'catalog:'

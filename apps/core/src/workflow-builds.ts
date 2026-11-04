@@ -10,8 +10,6 @@ import {
   generateWorkflow,
   generatorVersion,
   maxSealedPointerLength,
-  maxTemplateItems,
-  maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
@@ -25,6 +23,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { packageLimits } from "@grasp-os/shared/packages";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
@@ -221,10 +220,17 @@ const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
     z.strictObject({ param: z.string().min(1).max(64) }),
     z.strictObject({
       object: z
-        .array(z.tuple([z.string().max(maxTemplateKeyLength), templateSchema]))
-        .max(maxTemplateItems),
+        .array(
+          z.tuple([
+            z.string().max(sealedBuildLimits.templateKeyLength),
+            templateSchema,
+          ])
+        )
+        .max(sealedBuildLimits.templateItems),
     }),
-    z.strictObject({ array: z.array(templateSchema).max(maxTemplateItems) }),
+    z.strictObject({
+      array: z.array(templateSchema).max(sealedBuildLimits.templateItems),
+    }),
   ])
 );
 
@@ -529,7 +535,7 @@ const sealedExpressionSchema = z.strictObject({
   ]),
   /** What it must answer: a condition a boolean (generate.ts). */
   result: z.enum(["boolean", "duration", "json"]),
-  source: z.string().max(8192),
+  source: z.string().max(sealedBuildLimits.expressionLength),
   /** The variables of the loops around its task, outermost first. */
   loopVariables: z.array(z.string().min(1).max(64)).max(2 * maxTaskScopes),
   /** The caught errors it may read, innermost last (generate.ts). */
@@ -545,8 +551,10 @@ const sealedExpressionSchema = z.strictObject({
 });
 
 export const tasksFileSchema = z.strictObject({
-  tasks: z.array(sealedTaskSchema).max(10_000),
-  expressions: z.array(sealedExpressionSchema).max(10_000),
+  tasks: z.array(sealedTaskSchema).max(sealedBuildLimits.tasks),
+  expressions: z
+    .array(sealedExpressionSchema)
+    .max(sealedBuildLimits.expressions),
   /** Whether the workflow has its own input.from and output.as steps. */
   workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
   /** The parameters expressions may read: those not sensitive. */

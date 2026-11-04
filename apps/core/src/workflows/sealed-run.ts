@@ -12,6 +12,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
@@ -432,7 +433,7 @@ const isSequentialLoop = (task: SealedTask | undefined): task is ForTask =>
   task?.kind === "for" && task.loop.concurrency === 1;
 
 /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
-const maxDeadlineMs = 365 * 86_400_000;
+const maxDeadlineMs = sealedBuildLimits.deadlineMs;
 
 /** A `listen` task. */
 type ListenTask = Extract<SealedTask, { kind: "listen" }>;
@@ -746,7 +747,7 @@ const sleepsUntil = (task: SealedTask): boolean =>
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
-const maxRetryDelayMs = 365 * 86_400_000;
+const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
 
 /** A task's step that records that its `if` skipped it. */
 const skippedSchema = z.strictObject({ skipped: z.literal(true) });

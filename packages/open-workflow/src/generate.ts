@@ -1,5 +1,6 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
 import { checkSource, parseSlot } from "@grasp-os/workflow-expressions/source";
 
@@ -1043,15 +1044,6 @@ const isLiteral = (
 ): template is { readonly literal: JsonValue } => "literal" in template;
 
 /**
- * The most entries one array or object of a call's template holds, where
- * anything in it is built at call time, and the longest key of such an
- * object: what the sealed build's schema reads back (workflow-builds.ts).
- * A literal part, sealed as one value, isn't bound by them.
- */
-export const maxTemplateItems = 1024;
-export const maxTemplateKeyLength = 1024;
-
-/**
  * Whether a template's array or object at `pointer`, of `items` entries
  * and keys at most `keyLength` long, fits what a build seals; refused as
  * `with:too_large` otherwise, so publication reports what a run could
@@ -1064,7 +1056,10 @@ const withinTemplateBounds = (
   items: number,
   keyLength = 0
 ): boolean => {
-  if (items <= maxTemplateItems && keyLength <= maxTemplateKeyLength) {
+  if (
+    items <= sealedBuildLimits.templateItems &&
+    keyLength <= sealedBuildLimits.templateKeyLength
+  ) {
     return true;
   }
   emitter.refusals.add(pointer, "with:too_large", taskId);

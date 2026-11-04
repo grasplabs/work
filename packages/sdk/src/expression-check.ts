@@ -57,7 +57,7 @@ export const expressionRoots = ["input", "steps", "params", "run"] as const;
  * from a value to its prototype and from there to `Function`, and
  * `Object.prototype`'s accessors to define and find getters and setters.
  */
-const blockedProperties = new Set([
+export const blockedProperties: readonly string[] = [
   "constructor",
   "prototype",
   "__proto__",
@@ -65,7 +65,9 @@ const blockedProperties = new Set([
   "__defineSetter__",
   "__lookupGetter__",
   "__lookupSetter__",
-]);
+];
+
+const blocked = new Set(blockedProperties);
 
 /**
  * Operators that work on values alone: not bitwise operators, which no
@@ -204,7 +206,7 @@ class Checker {
   }
 
   private property(node: Node, name: string): void {
-    if (blockedProperties.has(name)) {
+    if (blocked.has(name)) {
       this.fail(node, "expression.property", `\`${name}\` can't be read.`);
     }
   }
