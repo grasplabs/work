@@ -44,7 +44,6 @@ import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
-  versionContract,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -57,13 +56,11 @@ import type { StepError } from "../src/workflows/code.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
-import { admitAttempt as admittedAs } from "../src/workflows/quotas.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import {
-  loadedRun,
+  loadedActivation,
   runOf,
   sealedActivation,
-  workflowOwnerOf,
 } from "../src/workflows/resource-runs.ts";
 import { modelCallsIn, sentCallsIn } from "../src/workflows/run-object.ts";
 import {
@@ -472,16 +469,15 @@ const waitingRun = async ({ by, workflow }: Sealed): Promise<string> => {
 };
 
 /**
- * Run `runId` as its activation loads it (resource-runs.ts, `loadedRun`,
- * through the pin its row has) and serves it on the run host
- * (`sealedRunFrom`).
+ * What an activation of run `runId` runs, as the dispatcher loads it
+ * (resource-runs.ts, `loadedActivation`, through the pin its row has).
  */
-const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
+const activationOf = async (runId: string) => {
   const row = await runOf(serving, runId);
   if (row === undefined) {
     throw new Error(`Run ${runId} has no row`);
   }
-  const { run } = await loadedRun(
+  return await loadedActivation(
     serving,
     {
       workflow: workflowResourceIdSchema.parse(row.workflowResourceId),
@@ -490,6 +486,11 @@ const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
     },
     runId
   );
+};
+
+/** Run `runId` as its activation loads it, served on the run host. */
+const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
+  const { run } = await activationOf(runId);
   return sealedRunFrom(run);
 };
 
@@ -911,33 +912,14 @@ describe("a sealed build's run on the run host", () => {
         send(
           'const answer = await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); return { sent: typeof answer.messageId };'
         )
-      ),
-      {
-        // As its workflow's, against its account's lineage.
-        admitAttempt: (run) => async (attempt) =>
-          await admittedAs(
-            serving,
-            {
-              run: run.runId,
-              root: run.calling.accountRunId,
-              resource: workflowOwnerOf(run.workflowId),
-            },
-            attempt
-          ),
-      }
+      )
     );
-    const admitted = await env.DB.prepare(
-      "SELECT resource FROM run_lineage_attempts WHERE run_id = ? AND step_key = 'key:send:task'"
-    )
-      .bind(runId)
-      .all<{ resource: string }>();
     const events = JSON.stringify(await allEvents());
     const { sent: mail } = await sealed.mail.did();
     expect({
       ran,
       mail,
       checked: await checkedCalls(runId),
-      admittedAs: admitted.results.map(({ resource }) => resource),
       secretAudited: events.includes(sealed.secret),
     }).toStrictEqual({
       ran: { ended: { sent: "string" }, tampered: [] },
@@ -951,7 +933,6 @@ describe("a sealed build's run on the run host", () => {
           arguments: await sha256Hex(canonicalJson(sent)),
         },
       ],
-      admittedAs: [`workflow-resource:${sealed.workflow.id}`],
       secretAudited: false,
     });
   });
@@ -2013,10 +1994,10 @@ const activated = async (
   maxModelCalls?: number
 ): Promise<unknown> =>
   await runInDurableObject(runObjectOf(env, runId), async (_object, state) => {
-    const loaded = await sealedRunOf(runId);
+    const activation = await activationOf(runId);
+    const loaded = sealedRunFrom(activation.run);
     const run =
       maxModelCalls === undefined ? loaded : { ...loaded, maxModelCalls };
-    const contract = await versionContract(env, run.workflowId, run.version);
     try {
       return await sealedActivation(
         serving,
@@ -2026,12 +2007,7 @@ const activated = async (
           sentCalls: sentCallsIn(state.storage.sql),
           modelCalls: modelCallsIn(state.storage.sql),
         },
-        {
-          run,
-          output: JSON.stringify(contract?.output),
-          owner: workflowOwnerOf(run.workflowId),
-          admission: { run: runId, root: run.calling.accountRunId },
-        },
+        { ...activation, run },
         () => modulesOfTest(run, source)
       );
     } catch (error) {
@@ -2092,6 +2068,30 @@ describe("a sealed run's activations", () => {
       sentBefore: 1,
       resumed: { failed: "operation.deadline_exceeded" },
       sent: 1,
+    });
+  });
+
+  it("admits each attempt as its workflow's, on its account's lineage", async () => {
+    await answeringProvider(() => hello, { models: [allowedModel] });
+    const runId = await waitingRun(sealed);
+    const ended = await activated(
+      runId,
+      moduleOf(
+        `const { line } = ${taskStep("greet", `await env.summary.call("grasp.model", ${greeting})`)}; return { status: line };`
+      ),
+      activationEngine(new Map())
+    );
+    const admitted = await env.DB.prepare(
+      "SELECT resource FROM run_lineage_attempts WHERE run_id = ? AND step_key = 'key:greet:task'"
+    )
+      .bind(runId)
+      .all<{ resource: string }>();
+    expect({
+      ended,
+      admittedAs: admitted.results.map(({ resource }) => resource),
+    }).toStrictEqual({
+      ended: { status: "Hello Ada" },
+      admittedAs: [`workflow-resource:${sealed.workflow.id}`],
     });
   });
 

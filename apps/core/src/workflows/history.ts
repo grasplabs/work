@@ -355,7 +355,14 @@ const waitOf = (
   };
 };
 
-/** Whether a retry of `rounded` runs after its run at `ordinal`. */
+/**
+ * Whether a retry of `rounded` runs after its run at `ordinal`: told from
+ * the retry's backoff or its run. While its decision is still being made
+ * (or after one with no backoff, until its run starts), the round reads
+ * as failed, as a held step's completion reads until its hold is
+ * journaled; the decision's own record can't tell, as it records no
+ * retry it declined differently.
+ */
 const retriedAfter = (rounded: RoundedStep, ordinal: number): boolean =>
   rounded.retries.some((retry) => retry > ordinal);
 

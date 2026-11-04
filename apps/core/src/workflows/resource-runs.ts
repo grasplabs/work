@@ -814,7 +814,7 @@ const lineageStartOf = async (env: Env, row: RunRow): Promise<number> => {
  * the pin: its row, its receipt's input and frozen parameters, its
  * version's sealed build (the identity it was admitted for) and contract.
  */
-export const loadedRun = async (
+const loadedRun = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
@@ -1242,9 +1242,31 @@ export const runActivation = async (
 };
 
 /**
+ * What one activation of run `runId` of an independent workflow runs, as
+ * `pin` names it (`loadedRun`), and whose its attempts are: its
+ * workflow's, counted on its account.
+ */
+export const loadedActivation = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string
+): Promise<HostedActivation & { admission: { run: string; root: string } }> => {
+  const { run, output } = await loadedRun(env, pin, runId);
+  return {
+    run,
+    output,
+    owner: workflowOwnerOf(pin.workflow),
+    // Counted on its account: its lineage's root (its own, or its
+    // parent's for a child), or its workflow's account in the lineage a
+    // trigger started it in (quotas.ts, `triggeredAccountClaimed`).
+    admission: { run: runId, root: run.calling.accountRunId },
+  };
+};
+
+/**
  * Runs (or resumes) one activation of a run of an independent workflow,
- * as `pin` names it (`loadedRun`): the build's generated module run in an
- * isolate of its own against a host of the run (resource-host.ts).
+ * as `pin` names it (`loadedActivation`): the build's generated module run
+ * in an isolate of its own against a host of the run (`runActivation`).
  * Answers the run's output, once it matches its version's output schema.
  */
 export const runResourceWorkflow = async (
@@ -1253,18 +1275,13 @@ export const runResourceWorkflow = async (
   runId: string,
   engineStep: RunStep,
   memory: ResourceRunMemory
-): Promise<unknown> => {
-  const { run, output } = await loadedRun(env, pin, runId);
-  return await runActivation(env, engineStep, memory, {
-    run,
-    output,
-    owner: workflowOwnerOf(pin.workflow),
-    // Counted on its account: its lineage's root (its own, or its
-    // parent's for a child), or its workflow's account in the lineage a
-    // trigger started it in (quotas.ts, `triggeredAccountClaimed`).
-    admission: { run: runId, root: run.calling.accountRunId },
-  });
-};
+): Promise<unknown> =>
+  await runActivation(
+    env,
+    engineStep,
+    memory,
+    await loadedActivation(env, pin, runId)
+  );
 
 /** Where the engine has a run's result: its output, or why it failed. */
 export const engineResultOf = async (
