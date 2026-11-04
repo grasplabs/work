@@ -1,7 +1,3 @@
-import {
-  generatedImport,
-  generatorVersion,
-} from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -23,6 +19,10 @@ import {
 } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
+import {
+  generatedImport,
+  generatorVersion,
+} from "@grasp-os/workflow-schema/generate";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -306,13 +306,13 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
 
 /**
- * Whether `build` was generated for the run host: by the current
- * generator, whose modules import the SDK the run's main module runs. A
- * build of the generator before it (`@grasp-os/sdk/open-workflow`, which
- * names its steps and calls its host in another way) runs on
- * resource-host.ts only, until GRA-1514 regenerates every stored version
- * onto `@grasp-os/sdk/workflow`: so none is ever loaded here, where its
- * first step would be refused as one the build doesn't seal.
+ * Whether `build` was generated for the run host: by grasp-workflow/1's
+ * generator (@grasp-os/workflow-schema), whose modules import the SDK the
+ * run's main module runs. An Open Workflow build (`@grasp-os/sdk/open-workflow`,
+ * which names its steps and calls its host in another way) runs on
+ * resource-host.ts only, until the hard cut regenerates every stored
+ * version: so none is ever loaded here, where its first step would be
+ * refused as one the build doesn't seal.
  */
 export const generatedForRunHost = (build: LoadedBuild): boolean =>
   build.generator === generatorVersion && isRunHostSdk(generatedImport);
