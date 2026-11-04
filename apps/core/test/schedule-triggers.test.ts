@@ -884,14 +884,26 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
 
   it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
     const admin = await person("admin");
+    const bob = await person("builder");
     const workflow = await reporting(admin);
-    const granted = await scheduleTrigger(admin, workflow.id);
+    await shareWorkflowResource(env, admin, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const granted = await scheduleTrigger(admin, workflow.id, { owner: bob });
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      owner: bob,
+      granted: false,
+    });
     const racing = await scheduleTrigger(admin, workflow.id, {
       granted: false,
     });
     // Refused, so its builder asks again.
     await revokePermission(env, admin, await askedStart(admin, racing.id));
-    await deleteTriggerResource(env, admin, granted.id);
+    // Deleted by a builder, who could never revoke an admin's grant.
+    await deleteTriggerResource(env, bob, granted.id);
+    await deleteTriggerResource(env, bob, waiting.id);
     const statusesOf = async (trigger: string) => {
       const held = await listPermissions(env, admin, {
         type: "trigger",
@@ -936,13 +948,15 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     expect({
       granted: await statusesOf(granted.id),
       grantRevokedBy: revokedOf(granted.permission),
+      waiting: await statusesOf(waiting.id),
       askedAgain,
       racing: await statusesOf(racing.id),
     }).toStrictEqual({
       // The start it asked for as it was created, granted, then revoked.
-      granted: [{ status: "revoked", revokedBy: admin.userId }],
+      granted: [{ status: "revoked", revokedBy: bob.userId }],
       // Audited as revoked, by whoever deleted the trigger.
-      grantRevokedBy: [admin.userId],
+      grantRevokedBy: [bob.userId],
+      waiting: [{ status: "revoked", revokedBy: bob.userId }],
       askedAgain: "workflow.trigger_unavailable",
       racing: [{ status: "revoked", revokedBy: admin.userId }],
     });
