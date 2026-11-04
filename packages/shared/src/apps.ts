@@ -1087,6 +1087,8 @@ export const appErrors = defineErrorFamily({
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (resource.workflow).",
+  "app.chat_has_app":
+    "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.no_draft": "This chat has no draft of that App to preview.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
