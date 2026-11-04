@@ -13,6 +13,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { runBindingsFor } from "../src/bindings.ts";
+import { appRun } from "../src/workflows/app-run.ts";
+import type { AppRunCalls } from "../src/workflows/app-run.ts";
 import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
@@ -175,6 +177,8 @@ const hostHeldTo = async (
     waiting: async () => {
       await Promise.resolve();
     },
+  };
+  const runCalls: AppRunCalls = {
     callFunction: async (_caller, reference) => {
       appCalls.push(
         typeof reference === "object" &&
@@ -192,21 +196,26 @@ const hostHeldTo = async (
       throw new Error("No model step here");
     },
   };
+  const hostEnv = { ...env, DB: db };
   const host = new RunHost(
-    { ...env, DB: db },
+    hostEnv,
     step,
-    {
-      app,
-      workflow: workflowIdSchema.parse("tidy"),
-      version: 1,
-      runId,
-      shareSubject: `trigger:${app}`,
-      authority,
-      collections: {},
-      connections,
-      brains: {},
-      calls,
-    },
+    appRun(
+      hostEnv,
+      {
+        app,
+        workflow: workflowIdSchema.parse("tidy"),
+        version: 1,
+        runId,
+        shareSubject: `trigger:${app}`,
+        authority,
+        collections: {},
+        connections,
+        brains: {},
+        calls,
+      },
+      runCalls
+    ),
     hooks
   );
   return { host, runId, appCalls, tampered, models, userId, leases };

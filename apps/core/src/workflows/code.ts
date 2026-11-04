@@ -42,6 +42,7 @@ import type { SessionCall, SessionOptions } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
+import { collectionMethods } from "./app-run.ts";
 import { attemptCallLabels } from "./attempt-host.ts";
 import type { AttemptHost } from "./attempt-host.ts";
 import {
@@ -49,7 +50,7 @@ import {
   betweenStepsBudgetOf,
   BoundedRunHost,
 } from "./between-steps.ts";
-import { collectionMethods, cpuLimitKill, fromIsolate } from "./host.ts";
+import { cpuLimitKill, fromIsolate } from "./host.ts";
 
 // An App's workflows are its code, written by the agent: they run as its
 // server code does, in a Worker Loader isolate with no network and an

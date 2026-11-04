@@ -20,6 +20,8 @@ import { runExtraction } from "../knowledge/extraction.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
+import { appRun } from "./app-run.ts";
+import type { HostedAppRun } from "./app-run.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
@@ -36,13 +38,7 @@ import {
   settle,
   stepLimitOf,
 } from "./host.ts";
-import type {
-  AiCalls,
-  FailedStep,
-  HostHooks,
-  HostedRun,
-  RunStep,
-} from "./host.ts";
+import type { AiCalls, FailedStep, HostHooks, RunStep } from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { accountOf, admitAttempt } from "./quotas.ts";
 import type {
@@ -328,7 +324,7 @@ const runWorkflow = async (
       contextOf(pinned.app, runId)
     );
     const files = await versionFiles(env, pinned.app, pinned.version);
-    const run: HostedRun = {
+    const run: HostedAppRun = {
       ...pinned,
       runId,
       // The engine's record of the run, never its input.
@@ -366,7 +362,13 @@ const runWorkflow = async (
     );
     hosted = run;
     const calls: AttemptCall[] = [];
-    const host = new RunHost(env, step, run, {
+    const kind = appRun(env, run, {
+      callFunction: async (caller, reference, input, idempotencyKey) =>
+        await callRunFunction(env, caller, reference, input, idempotencyKey),
+      modelBinding: async (alias) =>
+        await stepModelBinding(env, run.app, run.version, alias),
+    });
+    const host = new RunHost(env, step, kind, {
       stepFailed,
       attemptCall: trackAttemptCalls(calls),
       aiCalls: memory.aiCalls,
@@ -377,10 +379,6 @@ const runWorkflow = async (
       waiting: async (why) => {
         await recordWaiting(env, row, why);
       },
-      callFunction: async (caller, reference, input, idempotencyKey) =>
-        await callRunFunction(env, caller, reference, input, idempotencyKey),
-      modelBinding: async (alias) =>
-        await stepModelBinding(env, run.app, run.version, alias),
       admitAttempt: async (attempt) =>
         await admitAttempt(
           env,

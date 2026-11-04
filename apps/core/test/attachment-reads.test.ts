@@ -8,6 +8,8 @@ import { authoritySchema } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appRun } from "../src/workflows/app-run.ts";
+import type { AppRunCalls } from "../src/workflows/app-run.ts";
 import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
@@ -57,6 +59,10 @@ const hooks: HostHooks = {
   waiting: async () => {
     await Promise.resolve();
   },
+};
+
+/** What a run that only reads attachments calls back: nothing. */
+const calls: AppRunCalls = {
   callFunction: () => {
     throw new Error("A read calls no App function");
   },
@@ -84,26 +90,31 @@ const runReading = async (changes: Partial<Env> = {}) => {
   )
     .bind(runId, app, userId, Date.now())
     .run();
+  const hostEnv = { ...env, ...changes };
   const host = new RunHost(
-    { ...env, ...changes },
+    hostEnv,
     step,
-    {
-      app,
-      workflow: workflowIdSchema.parse("scans"),
-      version: 1,
-      runId,
-      shareSubject: userId,
-      authority: authoritySchema.parse({
-        subject: { type: "app", appId: app },
-        onBehalfOf: userId,
-        mode: "workflow",
-        appVersion: 1,
-      }),
-      connections: {},
-      brains: {},
-      collections: {},
-      calls: { steps: null, kinds: {}, models: {}, keyed: [], all: [] },
-    },
+    appRun(
+      hostEnv,
+      {
+        app,
+        workflow: workflowIdSchema.parse("scans"),
+        version: 1,
+        runId,
+        shareSubject: userId,
+        authority: authoritySchema.parse({
+          subject: { type: "app", appId: app },
+          onBehalfOf: userId,
+          mode: "workflow",
+          appVersion: 1,
+        }),
+        connections: {},
+        brains: {},
+        collections: {},
+        calls: { steps: null, kinds: {}, models: {}, keyed: [], all: [] },
+      },
+      calls
+    ),
     hooks
   );
   return { host, stored, runId };
