@@ -602,7 +602,7 @@ const parseOutput = <Output>(
 };
 
 /** Tokens the prompt took, cached or not. */
-const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
+export const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
   input + cacheRead + cacheWrite;
 
 const costOf = ({ cost }: Usage): number =>

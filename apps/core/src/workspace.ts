@@ -205,7 +205,7 @@ import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
-import { modelSettings, models } from "./models.ts";
+import { inputTokens, modelSettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
@@ -2015,12 +2015,15 @@ export class Workspace extends DurableObject<Env> {
           }
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
-            cache.requests += 1;
-            cache.inputTokens +=
-              message.usage.input +
-              message.usage.cacheRead +
-              message.usage.cacheWrite;
-            cache.cacheReadTokens += message.usage.cacheRead;
+            // Only a response the provider counted a prompt for: not the
+            // recall's step core writes (agent.ts), nor a request the
+            // gateway refused, held or cancelled before any count.
+            const prompt = inputTokens(message.usage);
+            if (prompt > 0) {
+              cache.requests += 1;
+              cache.inputTokens += prompt;
+              cache.cacheReadTokens += message.usage.cacheRead;
+            }
           }
           // The turn's one question carries its files.
           const id = this.#keep(chat.id, message, {
@@ -2067,10 +2070,7 @@ export class Workspace extends DurableObject<Env> {
           chatId: chat.id,
           turnId: live.id,
           ...cache,
-          share:
-            cache.inputTokens === 0
-              ? 0
-              : cache.cacheReadTokens / cache.inputTokens,
+          share: cache.cacheReadTokens / cache.inputTokens,
         });
       }
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
