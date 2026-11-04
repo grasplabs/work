@@ -19,9 +19,10 @@ import type {
  * or fails with the same `expression.*` error, on every replay.
  *
  * A step's evaluations together may share a budget (`expressionBudget`),
- * so the same step spends the same fuel on core's host and here. The
- * budget makes a step deterministic; it isn't what bounds the isolate's
- * work, which runs in the isolate's own CPU time and is bounded by it.
+ * taken in turn whether they run one after another or at once, so a step
+ * runs out of it at the same evaluation every time. The budget makes a
+ * step deterministic; it isn't what bounds the isolate's work, which runs
+ * in the isolate's own CPU time and is bounded by it.
  */
 
 /** Where in a workflow's data flow an expression runs: its variables. */
@@ -54,14 +55,13 @@ export interface ExpressionBudget {
 
 /**
  * The fuel one step's evaluations may spend together: eight expressions'
- * worth of the evaluator's own per-expression fuel (2^24), as an attempt
- * of a step has on core's host.
+ * worth of the evaluator's own per-expression fuel (2^24).
  */
 export const stepExpressionFuel = 2 ** 27;
 
 /**
- * What each evaluation costs a budget before jq runs, as on core's host:
- * 1/32 of an expression's fuel, so a step runs at most 256 evaluations.
+ * What each evaluation costs a budget before jq runs: 1/32 of an
+ * expression's fuel, so a step runs fewer than 256 evaluations.
  */
 export const evaluationFuel = 2 ** 19;
 
@@ -118,18 +118,11 @@ export const evaluate = async <S extends ExpressionStage>(
       remedy: "Ask for a boolean, a duration or JSON.",
     });
   }
-  if (budget !== undefined) {
-    if (!(budget.fuel >= evaluationFuel)) {
-      throw expressionError("expression.budget_exhausted", site, {
-        remedy: "Do less work in the task's expressions, or split the task.",
-      });
-    }
-    budget.fuel -= evaluationFuel;
-  }
   return await evaluateExpression(
     compiled,
     scope,
     resultContracts[result],
-    budget
+    budget,
+    evaluationFuel
   );
 };

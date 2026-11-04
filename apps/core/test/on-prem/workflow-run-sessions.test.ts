@@ -228,7 +228,7 @@ describe("an App workflow's runs on-prem", runTime, () => {
   it("evaluates its expressions in its session, with the release's jq", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Prices" });
-    await release(builder, app, evaluating("{ total: (. | add) }"));
+    await release(builder, app, evaluating("{ total: (. // [] | add) }"));
     const run = await builder.api.workflows.start(app, "priced", [300, 900]);
     await finished(run.id, runTime.timeout);
     await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject({

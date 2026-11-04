@@ -7,8 +7,9 @@ import { signedInApi } from "./sign-in.ts";
 import { appWith, evaluating } from "./workflow-apps.ts";
 
 // The workflow SDK's `evaluate` in a real run: jq runs in the run's own
-// isolate, from the WebAssembly the release loads beside the SDK's
-// modules, and needs nothing of core's while it does. What it evaluates
+// isolate (and in its workflow's tests, as the version is made current),
+// from the WebAssembly the release loads beside the SDK's modules, and
+// needs nothing of core's while it does. What it evaluates
 // and refuses is the SDK's to test (packages/sdk's expressions.test.ts);
 // here, that a run's isolate has it, type-checked as App code is, and that
 // an expression's failure fails its step as the evaluator says it.
@@ -29,11 +30,12 @@ const outcomeOf = async (
 describe("a run's expressions", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
-  it("evaluate jq in the run's own isolate, as its step's result", async () => {
+  it("evaluate jq in the run's own isolate and its workflow's tests, as its step's result", async () => {
     const admin = await personApi("admin");
     const app = await appWith(
       admin,
-      evaluating("{ total: (.lines | map(.qty * .price) | add) }")
+      // Its test evaluates it on no input: the lines, if any.
+      evaluating("{ total: (.lines // [] | map(.qty * .price) | add) }")
     );
     const run = await admin.api.workflows.start(app, "priced", {
       lines: [
@@ -52,7 +54,10 @@ describe("a run's expressions", { timeout: 60_000 }, () => {
 
   it("fail the step of an expression that fails, with the evaluator's error", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(admin, evaluating("[range(0; 100000000)]"));
+    const app = await appWith(
+      admin,
+      evaluating("[range(0; 100000000)]", { price: [] })
+    );
     const run = await admin.api.workflows.start(app, "priced", {});
     await finished(run.id);
     await expect(outcomeOf(admin, run.id)).resolves.toMatchObject({

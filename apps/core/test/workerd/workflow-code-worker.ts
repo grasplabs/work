@@ -20,7 +20,28 @@ interface StandInEnv {
   LOADER: WorkerLoader;
   RUNTIME_PROFILE: string;
   SANDBOX_HOST: Fetcher;
+  /** jq's WebAssembly, which core reads from its release's assets. */
+  JQ_WASM: ArrayBuffer;
 }
+
+/**
+ * The env core's calls take: the stand-in's, its static assets answering
+ * jq's WebAssembly, the only asset a workflow isolate reads.
+ */
+const coreEnv = (env: StandInEnv) => ({
+  ...env,
+  ASSETS: {
+    fetch: async () =>
+      await Promise.resolve(
+        new Response(env.JQ_WASM, {
+          headers: { "content-type": "application/wasm" },
+        })
+      ),
+    connect: () => {
+      throw new Error("The stand-in's assets take no sockets.");
+    },
+  } satisfies Fetcher,
+});
 
 /** A module whose `Metadata.read` does `body`. */
 const moduleOf = (
@@ -53,7 +74,7 @@ const harnesses: Record<string, string> = {
 const testsWith = async (env: StandInEnv, harness: string) => {
   const id = workflowIdSchema.parse("notes");
   return await testOutcomeOf(
-    env,
+    coreEnv(env),
     appIdSchema.parse("app-stand-in"),
     id,
     {
@@ -84,7 +105,7 @@ export default {
     }
     const started = Date.now();
     try {
-      const value = await isolateCall(env, {
+      const value = await isolateCall(coreEnv(env), {
         key: null,
         owner: "app-stand-in",
         mainModule: "metadata.js",

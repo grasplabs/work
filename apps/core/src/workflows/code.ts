@@ -259,10 +259,17 @@ export const codeSession = async (
 };
 
 /**
- * jq's WebAssembly, as a run's isolate has it besides its modules: the
- * workflow SDK's `evaluate` imports it by `jqWasmModule`. In core's
- * Loader a module of its own; on-prem one of the release's platform
- * modules, which the sandbox host reads apart (sandbox-session.ts).
+ * jq's WebAssembly, as every workflow isolate (a run's, and its
+ * workflow's metadata, tests and dry runs) has it besides its modules: the
+ * workflow SDK's `evaluate` imports it by `jqWasmModule`, and a step that
+ * evaluates runs in tests and dry runs too. In core's Loader a module of
+ * its own, spread last so no module of the App's takes its name; on-prem
+ * one of the release's platform modules, which the sandbox host reads
+ * apart (sandbox-session.ts) and refuses an App module named as. It goes
+ * with every isolate, whether its code evaluates or not: about 1 MB, read
+ * from the assets once per core isolate. Accepted, as once App-owned
+ * workflows are gone (GRA-1367) every workflow is code generated from a
+ * JSON workflow, which evaluates its data flow with it.
  */
 const jqModules = async (
   env: Pick<Env, "ASSETS">
@@ -288,7 +295,11 @@ const jqModules = async (
 export const isolateCall = async (
   env: Pick<
     Env,
-    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+    | "ASSETS"
+    | "LOADER"
+    | "RUNTIME_PROFILE"
+    | "SANDBOX_HOST"
+    | "SANDBOX_IN_PROCESS"
   >,
   {
     key,
@@ -315,12 +326,14 @@ export const isolateCall = async (
   // starts.
   signal?.throwIfAborted();
   const host = sessionHost(env);
+  const jq = await jqModules(env);
   if (host !== undefined) {
     return await codeSession(
       host,
       {
         mainModule,
         modules: await modules(),
+        platformModules: jq.platform,
         entrypoint,
         method,
         args: args.map((value) => ({ value })),
@@ -337,7 +350,7 @@ export const isolateCall = async (
     .get(key, async () => ({
       ...workflowSandbox,
       mainModule,
-      modules: await modules(),
+      modules: { ...(await modules()), ...jq.loader },
       env: {},
     }))
     .getEntrypoint(entrypoint);
@@ -1417,7 +1430,11 @@ export interface TestOutcome {
 export const testOutcomeOf = async (
   env: Pick<
     Env,
-    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+    | "ASSETS"
+    | "LOADER"
+    | "RUNTIME_PROFILE"
+    | "SANDBOX_HOST"
+    | "SANDBOX_IN_PROCESS"
   >,
   app: AppId,
   id: WorkflowId,

@@ -63,6 +63,11 @@ const outcome = async (
   }
 };
 
+/** A budget with enough for two small evaluations and part of a third. */
+const nearlySpent = (): { fuel: number } => ({
+  fuel: 2 ** 24 + 2 * evaluationFuel + 2 ** 16,
+});
+
 /** What a caller that isn't type-checked can pass. */
 const unchecked = (value: unknown): never =>
   // SAFETY: invalid on purpose; evaluate checks it at run time.
@@ -189,6 +194,43 @@ describe(evaluate, () => {
     expect(first.ran).toBeLessThanOrEqual(stepExpressionFuel / evaluationFuel);
     expect(first.ran).toBeGreaterThan(0);
     await expect(count()).resolves.toStrictEqual(first);
+  });
+
+  it("takes evaluations at once from a budget as it would one after another", async () => {
+    const sources = [
+      "[range(0; 1000)] | length",
+      "[range(0; 1000)] | length",
+      "[range(0; 1000000)] | length",
+      ". + 1",
+    ];
+    const inTurn = async () => {
+      const budget = nearlySpent();
+      const outcomes = [];
+      for (const source of sources) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another, on purpose
+        const one = await outcome(task(source), definitionScope(1), { budget });
+        outcomes.push(one);
+      }
+      return { outcomes, left: budget.fuel };
+    };
+    const atOnce = async () => {
+      const budget = nearlySpent();
+      const outcomes = await Promise.all(
+        sources.map(
+          async (source) =>
+            await outcome(task(source), definitionScope(1), { budget })
+        )
+      );
+      return { outcomes, left: budget.fuel };
+    };
+    const expected = await inTurn();
+    expect(expected.outcomes.map((one) => "error" in one)).toStrictEqual([
+      false,
+      false,
+      true,
+      true,
+    ]);
+    await expect(atOnce()).resolves.toStrictEqual(expected);
   });
 
   it("gives an evaluation no more fuel than its step has left", async () => {
