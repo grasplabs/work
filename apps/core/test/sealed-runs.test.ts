@@ -10,6 +10,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
+import { namedError } from "@grasp-os/workerflow/errors";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -531,6 +532,74 @@ const retryingEngine = (
       leases.has(`${attempt}:${key}`)
         ? { generation: 1000, deadline: Date.now() + 60_000 }
         : undefined,
+  };
+};
+
+/** What an engine journaled of a step: its result, or the error it failed with. */
+type Journaled =
+  | { ok: true; value: unknown }
+  | { ok: false; name: string; message: string; code?: string };
+
+/**
+ * An engine that journals each step's outcome in `journal`, and replays a
+ * step it journaled without running it again, as the engine does in a
+ * later activation: its result, or its error as the engine keeps it (its
+ * name, message and code). The steps whose functions ran go in `ran`.
+ */
+const journalingEngine = (
+  journal: Map<string, Journaled>,
+  ran: string[]
+): Engine => {
+  const { step, leaseOf } = retryingEngine();
+  const replayed = async (
+    name: string,
+    run: () => Promise<unknown>
+  ): Promise<unknown> => {
+    const kept = journal.get(name);
+    if (kept?.ok === true) {
+      return kept.value;
+    }
+    if (kept !== undefined) {
+      throw namedError(kept.name, kept.message, kept.code);
+    }
+    try {
+      const value = await run();
+      journal.set(name, { ok: true, value });
+      return value;
+    } catch (error) {
+      const code: unknown =
+        error instanceof Error ? Reflect.get(error, "code") : undefined;
+      journal.set(name, {
+        ok: false,
+        name: error instanceof Error ? error.name : "Error",
+        message: error instanceof Error ? error.message : String(error),
+        ...(typeof code === "string" ? { code } : {}),
+      });
+      throw error;
+    }
+  };
+  return {
+    leaseOf,
+    step: {
+      ...step,
+      do: async (name, config, fn) =>
+        await replayed(name, async () => {
+          ran.push(name);
+          return await step.do(name, config, fn);
+        }),
+      sleep: async (name, duration) => {
+        await replayed(name, async () => {
+          await step.sleep(name, duration);
+          return null;
+        });
+      },
+      sleepUntil: async (name, until) => {
+        await replayed(name, async () => {
+          await step.sleepUntil(name, until);
+          return null;
+        });
+      },
+    },
   };
 };
 
@@ -1318,7 +1387,7 @@ try {
             type: `${standardErrors}runtime`,
             status: 500,
             instance: "/do/6/guarded/try/0/fetch",
-            title: "The task failed.",
+            title: "Something went wrong.",
           },
         },
         tampered: [],
@@ -1394,6 +1463,49 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
         tampered: ["workflow.invalid"],
       },
       forgedRan: 0,
+    });
+  });
+
+  it("decides a replay as it decided the run: its retries, its sleep's deadline and its catch, from the engine's journal", async () => {
+    const module = moduleOf(`
+let rounds = 0;
+const fetched = ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Error("not yet"); return { output: rounds }; })()', retryingBy("guarded"))};
+${enterPause("Date.now() + 1000")}
+${sleepPause("until")}
+try {
+  try {
+    ${taskStep("stop", "{ output: null }")};
+  } catch (thrown) {
+    if (${catchStep("inner", "async () => true")} === undefined) throw thrown;
+  }
+} catch (thrown) {
+  const caught = ${catchStep("outer", "async () => true")};
+  if (caught === undefined) throw thrown;
+  return { fetched, caught, rounds };
+}`);
+    const runId = await waitingRun(sealed);
+    const journal = new Map<string, Journaled>();
+    const first: string[] = [];
+    const ran = await ranAs(runId, module, {
+      engine: journalingEngine(journal, first),
+    });
+    const again: string[] = [];
+    const replayed = await ranAs(runId, module, {
+      engine: journalingEngine(journal, again),
+    });
+    const outcome = { fetched: { output: 3 }, caught: stopped };
+    expect({
+      ran,
+      decided: first.filter((name) => name.endsWith(":decide")).length,
+      replayed,
+      ranAgain: again,
+    }).toStrictEqual({
+      ran: { ended: { ...outcome, rounds: 3 }, tampered: [] },
+      decided: 2,
+      // Nothing runs again, and nothing is refused: every step, its
+      // deadline and its catch, is the journal's.
+      replayed: { ended: { ...outcome, rounds: 0 }, tampered: [] },
+      ranAgain: [],
     });
   });
 

@@ -686,17 +686,23 @@ const defaultRetryLimit = maxStepRetries;
  * to its lineage's active time.
  */
 const stepConfig = (
-  { retries, timeout }: z.output<typeof doOptionsSchema>,
-  /** The kind's own ceiling on an attempt's time (`RunKind.timeoutOf`). */
-  ceiling = maxAttemptTimeoutMs
-): WorkflowStepConfig => ({
-  retries: {
-    limit: retries?.limit ?? defaultRetryLimit,
-    delay: retries?.delay ?? defaultRetryDelayMs,
-    backoff: retries?.backoff ?? "exponential",
-  },
-  timeout: Math.min(timeout ?? maxAttemptTimeoutMs, ceiling),
-});
+  { retries: declared, timeout }: z.output<typeof doOptionsSchema>,
+  /** The kind's own, in place of the step's (`RunKind.limitsOf`). */
+  limits: StepLimits = {}
+): WorkflowStepConfig & { retries: StepRetries } => {
+  const retries = limits.retries ?? declared;
+  return {
+    retries: {
+      limit: retries?.limit ?? defaultRetryLimit,
+      delay: retries?.delay ?? defaultRetryDelayMs,
+      backoff: retries?.backoff ?? "exponential",
+    },
+    timeout: Math.min(
+      timeout ?? maxAttemptTimeoutMs,
+      limits.timeout ?? maxAttemptTimeoutMs
+    ),
+  };
+};
 
 /**
  * How a wait or an attempt that ran out of time ends in the engine: a
@@ -1165,7 +1171,12 @@ export const cpuLimitKill = (cause?: unknown): Error =>
  * the log.
  */
 export const forIsolate = (error: unknown): StepError => {
-  if (isTimeout(error)) {
+  // A step's timeout as the engine journals it, too: so a failure reads
+  // the same fresh and replayed.
+  if (
+    isTimeout(error) ||
+    (error instanceof Error && error.name === "TimeoutError")
+  ) {
     return { name: "TimeoutError", message: "The step ran out of time." };
   }
   if (isCpuLimitKill(error)) {
@@ -1360,11 +1371,12 @@ export interface RunKind {
    */
   attemptFailed?: (attempt: StepAttempt, error: StepError) => void;
   /**
-   * The longest an attempt of step `step` may take, below what its code
-   * declared: a sealed run's task's timeout, or its catch's retry
-   * policy's attempt duration (sealed-run.ts). None of an App's.
+   * Step `step`'s limits in place of what its code declared: a sealed
+   * run's engine retries, and the longest an attempt may take, its task's
+   * timeout or its catch's retry policy's attempt duration
+   * (sealed-run.ts). None of an App's.
    */
-  timeoutOf?: (step: string) => number | undefined;
+  limitsOf?: (step: string) => StepLimits;
   /**
    * What `attempt` settled with, as the host takes it, from what its
    * code reported (`result`): a sealed run's checks of what its step
@@ -1397,6 +1409,21 @@ export interface RunKind {
     error: StepError,
     round: number
   ) => RetryOffer | undefined;
+}
+
+/** A step's engine retries, as a step's config has them. */
+export interface StepRetries {
+  limit: number;
+  delay: number;
+  backoff: "constant" | "linear" | "exponential";
+}
+
+/** A kind's own limits of a step (`RunKind.limitsOf`). */
+export interface StepLimits {
+  /** Its engine retries, whatever its code declared. */
+  retries?: StepRetries;
+  /** The longest an attempt may take, below what its code declared. */
+  timeout?: number;
 }
 
 /**
@@ -1985,6 +2012,8 @@ export class RunHost extends RpcTarget {
     retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     let failed: StepError | undefined;
+    // The error its last round threw, as journaled, once no retry follows.
+    let lastRound: { thrown: unknown; as: StepError } | undefined;
     let attempted = false;
     let step = "";
     let sideEffect = false;
@@ -2000,7 +2029,7 @@ export class RunHost extends RpcTarget {
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
-      const config = stepConfig(parsed, this.#kind.timeoutOf?.(step));
+      const config = stepConfig(parsed, this.#kind.limitsOf?.(step));
       await this.#kind.requirePerson();
       // The attempts of this `do` this execution made, for an engine that
       // doesn't say which attempt it runs.
@@ -2018,7 +2047,7 @@ export class RunHost extends RpcTarget {
         const attempt = this.#attemptOf(
           step,
           context,
-          isLastAttempt(context, tries, parsed.retries?.limit)
+          isLastAttempt(context, tries, config.retries.limit)
         );
         // Admitted before its code runs, or failed with the refusal: a
         // limit reached fails the step; a lineage whose time attempts
@@ -2153,6 +2182,7 @@ export class RunHost extends RpcTarget {
       const rounds = async (base: string): Promise<unknown> => {
         tries = 0;
         load = loadWaitStart;
+        failed = undefined;
         let value = await this.#step.do(base, config, attemptStep);
         // When the step was first held on its current unknown outcome.
         const unknown: { since?: number } = {};
@@ -2231,14 +2261,19 @@ export class RunHost extends RpcTarget {
           value = await rounds(base);
           break;
         } catch (error) {
+          if (retry === undefined) {
+            throw error;
+          }
+          // As the engine journaled it, so a replay decides the same.
+          const roundError = forIsolate(error);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          const retried = await this.#retried(
-            step,
-            failed ?? forIsolate(error),
-            round,
-            { retry, firstFailedAt, stepDone: stepDone.promise }
-          );
+          const retried = await this.#retried(step, roundError, round, {
+            retry,
+            firstFailedAt,
+            stepDone: stepDone.promise,
+          });
           if (retried === undefined) {
+            lastRound = { thrown: error, as: roundError };
             throw error;
           }
           // It runs again: it waits for its AI provider no more.
@@ -2253,8 +2288,20 @@ export class RunHost extends RpcTarget {
     } catch (error) {
       // The step ran again after its wait and threw: it waits no more.
       await this.#keyWaitEndedQuietly(step, keyWait);
-      const reported = failed ?? forIsolate(error);
-      this.#kind.stepEnded?.(step, { ok: false, error: reported });
+      // What the step failed with as the engine journaled it, fresh or
+      // replayed alike, for its kind (`stepEnded`): never `failed`, which
+      // an attempt the engine gave up on may still set.
+      let journaled: StepError | undefined;
+      if (this.#kind.stepEnded !== undefined) {
+        journaled =
+          lastRound !== undefined && lastRound.thrown === error
+            ? lastRound.as
+            : forIsolate(error);
+      }
+      const reported = failed ?? journaled ?? forIsolate(error);
+      if (journaled !== undefined) {
+        this.#kind.stepEnded?.(step, { ok: false, error: journaled });
+      }
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
         await this.#audited(step, "failed", {
@@ -2361,13 +2408,15 @@ export class RunHost extends RpcTarget {
 
   /**
    * The decision step of a retry of step `step`, as the engine claimed its
-   * attempt (`context`): admitted as any attempt is, then the error
-   * `offer` names handed to the isolate's `retry`, outside any step's
-   * attempt (so nothing it calls is made), and its choice held to the
-   * policy by the kind (`RetryOffer.decided`): a choice the build's code
-   * never makes is tampering. A failure of its own (an expression that
-   * failed) retries nothing. Recorded, so a replay sleeps as long and
-   * decides the same.
+   * attempt (`context`): the error `offer` names handed to the isolate's
+   * `retry`, outside any step's attempt (so nothing it calls is made), and
+   * its choice held to the policy by the kind (`RetryOffer.decided`): a
+   * choice the build's code never makes is tampering. A failure of its
+   * own (an expression that failed) retries nothing. Not admitted as an
+   * attempt: it calls nothing, and its rounds are (a refusal for load
+   * here would skip the policy, where a round waits it out); a step has
+   * at most four. Recorded, so a replay sleeps as long and decides the
+   * same.
    */
   async #decideRetry(
     step: string,
@@ -2385,24 +2434,6 @@ export class RunHost extends RpcTarget {
   ): Promise<RetryDecision> {
     const firstAt = firstFailedAt ?? Date.now();
     const attempt = this.#attemptOf(step, context, false);
-    const admitted = await settle(
-      async () =>
-        await this.#admit(attempt, {
-          waitedMs: undefined,
-          maxWaitMs: loadWaitStart.maxWaitMs,
-        })
-    );
-    if (!admitted.ok) {
-      throw toStepError(admitted.error);
-    }
-    const { value: admission } = admitted;
-    if ("busyFor" in admission) {
-      // Refused for load: tried again by the engine, as a timeout is.
-      throw toStepError({
-        name: "TimeoutError",
-        message: "The retry's decision waited for load.",
-      });
-    }
     try {
       const call = this.#isolateStopped
         ? Promise.reject(cpuLimitKill())
@@ -2436,7 +2467,6 @@ export class RunHost extends RpcTarget {
       }
     } finally {
       attempt.over = true;
-      await admission.settle();
     }
   }
 

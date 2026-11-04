@@ -18,6 +18,7 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
+import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -50,6 +51,7 @@ import type {
   RetryOffer,
   RunKind,
   StepAttempt,
+  StepLimits,
 } from "./host.ts";
 import { admitAttempt } from "./quotas.ts";
 import type { AttemptAdmission } from "./quotas.ts";
@@ -469,6 +471,18 @@ const retryChoiceSchema = z
   .strictObject({ by: z.string(), retry: z.boolean() })
   .nullable();
 
+/**
+ * A sealed run's steps' engine retries, whatever its code declares: a
+ * failure trying again may fix (a timeout, the isolate's CPU, a busy
+ * store) is tried twice more, a second apart and doubling, as the old
+ * engine did. A catch's retry policy runs rounds of its own around them.
+ */
+const sealedRetries = {
+  limit: 2,
+  delay: 1000,
+  backoff: "exponential",
+} as const satisfies NonNullable<StepLimits["retries"]>;
+
 /** The codes of a task's own data that didn't fit its schema. */
 const dataCodes: ReadonlySet<string> = new Set([
   "workflow.task_data_invalid",
@@ -483,9 +497,11 @@ const dataCodes: ReadonlySet<string> = new Set([
  */
 const isolateFailure = (error: StepError): StepError => {
   const { code } = error;
+  // Only a code the platform defines: one core reads back the same from
+  // the engine's journal, so a replay maps it alike (host.ts, `forIsolate`).
   const kept =
-    code !== undefined &&
-    (code.startsWith("expression.") || dataCodes.has(code));
+    expressionErrors.codeOf(error) !== undefined ||
+    (code !== undefined && dataCodes.has(code));
   return {
     name: "Error",
     message: error.message,
@@ -805,13 +821,15 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * The longest an attempt of `step` may take: its task's timeout, and
-   * each retry policy's attempt duration of the tries around it.
+   * Every step's engine retries, whatever its code declared
+   * (`sealedRetries`), and the longest an attempt of `step` may take: its
+   * task's timeout, and each retry policy's attempt duration of the tries
+   * around it.
    */
-  timeoutOf(step: string): number | undefined {
+  limitsOf(step: string): StepLimits {
     const task = this.#steps.get(step)?.task;
     if (task === undefined) {
-      return undefined;
+      return { retries: sealedRetries };
     }
     const limits = [
       ...(task.timeoutMs === undefined ? [] : [task.timeoutMs]),
@@ -821,7 +839,10 @@ class SealedRun implements SealedRunKind {
           : [around.catch.retry.attemptMs]
       ),
     ];
-    return limits.length === 0 ? undefined : Math.min(...limits);
+    return {
+      retries: sealedRetries,
+      ...(limits.length === 0 ? {} : { timeout: Math.min(...limits) }),
+    };
   }
 
   /**
