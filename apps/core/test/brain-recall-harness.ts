@@ -272,23 +272,18 @@ const forgetKeptRecalls = async (company: BrainCompany, repeat: number) => {
   });
 };
 
-/**
- * Each arm's cold and warm recall of each case of `cases`, in a seeded
- * order, none once `signal` is aborted.
- */
+/** Each arm's cold and warm recall of each case of `cases`, in a seeded order. */
 const askAll = async (
   company: BrainCompany,
   cases: readonly BrainRecallCase[],
   arms: readonly BrainRecallArm[],
   repeat: number,
-  random: () => number,
-  signal: AbortSignal | undefined
+  random: () => number
 ): Promise<RecallObservation[]> => {
   const observations: RecallObservation[] = [];
   for (const recallCase of shuffled(cases, random)) {
     for (const arm of shuffled(arms, random)) {
       for (const phase of ["cold", "warm"] as const) {
-        signal?.throwIfAborted();
         observations.push(
           // oxlint-disable-next-line no-await-in-loop -- one recall at a time, so each is timed and charged alone
           await observe(company, recallCase, arm, repeat, phase)
@@ -302,15 +297,14 @@ const askAll = async (
 /**
  * How long each arm took to find each of `cases`' markers, once `since`
  * wrote them: each arm asked at least once, and again until it finds the
- * marker or `limitMs` has passed; none once `signal` is aborted.
+ * marker or `limitMs` has passed.
  */
 const lagsOf = async (
   company: BrainCompany,
   cases: readonly BrainRecallCase[],
   arms: readonly BrainRecallArm[],
   since: number,
-  limitMs: number,
-  signal: AbortSignal | undefined
+  limitMs: number
 ): Promise<UpdateLag[]> => {
   const lags: UpdateLag[] = [];
   for (const recallCase of cases) {
@@ -324,7 +318,6 @@ const lagsOf = async (
         let lagMs: number | null = null;
         let asking = true;
         while (asking) {
-          signal?.throwIfAborted();
           const askedAt = performance.now();
           firstAsk ??= askedAt;
           // oxlint-disable-next-line no-await-in-loop -- asked until found
@@ -367,11 +360,6 @@ export interface BrainRecallOptions {
    * in workerd, where any lag is a kept recall outliving the write.
    */
   lagLimitMs?: number;
-  /**
-   * Ends the run before its next ask once aborted: a run its caller gave
-   * up on doesn't go on asking under whatever runs next.
-   */
-  signal?: AbortSignal;
   seed?: number;
   /** What the run's numbers depend on, beyond the code: its model and profile. */
   identity: { model: string; profile: string; build?: unknown };
@@ -431,7 +419,6 @@ export const runBrainRecallComparison = async (
     measured,
     seed = 304,
     lagLimitMs = lagLimitDefaultMs,
-    signal,
     identity,
   }: BrainRecallOptions
 ): Promise<BrainRecallReport> => {
@@ -450,7 +437,7 @@ export const runBrainRecallComparison = async (
       }
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- one repeat at a time
-        ...(await askAll(company, early, arms, repeat, random, signal))
+        ...(await askAll(company, early, arms, repeat, random))
       );
     }
     await applyWindow(company, "t1");
@@ -459,12 +446,9 @@ export const runBrainRecallComparison = async (
       late,
       arms,
       performance.now(),
-      lagLimitMs,
-      signal
+      lagLimitMs
     );
-    observations.push(
-      ...(await askAll(company, late, arms, 0, random, signal))
-    );
+    observations.push(...(await askAll(company, late, arms, 0, random)));
 
     const byId = new Map(cases.map((each) => [each.id, each]));
     const scores = observations.flatMap((observation) => {
