@@ -2712,8 +2712,8 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Ends the chat's running build job `id` as `end` says, once: `false`
    * when it had ended already. Its turn's agent is told how it ended, if
-   * that turn still runs, in a notice it answers once it has answered
-   * (`ChatSession.followUp`), never shown as the person's; no other turn
+   * that turn still runs, in a notice it answers, even once it has
+   * answered (`ChatSession.notify`), never shown as the person's; no other turn
    * ever is, and nothing of its result goes with it: the agent reads that
    * with `env.build.job`.
    */
@@ -2732,7 +2732,7 @@ export class Workspace extends DurableObject<Env> {
           this.env,
           this.#scopeOf(this.#chat(job.chatId)).workspaceId,
           job.chatId
-        ).followUp(content)
+        ).notify(content)
       );
     }
     return true;

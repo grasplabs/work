@@ -304,7 +304,8 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
  * or `undefined` if it says nothing of that: after a question, a call, a
  * tool's result or a notice it answers, it goes on; after a response that
  * calls nothing, its turn is over. The chat's own transcript, so it holds
- * through a restart of either object.
+ * through a restart of either object. A notice is checked against pi's
+ * run as well (`#atWorkAfter`).
  */
 const atWorkAt = (entry: EntryRecord): boolean | undefined => {
   if (entry.kind === noticeKind) {
@@ -469,24 +470,33 @@ export class ChatHarness {
     return opened;
   }
 
-  /**
-   * The chat's latest entry that says whether the agent is at work
-   * (`atWorkAt`), and whether it is.
-   */
-  async #latest(): Promise<{ entry?: EntryRecord; atWork: boolean }> {
+  /** The chat's latest entry that says whether the agent is at work (`atWorkAt`). */
+  async #latest(): Promise<EntryRecord | undefined> {
     const page = await this.#conversation.entries(
       { order: "descending" },
       8,
       undefined,
       context
     );
-    for (const entry of page.items) {
-      const atWork = atWorkAt(entry);
-      if (atWork !== undefined) {
-        return { entry, atWork };
-      }
+    return page.items.find((entry) => atWorkAt(entry) !== undefined);
+  }
+
+  /**
+   * Whether the agent is at work once `latest` is the chat's latest entry
+   * that says so (`atWorkAt`). After a notice, only while pi's run is live:
+   * a steer that came as the run answered is placed after its answer, with
+   * no run to answer it.
+   */
+  async #atWorkAfter(latest: EntryRecord | undefined): Promise<boolean> {
+    if (latest?.kind !== noticeKind) {
+      return latest !== undefined && atWorkAt(latest) === true;
     }
-    return { atWork: false };
+    const live = await this.#harness.snapshot(
+      LiveDoc,
+      this.#conversation.id,
+      context
+    );
+    return live?.run !== undefined;
   }
 
   /** Takes in one of the agent's events (`watchEvents`). */
@@ -608,16 +618,18 @@ export class ChatHarness {
     const latest = await this.#latest();
     // A turn stopped before the model said anything ends in the chat as
     // cancelled all the same: pi keeps no response of it.
-    if (end.outcome === "cancelled" && latest.entry?.kind !== "pi.assistant") {
+    if (end.outcome === "cancelled" && latest?.kind !== "pi.assistant") {
       await this.#host(request.scope).keepTurnMessages(request.scope.chatId, [
         { message: cancelledMessage() },
       ]);
     }
     // A turn that ended without a last word of the model's (cancelled,
     // failed, stopped) is over too. Told before the turn returns, so its
-    // Workspace shows it ended. One that answered goes on while a notice
-    // it answers follows (`followUp`).
-    await this.#tell(end.outcome === "answered" && latest.atWork);
+    // Workspace shows it ended. One that answered goes on while it answers
+    // a notice that followed (`notify`).
+    await this.#tell(
+      end.outcome === "answered" && (await this.#atWorkAfter(latest))
+    );
     return end;
   }
 
@@ -666,10 +678,13 @@ export class ChatHarness {
 
   /**
    * Tells the turn under way `text` for it to answer, never shown as the
-   * person's: pi's follow-up, placed once the run answers, which starts a
-   * run that answers it. Dropped once no turn runs.
+   * person's. While its tools run, pi's steer: placed after the round, the
+   * run reads it with its next request. While the model writes, which may
+   * be its answer, pi's follow-up: placed once the run answers, it starts a
+   * run that answers it, where a steer would come after the answer
+   * unanswered. Dropped once no turn runs.
    */
-  async followUp(text: string): Promise<void> {
+  async notify(text: string): Promise<void> {
     const live = await this.#harness.snapshot(
       LiveDoc,
       this.#conversation.id,
@@ -682,7 +697,7 @@ export class ChatHarness {
       {
         type: "input",
         content: text,
-        whenBusy: "followUp",
+        whenBusy: live.tools === undefined ? "followUp" : "steer",
         entry: { kind: noticeKind },
       },
       context
@@ -751,9 +766,12 @@ export class ChatHarness {
   ): Promise<{ turn: CodeTurn; room: number }> {
     const env = this.#env;
     const { scope } = request;
-    const host = this.#host(scope);
+    // A stub a call, never one kept for the turn: a stub to a Workspace
+    // that restarted mid-turn stays broken, its calls failing or never
+    // answering, where a new one reaches the Workspace as it is now.
+    const host = () => this.#host(scope);
     const authority = chatAuthority(scope);
-    const guard = await host.turnGuard(scope);
+    const guard = await host().turnGuard(scope);
     if (guard.stop !== undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
@@ -788,12 +806,13 @@ export class ChatHarness {
       apis: apisFor(request.shared, request.readsBrain),
       scope,
       runs: {
-        open: async (opening) => await host.openCodeRun(scope.chatId, opening),
+        open: async (opening) =>
+          await host().openCodeRun(scope.chatId, opening),
         close: async (runId, status) =>
-          await host.endTurnRun(scope, runId, status),
+          await host().endTurnRun(scope, runId, status),
         output: (runId, callId, line) => {
           this.#ctx.waitUntil(
-            host.codeRunOutput(scope.chatId, runId, callId, line)
+            host().codeRunOutput(scope.chatId, runId, callId, line)
           );
         },
       },
@@ -816,7 +835,7 @@ export class ChatHarness {
           }
         : {}),
       withheld: async () => {
-        const checked = await host.turnGuard(scope);
+        const checked = await host().turnGuard(scope);
         this.#sources = checked.sources;
         if (checked.stop !== undefined) {
           this.#stop(checked.stop);
@@ -907,7 +926,7 @@ export class ChatHarness {
     const shown: TurnMessage[] = [];
     const seen: EntryId[] = [];
     let last: EntryId | undefined;
-    let atWork: boolean | undefined;
+    let latest: EntryRecord | undefined;
     let cursor;
     do {
       // oxlint-disable-next-line no-await-in-loop -- page after page
@@ -924,7 +943,7 @@ export class ChatHarness {
         if (entry.id !== after) {
           last = entry.id;
           seen.push(entry.id);
-          atWork = atWorkAt(entry) ?? atWork;
+          latest = atWorkAt(entry) === undefined ? latest : entry;
           const thinkingMs = this.#thought.get(entry.id);
           for (const message of shownOf(entry)) {
             shown.push(
@@ -941,8 +960,8 @@ export class ChatHarness {
     if (shown.length > 0) {
       await this.#host(scope).keepTurnMessages(scope.chatId, shown);
     }
-    if (atWork !== undefined) {
-      await this.#tell(atWork);
+    if (latest !== undefined) {
+      await this.#tell(await this.#atWorkAfter(latest));
     }
     const through = last;
     await this.#conversation.commit(async (tx) => {

@@ -1857,11 +1857,10 @@ describe("chat agent code run leases", () => {
           String(record?.id)
         )
       )
-    ).resolves.toStrictEqual({ call: "ended", first: false });
-    // The turn goes on in the chat's ChatSession, as its heartbeat alarm
-    // finds it: the run's later call is refused, so its step fails, and
-    // the model answers. Not run again.
-    await runDurableObjectAlarm(chatSession(env, id, chat.id));
+    ).resolves.toMatchObject({ call: "ended" });
+    // The turn goes on in the chat's ChatSession at once, not at its
+    // heartbeat alarm a minute on: the run's call fails with the object it
+    // went to, its step fails, and the model answers. Not run again.
     await vi.waitFor(
       () => {
         expect(provider.requests).toHaveLength(2);
