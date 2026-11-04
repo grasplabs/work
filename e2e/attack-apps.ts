@@ -364,16 +364,21 @@ const routes = (): Record<string, string> => {
   results.linkMarkup = attempt(() => {
     holder.insertAdjacentHTML("beforeend", '<li' + 'nk rel="preconnect" href="${attacker}/markup">');
   });
-  // A message from a window that isn't the page, as another App's frame
-  // beside this one would send.
-  let heard = "dropped";
-  const hear = (): void => {
-    heard = "heard";
+  // A message from a source that is neither the page nor this frame, as
+  // another App's frame beside this one would send; and one the frame
+  // posts itself, as a library scheduling its work does.
+  const heardFrom = (source: MessageEventSource): string => {
+    let heard = "dropped";
+    const hear = (): void => {
+      heard = "heard";
+    };
+    window.addEventListener("message", hear);
+    window.dispatchEvent(new MessageEvent("message", { data: "a message", source }));
+    window.removeEventListener("message", hear);
+    return heard;
   };
-  window.addEventListener("message", hear);
-  window.dispatchEvent(new MessageEvent("message", { data: "from a sibling", source: window }));
-  window.removeEventListener("message", hear);
-  results.foreignMessage = heard;
+  results.foreignMessage = heardFrom(new MessageChannel().port1);
+  results.ownMessage = heardFrom(window);
   results.windows = String(window.length);
   return results;
 };

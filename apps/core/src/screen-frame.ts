@@ -907,14 +907,17 @@ const start = (event) => {
     )
   );
 };
-// A message from any window but the page never reaches the screen's
-// code: another App's frame on the same page (a side panel) could
-// otherwise hand it what it read, for its own App to send on.
+// A message from any window but the page, or the frame's own (which
+// libraries post to themselves to schedule work), never reaches the
+// screen's code: another App's frame on the same page (a side panel)
+// could otherwise hand it what it read, for its own App to send on.
 const sourceOf = Object.getOwnPropertyDescriptor(MessageEvent.prototype, "source").get;
 const stopNow = Event.prototype.stopImmediatePropagation;
 const page = parent;
+const own = window;
 apply(listen, window, ["message", (event) => {
-  if (apply(sourceOf, event, []) !== page) {
+  const source = apply(sourceOf, event, []);
+  if (source !== page && source !== own) {
     apply(stopNow, event, []);
   }
 }, true]);
