@@ -199,7 +199,6 @@ const betweenSteps = (
 const listenFor = (...types: string[]) => ({
   binding: "replies",
   strategy: "any",
-  read: "envelope",
   filters: types.map((type) => ({ type, attributes: [] })),
 });
 

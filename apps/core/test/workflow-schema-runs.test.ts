@@ -1498,7 +1498,7 @@ const nothingSent = async (): Promise<undefined> => {
 // sealed binding and types an App sends the run, as the host minted it; a
 // timeout an outcome, `{ timedOut: true }`, never a failure; a wait in
 // each item of a loop under that item's keys; and a binding revoked since
-// the start, `workflow.event_denied`, which a catch takes.
+// the start, `workflow.event_denied`, failing the run, which no catch takes.
 describe("a grasp-workflow/1 event wait's generated code on the run host", () => {
   let listening: Listening;
 
@@ -1637,7 +1637,7 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
     });
   });
 
-  it("fails with `workflow.event_denied` once its binding is revoked, which a catch takes", async () => {
+  it("fails the run with `workflow.event_denied` once its binding is revoked, a `try` around it or not", async () => {
     const revoked = await eventWorkflow();
     const caught = await generated(
       [{ id: "guarded", type: "try", try: [replyWait()], catch: {} }],
@@ -1666,7 +1666,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       // Refused before it waits: the engine is asked for nothing.
       asked,
     }).toStrictEqual({
-      caught: { ended: null, tampered: [] },
+      // No catch takes it: the host checks the binding again on replay.
+      caught: failedWith("workflow.event_denied"),
       bare: failedWith("workflow.event_denied"),
       asked: [],
     });

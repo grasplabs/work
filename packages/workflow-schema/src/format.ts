@@ -231,7 +231,10 @@ export interface EventFilter {
  * (once the run started, or while it waited), as the host minted it, or
  * `{ timedOut: true }` when none came within its timeout. A timeout is an
  * outcome a later step reads (`steps.<id>.output.timedOut`), never a
- * failure; the event's data is `steps.<id>.output.event.data`.
+ * failure; the event's data is `steps.<id>.output.event.data`. A wait the
+ * host refuses (`workflow.event_denied`, `permission.person_inactive`)
+ * fails the run, and no catch takes it: the host checks its binding again
+ * on every replay, so a caught refusal would only come back.
  */
 export type EventWaitOutput =
   | {
@@ -397,7 +400,7 @@ export const forEachDescription = `Runs \`do\` for each of \`items\`, one item a
 
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
-  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`.";
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. A wait refused (its binding revoked, or the run's person no longer active) fails the run: no `try` catches it, as the run checks its binding again on every replay.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,

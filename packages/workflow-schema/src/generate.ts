@@ -131,13 +131,12 @@ export type SealedCall =
 
 /**
  * An event wait's events, as the host takes them (core's sealed listen):
- * the first of any of its types sent through its event binding, its
- * envelope as the host minted it, matched by type alone.
+ * the first of any of its types sent through its event binding, matched
+ * by type alone; its output is that event's envelope as the host minted it.
  */
 export interface SealedListen {
   readonly binding: string;
   readonly strategy: "any";
-  readonly read: "envelope";
   readonly filters: readonly {
     readonly type: string;
     readonly attributes: readonly never[];
@@ -840,7 +839,8 @@ class Generator {
    * the first event of its sealed binding and types sent to the run, its
    * timeout sealed beside them. The host decides what it takes and until
    * when from the table alone (`step.listen` passes neither), and answers
-   * `{ timedOut: true }` past its timeout. Its `if`, if any, is decided
+   * `{ timedOut: true }` past its timeout. A wait it refuses fails the
+   * run, whatever `try` is around it. Its `if`, if any, is decided
    * in an enter step before it, as a sleep's.
    */
   #listen(step: Placed<EventWaitStep>, depth: number): void {
@@ -854,7 +854,6 @@ class Generator {
       listen: {
         binding: from,
         strategy: "any",
-        read: "envelope",
         filters: types.map((each) => ({ type: each, attributes: [] })),
       },
       timeoutMs: durationMs(step.timeout),
