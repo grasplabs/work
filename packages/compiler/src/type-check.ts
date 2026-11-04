@@ -390,6 +390,8 @@ export interface TypeProgram {
   readonly imports: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   /** The App files, in the order the check reports them. */
   readonly order: readonly string[];
+  /** The program itself, for a check of its own on what TypeScript made of it. */
+  readonly program: ts.Program;
   /**
    * The program's own diagnostics, and those of each App file in `only`
    * (every App file without it), by its path.
@@ -536,6 +538,7 @@ export const typeProgram = (
             ])
           ),
     order: checked.map((file) => relative(file.fileName)),
+    program,
     diagnose: (only) => ({
       global: diagnosticsOf([
         ...program.getOptionsDiagnostics(),

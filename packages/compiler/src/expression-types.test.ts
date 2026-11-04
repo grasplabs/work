@@ -175,6 +175,40 @@ describe("type-checking a workflow's expressions", () => {
     });
   });
 
+  it("reads a data field named like a method, but no method without a call", () => {
+    const { expressions } = checkExpressionTypes(
+      {
+        ...scope,
+        input: "{ at: string; map: { join: number }; list: string[] }",
+      },
+      {
+        field: { source: "input.at.trim() + input.map.join" },
+        called: { source: "input.list.map((item) => item.at(0)).join(', ')" },
+        method: { source: "input.list.map" },
+        optional: { source: "[input.list?.join, input.at['trim']]" },
+        inCallback: { source: "input.list.map((item) => item.trim)" },
+      },
+      kitTypes
+    );
+    expect(
+      Object.fromEntries(
+        Object.entries(expressions).map(([name, errors]) => [
+          name,
+          errors.map(({ code, line, column }) => ({ code, line, column })),
+        ])
+      )
+    ).toStrictEqual({
+      field: [],
+      called: [],
+      method: [{ code: "expression.method", line: 1, column: 12 }],
+      optional: [
+        { code: "expression.method", line: 1, column: 14 },
+        { code: "expression.method", line: 1, column: 29 },
+      ],
+      inCallback: [{ code: "expression.method", line: 1, column: 31 }],
+    });
+  });
+
   it("holds a result to the type the workflow needs", () => {
     const { expressions } = check({
       condition: { source: "input.customer", result: "boolean" },

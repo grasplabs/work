@@ -11,6 +11,7 @@ import {
   sourcePosition,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError, TypeForm } from "@grasp-os/sdk/expression-check";
+import ts from "typescript";
 
 import { serverTarget, typeProgram } from "./type-check.ts";
 
@@ -85,6 +86,51 @@ const fromSubset = ({
   line,
   column,
 });
+
+/**
+ * Where lines `first` to `last` of the module (1-based) read a method
+ * without calling it: a member whose type has call signatures, not a
+ * call's callee. Its value would be `undefined` (`$read` gives no
+ * function), while a field of data named like a method (`at`, `map`)
+ * has a data type and is read.
+ */
+const methodReads = (
+  program: ts.Program,
+  first: number,
+  last: number
+): { line: number; column: number; name: string }[] => {
+  const file = program.getSourceFile(`/${modulePath}`);
+  if (file === undefined) {
+    return [];
+  }
+  const checker = program.getTypeChecker();
+  const found: { line: number; column: number; name: string }[] = [];
+  const visit = (node: ts.Node): void => {
+    const start = file.getLineAndCharacterOfPosition(node.getStart(file));
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      start.line + 1 >= first &&
+      start.line + 1 <= last &&
+      !(ts.isCallExpression(node.parent) && node.parent.expression === node) &&
+      checker.getTypeAtLocation(node).getNonNullableType().getCallSignatures()
+        .length > 0
+    ) {
+      const named = ts.isPropertyAccessExpression(node)
+        ? node.name
+        : node.argumentExpression;
+      const at = file.getLineAndCharacterOfPosition(named.getStart(file));
+      found.push({
+        line: at.line + 1,
+        column: at.character + 1,
+        name: named.getText(file).replaceAll(/^["'`]|["'`]$/gu, ""),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+};
 
 /**
  * Checks each expression against the subset first, then the ones that
@@ -166,12 +212,13 @@ export const checkExpressionTypes = (
   if (placed.length === 0) {
     return { expressions: errors, scope: scopeErrors };
   }
-  const { global, files } = typeProgram(
+  const checking = typeProgram(
     { [modulePath]: code },
     kitTypes,
     // A worker's lib, no DOM, and no module to import.
     serverTarget({}, new Set())
-  ).diagnose();
+  );
+  const { global, files } = checking.diagnose();
   const found = [...global, ...(files.get(modulePath)?.found ?? [])];
   for (const diagnostic of found) {
     if (diagnostic.severity !== "error") {
@@ -202,6 +249,20 @@ export const checkExpressionTypes = (
           line - at.first + 1,
           diagnostic.column ?? 1
         ),
+      });
+    }
+  }
+  for (const at of placed) {
+    for (const { line, column, name: method } of methodReads(
+      checking.program,
+      at.first,
+      at.last
+    )) {
+      errors[at.name]?.push({
+        code: "expression.method",
+        message: `\`${method}\` is a method, read without a call: it has no value.`,
+        fix: `Call it, as \`${method}(…)\`.`,
+        ...sourcePosition(at.form, at.source, line - at.first + 1, column),
       });
     }
   }
