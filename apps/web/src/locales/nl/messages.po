@@ -1791,8 +1791,8 @@ msgid "A topic"
 msgstr "Een onderwerp"
 
 #: src/workflows/workflow-triggers-tab.tsx
-msgid "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
-msgstr "Een trigger start zelf een run, namens wie hem maakte. Hij start niets tot een beheerder hem toestaat deze workflow te starten."
+msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow: it starts nothing until they do."
+msgstr "Een trigger start zelf een run, namens wie hem heeft gemaakt. Wie er een toevoegt, vraagt een beheerder om hem deze workflow te laten starten: tot dan start hij niets."
 
 #: src/workflows/version-source.tsx
 msgid "A version's definition and source"
@@ -2351,6 +2351,10 @@ msgstr "Een beheerder koppelt dit voor iedereen."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "Een beheerder heeft het bedrijfsgeheugen nog niet ingesteld."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An admin refused or took back its start: it starts nothing."
+msgstr "Een beheerder heeft het starten geweigerd of ingetrokken: hij start niets."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
@@ -6623,7 +6627,7 @@ msgid "Independent workflow"
 msgstr "Zelfstandige workflow"
 
 #: src/chat/thread.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Input"
 msgstr "Invoer"
 
@@ -6884,6 +6888,10 @@ msgstr "Het begint als voorgesteld: Grasp gebruikt het, en je kunt het hier corr
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "It starts no more runs. Runs it already started go on. This can't be undone."
 msgstr "Hij start geen runs meer. Runs die hij al startte, gaan door. Dit kan niet ongedaan worden gemaakt."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It starts nothing until an admin allows it to start this workflow."
+msgstr "Hij start niets tot een beheerder hem deze workflow laat starten."
 
 #: src/knowledge/new-document.tsx
 msgid "It starts with its name as a heading; write the rest in the editor."
@@ -8226,6 +8234,10 @@ msgstr "Nee"
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "Geen {onlySignIn}? Een personeelslijst werkt ook."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No admin has been asked to let it start this workflow: it starts nothing until one allows it."
+msgstr "Er is nog geen beheerder gevraagd hem deze workflow te laten starten: hij start niets tot een beheerder dat toestaat."
+
 #: src/settings/ai-providers.tsx
 msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
 msgstr "Er is nog geen AI-aanbieder gekoppeld, dus de AI-functies van Grasp kunnen niet antwoorden."
@@ -8704,6 +8716,7 @@ msgid "None."
 msgstr "Geen."
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Not allowed"
 msgstr "Niet toegestaan"
 
@@ -8815,6 +8828,10 @@ msgstr "Niet gelezen: koppel opnieuw"
 #: src/onboarding/setup-steps.tsx
 msgid "Not read: no connection"
 msgstr "Niet gelezen: geen verbinding"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Not requested yet"
+msgstr "Nog niet aangevraagd"
 
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
@@ -10838,6 +10855,15 @@ msgstr "Een pakketaanvraag vervangen"
 msgid "Report"
 msgstr "Rapport"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "ask an admin to let a trigger start"
+msgid "Request"
+msgstr "Aanvragen"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Request again"
+msgstr "Opnieuw aanvragen"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Request an app"
 msgstr "Een app aanvragen"
@@ -11258,7 +11284,7 @@ msgstr "Run niet gevonden"
 msgid "Run of {workflow}"
 msgstr "Run van {workflow}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Run version {version}"
 msgstr "Versie {version} uitvoeren"
 
@@ -12368,7 +12394,7 @@ msgid "Start {name}?"
 msgstr "{name} starten?"
 
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Start a run"
 msgstr "Een run starten"
 
@@ -12442,7 +12468,7 @@ msgstr "Wordt gestart"
 
 #: src/workflows/item-test.tsx
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Starting…"
 msgstr "Bezig met starten…"
 
@@ -13328,7 +13354,7 @@ msgstr "Standaard, {each}"
 msgid "The definition of version {shownVersion}"
 msgstr "De definitie van versie {shownVersion}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 #: src/workflows/traces.tsx
 msgid "The details of this run were removed when its retention ended."
 msgstr "De details van deze run zijn verwijderd toen de bewaartermijn afliep."
@@ -13393,7 +13419,7 @@ msgid "The input fields aren't JSON."
 msgstr "De invoervelden zijn geen JSON."
 
 #: src/workflows/start-run.tsx
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "The input isn't JSON."
 msgstr "De invoer is geen JSON."
@@ -13600,23 +13626,23 @@ msgstr "De rest klopt"
 msgid "The roles above say what each may do."
 msgstr "De rollen hierboven laten zien wat elke rol mag."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run completed."
 msgstr "De run is voltooid."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run failed."
 msgstr "De run is mislukt."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is going."
 msgstr "De run is bezig."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is paused."
 msgstr "De run is gepauzeerd."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run is starting."
 msgstr "De run start."
 
@@ -13632,7 +13658,7 @@ msgstr "De run is gestart. Hij staat bij de runs van de workflow."
 msgid "The run started. Open it."
 msgstr "De run is gestart. Openen."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "The run was stopped."
 msgstr "De run is gestopt."
 
@@ -14015,6 +14041,10 @@ msgstr "Dit gesprek staat open op een ander apparaat"
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Dit gesprek ging verder in een ander venster. Je ziet nu dat gesprek."
+
+#: src/workflows/traced-run.tsx
+msgid "This is a real run, not a test: it notifies people and uses connections as any run of this version does."
+msgstr "Dit is een echte run, geen test: hij stuurt mensen meldingen en gebruikt koppelingen zoals elke run van deze versie."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This is right"
@@ -14833,7 +14863,7 @@ msgstr "Versie {pendingVersion} is klaar om te publiceren"
 msgid "Version {version}"
 msgstr "Versie {version}"
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
 
@@ -14991,6 +15021,7 @@ msgid "Waiting for a share of this person's runs; tries again by {time}"
 msgstr "Wacht op een deel van de uitvoeringen van deze persoon; probeert het uiterlijk {time} opnieuw"
 
 #: src/engines/app-webhooks.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Waiting for an admin"
 msgstr "Wacht op een beheerder"
 
@@ -15432,7 +15463,7 @@ msgstr "Wat de klant deelt, en ons eigen deskresearch. Voegt beleid, procedures 
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Wat de modellen die in Grasp voor u werken deze maand ({month}, UTC) kosten, in Amerikaanse dollars, zoals ze geprijsd zijn."
 
-#: src/workflows/test-run.tsx
+#: src/workflows/traced-run.tsx
 msgid "What the run of version {traceVersion} did"
 msgstr "Wat de run van versie {traceVersion} deed"
 

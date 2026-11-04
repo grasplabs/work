@@ -43,6 +43,7 @@ const base = {
   workflowId: "workflow-1",
   workflowVersion: 1,
   createdAt: "2026-10-30T09:00:00.000Z",
+  start: "active" as const,
 };
 
 const stoppedSchedule: WorkflowTrigger = {
@@ -221,13 +222,22 @@ const shown = async (
       ];
     },
   };
+  const permissions = {
+    request: async (request: unknown) => {
+      await Promise.resolve();
+      asked.push({ request });
+      return request;
+    },
+  };
   const core = {
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
         connections: typeof connections;
+        permissions: typeof permissions;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources, connections }),
+    ): Promise<T> =>
+      await action({ workflowResources, connections, permissions }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -661,6 +671,72 @@ describe("a workflow's Triggers tab", () => {
       newOne: buttons("Make a new secret").length,
       revoke: buttons("Revoke the secret").length,
     }).toStrictEqual({ revoked: true, newOne: 1, revoke: 0 });
+  });
+
+  it("says a trigger waits for an admin to let it start, offering nothing to ask", async () => {
+    await shown(true, false, false, [{ ...ownMail, start: "requested" }]);
+
+    expect({
+      waits: document.body.textContent.includes("Waiting for an admin"),
+      ask: buttons("Request again").length + buttons("Ask an admin").length,
+    }).toStrictEqual({ waits: true, ask: 0 });
+  });
+
+  it("asks again for a refused trigger's start, under the name it asked with, and reads the triggers again", async () => {
+    const asked = await shown(true, false, false, [
+      { ...ownMail, start: "revoked" },
+    ]);
+    const readsBefore = listReads;
+    await press("Request again");
+
+    expect({
+      refused: document.body.textContent.includes("Not allowed"),
+      asked,
+      readAgain: listReads > readsBefore,
+    }).toStrictEqual({
+      refused: true,
+      asked: [
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-email" },
+            object: { type: "workflow", workflowId: "workflow-1" },
+            actions: ["start"],
+            binding: "START",
+          },
+        },
+      ],
+      readAgain: true,
+    });
+  });
+
+  it("says a trigger that never asked to start isn't requested yet, not refused, and asks for it", async () => {
+    const asked = await shown(true, false, false, [
+      { ...ownMail, start: null },
+    ]);
+    const text = document.body.textContent;
+    const again = buttons("Request again").length;
+    await press("Request");
+
+    expect({
+      notYet: text.includes("Not requested yet"),
+      refused: text.includes("refused"),
+      again,
+      asked,
+    }).toStrictEqual({
+      notYet: true,
+      refused: false,
+      again: 0,
+      asked: [
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-email" },
+            object: { type: "workflow", workflowId: "workflow-1" },
+            actions: ["start"],
+            binding: "START",
+          },
+        },
+      ],
+    });
   });
 
   it("says a stopped trigger someone turned off is off", async () => {

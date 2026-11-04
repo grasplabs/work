@@ -1,12 +1,8 @@
-import {
-  triggerIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
 import { maxFailedStarts, workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -15,6 +11,7 @@ import { listNotifications } from "../src/notifications.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
+  listPermissions,
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
@@ -115,29 +112,27 @@ const reporting = async (admin: Identity) => {
   return workflow;
 };
 
-/** `start` on workflow `id` for trigger `trigger`, asked and granted by `admin`: its ID. */
+/** The `start` trigger `trigger` asked for as it was created: its ID. */
+const askedStart = async (
+  admin: Identity,
+  trigger: string
+): Promise<string> => {
+  const [asked] = await listPermissions(
+    env,
+    admin,
+    { type: "trigger", triggerId: trigger },
+    undefined,
+    "requested"
+  );
+  return asked?.id ?? "";
+};
+
+/** The `start` trigger `trigger` asked for, granted by `admin`: its ID. */
 const grantStart = async (
   admin: Identity,
-  trigger: string,
-  id: string
+  trigger: string
 ): Promise<string> => {
-  const request: PermissionRequest = {
-    subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger) },
-    object: {
-      type: "workflow",
-      workflowId: workflowResourceIdSchema.parse(id),
-    },
-    actions: ["start"],
-    binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
-  };
-  const { id: permission } = await requestPermission(env, admin, request, {
-    app: () => {
-      throw new Error("No App here");
-    },
-    resource: async (ref, needed) => {
-      await requireResourceRole(env, admin, ref, needed);
-    },
-  });
+  const permission = await askedStart(admin, trigger);
   await grantPermission(env, admin, permission, { version: null });
   return permission;
 };
@@ -154,7 +149,10 @@ const scheduleConfig = (
   missedOccurrences: "coalesce",
 });
 
-/** A schedule trigger of `admin`'s on workflow `id`, granted unless `granted` is false. */
+/**
+ * A schedule trigger of `admin`'s on workflow `id`, the `start` it asks
+ * for granted unless `granted` is false.
+ */
 const scheduleTrigger = async (
   admin: Identity,
   id: string,
@@ -176,9 +174,7 @@ const scheduleTrigger = async (
     version: 1,
     config: scheduleConfig(cron, timeZone),
   });
-  const permission = granted
-    ? await grantStart(admin, trigger.id, id)
-    : undefined;
+  const permission = granted ? await grantStart(admin, trigger.id) : undefined;
   return { ...trigger, permission };
 };
 
@@ -231,6 +227,58 @@ const failingOnce = (matches: RegExp): Env => {
             throw new Error("The database went away");
           }
           return target.prepare(query);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
+ * `env` whose database runs `meanwhile` once, just before the first
+ * statement `at` matches is run on its own (not in a batch): another
+ * request's change landing between what was read and that statement.
+ */
+const changedBefore = (at: RegExp, meanwhile: () => Promise<unknown>): Env => {
+  let ran = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property): unknown => {
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        if (
+          typeof value === "function" &&
+          (property === "first" ||
+            property === "all" ||
+            property === "raw" ||
+            property === "run")
+        ) {
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (!ran) {
+              ran = true;
+              await meanwhile();
+            }
+            const answer: unknown = await Reflect.apply(value, target, args);
+            return answer;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          const statement = target.prepare(query);
+          return ran || !at.test(query) ? statement : racing(statement);
         };
       }
       return typeof value === "function"
@@ -653,6 +701,8 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     const ungranted = await scheduleTrigger(admin, workflow.id, {
       granted: false,
     });
+    // Refused: no longer waiting, its refusals count.
+    await revokePermission(env, admin, await askedStart(admin, ungranted.id));
     // One more refusal would be too many.
     await dueAt(ungranted.id, occurrence, maxFailedStarts - 1);
     await startDueScheduleTriggers(env);
@@ -736,6 +786,179 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         },
         { action: "trigger.schedule.restarted", detail: { version: 1 } },
       ],
+    });
+  });
+
+  it("skip occurrences untried, uncounted and unlogged while their start waits for an admin, and start the next once granted", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // More refusals while it waits than any count stops at.
+    for (let occurrence = 0; occurrence <= maxFailedStarts; occurrence += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one occurrence after another
+      await dueAt(waiting.id, lastMinute());
+      // oxlint-disable-next-line no-await-in-loop -- one occurrence after another
+      await startDueScheduleTriggers(env);
+    }
+    const whileWaiting = await scheduleOf(waiting.id);
+    const loggedWhileWaiting = await allEvents();
+    await grantStart(admin, waiting.id);
+    const occurrence = lastMinute();
+    await dueAt(waiting.id, occurrence, whileWaiting?.failedStarts ?? 0);
+    await startDueScheduleTriggers(env);
+    const granted = await scheduleOf(waiting.id);
+    const runs = await runsOf(waiting.id);
+
+    expect({
+      whileWaiting: {
+        goesOn: whileWaiting?.nextAt !== null,
+        failedStarts: whileWaiting?.failedStarts,
+        refusals: loggedWhileWaiting.filter(
+          ({ action, target }) =>
+            (action === "trigger.schedule.refused" &&
+              target?.id === waiting.id) ||
+            (action === "workflow.start.refused" && target?.id === workflow.id)
+        ).length,
+      },
+      granted: {
+        movedOn: (granted?.nextAt ?? 0) > occurrence.getTime(),
+        failedStarts: granted?.failedStarts,
+      },
+      runs: runs.map(({ key }) => key),
+    }).toStrictEqual({
+      whileWaiting: { goesOn: true, failedStarts: 0, refusals: 0 },
+      granted: { movedOn: true, failedStarts: 0 },
+      runs: [keyOf(waiting.id, 1, occurrence)],
+    });
+  });
+
+  it("start an occurrence whose start was granted between its read and its skip", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    const occurrence = lastMinute();
+    await dueAt(waiting.id, occurrence);
+    // Granted after the clock read it as waiting, before it skipped it.
+    await startDueScheduleTriggers(
+      changedBefore(
+        /^update "trigger_schedules"/iu,
+        async () => await grantStart(admin, waiting.id)
+      )
+    );
+    const runs = await runsOf(waiting.id);
+
+    expect(runs.map(({ key }) => key)).toStrictEqual([
+      keyOf(waiting.id, 1, occurrence),
+    ]);
+  });
+
+  it("leave an occurrence untried and unlogged when another clock run skipped it first, while its start waits", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    await dueAt(waiting.id, lastMinute());
+    // Another clock run, overlapping, skips it after this one read it.
+    await startDueScheduleTriggers(
+      changedBefore(/^update "trigger_schedules"/iu, async () => {
+        await startDueScheduleTriggers(env);
+      })
+    );
+    const logged = await allEvents();
+    const runs = await runsOf(waiting.id);
+
+    expect({
+      runs: runs.length,
+      refusals: logged.filter(
+        ({ action, target }) =>
+          (action === "workflow.start.refused" && target?.id === workflow.id) ||
+          (action === "trigger.schedule.refused" && target?.id === waiting.id)
+      ).length,
+    }).toStrictEqual({ runs: 0, refusals: 0 });
+  });
+
+  it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
+    const admin = await person("admin");
+    const bob = await person("builder");
+    const workflow = await reporting(admin);
+    await shareWorkflowResource(env, admin, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const granted = await scheduleTrigger(admin, workflow.id, { owner: bob });
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      owner: bob,
+      granted: false,
+    });
+    const racing = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // Refused, so its builder asks again.
+    await revokePermission(env, admin, await askedStart(admin, racing.id));
+    // Deleted by a builder, who could never revoke an admin's grant.
+    await deleteTriggerResource(env, bob, granted.id);
+    await deleteTriggerResource(env, bob, waiting.id);
+    const statusesOf = async (trigger: string) => {
+      const held = await listPermissions(env, admin, {
+        type: "trigger",
+        triggerId: trigger,
+      });
+      return held.map(({ status, revokedBy }) => ({ status, revokedBy }));
+    };
+    // Deleted between what the request read and its write.
+    const askedAgain = await outcome(
+      requestPermission(
+        env,
+        admin,
+        {
+          subject: { type: "trigger", triggerId: racing.id },
+          object: { type: "workflow", workflowId: workflow.id },
+          actions: ["start"],
+          binding: triggerStartBinding,
+        },
+        {
+          app: () => {
+            throw new Error("No App here");
+          },
+          resource: async (ref, needed) => {
+            await requireResourceRole(env, admin, ref, needed);
+          },
+        },
+        async () => {
+          await deleteTriggerResource(env, admin, racing.id);
+        }
+      )
+    );
+
+    const logged = await allEvents();
+    const revokedOf = (permission: string | undefined) =>
+      logged
+        .filter(
+          ({ action, target }) =>
+            action === "permission.revoked" && target?.id === permission
+        )
+        .map(({ actor }) => (actor.type === "person" ? actor.userId : actor));
+
+    expect({
+      granted: await statusesOf(granted.id),
+      grantRevokedBy: revokedOf(granted.permission),
+      waiting: await statusesOf(waiting.id),
+      askedAgain,
+      racing: await statusesOf(racing.id),
+    }).toStrictEqual({
+      // The start it asked for as it was created, granted, then revoked.
+      granted: [{ status: "revoked", revokedBy: bob.userId }],
+      // Audited as revoked, by whoever deleted the trigger.
+      grantRevokedBy: [bob.userId],
+      waiting: [{ status: "revoked", revokedBy: bob.userId }],
+      askedAgain: "workflow.trigger_unavailable",
+      racing: [{ status: "revoked", revokedBy: admin.userId }],
     });
   });
 

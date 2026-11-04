@@ -14,7 +14,12 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId, StoreId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  PermissionId,
+  StoreId,
+  TriggerId,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   bindingNameSchema,
@@ -44,6 +49,7 @@ import {
   roleErrors,
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
 import {
   and,
   asc,
@@ -58,6 +64,7 @@ import {
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { tellKept } from "./access-revocations.ts";
@@ -990,6 +997,13 @@ export const requestPermission = async (
   // (`noBindingClash`), in the insert itself: the unique indexes each
   // cover one side only.
   const { subjectType, subjectId } = subjectColumns(subject);
+  // A trigger's only while it is live, in the insert too: one deleted
+  // since it was read (`requireTriggerPins`) revoked its permissions, and
+  // takes no request after.
+  const live =
+    subject.type === "trigger"
+      ? sql` AND EXISTS (SELECT 1 FROM ${triggerResources} WHERE ${triggerResources.id} = ${subjectId} AND ${triggerResources.deletedAt} IS NULL)`
+      : sql``;
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
@@ -997,7 +1011,7 @@ export const requestPermission = async (
       insertWhere(
         db,
         row,
-        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')`
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}`
       ),
       outboxedIfChanged(
         db,
@@ -1011,6 +1025,8 @@ export const requestPermission = async (
     throw error;
   }
   if ((await findRow(env, row.id)) === undefined) {
+    // A trigger deleted meanwhile is refused as one gone is.
+    await requireSubjectBuilder(subject, roles);
     throw permissionErrors.create("permission.conflict", { binding });
   }
   return permission;
@@ -1051,21 +1067,24 @@ export const declarableOf = async (
   );
 };
 
-/** Requested rows of `app` for `requested`, and their audit entries. */
+/**
+ * Requested rows of `subject` for `requested`, and their audit entries
+ * (with `extra` in their detail), for the batch that creates `subject`.
+ */
 const requestsOf = (
   by: Acting,
-  app: AppId,
+  subject: PermissionSubject,
   requested: readonly {
     object: PermissionObject;
     actions: readonly string[];
     binding: string;
   }[],
-  blueprint: string
+  extra: Record<string, AuditDetailValue> = {}
 ): { rows: Row[]; entries: AuditEntry[] } => {
   const requestedAt = new Date();
   const rows = requested.map(({ object, actions, binding }): Row => ({
     id: crypto.randomUUID(),
-    ...subjectColumns({ type: "app", appId: app }),
+    ...subjectColumns(subject),
     ...objectColumns(object),
     actions: JSON.stringify(actions),
     binding,
@@ -1084,9 +1103,7 @@ const requestsOf = (
   return {
     rows,
     entries: rows.map((row) =>
-      changeEntry(by, "permission.requested", toPermission(row), {
-        blueprint,
-      })
+      changeEntry(by, "permission.requested", toPermission(row), extra)
     ),
   };
 };
@@ -1114,7 +1131,7 @@ export const declaredRequests = (
       permission
     )
   );
-  return requestsOf(by, app, checked, blueprint);
+  return requestsOf(by, { type: "app", appId: app }, checked, { blueprint });
 };
 
 /**
@@ -1133,7 +1150,7 @@ export const workflowStartRequests = (
 ): { rows: Row[]; entries: AuditEntry[] } =>
   requestsOf(
     by,
-    app,
+    { type: "app", appId: app },
     started.map(({ workflowId, binding }) =>
       permissionErrors.parse("permission.invalid", permissionRequestSchema, {
         subject: { type: "app", appId: app },
@@ -1142,8 +1159,29 @@ export const workflowStartRequests = (
         binding,
       })
     ),
-    blueprint
+    { blueprint }
   );
+
+/**
+ * The request for trigger `trigger`, made by `by` as they create it
+ * (trigger-resources.ts), to start workflow `workflowId`, the one it pins:
+ * the row and its audit entry, for the batch that creates the trigger, so
+ * no trigger is left without a way to be allowed. Like any request, it
+ * allows nothing until an admin grants it.
+ */
+export const triggerStartRequest = (
+  by: Acting,
+  trigger: TriggerId,
+  workflowId: string
+): { rows: Row[]; entries: AuditEntry[] } =>
+  requestsOf(by, { type: "trigger", triggerId: trigger }, [
+    permissionErrors.parse("permission.invalid", permissionRequestSchema, {
+      subject: { type: "trigger", triggerId: trigger },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding: triggerStartBinding,
+    }),
+  ]);
 
 /**
  * Tells the chat's agent how its request for `permission` was decided,
@@ -1362,6 +1400,47 @@ const auditDetailSql = sql`json_patch(
     ELSE '{}'
   END
 )`;
+
+/**
+ * The statements revoking, for `by`, every permission of `subject` that
+ * isn't revoked yet, for the batch that removes `subject` (a trigger
+ * deleted): each audited as `permission.revoked`, from the rows the
+ * batch itself finds, so none is revoked unaudited, whenever it landed.
+ */
+export const revokedWith = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject
+): BatchItem<"sqlite">[] => {
+  const held = and(ofSubject(subject), ne(permissions.status, "revoked"));
+  const now = new Date();
+  const eventId = eventIdSql(crypto.randomUUID());
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
+    'action', 'permission.revoked',
+    'target', json_object('type', 'permission', 'id', ${permissions.id}),
+    'provenance', json('[]'),
+    'detail', json_set(
+      ${auditDetailSql},
+      '$.actions', ${joined(permissions.actions)},
+      '$.binding', ${permissions.binding}
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
+      ),
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
+      .where(held),
+  ];
+};
 
 /**
  * That `by` could grant a permission as the batch runs, as SQL: an admin
