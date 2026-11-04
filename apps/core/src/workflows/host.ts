@@ -1055,8 +1055,11 @@ export const modelCallLimitOf = (env: Env): number =>
  * (`uncountedWaitStep`),
  * and a step run again after one has no place of its own: it is the step
  * that already took its place, which its attempts are told
- * (`placeOfRunAgain`), so the policy's steps hold every round of it. Counted over every replay, so each step
- * keeps its place.
+ * (`placeOfRunAgain`), so the policy's steps hold every round of it. A
+ * catch's retry of a step (`#retried`) is the run's own, as its workflow
+ * chose it: three steps a round (its decision, its sleep and the step's
+ * run again), each a place of its own. Counted over every replay, so each
+ * step keeps its place.
  */
 export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   let own = 0;
@@ -1394,9 +1397,10 @@ export interface RunKind {
    */
   caughtOffer?: (attempt: StepAttempt) => Json | undefined;
   /**
-   * Hears how step `step` ended, fresh or replayed, as every activation
-   * reaches it, in order: what it recorded, or what it failed with in the
-   * end, past its retries.
+   * Hears how step `step`, one it let start (`stepRefusal`), ended, fresh
+   * or replayed, as every activation reaches it, in order: what it
+   * recorded, or what it failed with in the end, past its retries, as the
+   * engine journaled it.
    */
   stepEnded?: (step: string, outcome: Settled<unknown>) => void;
   /**
@@ -2012,9 +2016,9 @@ export class RunHost extends RpcTarget {
     retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     let failed: StepError | undefined;
-    // The error its last round threw, as journaled, once no retry follows.
-    let lastRound: { thrown: unknown; as: StepError } | undefined;
     let attempted = false;
+    // Whether its kind let it start: only such a step's end is its to hear.
+    let started = false;
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
@@ -2026,6 +2030,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
       await this.#requireStep(step, use);
+      started = true;
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
@@ -2273,7 +2278,6 @@ export class RunHost extends RpcTarget {
             stepDone: stepDone.promise,
           });
           if (retried === undefined) {
-            lastRound = { thrown: error, as: roundError };
             throw error;
           }
           // It runs again: it waits for its AI provider no more.
@@ -2288,18 +2292,14 @@ export class RunHost extends RpcTarget {
     } catch (error) {
       // The step ran again after its wait and threw: it waits no more.
       await this.#keyWaitEndedQuietly(step, keyWait);
-      // What the step failed with as the engine journaled it, fresh or
-      // replayed alike, for its kind (`stepEnded`): never `failed`, which
-      // an attempt the engine gave up on may still set.
-      let journaled: StepError | undefined;
-      if (this.#kind.stepEnded !== undefined) {
-        journaled =
-          lastRound !== undefined && lastRound.thrown === error
-            ? lastRound.as
-            : forIsolate(error);
-      }
-      const reported = failed ?? journaled ?? forIsolate(error);
-      if (journaled !== undefined) {
+      // A kind that hears how its steps end (`stepEnded`) hears, and its
+      // code is answered, what the step failed with as the engine
+      // journaled it, fresh or replayed alike: never `failed`, which an
+      // attempt the engine gave up on may still set.
+      const journaled =
+        this.#kind.stepEnded === undefined ? undefined : forIsolate(error);
+      const reported = journaled ?? failed ?? forIsolate(error);
+      if (started && journaled !== undefined) {
         this.#kind.stepEnded?.(step, { ok: false, error: journaled });
       }
       if (attempted) {
@@ -2354,8 +2354,9 @@ export class RunHost extends RpcTarget {
    * that records it (`#decideRetry`), then a durable sleep of the backoff
    * it decided, each named after the round it leads to. Answers when the
    * first round failed, which every later decision reads; `undefined`
-   * when it doesn't run again, and the step fails as its round did,
-   * whatever a decision itself failed with. Fresh or replayed alike.
+   * when it doesn't run again, and the step fails as its round did; a
+   * decision that failed fails the step with that failure. Fresh or
+   * replayed alike.
    */
   async #retried(
     step: string,
@@ -2379,23 +2380,19 @@ export class RunHost extends RpcTarget {
       return undefined;
     }
     const prefix = waitStep(await waitKeyOf(step), "retry", round + 1);
-    let decided: RetryDecision;
-    try {
-      decided = retryDecisionSchema.parse(
-        await this.#step.do(
-          `${prefix}:decide`,
-          stepConfig({}),
-          async (context) =>
-            await this.#decideRetry(step, context, offer, {
-              retry,
-              firstFailedAt,
-              stepDone,
-            })
-        )
-      );
-    } catch {
-      return undefined;
-    }
+    // A decision that failed fails the step with its failure, journaled.
+    const decided = retryDecisionSchema.parse(
+      await this.#step.do(
+        `${prefix}:decide`,
+        stepConfig({}),
+        async (context) =>
+          await this.#decideRetry(step, context, offer, {
+            retry,
+            firstFailedAt,
+            stepDone,
+          })
+      )
+    );
     if (!decided.retry) {
       return undefined;
     }
@@ -2434,6 +2431,9 @@ export class RunHost extends RpcTarget {
   ): Promise<RetryDecision> {
     const firstAt = firstFailedAt ?? Date.now();
     const attempt = this.#attemptOf(step, context, false);
+    if (this.#tampered !== undefined) {
+      throw toStepError(forIsolate(this.#tampered));
+    }
     try {
       const call = this.#isolateStopped
         ? Promise.reject(cpuLimitKill())
@@ -2444,7 +2444,8 @@ export class RunHost extends RpcTarget {
         chosen = fromIsolate(await call);
       } catch (error) {
         if (!isCpuLimitKill(error)) {
-          throw error;
+          // Rejected rather than reported: it chose nothing.
+          return { retry: false, delayMs: 0, firstFailedAt: firstAt };
         }
         this.#isolateStopped = true;
         throw toStepError(forIsolate(error));
@@ -2458,11 +2459,20 @@ export class RunHost extends RpcTarget {
       try {
         return offer.decided(chosen.value, firstAt);
       } catch (error) {
-        return await this.#refuseTampering(
-          error instanceof Error
-            ? error
-            : workflowErrors.create("workflow.invalid"),
-          { step, call: null }
+        // Tampering: the decision fails for good, and with it the step.
+        const refused = await settle(
+          async () =>
+            await this.#refuseTampering(
+              error instanceof Error
+                ? error
+                : workflowErrors.create("workflow.invalid"),
+              { step, call: null }
+            )
+        );
+        throw toStepError(
+          refused.ok
+            ? forIsolate(workflowErrors.create("workflow.invalid"))
+            : refused.error
         );
       }
     } finally {
@@ -2491,20 +2501,28 @@ export class RunHost extends RpcTarget {
       ? Promise.reject(cpuLimitKill())
       : fn(this.#kind.attemptHost(attempt, admission));
     this.#hooks.attemptCall?.(call, stepDone);
+    let reported: Settled<unknown>;
     try {
-      const reported = fromIsolate(await call);
-      return (await this.#kind.attemptSettled?.(attempt, reported)) ?? reported;
+      reported = fromIsolate(await call);
     } catch (error) {
-      if (!isCpuLimitKill(error)) {
+      if (isCpuLimitKill(error)) {
+        this.#isolateStopped = true;
+        return { ok: false, error: forIsolate(error) };
+      }
+      // Its function rejected rather than reported: a kind that checks
+      // what its attempts settle with checks this too, so no rejection
+      // gets past it; any other's engine tries it again as it threw.
+      if (this.#kind.attemptSettled === undefined) {
         throw error;
       }
-      this.#isolateStopped = true;
-      return { ok: false, error: forIsolate(error) };
+      reported = { ok: false, error: forIsolate(error) };
     }
+    return (await this.#kind.attemptSettled?.(attempt, reported)) ?? reported;
   }
 
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     let step = "";
+    let started = false;
     const slept = await settle(async () => {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
@@ -2513,11 +2531,14 @@ export class RunHost extends RpcTarget {
         "sleep",
         typeof duration === "number" ? duration : undefined
       );
+      started = true;
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
       return null;
     });
-    this.#kind.stepEnded?.(step, slept);
+    if (started) {
+      this.#kind.stepEnded?.(step, slept);
+    }
     return slept;
   }
 
@@ -2529,6 +2550,7 @@ export class RunHost extends RpcTarget {
    */
   async sleepUntil(name: unknown, until: unknown): Promise<Settled<null>> {
     let step = "";
+    let started = false;
     const slept = await settle(async () => {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
@@ -2537,12 +2559,15 @@ export class RunHost extends RpcTarget {
         "sleepUntil",
         typeof until === "number" ? until : undefined
       );
+      started = true;
       const at = checked(timestampSchema, until);
       await this.#kind.requirePerson();
       await this.#step.sleepUntil(step, at);
       return null;
     });
-    this.#kind.stepEnded?.(step, slept);
+    if (started) {
+      this.#kind.stepEnded?.(step, slept);
+    }
     return slept;
   }
 

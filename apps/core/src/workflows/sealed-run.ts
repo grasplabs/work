@@ -103,7 +103,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
 //   in no items or branches, `workflow:input` and `workflow:output` where
 //   the workflow has them, and the SDK's `$params`. Any other name, or a
-//   step run as anything but a `do`, is refused, and fails the run.
+//   step run otherwise than it runs (a task's step as a `do`, a sleeping
+//   task's own as its sleep, a try's catch as a catch), or beside another
+//   step, is refused, and fails the run.
 // - A call outside its task's step, or more than one. A call goes through
 //   the host of the attempt whose code makes it (attempt-host.ts), only
 //   while that attempt holds its lease and is the step running now, and
@@ -151,15 +153,19 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   record of the failure no catch took yet (`#pending`), mapped by
 //   resource-errors.ts from what it knows. A failure the host made keeps
 //   its mapping: an attempt one of whose calls the host failed or refused
-//   fails with that, whatever its code reports, or swallows. One only the
-//   isolate reports is an expression's, a task's data's, or the task's
-//   own runtime failure (`isolateFailure`): never one no catch may take,
-//   so never a host's relabelled. While one is pending, the only step
+//   fails with that, whatever its code reports, throws instead, or
+//   swallows, a function that rejects rather than reports included. One
+//   only the isolate reports is an expression's, a task's data's, or the
+//   task's own runtime failure, as the platform's unexpected one
+//   (`isolateFailure`): never one no catch may take, so never a host's
+//   relabelled. Each is decided on as the engine journaled it, so a
+//   replay decides alike (host.ts, `#doStep`). While one is pending, the only step
 //   that runs is a `try`'s catch (`RunHost.caught`): its code is offered
 //   the error only when that catch may take it (one a catch may take, of
 //   a task in its try's list, with every property of its sealed
 //   `errors.with`) and decides by its `when` (decision 2); saying it took
-//   what it wasn't offered is tampering. The step journals the error it
+//   what it wasn't offered, or that a catch with no conditions didn't
+//   take what it was, is tampering. The step journals the error it
 //   took, so a replay binds the same one. A run whose code goes on past a
 //   failure no catch took is refused at its next step, or as it ends
 //   (`failureUntaken`).
@@ -169,7 +175,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   policy with rounds left. The isolate only chooses which catch takes
 //   the failure and whether its retry's `when` holds; the host holds that
 //   to a try around the task whose filter the error has, and computes the
-//   backoff and the limits itself, recorded (`#retryDecided`).
+//   backoff and the limits itself, recorded (`retryDecided`): never past
+//   the innermost catch with no conditions, which takes the failure, nor
+//   without a retry of a policy with none.
 // - A raise forged or swallowed. A raise's step fails with the error its
 //   build sealed, by the host, unless its record says the task was
 //   skipped (its `if`, decision 2).
@@ -179,7 +187,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   isolate computes that deadline as it does any expression (decision
 //   1), and leaving a wait out is flow, as an `if` is.
 // - An attempt longer than sealed. Each is held to its task's timeout and
-//   its tries' retry attempt durations (`timeoutOf`).
+//   its tries' retry attempt durations, and its engine retries are the
+//   host's own (`limitsOf`), whatever its code declares.
 
 /**
  * Whether `sdk` is the one a sealed build's generated module must import:
@@ -518,13 +527,52 @@ const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
 });
 
 /**
- * What the isolate's retry `choice` of round `round`, of a task in the
- * lists of `tries`, decides: none, unless it names one of them, whose
- * filter `error` has (anything else is tampering), whose catch retries
- * with rounds left. Its backoff is the policy's, jitter drawn here, and
- * none past its duration limit, from `firstFailedAt`.
+ * Whether a catch or its retry policy decides with no condition of its
+ * own (`when`, `exceptWhen`): the isolate has nothing to decide for it.
  */
-const retryDecided = (
+const unconditional = (
+  conditions: { when?: number; exceptWhen?: number } | undefined
+): boolean =>
+  conditions !== undefined &&
+  conditions.when === undefined &&
+  conditions.exceptWhen === undefined;
+
+/**
+ * The backoff before round `round + 1` of `policy`, its jitter drawn here.
+ */
+const backoffOf = (
+  policy: NonNullable<Extract<SealedTask, { kind: "try" }>["catch"]["retry"]>,
+  round: number
+): number => {
+  let factor = 1;
+  if (policy.backoff === "linear") {
+    factor = round;
+  } else if (policy.backoff === "exponential") {
+    factor = 2 ** (round - 1);
+  }
+  const { jitter } = policy;
+  return (
+    policy.delayMs * factor +
+    (jitter === undefined
+      ? 0
+      : Math.round(
+          jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
+        ))
+  );
+};
+
+/**
+ * What the isolate's retry `choice` of round `round`, of a task in the
+ * lists of `tries` (innermost first), decides. It names the try whose
+ * catch takes `error` (decision 2: its `when`), which must be one of
+ * them whose filter `error` has, and none past the innermost such catch
+ * with no conditions, which takes it whatever the isolate says; and
+ * whether that catch's retry `when` holds, which a policy with no
+ * conditions does. Anything else is tampering. It retries while the
+ * policy has rounds left, after its backoff, and none past its duration
+ * limit from `firstFailedAt`, nor a year.
+ */
+export const retryDecided = (
   tries: readonly Extract<SealedTask, { kind: "try" }>[],
   error: CaughtError,
   round: number,
@@ -536,32 +584,44 @@ const retryDecided = (
   if (!chosen.success) {
     throw tampering("A retry's choice names a catch and whether it retries.");
   }
+  const takes = (index: number): boolean => {
+    const around = tries[index];
+    return (
+      around !== undefined &&
+      matchesFilter(error, around.catch.errors) &&
+      unconditional(around.catch)
+    );
+  };
+  const forced = tries.findIndex((_, index) => takes(index));
+  const by = chosen.data?.by;
+  const at = tries.findIndex(({ id }) => id === by);
+  const around = tries[at];
   if (chosen.data === null) {
+    if (forced !== -1) {
+      throw tampering(
+        `Task "${tries[forced]?.id ?? ""}"'s catch takes the failure.`
+      );
+    }
     return stop;
   }
-  const { by } = chosen.data;
-  const around = tries.find(({ id }) => id === by);
-  if (around === undefined || !matchesFilter(error, around.catch.errors)) {
-    throw tampering(`Task "${by}"'s catch can't take the failure.`);
+  if (
+    around === undefined ||
+    !matchesFilter(error, around.catch.errors) ||
+    (forced !== -1 && at > forced)
+  ) {
+    throw tampering(`Task "${by ?? ""}"'s catch can't take the failure.`);
   }
   const policy = around.catch.retry;
-  if (!chosen.data.retry || policy === undefined || round >= policy.attempts) {
+  if (policy === undefined || round >= policy.attempts) {
     return stop;
   }
-  let factor = 1;
-  if (policy.backoff === "linear") {
-    factor = round;
-  } else if (policy.backoff === "exponential") {
-    factor = 2 ** (round - 1);
+  if (!chosen.data.retry) {
+    if (unconditional(policy)) {
+      throw tampering(`Task "${around.id}"'s catch retries the failure.`);
+    }
+    return stop;
   }
-  const { jitter } = policy;
-  const delayMs =
-    policy.delayMs * factor +
-    (jitter === undefined
-      ? 0
-      : Math.round(
-          jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
-        ));
+  const delayMs = backoffOf(policy, round);
   const limited =
     policy.limitMs !== undefined &&
     Date.now() + delayMs - firstFailedAt > policy.limitMs;
@@ -721,6 +781,12 @@ class SealedRun implements SealedRunKind {
   #pending: Failure | undefined;
   /** Each sleeping task's deadline, as its enter step recorded it. */
   readonly #deadlines = new Map<string, number>();
+  /**
+   * The step running now, from when the host let it start until it ended
+   * (`stepEnded`): the build's code runs its steps one at a time, so none
+   * starts beside another, nor during a retry's decision.
+   */
+  #running: string | undefined;
   readonly run: HostedSealedRun;
   readonly audit: RunKind["audit"];
   readonly decisionRun: RunKind["decisionRun"];
@@ -772,13 +838,19 @@ class SealedRun implements SealedRunKind {
    * task's step as a `do`, but a sleeping task's own as its sleep (of
    * exactly its sealed length, or until exactly its recorded deadline)
    * and a try's catch as a catch. While a failure no catch took is
-   * pending, any step but a catch.
+   * pending, any step but a catch; while another step runs, any step. A
+   * step it lets start runs until it ends (`stepEnded`).
    */
   stepRefusal(
     step: string,
     use: HostStepUse,
     time?: number
   ): Error | undefined {
+    if (this.#running !== undefined) {
+      return tampering(
+        `Step "${step}" starts only once step "${this.#running}" ended.`
+      );
+    }
     if (this.#pending !== undefined && use !== "caught") {
       return tampering(
         "A run goes on past a failure only once a catch took it."
@@ -786,9 +858,11 @@ class SealedRun implements SealedRunKind {
     }
     const runs =
       step === paramsStep ? use === "do" : this.#runsAs(step, use, time);
-    return runs
-      ? undefined
-      : tampering(`Step "${step}" isn't one the build seals.`);
+    if (!runs) {
+      return tampering(`Step "${step}" isn't one the build seals.`);
+    }
+    this.#running = step;
+    return undefined;
   }
 
   /** `stepRefusal`'s check of a step of the sealed table, `step`. */
@@ -886,6 +960,45 @@ class SealedRun implements SealedRunKind {
     return await this.#recordChecked(attempt, result.value);
   }
 
+  /**
+   * A catch step's answer, `value`: whether its catch takes the error it
+   * was offered, as what it journals. Taking what it wasn't offered, or
+   * leaving what a catch with no conditions was offered, is tampering.
+   */
+  async #caughtChecked(
+    attempt: StepAttempt,
+    task: SealedTask | undefined,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    const offered = this.#offers.get(attempt);
+    if (typeof value !== "boolean" || (value && offered === undefined)) {
+      return await this.#refused(
+        attempt,
+        "A catch takes only the error it was offered."
+      );
+    }
+    // A catch with no conditions takes what it is offered: there is
+    // nothing for its code to decide (decision 2).
+    if (
+      !value &&
+      offered !== undefined &&
+      task?.kind === "try" &&
+      unconditional(task.catch)
+    ) {
+      return await this.#refused(
+        attempt,
+        "A catch with no conditions takes the error it was offered."
+      );
+    }
+    return {
+      ok: true,
+      value:
+        value && offered !== undefined
+          ? { caught: true, error: offered }
+          : { caught: false },
+    };
+  }
+
   /** `attemptSettled`'s checks of what `attempt`'s step records, `value`. */
   async #recordChecked(
     attempt: StepAttempt,
@@ -893,20 +1006,7 @@ class SealedRun implements SealedRunKind {
   ): Promise<Settled<unknown>> {
     const { task, kind } = this.#steps.get(attempt.step) ?? {};
     if (kind === "catch") {
-      const offered = this.#offers.get(attempt);
-      if (typeof value !== "boolean" || (value && offered === undefined)) {
-        return await this.#refused(
-          attempt,
-          "A catch takes only the error it was offered."
-        );
-      }
-      return {
-        ok: true,
-        value:
-          value && offered !== undefined
-            ? { caught: true, error: offered }
-            : { caught: false },
-      };
+      return await this.#caughtChecked(attempt, task, value);
     }
     const skipped = skippedSchema.safeParse(value).success;
     if (kind === "task" && task?.kind === "raise" && !skipped) {
@@ -928,6 +1028,9 @@ class SealedRun implements SealedRunKind {
    * would see it (a catch step's own, or one of no task's, none may take).
    */
   stepEnded(step: string, outcome: Settled<unknown>): void {
+    if (this.#running === step) {
+      this.#running = undefined;
+    }
     const sealed = this.#steps.get(step);
     const task = sealed?.task;
     if (!outcome.ok) {

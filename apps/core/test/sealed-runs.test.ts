@@ -1350,6 +1350,7 @@ try {
   it("fails an attempt with the host's failure of its call, whatever its code makes of it, and takes a failure only its code reports as the task's own", async () => {
     const revoking = await sealedWorkflow();
     const swallowing = await waitingRun(revoking);
+    const rejecting = await waitingRun(revoking);
     await revokeWorkflowBinding(
       serving,
       revoking.admin,
@@ -1366,6 +1367,17 @@ try {
   return { code: thrown.code, caught: error !== undefined };
 }`)
     );
+    // Its step's function rejects rather than reporting, as code that
+    // throws what can't be described makes it.
+    const rejected = await ranAs(
+      rejecting,
+      moduleOf(`
+try {
+  return ${taskStep("fetch", '(async () => { try { await env.mail.call("mail.send", { to: input.who, subject: "x" }); } catch {} throw { get name() { throw new Error("undescribable"); } }; })()')};
+} catch (thrown) {
+  return { code: thrown.code };
+}`)
+    );
     const relabelled = await ranAs(
       await waitingRun(sealed),
       moduleOf(`
@@ -1375,14 +1387,19 @@ try {
   return { code: thrown.code ?? null, caught: ${catchStep("guarded", "async () => true")} };
 }`)
     );
-    expect({ swallowed, relabelled }).toStrictEqual({
+    expect({ swallowed, rejected, relabelled }).toStrictEqual({
       swallowed: {
         ended: { code: "workflow.call_denied", caught: true },
         tampered: [],
       },
+      rejected: {
+        ended: { code: "workflow.call_denied" },
+        tampered: [],
+        untaken: true,
+      },
       relabelled: {
         ended: {
-          code: null,
+          code: "internal.unexpected",
           caught: {
             type: `${standardErrors}runtime`,
             status: 500,
@@ -1427,7 +1444,7 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
       third: { ended: { output: 3 }, tampered: [] },
       thirdSteps: { decided: 2, ran: 2, timeout: 10_000 },
       // Its policy's three rounds, then the failure goes on.
-      never: { ended: undefined, why: "never", tampered: [] },
+      never: failedWith("internal.unexpected"),
       neverRan: 2,
     });
   });
@@ -1457,11 +1474,7 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
     }).toStrictEqual({
       notTransient: failedWith("expression.failed"),
       notTransientDecided: 0,
-      forged: {
-        ended: undefined,
-        why: "again",
-        tampered: ["workflow.invalid"],
-      },
+      forged: refusedAs(`Task "outer"'s catch can't take the failure.`),
       forgedRan: 0,
     });
   });
@@ -1509,9 +1522,36 @@ try {
     });
   });
 
+  it("refuses a step started while another runs, past the SDK", async () => {
+    const ran = await ranAs(
+      await waitingRun(sealed),
+      // The engine itself, as code past the SDK has it: no \`workflow\`.
+      `export default { run: async (engine) => {
+  let release = () => undefined;
+  const held = new Promise((resolve) => { release = resolve; });
+  const first = engine.do("fetch:task", {}, async () => { await held; return { output: 1 }; });
+  try {
+    await engine.do("finish:task", {}, async () => ({ output: 2 }));
+    return "both";
+  } catch (error) {
+    return error.code;
+  } finally {
+    release();
+    await first.catch(() => null);
+  }
+} };`
+    );
+    expect(ran).toStrictEqual({
+      ended: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+    });
+  });
+
   it("sleeps only as long as sealed, or until exactly the deadline its task recorded", async () => {
+    // A workflow of its own: its person's runs of one are bounded.
+    const sleeping = await sealedWorkflow();
     const run = async (body: string) =>
-      await ranAs(await waitingRun(sealed), moduleOf(body));
+      await ranAs(await waitingRun(sleeping), moduleOf(body));
     expect({
       sealedLength: await run(
         'await step.sleep("linger", { key: "task", description: "Its wait", duration: "1 hour" }); return "slept";'
