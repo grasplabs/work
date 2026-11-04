@@ -22,6 +22,7 @@ import {
   chatPlatformName,
   chatPlatformSchema,
   chatToolEventsKept,
+  readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -4443,7 +4444,9 @@ export class Workspace extends DurableObject<Env> {
    * Keeps `problem`, what the preview of `personId`'s own chat's draft of
    * App `appId` at `revision` reported on `screen`, for the agent's next
    * check (preview-reports.ts). Dropped once the draft is at another
-   * revision.
+   * revision, and never kept for a preview opened read-only (a version
+   * of the draft or of the App): a chat with no draft is at that
+   * revision too, yet nothing it reports is its draft's.
    */
   previewReport(
     chatId: unknown,
@@ -4455,7 +4458,7 @@ export class Workspace extends DurableObject<Env> {
   ): void {
     const { id } = this.#ownChat(chatId, personId);
     const { revision: now } = this.draft(id, appId);
-    if (revision !== now) {
+    if (revision === readOnlyRevision || revision !== now) {
       return;
     }
     this.#previewReports.report(id, appId, now, {

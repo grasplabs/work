@@ -193,9 +193,10 @@ export interface ChatDraft {
 /**
  * The revision a preview of a version of the draft, or of the App,
  * carries (`ChatsApi.preview` with `version` or `appVersion`): no draft
- * is ever at it, so every call of that preview (function, query,
- * stream, report) is refused as out of date, the latest version's too.
- * Read-only by construction.
+ * with changes is ever at it (a chat with none reads as at it, and is
+ * refused for having none), so every call of that preview (function,
+ * query, stream) is refused, the latest version's too, and nothing it
+ * reports is kept. Read-only by construction.
  */
 export const readOnlyRevision = 0;
 

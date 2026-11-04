@@ -14906,10 +14906,6 @@ msgstr "Version {number} sur {latest}"
 msgid "Version {number}, current"
 msgstr "Version {number}, actuelle"
 
-#: src/engines/app-workspace.tsx
-msgid "Version {pendingVersion} is ready to publish"
-msgstr "La version {pendingVersion} est prête à être publiée"
-
 #: src/brain/brain.ts
 #: src/engines/app-workflows.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -14926,6 +14922,10 @@ msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est ex
 #: src/workflows/start-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran."
 msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est exécuté."
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} is ready to publish"
+msgstr "La version {version} est prête à être publiée"
 
 #: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."

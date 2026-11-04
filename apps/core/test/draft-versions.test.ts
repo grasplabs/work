@@ -1,5 +1,5 @@
 import { readOnlyRevision } from "@grasp-os/shared/chat";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
@@ -240,6 +240,28 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       version
     );
     const live = await chats.preview(chatId, app, undefined, undefined, 1);
+    // Previewed from a chat of theirs that never drafted the App, which
+    // reads as at the read-only revision: what its frame reports never
+    // reaches that chat's agent as its draft's.
+    const look = await chats.create("Look");
+    const looking = chatIdSchema.parse(look.id);
+    const elsewhere = await chats.preview(
+      looking,
+      app,
+      undefined,
+      undefined,
+      version
+    );
+    await chats.previewReport(looking, app, elsewhere.revision, "desk", {
+      kind: "rejection",
+      message: "Not a draft's.",
+    });
+    const reports = await chatsOf(builder).previewReports(
+      looking,
+      app,
+      elsewhere.revision,
+      0
+    );
 
     expect({
       version,
@@ -259,6 +281,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
             )
         )
       ),
+      elsewhere: elsewhere.artifact === proposed.artifact,
+      reports,
       both: await failure(
         async () => await chats.preview(chatId, app, undefined, 1, version)
       ),
@@ -284,6 +308,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       asDrafted: true,
       notLive: true,
       calls: ["app.no_draft", "app.no_draft"],
+      elsewhere: true,
+      reports: { problems: [], logs: [], seen: false },
       both: "screen.invalid",
       missing: "app.version_not_found",
       othersChat: "agent.chat_not_found",

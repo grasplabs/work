@@ -367,10 +367,19 @@ const draftOf = (app: string): ChatDraft => ({
 /**
  * Core, over the page's own connection (a WebSocket) and a real Cap'n Web
  * session, as far as a preview's load reaches it: who is signed in, and
- * each preview asked for, kept and never answered.
+ * each preview asked for, kept and never answered, or refused with
+ * `refusal` when one is given. `reached` resolves at the first.
  */
 class PreviewingCore extends RpcTarget {
   readonly asked: unknown[][] = [];
+  readonly #reached = Promise.withResolvers<boolean>();
+  readonly reached = this.#reached.promise;
+  readonly #refusal: string | undefined;
+
+  constructor(refusal?: string) {
+    super();
+    this.#refusal = refusal;
+  }
 
   authenticate(): this {
     return this;
@@ -388,6 +397,10 @@ class PreviewingCore extends RpcTarget {
 
   async preview(...args: unknown[]): Promise<never> {
     this.asked.push(args);
+    this.#reached.resolve(true);
+    if (this.#refusal !== undefined) {
+      throw Object.assign(new Error("Refused."), { code: this.#refusal });
+    }
     return await Promise.withResolvers<never>().promise;
   }
 }
@@ -628,7 +641,9 @@ describe(AppWorkspace, () => {
       "chat-proposed",
       async () => await Promise.resolve(watching())
     );
-    await settled();
+    await act(async () => {
+      await core.reached;
+    });
     const frame = document.querySelector("iframe");
 
     await press(button("Review and publish"));
@@ -657,6 +672,35 @@ describe(AppWorkspace, () => {
       review: "Publish version 2",
       asked: [["chat-proposed", "invoice-desk", undefined, undefined, 2]],
     });
+  });
+
+  it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {
+    // An App of workflows alone: core has no page of it to build.
+    const core = new PreviewingCore("screen.not_found");
+    socketsTo(core);
+    await opened(
+      fakeApps("published", { pendingVersion: 2 }).apps,
+      identityOf(false),
+      "chat-workflows",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    // Its refusal crosses the session back, then the area changes: each
+    // look lets what came render first.
+    await vi.waitFor(async () => {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(says("Grasp finished these changes")).toBeTruthy();
+    });
+
+    expect({
+      ready: says("Grasp finished these changes"),
+      frame: document.querySelector("iframe"),
+      review: button("Review and publish").disabled,
+    }).toStrictEqual({ ready: true, frame: null, review: false });
   });
 
   it("opens the App's own chat when the chat handed over can't be followed", async () => {

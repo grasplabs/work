@@ -756,7 +756,7 @@ export const ScreenFrame = ({
  * changes nothing and reads no real data, and what goes wrong goes to the
  * agent. With `version`, of that earlier version of the draft, read-only;
  * with `appVersion` instead, of that version of the App (its first
- * screen), read-only the same way.
+ * screen), read-only the same way. `onEnded` is told once it failed.
  */
 export const PreviewFrame = ({
   chatId,
@@ -764,12 +764,14 @@ export const PreviewFrame = ({
   screen,
   version: draftVersion,
   appVersion,
+  onEnded,
 }: {
   chatId: string;
   app: string;
   screen?: string;
   version?: number;
   appVersion?: number;
+  onEnded?: ScreenEnded;
 }) => {
   const { t } = useLingui();
   // Opened read-only: a version of the draft, or of the App.
@@ -796,6 +798,7 @@ export const PreviewFrame = ({
         ...(appVersion === undefined ? {} : { appVersion }),
       }}
       title={title}
+      {...(onEnded === undefined ? {} : { onEnded })}
     />
   );
 };

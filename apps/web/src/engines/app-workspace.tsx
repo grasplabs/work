@@ -603,9 +603,29 @@ const DraftArea = ({
   );
 };
 
+/** The version proposed, said to be ready, with the way to publish it. */
+const ReadyToPublish = ({ app, version }: { app: App; version: number }) => (
+  <PreviewState
+    action={
+      <ReviewAndPublish app={app} version={version}>
+        <Trans>Review and publish</Trans>
+      </ReviewAndPublish>
+    }
+    icon={<GlobeIcon />}
+    title={<Trans>Version {version} is ready to publish</Trans>}
+  >
+    <Trans>
+      Grasp finished these changes. Review what they change, then publish them
+      to make them the live App.
+    </Trans>
+  </PreviewState>
+);
+
 /**
  * The version proposed, previewed before it is published: read-only, as
- * an earlier version of the draft is, and the way to publish it.
+ * an earlier version of the draft is, and the way to publish it. A
+ * version with no page to show (an App of workflows alone) is said to be
+ * ready instead.
  */
 const PendingArea = ({
   app,
@@ -617,7 +637,11 @@ const PendingArea = ({
   version: number;
 }) => {
   const { t } = useLingui();
+  const [nothingToShow, setNothingToShow] = useState(false);
   const { id, name } = app;
+  if (nothingToShow) {
+    return <ReadyToPublish app={app} version={version} />;
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
@@ -644,8 +668,11 @@ const PendingArea = ({
             app={id}
             appVersion={version}
             chatId={chatId}
-            // Another version proposed is a fresh start.
-            key={version}
+            onEnded={(ended) => {
+              if (ended.status === "failed" && ended.reason === "not-found") {
+                setNothingToShow(true);
+              }
+            }}
           />
         </section>
       </div>
@@ -675,25 +702,18 @@ const PreviewArea = ({
   }
   const { pendingVersion, currentVersion, name } = app;
   if (pendingVersion !== null && chatId !== undefined) {
-    return <PendingArea app={app} chatId={chatId} version={pendingVersion} />;
+    return (
+      <PendingArea
+        app={app}
+        chatId={chatId}
+        // Another version proposed is a fresh start.
+        key={pendingVersion}
+        version={pendingVersion}
+      />
+    );
   }
   if (pendingVersion !== null) {
-    return (
-      <PreviewState
-        action={
-          <ReviewAndPublish app={app} version={pendingVersion}>
-            <Trans>Review and publish</Trans>
-          </ReviewAndPublish>
-        }
-        icon={<GlobeIcon />}
-        title={<Trans>Version {pendingVersion} is ready to publish</Trans>}
-      >
-        <Trans>
-          Grasp finished these changes. Review what they change, then publish
-          them to make them the live App.
-        </Trans>
-      </PreviewState>
-    );
+    return <ReadyToPublish app={app} version={pendingVersion} />;
   }
   if (running) {
     return (
