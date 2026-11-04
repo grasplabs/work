@@ -3510,14 +3510,15 @@ describe("a sealed run's state between runs on the run host", () => {
     // fails, nor a task whose own step waits and that has no leave step.
     const tableOf = (
       task: (typeof generated.tasks)[number],
-      kept: boolean
+      kept: boolean | Kept
     ): "sealed" | "refused" => {
+      const state = kept === true ? finishKept : kept;
       try {
         readSealedTasks(
           sealedTasksText({
             ...generated,
             tasks: [task].map((each) =>
-              kept ? { ...each, state: finishKept } : each
+              state === false ? each : { ...each, state }
             ),
           })
         );
@@ -3543,6 +3544,31 @@ describe("a sealed run's state between runs on the run host", () => {
       waitLeavingKeeping: tableOf(
         { ...waiting, steps: ["task", "leave"] },
         true
+      ),
+      // A sensitive parameter anywhere in a template, and keys past 64.
+      nestedParam: tableOf(finishTask, {
+        secret: {
+          template: { object: [["inner", { array: [{ param: "token" }] }]] },
+          value: sealedShape(v.object({ inner: v.array(v.string()) })),
+        },
+      }),
+      tooManyKeys: tableOf(
+        finishTask,
+        Object.fromEntries(
+          Array.from({ length: 65 }, (_, at) => [
+            `key${at}`,
+            { template: { slot: at }, value: sealedShape(v.number()) },
+          ])
+        )
+      ),
+      sixtyFourKeys: tableOf(
+        finishTask,
+        Object.fromEntries(
+          Array.from({ length: 64 }, (_, at) => [
+            `key${at}`,
+            { template: { slot: at }, value: sealedShape(v.number()) },
+          ])
+        )
       ),
     };
     const keeps = { finish: sealedKeeps ?? {} };
@@ -3571,6 +3597,9 @@ describe("a sealed run's state between runs on the run host", () => {
         wait: "sealed",
         waitKeeping: "refused",
         waitLeavingKeeping: "sealed",
+        nestedParam: "refused",
+        tooManyKeys: "refused",
+        sixtyFourKeys: "sealed",
       },
       wrong: ["workflow.invalid"],
       right: [],

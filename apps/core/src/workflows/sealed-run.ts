@@ -295,9 +295,10 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   must be exactly `{ output, state }` with exactly those keys, each
 //   value held to its template as a call's (`matched`: literals exact, an
 //   expression's value any JSON, never a sensitive parameter) and to the
-//   descriptor of the value its key takes, by the SDK's own validator,
-//   no marker of core's in it (`#stateChecked`); anything else is
-//   tampering: the host holds them to the build, never to the isolate. It is written only as the host records the step
+//   descriptor of the value its key takes, by the SDK's own validator
+//   (which generated code runs first, failing its step as data: a value
+//   past it here got past the SDK), no marker of core's in it
+//   (`#stateChecked`); anything else is tampering: the host holds them to the build, never to the isolate. It is written only as the host records the step
 //   (host.ts, `RunKind.stepRecording`): after the host's last check of
 //   the attempt, its lease held, so never by an attempt that failed, was
 //   refused, caught or held, nor by a failed retry round. It writes
@@ -315,7 +316,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   whose state would carry what it read to the workflow's other runs
 //   (restricted.ts): its skip is audited (`workflow.state.withheld`).
 // - State changing under a run. A run reads its workflow's state once,
-//   as its start is decided, frozen with its start's receipt (a draft's
+//   as its start is decided (a write or reset landing between that and
+//   its admission is the next start's to read), frozen with its start's receipt (a draft's
 //   test run with its row), and every activation hands the isolate that
 //   same snapshot (`sealedRunStart`), whatever other runs write since. A
 //   run an App's test started reads none: nothing of the organization's.
@@ -1765,10 +1767,12 @@ class SealedRun implements SealedRunKind {
         "state"
       );
     }
-    // Past what its workflow's state takes in all, it fails, a test run's
-    // too, which writes nothing: so a draft's test fails where its runs
-    // would (workflow-state.ts counts it with what other runs kept).
-    const bytes = given.reduce(
+    // Past what its workflow's state takes in all, with what the run's
+    // snapshot holds besides, it fails, a test run's too, which writes
+    // nothing: so a draft's test fails where its runs would (the write
+    // counts it again with what the state holds as it lands).
+    const merged = { ...this.run.state, ...Object.fromEntries(given) };
+    const bytes = Object.entries(merged).reduce(
       (total, [key, each]) =>
         total +
         utf8.encode(key).byteLength +
