@@ -17,6 +17,10 @@ import {
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { formatList } from "../format.ts";
+import {
+  kindLabels,
+  triggerDescription,
+} from "../workflows/trigger-description.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
 // admin grants or rejects on the dashboard's pile (`dashboard/pile-cards.tsx`).
@@ -72,14 +76,24 @@ export const holderName = (
   }
 };
 
-/** Who asks: the App, agent or independent resource the permission is for. */
+/**
+ * Who asks: the App, agent or independent resource the permission is for;
+ * a trigger by its kind and what starts it, as core lists it.
+ */
 export const subjectOf = (
-  { subject }: Permission,
+  { subject, trigger }: Permission,
   directory: Directory
-): string =>
-  subject.type === "app"
-    ? appName(directory, subject.appId)
-    : holderName(subject);
+): string => {
+  if (subject.type === "app") {
+    return appName(directory, subject.appId);
+  }
+  if (trigger === undefined) {
+    return holderName(subject);
+  }
+  const kind = i18n._(kindLabels[trigger.kind]);
+  const what = triggerDescription(trigger);
+  return i18n._(msg`${kind} (${what})`);
+};
 
 /**
  * A workflow's store a permission asks for, in plain words: what its

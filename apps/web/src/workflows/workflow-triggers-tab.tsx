@@ -2,15 +2,12 @@ import type {
   ConnectorEventType,
   ListedConnection,
 } from "@grasp-os/shared/connect";
-import { connectorEventActions } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
-import {
-  triggerIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import {
-  triggerStartBinding,
+  triggerEventsRequest,
+  triggerStartRequest,
   workflowWebhookHeaders,
 } from "@grasp-os/shared/workflow-triggers";
 import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
@@ -52,6 +49,13 @@ import { formatDateTime, formatList } from "../format.ts";
 import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import {
+  eventLabels,
+  eventTypeOf,
+  eventTypes,
+  summaryOf,
+  triggerDescription,
+} from "./trigger-description.ts";
 
 // An independent workflow's Triggers tab (GRA-1303): what starts it on
 // its own, as core lists its triggers (`workflowResources.triggers`):
@@ -67,9 +71,11 @@ import { useCore } from "../use-core.ts";
 // whose starts kept failing stopped, and says so, with Turn on again for
 // its owner. Core decides every change again (trigger-resources.ts) and
 // what it refuses is said where it was asked; nothing starts until an
-// admin grants the trigger `start` on the workflow, which core asks for as
-// the trigger is created. Each trigger says while it waits for that, and
-// once refused offers to ask again.
+// admin grants the trigger `start` on the workflow, and a connector
+// trigger hears nothing until one grants it its event's read on its
+// connection; core asks for both as the trigger is created. Each trigger
+// says while it waits for either, and once refused offers to ask again
+// for whatever was refused.
 //
 // A webhook trigger (GRA-1478) takes signed POSTs at a URL of its own:
 // the URL shows with a way to copy it to whoever sees the trigger, and
@@ -82,35 +88,6 @@ import { useCore } from "../use-core.ts";
 const providerOf = (type: ConnectorEventType): string =>
   type.startsWith("m365.") ? "microsoft" : "google";
 
-const eventTypes = Object.keys(connectorEventActions).filter(
-  (type): type is ConnectorEventType =>
-    Object.hasOwn(connectorEventActions, type)
-);
-
-/** `value` as a connector event type, if it is one. */
-const eventTypeOf = (value: unknown): ConnectorEventType | undefined =>
-  eventTypes.find((type) => type === value);
-
-/** Each event type, in words. */
-const eventLabels = {
-  "m365.mail.received": msg`New mail in Microsoft 365`,
-  "m365.file.created": msg`A new file in Microsoft 365`,
-  "google.mail.received": msg`New mail in Google`,
-  "google.file.created": msg`A new file in Google Drive`,
-} as const satisfies Record<ConnectorEventType, MessageDescriptor>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A field of `config` at `path`, if it is text. */
-const textAt = (config: unknown, ...path: string[]): string | undefined => {
-  let node: unknown = config;
-  for (const key of path) {
-    node = isRecord(node) ? node[key] : undefined;
-  }
-  return typeof node === "string" ? node : undefined;
-};
-
 /** What starts a run of `trigger`, in words. */
 const TriggerWhat = ({
   trigger,
@@ -119,41 +96,14 @@ const TriggerWhat = ({
   trigger: WorkflowTrigger;
   connections: readonly ListedConnection[];
 }) => {
-  const { t } = useLingui();
-  const { config } = trigger;
-  if (trigger.kind === "schedule") {
-    const cron = textAt(config, "schedule", "cron") ?? "";
-    const zone = textAt(config, "schedule", "timeZone") ?? "";
-    return (
-      <Trans>
-        On the schedule <code className="font-mono">{cron}</code>, in {zone}
-      </Trans>
-    );
-  }
-  if (trigger.kind === "connector") {
-    const type = eventTypeOf(textAt(config, "event"));
-    const id = textAt(config, "connection", "connectionId");
-    const found = connections.find((each) => each.id === id);
-    const account = found?.accountName ?? found?.provider ?? id ?? "";
-    if (type === undefined) {
-      return <Trans>When {account} reports an event</Trans>;
-    }
-    const event = t(eventLabels[type]);
-    return (
-      <Trans>
-        {event}, at {account}
-      </Trans>
-    );
-  }
-  if (trigger.kind === "email") {
-    const localPart = trigger.address ?? "";
-    return t`When an email arrives for ${localPart}`;
-  }
-  if (trigger.kind === "system") {
-    const type = textAt(config, "event", "type") ?? "";
-    return <Trans>When the event {type} is sent</Trans>;
-  }
-  return <Trans>When its webhook is called</Trans>;
+  const summary = summaryOf(trigger);
+  const found = connections.find(
+    (each) => each.id === summary.connection?.connectionId
+  );
+  return triggerDescription(summary, {
+    accountName: found?.accountName ?? found?.provider,
+    address: trigger.address,
+  });
 };
 
 /** The kind of trigger's icon. */
@@ -393,73 +343,147 @@ const WebhookDetails = ({
   );
 };
 
-/**
- * Whether an admin let `trigger` start its workflow, which it asked for as
- * it was created: nothing once they did; that it waits while they
- * haven't decided; once refused or taken back, that it starts nothing;
- * and if it never asked, that no admin was asked. Whoever manages it may
- * ask in either of the last two.
- */
-const TriggerStart = ({
-  trigger,
-  manages,
-  busy,
-  onAsk,
-}: {
-  trigger: WorkflowTrigger;
-  manages: boolean;
-  busy: boolean;
-  onAsk: () => void;
-}) => {
-  if (trigger.start === "active") {
-    return null;
-  }
-  if (trigger.start === "requested") {
+/** A permission a trigger asks an admin for, and where it stands. */
+interface Asked {
+  what: "start" | "events";
+  status: WorkflowTrigger["start"];
+}
+
+/** What waiting for, being refused or never asking for `what` means, in words. */
+const askedTexts = {
+  start: {
+    requested: msg`It starts nothing until an admin allows it to start this workflow.`,
+    revoked: msg`An admin refused or took back its start: it starts nothing.`,
+    never: msg`No admin has been asked to let it start this workflow: it starts nothing until one allows it.`,
+  },
+  events: {
+    requested: msg`It hears nothing until an admin allows it to read these events on its connection.`,
+    revoked: msg`An admin refused or took back its reading of these events: it hears nothing.`,
+    never: msg`No admin has been asked to let it read these events on its connection: it hears nothing until one allows it.`,
+  },
+} as const satisfies Record<
+  Asked["what"],
+  Record<"requested" | "revoked" | "never", MessageDescriptor>
+>;
+
+/** Where one of a trigger's permissions that isn't granted stands. */
+const AskedLine = ({ what, status }: Asked) => {
+  const { t } = useLingui();
+  if (status === "requested") {
     return (
-      <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+      <span className="flex flex-wrap items-center gap-2">
         <Badge variant="attention">
           <Trans>Waiting for an admin</Trans>
         </Badge>
-        <Trans>
-          It starts nothing until an admin allows it to start this workflow.
-        </Trans>
+        {t(askedTexts[what].requested)}
       </span>
     );
   }
   // Never asked (a trigger made before triggers asked as they were
   // created): nobody refused it, so it isn't said to be refused.
-  if (trigger.start === null) {
+  if (status === null) {
     return (
-      <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+      <span className="flex flex-wrap items-center gap-2">
         <Badge variant="attention">
           <Trans>Not requested yet</Trans>
         </Badge>
-        <Trans>
-          No admin has been asked to let it start this workflow: it starts
-          nothing until one allows it.
-        </Trans>
-        {manages ? (
-          <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
-            <Trans context="ask an admin to let a trigger start">Request</Trans>
-          </Button>
-        ) : null}
+        {t(askedTexts[what].never)}
       </span>
     );
   }
   return (
-    <span className="text-muted-foreground flex flex-wrap items-center gap-2 pl-7 text-sm">
+    <span className="flex flex-wrap items-center gap-2">
       <Badge variant="destructive">
         <Trans>Not allowed</Trans>
       </Badge>
-      <Trans>An admin refused or took back its start: it starts nothing.</Trans>
-      {manages ? (
-        <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
-          <Trans>Request again</Trans>
-        </Button>
-      ) : null}
+      {t(askedTexts[what].revoked)}
     </span>
   );
 };
+
+/**
+ * What `trigger` asks an admin for as it is created: to start its
+ * workflow, and for a connector trigger to read its event on its
+ * connection. Each it holds says nothing; each else says that it waits,
+ * was refused or taken back, or was never asked. Whoever manages it may
+ * ask again for each refused or never asked, at once (`onAsk`).
+ */
+const TriggerAccess = ({
+  asked,
+  manages,
+  busy,
+  onAsk,
+}: {
+  asked: readonly Asked[];
+  manages: boolean;
+  busy: boolean;
+  onAsk: () => void;
+}) => {
+  const open = asked.filter(({ status }) => status !== "active");
+  if (open.length === 0) {
+    return null;
+  }
+  const refused = open.some(({ status }) => status === "revoked");
+  const askable = open.some(
+    ({ status }) => status === "revoked" || status === null
+  );
+  return (
+    <div className="text-muted-foreground flex flex-col gap-2 pl-7 text-sm">
+      {open.map(({ what, status }) => (
+        <AskedLine key={what} status={status} what={what} />
+      ))}
+      {manages && askable ? (
+        <div>
+          <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
+            {refused ? (
+              <Trans>Request again</Trans>
+            ) : (
+              <Trans context="ask an admin to let a trigger start">
+                Request
+              </Trans>
+            )}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+/** What `trigger` asks an admin for, and where each stands. */
+const askedOf = (trigger: WorkflowTrigger): Asked[] => [
+  { what: "start", status: trigger.start },
+  ...(trigger.kind === "connector"
+    ? [{ what: "events" as const, status: trigger.events }]
+    : []),
+];
+
+/**
+ * The requests that ask again for what `trigger` was refused or never
+ * asked for, under the names it asked with as it was created: a refused
+ * or revoked one no longer holds them.
+ */
+const requestsAgain = (trigger: WorkflowTrigger): PermissionRequest[] =>
+  askedOf(trigger).flatMap(({ what, status }) => {
+    if (status !== "revoked" && status !== null) {
+      return [];
+    }
+    if (what === "start") {
+      return [triggerStartRequest(trigger.id, trigger.workflowId)];
+    }
+    const { connection, event } = summaryOf(trigger);
+    const request =
+      connection === null || event === null
+        ? undefined
+        : triggerEventsRequest(
+            trigger.id,
+            {
+              connectionId: connection.connectionId,
+              resource: connection.resource ?? undefined,
+            },
+            event
+          );
+    return request === undefined ? [] : [request];
+  });
 
 /** One trigger: what starts it, its version, where it stands, and what the reader may change. */
 const TriggerRow = ({
@@ -501,24 +525,13 @@ const TriggerRow = ({
     await onChanged();
   };
 
-  // Under the name it asked with as it was created: a refused or revoked
-  // one no longer holds it.
-  const askToStart = async (): Promise<void> => {
-    await run(
-      async (session) =>
-        await session.permissions.request({
-          subject: {
-            type: "trigger",
-            triggerId: triggerIdSchema.parse(trigger.id),
-          },
-          object: {
-            type: "workflow",
-            workflowId: workflowResourceIdSchema.parse(trigger.workflowId),
-          },
-          actions: ["start"],
-          binding: triggerStartBinding,
-        })
-    );
+  const askAgain = async (): Promise<void> => {
+    await run(async (session) => {
+      for (const request of requestsAgain(trigger)) {
+        // oxlint-disable-next-line no-await-in-loop -- one request after another, as an admin sees them
+        await session.permissions.request(request);
+      }
+    });
     await onChanged();
   };
 
@@ -544,13 +557,13 @@ const TriggerRow = ({
           ) : null}
         </span>
       </div>
-      <TriggerStart
+      <TriggerAccess
+        asked={askedOf(trigger)}
         busy={busy}
         manages={manages}
         onAsk={() => {
-          void askToStart();
+          void askAgain();
         }}
-        trigger={trigger}
       />
       {trigger.webhook === null ? null : (
         <WebhookDetails
@@ -1192,8 +1205,9 @@ export const TriggersTabContent = ({
         <p className="text-muted-foreground">
           <Trans>
             A trigger starts a run on its own, as whoever made it. Adding one
-            asks an admin to allow it to start this workflow: it starts nothing
-            until they do.
+            asks an admin to allow it to start this workflow, and one on a
+            connection to read its events there: it starts nothing until they
+            do.
           </Trans>
         </p>
         <TriggersRead

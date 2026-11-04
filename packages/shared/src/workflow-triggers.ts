@@ -5,7 +5,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import { jsonPointerPattern } from "./json.ts";
 import type { Json } from "./json.ts";
-import type { PermissionStatus } from "./permissions.ts";
+import type { PermissionRequest, PermissionStatus } from "./permissions.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
 // the session's `workflowResources.triggers` serves them: each a resource
@@ -227,6 +227,13 @@ export interface WorkflowTrigger {
    * holds none, as no trigger made since it asks does.
    */
   start: PermissionStatus | null;
+  /**
+   * Where a connector trigger's read of its event on its connection (and
+   * part of it) stands, which it asks an admin for beside `start` as it is
+   * created (`triggerEventsRequest`): as `start` says. Null for any other
+   * kind, and for one holding none.
+   */
+  events: PermissionStatus | null;
 }
 
 /**
@@ -234,6 +241,69 @@ export interface WorkflowTrigger {
  * as it is created and whenever it is asked for again.
  */
 export const triggerStartBinding = "START";
+
+/**
+ * The binding name a connector trigger's read of its connection's events
+ * is asked for under, as it is created and whenever it is asked for again.
+ */
+export const triggerEventsBinding = "EVENTS";
+
+/** The request for trigger `triggerId`'s `start` on `workflowId`, the workflow it pins. */
+export const triggerStartRequest = (
+  triggerId: string,
+  workflowId: string
+): PermissionRequest => ({
+  subject: { type: "trigger", triggerId },
+  object: { type: "workflow", workflowId },
+  actions: ["start"],
+  binding: triggerStartBinding,
+});
+
+/**
+ * The request for connector trigger `triggerId` to hear the events of
+ * type `event` on `connection` (and the part of it it names): that event's
+ * read action there (`connectorEventActions`), and nothing else, as core
+ * grants a trigger on a connection. Undefined for an event type no
+ * connection reports.
+ */
+export const triggerEventsRequest = (
+  triggerId: string,
+  connection: { connectionId: string; resource?: string | undefined },
+  event: string
+): PermissionRequest | undefined => {
+  const action = Object.entries(connectorEventActions).find(
+    ([type]) => type === event
+  )?.[1];
+  if (action === undefined) {
+    return undefined;
+  }
+  return {
+    subject: { type: "trigger", triggerId },
+    object: {
+      type: "connection",
+      connectionId: connection.connectionId,
+      ...(connection.resource === undefined
+        ? {}
+        : { resource: connection.resource }),
+    },
+    actions: [action],
+    binding: triggerEventsBinding,
+  };
+};
+
+/**
+ * What a trigger holding a permission is, for whoever decides it (the
+ * admin's pending requests): its kind, and what starts it, without its
+ * input or mapping. A schedule's expression and time zone; a connector
+ * or system trigger's event type; a connector trigger's connection.
+ * An email trigger's address and a webhook's URL are never in it.
+ */
+export interface TriggerSummary {
+  kind: TriggerKind;
+  schedule: { cron: string; timeZone: string } | null;
+  event: string | null;
+  connection: { connectionId: string; resource: string | null } | null;
+}
 
 /**
  * An independent workflow's triggers over `/rpc`
@@ -251,8 +321,10 @@ export interface WorkflowTriggersApi {
   /**
    * Creates a trigger (`workflowTriggerCreateSchema`) that acts for the
    * caller, who must build the workflow, and with it the request for its
-   * `start` on the workflow (under `triggerStartBinding`), which waits for
-   * an admin; both audited. Deleting the trigger revokes it.
+   * `start` on the workflow (under `triggerStartBinding`) and, for a
+   * connector trigger, for its event's read on its connection (under
+   * `triggerEventsBinding`), which wait for an admin; all audited.
+   * Deleting the trigger revokes them.
    */
   create: (input: unknown) => Promise<CreatedWorkflowTrigger>;
   /**
