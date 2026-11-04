@@ -79,6 +79,8 @@ export const compilerAssets = {
   serverSdkModules: "sdk-server-modules.json",
   /** The package builder's module (src/packages/worker.ts). */
   packageBuilder: "package-builder.js",
+  /** Ultracite's lint and format of App code (src/ultracite-worker.ts). */
+  ultracite: "ultracite.js",
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
   /**

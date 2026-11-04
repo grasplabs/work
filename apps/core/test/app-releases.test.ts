@@ -1369,7 +1369,8 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["server/extra.ts"],
+      // And the other file's name, unused in its own module.
+      files: ["server/extra-name.ts", "server/extra.ts"],
     });
   });
 

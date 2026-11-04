@@ -25,18 +25,6 @@ const root = "/tmp/app";
 const note =
   "Screens can't change the kit (@grasp-os/ui): use what it has, or build the look from plain elements.";
 
-/**
- * ESLint validates rule options against their JSON schema with code it
- * generates at runtime, which Workers forbid. The options are the repo's
- * own and fixed, so the rules go in without a schema.
- */
-const rules = Object.fromEntries(
-  Object.entries(shadcn.rules).map(([name, rule]) => [
-    name,
-    { ...rule, meta: { ...rule.meta, schema: false as const } },
-  ])
-);
-
 const writeFiles = (files: Record<string, string>): void => {
   for (const [path, content] of Object.entries(files)) {
     const file = `${root}/${path}`;
@@ -78,7 +66,7 @@ export const lint = (
         parser,
         parserOptions: { ecmaFeatures: { jsx: true } },
       },
-      plugins: { shadcn: { ...shadcn, rules }, grasp: designRules },
+      plugins: { shadcn, grasp: designRules },
       settings: { shadcn: { note } },
       rules: { ...kit.lintRules, ...designRuleLevels },
     },

@@ -14,6 +14,8 @@ export const diagnosticCategories = [
   "types",
   /** The design system's lint (`shadcn/…`). */
   "design-system",
+  /** Ultracite's rules: the code's quality and style (`lint`). */
+  "code",
   /** The App's layout: its screens, server, tests and file names. */
   "structure",
   /** Any other rule: the platform's own, never the App's to fix. */

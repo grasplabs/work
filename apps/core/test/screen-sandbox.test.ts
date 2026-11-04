@@ -3,6 +3,7 @@ import {
   checkerSettings,
   isolateSettings,
   loadAppCompiler,
+  loadUltracite,
   packageBuilderCode,
   packageBuilderSettings,
   startAppCompiler,
@@ -299,6 +300,53 @@ describe(
         warmRead: [],
         anew: "checked",
         anewRead: ["compiler.js", "esbuild.wasm", "kit.json"],
+      });
+    });
+
+    it("read the compiler's code and Ultracite's lint's one after the other, never together, when both start cold at once", async () => {
+      // Together they would hold about 80 MB of core's 128 at once
+      // (index.ts, `platformCodeTurns`). Each file's read, from its fetch
+      // to its answer, a little slowed so reads that could overlap do.
+      const reads: { file: string; from: number; to: number }[] = [];
+      const assets: Fetcher = {
+        fetch: async (...args: Parameters<Fetcher["fetch"]>) => {
+          const path = new URL(new Request(...args).url).pathname;
+          const from = performance.now();
+          await scheduler.wait(20);
+          const response = await env.ASSETS.fetch(...args);
+          const body = await response.arrayBuffer();
+          reads.push({
+            file: path.slice(path.lastIndexOf("/") + 1),
+            from,
+            to: performance.now(),
+          });
+          return new Response(body, { headers: response.headers });
+        },
+        connect: env.ASSETS.connect.bind(env.ASSETS),
+      };
+
+      const [compiler, ultracite] = await Promise.all([
+        loadAppCompiler(env.LOADER, assets),
+        loadUltracite(env.LOADER, assets),
+      ]);
+      const answers = await Promise.all([
+        checked(compiler),
+        ultracite.lint({ "components/one.ts": "export const one = 1;\n" }),
+      ]);
+
+      const lint = reads.filter(({ file }) => file === "ultracite.js");
+      const compilerReads = reads.filter(({ file }) => file !== "ultracite.js");
+      const overlap = lint.some((one) =>
+        compilerReads.some(({ from, to }) => one.from < to && from < one.to)
+      );
+      expect({
+        answers,
+        files: reads.map(({ file }) => file).toSorted(),
+        overlap,
+      }).toStrictEqual({
+        answers: ["checked", { "components/one.ts": [] }],
+        files: ["compiler.js", "esbuild.wasm", "kit.json", "ultracite.js"],
+        overlap: false,
       });
     });
 

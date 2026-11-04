@@ -11,6 +11,9 @@
     "#types": {
       "types": "./src/types-module.d.ts"
     },
+    "#ultracite-rules": {
+      "types": "./src/ultracite-rules.d.ts"
+    },
     "#version": {
       "types": "./src/version.d.ts",
       "default": "./dist/version.js"
@@ -29,11 +32,21 @@
     "@grasp-os/ui": "workspace:*",
     "@shadcn/lint": "catalog:",
     "@tsrs/wasm": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
     "esbuild-wasm": "catalog:",
     "eslint": "catalog:",
+    "eslint-plugin-import-x": "catalog:",
+    "eslint-plugin-jsdoc": "catalog:",
+    "eslint-plugin-jsx-a11y": "catalog:",
+    "eslint-plugin-promise": "catalog:",
+    "eslint-plugin-react": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
+    "eslint-plugin-sonarjs": "catalog:",
+    "eslint-plugin-unicorn": "catalog:",
     "lucide-react": "catalog:",
+    "prettier": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-refresh": "catalog:",

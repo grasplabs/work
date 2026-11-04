@@ -181,3 +181,42 @@ export const sharedRun = async <T>(
     }
   }
 };
+
+/** Work of an isolate's requests that runs one at a time (`inTurn`): its last turn. */
+export interface Turns {
+  last?: { done: Promise<unknown>; endsBy: number };
+}
+
+/**
+ * What `start` answers, started once every earlier turn of `turns` ended,
+ * or was taken for abandoned: each turn may take `turnMs` from when the
+ * one before it was due to end, as a cancelled request's turn never ends
+ * (see above). For work that must never overlap within an isolate, such
+ * as reads that each hold a large part of its memory.
+ */
+export const inTurn = async <T>(
+  turns: Turns,
+  turnMs: number,
+  start: () => Promise<T>
+): Promise<T> => {
+  const previous = turns.last;
+  const { promise: done, resolve } = Promise.withResolvers<boolean>();
+  const turn = {
+    done,
+    endsBy: Math.max(Date.now(), previous?.endsBy ?? 0) + turnMs,
+  };
+  turns.last = turn;
+  try {
+    const left = (previous?.endsBy ?? 0) - Date.now();
+    if (previous !== undefined && left > 0) {
+      // Its outcome is the other request's: only its end matters here.
+      await settledWithin(previous.done, left);
+    }
+    return await start();
+  } finally {
+    resolve(true);
+    if (turns.last === turn) {
+      turns.last = undefined;
+    }
+  }
+};

@@ -52,14 +52,24 @@ export const list = query({
 export const create = mutation({
   args: { title: v.string().trim().min(1).max(200) },
   returns: v.id("cards"),
-  handler: async (ctx, args) => await ctx.db.insert("cards", { title: args.title, column: "todo" }),
+  handler: async (ctx, args) =>
+    await ctx.db.insert("cards", { title: args.title, column: "todo" }),
 });
 
 export const move = mutation({
-  args: { id: v.id("cards"), column: v.enum(columns), expectedRevision: v.number().integer().min(1) },
+  args: {
+    id: v.id("cards"),
+    column: v.enum(columns),
+    expectedRevision: v.number().integer().min(1),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch("cards", args.id, { column: args.column }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch(
+      "cards",
+      args.id,
+      { column: args.column },
+      { expectedRevision: args.expectedRevision }
+    );
     return null;
   },
 });
@@ -82,7 +92,12 @@ export default app({
 /** The board's one screen: four columns of cards. */
 const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
 import { api } from "@server/_generated/api";
 
 const columns = [
@@ -96,12 +111,15 @@ export default function Board() {
   const cards = useQuery(api.cards.list, {});
   const create = useMutation(api.cards.create);
   const move = useMutation(api.cards.move);
+  const handleAdd = async () => {
+    await create({ title: "New card" });
+  };
   if (cards === undefined) {
     return <p role="status">Loading the board…</p>;
   }
   return (
     <main className="flex flex-col gap-4 p-6">
-      <Button onClick={() => void create({ title: "New card" })}>Add a card</Button>
+      <Button onClick={handleAdd}>Add a card</Button>
       <div className="grid grid-cols-4 gap-4">
         {columns.map((column, index) => {
           const next = columns[index + 1];
@@ -117,7 +135,16 @@ export default function Board() {
                     </CardHeader>
                     <CardContent>
                       {next === undefined ? null : (
-                        <Button variant="outline" onClick={() => void move({ id: card._id, column: next.id, expectedRevision: card._rev })}>
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            await move({
+                              id: card._id,
+                              column: next.id,
+                              expectedRevision: card._rev,
+                            });
+                          }}
+                        >
                           Move to {next.title}
                         </Button>
                       )}
@@ -142,7 +169,7 @@ const guessed = registration.replace(
   '{ cards: "appMembers" }'
 );
 
-/** The board's operations with a type error on their line 15. */
+/** The board's operations with a type error on their line 16. */
 const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
 
 /** Code that calls the draft of `app`'s `cards.list`, and nothing more. */
@@ -279,7 +306,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       code: typeError.code,
       located: typeError.message
         .split("\n")
-        .some((line) => line.startsWith("server/cards.ts:15: ")),
+        .some((line) => line.startsWith("server/cards.ts:16: ")),
     }).toStrictEqual({ code: "version.build_failed", located: true });
     expect(returned(fixed?.text)).toStrictEqual({
       passed: true,

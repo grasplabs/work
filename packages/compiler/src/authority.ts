@@ -3,11 +3,11 @@ const named = (value: unknown): string[] =>
   typeof value === "object" && value !== null ? Object.keys(value) : [];
 
 /**
- * The platform's code that reads App source (the App compiler) and package
- * bytes (the package builder) runs in an isolate with no bindings, no
- * importable env and no network (index.ts, `isolateSettings` and
- * `packageBuilderSettings`): it parses, checks and bundles, and needs
- * nothing else. Each entrypoint asserts that as it is called: an isolate
+ * The platform's code that reads App source (the App compiler and
+ * Ultracite's lint) and package bytes (the package builder) runs in an
+ * isolate with no bindings, no importable env and no network (index.ts,
+ * `isolateSettings` and `packageBuilderSettings`): it parses, checks and
+ * bundles, and needs nothing else. Each entrypoint asserts that as it is called: an isolate
  * handed a binding (a credential, a store, a service), or props on its
  * entrypoint, is a wiring mistake, and the code refuses to work in it
  * rather than hold that authority beside input an App controls.

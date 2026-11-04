@@ -11,8 +11,8 @@
  */
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isolateBase, withNode } from "@grasp-os/shared/runtime";
-import { sharedRun } from "@grasp-os/shared/shared-runs";
-import type { SharedRun } from "@grasp-os/shared/shared-runs";
+import { inTurn, sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun, Turns } from "@grasp-os/shared/shared-runs";
 
 import { version } from "#version";
 
@@ -20,6 +20,7 @@ import type TypeChecker from "./checker.ts";
 import { compilerAssets, kitModule, typesModule } from "./kit.ts";
 import type { KitModules } from "./kit.ts";
 import type PackageBuilder from "./packages/worker.ts";
+import type UltraciteLinter from "./ultracite-worker.ts";
 import type AppCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
@@ -80,6 +81,8 @@ export {
 } from "./kit.ts";
 export {
   incrementSchema,
+  lintKey,
+  lintRecordOf,
   moduleRecordOf,
   screenIncrementKeys,
   screenSources,
@@ -88,6 +91,7 @@ export type {
   BuildMetrics,
   IncrementalBuild,
   Increments,
+  LintRecord,
   ModuleRecord,
 } from "./increments.ts";
 export { screenRefusals } from "./refusals.ts";
@@ -162,8 +166,9 @@ export const platformCodeReadMs = 10_000;
  * for as long as a read may take (`sharedRun`): one whose request was
  * cancelled holds no other. With `keep`, what was read stays for the
  * isolate's life (only a read that worked); without, it goes once read.
+ * With `turns`, it runs in turn with the other reads of those (`inTurn`).
  */
-const reader = <T>(keep: boolean) => {
+const reader = <T>(keep: boolean, turns?: Turns) => {
   const done = new WeakMap<Fetcher, Map<string, T>>();
   const running = new WeakMap<Fetcher, Map<string, SharedRun<T>>>();
   return async (
@@ -178,7 +183,14 @@ const reader = <T>(keep: boolean) => {
     }
     const reading = running.get(assets) ?? new Map<string, SharedRun<T>>();
     running.set(assets, reading);
-    const code = await sharedRun(reading, key, platformCodeReadMs, read);
+    const code = await sharedRun(
+      reading,
+      key,
+      platformCodeReadMs,
+      turns === undefined
+        ? read
+        : async () => await inTurn(turns, platformCodeReadMs, read)
+    );
     if (keep) {
       reads.set(key, code);
       done.set(assets, reads);
@@ -197,8 +209,15 @@ const reader = <T>(keep: boolean) => {
  * needs them, to start an isolate: the compiler's stays warm under its
  * App's and release's name (`startAppCompiler`), and the Loader asks for its code
  * only when it isn't, so a warm build reads none of it.
+ *
+ * A cold check starts the compiler's isolate and Ultracite's together:
+ * their reads at once would be about 80 MB of the 128. So the reads of
+ * platform code run one at a time (`platformCodeTurns`): each holds its
+ * copy only until the Loader has it, and then the next reads.
  */
-const workerCodeRead = reader<WorkerLoaderWorkerCode>(false);
+const platformCodeTurns: Turns = {};
+
+const workerCodeRead = reader<WorkerLoaderWorkerCode>(false, platformCodeTurns);
 
 /** esbuild's WebAssembly, never kept (`workerCodeRead`). */
 const wasmRead = reader<ArrayBuffer>(false);
@@ -414,7 +433,7 @@ export interface PlatformCode {
  * on-prem, where core runs on plain workerd with no Loader to keep the
  * compiler warm, so every build hands it over.
  */
-const platformCodeRead = reader<PlatformCode>(true);
+const platformCodeRead = reader<PlatformCode>(true, platformCodeTurns);
 
 /**
  * The App compiler's code, read from core's static assets once per
@@ -606,3 +625,65 @@ export const packageBuilderCode = async (
       cpuMs: packageBuilderSettings.limits.cpuMs,
     };
   });
+
+/**
+ * Ultracite's lint and format (src/ultracite-worker.ts) in an isolate as
+ * the compiler's runs (`isolateSettings`), its code read from the assets
+ * only to start the isolate and never kept (`workerCodeRead`): a build,
+ * or a core isolate that never lints, reads none of it.
+ */
+const ultraciteWorker = async (
+  assets: Fetcher
+): Promise<WorkerLoaderWorkerCode> =>
+  await workerCodeRead(assets, `ultracite:${version}`, async () => ({
+    ...isolateSettings,
+    mainModule: compilerAssets.ultracite,
+    modules: {
+      [compilerAssets.ultracite]: await readCompilerFile(
+        assets,
+        compilerAssets.ultracite,
+        "javascript"
+      ),
+    },
+  }));
+
+/**
+ * Ultracite's lint, in one isolate per release that every App's writes
+ * and checks share, kept warm as the compiler's is (`startAppCompiler`),
+ * and as safe to share: it parses App code and never runs it. Apart from
+ * the compiler's, so a lint never shares a build's limits.
+ */
+export const startUltracite = (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Service<UltraciteLinter> =>
+  loader
+    .get(`ultracite:${version}`, async () => await ultraciteWorker(assets))
+    .getEntrypoint<UltraciteLinter>();
+
+/** Ultracite's lint in a fresh isolate of its own, as `loadAppCompiler` the compiler. */
+export const loadUltracite = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<UltraciteLinter>> =>
+  loader.load(await ultraciteWorker(assets)).getEntrypoint<UltraciteLinter>();
+
+/** Ultracite's lint's code, for the on-prem sandbox host, as `appCompilerCode` gives the compiler's. */
+export const ultraciteCode = async (assets: Fetcher): Promise<PlatformCode> =>
+  await platformCodeRead(assets, `ultracite:${version}`, async () => ({
+    mainModule: compilerAssets.ultracite,
+    modules: {
+      [compilerAssets.ultracite]: {
+        type: "js",
+        bytes: new Uint8Array(
+          await readCompilerBytes(
+            assets,
+            compilerAssets.ultracite,
+            "javascript"
+          )
+        ),
+      },
+    },
+    nodejsCompat: true,
+    cpuMs: isolateSettings.limits.cpuMs,
+  }));

@@ -152,7 +152,9 @@ export const mailOwnKey = action({
 });
 
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
+  // `permission` only where the `ai` permission is declared: an unused
+  // import fails the type check.
+  "app.ts": `import { app${ai === undefined ? "" : ", permission"} } from "@grasp-os/sdk";
 
 import schema from "./schema.ts";
 import { send } from "./server/effects.ts";

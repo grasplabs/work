@@ -3,6 +3,7 @@ import {
   buildFiles,
   isGeneratedPath,
   workflowFiles,
+  workflowsFolder,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import { generateModules, symbolicModules } from "@grasp-os/sdk/host";
@@ -21,11 +22,15 @@ import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { hostModules } from "./host-modules.ts";
+import { keepLints, readLints } from "./module-cache.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
+import { platformRunner } from "./platform-sandbox.ts";
 import {
+  buildRefreshMs,
   buildScreens,
   buildWorkflows,
   checkAppCode,
+  leaseSlackMs,
   withinBuildWait,
 } from "./screens.ts";
 import type { BuildProfile } from "./screens.ts";
@@ -100,7 +105,7 @@ const toDiagnostic = ({
  * the build wait (`withinBuildWait`): it runs again at its first use.
  */
 const savedBuild = async (
-  kind: keyof SavedBuilds | "server",
+  kind: keyof SavedBuilds | "server" | "lint",
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
   select: (files: Record<string, string>) => Record<string, string>,
   build: () => Promise<{
@@ -370,4 +375,89 @@ export const draftServerBuild = async (
     env,
     signal
   );
+};
+
+/**
+ * The files Ultracite's rules read (`lint`): the App's TypeScript, but its
+ * declarations, what core generates, and what is under `workflows/`, which
+ * the agent never changes (app-no-workflows.ts).
+ */
+const lintedFiles = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).filter(
+      ([path]) =>
+        (path.endsWith(".ts") || path.endsWith(".tsx")) &&
+        !path.endsWith(".d.ts") &&
+        !isGeneratedPath(path) &&
+        !path.startsWith(workflowsFolder.folder)
+    )
+  );
+
+const diagnosticSchema = z.object({
+  file: z.string().optional(),
+  line: z.number().optional(),
+  column: z.number().optional(),
+  rule: z.string(),
+  severity: z.enum(["error", "warning"]),
+  message: z.string(),
+  fix: z.string().optional(),
+});
+
+/** What Ultracite's `lint` answers: each file's diagnostics, by path. */
+const lintedSchema = z.record(z.string(), z.array(diagnosticSchema));
+
+/**
+ * What Ultracite's rules say of a draft's TypeScript (Ultracite's
+ * `lint`): a build of its own, in an isolate of its own, so it runs beside
+ * the others rather than after them. Each file's result is kept under the
+ * key of its content (module-cache.ts), so a write lints only the files
+ * that changed. Failed while any of its errors is left; its warnings stay
+ * warnings. Never throws, unless `signal` gave up on it, as `buildOnSave`.
+ */
+export const draftLintBuild = async (
+  env: Env,
+  source: Pick<SavedSource, "app" | "version" | "files">,
+  signal?: AbortSignal
+): Promise<SavedBuild> => {
+  const built = await savedBuild(
+    "lint",
+    source,
+    lintedFiles,
+    async () => {
+      const files = lintedFiles(source.files);
+      const kept = await readLints(env, files, buildRefreshMs);
+      const missing = Object.fromEntries(
+        Object.entries(files).filter(([path]) => !Object.hasOwn(kept, path))
+      );
+      let linted: Record<string, Diagnostic[]> = {};
+      if (Object.keys(missing).length > 0) {
+        const runner = platformRunner(env, source.app);
+        linted = lintedSchema.parse(
+          await runner.run("ultracite", "lint", [missing])
+        );
+        await keepLints(
+          env,
+          missing,
+          linted,
+          runner.callMs("ultracite") + leaseSlackMs
+        );
+      }
+      const diagnostics = Object.keys(files)
+        .toSorted()
+        .flatMap((path) => kept[path] ?? linted[path] ?? []);
+      return {
+        ok: diagnostics.every(({ severity }) => severity !== "error"),
+        diagnostics,
+      };
+    },
+    env,
+    signal
+  );
+  return {
+    ...built,
+    diagnostics: built.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      category: "code" as const,
+    })),
+  };
 };

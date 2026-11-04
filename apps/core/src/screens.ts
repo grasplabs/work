@@ -365,7 +365,7 @@ export const buildKeepMs = 30 * day;
  * serving it writes it again (`cachedBuild`), so one in use never reaches
  * `buildKeepMs`.
  */
-const buildRefreshMs = buildKeepMs / 2;
+export const buildRefreshMs = buildKeepMs / 2;
 
 /** Whether `value` is what the compiler's `buildIncrementally` answers, its build aside. */
 const incrementalShaped = (

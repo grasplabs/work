@@ -2,8 +2,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { sharedRun } from "../src/shared-runs.ts";
-import type { SharedRun } from "../src/shared-runs.ts";
+import { inTurn, sharedRun } from "../src/shared-runs.ts";
+import type { SharedRun, Turns } from "../src/shared-runs.ts";
 
 // Work shared across the requests of an isolate (src/shared-runs.ts):
 // pure scheduling, so tested on its own. Work whose request was cancelled
@@ -178,5 +178,75 @@ describe("work shared across requests", () => {
       left: ["just abandoned", "running"],
     });
     running.resolve("done");
+  });
+});
+
+/** A read that takes a moment. */
+const reading = async (): Promise<string> => {
+  await sleep(1);
+  return "read";
+};
+
+describe("work run in turn", () => {
+  it("never runs two turns at once, and runs each, in order", async () => {
+    const turns: Turns = {};
+    let running = 0;
+    let most = 0;
+    const order: number[] = [];
+    const read = async (index: number): Promise<number> => {
+      running += 1;
+      most = Math.max(most, running);
+      await sleep(10);
+      order.push(index);
+      running -= 1;
+      return index;
+    };
+
+    const answers = await Promise.all(
+      [1, 2, 3].map(
+        async (index) =>
+          await inTurn(
+            turns,
+            abandonAfterMs * 10,
+            async () => await read(index)
+          )
+      )
+    );
+
+    expect({ answers, order, most, left: turns.last }).toStrictEqual({
+      answers: [1, 2, 3],
+      order: [1, 2, 3],
+      most: 1,
+      left: undefined,
+    });
+  });
+
+  it("takes a turn that never ends, as a cancelled request's, for abandoned once its time is up", async () => {
+    const turns: Turns = {
+      last: {
+        done: held<undefined>().promise,
+        endsBy: Date.now() + abandonAfterMs,
+      },
+    };
+    const started = Date.now();
+
+    const answer = await inTurn(turns, abandonAfterMs, reading);
+
+    expect({
+      answer,
+      waited: Date.now() - started >= abandonAfterMs - 5,
+    }).toStrictEqual({ answer: "read", waited: true });
+  });
+
+  it("starts the next turn once one fails", async () => {
+    const turns: Turns = {};
+    const failing = inTurn(turns, abandonAfterMs * 10, async () => {
+      await sleep(5);
+      throw new Error("The read failed");
+    });
+    const next = inTurn(turns, abandonAfterMs * 10, reading);
+
+    await expect(failing).rejects.toThrow("The read failed");
+    await expect(next).resolves.toBe("read");
   });
 });

@@ -208,18 +208,22 @@ export default appTest({
 });
 `;
 
-/** A suite of one test, which runs `body` with an owner at hand. */
+/**
+ * A suite of one test, which runs `body` with an owner at hand: the
+ * owner and the references only where it names them, as an unused name
+ * fails the type check.
+ */
 const suiteOf = (
   body: string,
   before = ""
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
+import { ${["api", "workflows"].filter((name) => `${before}${body}`.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 ${before}
 export default appTest({
   fixtures: "notes",
   tests: {
     "runs": async (t) => {
-      const owner = await t.as("note-owner");
+${`${before}${body}`.includes("owner") ? '      const owner = await t.as("note-owner");' : ""}
       ${body}
     },
   },
