@@ -282,7 +282,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.connector_trigger_holds": {
     none: "a trigger's held events, by their keys",
   },
-  // Their workspace: the object is theirs alone, emptied whole.
+  // Their workspace: the object is theirs alone, emptied whole. So is each
+  // chat's `ChatSession` object (chat-session.ts), the chat's transcript as
+  // pi-durable keeps it in tables of its own (`pi_`, no schema of ours):
+  // the workspace area erases every one of its chats' (`erasePerson`).
   "workspace.chats": { erased: "workspace" },
   "workspace.dashboards": { erased: "workspace" },
   "workspace.custom_widgets": { erased: "workspace" },
