@@ -58,7 +58,13 @@ const AddPerson = ({ project }: { project: Project }) => {
   const ids = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [candidates, setCandidates] = useState<ProjectShareCandidates>();
+  // Read for one reading of the project: once it is read again (after an
+  // add or a removal), whom to offer is read again too.
+  const [offered, setOffered] = useState<{
+    from: Project;
+    list: ProjectShareCandidates;
+  }>();
+  const candidates = offered?.from === project ? offered.list : undefined;
   const [chosen, setChosen] = useState("");
   const [role, setRole] = useState<ProjectRole>("user");
   const read = async (): Promise<void> => {
@@ -68,7 +74,9 @@ const AddPerson = ({ project }: { project: Project }) => {
     const listed = await run(
       async (session) => await session.projects.shareCandidates(project.id)
     );
-    setCandidates(listed);
+    if (listed !== undefined) {
+      setOffered({ from: project, list: listed });
+    }
   };
   const [chosenType, chosenId] = chosen.split(":", 2);
   const add = async (): Promise<void> => {
@@ -94,8 +102,6 @@ const AddPerson = ({ project }: { project: Project }) => {
       );
     });
     setChosen("");
-    // Read again when next opened: whoever was just added isn't offered.
-    setCandidates(undefined);
   };
   // Core offers only who isn't in it yet, its owner included.
   const people = candidates?.people ?? [];

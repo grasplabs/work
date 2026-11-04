@@ -57,9 +57,15 @@ export const usePages = <T extends Paged>(
       async (session) => await read(session, cursorAfter(last))
     );
     if (page !== undefined) {
+      // An item or member that moved later since (a share changed) may
+      // come again: shown once.
+      const shown = new Set(all.map(({ type, id }) => `${type}:${id}`));
       setLoaded({
         from,
-        rest: [...(current?.rest ?? []), ...page.list],
+        rest: [
+          ...(current?.rest ?? []),
+          ...page.list.filter(({ type, id }) => !shown.has(`${type}:${id}`)),
+        ],
         more: page.more,
       });
     }
