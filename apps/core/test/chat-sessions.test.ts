@@ -213,6 +213,69 @@ describe("a chat's ChatSession", () => {
     }
   });
 
+  it("ends a turn pi parked on an earlier wake that the object didn't live to end", async () => {
+    const { userId, person: signedIn } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // The Workspace first, so nothing asks for the turn again, then the
+      // chat's object, mid-answer.
+      for (const object of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await runInDurableObject(object, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      // As pi leaves a task an earlier wake parked (`restartLimit`, 5) when
+      // the object reset before it could end the turn: pending, cut off
+      // as often as pi lets it be, with no report left to come.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_tasks SET status = 'pending', record = json_set(record, '$.state.status', 'pending', '$.restarts', 5) WHERE json_extract(record, '$.kind') = 'pi.generation'"
+        );
+      });
+      await runDurableObjectAlarm(session());
+      const woken = workspace(env, id);
+      await vi.waitFor(
+        async () => {
+          await expect(
+            woken.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: false });
+        },
+        { timeout: 15_000 }
+      );
+      const person = await personOf(env, {
+        userId,
+        role: "user",
+        staff: false,
+        email: String(signedIn.email),
+      });
+      await woken.deleteChat(chat.id, userId, person, {
+        type: "person",
+        userId,
+      });
+      await woken.erasePerson(userId);
+      await expect(tablesOf(id, chat.id)).resolves.toStrictEqual([]);
+    } finally {
+      never.resolve(true);
+    }
+  });
+
   it("is erased with its chat", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const { id, stub, chat, ask } = await chatOf(userId, says("Hi."));

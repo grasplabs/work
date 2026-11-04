@@ -430,7 +430,7 @@ export class ChatHarness {
   #room: number = DEFAULT_COMPACTION_POLICY.keepRecentTokens;
   /** Why the turn under way was stopped, if it was. */
   #stopped: TurnStop | undefined;
-  /** Whether pi parked the turn's work as the Harness opened. */
+  /** Whether pi held the turn's work parked as the Harness opened. */
   #parked = false;
   /** The turn whose notices are taken now: while its `run` waits on pi. */
   #noticesFor: string | undefined;
@@ -483,10 +483,6 @@ export class ChatHarness {
     });
     const registry = createRegistry();
     const pi = createModels();
-    // pi parks a task restarts cut off too often (`restartLimit`) and says
-    // so as it opens: the chat's run would wait on it for ever, so it is
-    // aborted (`setUpStored`), and the turn ends failed.
-    let parked = false;
     const harness = await Harness.open(
       storage,
       {
@@ -504,9 +500,10 @@ export class ChatHarness {
         }),
         identity: { attribution: null },
         onWake,
+        // Said once, as the open that parks a task: what the object does
+        // of it reads pi's state (`setUpStored`), at every open.
         onReport: (error, info) => {
           if (info.type === "task_parked") {
-            parked = true;
             log.warn("chat.task_parked", {
               chatSession: ctx.id.name,
               task: info.task.kind,
@@ -526,7 +523,6 @@ export class ChatHarness {
       registry,
       pi
     );
-    opened.#parked = parked;
     // Called at once with the view as it is, then at each commit.
     const view = await conversation.viewState(context);
     view.subscribe((value) => {
@@ -768,13 +764,21 @@ export class ChatHarness {
    * pi parked, or one whose context holds what the chat may no longer
    * read, is aborted, and the next question rebases (`#submit`), the
    * guard holding every request meanwhile. A rebase can take longer than
-   * an object may block.
+   * an object may block. A parked task is read from pi's state, as an
+   * earlier open may have parked it and reset before it ended the turn.
+   * The turn takes its notices again, as its run did.
    */
   async setUpStored(): Promise<void> {
     const request = await this.#request();
     if (!this.#running || request === undefined) {
       return;
     }
+    this.#noticesFor = request.turnId;
+    const { tasks } = await this.#harness.inspect(context);
+    this.#parked = tasks.some(
+      ({ state }) =>
+        state.kind === "blocked" && state.reason === "restart_limit"
+    );
     try {
       await this.#setUp(request);
       const { withheld } = await this.#host(request.scope).turnGuard(

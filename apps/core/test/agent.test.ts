@@ -1198,6 +1198,50 @@ describe("chat agent after a restart", () => {
     });
   });
 
+  it("takes a notice for a turn a restart of both objects cut short when it is the first call to reach its ChatSession", async () => {
+    const { id, stub, chat, provider, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
+      ),
+      says("Noted.")
+    );
+    void ask("What is 6 * 7?").catch(() => "settled");
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    await restart(id);
+    const session = () => chatSession(env, id, chat.id);
+    await runInDurableObject(session(), (_, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The turn's ID, as its question was submitted with it.
+    const [turn] = await runInDurableObject(session(), (_, state) =>
+      state.storage.sql
+        .exec<{ turnId: string }>(
+          "SELECT json_extract(record, '$.requestId') AS turnId FROM pi_submissions ORDER BY id LIMIT 1"
+        )
+        .toArray()
+    );
+    // How a build job of the turn ended, as its Workspace tells it.
+    const notice = `Build job ${crypto.randomUUID()} ended.`;
+    await session().notify(turn?.turnId ?? "", crypto.randomUUID(), notice);
+    await vi.waitFor(
+      () => {
+        expect(
+          provider.requests.some(({ body }) =>
+            JSON.stringify(body).includes(notice)
+          )
+        ).toBeTruthy();
+      },
+      { timeout: 15_000 }
+    );
+  });
+
   it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession", async () => {
     const answer = pausedReply(says("42."), 1);
     const { id, stub, chat, personId, ask } = await newChat(

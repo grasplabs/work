@@ -1,17 +1,21 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatMessage } from "@grasp-os/shared/chat";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, PurgeInput } from "@grasp-os/shared/knowledge";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResponse, withheldResult } from "../src/agent.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
   personalChatsOf,
@@ -925,6 +929,81 @@ describe("a chat's Knowledge", setUpTime, () => {
           holdsSecret: false,
         }))
     );
+  });
+
+  it("ends a turn a restart cut short once what it read was revoked, sends what it read in no later request, and rebases before the next question", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const secret = `CANARY-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "everyone",
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "doc.md",
+      text: `# Route plan\n\nDeparts ${secret}.`,
+      ifVersion: 0,
+    });
+    // The answer after the read pauses: the turn is still under way.
+    const answer = pausedReply(says(`It departs ${secret}.`), 1);
+    const { id, stub, chat, provider, ask, agent } = await chatOf(
+      person.userId,
+      codeStep(readCode(documentId)),
+      answer.reply,
+      says("I can't read that any more."),
+      says("Still not.")
+    );
+    const plansGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    const asked = ask("When does the route plan depart?").then(
+      () => "ended",
+      () => "ended"
+    );
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    await admin.api.permissions.revoke(plansGrant);
+    // The chat's object restarts mid-turn, and wakes again.
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    await runInDurableObject(session(), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    await runDurableObjectAlarm(session());
+    answer.release();
+    const ended = await asked;
+    const afterRevoke = provider.requests.length;
+    await ask("And now?");
+    // Granted again, it stays out: the context was rebased before that
+    // question's first request.
+    await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    await ask("And now?");
+    const later = provider.requests
+      .slice(afterRevoke)
+      .map(({ body }) => JSON.stringify(body));
+    const results = await codeResults(stub, chat.id);
+    expect({
+      ended,
+      later: later.map((body) => body.includes(secret)),
+      transcript: results.some(({ text }) => text.includes(secret)),
+    }).toStrictEqual({
+      ended: "ended",
+      later: [false, false],
+      // The person still sees what was read.
+      transcript: true,
+    });
   });
 
   it("withholds what a read or a search handed over once its document is gone, though its collection may still be read", async () => {
