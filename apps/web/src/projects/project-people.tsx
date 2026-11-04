@@ -61,10 +61,6 @@ const AddPerson = ({ project }: { project: Project }) => {
   const [candidates, setCandidates] = useState<ProjectShareCandidates>();
   const [chosen, setChosen] = useState("");
   const [role, setRole] = useState<ProjectRole>("user");
-  const inIt = new Set([
-    `person:${project.owner.id}`,
-    ...project.members.map(({ type, id }) => `${type}:${id}`),
-  ]);
   const read = async (): Promise<void> => {
     if (candidates !== undefined) {
       return;
@@ -98,13 +94,12 @@ const AddPerson = ({ project }: { project: Project }) => {
       );
     });
     setChosen("");
+    // Read again when next opened: whoever was just added isn't offered.
+    setCandidates(undefined);
   };
-  const people = (candidates?.people ?? []).filter(
-    ({ id }) => !inIt.has(`person:${id}`)
-  );
-  const teams = (candidates?.teams ?? []).filter(
-    ({ id }) => !inIt.has(`team:${id}`)
-  );
+  // Core offers only who isn't in it yet, its owner included.
+  const people = candidates?.people ?? [];
+  const teams = candidates?.teams ?? [];
   return (
     <form
       className="flex flex-col gap-1"

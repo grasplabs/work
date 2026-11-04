@@ -39,6 +39,7 @@ import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { and, asc, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import {
   appsSharedWithProject,
@@ -244,11 +245,14 @@ const countsIn = async (
         FROM ${itemRowsSql(ids)} AS items WHERE ${opensSql(visible)}
         GROUP BY items.projectId, items.type`
     ),
-    // The connections its items hold a grant on that isn't revoked, each once.
+    // The connections its items hold a grant on that isn't revoked, each
+    // once. CROSS JOIN keeps SQLite on the project's items first, then the
+    // grants' subject index: left to choose without statistics, it walked
+    // every connection grant in the organization.
     db.all<{ projectId: string; count: number }>(
       sql`SELECT items.projectId AS projectId, count(DISTINCT ${permissions.objectId}) AS count
         FROM ${itemRowsSql(ids)} AS items
-        JOIN ${permissions} ON ${permissions.subjectType} = items.type AND ${permissions.subjectId} = items.id
+        CROSS JOIN ${permissions} ON ${permissions.subjectType} = items.type AND ${permissions.subjectId} = items.id
         WHERE ${permissions.objectType} = 'connection' AND ${permissions.status} <> 'revoked'
           AND ${opensSql(visible)}
         GROUP BY items.projectId`
@@ -889,8 +893,13 @@ export const projectShareCandidates = async (
   id: unknown
 ): Promise<ProjectShareCandidates> => {
   requireNotStaff(by);
-  await requireProjectRole(env, by, id, "builder");
+  const { project } = await requireProjectRole(env, by, id, "builder");
   const db = drizzle(env.DB);
+  // Who is in it already, its owner included, isn't offered: adding them
+  // again would change their role, and the page shows only its first
+  // members.
+  const inIt = (type: "person" | "team", column: SQLiteColumn) =>
+    sql`NOT EXISTS (SELECT 1 FROM ${projectMembers} WHERE ${projectMembers.projectId} = ${project.id} AND ${projectMembers.memberType} = ${type} AND ${projectMembers.memberId} = ${column})`;
   const [people, organizationTeams] = await Promise.all([
     db
       .select({ id: users.id, name: users.name })
@@ -899,14 +908,18 @@ export const projectShareCandidates = async (
       .where(
         and(
           eq(members.organizationId, organizationId),
-          notRemoved(members.userId)
+          notRemoved(members.userId),
+          ne(users.id, project.ownerId),
+          inIt("person", users.id)
         )
       )
       .orderBy(asc(users.name), asc(users.id)),
     db
       .select({ id: teams.id, name: teams.name })
       .from(teams)
-      .where(eq(teams.organizationId, organizationId))
+      .where(
+        and(eq(teams.organizationId, organizationId), inIt("team", teams.id))
+      )
       .orderBy(asc(teams.name), asc(teams.id)),
   ]);
   return { people, teams: organizationTeams };

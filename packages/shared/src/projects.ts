@@ -188,7 +188,10 @@ export interface ProjectItemCandidate extends ProjectItemRef {
   builds: boolean;
 }
 
-/** The organization's people and teams, by name, to add to a project. */
+/**
+ * The organization's people and teams, by name, to add to a project: all
+ * but who is in it already, its owner included.
+ */
 export interface ProjectShareCandidates {
   people: { id: string; name: string }[];
   teams: { id: string; name: string }[];

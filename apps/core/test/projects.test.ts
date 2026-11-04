@@ -120,6 +120,12 @@ describe("projects", { timeout: 120_000 }, () => {
     });
     const asOwner = await owner.api.projects.get(project);
     const asAda = await ada.api.projects.get(project);
+    // Paging on from before the first item, past what `get` showed.
+    const adaPaged = await ada.api.projects.items(project, {
+      at: new Date(0).toISOString(),
+      type: "app",
+      id: "0",
+    });
     const listed = await ada.api.projects.list();
 
     expect({
@@ -127,6 +133,7 @@ describe("projects", { timeout: 120_000 }, () => {
         .map(({ type, sharedAs }) => ({ type, sharedAs }))
         .toSorted((one, other) => one.type.localeCompare(other.type)),
       adaItems: asAda.items,
+      adaPaged: adaPaged.items,
       adaCounts: listed.find(({ id }) => id === project)?.counts,
       adaWorkflow: await seesWorkflow(ada, workflow),
       adaApp: await outcome(ada.api.apps.get(app)),
@@ -139,6 +146,7 @@ describe("projects", { timeout: 120_000 }, () => {
         { type: "workflow", sharedAs: null },
       ],
       adaItems: [],
+      adaPaged: [],
       adaCounts: { apps: 0, workflows: 0, connections: 0 },
       adaWorkflow: "workflow.resource_unavailable",
       adaApp: "app.not_found",
@@ -188,6 +196,8 @@ describe("projects", { timeout: 120_000 }, () => {
       role: "user",
     });
     const { name } = await owner.api.projects.get(project);
+    // Who is in it already, its owner included, isn't offered to add.
+    const offered = await owner.api.projects.shareCandidates(project);
     const projectRow = async (who: Person) => {
       const members = await who.api.workflowResources.members(workflow);
       return members
@@ -215,6 +225,13 @@ describe("projects", { timeout: 120_000 }, () => {
       rowForAda: await projectRow(ada),
       rowForOutsider: await projectRow(outsider),
       appRowForTeammate: await appRow(teammate),
+      offeredAgain: [
+        ...offered.people.filter(({ id }) =>
+          [owner.userId, ada.userId].includes(id)
+        ),
+        ...offered.teams.filter(({ id }) => id === team),
+      ],
+      offersOthers: offered.people.some(({ id }) => id === outsider.userId),
     }).toStrictEqual({
       ada: "ok",
       teammate: "ok",
@@ -229,6 +246,8 @@ describe("projects", { timeout: 120_000 }, () => {
       rowForAda: [{ id: project, projectName: name, role: "user" }],
       rowForOutsider: [{ id: project, projectName: null, role: "user" }],
       appRowForTeammate: [{ id: project, name, role: "user" }],
+      offeredAgain: [],
+      offersOthers: true,
     });
   });
 
@@ -348,6 +367,21 @@ describe("projects", { timeout: 120_000 }, () => {
         stranger.api.projects.update(project, { name: "Mine" })
       ),
       strangerDelete: await outcome(stranger.api.projects.remove(project)),
+      // Paging on from a cursor reads nothing of a project they aren't in.
+      strangerItems: await outcome(
+        stranger.api.projects.items(project, {
+          at: new Date(0).toISOString(),
+          type: "workflow",
+          id: ownersOnly,
+        })
+      ),
+      strangerMembers: await outcome(
+        stranger.api.projects.members(project, {
+          at: new Date(0).toISOString(),
+          type: "person",
+          id: member.userId,
+        })
+      ),
       // Sharing an item of their own with someone else's project.
       strangerShares: await outcome(
         stranger.api.workflowResources.share(await workflowOf(stranger), {
@@ -404,6 +438,8 @@ describe("projects", { timeout: 120_000 }, () => {
       strangerGet: "project.not_found",
       strangerRename: "project.not_found",
       strangerDelete: "project.not_found",
+      strangerItems: "project.not_found",
+      strangerMembers: "project.not_found",
       strangerShares: "project.not_found",
       strangerCandidates: false,
       memberGet: "ok",
