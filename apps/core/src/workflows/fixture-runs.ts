@@ -28,6 +28,7 @@ import type { RunStep } from "./host.ts";
 import { quotaLimits } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
+import { generatedForRunHost } from "./sealed-run.ts";
 
 // Runs an App's tests start (spec 28.2, `workflowTest`): a test principal
 // starts a workflow the release under test binds, and the run is real:
@@ -448,7 +449,10 @@ const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
 /**
  * How many times test run `runId`'s task `task` completed its step: each
- * time the engine recorded it so, once however often it was replayed.
+ * time the engine recorded it so, once however often it was replayed. The
+ * step is named as its build names it: `<task>:task` on the run host
+ * (sealed-run.ts), `task:<task>` on resource-host.ts. None once the run's
+ * record is gone.
  */
 export const fixtureTaskCompletions = async (
   env: Env,
@@ -459,9 +463,28 @@ export const fixtureTaskCompletions = async (
   if (!parsed.success) {
     throw operationErrors.create("contract.invalid_args");
   }
-  return (
-    (await runEngine(env).succeededSteps(runId, `task:${parsed.data}`)) ?? 0
+  const row = await drizzle(env.DB)
+    .select({
+      workflow: appTestRuns.workflowResourceId,
+      version: appTestRuns.version,
+      manifest: appTestRuns.manifestHash,
+    })
+    .from(appTestRuns)
+    .where(eq(appTestRuns.runId, runId))
+    .get();
+  if (row === undefined) {
+    return 0;
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    row.workflow,
+    row.version,
+    row.manifest
   );
+  const step = generatedForRunHost(build)
+    ? `${parsed.data}:task`
+    : `task:${parsed.data}`;
+  return (await runEngine(env).succeededSteps(runId, step)) ?? 0;
 };
 
 /** Most left-behind test runs one sweep removes. */

@@ -2284,7 +2284,12 @@ class SealedRun implements SealedRunKind {
           this.#env,
           fixtureRunOf(this.run),
           task.id,
-          attempt.step,
+          // Kept by its step's name with its key decoded (`review:task@0`),
+          // as its test finds a loop item's decision by the indices after
+          // `@` (`respond`'s `at`). The table admitted the name, and only
+          // its one canonical encoding (`stepNameOf`), so decoding keeps
+          // one decision per step.
+          decodeURIComponent(attempt.step),
           built
         );
         this.#requireHolds(attempt);

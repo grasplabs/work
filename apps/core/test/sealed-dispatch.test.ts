@@ -146,6 +146,26 @@ const review = {
   },
 };
 
+/** Asks the fixture's `approver` about each of two items, in turn. */
+const batch = {
+  batch: {
+    for: { each: "w", at: "i", in: '${ ["a", "b"] }' },
+    do: [
+      {
+        sign: {
+          call: "grasp.decision",
+          with: {
+            binding: "approval",
+            recipients: ["person:approver"],
+            prompt: "Approve this one?",
+            input: { who: "${ $w }" },
+          },
+        },
+      },
+    ],
+  },
+};
+
 /** The workflow SDK, by the flat name the sealed build has it. */
 const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 
@@ -190,6 +210,25 @@ export default workflow("sealed", { params: {}, input: z.object({ who: z.string(
   const told = [];
   const decided = await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
   return { status: \`\${decided.approved ? "approved" : "rejected"} by \${decided.by}, told \${told.join(",")}\` };
+});
+`;
+
+/**
+ * The module the generator for the run host writes for `linger` then
+ * `batch`, one item after another: its output each item's answer.
+ */
+const batchModule = `
+import { workflow, z } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step) => {
+  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
+  const { items } = await step.do("batch", { key: "enter", description: "Its items" }, async () => ({ items: ["a", "b"] }));
+  const answers = [];
+  for (let at = 0; at < items.length; at += 1) {
+    await step.do("sign", { key: "enter@" + at, description: "Its ask" }, async () => ({ recipients: ["person:approver"], prompt: "Approve this one?", input: { who: items[at] } }));
+    const decided = await step.decision("sign", { key: "task@" + at, description: "Approve this one?", from: "person:approver", timeout: "365 days", ask: async () => undefined });
+    answers.push(decided.approved);
+  }
+  return { status: answers.join(",") };
 });
 `;
 
@@ -824,6 +863,72 @@ describe(
           },
         ],
         organization: { decisions: 0, asked: 0 },
+      });
+    });
+
+    it("finds an App test's answer to a loop item's decision on the run host by its item, as `respond`'s `at` names it", async () => {
+      const app = await requestsApp([linger, batch], {
+        deciders: { approval: ["approver"] },
+      });
+      const host = fixtureHostFor(env, app.release, app.files);
+      const session = await host.open("desk", `test-${unique()}`);
+      const started = z
+        .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
+        .parse(
+          JSON.parse(
+            await session.start(
+              "desk-user",
+              await startOf(app.release, { who: "Ada" })
+            )
+          )
+        );
+      const { runId, pin } = await fixtureRunOf(app.app);
+      // Each wait answers the item it waits for: the first approved, the
+      // second declined, each found by its item alone.
+      const answers: unknown[] = [];
+      const { step, leaseOf } = newerEngine();
+      const engine: Engine = {
+        leaseOf,
+        step: {
+          ...step,
+          waitForEvent: async () => {
+            const at = answers.length;
+            answers.push(
+              JSON.parse(
+                await session.respond(
+                  "approver",
+                  started.value.run,
+                  JSON.stringify({ task: "sign", approved: at === 0, at: [at] })
+                )
+              )
+            );
+            const timedOut = new Error("Execution timed out");
+            timedOut.name = "WorkflowTimeoutError";
+            return await Promise.reject(timedOut);
+          },
+        },
+      };
+      const ended = await ranOnRunHost(
+        await fixtureActivation(env, pin, runId),
+        batchModule,
+        { engine }
+      );
+      const kept = await env.DB.prepare(
+        "SELECT step, status FROM app_test_decisions WHERE run_id = ? ORDER BY step"
+      )
+        .bind(runId)
+        .all();
+      await session.close();
+      expect({ ended, answers, kept: kept.results }).toStrictEqual({
+        ended: { status: "true,false" },
+        answers: [
+          { ok: true, value: null },
+          { ok: true, value: null },
+        ],
+        kept: [
+          { step: "sign:task@0", status: "approved" },
+          { step: "sign:task@1", status: "rejected" },
+        ],
       });
     });
 
