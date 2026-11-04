@@ -519,7 +519,7 @@ const newRequest = (
   endedAt: null,
   endedGeneration: null,
   endedReason: null,
-  scannedAt: null,
+  malwareCheckedAt: null,
   advisoriesNoticed: null,
 });
 
@@ -2227,7 +2227,10 @@ const noticeAdvisories = async (
   const fresh = found.filter(({ advisory }) => !known.has(advisory.id));
   const [first] = fresh;
   if (first === undefined) {
-    await db.update(dependencyRequests).set({ scannedAt: at }).where(inForce);
+    await db
+      .update(dependencyRequests)
+      .set({ malwareCheckedAt: at })
+      .where(inForce);
     return;
   }
   // What was known, and what is told now: never told again.
@@ -2273,7 +2276,7 @@ const noticeAdvisories = async (
     ),
     db
       .update(dependencyRequests)
-      .set({ scannedAt: at, advisoriesNoticed: noticed })
+      .set({ malwareCheckedAt: at, advisoriesNoticed: noticed })
       .where(and(inForce, storedEvent(recorded.id))),
     ...packageNoticed(db, {
       type: "package_advisory",
@@ -2396,9 +2399,9 @@ export const rescanPackages = async (
       and(
         inArray(dependencyRequests.status, ["approved", "retired"]),
         or(
-          isNull(dependencyRequests.scannedAt),
+          isNull(dependencyRequests.malwareCheckedAt),
           lt(
-            dependencyRequests.scannedAt,
+            dependencyRequests.malwareCheckedAt,
             new Date(at.getTime() - malwareRecheckMs)
           )
         )
@@ -2409,7 +2412,7 @@ export const rescanPackages = async (
       dependencyRequests.subjectId,
       dependencyRequests.graphHash
     )
-    .orderBy(sql`MIN(coalesce(${dependencyRequests.scannedAt}, 0))`)
+    .orderBy(sql`MIN(coalesce(${dependencyRequests.malwareCheckedAt}, 0))`)
     .limit(malwareRecheckGraphs);
   for (const graph of due) {
     // oxlint-disable-next-line no-await-in-loop -- one graph at a time, bounded
