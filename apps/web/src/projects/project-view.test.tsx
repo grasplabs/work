@@ -70,7 +70,30 @@ const project = (role: Project["role"]): Project => ({
 });
 
 /** Core's projects API, keeping each call it was asked. */
-const fakeProjects = () => {
+/** Desk, an App filed after Invoices. */
+const desk: ProjectItemsPage["items"][number] = {
+  type: "app",
+  id: "app-desk",
+  name: "Desk",
+  sharedAs: null,
+  builds: true,
+  addedAt: "2026-11-02T10:00:00.000Z",
+};
+
+/** Invoices again, moved later by a share changed since it was shown. */
+const invoicesMoved: ProjectItemsPage["items"][number] = {
+  type: "workflow",
+  id: "wf-invoices",
+  name: "Invoices",
+  sharedAs: "builder",
+  builds: true,
+  addedAt: "2026-11-01T12:00:00.000Z",
+};
+
+const fakeProjects = (
+  pages: ProjectItemsPage[] = [{ items: [desk], more: false }]
+) => {
+  const left = [...pages];
   const asked: unknown[][] = [];
   const projects = {
     itemCandidates: async (): Promise<ProjectItemCandidate[]> => {
@@ -85,26 +108,14 @@ const fakeProjects = () => {
       await Promise.resolve();
       asked.push(["unfile", item.id]);
     },
-    // The page after Invoices: one more, and then no more.
+    // The pages after Invoices, one each time it is asked.
     items: async (
       _id: string,
       after: ProjectCursor
     ): Promise<ProjectItemsPage> => {
       await Promise.resolve();
       asked.push(["items", after.type, after.id, after.at]);
-      return {
-        items: [
-          {
-            type: "app",
-            id: "app-desk",
-            name: "Desk",
-            sharedAs: null,
-            builds: true,
-            addedAt: "2026-11-02T10:00:00.000Z",
-          },
-        ],
-        more: false,
-      };
+      return left.shift() ?? { items: [], more: false };
     },
   };
   return { session: { projects }, asked };
@@ -277,6 +288,32 @@ describe("A project's page", () => {
       after: true,
       showMore: undefined,
       asked: [["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"]],
+    });
+  });
+
+  it("moves on past a page made only of items shown already", async () => {
+    const { session, asked } = fakeProjects([
+      { items: [invoicesMoved], more: true },
+      { items: [desk], more: false },
+    ]);
+    await shown(session, { ...project("user"), moreItems: true });
+
+    await press(button("Show more"));
+    await press(button("Show more"));
+
+    expect({
+      desk: document.body.textContent?.includes("Desk"),
+      invoicesShown: [...document.querySelectorAll("li")].filter((row) =>
+        row.textContent?.includes("Invoices")
+      ).length,
+      asked,
+    }).toStrictEqual({
+      desk: true,
+      invoicesShown: 1,
+      asked: [
+        ["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"],
+        ["items", "workflow", "wf-invoices", "2026-11-01T12:00:00.000Z"],
+      ],
     });
   });
 });

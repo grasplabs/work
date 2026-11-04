@@ -43,13 +43,17 @@ export const usePages = <T extends Paged>(
     from: object;
     rest: T[];
     more: boolean;
+    /** The last row core returned: the next page goes on after it. */
+    last: T | undefined;
   }>();
   // Pages read for another reading of the project are dropped.
   const current = loaded?.from === from ? loaded : undefined;
   const all = [...first, ...(current?.rest ?? [])];
   const more = current?.more ?? firstMore;
   const readMore = async (): Promise<void> => {
-    const last = all.at(-1);
+    // After the last row core returned, not the last shown: a page whose
+    // rows were all shown already still moves on.
+    const last = current === undefined ? first.at(-1) : current.last;
     if (last === undefined) {
       return;
     }
@@ -67,6 +71,7 @@ export const usePages = <T extends Paged>(
           ...page.list.filter(({ type, id }) => !shown.has(`${type}:${id}`)),
         ],
         more: page.more,
+        last: page.list.at(-1) ?? last,
       });
     }
   };
