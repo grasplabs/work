@@ -571,7 +571,7 @@ msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
 msgid "{each} a run"
 msgstr "{each} per run"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "{event}, at {account}"
 msgstr "{event}, bij {account}"
 
@@ -678,6 +678,10 @@ msgstr "{inDays, plural, one {Je volgende rapport is morgen klaar} other {Je vol
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
 msgstr "{invited, plural, one {Stakeholders van {interviewed} van # uitgenodigd team} other {Stakeholders van {interviewed} van # uitgenodigde teams}}"
+
+#: src/activity/pending.tsx
+msgid "{kind} ({what})"
+msgstr "{kind} ({what})"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{kind}, {severity}, {about}: {summary}"
@@ -1625,11 +1629,11 @@ msgstr "per maand"
 msgid "A name has no [, ], # or |, and no empty folders."
 msgstr "Een naam bevat geen [, ], # of | en geen lege mappen."
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "A new file in Google Drive"
 msgstr "Een nieuw bestand in Google Drive"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "A new file in Microsoft 365"
 msgstr "Een nieuw bestand in Microsoft 365"
 
@@ -1791,8 +1795,8 @@ msgid "A topic"
 msgstr "Een onderwerp"
 
 #: src/workflows/workflow-triggers-tab.tsx
-msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow: it starts nothing until they do."
-msgstr "Een trigger start zelf een run, namens wie hem heeft gemaakt. Wie er een toevoegt, vraagt een beheerder om hem deze workflow te laten starten: tot dan start hij niets."
+msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
+msgstr "Een trigger start zelf een run, namens wie hem heeft gemaakt. Wie er een toevoegt, vraagt een beheerder om hem deze workflow te laten starten, en een trigger op een koppeling om daar de gebeurtenissen te lezen: tot dan start hij niets."
 
 #: src/workflows/version-source.tsx
 msgid "A version's definition and source"
@@ -2355,6 +2359,10 @@ msgstr "Een beheerder koppelt dit voor iedereen."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "Een beheerder heeft het bedrijfsgeheugen nog niet ingesteld."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An admin refused or took back its reading of these events: it hears nothing."
+msgstr "Een beheerder heeft het lezen van deze gebeurtenissen geweigerd of ingetrokken: hij hoort niets."
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "An admin refused or took back its start: it starts nothing."
@@ -4299,6 +4307,10 @@ msgstr "Koppeling {connectionId}"
 msgid "Connection {connectionId}, {resource}"
 msgstr "Koppeling {connectionId}, {resource}"
 
+#: src/workflows/trigger-description.ts
+msgid "Connection trigger"
+msgstr "Koppelingstrigger"
+
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 msgid "Connections"
@@ -5137,6 +5149,10 @@ msgstr "E-mail en agenda"
 msgid "Email and sign-ins"
 msgstr "E-mail en aanmeldingen"
 
+#: src/workflows/trigger-description.ts
+msgid "Email trigger"
+msgstr "E-mailtrigger"
+
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Medewerker"
@@ -5233,6 +5249,10 @@ msgstr "Europese Unie"
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Event"
 msgstr "Gebeurtenis"
+
+#: src/workflows/trigger-description.ts
+msgid "Event trigger"
+msgstr "Gebeurtenistrigger"
 
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
@@ -6833,6 +6853,10 @@ msgstr "Er zijn geen stappen."
 msgid "It has recorded no step yet."
 msgstr "Er is nog geen stap vastgelegd."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It hears nothing until an admin allows it to read these events on its connection."
+msgstr "Hij hoort niets tot een beheerder hem deze gebeurtenissen op zijn koppeling laat lezen."
+
 #: src/brain/forget.tsx
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Het is voorgoed weg en kan niet worden teruggehaald. Het auditlogboek houdt bij dat het is verwijderd en door wie, nooit wat het was."
@@ -8187,11 +8211,11 @@ msgstr "Nieuw in {projectName}"
 msgid "New key for {label}"
 msgstr "Nieuwe sleutel voor {label}"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "New mail in Google"
 msgstr "Nieuwe mail in Google"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "New mail in Microsoft 365"
 msgstr "Nieuwe mail in Microsoft 365"
 
@@ -8267,6 +8291,10 @@ msgstr "Nee"
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "Geen {onlySignIn}? Een personeelslijst werkt ook."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No admin has been asked to let it read these events on its connection: it hears nothing until one allows it."
+msgstr "Er is nog geen beheerder gevraagd om hem deze gebeurtenissen op zijn koppeling te laten lezen: hij hoort niets tot er een dat toestaat."
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "No admin has been asked to let it start this workflow: it starts nothing until one allows it."
@@ -9240,9 +9268,9 @@ msgstr "bij mail aan {address}@"
 msgid "on the event {event}, filtered"
 msgstr "bij de gebeurtenis {event}, gefilterd"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "On the schedule <0>{cron}</0>, in {zone}"
-msgstr "Volgens het schema <0>{cron}</0>, in {zone}"
+#: src/workflows/trigger-description.ts
+msgid "On the schedule {cron}, in {zone}"
+msgstr "Volgens het schema {cron}, in {zone}"
 
 #: src/workflows/triggers.tsx
 msgid "On the schedule set by {param} ({timeZone})"
@@ -11620,6 +11648,10 @@ msgstr "Wordt opgeschaald"
 #: src/workflows/workflows-table.tsx
 msgid "Schedule stopped"
 msgstr "Schema gestopt"
+
+#: src/workflows/trigger-description.ts
+msgid "Schedule trigger"
+msgstr "Schematrigger"
 
 #: src/engines/apps-overview.tsx
 #: src/routes/_shell.settings.members.tsx
@@ -15230,6 +15262,10 @@ msgstr "We openen je platform zodra we alles met je hebben nagelopen. Je hoort v
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "We willen minder tijd kwijt zijn aan herhaalwerk, zodat er meer tijd is voor onze klanten. Het gaat om hoe het werk loopt, niet om banen."
 
+#: src/workflows/trigger-description.ts
+msgid "Webhook trigger"
+msgstr "Webhooktrigger"
+
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Webhook URL"
 msgstr "Webhook-URL"
@@ -15637,7 +15673,7 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Wanneer"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Wanneer {account} een gebeurtenis meldt"
 
@@ -15645,8 +15681,12 @@ msgstr "Wanneer {account} een gebeurtenis meldt"
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 msgstr "Als een taak steeds op dezelfde manier mislukt, noteert het Brein dat hier als een les die je kunt nakijken."
 
+#: src/workflows/trigger-description.ts
+msgid "When an email arrives at its own address"
+msgstr "Wanneer er een e-mail op zijn eigen adres binnenkomt"
+
+#: src/workflows/trigger-description.ts
 #: src/workflows/triggers.tsx
-#: src/workflows/workflow-triggers-tab.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "Wanneer er een e-mail binnenkomt voor {localPart}"
 
@@ -15654,7 +15694,7 @@ msgstr "Wanneer er een e-mail binnenkomt voor {localPart}"
 msgid "When it goes differently"
 msgstr "Als het anders gaat"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "When its webhook is called"
 msgstr "Wanneer zijn webhook wordt aangeroepen"
 
@@ -15666,7 +15706,7 @@ msgstr "als iemand hem start"
 msgid "When the event {event} happens"
 msgstr "Wanneer de gebeurtenis {event} plaatsvindt"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/workflows/trigger-description.ts
 msgid "When the event {type} is sent"
 msgstr "Wanneer de gebeurtenis {type} wordt verstuurd"
 

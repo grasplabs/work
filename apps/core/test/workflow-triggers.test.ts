@@ -1,8 +1,18 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import type { Permission } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import {
+  triggerEventsRequest,
+  triggerStartRequest,
+} from "@grasp-os/shared/workflow-triggers";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import {
+  deliverConnectorEvent,
+  listenersOf,
+} from "../src/workflows/connector-events.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -108,6 +118,10 @@ const loggedAbout = async (id: string) => {
     }));
 };
 
+/** The trigger holding a permission, if a trigger does. */
+const triggerOf = ({ subject }: Pick<Permission, "subject">): string =>
+  subject.type === "trigger" ? subject.triggerId : "";
+
 describe("an independent workflow's triggers over /rpc", () => {
   it("are created by a builder of the workflow, acting for them, shown with their configuration, and audited", async () => {
     const { owner, workflow, trigger } = await ownerWithTrigger();
@@ -137,6 +151,8 @@ describe("an independent workflow's triggers over /rpc", () => {
         stopped: false,
         // It asks an admin for its start as it is created.
         start: "requested",
+        // It hears no connection.
+        events: null,
       },
       nextAtIsAhead: true,
       listed: [trigger],
@@ -446,5 +462,175 @@ describe("an independent workflow's triggers over /rpc", () => {
       nextAt: trigger.nextAt,
       listed: await owner.api.workflowResources.triggers.list(workflow),
     }).toStrictEqual({ config, nextAt: null, listed: [trigger] });
+  });
+
+  it("ask an admin, as a connector trigger is created, to start and to read its event on exactly its connection, named by what they are, and once granted hear and start", async () => {
+    const owner = await personApi("builder");
+    const decider = await personApi("admin");
+    const workflow = await reporting(owner);
+    const connectionId = `connection-${unique()}`;
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, account_name, account_email, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', '[]', ?, ?, ?, ?)"
+      )
+      .bind(connectionId, owner.userId, "Mail", "mail@acme.test", now, now)
+      .run();
+    const mailbox = "reports@acme.test";
+    const { triggers } = owner.api.workflowResources;
+    const trigger = await triggers.create({
+      kind: "connector",
+      workflowId: workflow,
+      version: 1,
+      config: {
+        connection: { connectionId, resource: mailbox },
+        event: "m365.mail.received",
+        input: { fields: { report: "/payload/subject" }, defaults: {} },
+      },
+    });
+    const schedule = await nightlyTrigger(owner, workflow);
+    const standing = async () => {
+      const listed = await triggers.list(workflow);
+      return listed.map(({ id, start, events }) => ({
+        id,
+        start,
+        events,
+      }));
+    };
+    // What the admin's pending list shows of these triggers' requests.
+    const waitingFor = async () => {
+      const { items } = await decider.api.waiting.list();
+      return items.flatMap((item) =>
+        item.kind === "permissionRequest" &&
+        item.request.subject.type === "trigger" &&
+        [trigger.id, schedule.id].includes(item.request.subject.triggerId)
+          ? [item.request]
+          : []
+      );
+    };
+    const settle = async (id: string, verdict: "grant" | "reject") => {
+      await decider.api.waiting.settle(
+        verdict === "grant"
+          ? {
+              kind: "permissionRequest",
+              id,
+              verdict,
+              reviewed: { version: null },
+            }
+          : { kind: "permissionRequest", id, verdict }
+      );
+    };
+    const listening = async () => {
+      const listeners = await listenersOf(env);
+      return listeners.some(
+        (listener) =>
+          listener.connection === connectionId &&
+          listener.resource === mailbox &&
+          listener.owner === owner.userId
+      );
+    };
+    const event = (id: string) => ({
+      id,
+      connection: connectionId,
+      owner: owner.userId,
+      resource: mailbox,
+      action: "mail.list",
+      type: "m365.mail.received",
+      payload: { subject: "Weekly" },
+    });
+
+    const asked = await waitingFor();
+    const created = {
+      standing: await standing(),
+      // In the feed's order, which this test doesn't decide: the
+      // connector trigger's first, each start before its events.
+      shown: asked
+        .map(({ subject, object, actions, binding, trigger: what }) => ({
+          subject,
+          object,
+          actions,
+          binding,
+          trigger: what,
+        }))
+        .toSorted(
+          (one, other) =>
+            Number(triggerOf(one) === schedule.id) -
+              Number(triggerOf(other) === schedule.id) ||
+            other.binding.localeCompare(one.binding)
+        ),
+      listening: await listening(),
+    };
+    // Refused its events, then asked again for them as the tab does.
+    const events = asked.find(({ binding }) => binding === "EVENTS");
+    await settle(events?.id ?? "", "reject");
+    const refused = await standing();
+    const again = triggerEventsRequest(
+      trigger.id,
+      { connectionId, resource: mailbox },
+      "m365.mail.received"
+    );
+    if (again === undefined) {
+      throw new Error("Expected a request for its events");
+    }
+    await owner.api.permissions.request(again);
+    for (const each of await waitingFor()) {
+      if (triggerOf(each) === trigger.id) {
+        // oxlint-disable-next-line no-await-in-loop -- one decision after another
+        await settle(each.id, "grant");
+      }
+    }
+    const granted = {
+      standing: await standing(),
+      listening: await listening(),
+      delivered: await deliverConnectorEvent(env, event(crypto.randomUUID())),
+    };
+
+    const subject = { type: "trigger", triggerId: trigger.id };
+    const summary = {
+      kind: "connector",
+      schedule: null,
+      event: "m365.mail.received",
+      connection: { connectionId, resource: mailbox },
+    };
+    expect({ created, refused, granted }).toStrictEqual({
+      created: {
+        standing: [
+          { id: trigger.id, start: "requested", events: "requested" },
+          { id: schedule.id, start: "requested", events: null },
+        ],
+        shown: [
+          { ...triggerStartRequest(trigger.id, workflow), trigger: summary },
+          {
+            subject,
+            object: { type: "connection", connectionId, resource: mailbox },
+            actions: ["mail.list"],
+            binding: "EVENTS",
+            trigger: summary,
+          },
+          {
+            ...triggerStartRequest(schedule.id, workflow),
+            trigger: {
+              kind: "schedule",
+              schedule: nightly.schedule,
+              event: null,
+              connection: null,
+            },
+          },
+        ],
+        listening: false,
+      },
+      refused: [
+        { id: trigger.id, start: "requested", events: "revoked" },
+        { id: schedule.id, start: "requested", events: null },
+      ],
+      granted: {
+        standing: [
+          { id: trigger.id, start: "active", events: "active" },
+          { id: schedule.id, start: "requested", events: null },
+        ],
+        listening: true,
+        delivered: { runs: 1 },
+      },
+    });
   });
 });

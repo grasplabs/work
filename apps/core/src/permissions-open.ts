@@ -9,7 +9,10 @@ import { requireStoreManager } from "./data-stores.ts";
 import { sdkStoreOwners } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { listPermissions } from "./permissions.ts";
-import { requireTriggerManager } from "./trigger-resources.ts";
+import {
+  requireTriggerManager,
+  triggerSummaries,
+} from "./trigger-resources.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 
 // The permissions a person may see: the one filter every reader of them
@@ -164,7 +167,9 @@ const resourcesOpen = async (
  * (`appsFoundBy`) and may open now: one that read what they can't read
  * (`app.unreadable`) shows none of its permissions either. Each App named
  * is checked once. One naming an independent workflow, store or trigger
- * only if they have a role in it or manage it (`resourcesOpen`).
+ * only if they have a role in it or manage it (`resourcesOpen`). One a
+ * live trigger holds carries what the trigger is (`trigger`), so whoever
+ * decides it knows which trigger asks.
  */
 export const permissionsOpenTo = async (
   env: Env,
@@ -223,5 +228,17 @@ export const permissionsOpenTo = async (
       open.push(permission);
     }
   }
-  return open;
+  const triggers = await triggerSummaries(
+    env,
+    open.flatMap(({ subject: of }) =>
+      of.type === "trigger" ? [of.triggerId] : []
+    )
+  );
+  return open.map((permission) => {
+    const trigger =
+      permission.subject.type === "trigger"
+        ? triggers.get(permission.subject.triggerId)
+        : undefined;
+    return trigger === undefined ? permission : { ...permission, trigger };
+  });
 };

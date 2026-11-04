@@ -7,6 +7,7 @@ import {
   connectionIdSchema,
   permissionIdSchema,
   runIdSchema,
+  triggerIdSchema,
   workflowIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
@@ -400,6 +401,83 @@ describe(inboxItems, () => {
       about: { kind: "integration", integration: "native:microsoft" },
       urgent: true,
     });
+  });
+
+  it("names a trigger asking for a permission by its kind and what starts it", () => {
+    const triggerAsks = (
+      id: string,
+      object: Permission["object"],
+      actions: string[],
+      trigger?: Permission["trigger"]
+    ): Permission => ({
+      ...request,
+      id: permissionIdSchema.parse(id),
+      subject: { type: "trigger", triggerId: triggerIdSchema.parse(id) },
+      object,
+      actions,
+      ...(trigger === undefined ? {} : { trigger }),
+    });
+    const workflow = {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse("workflow-1"),
+    } as const;
+    const read = waiting();
+    read.requests = {
+      state: "ready",
+      data: {
+        requests: [
+          triggerAsks("schedule-1", workflow, ["start"], {
+            kind: "schedule",
+            schedule: { cron: "0 9 * * 1-5", timeZone: "Europe/Berlin" },
+            event: null,
+            connection: null,
+          }),
+          triggerAsks(
+            "mail-1",
+            {
+              type: "connection",
+              connectionId: connectionIdSchema.parse("connection-1"),
+            },
+            ["mail.list"],
+            {
+              kind: "connector",
+              schedule: null,
+              event: "m365.mail.received",
+              connection: { connectionId: "connection-1", resource: null },
+            }
+          ),
+          triggerAsks("email-1", workflow, ["start"], {
+            kind: "email",
+            schedule: null,
+            event: null,
+            connection: null,
+          }),
+          triggerAsks("webhook-1", workflow, ["start"], {
+            kind: "webhook",
+            schedule: null,
+            event: null,
+            connection: null,
+          }),
+          // Listed without what it is: by its ID, as before.
+          triggerAsks("unknown-1", workflow, ["start"]),
+        ],
+        directory: { people: new Map(), apps: new Map() },
+      },
+    };
+
+    const titles = inboxItems(read, admin, readAt)
+      .filter(({ kind }) => kind === "permissionRequest")
+      .map(({ context }) => context);
+
+    expect(titles.toSorted()).toStrictEqual(
+      [
+        "Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1",
+        "Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1",
+        "Email trigger (When an email arrives at its own address): start on Workflow workflow-1",
+        "Webhook trigger (When its webhook is called): start on Workflow workflow-1",
+        "Trigger unknown-1: start on Workflow workflow-1",
+      ].toSorted()
+    );
   });
 
   it("puts what blocks something first, then the newest", () => {

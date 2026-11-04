@@ -49,7 +49,10 @@ import {
   roleErrors,
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
+import {
+  triggerEventsRequest,
+  triggerStartRequest,
+} from "@grasp-os/shared/workflow-triggers";
 import {
   and,
   asc,
@@ -1163,25 +1166,42 @@ export const workflowStartRequests = (
   );
 
 /**
- * The request for trigger `trigger`, made by `by` as they create it
- * (trigger-resources.ts), to start workflow `workflowId`, the one it pins:
- * the row and its audit entry, for the batch that creates the trigger, so
- * no trigger is left without a way to be allowed. Like any request, it
- * allows nothing until an admin grants it.
+ * The requests of trigger `trigger`, made by `by` as they create it
+ * (trigger-resources.ts): to start workflow `workflowId`, the one it pins,
+ * and, for a connector trigger, to hear its event on its connection
+ * (`events`, as its version names them). The rows and their audit
+ * entries, for the batch that creates the trigger, so no trigger is left
+ * without a way to be allowed. Like any request, they allow nothing until
+ * an admin grants them.
  */
-export const triggerStartRequest = (
+export const triggerRequests = (
   by: Acting,
   trigger: TriggerId,
-  workflowId: string
-): { rows: Row[]; entries: AuditEntry[] } =>
-  requestsOf(by, { type: "trigger", triggerId: trigger }, [
-    permissionErrors.parse("permission.invalid", permissionRequestSchema, {
-      subject: { type: "trigger", triggerId: trigger },
-      object: { type: "workflow", workflowId },
-      actions: ["start"],
-      binding: triggerStartBinding,
-    }),
-  ]);
+  workflowId: string,
+  events?: {
+    connection: { connectionId: string; resource?: string };
+    event: string;
+  }
+): { rows: Row[]; entries: AuditEntry[] } => {
+  const hears =
+    events === undefined
+      ? undefined
+      : triggerEventsRequest(trigger, events.connection, events.event);
+  return requestsOf(
+    by,
+    { type: "trigger", triggerId: trigger },
+    [
+      triggerStartRequest(trigger, workflowId),
+      ...(hears === undefined ? [] : [hears]),
+    ].map((request) =>
+      permissionErrors.parse(
+        "permission.invalid",
+        permissionRequestSchema,
+        request
+      )
+    )
+  );
+};
 
 /**
  * Tells the chat's agent how its request for `permission` was decided,

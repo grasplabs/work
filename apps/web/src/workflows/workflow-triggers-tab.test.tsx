@@ -44,6 +44,7 @@ const base = {
   workflowVersion: 1,
   createdAt: "2026-10-30T09:00:00.000Z",
   start: "active" as const,
+  events: null,
 };
 
 const stoppedSchedule: WorkflowTrigger = {
@@ -80,6 +81,7 @@ const othersMail: WorkflowTrigger = {
   address: null,
   webhook: null,
   stopped: false,
+  events: "active",
 };
 
 const ownMail: WorkflowTrigger = {
@@ -736,6 +738,80 @@ describe("a workflow's Triggers tab", () => {
           },
         },
       ],
+    });
+  });
+
+  it("says a connection's trigger waits to read its events, beside its start, offering nothing to ask", async () => {
+    await shown(true, false, false, [{ ...othersMail, events: "requested" }]);
+    const text = document.body.textContent;
+
+    expect({
+      waits: text.includes("Waiting for an admin"),
+      events: text.includes(
+        "It hears nothing until an admin allows it to read these events on its connection."
+      ),
+      start: text.includes("allows it to start this workflow"),
+      ask: buttons("Request again").length + buttons("Request").length,
+    }).toStrictEqual({ waits: true, events: true, start: false, ask: 0 });
+  });
+
+  it("asks again, at once, for everything a connection's trigger was refused, under the names it asked with", async () => {
+    const asked = await shown(true, false, false, [
+      {
+        ...othersMail,
+        config: {
+          connection: { connectionId: "connection-ms", resource: "invoices" },
+          event: "m365.mail.received",
+          input: { fields: {}, defaults: {} },
+        },
+        start: "revoked",
+        events: "revoked",
+      },
+      // Granted its start: only its events are asked for again.
+      { ...othersMail, id: "trigger-mail-2", events: null },
+    ]);
+    const readsBefore = listReads;
+    const refusals = document.body.textContent.split("Not allowed").length - 1;
+    await press("Request again");
+    await press("Request");
+
+    expect({
+      refusals,
+      asked,
+      readAgain: listReads > readsBefore,
+    }).toStrictEqual({
+      refusals: 2,
+      asked: [
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-mail" },
+            object: { type: "workflow", workflowId: "workflow-1" },
+            actions: ["start"],
+            binding: "START",
+          },
+        },
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-mail" },
+            object: {
+              type: "connection",
+              connectionId: "connection-ms",
+              resource: "invoices",
+            },
+            actions: ["mail.list"],
+            binding: "EVENTS",
+          },
+        },
+        {
+          request: {
+            subject: { type: "trigger", triggerId: "trigger-mail-2" },
+            object: { type: "connection", connectionId: "connection-ms" },
+            actions: ["mail.list"],
+            binding: "EVENTS",
+          },
+        },
+      ],
+      readAgain: true,
     });
   });
 

@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { connectorEventActions } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
@@ -19,6 +20,7 @@ import {
 } from "@grasp-os/shared/workflow-triggers";
 import type {
   TriggerKind,
+  TriggerSummary,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
 import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
@@ -41,8 +43,8 @@ import {
   triggerSchedules,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
-import { notNullFailed } from "./db/d1.ts";
-import { revokedWith, triggerStartRequest } from "./permissions.ts";
+import { inList, notNullFailed } from "./db/d1.ts";
+import { revokedWith, triggerRequests } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
@@ -100,8 +102,9 @@ import {
 //   personal one must be its creator's own, whom its runs act for. It
 //   hears nothing until an admin grants it the event's read action on
 //   exactly that connection (and part of it), a grant of its own beside
-//   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
-//   into the event, RFC 6901) with literal defaults, never an expression.
+//   `start` (permissions.ts), which it asks for as it is created, as it
+//   does `start`. Its input is a fixed mapping (JSON Pointers into the
+//   event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
 // - An email trigger taking mail meant for another, or mailed by anyone
 //   who learned its ID: its address is `trigger-` and 128 random bits of
@@ -346,7 +349,9 @@ const requirePublished = async (
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
  * build the workflow. It may start nothing until an admin grants it
  * `start` on the workflow, which it asks for as it is created, in the same
- * batch (`triggerStartRequest`). A person has at most the quota limits'
+ * batch (`triggerRequests`); a connector trigger hears nothing until an
+ * admin grants it its event's read on its connection, which it asks for
+ * beside it. A person has at most the quota limits'
  * `triggerResourcesPerPerson` live triggers (`workflow.trigger_limit`),
  * counted in the insert; the workflow must be live as it lands.
  */
@@ -377,7 +382,22 @@ export const createTriggerResource = async (
   const cap = quotaLimits(env).triggerResourcesPerPerson;
   const now = new Date();
   const db = drizzle(env.DB);
-  const asked = triggerStartRequest(by, id, workflow.id);
+  const asked = triggerRequests(
+    by,
+    id,
+    workflow.id,
+    fields.connectionId === null || fields.eventType === null
+      ? undefined
+      : {
+          connection: {
+            connectionId: fields.connectionId,
+            ...(fields.connectionResource === null
+              ? {}
+              : { resource: fields.connectionResource }),
+          },
+          event: fields.eventType,
+        }
+  );
   const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
       // Only while `by` is under the cap, counted in this statement:
@@ -432,7 +452,7 @@ export const createTriggerResource = async (
       })
     ),
     // Asked for as it lands, so the trigger never waits on a request
-    // nobody made: an admin sees it with the others.
+    // nobody made: an admin sees them with the others.
     ...asked.rows.map((row) => db.insert(permissions).values(row)),
     ...asked.entries.map((each) => outboxed(db, each)),
   ]);
@@ -895,6 +915,7 @@ interface TriggerRow {
   nextAt: Date | null;
   failedStarts: number | null;
   start: string | null;
+  events: string | null;
 }
 
 /** A system trigger's configuration, if its version keeps one. */
@@ -984,24 +1005,55 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
     row.nextAt === null &&
     (row.failedStarts ?? 0) >= maxFailedStarts,
   start: permissionStatusSchema.nullable().parse(row.start),
+  events: permissionStatusSchema.nullable().parse(row.events),
 });
 
 /**
- * Where a trigger's `start` on the workflow its current version pins
- * stands, as SQL for a query joining both (`trigger_resources` and that
- * `trigger_resource_versions` row): of its permissions for it, an active
- * one first, then a requested one, then a revoked one; NULL if none.
+ * Where a trigger's permission on `object` (of `objectType`, and matching
+ * `also`) allowing `action` stands, as SQL for a query joining
+ * `trigger_resources` and its current `trigger_resource_versions` row: of
+ * its permissions for it, an active one first, then a requested one, then
+ * a revoked one; NULL if none.
  */
-export const startStatusSql = sql<string | null>`(SELECT ${permissions.status}
+const heldStatusSql = (
+  objectType: "workflow" | "connection",
+  object: SQL,
+  action: SQL,
+  also: SQL = sql``
+) => sql<string | null>`(SELECT ${permissions.status}
   FROM ${permissions}
   WHERE ${permissions.subjectType} = 'trigger'
     AND ${permissions.subjectId} = ${triggerResources.id}
-    AND ${permissions.objectType} = 'workflow'
-    AND ${permissions.objectId} = ${triggerResourceVersions.workflowResourceId}
-    AND EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'start')
+    AND ${permissions.objectType} = ${objectType}
+    AND ${permissions.objectId} = ${object}${also}
+    AND EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})
   ORDER BY CASE ${permissions.status}
     WHEN 'active' THEN 0 WHEN 'requested' THEN 1 ELSE 2 END
   LIMIT 1)`;
+
+/** Where a trigger's `start` on the workflow its current version pins stands (`heldStatusSql`). */
+export const startStatusSql = heldStatusSql(
+  "workflow",
+  sql`${triggerResourceVersions.workflowResourceId}`,
+  sql`'start'`
+);
+
+/**
+ * Where a connector trigger's read of its event on the connection and part
+ * its current version names stands (`heldStatusSql`); NULL for any other
+ * kind, which names no connection.
+ */
+const eventsStatusSql = heldStatusSql(
+  "connection",
+  sql`${triggerResourceVersions.connectionId}`,
+  sql`(CASE ${triggerResourceVersions.eventType} ${sql.join(
+    Object.entries(connectorEventActions).map(
+      ([type, action]) => sql`WHEN ${type} THEN ${action}`
+    ),
+    sql` `
+  )} END)`,
+  sql` AND ${permissions.resource} IS ${triggerResourceVersions.connectionResource}`
+);
 
 /** The live triggers `where` finds, at their current versions, oldest first. */
 const triggersWhere = async (
@@ -1033,6 +1085,7 @@ const triggersWhere = async (
       nextAt: triggerSchedules.nextAt,
       failedStarts: triggerSchedules.failedStarts,
       start: startStatusSql,
+      events: eventsStatusSql,
     })
     .from(triggerResources)
     .innerJoin(
@@ -1053,6 +1106,63 @@ const triggersWhere = async (
     .orderBy(asc(triggerResources.createdAt), asc(triggerResources.id))
     .all();
   return rows.map(viewOf);
+};
+
+/**
+ * What each of the live triggers `ids` is (`TriggerSummary`), by ID, for
+ * the permissions they hold as listed to whoever may see them
+ * (permissions-open.ts): one read, however many. A trigger deleted since
+ * has none.
+ */
+export const triggerSummaries = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<Map<string, TriggerSummary>> => {
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      id: triggerResources.id,
+      kind: triggerResources.kind,
+      cron: triggerResourceVersions.scheduleCron,
+      timeZone: triggerResourceVersions.scheduleTimeZone,
+      event: triggerResourceVersions.eventType,
+      connectionId: triggerResourceVersions.connectionId,
+      resource: triggerResourceVersions.connectionResource,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        inList(triggerResources.id, [...new Set(ids)]),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .all();
+  return new Map(
+    rows.map((row): [string, TriggerSummary] => [
+      row.id,
+      {
+        kind: row.kind,
+        schedule:
+          row.cron === null || row.timeZone === null
+            ? null
+            : { cron: row.cron, timeZone: row.timeZone },
+        event: row.event,
+        connection:
+          row.connectionId === null
+            ? null
+            : { connectionId: row.connectionId, resource: row.resource },
+      },
+    ])
+  );
 };
 
 /** Live trigger `id`, as anyone who may manage it (`requireTriggerManager`) sees it. */

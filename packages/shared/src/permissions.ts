@@ -18,6 +18,7 @@ import {
 } from "./ids.ts";
 import type { PermissionId } from "./ids.ts";
 import { storeOperationPathPattern } from "./operation-limits.ts";
+import type { TriggerSummary } from "./workflow-triggers.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
 // permission: a person asks for it, an admin grants it (their own request
@@ -511,6 +512,12 @@ export interface Permission {
    * admin consents to. Absent for any other permission.
    */
   reach?: StoreReach[];
+  /**
+   * For a live trigger holding it, what the trigger is (its kind and what
+   * starts it), so whoever decides it knows which trigger asks. Absent for
+   * any other permission.
+   */
+  trigger?: TriggerSummary;
 }
 
 /** What one generated operation of a workflow's store reaches. */
