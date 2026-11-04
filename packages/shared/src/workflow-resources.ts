@@ -204,7 +204,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.binding_invalid":
     "That target can't serve this binding: check its kind, its contract and that the workflow holds the permission it needs.",
   "workflow.binding_unapproved":
-    "A binding of this version has no approval that serves its exact contract, so it can't start.",
+    "An admin hasn't approved what this version reaches yet, so it can't start. Ask for it to go live, or ask an admin to approve it on the workflow's Files and apps tab.",
   "workflow.binding_conflict":
     "Someone changed this binding as you did. Read it again, then retry.",
   "workflow.params_invalid":
@@ -528,8 +528,7 @@ export interface WorkflowBindingApproval {
  * bindings an admin hasn't approved, so its starts are refused
  * (`workflow.binding_unapproved`): each binding, with the targets core can
  * offer now that would serve it, each checked as an approval is. A
- * binding with none offered is approved where its target is chosen in
- * full (its workflow's page).
+ * decision is offered none: the admin names its deciders.
  */
 export interface PendingWorkflowBindings {
   workflow: { id: string; name: string };
@@ -1395,6 +1394,12 @@ export interface WorkflowResourcesApi {
    * for the organization's own admins, never Grasp staff.
    */
   pendingBindings: () => Promise<PendingWorkflowBindings[]>;
+  /**
+   * Its versions whose bindings no admin approved, each with the targets
+   * core can offer: the version a start runs now and the one asked to go
+   * live; for the organization's own admins, never Grasp staff.
+   */
+  pendingBindingsOf: (id: string) => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */

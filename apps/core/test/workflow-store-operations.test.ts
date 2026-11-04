@@ -17,6 +17,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { workflowPendingBindings } from "../src/workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   callApprovedStoreOperation,
@@ -195,9 +196,10 @@ const granted = async (
 /**
  * A consumer workflow with one operation binding, `orders`, of a catalog
  * contract of `path`'s exact shapes on `owner`'s store, its permission
- * granted and its binding approved: what its runs call through.
+ * granted, every operation of the store listed, and its binding not yet
+ * approved.
  */
-const consumerOf = async (
+const unapprovedConsumerOf = async (
   admin: Person,
   ada: Person,
   owner: Owner,
@@ -235,6 +237,25 @@ const consumerOf = async (
     object: { type: "store", storeId: owner.storeId },
     actions: [...owner.store.operations.keys()],
   });
+  return { workflow, permissionId, operation };
+};
+
+/**
+ * `unapprovedConsumerOf`'s workflow, its binding approved: what its runs
+ * call through.
+ */
+const consumerOf = async (
+  admin: Person,
+  ada: Person,
+  owner: Owner,
+  path: string
+) => {
+  const { workflow, permissionId, operation } = await unapprovedConsumerOf(
+    admin,
+    ada,
+    owner,
+    path
+  );
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "orders",
     target: {
@@ -328,6 +349,39 @@ describe("a workflow's store, called by another workflow", () => {
       ],
       mutationsCalled: 4,
     });
+  });
+
+  it("is offered to an admin on the consumer's own page as the one listed operation of the contract's shapes and kind", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const owner = await ownerOf(ada);
+    const { workflow, permissionId } = await unapprovedConsumerOf(
+      admin,
+      ada,
+      owner,
+      "getOrder"
+    );
+
+    const [pending] = await workflowPendingBindings(env, admin, workflow.id);
+
+    expect(
+      pending?.bindings.map(({ alias, offered }) => ({
+        alias,
+        targets: offered.map(({ target }) => target),
+      }))
+    ).toStrictEqual([
+      {
+        alias: "orders",
+        targets: [
+          {
+            kind: "storeOperation",
+            permissionId,
+            operation: "getOrder",
+            operationKind: "query",
+          },
+        ],
+      },
+    ]);
   });
 
   it("lists by an index whose optional field the call leaves out as the records without it, and one given as those with it", async () => {

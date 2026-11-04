@@ -1951,6 +1951,14 @@ export interface ConnectApi
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
   /**
+   * The IDs of the generated contracts connection `connectionId` could
+   * serve, by its kind alone: a native connection its connector's
+   * families, a Composio connection its toolkit's, an HTTP connection
+   * `http.request@1`; none for one that is gone. Nothing is loaded and no
+   * server is asked: `connectorContract` reads each as it is served now.
+   */
+  connectorContracts: (request: ConnectorContractsRequest) => Promise<string[]>;
+  /**
    * Whether an action of a connection only reads, the input properties it
    * takes and the connection's provider (`ActionShape`), by the rules a
    * call of it goes by. `connect.action_not_found` for one the connection
@@ -2177,6 +2185,14 @@ export const connectorContractRequestSchema = z.strictObject({
 });
 export type ConnectorContractRequest = z.input<
   typeof connectorContractRequestSchema
+>;
+
+/** The connection whose generated contracts to list. */
+export const connectorContractsRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+});
+export type ConnectorContractsRequest = z.input<
+  typeof connectorContractsRequestSchema
 >;
 
 /** Which action of which connection `actionShape` describes. */
