@@ -36,7 +36,16 @@ test("a new page opens at its top, and what is too wide does not scroll the page
     element.append(filler);
   });
 
-  const barBefore = await nav.boundingBox();
+  // Where the header's bar is: its place, not its size, which a web font
+  // that finishes loading meanwhile may change by a pixel.
+  const placeOf = async () => {
+    const box = await nav.boundingBox();
+    if (box === null) {
+      throw new Error("The breadcrumb isn't shown.");
+    }
+    return { x: box.x, y: box.y };
+  };
+  const barBefore = await placeOf();
   // A sideways swipe or wheel over it, then the way down.
   await panel.hover();
   await page.mouse.wheel(600, 0);
@@ -45,7 +54,7 @@ test("a new page opens at its top, and what is too wide does not scroll the page
     .poll(async () => await panel.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   expect(await panel.evaluate((element) => element.scrollLeft)).toBe(0);
-  expect(await nav.boundingBox()).toEqual(barBefore);
+  expect(await placeOf()).toStrictEqual(barBefore);
 
   await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows$/u);

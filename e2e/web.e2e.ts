@@ -611,8 +611,12 @@ test("never sends what it gave up on while core was out of reach, once core is b
   recording = true;
   await open?.close();
   await nav.getByRole("link", { name: "Brain" }).click();
+  // The page's own: the chat dock under it says the same at once, as its
+  // call drops, while the brain's read still waits for a connection.
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page
+      .getByRole("main")
+      .getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
 
   // Core is back. Trying the page again reads the brain once more: that is
