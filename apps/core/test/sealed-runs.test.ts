@@ -205,6 +205,11 @@ const granted = async (
  * wait, task `send` mails its input's `who` through connector binding
  * `mail`, the subject its sensitive `token` parameter as a binding
  * argument (`secret`), and task `greet` asks model binding `summary`.
+ * Loop `rows` runs its items one after another, each mailing its row
+ * (`notify`), raising what its own try's catch takes (`check` in
+ * `guard`) and sleeping until a deadline (`nap`); loop `pages` runs loop
+ * `lines` in each item, its items stopped by a `while`; fork `both` and
+ * loop `wide`, of items at once, don't run on the run host yet.
  */
 const sealedWorkflow = async () => {
   const admin = await person("admin");
@@ -407,6 +412,85 @@ const sealedWorkflow = async () => {
                 limit: { attempt: { count: 3 } },
               },
             },
+          },
+        },
+        {
+          rows: {
+            for: { each: "row", in: '${ ["a", "b", "c"] }' },
+            do: [
+              {
+                notify: {
+                  call: "grasp.connector",
+                  with: {
+                    binding: "mail",
+                    operation: "mail.send",
+                    arguments: { to: "${ $row }", subject: "loop" },
+                  },
+                },
+              },
+              {
+                guard: {
+                  try: [
+                    {
+                      check: {
+                        raise: {
+                          error: {
+                            type: "urn:grasp:error:bad",
+                            status: 409,
+                            title: "Bad row.",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                  catch: { errors: { with: { status: 409 } } },
+                },
+              },
+              {
+                nap: {
+                  call: "grasp.sleepUntil",
+                  with: {
+                    timestamp:
+                      "${ $workflow.startedAt.epoch.milliseconds + 3000 }",
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          pages: {
+            for: {
+              each: "page",
+              at: "pageAt",
+              in: '${ [["x", "stop"], ["y"]] }',
+            },
+            do: [
+              {
+                lines: {
+                  for: { each: "line", at: "lineAt", in: "${ $page }" },
+                  while: '${ $line != "stop" }',
+                  do: [{ mark: { set: { seen: "${ $line }" } } }],
+                },
+              },
+            ],
+          },
+        },
+        {
+          both: {
+            fork: {
+              branches: [
+                { left: { set: { side: "left" } } },
+                { right: { set: { side: "right" } } },
+              ],
+            },
+          },
+        },
+        {
+          wide: {
+            for: { each: "w", in: "${ [1, 2] }" },
+            metadata: { grasp: { concurrency: 2 } },
+            do: [{ spread: { set: { w: "${ $w }" } } }],
           },
         },
       ],
@@ -2428,6 +2512,298 @@ describe("a sealed run's decisions on the run host", () => {
       ran: [],
       decisions: [expect.objectContaining({ step: "review:task" })],
       asked: 1,
+    });
+  });
+});
+
+/** Engine step `name` with key `key`, as the SDK names it. */
+const engineStep = (name: string, key: string): string =>
+  `${name}:${encodeURIComponent(key)}`;
+
+/** Loop `rows`'s enter step, recording `items`, as `items`. */
+const enterRows = (items: string): string =>
+  `const { items } = await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ items: ${items} }));`;
+
+/** Task `notify`'s call in item `at` of `rows`, mailing `items[at]`. */
+const notifyAt = (at: string): string =>
+  `await step.do("notify", { key: "task@" + ${at}, description: "Its task" }, async () => typeof (await env.mail.call("mail.send", { to: items[${at}], subject: "loop" })).messageId)`;
+
+/** Task `check`'s raise in item `at` of `rows`, recording `record`. */
+const checkAt = (at: string, record = "{ output: null }"): string =>
+  `await step.do("check", { key: "task@" + ${at}, description: "Its raise" }, async () => (${record}))`;
+
+/** Try `guard`'s catch in item `at` of `rows`, deciding by `takes`. */
+const guardAt = (at: string, takes = "async () => true"): string =>
+  `await step.caught("guard", { key: "catch@" + ${at}, description: "Its catch" }, ${takes})`;
+
+/** Task `nap`'s enter step in item `at` of `rows`, recording `until`. */
+const napAt = (at: number, until: string): string =>
+  `await step.do("nap", { key: "enter@${at}", description: "Its start" }, async () => ({ output: null, until: ${until} }))`;
+
+/** Item `at` of `rows`: its mail, and its raise its own catch takes. */
+const rowAt = (at: string): string => `
+sent.push(${notifyAt(at)});
+try {
+  ${checkAt(at)};
+} catch (thrown) {
+  const error = ${guardAt(at)};
+  if (error === undefined) throw thrown;
+  caught.push(error.title);
+}`;
+
+// The ways loop items can fail a sealed run's security, each refused by
+// the host: a step the table doesn't have in items (a fork's branch, a
+// loop of items at once, a nested task named as if in no loop, a key in
+// another form); an item its loop's enter step never recorded, past its
+// count or of a loop it never entered or skipped; items skipped,
+// reordered, run after the run left their loop, or run over by entering
+// the loop again; a loop past the platform's 1,000 items; a catch or a
+// deadline of another item than the one running; a step past a failure
+// pending in an item; an item started without the item step its loop
+// seals. And a replay runs every item's steps alike.
+describe("a sealed run's loop items on the run host", () => {
+  beforeAll(async () => {
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+  });
+
+  afterEach(endLiveResourceRuns);
+
+  it("runs a loop's items in order, each step under its item's own name, and a replay alike", async () => {
+    const looping = await sealedWorkflow();
+    const runId = await waitingRun(looping);
+    const journal = new Map<string, Journaled>();
+    const firstRan: string[] = [];
+    const replayRan: string[] = [];
+    const source = moduleOf(`
+${enterRows('["a", "b"]')}
+const sent = [];
+const caught = [];
+const slept = [];
+for (let index = 0; index < items.length; index += 1) {
+  ${rowAt("index")}
+  const { until } = await step.do("nap", { key: "enter@" + index, description: "Its start" }, async () => ({ output: null, until: Date.now() + 1000 + index }));
+  await step.sleepUntil("nap", { key: "task@" + index, description: "Its sleep", until });
+  slept.push(index);
+}
+return { sent, caught, slept };`);
+    const first = await ranAs(runId, source, {
+      engine: journalingEngine(journal, firstRan),
+    });
+    const replayed = await ranAs(runId, source, {
+      engine: journalingEngine(journal, replayRan),
+    });
+    const { sent: mail } = await looping.mail.did();
+    const checked = await checkedCalls(runId);
+    const ended = {
+      sent: ["string", "string"],
+      caught: ["Bad row.", "Bad row."],
+      slept: [0, 1],
+    };
+    expect({
+      first,
+      replayed,
+      replayRan,
+      mail: mail.map(({ to }) => to),
+      checked: checked.map(({ step }) => step),
+      journaled: [...journal.keys()].filter((name) => name.includes("%40")),
+    }).toStrictEqual({
+      first: { ended, tampered: [] },
+      replayed: { ended, tampered: [] },
+      replayRan: [],
+      mail: ["a", "b"],
+      checked: [engineStep("notify", "task@0"), engineStep("notify", "task@1")],
+      journaled: [
+        engineStep("notify", "task@0"),
+        engineStep("check", "task@0"),
+        engineStep("guard", "catch@0"),
+        engineStep("nap", "enter@0"),
+        engineStep("nap", "task@0"),
+        engineStep("notify", "task@1"),
+        engineStep("check", "task@1"),
+        engineStep("guard", "catch@1"),
+        engineStep("nap", "enter@1"),
+        engineStep("nap", "task@1"),
+      ],
+    });
+  });
+
+  it("refuses a step in items the table doesn't have, and an item its loop never recorded", async () => {
+    const looping = await sealedWorkflow();
+    const run = async (body: string) =>
+      await ranAs(await waitingRun(looping), moduleOf(body));
+    expect({
+      forkBranch: await run(
+        'return await step.do("left", { key: "task@0", description: "Its task" }, async () => ({ output: null }));'
+      ),
+      itemsAtOnce: await run(
+        'return await step.do("wide", { key: "enter", description: "Its items" }, async () => ({ items: [1, 2] }));'
+      ),
+      noItem: await run(
+        `${enterRows('["a"]')} return await step.do("notify", { key: "task", description: "Its task" }, async () => null);`
+      ),
+      leadingZero: await run(
+        `${enterRows('["a"]')} return ${checkAt('"00"')};`
+      ),
+      pastCount: await run(
+        `${enterRows('["a"]')} const sent = []; sent.push(${notifyAt("0")}); return ${checkAt("1")};`
+      ),
+      neverEntered: await run(`const items = ["a"]; return ${notifyAt("0")};`),
+      skippedLoop: await run(
+        `await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ skipped: true })); const items = ["a"]; return ${notifyAt("0")};`
+      ),
+      // Past the SDK: the key unencoded, as no SDK names it.
+      otherEncoding: await ranAs(
+        await waitingRun(looping),
+        `export default { run: async (engine) => {
+  await engine.do("rows:enter", {}, async () => ({ items: ["a"] }));
+  try { await engine.do("check:task@0", {}, async () => ({ output: null })); return "ran"; } catch (error) { return error.code; }
+} };`
+      ),
+    }).toStrictEqual({
+      forkBranch: refusedAs(
+        `Step "${engineStep("left", "task@0")}" isn't one the build seals.`
+      ),
+      itemsAtOnce: refusedAs(`Step "wide:enter" isn't one the build seals.`),
+      noItem: refusedAs(`Step "notify:task" isn't one the build seals.`),
+      leadingZero: refusedAs(
+        `Step "${engineStep("check", "task@00")}" isn't one the build seals.`
+      ),
+      pastCount: refusedAs(`Loop "rows" has no item 1 here.`),
+      neverEntered: refusedAs(`Loop "rows" has no item 0 here.`),
+      skippedLoop: refusedAs(`Loop "rows" has no item 0 here.`),
+      otherEncoding: {
+        ended: "workflow.invalid",
+        tampered: ["workflow.invalid"],
+      },
+    });
+  });
+
+  it("refuses items skipped, reordered, run after the run left their loop, or run over by entering it again", async () => {
+    const looping = await sealedWorkflow();
+    const run = async (body: string) =>
+      await ranAs(
+        await waitingRun(looping),
+        moduleOf(`${enterRows('["a", "b", "c"]')} const sent = []; ${body}`)
+      );
+    expect({
+      skipped: await run(
+        `sent.push(${notifyAt("0")}); return ${notifyAt("2")};`
+      ),
+      reordered: await run(
+        `sent.push(${notifyAt("0")}); sent.push(${notifyAt("1")}); return ${checkAt("0")};`
+      ),
+      afterLeaving: await run(
+        `sent.push(${notifyAt("0")}); ${taskStep("finish", "{ output: null }")}; return ${notifyAt("1")};`
+      ),
+      stoppedEarly: await run(`sent.push(${notifyAt("0")}); return sent;`),
+      // Past the SDK, which would refuse a name it ran: the loop entered
+      // again to run its items over.
+      enteredAgain: await ranAs(
+        await waitingRun(looping),
+        `export default { run: async (engine) => {
+  await engine.do("rows:enter", {}, async () => ({ items: ["a"] }));
+  await engine.do(${JSON.stringify(engineStep("check", "task@0"))}, {}, async () => ({ skipped: true }));
+  try { await engine.do("rows:enter", {}, async () => ({ items: ["a"] })); return "entered"; } catch (error) { return error.code; }
+} };`
+      ),
+    }).toStrictEqual({
+      skipped: refusedAs(
+        `Item 2 of loop "rows" doesn't run now: its items run in order, each once.`
+      ),
+      reordered: refusedAs(
+        `Item 0 of loop "rows" doesn't run now: its items run in order, each once.`
+      ),
+      afterLeaving: refusedAs(`Loop "rows" has no item 1 here.`),
+      stoppedEarly: { ended: ["string"], tampered: [] },
+      enteredAgain: {
+        ended: "workflow.invalid",
+        tampered: ["workflow.invalid"],
+      },
+    });
+  });
+
+  it("holds a loop to 1,000 items, and each item's catch, failure and deadline to that item", async () => {
+    const looping = await sealedWorkflow();
+    const run = async (body: string) =>
+      await ranAs(await waitingRun(looping), moduleOf(body));
+    const atMost = await run(
+      `${enterRows("Array.from({ length: 1000 }, (_, at) => at)")} return items.length;`
+    );
+    const tooMany = await run(
+      `${enterRows("Array.from({ length: 1001 }, (_, at) => at)")} return items.length;`
+    );
+    const notAList = await run(
+      'await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ output: ["a"] })); return "entered";'
+    );
+    // Item 0's raise, swallowed: item 1 doesn't start.
+    const pastFailure = await run(
+      `${enterRows('["a", "b"]')} const sent = []; sent.push(${notifyAt("0")}); try { ${checkAt("0")}; } catch {} return ${notifyAt("1")};`
+    );
+    // Item 0's raise, offered to item 1's catch.
+    const otherCatch = await run(
+      `${enterRows('["a", "b"]')} try { ${checkAt("0")}; } catch { return ${guardAt("1")}; }`
+    );
+    // Item 1 sleeps until item 0's deadline.
+    const otherDeadline = await run(`${enterRows('["a", "b"]')}
+const first = (${napAt(0, "Date.now() + 1000")}).until;
+const sent = [];
+sent.push(${notifyAt("1")});
+${napAt(1, "first + 500")};
+await step.sleepUntil("nap", { key: "task@1", description: "Its sleep", until: first });
+return "woke";`);
+    expect({
+      atMost,
+      tooMany,
+      notAList,
+      pastFailure,
+      otherCatch,
+      otherDeadline,
+    }).toStrictEqual({
+      atMost: { ended: 1000, tampered: [] },
+      tooMany: failedWith("workflow.collection_invalid"),
+      notAList: failedWith("workflow.collection_invalid"),
+      pastFailure: refusedAs(
+        "A run goes on past a failure only once a catch took it."
+      ),
+      otherCatch: refusedAs(
+        `Item 1 of loop "rows" doesn't run now: its items run in order, each once.`
+      ),
+      otherDeadline: refusedAs(
+        `Step "${engineStep("nap", "task@1")}" isn't one the build seals.`
+      ),
+    });
+  });
+
+  it("starts each item of a loop that seals an item step by that step, its while stopping it, in each item of the loop around it", async () => {
+    const looping = await sealedWorkflow();
+    const pagesOf = `const { items: pages } = await step.do("pages", { key: "enter", description: "Its items" }, async () => ({ items: [["x", "stop"], ["y"]] }));`;
+    const nested = await ranAs(
+      await waitingRun(looping),
+      moduleOf(`${pagesOf}
+const seen = [];
+for (let page = 0; page < pages.length; page += 1) {
+  const { items: lines } = await step.do("lines", { key: "enter@" + page, description: "Its items" }, async () => ({ items: pages[page] }));
+  for (let line = 0; line < lines.length; line += 1) {
+    const on = await step.do("lines", { key: "item@" + page + "/" + line, description: "Its while" }, async () => lines[line] !== "stop");
+    if (!on) break;
+    seen.push((await step.do("mark", { key: "task@" + page + "/" + line, description: "Its task" }, async () => ({ output: { seen: lines[line] } }))).output.seen);
+  }
+}
+return seen;`)
+    );
+    const withoutItemStep = await ranAs(
+      await waitingRun(looping),
+      moduleOf(`${pagesOf}
+await step.do("lines", { key: "enter@0", description: "Its items" }, async () => ({ items: pages[0] }));
+return await step.do("mark", { key: "task@0/0", description: "Its task" }, async () => ({ output: null }));`)
+    );
+    expect({ nested, withoutItemStep }).toStrictEqual({
+      nested: { ended: ["x", "y"], tampered: [] },
+      withoutItemStep: refusedAs(
+        `Item 0 of loop "lines" doesn't run now: its items run in order, each once.`
+      ),
     });
   });
 });
