@@ -35,6 +35,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import type { HostedActivation } from "../src/workflows/resource-runs.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
+import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -50,14 +51,18 @@ import { unique } from "./sign-in.ts";
 // is wired into drafts and publishing (GRA-1535), so the sealed runs here
 // are started for real, their activations loaded as the dispatcher loads
 // them, and run on the run host with a module of the test's own, written
-// as that generator writes one, in place of the build's generated one.
+// as that generator writes one, in place of the build's generated one,
+// through the same mapping `runActivation` takes for such a build
+// (`sealedActivationOf`). Until then every stored build takes
+// `runActivation`'s other branch, which the last test runs.
 // What each must keep on the run host, from the threat model of its kind:
 //
 // - a test run of a checkpoint calls nothing: every call is answered from
 //   its start's fixtures, and its waits are held short;
 // - a run an App's test started reaches nothing of the organization's: its
 //   model calls are answered by its fixture, never a model, and its store
-//   calls run on its test's own store, never the App's.
+//   calls run on its test's own store, never the App's, once whatever its
+//   step's attempts; any other call is refused before it is audited.
 
 const objectSchema = (properties: Record<string, unknown>) => ({
   format: "json",
@@ -188,12 +193,17 @@ const memoryOfTest = (): Required<
   };
 };
 
+interface Engine {
+  step: RunStep;
+  leaseOf: HostHooks["leaseOf"];
+}
+
 /**
  * `engineOfTest`, its attempts a newer activation's than the run's own
  * engine's, which is left waiting: a real admission would otherwise take
  * them for ones it superseded.
  */
-const newerEngine = (): { step: RunStep; leaseOf: HostHooks["leaseOf"] } => {
+const newerEngine = (): Engine => {
   const { step, leaseOf } = engineOfTest();
   return {
     step,
@@ -205,21 +215,64 @@ const newerEngine = (): { step: RunStep; leaseOf: HostHooks["leaseOf"] } => {
 };
 
 /**
+ * An engine of the test's own that journals what each step answered, so a
+ * later activation on it replays those steps, and that counts each step's
+ * attempts on. With `evictAfter`, the activation is lost as soon as that
+ * step's attempt returns, before anything of it is journaled, as an
+ * evicted activation's is.
+ */
+const journalingEngine = (): Engine & { evictAfter?: string } => {
+  const journal = new Map<string, unknown>();
+  const attempts = new Map<string, number>();
+  const leases = new Set<string>();
+  const engine: Engine & { evictAfter?: string } = {
+    step: {
+      ...engineOfTest().step,
+      do: async (name, _config, fn) => {
+        if (journal.has(name)) {
+          return journal.get(name);
+        }
+        const attempt = (attempts.get(name) ?? 0) + 1;
+        attempts.set(name, attempt);
+        const key = `key:${name}`;
+        leases.add(`${attempt}:${key}`);
+        try {
+          const value = await fn({ attempt, idempotencyKey: key });
+          if (engine.evictAfter === name) {
+            throw new Error("The activation was evicted");
+          }
+          journal.set(name, value);
+          return value;
+        } finally {
+          leases.delete(`${attempt}:${key}`);
+        }
+      },
+    },
+    leaseOf: (key, attempt) =>
+      leases.has(`${attempt}:${key}`)
+        ? { generation: 1000, deadline: Date.now() + 60_000 }
+        : undefined,
+  };
+  return engine;
+};
+
+/**
  * Runs `activation` as `runActivation` runs a build generated for the run
  * host (`sealedActivationOf`, `sealedActivation`), with `source` in place
- * of the build's generated module: its output, or the code it failed with.
+ * of the build's generated module, on `engine` with `memory`: its output,
+ * or the code it failed with.
  */
 const ranOnRunHost = async (
   activation: HostedActivation,
-  source: string
+  source: string,
+  { engine = newerEngine(), memory = memoryOfTest() } = {}
 ): Promise<unknown> => {
   const sealed = sealedActivationOf(activation);
-  const { step, leaseOf } = newerEngine();
   try {
     return await sealedActivation(
       env,
-      step,
-      { leaseOf, ...memoryOfTest() },
+      engine.step,
+      { leaseOf: engine.leaseOf, ...memory },
       sealed,
       () => ({
         ...sealed.run.build.sdk,
@@ -445,6 +498,29 @@ const fixtureRunOf = async (app: string) => {
 
 const listedSchema = z.object({ ok: z.literal(true), value: z.unknown() });
 
+/** What the test's own store holds, as its session's user lists it. */
+const savedIn = async (
+  app: Awaited<ReturnType<typeof requestsApp>>,
+  session: { call: (name: string, request: string) => Promise<string> }
+): Promise<unknown> =>
+  listedSchema.parse(
+    JSON.parse(
+      await session.call(
+        "desk-user",
+        JSON.stringify({
+          reference: {
+            resourceId: app.release.manifest.resourceId,
+            resourceVersion: app.release.manifest.resourceVersion,
+            contractId: "requests.list",
+            fingerprint: app.release.fingerprints["requests.list"],
+            kind: "query",
+          },
+          input: {},
+        })
+      )
+    )
+  ).value;
+
 describe(
   "the engine a JSON workflow's run runs on",
   { timeout: 180_000 },
@@ -501,32 +577,53 @@ describe(
         await fixtureActivation(env, pin, runId),
         moduleOf(true)
       );
-      const listed = listedSchema.parse(
-        JSON.parse(
-          await session.call(
-            "desk-user",
-            JSON.stringify({
-              reference: {
-                resourceId: app.release.manifest.resourceId,
-                resourceVersion: app.release.manifest.resourceVersion,
-                contractId: "requests.list",
-                fingerprint: app.release.fingerprints["requests.list"],
-                kind: "query",
-              },
-              input: {},
-            })
-          )
-        )
-      );
+      const saved = await savedIn(app, session);
       await session.close();
       expect({
         ended,
-        saved: listed.value,
+        saved,
         asked: provider.requests.length,
       }).toStrictEqual({
         ended: { status: "Hello from the fixture" },
         saved: ["Ada"],
         asked: 0,
+      });
+    });
+
+    it("sends an App test's store call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
+      const app = await requestsApp([linger, summarize, save], {
+        models: { summary: { line: "Hello" } },
+        operations: { save: "requests.add" },
+      });
+      const host = fixtureHostFor(env, app.release, app.files);
+      const session = await host.open("desk", `test-${unique()}`);
+      await session.start(
+        "desk-user",
+        await startOf(app.release, { who: "Ada" })
+      );
+      const { runId, pin } = await fixtureRunOf(app.app);
+      const activation = await fixtureActivation(env, pin, runId);
+      // One run's engine and memory across its activations: the first is
+      // evicted once its store call's attempt returned, nothing journaled.
+      const engine = journalingEngine();
+      const memory = memoryOfTest();
+      engine.evictAfter = "save:task";
+      const evicted = await ranOnRunHost(activation, moduleOf(true), {
+        engine,
+        memory,
+      });
+      engine.evictAfter = undefined;
+      const resumed = await ranOnRunHost(activation, moduleOf(true), {
+        engine,
+        memory,
+      });
+      const saved = await savedIn(app, session);
+      await session.close();
+      expect({ evicted, resumed, saved }).toStrictEqual({
+        evicted: { failed: "internal.unexpected" },
+        // Not `{ status: "Hello" }`: its store call isn't sent again.
+        resumed: { failed: "operation.deadline_exceeded" },
+        saved: ["Ada"],
       });
     });
 
@@ -544,7 +641,15 @@ describe(
         sendModule
       );
       await session.close();
-      expect(ended).toStrictEqual({ failed: "resource.unavailable" });
+      const events = await allEvents();
+      const checked = events.filter(
+        ({ action, target }) =>
+          action === "workflow.call.checked" && target?.id === runId
+      );
+      expect({ ended, checked }).toStrictEqual({
+        ended: { failed: "resource.unavailable" },
+        checked: [],
+      });
     });
 
     it("runs a build of the generator before it on resource-host.ts, as before", async () => {

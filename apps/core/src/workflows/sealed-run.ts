@@ -173,7 +173,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   it is made (`requireCallAuthority`, in `makeCall` and `emitEvent`): a
 //   revoked approval, permission or role stops the next call
 //   (`workflow.call_denied`). The person the run acts for must still be an
-//   active member before every step.
+//   active member before every step; a run an App's test started acts for
+//   its fixture's principal, whose role nothing changes.
 // - An effect repeated. A store operation's, a model's and an action's
 //   call goes out at most once per step, whatever its attempts
 //   (`SentCalls`, marked sent just before it leaves, after every check of
@@ -191,7 +192,17 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   one of its lineage's host calls; its attempts are admitted as its
 //   activation says (resource-runs.ts, `sealedActivation`): an independent
 //   run's as its workflow's (`workflow-resource:<id>`) in its account's
-//   lineage, a test run's as its own.
+//   lineage, a test run's as its own, a run an App's test started against
+//   its test's own admission, which counts nothing of the organization's.
+// - A test's run reaching the organization. A test run of a draft's
+//   checkpoint calls nothing: every call is answered from its start's
+//   fixtures (resource-calls.ts, `makeCall`, `calling.candidate`). A run
+//   an App's test started makes only the calls its test serves
+//   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
+//   arguments are matched or audited (`resource.unavailable`); its model
+//   calls are answered by its fixture and its store calls run on its
+//   test's own store (`fixtureCall`), tried once as a real call is; and
+//   `makeCall` refuses every call of it again.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
 //   record of the failure no catch took yet (`#pending`), mapped by
 //   resource-errors.ts from what it knows. A failure the host made keeps
@@ -2290,7 +2301,15 @@ class SealedRun implements SealedRunKind {
           `Step "${attempt.step}" calls only ${template.operation}.`
         );
       }
-      const { params } = this.run;
+      const { params, calling } = this.run;
+      // A test's run reaches only its own sealed modules and the model and
+      // store calls its test serves (fixture-calls.ts): never a connection,
+      // an action or an event. Refused before its arguments are matched,
+      // its sensitive values put in or it is audited, so nothing says a
+      // call went out.
+      if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
+        throw operationErrors.create("resource.unavailable");
+      }
       const sensitive: Json[] = [];
       let value: Json;
       try {
@@ -2422,12 +2441,6 @@ class SealedRun implements SealedRunKind {
     effect: Effect
   ): Promise<Json> {
     const { calling, build } = this.run;
-    // A test's run reaches only its own sealed modules and the model and
-    // store calls its test serves (fixture-calls.ts): never a connection,
-    // an action or an event.
-    if (calling.fixture === true && !fixtureCalls.has(call.name)) {
-      throw operationErrors.create("resource.unavailable");
-    }
     switch (call.name) {
       case "grasp.connector": {
         const built: BuiltCall = {
@@ -2551,6 +2564,9 @@ class SealedRun implements SealedRunKind {
       principal: calling.principal,
       createdAt,
     };
+    // Tried once as a real call is: marked as it goes to its test, so no
+    // later attempt of its step sends it again (`SentCalls`).
+    effect.sending?.();
     return await fixtureCall(this.#env, run, built, effect);
   }
 
