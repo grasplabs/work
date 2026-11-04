@@ -222,6 +222,9 @@ const typeRules: readonly {
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },
+  // An attachment of a message an independent workflow's email trigger
+  // received, copied into the run it started as a file of the run.
+  { action: "workflow.email.attachment", type: "action" },
   // A run's step refused a call of a binding its version's review doesn't
   // show it calling.
   { action: "workflow.call.refused", type: "permission" },

@@ -119,7 +119,10 @@ export const connectorTriggerConfigSchema = z.strictObject({
  * An email trigger's configuration: how each message to its address
  * becomes the run's input, mapped as a connector trigger's event is, from
  * the message as an App's email trigger hands it over (`inboundEmailSchema`
- * in workflows.ts: `/subject`, `/from/address`, `/text`).
+ * in workflows.ts: `/subject`, `/from/address`, `/text`). An attachment a
+ * run file may be also carries `file` (`/attachments/0/file`): mapped
+ * where the workflow's input takes a file, it is copied into the run as a
+ * file of its own.
  */
 export const emailTriggerConfigSchema = z.strictObject({
   input: inputMappingSchema,

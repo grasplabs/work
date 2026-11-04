@@ -6223,6 +6223,10 @@ msgstr "La moitié de mon lundi part dans les factures. La plupart n’ont pas d
 msgid "handbook/leave"
 msgstr "manuel/conges"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "A transmis une pièce jointe d’e-mail à une exécution"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Transmis à celui-ci"
@@ -11677,6 +11681,10 @@ msgstr "Recherchez dans vos chats et ouvrez-en un."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
 
+#: src/chat/thread.tsx
+msgid "Searched Grasp's reference for {text}"
+msgstr "{text} recherché dans la référence de Grasp"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "A cherché dans les connaissances"
@@ -11692,6 +11700,10 @@ msgstr "A cherché dans le journal d’audit"
 #: src/chat/thread.tsx
 msgid "Searched the brain for {query}"
 msgstr "{query} recherché dans le cerveau"
+
+#: src/chat/thread.tsx
+msgid "Searching Grasp's reference for {text}"
+msgstr "Recherche de {text} dans la référence de Grasp"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"

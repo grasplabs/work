@@ -1,5 +1,6 @@
 import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
-import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { fileErrors } from "@grasp-os/shared/app-files";
+import { sha256Hex, sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
 import {
   appIdSchema,
@@ -7,6 +8,13 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  runFileLimits,
+  runFileNamed,
+  runFileNameSchema,
+  runFileTextTypes,
+} from "@grasp-os/shared/run-files";
+import type { RunFileType } from "@grasp-os/shared/run-files";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
@@ -17,9 +25,9 @@ import {
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Address, Email } from "postal-mime";
+import type { Address, Attachment, Email } from "postal-mime";
 
-import { keepAuditEvent } from "../audit-outbox.ts";
+import { keepAuditEvent, outboxedWhere } from "../audit-outbox.ts";
 import {
   apps,
   triggerResources,
@@ -28,7 +36,12 @@ import {
 } from "../db/core/schema.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
-import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
+import {
+  isWorthKeeping,
+  keepMessage,
+  parsedOf,
+  stagedAttachmentKey,
+} from "./kept-email.ts";
 import {
   learnMailDomain,
   lineageRefusals,
@@ -37,7 +50,10 @@ import {
   stampedMessageRun,
 } from "./mail-stamps.ts";
 import type { MailStamp, StampedRun } from "./mail-stamps.ts";
+import { runFileTypeShown } from "./office-files.ts";
+import { isRunFileText } from "./run-files.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
+import type { StartFiles } from "./start-files.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
 // sends every message for the deployment's mail domain to core's email
@@ -147,8 +163,26 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 //   end; past that the delivery fails for now, for its sender to try again
 //   later, and one held back a day is dropped, audited once.
 // - An oversized or malicious attachment: the message bounces past
-//   `maxMessageBytes`, attachments are only listed, and none is kept:
-//   an independent run has no way to read one (`stored: null`).
+//   `maxMessageBytes`, and nothing of it is kept as a message
+//   (`stored: null`). An attachment reaches the run only as a file of its
+//   own (GRA-1363), copied in as the start is admitted, as an App's file
+//   a screen hands its run is (start-files.ts): only where the
+//   workflow's input takes a file and its trigger maps the attachment's
+//   `file` there; only one a run file may be, its type shown by its bytes
+//   (never the label its sender gave it), its name one a run file may
+//   have, and not inline; at most `runFileLimits.startFiles` of a
+//   message, within the run's and the workflow's limits. Anyone with
+//   the address can fill the workflow's run-file room (5 GiB), at most
+//   `triggeredRunsPerHour` messages of 10 MiB an hour; past it a message
+//   with a file to copy is refused for good and audited
+//   (`file.workflow_quota`), never retried unheard. Its
+//   reference in the message, `attachment-<index>`, names an attachment
+//   of that message alone, and becomes the run file's own ID; the run
+//   reads it only through its workflow's own files binding, and it goes
+//   with the run's details. Each copy is audited with the run
+//   (`workflow.email.attachment.sent`), never its name. While it is
+//   copied it waits in R2 (`stagedAttachmentKey`), deleted once the
+//   start is decided, else with its day's kept mail.
 // - A sender writing an internal address: From is untrusted data for the
 //   run, as above; only the envelope sender, which SPF vouches for, makes
 //   mail a run's own, with a stamp core recorded.
@@ -181,11 +215,79 @@ const mailboxes = (addresses: readonly Address[] | undefined) =>
     .slice(0, maxListed)
     .map(({ name, address }) => ({ name: cut(name), address: cut(address) }));
 
+/** An attachment's content, as bytes. */
+const bytesOf = (content: ArrayBuffer | Uint8Array | string): Uint8Array =>
+  typeof content === "string"
+    ? new TextEncoder().encode(content)
+    : new Uint8Array(content);
+
 /** The byte length of an attachment's content. */
 const sizeOf = (content: ArrayBuffer | Uint8Array | string): number =>
-  typeof content === "string"
-    ? new TextEncoder().encode(content).byteLength
-    : content.byteLength;
+  bytesOf(content).byteLength;
+
+/** An attachment of a message a run file may be: what a start copies. */
+interface AttachedFile {
+  /** Its index among the message's attachments. */
+  index: number;
+  name: string;
+  type: RunFileType;
+  bytes: Uint8Array;
+}
+
+/** What an attachment's file is named in its message, before it is copied. */
+const attachmentRef = (index: number): string => `attachment-${String(index)}`;
+
+/** What an attachment with no name a run file may have is named. */
+const unnamedAttachment = "attachment";
+
+/** The attachment a run file may be, as one: its type by its bytes. */
+const attachedFileOf = async (
+  attachment: Attachment,
+  index: number
+): Promise<AttachedFile | undefined> => {
+  if (attachment.disposition === "inline") {
+    return undefined;
+  }
+  const bytes = bytesOf(attachment.content);
+  const type = await runFileTypeShown(bytes, attachment.mimeType);
+  if (
+    type === undefined ||
+    bytes.byteLength > runFileLimits.fileBytes ||
+    (runFileTextTypes.has(type)
+      ? !isRunFileText(bytes)
+      : bytes.byteLength === 0)
+  ) {
+    return undefined;
+  }
+  const named = runFileNameSchema.safeParse(attachment.filename ?? "");
+  return {
+    index,
+    type,
+    bytes,
+    name: runFileNamed(named.success ? named.data : unnamedAttachment, type),
+  };
+};
+
+/**
+ * The attachments of `parsed` its run may have as files (`attachedFileOf`):
+ * the first `runFileLimits.startFiles` of those its input lists.
+ */
+const attachedFiles = async (parsed: Email): Promise<AttachedFile[]> => {
+  const found: AttachedFile[] = [];
+  for (const [index, attachment] of parsed.attachments
+    .slice(0, maxListed)
+    .entries()) {
+    if (found.length >= runFileLimits.startFiles) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one at a time, few
+    const file = await attachedFileOf(attachment, index);
+    if (file !== undefined) {
+      found.push(file);
+    }
+  }
+  return found;
+};
 
 /**
  * How many bytes `input` is over a run's input, as UTF-8 JSON; 0 or less
@@ -344,13 +446,18 @@ const textOfHtml = (full: string): string => {
     .trim();
 };
 
-/** A parsed message as its run's input. */
+/**
+ * A parsed message as its run's input: each attachment of `files` with
+ * its reference (`attachmentRef`).
+ */
 const inputOf = (
   id: string,
   stored: string | null,
   envelopeFrom: string,
-  parsed: Email
+  parsed: Email,
+  files: readonly AttachedFile[] = []
 ): InboundEmail => {
+  const referenced = new Set(files.map(({ index }) => index));
   const [from] = mailboxes(parsed.from === undefined ? [] : [parsed.from]);
   const date = parsed.date === undefined ? null : new Date(parsed.date);
   return fitted({
@@ -366,10 +473,13 @@ const inputOf = (
     truncated: false,
     attachments: parsed.attachments
       .slice(0, maxListed)
-      .map(({ filename, mimeType, content }) => ({
+      .map(({ filename, mimeType, content }, index) => ({
         filename: filename === null ? null : cut(filename),
         mimeType: cut(mimeType),
         size: sizeOf(content),
+        ...(referenced.has(index)
+          ? { file: { id: attachmentRef(index) } }
+          : {}),
       })),
   });
 };
@@ -538,6 +648,80 @@ const emailTakerAt = async (
     .get();
 
 /**
+ * The attachments `files` of message `id` that `taker`'s start may hand
+ * its run, each read only by its reference in this message; and what
+ * deletes what waited in R2 for the copy, once the start is decided.
+ */
+const messageFiles = (
+  env: Env,
+  taker: Taker,
+  id: string,
+  files: readonly AttachedFile[]
+): { files: StartFiles; done: () => Promise<void> } => {
+  const byRef = new Map(files.map((file) => [attachmentRef(file.index), file]));
+  const staged = new Map<string, string>();
+  return {
+    files: {
+      read: async (fileId) => {
+        const file = byRef.get(fileId);
+        if (file === undefined) {
+          throw fileErrors.create("file.not_found");
+        }
+        const sha256 = await sha256HexOfBytes(file.bytes);
+        let key = staged.get(fileId);
+        if (key === undefined) {
+          key = stagedAttachmentKey(taker.id, id, file.index);
+          await env.FILES.put(key, file.bytes, { sha256 });
+          staged.set(fileId, key);
+        }
+        return {
+          id: fileId,
+          name: file.name,
+          type: file.type,
+          size: file.bytes.byteLength,
+          chunks: [{ key, sha256 }],
+        };
+      },
+      // A statement of the admitting batch, never run on its own: the
+      // copy and its run, never the attachment's name.
+      sent: (file, runId, workflowId, admitted) =>
+        outboxedWhere(
+          drizzle(env.DB),
+          {
+            actor: { type: "system" },
+            action: "workflow.email.attachment.sent",
+            target: { type: "trigger", id: taker.id },
+            detail: {
+              message: id,
+              attachment: file.id,
+              workflow: workflowId,
+              run: runId,
+              type: file.type,
+              size: file.size,
+            },
+          },
+          admitted
+        ),
+    },
+    done: async () => {
+      if (staged.size === 0) {
+        return;
+      }
+      try {
+        await env.FILES.delete([...staged.values()]);
+      } catch (error) {
+        // Its start is decided either way: what R2 kept goes with its
+        // day's kept mail.
+        log.warn("workflow.email_staged_left", {
+          message: id,
+          ...errorFields(error),
+        });
+      }
+    },
+  };
+};
+
+/**
  * Takes a message to `taker`, the email trigger at `address` (its token
  * `recorded`, if any, gone): starts its run, the message mapped into its
  * input, acting for its creator; bounces it, drops it (audited), or fails
@@ -582,21 +766,32 @@ const receiveForTrigger = async (
   const mapping = inputMappingSchema.parse(
     JSON.parse(taker.inputMapping ?? "{}")
   );
-  const outcome: Outcome = await startOnce(env, taker, {
-    same,
-    key: `${coreStartKeyPrefix}email:${taker.id}:${same}`,
-    admission: `email:${same}:${taker.id}`,
-    input: mappedInput(mapping, inputOf(id, null, message.from, parsed)),
-    stamped,
-    noted: { message: id },
-    audited: {
-      refused: "workflow.email.refused",
-      dropped: "workflow.email.dropped",
-      detail: { message: id },
-    },
-    logged: { type: "email", message: id },
-    ...(loop === undefined ? {} : { refusedAs: loop }),
-  });
+  const attached = await attachedFiles(parsed);
+  const handed = messageFiles(env, taker, id, attached);
+  let outcome: Outcome;
+  try {
+    outcome = await startOnce(env, taker, {
+      same,
+      key: `${coreStartKeyPrefix}email:${taker.id}:${same}`,
+      admission: `email:${same}:${taker.id}`,
+      input: mappedInput(
+        mapping,
+        inputOf(id, null, message.from, parsed, attached)
+      ),
+      files: handed.files,
+      stamped,
+      noted: { message: id },
+      audited: {
+        refused: "workflow.email.refused",
+        dropped: "workflow.email.dropped",
+        detail: { message: id },
+      },
+      logged: { type: "email", message: id },
+      ...(loop === undefined ? {} : { refusedAs: loop }),
+    });
+  } finally {
+    await handed.done();
+  }
   if (outcome === "unavailable") {
     // Disabled or deleted as it arrived: no such address. (Moved to
     // another version, it is tried again, at that version: `retry`.)

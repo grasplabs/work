@@ -1,3 +1,4 @@
+import { isZip, runFileTypeOf } from "@grasp-os/shared/run-files";
 import type { RunFileType } from "@grasp-os/shared/run-files";
 
 // Which Office document a ZIP someone else made is (GRA-886): a Word and
@@ -779,3 +780,15 @@ export const officeTypeOf = async (
   }
   return mainParts.find(([, part]) => part === type)?.[0];
 };
+
+/**
+ * The run-file type bytes someone else made show, whatever `label` they
+ * came with: a ZIP's by its package (`officeTypeOf`), any other's by its
+ * signature, or for text by the label (`runFileTypeOf`); undefined for
+ * bytes no run file may be.
+ */
+export const runFileTypeShown = async (
+  bytes: Uint8Array,
+  label: string | null
+): Promise<RunFileType | undefined> =>
+  isZip(bytes) ? await officeTypeOf(bytes) : runFileTypeOf(bytes, label);

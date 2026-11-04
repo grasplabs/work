@@ -469,6 +469,20 @@ const textOf = (decoder: TextDecoder, bytes: Uint8Array): boolean => {
   }
 };
 
+/** Whether all of `bytes` are what a text file's must be (`textOf`). */
+export const isRunFileText = (bytes: Uint8Array): boolean => {
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+  if (!textOf(decoder, bytes)) {
+    return false;
+  }
+  try {
+    decoder.decode();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * What finishing `row` answers when it needs no finishing: one finished,
  * then perhaps deleted (as the same attempt's later call may have), is

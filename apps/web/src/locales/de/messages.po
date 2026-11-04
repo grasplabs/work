@@ -6223,6 +6223,10 @@ msgstr "Mein halber Montag geht für Rechnungen drauf. Meist fehlt die Bestellnu
 msgid "handbook/leave"
 msgstr "handbuch/urlaub"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "Einen E-Mail-Anhang an einen Lauf übergeben"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Dorthin übergeben"
@@ -11677,6 +11681,10 @@ msgstr "Durchsuchen Sie Ihre Chats und öffnen Sie einen."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Oben durchsucht. Danach wandern Ereignisse ins Archiv."
 
+#: src/chat/thread.tsx
+msgid "Searched Grasp's reference for {text}"
+msgstr "In der Referenz von Grasp nach {text} gesucht"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Im Wissen gesucht"
@@ -11692,6 +11700,10 @@ msgstr "Im Audit-Trail gesucht"
 #: src/chat/thread.tsx
 msgid "Searched the brain for {query}"
 msgstr "Im Gehirn nach {query} gesucht"
+
+#: src/chat/thread.tsx
+msgid "Searching Grasp's reference for {text}"
+msgstr "Suche nach {text} in der Referenz von Grasp"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"

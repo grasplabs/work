@@ -44,6 +44,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.serverSdkModules,
         compilerAssets.packageBuilder,
         compilerAssets.esbuildWasm,
+        compilerAssets.reference,
       ].toSorted()
     );
     // The same sources are the same release, under any NODE_ENV.

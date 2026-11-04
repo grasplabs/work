@@ -21,9 +21,11 @@ import type { RunFileSource } from "./run-files.ts";
 // value's shape, `{ id }`, now naming its run file, read through the
 // workflow's own `files` binding. Threat note on GRA-885:
 //
-// - Only an App's screen hands a run a file (`StartFiles`, which only
-//   screen-workflows.ts builds). Any other start holding a `file` value is
-//   refused (`file.start_files`): no store to take it from.
+// - Only an App's screen or code hands a run an App's file (`StartFiles`,
+//   which app-start-files.ts builds), and only an email trigger's start
+//   its message's attachments (inbound-email.ts, GRA-1363). Any other
+//   start holding a `file` value is refused (`file.start_files`): nothing
+//   to take it from.
 // - Which files, and whether the person may read each, is the App's store
 //   to say (`StartFiles.read`), with their roles now: core copies only
 //   what that answers, by its recorded chunks.
@@ -32,16 +34,15 @@ import type { RunFileSource } from "./run-files.ts";
 //   receipt is written (`admitted`). A start never admitted drops its
 //   copies, or the sweep does.
 
-/** A file of the App, as the person may read it now: what is copied. */
+/** A file a start may hand its run, as it may be read now: what is copied. */
 export interface StartFile extends RunFileSource {
   readonly id: string;
-  /** Who uploaded it. */
-  readonly ownerId: string;
 }
 
 /**
- * The App files a start may hand its run: given only for a start an App's
- * screen makes, acting for the person using it.
+ * The files a start may hand its run: an App's, given only for a start an
+ * App's screen or code makes, acting for the person using it; or a
+ * message's attachments, for its email trigger's start (inbound-email.ts).
  */
 export interface StartFiles {
   /** File `fileId`, if the person may read it now: `file.not_found` otherwise. */
@@ -190,8 +191,9 @@ export interface HandedFiles {
  * Copies the files of `input` (canonical JSON, checked against
  * `descriptor`) into run `runId` of workflow `workflowId`, through
  * `files`: none when it holds none. `file.start_files` when it holds a
- * file but no App's screen starts it, no run is admitted with it, or
- * more than a start hands its run. The input as it is when it holds none.
+ * file but its start has no files to hand (`files` undefined), no run is
+ * admitted with it, or it holds more than a start hands its run. The
+ * input as it is when it holds none.
  */
 export const handFiles = async (
   env: Env,

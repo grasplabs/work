@@ -245,6 +245,35 @@ export const workflowSdkModules = async (
 export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.serverSdkModules);
 
+/** The agent's reference, read once per isolate (`memoiser`). */
+const memoisedReference = memoiser<Readonly<Record<string, string>>>();
+
+/**
+ * The SDK's and the UI kit's sources, as App code is type-checked against
+ * them, by path (`@grasp-os/sdk/src/app.ts`): what a chat's agent reads to
+ * write an App. One set per release.
+ */
+export const referenceFiles = async (
+  assets: Fetcher
+): Promise<Readonly<Record<string, string>>> =>
+  await memoisedReference(assets, compilerAssets.reference, async () => {
+    const parsed: unknown = JSON.parse(
+      await readCompilerFile(assets, compilerAssets.reference, "json")
+    );
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !Object.values(parsed).every((text) => typeof text === "string")
+    ) {
+      throw new Error(
+        `${compilerAssets.reference} is not in the expected shape.`
+      );
+    }
+    // SAFETY: an object of strings, checked above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return parsed as Record<string, string>;
+  });
+
 /**
  * How the compiler's isolate runs: no bindings, no importable env, no
  * network (`globalOutbound: null` and no subrequests), and at most one

@@ -1987,6 +1987,7 @@ export class Workspace extends DurableObject<Env> {
           },
         },
         loader: quietLoader(this.env.LOADER),
+        assets: this.env.ASSETS,
         sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
         // The Brain's recall before the first request, under the agent's

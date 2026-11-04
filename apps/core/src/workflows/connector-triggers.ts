@@ -33,6 +33,7 @@ import type { StampedRun } from "./mail-stamps.ts";
 import { admitChild } from "./quotas.ts";
 import { runOf } from "./resource-runs.ts";
 import { triggeredRunsPerHour } from "./runs.ts";
+import type { StartFiles } from "./start-files.ts";
 
 // Starting independent workflows from the events connections report
 // (platform specification 15.1, "Connect verified event"; trigger-
@@ -138,6 +139,14 @@ export const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.packages_revoked",
   "workflow.lineage_limit",
   "workflow.paused",
+  // An input holding files where nothing hands the run any, or more than a
+  // start hands it: the same input is refused so again.
+  "file.start_files",
+  // A message's attachments past the workflow's run-file bytes: dropped,
+  // audited, rather than failing every delivery until its sender gives up
+  // unheard. Anyone may mail a trigger, so its runs' files can fill the
+  // workflow's room; the hourly limit bounds how fast.
+  "file.workflow_quota",
 ]);
 
 const hourMs = 60 * 60 * 1000;
@@ -299,6 +308,8 @@ export interface Arrival {
   stamped: StampedRun | undefined;
   /** What admitting its start requires besides room (a grant to hear). */
   also?: SQL;
+  /** The files its start may hand its run: a message's attachments. */
+  files?: StartFiles;
   /** Noted with its start. */
   noted: Readonly<Record<string, string>>;
   /**
@@ -591,7 +602,9 @@ export const startOnce = async (
       {
         ...arrival.noted,
         ...(cause === undefined ? {} : { emittingRun: cause.runId }),
-      }
+      },
+      undefined,
+      arrival.files
     );
     await db
       .delete(connectorTriggerHolds)
