@@ -330,6 +330,28 @@ describe("an answer", () => {
     });
   });
 
+  it("is stored with its nested defaults filled in, as a write would store it", async () => {
+    const { store, ids } = await storeOf(notes({ title: v.string() }), [
+      { title: "A" },
+    ]);
+    const second = await store.defineTables(
+      notes({
+        title: v.string(),
+        detail: v.object({ tone: v.string().default("plain") }),
+      }),
+      consumer(2),
+      [],
+      [{ table: "notes", field: "detail", value: {} }]
+    );
+    await activate(store, second.schemaHash, 2);
+    const after = await notesOf(store);
+
+    expect(after.get(ids[0] ?? "")?.fields).toStrictEqual({
+      title: "A",
+      detail: { tone: "plain" },
+    });
+  });
+
   it("leaves a value a record holds that doesn't fit to a migration", async () => {
     const { store, ids } = await storeOf(prioritised(v.number().optional()), [
       { title: "A", priority: -1 },
@@ -1277,6 +1299,84 @@ describe("making the release current", { timeout: 180_000 }, () => {
       current: 2,
       read: ["Grace's"],
     });
+  });
+
+  it("makes a release current that changes the rules and adds a field, the field in force with the rules", async () => {
+    const outcomes = [];
+    for (const category of [
+      "v.string().optional()",
+      'v.string().default("general")',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const fixture = await appWith({
+        "schema.ts": v1Schema,
+        "app.ts": notesApp("owner"),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const first = await seal(fixture);
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const store = await openStore(env, fixture.store);
+      const owned = first.manifest.schemaHash;
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await insert(store, owned, { title: "Ada's" }, "ada");
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await insert(store, owned, { title: "Grace's" }, "grace");
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await commitFiles(
+        env,
+        fixture.owner,
+        fixture.app,
+        {
+          "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  notes: defineTable({ title: v.string().min(1).max(200), category: ${category} }),
+});
+`,
+          "app.ts": notesApp("appMembers"),
+        },
+        "Shared, with categories"
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const second = await seal(fixture, 2);
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const made = await failure(
+        async () => await setCurrentVersion(env, fixture.owner, fixture.app, 2)
+      );
+      const shared = second.manifest.schemaHash;
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const read = await titles(store, shared, "grace");
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const writes = await codeOf(
+        insert(store, shared, { title: "New", category: "launch" }, "ada")
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const held = await notesOf(store);
+      const categories = [...held.values()]
+        .map(({ fields: note }) =>
+          typeof note.category === "string" ? note.category : "none"
+        )
+        .toSorted((left, right) => left.localeCompare(right));
+      outcomes.push({ made, read, writes, categories });
+    }
+
+    expect(outcomes).toStrictEqual([
+      {
+        made: "ok",
+        read: ["Ada's", "Grace's"],
+        writes: "ok",
+        categories: ["launch", "none", "none"],
+      },
+      {
+        made: "ok",
+        read: ["Ada's", "Grace's"],
+        writes: "ok",
+        // The notes held before took the default as the release went in.
+        categories: ["general", "general", "launch"],
+      },
+    ]);
   });
 
   it("applies the rules as the version is made current", async () => {

@@ -159,7 +159,9 @@ type FieldSettled =
 /**
  * What a field the record lacks takes (it doesn't hold it, or holds null):
  * the value of the field it was renamed from, or the App's value for it,
- * when that fits.
+ * when that fits, with its nested defaults filled in as a write would
+ * store it (`withDefaultsFilled`), so the record's size is checked as it
+ * is stored.
  */
 const givenField = (
   checked: CheckedField,
@@ -176,7 +178,9 @@ const givenField = (
   if (given === undefined) {
     return { reason: present ? "invalid" : "missing" };
   }
-  return validates(descriptor, given) ? { value: given } : { reason: "unfit" };
+  return validates(descriptor, given)
+    ? { value: withDefaultsFilled(descriptor, given) }
+    : { reason: "unfit" };
 };
 
 /**

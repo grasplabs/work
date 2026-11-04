@@ -384,6 +384,36 @@ describe("a widening", () => {
     expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
   });
 
+  test("never counts a nested default as a widening, wherever it is nested", () => {
+    for (const [before, after] of [
+      // In an array's items, and in a record's values.
+      [
+        v.array(v.object({ tone: v.string().optional() })),
+        v.array(v.object({ tone: v.string().default("plain") })),
+      ],
+      [
+        v.record(v.object({ tone: v.string().optional() })),
+        v.record(v.object({ tone: v.string().default("plain") })),
+      ],
+      // A new nested field with a default.
+      [v.object({}), v.object({ tone: v.string().default("plain") })],
+      // Deeper down.
+      [
+        v.object({ inner: v.object({ tone: v.string().optional() }) }),
+        v.object({ inner: v.object({ tone: v.string().default("plain") }) }),
+      ],
+    ] as const) {
+      const plan = planSchemaChange(
+        notes({ ...noteFields, detail: before.optional() }),
+        notes({ ...noteFields, detail: after.optional() })
+      );
+      expect(plan).toMatchObject({ accepted: true, activates: true });
+      expect(checksOf(plan)).toStrictEqual([
+        { table: "notes", field: "detail", answer: null },
+      ]);
+    }
+  });
+
   test("fills a default in the union member a value fits, as a read of it would", () => {
     const detail = descriptorOf(
       v.union(

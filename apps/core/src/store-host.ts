@@ -1532,9 +1532,10 @@ const statusInForce = (
  */
 const awaitsActivation = (
   contract: SchemaManifest,
-  schema: SchemaManifest
+  schema: SchemaManifest,
+  options: Parameters<typeof planSchemaChange>[2] = {}
 ): boolean => {
-  const plan = planSchemaChange(contract, schema);
+  const plan = planSchemaChange(contract, schema, options);
   return plan.accepted && plan.activates;
 };
 
@@ -6043,11 +6044,19 @@ export class StoreHost {
     const schema = keepRules
       ? underContractRules(declared, contract)
       : declared;
-    const plan = planSchemaChange(contract, schema, {
-      reserved: this.#reservedFields(),
-      answers,
-    });
-    return plan.accepted && (plan.activates || (superseded && plan.changed))
+    const reserved = this.#reservedFields();
+    const plan = planSchemaChange(contract, schema, { reserved, answers });
+    if (!plan.accepted) {
+      return null;
+    }
+    // With its rules kept, what is left of a change that waited for its
+    // rules may check nothing (a field added beside them): it still moves
+    // the contract, which the seal left as it was for the rules' sake.
+    const waitedForRules =
+      keepRules &&
+      plan.changed &&
+      awaitsActivation(contract, declared, { reserved, answers });
+    return plan.activates || (superseded && plan.changed) || waitedForRules
       ? { baseHash: row.hash, plan, rollback: superseded }
       : null;
   }
