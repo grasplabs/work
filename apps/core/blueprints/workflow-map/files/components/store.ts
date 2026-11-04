@@ -1,5 +1,5 @@
 // The map's workflows and teams as its screen reads them from the App's
-// store (operations/), and what each refusal means to the person using
+// store (server/), and what each refusal means to the person using
 // it.
 
 import type { Id } from "@grasp-os/sdk";

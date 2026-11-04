@@ -5,11 +5,12 @@ import { v } from "./values.ts";
 import type { Infer, InferInput } from "./values.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what an
-// App's server functions read as `ctx.caller` and `ctx.people`, and its
-// screens as `useCaller()` and `usePeople()`. Core answers both itself,
-// from its own record of who is signed in and who is a member, never from
-// anything a screen or App code sends: a screen that makes up a caller
-// fools only itself, and every decision that matters is the server's.
+// App's server functions read as `ctx.auth.getUser()` and `ctx.people`,
+// and its screens as `useUser()` and `usePeople()`, as Convex's read
+// `ctx.auth`. Core answers both itself, from its own record of who is
+// signed in and who is a member, never from anything a screen or App code
+// sends: a screen that makes up a user fools only itself, and every
+// decision that matters is the server's.
 //
 // The directory is read-only and bounded, and only an App that declares it
 // (`app({ permissions: { people: true } })`) reads it: a member finds people by ID, by name
@@ -45,37 +46,32 @@ const team = v.object({ id, name });
 /** A team, by ID and name. */
 export type TeamRef = Infer<typeof team>;
 
-const personCaller = v.object({
-  kind: v.literal("person"),
-  id,
-  name,
-  email,
-  /** Their role in the organization. */
-  orgRole: v.enum(["admin", "builder", "user"]),
-  /** Their role in the App: a builder of it, or one of its users. */
-  appRole: v.enum(["builder", "user"]),
-  teams: v.array(team),
-});
+/**
+ * The roles someone holds in an App: `builder` for its builders (an
+ * admin builds every App), `user` for everyone with a role in it, its
+ * builders included, as a row rule's `role("user")` admits them. A
+ * visitor (someone outside the organization the App was shared with)
+ * holds none.
+ */
+export const appRoles = ["builder", "user"] as const;
 
-const visitorCaller = v.object({
-  kind: v.literal("visitor"),
+const user = v.object({
   /**
-   * Who owns what they insert, for this session only: it changes each
-   * time they sign in. Key what a visitor keeps by their `email`.
+   * Who they are: a member's ID, the same in every App. A visitor's is
+   * their session's, which owns what they insert and changes each time
+   * they sign in: key what a visitor keeps by their `email`.
    */
   id,
-  /** The address they signed in with: the same each time. */
-  email: v.string(),
+  /** Their name; a visitor's address, as they have no other. */
+  name,
+  /** Their address; null for a member who has no real one yet. */
+  email,
+  /** Their roles in the App (`appRoles`); none for a visitor. */
+  roles: v.array(v.enum(appRoles)),
 });
 
-const caller = v.union(personCaller, visitorCaller);
-
-/** A member of the organization calling the App. */
-export type PersonCaller = Infer<typeof personCaller>;
-/** Someone outside the organization the App was shared with. */
-export type VisitorCaller = Infer<typeof visitorCaller>;
 /** Who is calling: from core's verified identity, never from the client. */
-export type Caller = Infer<typeof caller>;
+export type User = Infer<typeof user>;
 
 const person = v.object({ id, name, email, teams: v.array(team) });
 
@@ -108,7 +104,7 @@ const paging = {
 
 /** Each directory read's arguments and answer: one contract for both sides. */
 const contracts = {
-  caller: { args: v.object({}), returns: caller },
+  user: { args: v.object({}), returns: user },
   find: {
     args: v.object({ ids: v.array(id).max(peopleLimits.pageMax) }),
     returns: v.array(person).max(peopleLimits.pageMax),
@@ -123,7 +119,7 @@ const contracts = {
   team: { args: v.object({ teamId: id, ...paging }), returns: page },
 } as const;
 
-/** The names of the reads: who calls, and the directory's three. */
+/** The names of the reads: who calls (`user`), and the directory's three. */
 export type PeopleOperationName = keyof typeof contracts;
 
 /** Whether `read` is one of the reads. */
@@ -149,7 +145,7 @@ const described = (read: PeopleOperationName): OperationManifest =>
 export const peopleOperations: Readonly<
   Record<PeopleOperationName, OperationManifest>
 > = Object.freeze({
-  caller: described("caller"),
+  user: described("user"),
   find: described("find"),
   search: described("search"),
   team: described("team"),
@@ -164,7 +160,7 @@ export const peopleOperations: Readonly<
  */
 export const peopleFingerprints: Readonly<Record<PeopleOperationName, string>> =
   {
-    caller: "87b560cef59fa7158b14044c8b1d156a01e4f7da27df445fbbf42154ee27bea1",
+    user: "0dbe0da92407b09709500f34a8b1e0a0dfddda4bf84492ee43546584f410013f",
     find: "f1538b1cacfa22be9293d76140ae785efa4a000e2d14ddaf3b5eb7bb4c1187bb",
     search: "56bdf9f1ce66d252e0c36f25e4a0910560000532b910ed4ca77e7d88c3b964e5",
     team: "bc78994e9287646b568949cdc4a0c38f6399c11cb6ed156bb0fda82121cb5482",
@@ -194,14 +190,14 @@ const referenceTo = <Name extends PeopleOperationName>(
   });
 
 /**
- * The references a screen reads through (`useCaller`, `usePeople`). They
+ * The references a screen reads through (`useUser`, `usePeople`). They
  * name no App: the screen's page binds its calls to its own App, and core
  * answers them for that App and the person signed in there, whatever a
  * reference says. So they work in Grasp's own screens only; a portable
- * host reads the caller through one of the App's functions.
+ * host reads who calls through one of the App's functions.
  */
 export const peopleReferences = Object.freeze({
-  caller: referenceTo("caller"),
+  user: referenceTo("user"),
   find: referenceTo("find"),
   search: referenceTo("search"),
   team: referenceTo("team"),

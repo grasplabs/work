@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import type { Id } from "../src/index.ts";
-import { screens } from "./notes/.grasp/references.ts";
+import { screens } from "./notes/server/_generated/api.ts";
 
 // Navigation between an App's screens (spec 10.7.7), as the session client
 // asks the host for it: one of the App's generated screen references and

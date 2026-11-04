@@ -26,7 +26,7 @@ import type { StoredPreferences } from "./store-host.ts";
 
 // An App's preferences (spec 10.7.7): `preferences.get` and
 // `preferences.update`, which the SDK declares (preference-operations.ts)
-// and generates into `#grasp` as public function references. They aren't
+// and generates into `@server/_generated/api` as public function references. They aren't
 // the App's functions: core answers them itself, as it answers workflow
 // references' queries (workflow-reference-queries.ts), from the App's own
 // business store, where they sit in a host-owned table no App code reaches

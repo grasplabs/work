@@ -39,8 +39,8 @@ export default defineSchema({
   invoices: defineTable({ total: v.number() }),
 });
 `,
-  "operations/invoices.ts": `import { v } from "@grasp-os/sdk";
-import { mutation } from "#grasp/server";
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+import { mutation } from "@server/_generated/server";
 
 export const book = mutation({
   args: { total: v.number() },
@@ -49,15 +49,12 @@ export const book = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { book } from "./operations/invoices.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoice desk",
   schema,
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  operations: { invoices: { book } },
-  internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 });
 `,
@@ -127,7 +124,7 @@ test("the side panel shows an App being built, and a builder makes its version c
     await expect(workflows).toContainText("May change something outside Grasp");
     // The App's functions its workflow may use are flagged as changed.
     await expect(workflows).toContainText(
-      "Code it may use changed: app.ts, operations/invoices.ts, and schema.ts"
+      "Code it may use changed: app.ts, schema.ts, and server/invoices.ts"
     );
     const makeCurrent = built.getByRole("button", {
       name: `Make version ${version} current`,

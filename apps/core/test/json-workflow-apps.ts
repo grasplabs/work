@@ -328,7 +328,7 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
 export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {
   input: v.object({ who: v.string().trim().min(1) }),
@@ -336,14 +336,13 @@ export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { ${alias} } from "./operations/requests.ts";
+import { ${alias} } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [${alias}] },
 });
@@ -355,7 +354,7 @@ export default app({
 });
 
 /**
- * The reference to `alias` that the `#grasp` generator writes into the
+ * The reference to `alias` that the `@server/_generated/api` generator writes into the
  * screens' references of version 1 of `app`, from its sealed release.
  */
 const workflowReference = async (app: string, alias: string) => {
@@ -376,7 +375,7 @@ const workflowReference = async (app: string, alias: string) => {
   );
 };
 
-/** A workflow reference, as `#grasp` generates it for a screen. */
+/** A workflow reference, as `@server/_generated/api` generates it for a screen. */
 export type WorkflowReference = Awaited<ReturnType<typeof workflowReference>>;
 
 /** A reference as the SDK sends it. */

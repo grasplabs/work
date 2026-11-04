@@ -3,9 +3,8 @@ import {
   paginationResultValidator,
   v,
 } from "@grasp-os/sdk";
-
-import { query } from "#grasp/server";
-import type { Doc, QueryCtx } from "#grasp/server";
+import { query } from "@server/_generated/server";
+import type { Doc, QueryCtx } from "@server/_generated/server";
 
 import { appLink, shortTextMax, workflowStates } from "../schema.ts";
 import { teamsMax } from "./teams.ts";

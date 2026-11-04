@@ -1,29 +1,37 @@
 /**
- * An App's server code as spec 8 lays it out, and what each part of it may
- * import. Four kinds of file, each a compilation target of its own:
+ * An App's server code as spec 8 lays it out, Convex's way, and what each
+ * part of it may import. Five kinds of file, each a compilation target of
+ * its own:
  *
  * - its schema (`schema.ts`) and shared values (`values.ts`): only the
- *   SDK's root module and each other, never an operation or the App's
- *   registration, so declaring the schema can't run server code, and the
- *   modules generated from it can't depend on what they are generated for;
- * - its server (`app.ts`, `operations/**`): its own server files, the
- *   schema and values, the SDK's root module and the generated `#grasp`
- *   modules: no platform module, no Workers runtime, nothing with
- *   authority of its own;
- * - its migrations (`migrations/*.ts`, spec 17.2): the schema, values and
- *   the SDK's root module, never server code or the generated modules, so
- *   a transform is built from nothing that reaches a store or a function.
- *   The registration imports them to register them; the host runs them
- *   in an isolate with no env and no network whatever they import;
- * - what the host generated for it (`.grasp/**`), which no App's version
- *   holds: the server constructors import `@grasp-os/sdk/server` and the
- *   schema; the references import nothing at run time;
+ *   SDK's root module and each other, never a server function or the
+ *   App's registration, so declaring the schema can't run server code,
+ *   and the modules generated from it can't depend on what they are
+ *   generated for;
+ * - its server (`app.ts`, `server/**`): its own server files, the schema
+ *   and values, the SDK's root module and the generated modules under
+ *   `server/_generated/`: no platform module, no Workers runtime, nothing
+ *   with authority of its own. Each module under `server/` (but
+ *   `_generated/` and `migrations/`) is found for its functions: its path
+ *   is their API (`server/tasks.ts`'s `list` is `api.tasks.list`);
+ * - its migrations (`server/migrations/*.ts`, spec 17.2): the schema,
+ *   values and the SDK's root module, never server code or the generated
+ *   modules, so a transform is built from nothing that reaches a store or
+ *   a function. The registration imports them to register them; the host
+ *   runs them in an isolate with no env and no network whatever they
+ *   import;
+ * - what the host generated for it (`server/_generated/**`, `.grasp/**`),
+ *   which no App's version holds: the server constructors import
+ *   `@grasp-os/sdk/server` and the schema; the references import nothing
+ *   at run time; the entry the host runs (`serverEntryPath`) imports the
+ *   registration and every server module;
  * - its tests (`tests/**`): each other, the schema and values, the SDK's
- *   root and testing modules and the public `#grasp` references, so a
- *   test reaches the App only as its callers do, through references the
- *   host resolves, never through its handlers or server constructors.
- *   Tests are never part of a release (`appCodeFiles`): core's test
- *   runner builds them on their own (`appTestFiles`).
+ *   root and testing modules and the public references
+ *   (`@server/_generated/api`), so a test reaches the App only as its
+ *   callers do, through references the host resolves, never through its
+ *   handlers or server constructors. Tests are never part of a release
+ *   (`appCodeFiles`): core's test runner builds them on their own
+ *   (`appTestFiles`).
  *
  * Screens never reach any of it: `screenImportError` says so, by name,
  * where a screen tries.
@@ -39,8 +47,8 @@ import { kitModuleName, appModuleName } from "./kit.ts";
 /**
  * The SDK modules an App's server isolate loads: the root (values, `app`,
  * `resource`, `AppError`), the server constructors the generated
- * `#grasp/server` calls, and the runner the host's main module calls.
- * App code imports only the root (`platformImports`).
+ * `server/_generated/server.ts` calls, and the runner the host's main
+ * module calls. App code imports only the root (`platformImports`).
  */
 export const serverSdkImports = [
   "@grasp-os/sdk",
@@ -56,58 +64,138 @@ export type AppCodeKind =
   | "generated"
   | "test";
 
-/** Where the host's generated modules are. */
-export const generatedFolder = ".grasp/";
+/** Where the generated modules App code imports are, as Convex has them. */
+export const generatedServerFolder = "server/_generated/";
 
-/** The modules generated for an App, by the alias its code imports them by. */
-export const generatedModules = {
-  "#grasp/server": ".grasp/server.ts",
-  "#grasp/server-references": ".grasp/server-references.ts",
-  "#grasp": ".grasp/references.ts",
-} as const;
-
-const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
-const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
+/** Where the host's own generated files are, which App code never imports. */
+export const hostGeneratedFolder = ".grasp/";
 
 /**
- * The App's operations, its server code: a `.ts` file anywhere under
- * `operations/`, its folders named as any App path's may be
- * (`hasAppPathSegments`), dots included but never leading, so no `.`,
- * `..` or hidden folder is ever server code.
+ * Whether `path` is one the host generates (`server/_generated/`,
+ * `.grasp/`): never an App's own file, so an App's files never hold one.
  */
-export const operationsFolder: CodeFolder = {
-  folder: "operations/",
+export const isGeneratedPath = (path: string): boolean =>
+  path.startsWith(generatedServerFolder) ||
+  path.startsWith(hostGeneratedFolder);
+
+/**
+ * The modules generated for an App, by the specifier its code imports
+ * them by: the public references (`api`), the internal ones (`internal`),
+ * the server builders (`server`) and the data model's types
+ * (`dataModel`). Server code may import them by a relative path too
+ * (`./_generated/server`), as Convex's does.
+ */
+export const generatedModules = {
+  "@server/_generated/api": "server/_generated/api.ts",
+  "@server/_generated/internal": "server/_generated/internal.ts",
+  "@server/_generated/server": "server/_generated/server.ts",
+  "@server/_generated/dataModel": "server/_generated/dataModel.ts",
+} as const;
+
+/**
+ * The entry the host runs an App's server from: its registration with
+ * the functions every server module exports (`serverEntrySource`).
+ */
+export const serverEntryPath = ".grasp/app.ts";
+
+const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
+const generatedFile = /^(?:server\/_generated|\.grasp)\/[\w.-]+\.ts$/u;
+
+/** Where an App's migrations are. */
+const migrationsPrefix = "server/migrations/";
+
+/**
+ * The App's migrations: each one file, `server/migrations/<name>.ts`,
+ * never in a folder, so nothing that only helps a migration is ever
+ * registered and run as one.
+ */
+export const migrationsFolder: CodeFolder = {
+  folder: migrationsPrefix,
   isFile: (path) =>
-    path.startsWith("operations/") &&
+    path.split("/").length === 3 &&
+    path.startsWith(migrationsPrefix) &&
     path.endsWith(".ts") &&
     !path.endsWith(".d.ts") &&
     hasAppPathSegments(path),
   holds:
-    "the App's server code: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot",
+    "the App's migrations: one TypeScript file each (server/migrations/<name>.ts), never in a folder",
 };
 
 /**
- * The App's migrations: each one file, `migrations/<name>.ts`, never in a
- * folder, so nothing that only helps a migration is ever registered and
- * run as one.
+ * Whether `path` is one of the App's server modules, whose exports are
+ * its functions: a `.ts` file anywhere under `server/` but its generated
+ * modules and its migrations, its folders named as any App path's may be
+ * (`hasAppPathSegments`), dots included but never leading, so no `.`,
+ * `..` or hidden folder is ever server code.
  */
-export const migrationsFolder: CodeFolder = {
-  folder: "migrations/",
+export const isServerModule = (path: string): boolean =>
+  path.startsWith("server/") &&
+  !path.startsWith(generatedServerFolder) &&
+  !path.startsWith(migrationsPrefix) &&
+  path.endsWith(".ts") &&
+  !path.endsWith(".d.ts") &&
+  hasAppPathSegments(path);
+
+/**
+ * `server/`: its modules, its migrations and the modules the host
+ * generates there, and nothing else.
+ */
+export const serverFolder: CodeFolder = {
+  folder: "server/",
   isFile: (path) =>
-    path.split("/").length === 2 &&
-    path.startsWith("migrations/") &&
-    path.endsWith(".ts") &&
-    !path.endsWith(".d.ts") &&
-    hasAppPathSegments(path),
+    isServerModule(path) ||
+    migrationsFolder.isFile(path) ||
+    generatedFile.test(path),
   holds:
-    "the App's migrations: one TypeScript file each (migrations/<name>.ts), never in a folder",
+    "the App's server code: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot, with its migrations in server/migrations/",
 };
 
 /** The folders of server code whose builds refuse what else is in them. */
 export const serverCodeFolders: readonly CodeFolder[] = [
-  operationsFolder,
+  serverFolder,
   migrationsFolder,
 ];
+
+/**
+ * The module path of each of `files`' server modules, as their functions'
+ * paths begin (`server/admin/users.ts` is `admin/users`), sorted.
+ */
+export const serverModulePaths = (files: Iterable<string>): string[] =>
+  [...files]
+    .filter((path) => isServerModule(path))
+    .map((path) => path.slice("server/".length, -".ts".length))
+    .toSorted();
+
+/**
+ * The entry the host runs an App's server from (`serverEntryPath`): the
+ * App's registration, with the functions each of `files`' server modules
+ * exports (`registerFunctions`). Generated from the file list alone, so
+ * the host has it before anything else is known of the App.
+ */
+export const serverEntrySource = (files: Iterable<string>): string => {
+  const modules = serverModulePaths(files);
+  const imports = modules
+    .map(
+      (module, index) =>
+        `import * as m${String(index)} from ${JSON.stringify(`../server/${module}.ts`)};\n`
+    )
+    .join("");
+  // Computed keys: a quoted `"__proto__"` key would set the map's
+  // prototype, where a computed one is a module the SDK refuses by path.
+  const entries = modules
+    .map(
+      (module, index) => `  [${JSON.stringify(module)}]: m${String(index)},\n`
+    )
+    .join("");
+  return `// Generated by Grasp: the App's registration, with its server functions.
+import { registerFunctions } from "@grasp-os/sdk/runner";
+
+import registered from "../app.ts";
+${imports}
+export default registerFunctions(registered, {
+${entries}});
+`;
+};
 
 /** Where an App's tests are: suites, their helpers and their fixtures. */
 export const appTestsFolder = "tests/";
@@ -174,25 +262,25 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (schemaFiles.has(path)) {
     return "schema";
   }
-  if (path === "app.ts" || operationsFolder.isFile(path)) {
-    return "server";
+  if (generatedFile.test(path)) {
+    return "generated";
   }
   if (migrationsFolder.isFile(path)) {
     return "migration";
   }
-  if (generatedFile.test(path)) {
-    return "generated";
+  if (path === "app.ts" || isServerModule(path)) {
+    return "server";
   }
   return isTestFile(path) ? "test" : undefined;
 };
 
 /**
  * The App's server code a workflow's types may name: its schema, values,
- * registration, operations and the migrations its registration imports,
- * with the host's generated modules, never its tests. A workflow's
- * `appFunctions<Tree>(env)` is typed by the App's operations (`import
- * type * as notes from "../operations/notes.ts"`), so they join its type
- * check; they never join its build.
+ * registration, server modules and the migrations its registration
+ * imports, with the host's generated modules, never its tests. A
+ * workflow's `appFunctions<Tree>(env)` is typed by the App's server
+ * modules (`import type * as notes from "../server/notes.ts"`), so they
+ * join its type check; they never join its build.
  */
 export const workflowTypeContext = (
   files: Readonly<Record<string, string>>
@@ -285,8 +373,8 @@ export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
 
 /**
  * The files a build of an App's server code reads: never its tests, and
- * everything under `operations/` and `migrations/`, so it can refuse what
- * isn't server code there (`serverCodeFolders`).
+ * everything under `server/`, so it can refuse what isn't server code
+ * there (`serverCodeFolders`).
  */
 export const appCodeFiles = (
   files: Readonly<Record<string, string>>
@@ -322,9 +410,9 @@ export const appTestFiles = (
 /** The kinds of file each kind's relative imports may reach. */
 const reachable: Readonly<Record<AppCodeKind, ReadonlySet<AppCodeKind>>> = {
   schema: new Set(["schema"]),
-  server: new Set(["server", "schema", "migration"]),
+  server: new Set(["server", "schema", "migration", "generated"]),
   migration: new Set(["schema"]),
-  generated: new Set(["schema"]),
+  generated: new Set(["schema", "server", "generated"]),
   test: new Set(["test", "schema"]),
 };
 
@@ -342,11 +430,16 @@ const platformImports: Readonly<
   migration: new Map([["@grasp-os/sdk", kitModuleName("@grasp-os/sdk")]]),
   generated: new Map([
     ["@grasp-os/sdk/server", kitModuleName("@grasp-os/sdk/server")],
+    // The entry's `registerFunctions` (`serverEntrySource`).
+    ["@grasp-os/sdk/runner", kitModuleName("@grasp-os/sdk/runner")],
   ]),
   test: new Map([
     ["@grasp-os/sdk", kitModuleName("@grasp-os/sdk")],
     ["@grasp-os/sdk/testing", kitModuleName("@grasp-os/sdk/testing")],
-    ["#grasp", appModuleName(generatedModules["#grasp"])],
+    [
+      "@server/_generated/api",
+      appModuleName(generatedModules["@server/_generated/api"]),
+    ],
   ]),
 };
 
@@ -355,11 +448,12 @@ const described: Readonly<Record<AppCodeKind, string>> = {
   schema:
     "The schema (schema.ts, values.ts) imports only @grasp-os/sdk and each other",
   server:
-    "Server code (app.ts, operations/) imports its own files, schema.ts, values.ts, migrations/, @grasp-os/sdk, #grasp, #grasp/server and #grasp/server-references",
+    "Server code (app.ts, server/) imports its own files, schema.ts, values.ts, server/migrations/, @grasp-os/sdk and the generated modules (@server/_generated/server, api, internal and dataModel)",
   migration:
-    "A migration (migrations/) imports only schema.ts, values.ts and @grasp-os/sdk",
-  generated: "Generated code imports only @grasp-os/sdk/server and schema.ts",
-  test: "Tests (tests/) import each other, schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and #grasp: they reach the App through its references, as its callers do",
+    "A migration (server/migrations/) imports only schema.ts, values.ts and @grasp-os/sdk",
+  generated:
+    "Generated code imports only @grasp-os/sdk/server, @grasp-os/sdk/runner, schema.ts and the App's server code",
+  test: "Tests (tests/) import each other, schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and @server/_generated/api: they reach the App through its references, as its callers do",
 };
 
 const javascriptExtension = /\.js$/u;
@@ -409,7 +503,12 @@ export const appCodeImport = (
   if (isRelative(specifier)) {
     const target = resolveRelative(file, specifier, files);
     const targetKind = target === undefined ? undefined : appCodeKind(target);
-    if (target === undefined || targetKind === undefined) {
+    if (
+      target === undefined ||
+      targetKind === undefined ||
+      // The host's own files (the entry it runs) are never App code's.
+      (kind !== "generated" && target.startsWith(hostGeneratedFolder))
+    ) {
       return {
         error: `"${specifier}" is not a file of the App's server code.`,
       };
@@ -426,8 +525,9 @@ export const appCodeImport = (
 
 /** The imports screens can never make, and why: the App's server. */
 const serverSpecifiers: ReadonlySet<string> = new Set([
-  "#grasp/server",
-  "#grasp/server-references",
+  "@server/_generated/server",
+  "@server/_generated/internal",
+  "@server/_generated/dataModel",
   "@grasp-os/sdk/server",
   "@grasp-os/sdk/host",
   "@grasp-os/sdk/runner",
@@ -472,8 +572,7 @@ const serverPath = (
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
   return ["schema", "values", "app"].includes(path) ||
-    path.startsWith("operations/") ||
-    path.startsWith("migrations/") ||
+    path.startsWith("server/") ||
     path.startsWith(".grasp/")
     ? path
     : undefined;

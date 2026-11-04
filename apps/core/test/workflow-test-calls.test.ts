@@ -104,8 +104,8 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
@@ -128,14 +128,13 @@ export const list = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, followUp, list } from "./operations/requests.ts";
+import { followUp } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: { requests: { add, list } },
   screens: [],
   permissions: { workflows: [followUp] },
 });
@@ -310,7 +309,7 @@ const leftOf = async (app: string) => {
 const suiteOf = (
   body: string
 ): string => `import { workflowTest } from "@grasp-os/sdk/testing";
-import { api, workflows } from "#grasp";
+import { api, workflows } from "@server/_generated/api";
 
 export default workflowTest({
   fixtures: "desk",

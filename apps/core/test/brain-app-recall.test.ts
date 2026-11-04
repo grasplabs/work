@@ -43,8 +43,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/brain.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/brain.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const help = permission.brain({
   operations: ["recall"],
@@ -69,15 +69,13 @@ export const ask = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { ask, help } from "./operations/brain.ts";
+import { help } from "./server/brain.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Ask",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { brain: { ask } },
-  internalOperations: {},
   screens: [],
   permissions: { brain: help },
 });

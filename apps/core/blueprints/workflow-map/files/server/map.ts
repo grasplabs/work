@@ -4,9 +4,8 @@ import {
   paginationResultValidator,
   v,
 } from "@grasp-os/sdk";
-
-import { doc, mutation, query } from "#grasp/server";
-import type { Doc, Id, MutationCtx } from "#grasp/server";
+import { doc, mutation, query } from "@server/_generated/server";
+import type { Doc, Id, MutationCtx } from "@server/_generated/server";
 
 import { appLink, editedFields, workflowStates } from "../schema.ts";
 import { requireIdentifier, requireWorkflowText } from "./text.ts";

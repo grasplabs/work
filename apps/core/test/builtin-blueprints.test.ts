@@ -103,7 +103,7 @@ const releaseWith = (change: Partial<BuiltinBlueprint>): Release =>
   releaseChanging((blueprint) => (blueprint.id === "hello" ? change : {}));
 
 /** Where `hello` keeps its greeting, a function of its release. */
-const greetings = "operations/greetings.ts";
+const greetings = "server/greetings.ts";
 
 /** A release whose `hello` greets differently. */
 const changedHello = (): Release =>
@@ -372,7 +372,7 @@ describe("the built-in blueprints", () => {
       // oxlint-disable-next-line no-await-in-loop -- as above
       await builder.api.apps.versions.setCurrent(created.app.id, 1);
       // Its screens pass the compiler's checks, with the references they
-      // import (`#grasp`), as they do when saved and opened.
+      // import (`@server/_generated/api`), as they do when saved and opened.
       if (
         Object.keys(blueprint.files).some((path) => path.startsWith("screens/"))
       ) {

@@ -56,7 +56,7 @@ export default defineSchema({
   }),
 });
 `,
-  "operations/notes.ts": `import { mutation } from "#grasp/server";
+  "server/notes.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const create = mutation({
@@ -113,7 +113,6 @@ export const pay = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, label, pay, pin, remove, rename } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -127,8 +126,6 @@ export default app({
       labels: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { notes: { create, label, pay, pin, remove, rename } },
-  internalOperations: {},
   screens: [],
 });
 `,

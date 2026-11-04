@@ -105,8 +105,6 @@ export default app({
   name: "Invoices",
   schema,
   access: { tables: {} },
-  operations: {},
-  internalOperations: {},
   screens: [],
   permissions: { ai: reader },
 });

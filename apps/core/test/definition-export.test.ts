@@ -45,8 +45,8 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const followUp = permission.workflow("followUp", {
   input: ${workflowShape},
@@ -73,14 +73,13 @@ export const kickOff = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp, kickOff, later, remind, writer } from "./operations/requests.ts";
+import { followUp, later, remind, writer } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: { requests: { kickOff } },
   screens: [],
   permissions: { ai: writer, workflows: [followUp, remind, later] },
 });
@@ -367,9 +366,10 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ],
       generated: [
         ".grasp/contracts.json",
-        ".grasp/references.ts",
-        ".grasp/server-references.ts",
-        ".grasp/server.ts",
+        "server/_generated/api.ts",
+        "server/_generated/dataModel.ts",
+        "server/_generated/internal.ts",
+        "server/_generated/server.ts",
       ],
       store: ["alias", "operationManifestHash", "schemaHash", "schemaVersion"],
       workflow: [

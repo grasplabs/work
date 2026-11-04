@@ -16,9 +16,8 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+import { api } from "@server/_generated/api";
 import { useState } from "react";
-
-import { api } from "#grasp";
 
 import { refusal, settle } from "./intake";
 import type { GuestChat } from "./intake";

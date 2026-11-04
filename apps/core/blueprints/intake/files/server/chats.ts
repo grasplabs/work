@@ -1,6 +1,5 @@
 import { AppError, permission, v } from "@grasp-os/sdk";
-
-import { action } from "#grasp/server";
+import { action } from "@server/_generated/server";
 
 import { notesMax, shortTextMax, sourceFields } from "../schema.ts";
 import { reviewer } from "./drafts.ts";

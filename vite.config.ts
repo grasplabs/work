@@ -37,13 +37,13 @@ export default defineConfig({
       ...(core.ignorePatterns ?? []),
       ...generated,
       // The tests' own built-in, an App of spec 8's layout: its operations
-      // import what its seal generates (`#grasp/server`), which nothing
+      // import what its seal generates (`@server/_generated/server`), which nothing
       // here maps, so its files are untyped, like any inline test App's
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
       // The screens of a built-in of spec 8's layout, for the same reason:
-      // they import `#grasp`, generated from the App's manifest. The screen
+      // they import `@server/_generated/api`, generated from the App's manifest. The screen
       // build type-checks them and lints them against the kit, with the
       // references the host generated (builtin-blueprints.test.ts builds
       // them). Its server code and workflows are linted here

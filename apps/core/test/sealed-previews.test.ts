@@ -103,7 +103,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     );
     const next = await write(
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       revision
     );
@@ -307,7 +307,7 @@ export class App extends DurableObject {
     await scheduler.wait(1000);
     const next = await write(
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       revision
     );
@@ -344,7 +344,7 @@ export class App extends DurableObject {
       });
     }
     const { chatId, revision } = await chatWithDraft(other, app, {
-      "operations/notes.ts": notesFiles("drafted")["operations/notes.ts"] ?? "",
+      "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
     });
     const request = await requestFor(
       other,
@@ -408,7 +408,7 @@ export class App extends DurableObject {
     });
     const next = await write(
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       revision
     );
@@ -448,7 +448,7 @@ export class App extends DurableObject {
       app,
       1,
       {
-        "operations/notes.ts": notesFiles("third")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("third")["server/notes.ts"] ?? "",
       },
       [],
       revision,
@@ -476,8 +476,7 @@ export class App extends DurableObject {
         role: "builder",
       });
       const theirs = await chatWithDraft(other, app, {
-        "operations/notes.ts":
-          notesFiles("drafted")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
       });
       const codes: string[] = [];
       for (let count = 0; count <= screenLimits.requests.burst; count += 1) {

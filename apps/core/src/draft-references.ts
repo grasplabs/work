@@ -1,4 +1,4 @@
-import { generatedFolder, isAppLayout } from "@grasp-os/compiler";
+import { isAppLayout, isGeneratedPath } from "@grasp-os/compiler";
 import {
   generatedPaths,
   generateModules,
@@ -12,7 +12,7 @@ import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import type { BuildOptions } from "./screens.ts";
 
-// What an App's screens import as `#grasp` (spec 8, 10.1): the public
+// What an App's screens import as `@server/_generated/api` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
 // function's contract ID, exact fingerprint, kind and argument
 // descriptors) and grant nothing: core resolves every call against the
@@ -30,11 +30,11 @@ const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
   Object.entries(files).some(
     ([path, source]) =>
       (path.startsWith("screens/") || path.startsWith("components/")) &&
-      source.includes("#grasp")
+      source.includes("@server/_generated/api")
   );
 
 /**
- * `files` with the references their screens import as `#grasp`, as
+ * `files` with the references their screens import as `@server/_generated/api`, as
  * `referencesOf` answers them: unchanged when no screen names them, when
  * the files aren't of spec 8's layout, or when there are none (their
  * server code doesn't build or inspect: an expected error). A screen that
@@ -59,7 +59,7 @@ export const withReferencesText = async (
   }
   return references === undefined
     ? files
-    : { ...files, [generatedPaths.references]: references };
+    : { ...files, [generatedPaths.api]: references };
 };
 
 /** What references are generated from: a manifest, and its bound workflows. */
@@ -82,13 +82,13 @@ const referencesOf = async (
           { resourceId: app, resourceVersion: version },
           source.workflows
         );
-  return Object.hasOwn(generated, generatedPaths.references)
-    ? generated[generatedPaths.references]
+  return Object.hasOwn(generated, generatedPaths.api)
+    ? generated[generatedPaths.api]
     : undefined;
 };
 
 /**
- * `files` with the references their screens import as `#grasp`, generated
+ * `files` with the references their screens import as `@server/_generated/api`, generated
  * for `app`'s `version` from what `sourceOf` reads (see
  * `withReferencesText`).
  */
@@ -140,7 +140,7 @@ export const inspectDraft = async (
   options?: BuildOptions
 ): Promise<DraftInspection> => {
   const code = Object.fromEntries(
-    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
+    Object.entries(files).filter(([path]) => !isGeneratedPath(path))
   );
   try {
     return { manifest: await filesManifest(env, code, app, options) };
@@ -163,7 +163,7 @@ export const inspectDraft = async (
  * its screens import the symbolic stand-ins inspection loads, typed
  * permissively (`symbolicModules`), and `standIn` says so: the server
  * build names the one reason, and a screen is checked for everything else
- * rather than failing on each import of `#grasp`. Checked against
+ * rather than failing on each import of `@server/_generated/api`. Checked against
  * stand-ins, a screen is never passed (agent-builds.ts, `buildPassed`).
  */
 export const withDraftReferences = async (
@@ -196,7 +196,7 @@ export const withDraftReferences = async (
       }
     }
     standIn = true;
-    return symbolicModules()[generatedPaths.references];
+    return symbolicModules()[generatedPaths.api];
   });
   return { files: withReferences, standIn };
 };

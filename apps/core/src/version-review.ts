@@ -915,8 +915,7 @@ export const reviewVersion = async (
           name === "app.ts" ||
           name === "schema.ts" ||
           name === "values.ts" ||
-          name.startsWith("operations/") ||
-          name.startsWith("migrations/")
+          name.startsWith("server/")
       )
   );
   // Asked for again only if not kept, as `madeCurrent` says: an App's

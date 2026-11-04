@@ -100,7 +100,7 @@ const appFiles = (
 
 export default defineSchema({ requests: defineTable({ who: v.string() }) });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1), reviewer: v.string() }),
@@ -108,15 +108,13 @@ export const followUp = permission.workflow("followUp", {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./operations/requests.ts";
+import { followUp } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
-  internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [followUp] },
 });
@@ -125,7 +123,7 @@ export default app({
 import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
 import { useForm, useWorkflow } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 const decision = workflows.followUp.decisions.approval;
 const responseSchema = v.object({
@@ -179,7 +177,7 @@ export function Review({
 }
 `,
   "screens/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 /** Run \`runId\`'s status, as the person may see it: thrown otherwise. */
 export function Watched({ runId }: { runId: string }) {
@@ -190,7 +188,7 @@ export function Watched({ runId }: { runId: string }) {
   "screens/desk.tsx": `import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 import { Review } from "./review.tsx";
 import { Watched } from "./watched.tsx";
 

@@ -175,7 +175,7 @@ const proposerText = ({ proposedBy }: VersionReview): string => {
 };
 
 /**
- * Each changed file of a version's server code (`app.ts`, `schema.ts`, `operations/` and the rest its seal builds), before and
+ * Each changed file of a version's server code (`app.ts`, `schema.ts`, `server/` and the rest its seal builds), before and
  * after: against the current version, or as a first version has it.
  */
 const serverCodeOf = async (

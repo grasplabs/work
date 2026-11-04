@@ -11,7 +11,7 @@ import { expectTypeOf } from "vite-plus/test";
 import type { Id } from "../src/index.ts";
 import { useNavigate } from "../src/react.ts";
 import type { Navigate, ScreenProps } from "../src/react.ts";
-import { screens } from "./notes/.grasp/references.ts";
+import { screens } from "./notes/server/_generated/api.ts";
 
 declare const navigate: Navigate;
 declare const id: Id<"notes">;

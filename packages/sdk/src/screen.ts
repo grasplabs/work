@@ -3,7 +3,7 @@
  * `useRun` and `followRuns`, with which a screen starts and follows its
  * App's workflow runs through the page around its sandboxed frame. An App
  * of spec 8's layout uses `@grasp-os/sdk/react` instead: its queries,
- * mutations, actions and workflows through the generated `#grasp`
+ * mutations, actions and workflows through the generated `@server/_generated/api`
  * references. GRA-418 removes this module. A screen reaches its App's
  * code through those references only: there is no call of an App's
  * server from here.

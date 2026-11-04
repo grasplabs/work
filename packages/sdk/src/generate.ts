@@ -12,20 +12,24 @@ import { descriptorOf } from "./value-schema.ts";
 import { workflowQueries } from "./workflow-queries.ts";
 import type { WorkflowQueryName } from "./workflow-queries.ts";
 
-// The modules the host generates for an App (spec 7.3, 8), from its
-// manifest as the host read it (app-manifest.ts), never from its code:
+// The modules the host generates for an App (spec 7.3, 8), as Convex
+// generates `convex/_generated/`, from its manifest as the host read it
+// (app-manifest.ts), never from its code:
 //
-// - `.grasp/server.ts` (`#grasp/server`): the server constructors and
-//   `doc`, specialized to the App's schema. Its code is the same for every
-//   App (`serverModule(schema)`); the specialization is in its types,
-//   which come from `schema.ts` itself.
-// - `.grasp/server-references.ts` (`#grasp/server-references`): the
+// - `server/_generated/server.ts` (`@server/_generated/server`): the
+//   server constructors and `doc`, specialized to the App's schema. Its
+//   code is the same for every App (`serverModule(schema)`); the
+//   specialization is in its types, which come from `schema.ts` itself.
+// - `server/_generated/dataModel.ts` (`@server/_generated/dataModel`): the
+//   data model's types (`Doc`, `Id`, `TableName`), from `schema.ts` too.
+// - `server/_generated/internal.ts` (`@server/_generated/internal`): the
 //   `internal` tree, for the App's own server code only.
-// - `.grasp/references.ts` (`#grasp`): the public `api`, `workflows`, the
-//   permissions its screens use (`permissions.files`, `permissions.links`),
-//   its `screens`, and `preferences` when it
-//   declares them. What a browser gets: data and types, extracted from
-//   descriptors, with no handler, schema or server code in it.
+// - `server/_generated/api.ts` (`@server/_generated/api`): the public
+//   `api`, `workflows`, the permissions its screens use
+//   (`permissions.files`, `permissions.links`), its `screens`, and
+//   `preferences` when it declares them. What a browser gets: data and
+//   types, extracted from descriptors, with no handler, schema or server
+//   code in it.
 // - `.grasp/contracts.json`: the App's manifest, each function's
 //   fingerprint and the workflows it binds with theirs, canonical: what
 //   the release's contract hash covers.
@@ -42,9 +46,10 @@ export interface ReleaseIdentity {
 
 /** Where each generated module is, among the App's files. */
 export const generatedPaths = {
-  server: ".grasp/server.ts",
-  serverReferences: ".grasp/server-references.ts",
-  references: ".grasp/references.ts",
+  api: "server/_generated/api.ts",
+  internal: "server/_generated/internal.ts",
+  server: "server/_generated/server.ts",
+  dataModel: "server/_generated/dataModel.ts",
   contracts: ".grasp/contracts.json",
 } as const;
 
@@ -612,13 +617,33 @@ const typeImports = (text: string, names: readonly string[]): string => {
 };
 
 /**
- * `#grasp/server`: the constructors, specialized to `schema.ts` by type.
- * The same for every App, so inspection can load it before anything is
- * generated from the App's manifest.
+ * `@server/_generated/dataModel`: the data model's types, from
+ * `schema.ts` alone. The same for every App, so inspection can load it
+ * before anything is generated from the App's manifest.
  */
-export const serverModuleSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
+export const dataModelSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
 import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
-import { serverModule } from "@grasp-os/sdk/server";
+
+import type schema from "../../schema.ts";
+
+type Tables = (typeof schema)["tables"];
+
+/** The App's tables, by name, as \`schema.ts\` declares them. */
+export type DataModel = Tables;
+/** The names of the App's tables. */
+export type TableName = keyof Tables & string;
+/** The ID of a record of table \`Table\`. */
+export type Id<Table extends TableName> = SdkId<Table>;
+/** A record of table \`Table\`, as a read returns it. */
+export type Doc<Table extends TableName> = SdkDoc<Tables[Table], Table>;
+`;
+
+/**
+ * `@server/_generated/server`: the constructors, specialized to
+ * `schema.ts` by type. The same for every App, so inspection can load it
+ * before anything is generated from the App's manifest.
+ */
+export const serverModuleSource = `${banner}import { serverModule } from "@grasp-os/sdk/server";
 import type {
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
@@ -626,9 +651,11 @@ import type {
   Use,
 } from "@grasp-os/sdk/server";
 
-import schema from "../schema.ts";
+import schema from "../../schema.ts";
+import type { DataModel } from "./dataModel.ts";
 
-type Tables = (typeof schema)["tables"];
+export type { CallerCtx } from "@grasp-os/sdk/server";
+export type { Doc, Id, TableName } from "./dataModel.ts";
 
 const server = serverModule(schema);
 
@@ -640,15 +667,9 @@ export const action = server.action;
 export const internalAction = server.internalAction;
 export const doc = server.doc;
 
-/** The names of the App's tables. */
-export type TableName = keyof Tables & string;
-/** The ID of a record of table \`Table\`. */
-export type Id<Table extends TableName> = SdkId<Table>;
-/** A record of table \`Table\`, as a read returns it. */
-export type Doc<Table extends TableName> = SdkDoc<Tables[Table], Table>;
-export type QueryCtx = SdkQueryCtx<Tables>;
+export type QueryCtx = SdkQueryCtx<DataModel>;
 export type MutationCtx<Uses extends readonly Use[] = readonly []> =
-  SdkMutationCtx<Tables, Uses>;
+  SdkMutationCtx<DataModel, Uses>;
 export type ActionCtx<Uses extends readonly Use[] = readonly []> =
   SdkActionCtx<Uses>;
 `;
@@ -694,7 +715,7 @@ const operationsOf = (
     .filter((operation) => operation.visibility === visibility)
     .toSorted((a, b) => (a.path < b.path ? -1 : 1));
 
-/** `#grasp/server-references`: the internal tree. */
+/** `@server/_generated/internal`: the internal tree. */
 const serverReferencesText = (
   manifest: AppManifest,
   identity: ReleaseIdentity,
@@ -849,7 +870,7 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
 
 /**
  * The reference to `workflow`, as the data a generated module holds: what
- * a screen's `#grasp` imports under `workflows.<alias>`.
+ * a screen's `@server/_generated/api` imports under `workflows.<alias>`.
  */
 export const workflowReferenceOf = async (
   identity: ReleaseIdentity,
@@ -951,7 +972,7 @@ const workflowsExport = async (
   return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`;
 };
 
-/** `#grasp`: the public api and everything else a browser may hold. */
+/** `@server/_generated/api`: the public api and everything else a browser may hold. */
 const referencesText = async (
   manifest: AppManifest,
   identity: ReleaseIdentity,
@@ -1121,12 +1142,13 @@ export const generateModules = async (
   });
   return {
     [generatedPaths.server]: serverModuleSource,
-    [generatedPaths.serverReferences]: serverReferencesText(
+    [generatedPaths.dataModel]: dataModelSource,
+    [generatedPaths.internal]: serverReferencesText(
       manifest,
       identity,
       fingerprints
     ),
-    [generatedPaths.references]: await referencesText(
+    [generatedPaths.api]: await referencesText(
       manifest,
       identity,
       fingerprints,
@@ -1185,8 +1207,8 @@ const symbolicTree = (visibility: "public" | "internal"): string =>
   `symbolic(${JSON.stringify(visibility)})`;
 
 /**
- * The modules inspection loads in place of `#grasp` and
- * `#grasp/server-references` before the App's references exist (spec
+ * The modules inspection loads in place of `@server/_generated/api` and
+ * `@server/_generated/internal` before the App's references exist (spec
  * 8): the registration is what says which paths there are, so its code
  * gets symbolic references, which grant nothing and resolve only against
  * that registration. Sealing then generates the real modules and inspects
@@ -1244,7 +1266,7 @@ export const symbolicModules = (): Record<string, string> => {
 };
 `;
   return {
-    [generatedPaths.serverReferences]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree("internal")} as unknown as StandIn;\n`,
-    [generatedPaths.references]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
+    [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree("internal")} as unknown as StandIn;\n`,
+    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
   };
 };

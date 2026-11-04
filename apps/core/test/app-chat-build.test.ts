@@ -39,7 +39,7 @@ export default defineSchema({
 
 /** The board's operations: list the cards, add one, move one on. */
 const operations = `import { v } from "@grasp-os/sdk";
-import { doc, mutation, query } from "#grasp/server";
+import { doc, mutation, query } from "@server/_generated/server";
 
 import { columns } from "../schema.ts";
 
@@ -68,14 +68,13 @@ export const move = mutation({
 /** The board's registration, as the SDK's `app` takes it. */
 const registration = `import { app } from "@grasp-os/sdk";
 
-import { create, list, move } from "./operations/cards.ts";
+import { create, list, move } from "./server/cards.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Board",
   schema,
   access: { tables: { cards: { read: "appMembers", write: "appMembers" } } },
-  operations: { cards: { list, create, move } },
   screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
 });
 `;
@@ -84,7 +83,7 @@ export default app({
 const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 const columns = [
   { id: "todo", title: "To do" },
@@ -191,7 +190,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
     const app = await builder.api.apps.create({ name: `Board ${unique()}` });
     const files = {
       "schema.ts": schema,
-      "operations/cards.ts": operations,
+      "server/cards.ts": operations,
       "app.ts": guessed,
       "screens/board.tsx": screen,
     };
@@ -208,12 +207,12 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       codeStep(checking(app.id)),
       toolStep("writeFile", {
         app: app.id,
-        files: { "app.ts": registration, "operations/cards.ts": mistyped },
+        files: { "app.ts": registration, "server/cards.ts": mistyped },
       }),
       codeStep(calling(app.id)),
       toolStep("writeFile", {
         app: app.id,
-        files: { "operations/cards.ts": operations },
+        files: { "server/cards.ts": operations },
       }),
       codeStep(checking(app.id)),
       says("The board is drafted.")
@@ -280,7 +279,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       code: typeError.code,
       located: typeError.message
         .split("\n")
-        .some((line) => line.startsWith("operations/cards.ts:15: ")),
+        .some((line) => line.startsWith("server/cards.ts:15: ")),
     }).toStrictEqual({ code: "version.build_failed", located: true });
     expect(returned(fixed?.text)).toStrictEqual({
       passed: true,
@@ -296,9 +295,9 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         app: app.id,
         changed: [
           "app.ts",
-          "operations/cards.ts",
           "schema.ts",
           "screens/board.tsx",
+          "server/cards.ts",
         ],
       },
     ]);

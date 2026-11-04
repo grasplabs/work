@@ -735,8 +735,7 @@ const serverCodeIncludes = [
   "app.ts",
   "schema.ts",
   "values.ts",
-  "operations/**/*.ts",
-  "migrations/*.ts",
+  "server/**/*.ts",
   ".grasp/*.ts",
 ];
 

@@ -59,8 +59,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/review.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action, mutation } from "#grasp/server";
+  "server/review.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action, mutation } from "@server/_generated/server";
 
 export const review = permission.workflow("review", {
   input: v.object({ doc: v.file() }),
@@ -88,7 +88,7 @@ export const stageReview = mutation({
 });
 `,
   "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { review, stageReview, startReview } from "./operations/review.ts";
+import { review } from "./server/review.ts";
 import schema from "./schema.ts";
 
 export const attachments = permission.files({
@@ -99,7 +99,6 @@ export default app({
   name: "Reviews",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { review: { startReview, stageReview } },
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { files: attachments, workflows: [review] },
 });
@@ -930,7 +929,7 @@ describe(
       const aliased = Object.fromEntries(
         Object.entries(files()).map(([path, text]) => [
           path,
-          path === "operations/review.ts"
+          path === "server/review.ts"
             ? text.replace(
                 "input: v.object({ doc: v.file() })",
                 "input: v.object({ doc: v.object({ id: v.string() }) })"
@@ -958,7 +957,7 @@ describe(
       const extras = Array.from({ length: 120 }, (_, at) => `extra${at}`);
       const many = Object.fromEntries(
         Object.entries(files()).map(([path, text]) => {
-          if (path === "operations/review.ts") {
+          if (path === "server/review.ts") {
             return [
               path,
               text.replace(
@@ -973,7 +972,7 @@ describe(
               text
                 .replace(
                   'import schema from "./schema.ts";',
-                  'import schema from "./schema.ts";\nimport * as extra from "./operations/extra.ts";'
+                  'import schema from "./schema.ts";\nimport * as extra from "./server/extra.ts";'
                 )
                 .replace(
                   "permissions: { files: attachments, workflows: [review] },",
@@ -984,7 +983,7 @@ describe(
           return [path, text];
         })
       );
-      many["operations/extra.ts"] = [
+      many["server/extra.ts"] = [
         'import { permission, v } from "@grasp-os/sdk";',
         ...extras.map(
           (name) =>

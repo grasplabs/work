@@ -24,7 +24,7 @@ import {
   v,
 } from "../src/values.ts";
 import type { Id } from "../src/values.ts";
-import { workflows } from "./notes/.grasp/references.ts";
+import { workflows } from "./notes/server/_generated/api.ts";
 import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const noteFields = {

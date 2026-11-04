@@ -28,8 +28,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -41,15 +41,12 @@ export const create = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoice desk",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create } },
-  internalOperations: {},
   screens: [],
 });
 `,

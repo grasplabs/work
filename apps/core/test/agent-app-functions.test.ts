@@ -32,8 +32,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -80,15 +80,12 @@ export const holdThenCreate = action({
 });
 `,
   "app.ts": `import { app, v } from "@grasp-os/sdk";
-import { create, failWithFirst, holdThenCreate, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, failWithFirst, holdThenCreate, titles } },
-  internalOperations: {},
   screens: [],
   preferences: v.object({ compact: v.boolean().default(false) }),
 });

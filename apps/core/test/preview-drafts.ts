@@ -68,8 +68,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, permission, v } from "@grasp-os/sdk";
-import { action, doc, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, permission, v } from "@grasp-os/sdk";
+import { action, doc, mutation, query } from "@server/_generated/server";
 
 // ${marker}
 
@@ -265,21 +265,19 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { alsoBroken, broken, callsThrowsTheFirst, chatty, consult, create, forgiving, handledThenFailed, late, list, oddly, patient, rethrows, sly, throwsTheFirst, titles, writer } from "./operations/notes.ts";
+import { writer } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows, alsoBroken, handledThenFailed, patient, throwsTheFirst, callsThrowsTheFirst } },
-  internalOperations: {},
   screens: [],
   permissions: { ai: writer },
 });
 `,
   "screens/desk.tsx": `import { useQuery } from "@grasp-os/sdk/react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Desk() {
   const titles = useQuery(api.notes.titles, {});
@@ -330,7 +328,7 @@ export const withPreferences = (
 
 /**
  * The reference to the preference operation `name` of a release of `app`
- * at `version`, as `#grasp` generates it from those preferences.
+ * at `version`, as `@server/_generated/api` generates it from those preferences.
  */
 export const preferenceReference = async (
   app: string,
@@ -360,7 +358,6 @@ export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   preferences: ${preferencesSource},
 });
@@ -456,7 +453,7 @@ export const previewDraftsOf = (idp: Idp) => ({
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const draft = await chatWithDraft(builder, app, {
-      "operations/notes.ts": notesFiles("drafted")["operations/notes.ts"] ?? "",
+      "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
     });
     return { builder, app, ...draft };
   },

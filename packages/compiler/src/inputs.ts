@@ -80,7 +80,7 @@ export const componentsFolder: CodeFolder = {
 /**
  * The files a build reads: screens, components and declarations, and the
  * references the host generated for the App's server code, which screens
- * import as `#grasp`.
+ * import as `@server/_generated/api`.
  */
 export const buildFiles = (
   files: Record<string, string>
@@ -246,7 +246,7 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
 
 /**
  * What a build takes of the modules the host generates for an App
- * (`.grasp/`), apart from the App's own files, so an App at its limits
+ * (`server/_generated/`, `.grasp/`), apart from the App's own files, so an App at its limits
  * still builds. The host writes them, never the App: each is derived from
  * the App's manifest, which the host has already read and bounded
  * (`appManifestMaxBytes`, whatever the size of the App's source), and
@@ -261,7 +261,8 @@ const generatedLimits = {
 } as const;
 
 /** Whether `path` is where the host puts a module it generates. */
-const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
+const isGenerated = (path: string): boolean =>
+  path.startsWith(".grasp/") || path.startsWith("server/_generated/");
 
 /**
  * Why a build of an App's server code (`appCodeFiles`) or screens

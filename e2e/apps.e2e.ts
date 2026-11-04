@@ -18,7 +18,7 @@ export default defineSchema({ clicks: defineTable({ at: v.number() }) });
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+import { mutation, query } from "@server/_generated/server";
 
 export const count = query({
   args: {},
@@ -37,22 +37,20 @@ export const addOne = mutation({
 const registration = (
   screen: string
 ): string => `import { app } from "@grasp-os/sdk";
-import { addOne, count } from "./operations/counter.ts";
+import { addOne, count } from "./server/counter.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Counter",
   schema,
   access: { tables: { clicks: { read: "appMembers", write: "appMembers" } } },
-  operations: { counter: { count, addOne } },
-  internalOperations: {},
   screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
 });
 `;
 
 const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Counter() {
   const count = useQuery(api.counter.count, {});
@@ -70,7 +68,7 @@ export default function Counter() {
 /** The counter App's code: its schema, functions and one screen, `name`. */
 const counterApp = (name = "counter"): Record<string, string> => ({
   "schema.ts": schema,
-  "operations/counter.ts": operations,
+  "server/counter.ts": operations,
   "app.ts": registration(name),
   [`screens/${name}.tsx`]: screen,
 });

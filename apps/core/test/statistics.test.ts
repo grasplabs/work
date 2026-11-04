@@ -49,8 +49,8 @@ const statsFiles = (): Record<string, string> => ({
 
 export default defineSchema({ marks: defineTable({ at: v.number() }) });
 `,
-  "operations/stats.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/stats.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const grasp = permission.grasp();
 
@@ -118,15 +118,13 @@ export const platformReadBurst = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 
-import { grasp, platformRead, platformReadBurst, platformReadMany, platformWrite } from "./operations/stats.ts";
+import { grasp } from "./server/stats.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Stats",
   schema,
   access: { tables: { marks: { read: "owner", write: "owner" } } },
-  operations: { stats: { platformRead, platformReadMany, platformReadBurst, platformWrite } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [grasp] },
 });

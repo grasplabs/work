@@ -31,7 +31,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
 import { useState } from "react";
 
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 /** What a run is doing, in words, from its status. */
 const statusLabels: Record<string, string> = {

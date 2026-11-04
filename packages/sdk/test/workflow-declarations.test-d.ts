@@ -1,7 +1,7 @@
 // Compile-time guarantees of a workflow declaration (`permission.workflow`,
 // spec 7.4, 10.4.1) and the reference generated from it: the App declares
 // the output a run gives beside the input it takes, both required; and the
-// reference its screens get (`workflows.<alias>` in `#grasp`, generated
+// reference its screens get (`workflows.<alias>` in `@server/_generated/api`, generated
 // from the Notes fixture's declarations) takes and gives exactly what the
 // declaration does. Type-checked by `vp check`, never run: every
 // `@ts-expect-error` must stay an error.
@@ -14,9 +14,9 @@ import type {
   WorkflowPermission,
 } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
-import { workflows } from "./notes/.grasp/references.ts";
 import type { archiveNotes } from "./notes/app.ts";
 import { summarizeNote } from "./notes/app.ts";
+import { workflows } from "./notes/server/_generated/api.ts";
 
 /** The input a declaration takes, as a caller passes it. */
 type DeclaredInput<Declared> =

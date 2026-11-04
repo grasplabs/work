@@ -8,9 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { api } from "@server/_generated/api";
 import { useEffect, useRef, useState } from "react";
-
-import { api } from "#grasp";
 
 import { BoardPage } from "../components/board-page";
 import { NarrativeEditor, TakeSnapshot } from "../components/controls";

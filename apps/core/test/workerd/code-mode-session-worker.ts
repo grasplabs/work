@@ -1,6 +1,10 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp } from "@grasp-os/sdk/host";
+import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -31,11 +35,14 @@ interface StandInEnv {
 const schema = defineSchema({ notes: defineTable({ title: v.string() }) });
 const { action } = serverModule(schema);
 const { manifest } = inspectApp(
-  app({
-    name: "Jobs",
-    schema,
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operations: {
+  registerFunctions(
+    app({
+      name: "Jobs",
+      schema,
+      access: { tables: { notes: { read: "owner", write: "owner" } } },
+      screens: [],
+    }),
+    {
       jobs: {
         echo: action({
           args: { n: v.number() },
@@ -43,13 +50,12 @@ const { manifest } = inspectApp(
           handler: (_ctx, args) => args,
         }),
       },
-    },
-    screens: [],
-  })
+    }
+  )
 );
 const release = {
   modules: {
-    [appModuleName("app.ts")]:
+    [appModuleName(serverEntryPath)]:
       'export default { "jobs.echo": async (channel, args) => ({ n: args.n + 1 }) };',
   },
   sdk: {

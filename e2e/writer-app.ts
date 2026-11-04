@@ -13,7 +13,7 @@ export default defineSchema({
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+import { action } from "@server/_generated/server";
 
 const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -45,15 +45,13 @@ export const outline = action({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { draft, outline } from "./operations/writer.ts";
+import { draft, outline } from "./server/writer.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Writer",
   schema,
   access: { tables: { drafts: { read: "owner", write: "owner" } } },
-  operations: { writer: { draft, outline } },
-  internalOperations: {},
   screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
 });
 `;
@@ -61,7 +59,7 @@ export default app({
 const screen = `import { useStream } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Writer() {
   const [outlining, setOutlining] = useState(false);
@@ -115,7 +113,7 @@ export default function Writer() {
 /** The Writer App's files. */
 export const writerAppFiles = (): Record<string, string> => ({
   "schema.ts": schema,
-  "operations/writer.ts": operations,
+  "server/writer.ts": operations,
   "app.ts": registration,
   "screens/writer.tsx": screen,
 });

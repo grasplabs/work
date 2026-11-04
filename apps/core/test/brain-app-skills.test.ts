@@ -46,8 +46,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/skills.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/skills.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const how = permission.brain({
   operations: ["skillsSelect", "skillsRead"],
@@ -84,15 +84,13 @@ export const open = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { how, open, pick } from "./operations/skills.ts";
+import { how } from "./server/skills.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "How",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { skills: { pick, open } },
-  internalOperations: {},
   screens: [],
   permissions: { brain: how },
 });

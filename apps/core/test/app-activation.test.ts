@@ -51,8 +51,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -67,15 +67,12 @@ export const titles = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: ${JSON.stringify(title)},
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -86,8 +83,8 @@ const emptyFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const hello = query({
   args: {},
@@ -96,15 +93,12 @@ export const hello = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { hello } from "./operations/hello.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Hello",
   schema,
   access: { tables: {} },
-  operations: { hello: { hello } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -116,7 +110,7 @@ export default app({
  */
 const withoutNotes: Record<string, string | null> = {
   ...emptyFiles,
-  "operations/notes.ts": null,
+  "server/notes.ts": null,
 };
 
 type Caller = Awaited<ReturnType<typeof person>>;
@@ -199,8 +193,8 @@ export default defineSchema({
   notes: defineTable({ ${fields} })${indexed ? '.index("by_title", ["title"])' : ""},
 });
 `,
-    "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 const note = v.object({ ${fields} });
 
@@ -242,15 +236,12 @@ export const rows = query({
 });
 `,
     "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, rename, retitle, rows } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, rename, retitle, rows } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -994,7 +985,7 @@ describe(
       // The same schema, under code changed elsewhere.
       const again = await nextVersion(owner, app, {
         ...files,
-        "operations/notes.ts": `${files["operations/notes.ts"] ?? ""}// Again.\n`,
+        "server/notes.ts": `${files["server/notes.ts"] ?? ""}// Again.\n`,
       });
       await vi.waitFor(
         async () => {

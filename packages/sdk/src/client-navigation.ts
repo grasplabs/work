@@ -105,7 +105,7 @@ const readSurfaces = (
     if (typeof input !== "object" || input === null) {
       return undefined;
     }
-    // SAFETY: a generated reference's descriptor, as `#grasp` froze it;
+    // SAFETY: a generated reference's descriptor, as `@server/_generated/api` froze it;
     // `validateValue` refuses one that isn't a descriptor.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     surfaces.set(name, input as ValueDescriptor);
@@ -134,7 +134,7 @@ const readScreen = (value: unknown): ReadScreen | undefined => {
   if (surfaces === undefined) {
     return undefined;
   }
-  // SAFETY: a generated screen reference's descriptor, as `#grasp` froze
+  // SAFETY: a generated screen reference's descriptor, as `@server/_generated/api` froze
   // it; `validateValue` refuses one that isn't a descriptor.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return { name, input: input as ValueDescriptor, surfaces };

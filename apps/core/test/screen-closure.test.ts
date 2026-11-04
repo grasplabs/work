@@ -35,8 +35,6 @@ export default app({
   name: "Closure",
   schema,
   access: { tables: {} },
-  operations: {},
-  internalOperations: {},
   screens: [],
 });
 `,

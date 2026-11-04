@@ -115,7 +115,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       app,
       1,
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       [],
       revision + 1,
@@ -209,7 +209,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     await scheduler.wait(500);
     const next = await write(
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       revision
     );

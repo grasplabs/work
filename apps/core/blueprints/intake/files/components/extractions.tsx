@@ -1,8 +1,7 @@
 import { useWorkflow } from "@grasp-os/sdk/react";
 import type { WorkflowViewOf } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 import type { DraftSource } from "./intake";
 

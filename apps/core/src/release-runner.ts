@@ -1,4 +1,8 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
@@ -92,7 +96,7 @@ const answerMaxLength = operationResultMaxBytes;
 const runMain = `import { WorkerEntrypoint } from "cloudflare:workers";
 import { runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
 import { jsonAnswer } from ${JSON.stringify(hostJsonModule)};
-import registered from ${JSON.stringify(appModuleName("app.ts"))};
+import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 
 const rebuilt = (settled) => {
   if (settled.ok) {

@@ -5,8 +5,13 @@ import {
   permission,
   v,
 } from "@grasp-os/sdk";
-
-import { action, doc, internalMutation, mutation, query } from "#grasp/server";
+import {
+  action,
+  doc,
+  internalMutation,
+  mutation,
+  query,
+} from "@server/_generated/server";
 
 import {
   decisionMax,
@@ -17,7 +22,7 @@ import {
   signalFields,
 } from "../schema.ts";
 import { mapFigures } from "../values.ts";
-import { builder } from "./access.ts";
+import { requireBuilder } from "./access.ts";
 import { freeze, windowDays } from "./freeze.ts";
 import type { MapFigure } from "./freeze.ts";
 
@@ -169,9 +174,9 @@ export const take = action({
     decisionNeeded: v.string().trim().max(decisionMax).default(""),
   },
   returns: v.id("snapshots"),
-  uses: [builder, addFigures, finish, map, grasp],
+  uses: [addFigures, finish, map, grasp],
   handler: async (ctx, args) => {
-    await ctx.runQuery(builder, {});
+    await requireBuilder(ctx);
     const read: MapFigure[] = [];
     const seen = new Set<string>();
     let cursor: string | null = null;

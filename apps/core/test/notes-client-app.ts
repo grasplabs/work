@@ -3,7 +3,7 @@ import type { Id, OperationReference, ReferenceKind } from "@grasp-os/sdk";
 import type { Release } from "../src/app-releases.ts";
 
 // A Notes App on the accepted SDK, and its `api` as its screens import it
-// from `#grasp`: what the session client's tests call, through a screen's
+// from `@server/_generated/api`: what the session client's tests call, through a screen's
 // page (screen-client*.test.ts) or a portable host
 // (portable-client.test.ts).
 
@@ -19,8 +19,8 @@ export default defineSchema({
   notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
 });
 `,
-  "operations/notes.ts": `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { action, doc, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+import { action, doc, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../schema.ts";
 
 export const list = query({
@@ -118,21 +118,18 @@ export const big = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, get, create, update, remove, echo, stamp, big } },
-  internalOperations: {},
   screens: [],
 });
 `,
   "screens/notes.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Notes() {
   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
@@ -169,7 +166,7 @@ export type Page =
   | { items: Note[]; hasMore: false; nextCursor: null }
   | { items: Note[]; hasMore: true; nextCursor: string };
 
-/** The reference to `path` of `release`, typed as the App's `#grasp` types it. */
+/** The reference to `path` of `release`, typed as the App's `@server/_generated/api` types it. */
 export const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   release: Release,
   path: string
@@ -179,7 +176,7 @@ export const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   if (operation === undefined || fingerprint === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  // The same data the host generates into `#grasp` for this release (sdk
+  // The same data the host generates into `@server/_generated/api` for this release (sdk
   // generate.ts), typed by hand as it would be.
   return {
     resourceId: release.manifest.resourceId,
@@ -196,7 +193,7 @@ export const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   };
 };
 
-/** The App's `api`, as its screens import it from `#grasp`. */
+/** The App's `api`, as its screens import it from `@server/_generated/api`. */
 export const apiOf = (release: Release) => ({
   list: referenceTo<
     { pagination: { cursor?: string | null; pageSize?: number } },

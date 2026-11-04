@@ -204,7 +204,7 @@ class Channel extends ChannelTarget implements OperationChannel {
       const counted =
         name !== "write" &&
         name !== "emit" &&
-        !(name === "people" && args[0] === "caller");
+        !(name === "people" && args[0] === "user");
       if (counted) {
         this.#state.uses += 1;
       }

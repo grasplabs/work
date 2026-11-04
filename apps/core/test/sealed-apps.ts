@@ -194,7 +194,7 @@ export const sweptAway = async (app: AppId, version: number): Promise<void> => {
 
 /**
  * The reference to query `name` of the workflow the App declares as
- * `alias`, as `#grasp` generates it from `release`.
+ * `alias`, as `@server/_generated/api` generates it from `release`.
  */
 export const queryReference = async (
   release: Release,

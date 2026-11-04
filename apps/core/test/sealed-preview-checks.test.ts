@@ -26,7 +26,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
   it("keeps what the draft's code threw for its chat's check alone, bounded, never in any caller's answer", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const other = await chatWithDraft(builder, app, {
-      "operations/notes.ts": notesFiles("other")["operations/notes.ts"] ?? "",
+      "server/notes.ts": notesFiles("other")["server/notes.ts"] ?? "",
     });
     const call = async (path: string) =>
       await builder.api.chats.previewFunction(
@@ -258,7 +258,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const { chatId, revision } = await chatWithDraft(builder, app, {
-      "operations/notes.ts": "export const titles = ;\n",
+      "server/notes.ts": "export const titles = ;\n",
     });
     const request = JSON.stringify({
       reference: {
@@ -301,7 +301,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const theirs = await chatWithDraft(other, app, {
-      "operations/notes.ts": notesFiles("drafted")["operations/notes.ts"] ?? "",
+      "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
     });
     await builder.api.chats.previewFunction(
       chatId,

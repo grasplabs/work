@@ -1,7 +1,8 @@
 // The SDK's root module (`@grasp-os/sdk`): values and schemas (values.ts),
 // and how an App registers itself, the permissions it needs and the error
 // it fails with on purpose. Server code and schemas import these; the
-// server constructors come from the generated `#grasp/server` module.
+// server constructors come from the generated `server/_generated/server`
+// module.
 
 export * from "./values.ts";
 export { app } from "./app.ts";
@@ -10,8 +11,8 @@ export type {
   AppDefinition,
   AppPermissions,
   OperationAccess,
-  OperationTree,
   ScreenDefinition,
+  ServerModules,
   TableVerbs,
 } from "./app.ts";
 export { AppError } from "./app-error.ts";
@@ -58,7 +59,7 @@ export type {
   WorkflowConfig,
   WorkflowPermission,
 } from "./permissions.ts";
-// References (spec 8, 32.1): what the generated `#grasp` modules hold.
+// References (spec 8, 32.1): what the generated `@server/_generated/api` modules hold.
 export type {
   AnyOperationReference,
   AnyWorkflowReference,
@@ -104,14 +105,12 @@ export type {
   WorkflowWaitOf,
 } from "./references.ts";
 // Who calls an App, and the organization's people (people.ts): what a
-// server function reads as `ctx.caller` and `ctx.people`.
+// server function reads as `ctx.auth.getUser()` and `ctx.people`.
 export type {
-  Caller,
   PageOptions,
   PeopleDirectory,
   PeoplePage,
   Person,
-  PersonCaller,
   TeamRef,
-  VisitorCaller,
+  User,
 } from "./people.ts";

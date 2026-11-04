@@ -2,7 +2,12 @@ import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 import { appMaxOperations } from "@grasp-os/shared/operation-limits";
 
-import { app, AppDefinitionError, inspectApp } from "./app.ts";
+import {
+  app,
+  AppDefinitionError,
+  inspectApp,
+  registerFunctions,
+} from "./app.ts";
 import type {
   AppManifest,
   OperationAccess,
@@ -46,8 +51,8 @@ import type { AnySchema } from "./value-schema.ts";
 // (its handler running nothing too), and the App through `app`. What that
 // registration's inspection makes must then be exactly the manifest read,
 // canonically: anything a declaration couldn't have made (a widened verb,
-// a use of something unregistered, a public function in the internal
-// tree, a key no declaration has, a descriptor out of bounds) is refused.
+// a use of something unregistered, a path no module's export makes, a key
+// no declaration has, a descriptor out of bounds) is refused.
 // There is no other path from text to an `AppManifest`.
 
 const refuse = (message: string): never => {
@@ -247,37 +252,34 @@ const functionFrom = (
   return { path, ...read, declaration, tables: input.tables };
 };
 
-/** `value` placed at dotted `path` in `tree`, refusing a path that clashes. */
+/**
+ * `value` exported as dotted `path` among `modules`: from the module of
+ * every segment but the last (`tasks.list` is `server/tasks.ts`'s `list`),
+ * as App code exports it, refusing a path no module could make.
+ */
 const place = (
-  tree: Record<string, unknown>,
+  modules: Record<string, Record<string, unknown>>,
   path: string,
   value: unknown
 ): void => {
   const segments = path.split(".");
-  let node = tree;
-  for (const [index, segment] of segments.entries()) {
-    const last = index === segments.length - 1;
-    const existing = Object.hasOwn(node, segment) ? node[segment] : undefined;
-    if (last) {
-      if (existing !== undefined) {
-        refuse(`\`${path}\` clashes with another registered path.`);
-      }
-      Object.defineProperty(node, segment, { enumerable: true, value });
-      return;
-    }
-    if (existing === undefined) {
-      const child: Record<string, unknown> = {};
-      Object.defineProperty(node, segment, {
-        enumerable: true,
-        value: child,
-      });
-      node = child;
-    } else if (isPlainObject(existing)) {
-      node = existing;
-    } else {
-      refuse(`\`${path}\` clashes with another registered path.`);
-    }
+  const name = segments.pop();
+  if (name === undefined || segments.length === 0) {
+    refuse(
+      `\`${path}\` isn't a module's export: a path is a module's and an export's name.`
+    );
+    return;
   }
+  const module = segments.join("/");
+  const exports = Object.hasOwn(modules, module) ? modules[module] : undefined;
+  const target = exports ?? {};
+  if (exports === undefined) {
+    Object.defineProperty(modules, module, { enumerable: true, value: target });
+  }
+  if (Object.hasOwn(target, name)) {
+    refuse(`\`${path}\` clashes with another registered path.`);
+  }
+  Object.defineProperty(target, name, { enumerable: true, value });
 };
 
 /** The screens of the manifest, as a declaration lists them. */
@@ -530,8 +532,7 @@ export const readAppManifest = (text: string): AppManifest => {
   const declare = (
     overrides: Readonly<Record<string, OperationAccess>>
   ): AppManifest => {
-    const operations: Record<string, unknown> = {};
-    const internalOperations: Record<string, unknown> = {};
+    const modules: Record<string, Record<string, unknown>> = {};
     for (const { path, kind, visibility, declaration } of functions) {
       const construct: unknown = Reflect.get(
         server,
@@ -540,11 +541,7 @@ export const readAppManifest = (text: string): AppManifest => {
       if (typeof construct !== "function") {
         return refuse(`\`${path}\` has no constructor.`);
       }
-      place(
-        visibility === "public" ? operations : internalOperations,
-        path,
-        Reflect.apply(construct, undefined, [declaration])
-      );
+      place(modules, path, Reflect.apply(construct, undefined, [declaration]));
     }
     const access: Record<string, TableAccess> = {};
     for (const [name, table] of Object.entries(schemaManifest.tables)) {
@@ -557,8 +554,6 @@ export const readAppManifest = (text: string): AppManifest => {
       name: data.name,
       schema,
       access: { tables: access },
-      operations,
-      internalOperations,
       operationAccess: overrides,
       screens: screensFrom(data.screens),
       surfaces: surfacesFrom(data.surfaces),
@@ -569,7 +564,7 @@ export const readAppManifest = (text: string): AppManifest => {
       migrations: migrationsFrom(data.migrations),
       ...(answers ? { answers: data.answers } : {}),
     } as Parameters<typeof app>[0];
-    return inspectApp(app(definition)).manifest;
+    return inspectApp(registerFunctions(app(definition), modules)).manifest;
   };
 
   // A function whose verbs aren't what its kind and the App's access give

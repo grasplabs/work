@@ -25,7 +25,7 @@ import type { TriggerDeclaration } from "./workflows.ts";
 
 /**
  * A file's path in an App, relative to its root and `/`-separated, such
- * as `screens/inbox.tsx` or `operations/notes.ts`. No absolute paths, no empty,
+ * as `screens/inbox.tsx` or `server/notes.ts`. No absolute paths, no empty,
  * `.` or `..` segments, no backslashes.
  */
 export const appPathSchema = z
@@ -40,11 +40,14 @@ export const appPathSchema = z
         segments.every((segment) => appPathSegmentPattern.test(segment)) &&
         // Files are keyed by path in plain objects: `__proto__` would be
         // the object's prototype, not a file.
-        !Object.hasOwn(Object.prototype, path)
+        !Object.hasOwn(Object.prototype, path) &&
+        // The modules Grasp generates for an App, as Convex's
+        // `_generated/`: never one of its own files.
+        !path.startsWith("server/_generated/")
       );
     },
     {
-      message: `A relative path of at most ${appLimits.pathDepth} names made of letters, digits, _, - and ., none starting with .`,
+      message: `A relative path of at most ${appLimits.pathDepth} names made of letters, digits, _, - and ., none starting with ., and never under server/_generated/, which Grasp generates`,
     }
   );
 
@@ -335,7 +338,7 @@ export interface VersionReview {
   files: { path: string; change: ReviewChange }[];
   /**
    * How its server code (`app.ts`, `schema.ts`, `values.ts`,
-   * `operations/` and `migrations/`, as its seal builds them) differs, if
+   * `server/`, as its seal builds them) differs, if
    * it does: it runs as whoever uses the App, with every permission the
    * App holds. Its files that differ are `serverFiles`.
    */
@@ -1063,7 +1066,7 @@ export const appErrors = defineErrorFamily({
   "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.v1_server":
-    "An App no longer has files under app/: its server code is app.ts, schema.ts and its functions in operations/. Delete the files under app/ and commit again.",
+    "An App no longer has files under app/: its server code is app.ts, schema.ts and its functions in server/. Delete the files under app/ and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.candidate_busy":
     "This version is already being checked to be made current. Try again in a moment.",
@@ -1103,7 +1106,7 @@ export const appErrors = defineErrorFamily({
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_layout":
-    "A preview runs only an App of spec 8's layout: app.ts and schema.ts, with its functions in operations/. This draft has no app.ts or schema.ts.",
+    "A preview runs only an App of spec 8's layout: app.ts and schema.ts, with its functions in server/. This draft has no app.ts or schema.ts.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });

@@ -1,7 +1,7 @@
 import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
-import type { Caller, PeopleDirectory } from "./people.ts";
+import type { PeopleDirectory, User } from "./people.ts";
 import { isPermission, isWorkflowPermission } from "./permissions.ts";
 import type {
   AiClient,
@@ -47,7 +47,7 @@ import type {
 // actions, public or internal, each declared with its arguments, its
 // return and a handler `handler(ctx, args)`. A definition is a value: it
 // runs nothing and registers nothing. The App registers it under a path
-// (`app({ operations })`, app.ts), and the host runs it, validating the
+// by exporting it from a module under `server/` (app.ts), and the host runs it, validating the
 // arguments it is called with and what it returns against the declared
 // schemas, which it holds as descriptors, never trusting App code to.
 //
@@ -74,7 +74,7 @@ import type {
 // sends it; the types here make the mistakes fail to compile first.
 //
 // The constructors are specialized to the App's schema by `serverModule`,
-// which the generated `#grasp/server` module calls; an author never
+// which the generated `server/_generated/server` module calls; an author never
 // writes their generics. There is no `input`/`output` form, no `reads` or
 // `writes` list and no `ctx.data`: the superseded shapes of spec 7 are
 // refused, not aliased.
@@ -335,20 +335,25 @@ export type PermissionClients<Uses extends readonly Use[]> = {
   Present<"brain", BrainClientOf<Extract<Uses[number], BrainPermission>>> &
   Present<"guests", GuestsClientOf<Extract<Uses[number], GuestsPermission>>>;
 
+/** `ctx.auth`: who the call is for, as Convex's `ctx.auth` answers it. */
+export interface Auth {
+  /**
+   * Who the call is for (`User`): their ID, name, address and roles in
+   * the App (`builder`, `user`; none for a visitor the App was shared
+   * with, whose `id` is their session's: key a visitor by `email`). A
+   * workflow run's call is for the person the run acts for. Read once as
+   * the call starts, from core's own record of who is signed in.
+   */
+  readonly getUser: () => Promise<User>;
+}
+
 /**
  * What every handler has, whatever its kind: who is calling, and the
  * organization's people (people.ts). Both come from core's own record of
  * who is signed in, never from the caller's request.
  */
 export interface CallerCtx {
-  /**
-   * Who the call is for: a member of the organization (`kind: "person"`),
-   * with their roles and teams, or a visitor the App was shared with
-   * (`kind: "visitor"`, whose `id` is their session's and changes each
-   * time they sign in: key a visitor by `email`). A workflow run's call is
-   * for the person the run acts for. Read as the call starts.
-   */
-  readonly caller: Caller;
+  readonly auth: Auth;
   /**
    * The organization's members, read-only, for an App that declares it
    * (`app({ permissions: { people: true } })`; `permission.denied` otherwise): by ID, by
@@ -808,7 +813,7 @@ export interface ServerModule<Tables extends AnyTables> {
 }
 
 /**
- * The server constructors for `schema`: what the generated `#grasp/server`
+ * The server constructors for `schema`: what the generated `server/_generated/server`
  * module exports for an App or a store, never imported by App code
  * directly. Throws for anything but a schema `defineSchema` made.
  */

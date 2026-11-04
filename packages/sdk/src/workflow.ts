@@ -820,9 +820,9 @@ export type FunctionResult<Value> =
 type GroupDepth = [never, 0, 1, 2, 3];
 
 /**
- * The registered paths (`drafts.propose`) of the public functions of kind
- * `Kind` in `Tree`, the App's functions grouped as its `operations`
- * registers them: a definition by its path, a group by the paths in it.
+ * The paths (`drafts.propose`) of the public functions of kind `Kind` in
+ * `Tree`, the App's functions grouped by their server modules, as their
+ * paths are: a definition by its path, a group by the paths in it.
  * Never a streaming action's: it runs only for a screen following it
  * (spec 10.7.6), and a workflow's call answers once, so the host refuses
  * it (`operation.mode_mismatch`).
@@ -898,10 +898,10 @@ export type AppFunctionsStub<Tree> = unknown extends Tree
  * `appFunctions<Intake>(env).mutation("drafts.propose", input)` is
  * `env.APP.callFunction({ contractId: "drafts.propose", kind: "mutation" },
  * input)`, typed by the App's own definitions, which a workflow imports
- * as types only, grouped as the App's `operations` registers them:
+ * as types only, grouped by their server modules, as their paths are:
  *
  * ```ts
- * import type * as drafts from "../operations/drafts.ts";
+ * import type * as drafts from "../server/drafts.ts";
  *
  * type Intake = { drafts: typeof drafts };
  *

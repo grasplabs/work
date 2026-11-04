@@ -46,8 +46,8 @@ export default defineSchema({
   board: defineTable({ file: v.file().nullable().default(null) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { doc, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { doc, mutation, query } from "@server/_generated/server";
 
 export const get = query({
   args: { id: v.id("notes") },
@@ -166,7 +166,6 @@ export const unpin = mutation({
 });
 `,
   "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { attachFile, create, detachFile, get, keepTwice, pin, pinById, remove, renew, stash, stashMany, unpin } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export const files = permission.files({
@@ -183,14 +182,12 @@ export default app({
       board: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { notes: { get, create, attachFile, detachFile, remove, renew, keepTwice, stash, stashMany, pin, pinById, unpin } },
-  internalOperations: {},
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   permissions: { files },
 });
 `,
   "screens/notes.tsx": `import { useFile, useUpload } from "@grasp-os/sdk/react";
-import { permissions } from "#grasp";
+import { permissions } from "@server/_generated/api";
 
 export default function Notes() {
   const upload = useUpload(permissions.files);
@@ -208,7 +205,7 @@ interface Note {
   attachments: { id: string }[];
 }
 
-/** The reference to `path` of `release`, typed as `#grasp` types it. */
+/** The reference to `path` of `release`, typed as `@server/_generated/api` types it. */
 const referenceTo = <Args, Return, Kind extends ReferenceKind>(
   release: Release,
   path: string
@@ -295,7 +292,7 @@ const apiOf = (release: Release) => ({
   >(release, "notes.unpin"),
 });
 
-/** The App's `permissions`, as its screens import them from `#grasp`. */
+/** The App's `permissions`, as its screens import them from `@server/_generated/api`. */
 export const permissions = {
   files: {
     kind: "files",

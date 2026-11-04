@@ -70,8 +70,6 @@ export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: {},
-  internalOperations: {},
   screens: [],
 });
 `,

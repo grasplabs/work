@@ -74,7 +74,7 @@ export default defineSchema({
   blobs: defineTable({ body: v.string() }),
 });
 `,
-  "operations/notes.ts": `import { action, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { action, mutation, query } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const count = query({
@@ -138,7 +138,6 @@ export const add = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, count, create, fill, keepDeep, write } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -150,8 +149,6 @@ export default app({
       blobs: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { notes: { add, count, create, fill, keepDeep, write } },
-  internalOperations: {},
   screens: [],
 });
 `,

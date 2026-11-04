@@ -49,8 +49,8 @@ const mailFiles = (
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const mail = permission.connection("mail", {
   contract: "${contract}",
@@ -136,15 +136,13 @@ export const careless = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { careless, inbox, mail, probe, send, sendFresh } from "./operations/mail.ts";
+import { mail } from "./server/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { send, inbox, careless, sendFresh, probe } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [mail] },
 });
@@ -161,7 +159,7 @@ const unknownContractFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { permission } from "@grasp-os/sdk";
+  "server/mail.ts": `import { permission } from "@grasp-os/sdk";
 
 export const mail = permission.connection("mail", {
   contract: "grasp.mail@1" as never,
@@ -169,15 +167,13 @@ export const mail = permission.connection("mail", {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { mail } from "./operations/mail.ts";
+import { mail } from "./server/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {},
-  internalOperations: {},
   screens: [],
   permissions: { connections: [mail] },
 });
@@ -187,8 +183,8 @@ export default app({
 /** The Mailer, with a second alias of the same contract: its archive. */
 const archiveFiles = (): Record<string, string> => ({
   ...mailFiles(),
-  "operations/archive.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/archive.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const archive = permission.connection("archive", {
   contract: "microsoft-365.mail@1",
@@ -206,16 +202,14 @@ export const archived = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { archive, archived } from "./operations/archive.ts";
-import { careless, inbox, mail, probe, send, sendFresh } from "./operations/mail.ts";
+import { archive } from "./server/archive.ts";
+import { mail } from "./server/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { send, inbox, careless, sendFresh, probe }, archive: { archived } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [mail, archive] },
 });
@@ -224,8 +218,8 @@ export default app({
 
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
 const unusedMailFiles = (): Record<string, string> => ({
-  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
@@ -235,15 +229,13 @@ export const mail = permission.connection("mail", {
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { mail, ping } from "./operations/mail.ts";
+import { mail } from "./server/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { ping } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [mail] },
 });
@@ -1178,8 +1170,8 @@ const crmFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.connection("crm", {
   contract: "composio.crm@1",
@@ -1220,15 +1212,13 @@ export const create = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { contacts, create, crm, sloppy } from "./operations/crm.ts";
+import { crm } from "./server/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Contacts",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { crm: { contacts, create, sloppy } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [crm] },
 });
@@ -1241,8 +1231,8 @@ const twoCrmFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.connection("crm", {
   contract: "composio.crm@1",
@@ -1266,15 +1256,13 @@ export const contacts = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { backup, contacts, crm } from "./operations/crm.ts";
+import { backup, crm } from "./server/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Two CRMs",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { crm: { contacts } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [crm, backup] },
 });

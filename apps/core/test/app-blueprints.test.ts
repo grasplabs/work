@@ -57,8 +57,8 @@ export default defineSchema({
   notes: defineTable({ text: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
   args: { text: v.string().min(1).max(200) },
@@ -73,15 +73,12 @@ export const list = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, list } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { add, list } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -98,7 +95,7 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
 const v1 = {
   ...notesCode,
   "screens/notes.tsx": `import { useQuery } from "@grasp-os/sdk/react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Notes() {
   const notes = useQuery(api.notes.list, {});

@@ -21,7 +21,7 @@ import { workflowReferenceLimits } from "../src/references.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
 import { WorkflowStore } from "../src/workflow-store.ts";
 import type { Selection } from "../src/workflow-store.ts";
-import { workflows } from "./notes/.grasp/references.ts";
+import { workflows } from "./notes/server/_generated/api.ts";
 
 // What `useWorkflow` shows and does (spec 10.4–10.4.7, 10.7.2, 10.7.3),
 // through the hook's store and the session client's workflow channel,

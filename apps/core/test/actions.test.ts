@@ -6,7 +6,11 @@ import {
   permission,
   v,
 } from "@grasp-os/sdk";
-import { inspectApp, manifestText } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -564,11 +568,24 @@ const emitsAnyway = action({
   handler: (ctx) => ("emit" in ctx ? "emit" : "no emit"),
 });
 
-const notesApp = app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {
+const notesApp = registerFunctions(
+  app({
+    name: "Notes",
+    schema,
+    access: { tables: { notes: { read: "owner", write: "owner" } } },
+    operationAccess: {
+      "notes.blindCount": { tables: { notes: { insert: true } } },
+    },
+    screens: [],
+    permissions: {
+      connections: [mail],
+      ai,
+      brain,
+      guests,
+      workflows: [followUp],
+    },
+  }),
+  {
     notes: {
       get,
       create,
@@ -609,20 +626,9 @@ const notesApp = app({
       fireAndForgetCaught,
     },
     chain: { level0, level1, level2, level3, level4 },
-  },
-  internalOperations: { count, readMany, consistentPair },
-  operationAccess: {
-    "notes.blindCount": { tables: { notes: { insert: true } } },
-  },
-  screens: [],
-  permissions: {
-    connections: [mail],
-    ai,
-    brain,
-    guests,
-    workflows: [followUp],
-  },
-});
+    reads: { count, readMany, consistentPair },
+  }
+);
 
 const { manifest } = inspectApp(notesApp);
 
@@ -2125,7 +2131,7 @@ describe("an action's nested calls", () => {
       if (path === "notes.checkLater") {
         runs += 1;
       }
-      if (path !== "consistentPair" || runs > 1) {
+      if (path !== "reads.consistentPair" || runs > 1) {
         return await defaultRun(path, args, channel);
       }
       let reads = 0;
@@ -2415,19 +2421,17 @@ describe("evidence of a refused use", () => {
       "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-      "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { action, query } from "#grasp/server";
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, query } from "@server/_generated/server";
 export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
 export const probe = action({ args: {}, returns: v.null(), handler: async () => null });
 `,
       "app.ts": `import { app } from "@grasp-os/sdk";
-import { label, probe } from "./operations/notes.ts";
 import schema from "./schema.ts";
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { label, probe } },
   screens: [],
 });
 `,

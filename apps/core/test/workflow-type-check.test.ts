@@ -55,14 +55,14 @@ const failedBuild = z.object({
 
 /**
  * A workflow `typed` whose step calls `call`, typed by the sample App's
- * own operations, as the App registers them under `counter`.
+ * own server module `server/counter.ts`, whose functions are `counter.*`.
  */
 const typed = (call: string): Record<string, string> => ({
   "workflows/typed.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
 
-import type * as sample from "../operations/sample.ts";
+import type * as counter from "../server/counter.ts";
 
-type Invoices = { counter: typeof sample };
+type Invoices = { counter: typeof counter };
 
 export default workflow("typed", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("count", { description: "Count" }, async () => {
@@ -75,8 +75,8 @@ export default workflow("typed", { params: {}, input: z.unknown() }, async (step
 
 /** Server code with an action that answers once and one that streams. */
 const streams = {
-  "operations/streams.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/streams.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
 
@@ -95,7 +95,7 @@ export const progress = action({
 const calling = (path: string): Record<string, string> => ({
   "workflows/streaming.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
 
-import type * as streams from "../operations/streams.ts";
+import type * as streams from "../server/streams.ts";
 
 type Invoices = { streams: typeof streams };
 
@@ -140,13 +140,10 @@ const migratedApp = (): Record<string, string> => {
     "app.ts": (app["app.ts"] ?? "")
       .replace(
         'import schema from "./schema.ts";',
-        'import derive from "./migrations/derive.ts";\nimport schema from "./schema.ts";'
+        'import derive from "./server/migrations/derive.ts";\nimport schema from "./schema.ts";'
       )
-      .replace(
-        "  internalOperations: {},",
-        "  internalOperations: {},\n  migrations: [derive],"
-      ),
-    "migrations/derive.ts": `import { migration, v } from "@grasp-os/sdk";
+      .replace("  screens: [],", "  migrations: [derive],\n  screens: [],"),
+    "server/migrations/derive.ts": `import { migration, v } from "@grasp-os/sdk";
 
 export default migration({
   name: "derive",
@@ -655,7 +652,7 @@ export {};
       await expect(
         built({
           ...sampleApp(),
-          "operations/extra.ts":
+          "server/extra.ts":
             "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
           ...checked("    return document.title;"),
         })
@@ -664,38 +661,6 @@ export {};
         files: ["workflows/checked.ts"],
         warned: ["server"],
       });
-    });
-
-    it("type a workflow by operations kept in a folder whose name has a dot", async () => {
-      const dotted = Object.fromEntries(
-        Object.entries(sampleApp()).map(([path, source]) => [
-          path.replace(/^operations\//u, "operations/v1.0/"),
-          path === "app.ts"
-            ? source.replaceAll('"./operations/', '"./operations/v1.0/')
-            : source,
-        ])
-      );
-      const typedFrom = (call: string) =>
-        Object.fromEntries(
-          Object.entries(typed(call)).map(([path, source]) => [
-            path,
-            source.replace(
-              '"../operations/sample.ts"',
-              '"../operations/v1.0/sample.ts"'
-            ),
-          ])
-        );
-      await expect(
-        Promise.all(
-          [
-            'APP.query("counter.hits", { name: "x" })',
-            'APP.query("counter.hits", { name: 1 })',
-          ].map(async (call) => await built({ ...dotted, ...typedFrom(call) }))
-        )
-      ).resolves.toStrictEqual([
-        { ok: true, files: [], warned: [] },
-        { ok: false, files: ["workflows/typed.ts"], warned: [] },
-      ]);
     });
 
     it("import code the workflows share from a folder whose name has a dot", async () => {
@@ -766,7 +731,7 @@ export {};
       await expect(
         built({
           ...sampleApp(),
-          "operations/types.d.ts": "declare var document: { title: string };\n",
+          "server/types.d.ts": "declare var document: { title: string };\n",
           ...checked("    return document.title;"),
         })
       ).resolves.toMatchObject({
@@ -788,7 +753,7 @@ export {};
       await expect(
         built({
           ...sampleApp(),
-          "operations/extra.ts": 'export const total: number = "twelve";\n',
+          "server/extra.ts": 'export const total: number = "twelve";\n',
           ...typed('APP.query("counter.hits", { name: "x" })'),
         })
       ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });

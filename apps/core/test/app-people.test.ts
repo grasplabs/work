@@ -49,27 +49,27 @@ export default defineSchema({
   notes: defineTable({ text: v.string() }),
 });
 `,
-  "operations/people.ts": `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/dir.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 /** Who calls, as the function sees it. */
 export const me = query({
   args: {},
   returns: v.string(),
-  handler: (ctx) => JSON.stringify(ctx.caller),
+  handler: async (ctx) => JSON.stringify(await ctx.auth.getUser()),
 });
 
-/** The same, from a mutation and an action. */
+/** The same, from a mutation and an action: whose ID it is. */
 export const meToo = mutation({
   args: {},
   returns: v.string(),
-  handler: (ctx) => ctx.caller.kind,
+  handler: async (ctx) => (await ctx.auth.getUser()).id,
 });
 
 export const meAgain = action({
   args: {},
   returns: v.string(),
-  handler: (ctx) => ctx.caller.kind,
+  handler: async (ctx) => (await ctx.auth.getUser()).id,
 });
 
 /** A search of the directory, or the code it was refused with. */
@@ -136,15 +136,12 @@ export const team = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { me, meAgain, meToo, note, noted, search, team, twice } from "./operations/people.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Directory",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { dir: { me, meToo, meAgain, note, noted, search, team, twice } },
-  internalOperations: {},
   screens: [],
   ${people ? "permissions: { people: true }," : ""}
 });
@@ -239,7 +236,7 @@ const call = async (
 
 type PeopleReference = (typeof peopleReferences)[keyof typeof peopleReferences];
 
-/** The request a screen's `useCaller` or `usePeople` read sends. */
+/** The request a screen's `useUser` or `usePeople` read sends. */
 const readRequestOf = (
   reference: PeopleReference,
   input: unknown,
@@ -257,7 +254,7 @@ const readRequestOf = (
     input,
   });
 
-/** What a screen's `useCaller` or `usePeople` read answers `by`. */
+/** What a screen's `useUser` or `usePeople` read answers `by`. */
 const read = async (
   { app }: Sealed,
   by: Caller,
@@ -285,12 +282,15 @@ const answerOf = (result: OperationResult): unknown => {
     : result.value;
 };
 
-/** A caller as a test compares it: who, by name, address and role. */
+/**
+ * Who calls, as a test compares it: who, by name and address. Their roles
+ * are the call's gate's, which the first test reads; what a caller's
+ * identity claims of itself is what the gate decides on.
+ */
 const callerSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string().nullable(),
-  orgRole: z.string(),
 });
 
 /** Who a call answered was calling, or the code it was refused with. */
@@ -332,7 +332,7 @@ const recordedReads = (
     }));
 
 describe("who calls an App, and its people", { timeout: 120_000 }, () => {
-  it("tell every kind of function who calls, from core: a builder and a user each as themselves, with their roles and teams", async () => {
+  it("tell every kind of function who calls, from core: a builder and a user each as themselves, with their roles", async () => {
     const app = await directoryApp();
     const sales = await newTeam(`Sales ${unique()}`);
     const ana = await member(`Ana ${unique()}`, { team: sales });
@@ -345,25 +345,19 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       action: valueOf(await call(app, ana, "dir.meAgain")),
     }).toStrictEqual({
       builder: {
-        kind: "person",
         id: app.owner.userId,
         name: "Person",
         email: app.owner.email,
-        orgRole: "builder",
-        appRole: "builder",
-        teams: [],
+        roles: ["builder", "user"],
       },
       user: {
-        kind: "person",
         id: ana.userId,
         name: ana.name,
         email: ana.email,
-        orgRole: "user",
-        appRole: "user",
-        teams: [sales],
+        roles: ["user"],
       },
-      mutation: "person",
-      action: "person",
+      mutation: ana.userId,
+      action: ana.userId,
     });
   });
 
@@ -416,7 +410,6 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       id: ben.userId,
       name: ben.name,
       email: ben.email,
-      orgRole: "user",
     });
   });
 
@@ -430,20 +423,17 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       id: ana.userId,
       name: ana.name,
       email: ana.email,
-      orgRole: "user",
     };
 
     expect({
       fromServer: callerOf(await call(app, claimed, "dir.me")),
-      fromScreen: callerOf(
-        await read(app, claimed, peopleReferences.caller, {})
-      ),
+      fromScreen: callerOf(await read(app, claimed, peopleReferences.user, {})),
       // Another App and version named: the call's own App answers.
       otherApp: callerOf(
         await read(
           app,
           ana,
-          peopleReferences.caller,
+          peopleReferences.user,
           {},
           {
             resourceId: "someone-elses",
@@ -453,7 +443,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       ),
       // Arguments that try to name someone: refused, not read.
       naming: valueOf(
-        await read(app, ana, peopleReferences.caller, {
+        await read(app, ana, peopleReferences.user, {
           userId: app.owner.userId,
         })
       ),
@@ -461,7 +451,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         await read(
           app,
           ana,
-          peopleReferences.caller,
+          peopleReferences.user,
           {},
           {
             fingerprint: "0".repeat(64),
@@ -491,7 +481,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     expect({
       before: typeof before === "object" ? "answered" : before,
       server: valueOf(await call(app, ben, "dir.me")),
-      screen: valueOf(await read(app, ben, peopleReferences.caller, {})),
+      screen: valueOf(await read(app, ben, peopleReferences.user, {})),
     }).toStrictEqual({
       before: "answered",
       server: "permission.person_inactive",
@@ -546,7 +536,6 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         id: ana.userId,
         name: ana.name,
         email: ana.email,
-        orgRole: "user",
       },
       server: "permission.denied",
       screen: "permission.denied",
@@ -620,7 +609,6 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         id: dirk.userId,
         name: dirk.name,
         email: null,
-        orgRole: "user",
       },
       placeholders: [],
     });
@@ -744,7 +732,7 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
 
     expect({
       me: z
-        .object({ id: z.string(), kind: z.string() })
+        .object({ id: z.string(), roles: z.array(z.string()) })
         .parse(JSON.parse(returned.me.value)),
       searched: returned.search.value.people.length,
       recorded: events
@@ -754,7 +742,7 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
         )
         .map(({ actor, detail }) => ({ actor, detail })),
     }).toStrictEqual({
-      me: { id: builder.userId, kind: "person" },
+      me: { id: builder.userId, roles: ["builder", "user"] },
       searched: 1,
       recorded: [
         {

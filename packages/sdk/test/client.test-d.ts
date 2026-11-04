@@ -18,8 +18,8 @@ import {
   useQuery,
 } from "../src/react.ts";
 import type { GraspError } from "../src/react.ts";
-import { api } from "./notes/.grasp/references.ts";
-import { internal } from "./notes/.grasp/server-references.ts";
+import { api } from "./notes/server/_generated/api.ts";
+import { internal } from "./notes/server/_generated/internal.ts";
 
 declare const client: GraspClient;
 declare const noteId: Id<"notes">;

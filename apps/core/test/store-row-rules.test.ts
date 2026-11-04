@@ -1,6 +1,11 @@
 import { app, defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
 import type { Id, SchemaDefinition } from "@grasp-os/sdk";
-import { inspectApp, manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+  schemaManifest,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -381,22 +386,24 @@ const operations = {
   countNotes,
 };
 
-const ruledApp = app({
-  name: "Requests",
-  schema,
-  access: {
-    tables: {
-      requests: { read: "appMembers", write: "appMembers" },
-      accounts: { read: "appMembers", write: "appMembers" },
-      orders: { read: "appMembers", write: "appMembers" },
-      notes: { read: "appMembers", write: "appMembers" },
-      tickets: { read: "appMembers", write: "appMembers" },
-      logs: { read: "appMembers", write: "appMembers" },
+const ruledApp = registerFunctions(
+  app({
+    name: "Requests",
+    schema,
+    access: {
+      tables: {
+        requests: { read: "appMembers", write: "appMembers" },
+        accounts: { read: "appMembers", write: "appMembers" },
+        orders: { read: "appMembers", write: "appMembers" },
+        notes: { read: "appMembers", write: "appMembers" },
+        tickets: { read: "appMembers", write: "appMembers" },
+        logs: { read: "appMembers", write: "appMembers" },
+      },
     },
-  },
-  operations,
-  screens: [],
-});
+    screens: [],
+  }),
+  { requests: operations }
+);
 
 const { manifest } = inspectApp(ruledApp);
 
@@ -549,7 +556,10 @@ const call = async (
       runId: null,
       authorize: async () => roles ?? (await operationRoles(env, by, appId)),
     },
-    { path, kind: mutations.has(path) ? "mutation" : "query" },
+    {
+      path: `requests.${path}`,
+      kind: mutations.has(path) ? "mutation" : "query",
+    },
     args
   );
 
@@ -1047,7 +1057,7 @@ export default defineSchema({
   memos: defineTable({ text: v.string() }),
 });
 `,
-    "operations/requests.ts": `import { mutation } from "#grasp/server";
+    "server/requests.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const add = mutation({
@@ -1081,7 +1091,6 @@ export const retitle = mutation({
 });
 `,
     "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, move, retitle } from "./operations/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -1093,8 +1102,6 @@ export default app({
       memos: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { requests: { add, move, retitle } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -1761,7 +1768,6 @@ export default app({
       notes: { read: "appMembers", write: "none" },
     },
   },
-  operations: {},
   screens: [],
 });
 `,

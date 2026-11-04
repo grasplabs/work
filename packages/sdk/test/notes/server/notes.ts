@@ -5,10 +5,15 @@ import {
   v,
 } from "@grasp-os/sdk";
 
-import { doc, internalQuery, mutation, query, action } from "#grasp/server";
-import { internal } from "#grasp/server-references";
-
 import { noteFields } from "../schema.ts";
+import { internal } from "./_generated/internal.ts";
+import {
+  doc,
+  internalQuery,
+  mutation,
+  query,
+  action,
+} from "./_generated/server.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },

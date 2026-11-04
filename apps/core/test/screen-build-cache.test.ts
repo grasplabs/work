@@ -424,7 +424,7 @@ const inspectionReceipts = async (): Promise<Map<string, string | null>> => {
 /** The Notes App with server code of its own, so nothing else inspected it. */
 const ownNotes = (): Record<string, string> => ({
   ...notesFiles,
-  "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
+  "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
 });
 
 /** What `files`' first inspection for `profile` kept: its receipt's key and object. */

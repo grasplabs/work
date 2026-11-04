@@ -14,7 +14,7 @@ const checked = (descriptor: ValueDescriptor): ValueDescriptor =>
 // the App's, for `useQuery` and `useMutation`; but no App code serves
 // them: core does (apps/core/src/app-preferences.ts), for the signed-in
 // person only. Declared here once, so the descriptors generated into
-// `#grasp` and the ones core checks a call against are the same, and so
+// `@server/_generated/api` and the ones core checks a call against are the same, and so
 // are their fingerprints.
 
 /** The names of the operations an App's `preferences` namespace holds. */

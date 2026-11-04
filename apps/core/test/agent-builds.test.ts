@@ -568,7 +568,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const written = await env.build.write(app.id, ${JSON.stringify({ ...notesFiles, "app.ts": throwing })});
         const proposal = await env.build.propose(app.id, "Notes");
         // Then an operations file that doesn't parse, its registration fixed.
-        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "app.ts": notesFiles["app.ts"], "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}\nexport const broken = query({ args: {` })});
+        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "app.ts": notesFiles["app.ts"], "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\nexport const broken = query({ args: {` })});
         return {
           errors: written.errors,
           diagnostics: written.diagnostics.map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
@@ -588,7 +588,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       diagnostics: [
         {
           file: "app.ts",
-          line: 4,
+          line: 3,
           rule: "server",
           severity: "error",
           says: true,
@@ -596,7 +596,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       ],
       version: null,
       // Its compile error, and nothing of the screens that import it.
-      unparsed: { errors: 1, files: ["operations/notes.ts"] },
+      unparsed: { errors: 1, files: ["server/notes.ts"] },
     });
   });
 
@@ -934,7 +934,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           "screens/a.tsx": "Alpha\nbeta\nalphabet",
           "screens/b.tsx": "ALPHA",
           "screensaver.md": "alpha",
-          "operations/x.ts": "alpha",
+          "server/x.ts": "alpha",
           "many.md": many,
         },
       }),
@@ -1592,9 +1592,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Calls an internal operation by its reference, typed as the seal's
     // generated references type it from the draft's own operations: what
     // it answers is typed, and a wrong call fails.
-    const operations = `${(notesFiles["operations/notes.ts"] ?? "").replace(
+    const operations = `${(notesFiles["server/notes.ts"] ?? "").replace(
       "import { action, doc, mutation, query }",
-      'import { internal } from "#grasp/server-references";\nimport { action, doc, internalQuery, mutation, query }'
+      'import { internal } from "@server/_generated/internal";\nimport { action, doc, internalQuery, mutation, query }'
     )}
 export const listAll = internalQuery({
   args: {},
@@ -1605,32 +1605,15 @@ export const listAll = internalQuery({
 export const titles = action({
   args: {},
   returns: v.array(v.string()),
-  uses: [internal.notes.list],
-  handler: async (ctx) => (await ctx.runQuery(internal.notes.list, {})).map(note => note.title),
+  uses: [internal.notes.listAll],
+  handler: async (ctx) => (await ctx.runQuery(internal.notes.listAll, {})).map(note => note.title),
 });
 `;
     const wrongCall = operations.replace(
-      "(await ctx.runQuery(internal.notes.list, {})).map(note => note.title)",
+      "(await ctx.runQuery(internal.notes.listAll, {})).map(note => note.title)",
       "await ctx.runQuery(internal.notes.missing, {})"
     );
-    // The public `list` registered as `page`: `notes.list` is internal here.
-    const registration = (notesFiles["app.ts"] ?? "")
-      .replace("import { big,", "import { big, listAll, titles,")
-      .replace("notes: { list,", "notes: { page: list,")
-      .replace("stamp, big }", "stamp, big, titles }")
-      .replace(
-        "internalOperations: {}",
-        "internalOperations: { notes: { list: listAll } }"
-      );
-    const sound = {
-      ...notesFiles,
-      "operations/notes.ts": operations,
-      "app.ts": registration,
-      "screens/notes.tsx": (notesFiles["screens/notes.tsx"] ?? "").replace(
-        "api.notes.list",
-        "api.notes.page"
-      ),
-    };
+    const sound = { ...notesFiles, "server/notes.ts": operations };
     const mistyped = operations.replace(
       "import { AppError,",
       'const total: number = "seven";\nvoid total;\nimport { AppError,'
@@ -1640,11 +1623,11 @@ export const titles = action({
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         // What each write says of the server code (its screens apart).
         const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("screens/")).map(({ file, rule }) => ({ file, rule })) });
-        const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "operations/notes.ts": wrongCall })}));
+        const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })}));
         const sound = server(await env.build.write(app.id, ${JSON.stringify(sound)}));
-        const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })}));
+        const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
         const proposal = await env.build.propose(app.id, "Notes");
-        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })}));
+        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })}));
         const unregistered = server(await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })}));
         return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
       };`),
@@ -1658,12 +1641,12 @@ export const titles = action({
     expect(returned(result?.text)).toMatchObject({
       wrongCall: {
         errors: 1,
-        diagnostics: [{ file: "operations/notes.ts", rule: "TS2339" }],
+        diagnostics: [{ file: "server/notes.ts", rule: "TS2339" }],
       },
       sound: { errors: 0, diagnostics: [] },
       mistyped: {
         errors: 1,
-        diagnostics: [{ file: "operations/notes.ts", rule: "TS2322" }],
+        diagnostics: [{ file: "server/notes.ts", rule: "TS2322" }],
       },
       proposed: { version: null, passed: false, server: "failed" },
       leftover: {
@@ -2014,7 +1997,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     await published(app);
     await release(builder, app, {
       ...notesFiles,
-      "operations/books.ts": "export const twice = false;\n",
+      "server/books.ts": "export const twice = false;\n",
       ...notify,
     });
     await requestGranted(idp, builder, outlook(app));
@@ -2023,7 +2006,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "operations/books.ts": "export const twice = true;\n",
+        "server/books.ts": "export const twice = true;\n",
       },
       "Server"
     );
@@ -2038,12 +2021,12 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     expect(review).toMatchObject({
       proposedBy: null,
       server: "modified",
-      serverFiles: [{ path: "operations/books.ts", change: "modified" }],
+      serverFiles: [{ path: "server/books.ts", change: "modified" }],
       workflows: [
         {
           id: "notify",
           change: "modified",
-          shared: ["operations/books.ts"],
+          shared: ["server/books.ts"],
           // Code it may use changed: it may change things through it.
           steps: [
             {

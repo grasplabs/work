@@ -36,8 +36,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 // ${marker}
 
@@ -123,15 +123,13 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { big, consult, create, draft, once, slow, titles, writer } from "./operations/notes.ts";
+import { writer } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, draft, slow, consult, big, once } },
-  internalOperations: {},
   screens: [],
   permissions: { ai: writer },
 });
@@ -150,7 +148,7 @@ const setUp = async (builder?: Person) => {
   const owner = builder ?? (await signedInApi(idp, "builder"));
   const app = await notesApp(owner);
   const drafted = await chatWithDraft(owner, app, {
-    "operations/notes.ts": notesFiles("drafted")["operations/notes.ts"] ?? "",
+    "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
   });
   return { builder: owner, app, ...drafted };
 };
@@ -528,8 +526,7 @@ describe(
       await progressed(followed.frames);
       await write(
         {
-          "operations/notes.ts":
-            notesFiles("again")["operations/notes.ts"] ?? "",
+          "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
         },
         revision
       );
@@ -575,8 +572,7 @@ describe(
       const first = await reader.read();
       await write(
         {
-          "operations/notes.ts":
-            notesFiles("again")["operations/notes.ts"] ?? "",
+          "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
         },
         revision
       );
@@ -622,8 +618,7 @@ describe(
         });
       }
       const { chatId, revision } = await chatWithDraft(other, app, {
-        "operations/notes.ts":
-          notesFiles("drafted")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
       });
       const seat = { chatId, app, revision };
       const request = await streamRequest(
@@ -802,8 +797,7 @@ describe(
         crypto.randomUUID()
       );
       const runId = await openTestRun(chatsOf(builder), chatId);
-      const changed =
-        notesFiles("saved meanwhile")["operations/notes.ts"] ?? "";
+      const changed = notesFiles("saved meanwhile")["server/notes.ts"] ?? "";
       const opened = await runInDurableObject(
         chatsOf(builder),
         async (instance) => {
@@ -821,7 +815,7 @@ describe(
             chatId,
             app,
             1,
-            { "operations/notes.ts": changed },
+            { "server/notes.ts": changed },
             [],
             revision,
             runId
@@ -861,7 +855,7 @@ describe(
       const { builder, app, chatId, revision } = await setUp();
       const kept = { chatId, app, revision };
       const other = await chatWithDraft(builder, app, {
-        "operations/notes.ts": notesFiles("other")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("other")["server/notes.ts"] ?? "",
       });
       const dropped = { chatId: other.chatId, app, revision: other.revision };
       // Five receipts of one chat's preview.
@@ -900,8 +894,7 @@ describe(
       }
       await other.write(
         {
-          "operations/notes.ts":
-            notesFiles("changed")["operations/notes.ts"] ?? "",
+          "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
         },
         other.revision
       );

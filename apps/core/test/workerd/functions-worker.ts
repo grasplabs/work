@@ -1,6 +1,10 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp } from "@grasp-os/sdk/host";
+import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 
 import type { OpenStore } from "../../src/data-stores.ts";
@@ -38,11 +42,14 @@ const isolationChild = stub();
 const throws = stub();
 
 const { manifest } = inspectApp(
-  app({
-    name: "Jobs",
-    schema,
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operations: {
+  registerFunctions(
+    app({
+      name: "Jobs",
+      schema,
+      access: { tables: { notes: { read: "owner", write: "owner" } } },
+      screens: [],
+    }),
+    {
       jobs: {
         echo: stub(),
         busy,
@@ -63,9 +70,8 @@ const { manifest } = inspectApp(
         waitsInside: action({ ...contract, uses: [leaf] }),
         catches: action({ ...contract, uses: [throws] }),
       },
-    },
-    screens: [],
-  })
+    }
+  )
 );
 
 /**
@@ -184,7 +190,7 @@ export default {
     const run = releaseRunner(
       { ...env, SANDBOX_HOST: host },
       {
-        modules: { [appModuleName("app.ts")]: appModule },
+        modules: { [appModuleName(serverEntryPath)]: appModule },
         sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
       },
       searchParams.get("owner") ?? "app-stand-in"

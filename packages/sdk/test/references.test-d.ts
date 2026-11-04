@@ -18,14 +18,14 @@ import type {
   ReturnOf,
   ScreenInputOf,
 } from "../src/index.ts";
-import type { workflows } from "./notes/.grasp/references.ts";
+import type { workflows } from "./notes/server/_generated/api.ts";
 import {
   api,
   preferences,
   permissions,
   screens,
-} from "./notes/.grasp/references.ts";
-import { internal } from "./notes/.grasp/server-references.ts";
+} from "./notes/server/_generated/api.ts";
+import { internal } from "./notes/server/_generated/internal.ts";
 import type {
   create,
   exportAll,
@@ -34,7 +34,7 @@ import type {
   remove,
   tally,
   update,
-} from "./notes/operations/notes.ts";
+} from "./notes/server/notes.ts";
 
 // What a browser's call signatures look like: one public reference of the
 // right kind, with its arguments, answering its return. The real hooks

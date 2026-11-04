@@ -94,20 +94,19 @@ const baseFields = `  title: v.string().trim().min(1).max(200),
 const migratedFields = `${baseFields}
   category: v.enum(["launch", "general"]),`;
 
-/** The App's registration, with `names`' migrations from `migrations/`. */
+/** The App's registration, with `names`' migrations from `server/migrations/`. */
 const appOf = (names: readonly string[], registered: boolean): string => {
   const access = tablesOf(names)
     .map((table) => `${table}: { read: "owner", write: "owner" }`)
     .join(", ");
   return `import { app } from "@grasp-os/sdk";
 import schema from "./schema.ts";
-${registered ? names.map((name, index) => `import m${index} from "./migrations/${name}.ts";`).join("\n") : ""}
+${registered ? names.map((name, index) => `import m${index} from "./server/migrations/${name}.ts";`).join("\n") : ""}
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { ${access} } },
-  operations: {},
   screens: [],
   migrations: [${registered ? names.map((_name, index) => `m${index}`).join(", ") : ""}],
 });
@@ -129,7 +128,7 @@ const notesFiles = (
     "schema.ts": schemaOf(names, migratedFields),
     ...Object.fromEntries(
       Object.entries(migrations).map(([name, source]) => [
-        `migrations/${name}.ts`,
+        `server/migrations/${name}.ts`,
         source,
       ])
     ),
@@ -149,7 +148,7 @@ const migrationSource = (
     fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "../../schema.ts";
 ${prelude}
 export default migration({
   name: ${JSON.stringify(name)},
@@ -414,13 +413,13 @@ describe("a migration's types", { timeout: 120_000 }, () => {
       "refuses a field of the wrong type for its table",
       "input: v.object({ title: noteFields.title }),",
       "(ctx, row) => ({ ...row, category: 42 })",
-      { code: "version.build_failed", files: ["migrations/typed.ts"] },
+      { code: "version.build_failed", files: ["server/migrations/typed.ts"] },
     ],
     [
       "refuses a spread of a row it declares no shape for, which lacks a field its table requires",
       "",
       '(ctx, row) => ({ ...row, category: "general" })',
-      { code: "version.build_failed", files: ["migrations/typed.ts"] },
+      { code: "version.build_failed", files: ["server/migrations/typed.ts"] },
     ],
   ])("%s", async (_case, input, handler, expected) => {
     await expect(
@@ -479,7 +478,6 @@ export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {},
   screens: [],
   migrations: [
     migration({
@@ -553,11 +551,11 @@ export default app({
     [
       "built from server code",
       {
-        "operations/helpers.ts": "export const label = 'general';\n",
-        "migrations/derive-category.ts": migrationSource(
+        "server/helpers.ts": "export const label = 'general';\n",
+        "server/migrations/derive-category.ts": migrationSource(
           "derive-category",
           "(ctx, row) => ({ ...row, category: label })",
-          { prelude: 'import { label } from "../operations/helpers.ts";' }
+          { prelude: 'import { label } from "../server/helpers.ts";' }
         ),
       },
       "version.build_failed",
@@ -565,7 +563,7 @@ export default app({
     [
       "that reaches the network while its code loads",
       {
-        "migrations/derive-category.ts": migrationSource(
+        "server/migrations/derive-category.ts": migrationSource(
           "derive-category",
           "(ctx, row) => row",
           { prelude: 'await fetch("https://example.com");' }
@@ -913,7 +911,7 @@ const sealedSalaries = async () =>
         ),
         ...Object.fromEntries(
           Object.entries(salaryHandlers).map(([name, handler]) => [
-            `migrations/${name}.ts`,
+            `server/migrations/${name}.ts`,
             migrationSource(name, handler, {
               fromSchema,
               toSchema,

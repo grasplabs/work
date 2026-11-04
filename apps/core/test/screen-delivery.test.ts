@@ -78,7 +78,7 @@ const lookCapMs = 400;
 // test lets it go (`<step>: release`, marked once the test has done what
 // it does meanwhile), never for a time that a slow runner could outlast.
 const operationsCode = `import { AppError, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+import { action, mutation, query } from "@server/_generated/server";
 
 const secret = ${JSON.stringify(secret)};
 
@@ -185,17 +185,14 @@ export default defineSchema({
   steps: defineTable({ step: v.string().min(1).max(100) }),
 });
 `,
-  "operations/notes.ts": operationsCode,
+  "server/notes.ts": operationsCode,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { big, failing, live, mark, read, released, slow } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { steps: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { read, live, mark, released, slow, failing, big } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -205,7 +202,7 @@ const screenOf = (
   label: string
 ): string => `import { useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Notes() {
   const notes = useQuery(api.notes.read, {});
@@ -219,7 +216,7 @@ const sampleFiles = {
 };
 
 /**
- * A screen that imports none of the App's references (`#grasp`): what it
+ * A screen that imports none of the App's references (`@server/_generated/api`): what it
  * builds to is its own code alone, the same in two Apps.
  */
 const plainScreenOf = (

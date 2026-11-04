@@ -161,7 +161,7 @@ describe(
         role: "builder",
       });
       const drafted = {
-        "operations/notes.ts": `${isolationFiles["operations/notes.ts"] ?? ""}\n// Drafted.\n`,
+        "server/notes.ts": `${isolationFiles["server/notes.ts"] ?? ""}\n// Drafted.\n`,
       };
       const [ownDraft, theirDraft] = await Promise.all([
         chatWithDraft(owner, app, drafted),

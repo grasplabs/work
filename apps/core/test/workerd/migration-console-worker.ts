@@ -1,4 +1,8 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 
 import { transformIsolate } from "../../src/migration-transform.ts";
 import { callSandboxed } from "../../src/sandboxed.ts";
@@ -69,7 +73,7 @@ export default {
       env,
       transformIsolate(
         {
-          modules: { [appModuleName("app.ts")]: app },
+          modules: { [appModuleName(serverEntryPath)]: app },
           sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
         },
         {

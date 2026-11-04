@@ -183,7 +183,7 @@ describe("the screen a draft's preview shows", () => {
   it("is the one picked while the draft still changes it, otherwise the first it changes", () => {
     const changed = changedScreens({
       changed: [
-        "operations/notes.ts",
+        "server/notes.ts",
         "screens/zeta.tsx",
         "screens/alpha.tsx",
         "screens/lib/format.ts",

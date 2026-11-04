@@ -29,7 +29,7 @@ export type {
 export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
-export { inspectApp } from "./app.ts";
+export { inspectApp, registerFunctions } from "./app.ts";
 export type {
   AppInspection,
   AppManifest,
@@ -163,6 +163,7 @@ export {
   generatedPaths,
   generateModules,
   readSealedWorkflows,
+  dataModelSource,
   serverModuleSource,
   symbolicModules,
   workflowFingerprint,
@@ -197,11 +198,11 @@ export {
   peopleReferences,
 } from "./people.ts";
 export type {
-  Caller,
   PeopleOperationName,
   PeoplePage,
   Person,
   TeamRef,
+  User,
 } from "./people.ts";
 export type {
   PreferencePlan,

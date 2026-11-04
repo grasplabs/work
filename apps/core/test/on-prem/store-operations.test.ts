@@ -22,8 +22,8 @@ export default defineSchema({
   contacts: defineTable({ name: v.string() }),
 });
 `,
-  "operations/crm.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/contacts.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const list = query({
   args: {},
@@ -32,15 +32,12 @@ export const list = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { list } from "./operations/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "CRM",
   schema,
   access: { tables: { contacts: { read: "appMembers", write: "appMembers" } } },
-  operations: { contacts: { list } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -53,8 +50,8 @@ export default defineSchema({
   marks: defineTable({ label: v.string() }),
 });
 `,
-  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.app("crm", {
   functions: {
@@ -74,15 +71,13 @@ export const list = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { crm, list } from "./operations/desk.ts";
+import { crm } from "./server/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: { marks: { read: "owner", write: "owner" } } },
-  operations: { desk: { list } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [crm] },
 });

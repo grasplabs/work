@@ -53,8 +53,8 @@ export default defineSchema({
   ledger: defineTable({ invoice: v.string(), total: v.number() }),
 });
 `,
-  "operations/sample.ts": `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/counter.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 export const hits = query({
   args: { name: v.string() },
@@ -84,6 +84,10 @@ export const hit = action({
   handler: async (ctx, args) => await ctx.runMutation(bump, { name: args.name }),
 });
 
+`,
+  "server/ledger.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
+
 export const purchaseOrder = query({
   args: { number: v.string() },
   returns: v.union(v.object({ amount: v.number() }), v.null()),
@@ -100,21 +104,25 @@ export const book = mutation({
   },
 });
 `,
-  "operations/effects.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/effects.ts": `import { permission } from "@grasp-os/sdk";
 
 export const send = permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] });
 
-const invoice = { to: "ben@acme.test", subject: "Invoice INV-7" };
+export const invoice = { to: "ben@acme.test", subject: "Invoice INV-7" };
 
 // What a connector answered, or the code it refused with.
-const outcome = async (work: () => Promise<unknown>): Promise<unknown> => {
+export const outcome = async (work: () => Promise<unknown>): Promise<unknown> => {
   try {
     return await work();
   } catch (error) {
     return { refused: String(Reflect.get(Object(error), "code")) };
   }
 };
+`,
+  "server/mail.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+import { invoice, outcome, send } from "./effects.ts";
 
 // Mails the invoice, under the call's own key: what the connector
 // answered, or its refusal, as JSON.
@@ -146,9 +154,8 @@ export const mailOwnKey = action({
 `,
   "app.ts": `import { app, permission } from "@grasp-os/sdk";
 
-import { mail, mailOwnKey, send } from "./operations/effects.ts";
-import { book, bump, hit, hits, purchaseOrder } from "./operations/sample.ts";
 import schema from "./schema.ts";
+import { send } from "./server/effects.ts";
 
 export default app({
   name: "Invoices",
@@ -159,12 +166,6 @@ export default app({
       ledger: { read: "owner", write: "owner" },
     },
   },
-  operations: {
-    counter: { hit, hits, bump },
-    ledger: { book, purchaseOrder },
-    mail: { mail, mailOwnKey },
-  },
-  internalOperations: {},
   screens: [],
   permissions: {
     connections: [send],${ai === undefined ? "" : `\n    ai: permission.ai({ maxOutputTokens: ${ai} }),`}

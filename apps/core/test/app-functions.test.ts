@@ -43,14 +43,14 @@ export default defineSchema({
   notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
 });
 `,
-  "operations/notes.ts": `import {
+  "server/notes.ts": `import {
   AppError,
   paginationOptionsValidator,
   paginationResultValidator,
   v,
 } from "@grasp-os/sdk";
-import { internal } from "#grasp/server-references";
-import { action, doc, internalQuery, mutation, query } from "#grasp/server";
+import { internal } from "@server/_generated/internal";
+import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../schema.ts";
 
 export const list = query({
@@ -295,17 +295,13 @@ export const recover = action({
   "app.ts": `import { app } from "@grasp-os/sdk";
 import {
   bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sdkMark, sneak, tally, update, notANumber, holey, lateWrite,
-} from "./operations/notes.ts";
+} from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: ${JSON.stringify(label)},
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {
-    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv, sdkMark, notANumber, holey, lateWrite },
-  },
-  internalOperations: { notes: { count } },
   screens: [],
 });
 `,
@@ -449,31 +445,6 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     expect(
       valueOf(await call(notes, notes.owner, "notes.get", { id }))
     ).toBeNull();
-  });
-
-  it("run an operation kept in a folder whose name has a dot", async () => {
-    const {
-      "operations/notes.ts": operations = "",
-      "app.ts": registration = "",
-      ...rest
-    } = notesFiles();
-    const notes = await sealedNotes({
-      ...rest,
-      "operations/v1.0/notes.ts": operations.replace(
-        'from "../schema.ts"',
-        'from "../../schema.ts"'
-      ),
-      "app.ts": registration.replace(
-        'from "./operations/notes.ts"',
-        'from "./operations/v1.0/notes.ts"'
-      ),
-    });
-    const id = valueOf(
-      await call(notes, notes.owner, "notes.create", { title: "Dotted" })
-    );
-    expect(
-      valueOf(await call(notes, notes.owner, "notes.get", { id }))
-    ).toMatchObject({ _id: id, title: "Dotted" });
   });
 
   it("answer what the store refused, and the App's own failures, as their callers may see them", async () => {
@@ -693,14 +664,14 @@ describe(
       };
       // Version 2 keeps `bump`'s contract, and renames `get`'s argument.
       const files = notesFiles("Notes, renamed");
-      const operations = files["operations/notes.ts"] ?? "";
+      const operations = files["server/notes.ts"] ?? "";
       const get = `export const get = query({
   args: { id: v.id("notes") },
   returns: doc("notes").nullable(),
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });`;
       expect(operations).toContain(get);
-      files["operations/notes.ts"] = operations.replace(
+      files["server/notes.ts"] = operations.replace(
         get,
         get
           .replace("{ id: v.id", "{ noteId: v.id")
@@ -968,12 +939,17 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
     expect([before, after]).toStrictEqual(["unmarked", "sealed"]);
   });
 
-  it("needs nothing of its runner but what protocol 1 pins", async () => {
+  it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
-    // A runner exporting only runFunction and manifestOfApp, as any SDK
-    // sealed under protocol 1 does: the host brings the rest itself.
+    // A runner exporting only runFunction, manifestOfApp and
+    // registerFunctions, as any SDK sealed under protocol 3 does: the
+    // host brings the rest itself.
     await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
-      const pinned = exportsOnly(text, ["runFunction", "manifestOfApp"]);
+      const pinned = exportsOnly(text, [
+        "runFunction",
+        "manifestOfApp",
+        "registerFunctions",
+      ]);
       if (!finalExports.test(pinned)) {
         throw new Error("The runner has no export list to rewrite");
       }
@@ -996,7 +972,7 @@ describe("a release changed since it was sealed", { timeout: 120_000 }, () => {
   it("doesn't run when an artifact's bytes changed", async () => {
     const notes = await sealedNotes();
     const entry = notes.release.manifest.artifacts.find(
-      ({ path }) => path === "modules/app~operations~notes.js"
+      ({ path }) => path === "modules/app~server~notes.js"
     );
     const stored = await env.FILES.get(artifactKey(entry?.sha256 ?? ""));
     const code = (await stored?.text()) ?? "";

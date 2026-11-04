@@ -5,7 +5,11 @@ import {
   defineTable,
   v,
 } from "@grasp-os/sdk";
-import { inspectApp, manifestText } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import {
@@ -93,13 +97,15 @@ const ping = mutation({
   },
 });
 
-const ordersApp = registerApp({
-  name: "Orders",
-  schema,
-  access: { tables: { orders: { read: "appMembers", write: "appMembers" } } },
-  operations: { orders: { tell, place, ping } },
-  screens: [],
-});
+const ordersApp = registerFunctions(
+  registerApp({
+    name: "Orders",
+    schema,
+    access: { tables: { orders: { read: "appMembers", write: "appMembers" } } },
+    screens: [],
+  }),
+  { orders: { tell, place, ping } }
+);
 
 const { manifest } = inspectApp(ordersApp);
 

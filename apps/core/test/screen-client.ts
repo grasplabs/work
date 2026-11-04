@@ -374,7 +374,7 @@ export const memberOf = async (opened: Opened) => {
  */
 export const withSecrets = (): Record<string, string> => {
   const schema = files["schema.ts"] ?? "";
-  const operations = files["operations/notes.ts"] ?? "";
+  const operations = files["server/notes.ts"] ?? "";
   const app = files["app.ts"] ?? "";
   return {
     ...files,
@@ -382,7 +382,7 @@ export const withSecrets = (): Record<string, string> => {
       "export default defineSchema({",
       "export default defineSchema({\n  secrets: defineTable({ text: v.string() }),"
     ),
-    "operations/notes.ts": `${operations}
+    "server/notes.ts": `${operations}
 export const secrets = query({
   args: {},
   returns: v.array(doc("secrets")),
@@ -395,18 +395,9 @@ export const tell = mutation({
   handler: async (ctx, args) => await ctx.db.insert("secrets", args),
 });
 `,
-    "app.ts": app
-      .replace(
-        "import { big, create, echo, get, list, remove, stamp, update }",
-        "import { big, create, echo, get, list, remove, secrets, stamp, tell, update }"
-      )
-      .replace(
-        'access: { tables: { notes: { read: "owner", write: "owner" } } }',
-        'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
-      )
-      .replace(
-        "operations: { notes: { list, get, create, update, remove, echo, stamp, big } }",
-        "operations: { notes: { list, get, create, update, remove, echo, stamp, big, secrets, tell } }"
-      ),
+    "app.ts": app.replace(
+      'access: { tables: { notes: { read: "owner", write: "owner" } } }',
+      'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
+    ),
   };
 };

@@ -28,7 +28,7 @@ import type {
   WorkflowWaitOf,
 } from "../src/index.ts";
 import { useMutation, usePaginatedQuery, useQuery } from "../src/react.ts";
-import { workflows } from "./notes/.grasp/references.ts";
+import { workflows } from "./notes/server/_generated/api.ts";
 
 /**
  * How a screen sends an event to a run of `workflow`: one of that

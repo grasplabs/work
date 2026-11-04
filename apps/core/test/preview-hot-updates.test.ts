@@ -221,8 +221,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     // A write of its server code starts afresh, on a new release.
     const server = await write(
       {
-        "operations/notes.ts":
-          notesFiles("rewritten")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("rewritten")["server/notes.ts"] ?? "",
       },
       next
     );
@@ -350,8 +349,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     await write(
       {
-        "operations/notes.ts":
-          notesFiles("changed")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
       },
       broken
     );
@@ -581,8 +579,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       }),
       sealedOf({
         ...base,
-        "operations/notes.ts":
-          notesFiles("changed")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
       }),
     ]);
     // Only the whole tree's hash, provenance, tells the first two apart:

@@ -22,7 +22,7 @@ export default defineSchema({
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+import { mutation, query } from "@server/_generated/server";
 
 const invoice = v.object({ id: v.string(), status: v.string() });
 
@@ -56,15 +56,13 @@ export const setStatus = mutation({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { list, setStatus } from "./operations/invoices.ts";
+import { list, setStatus } from "./server/invoices.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoices",
   schema,
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  operations: { invoices: { list, setStatus } },
-  internalOperations: {},
   screens: [{ name: "intake", path: "/", source: "screens/intake.tsx" }],
 });
 `;
@@ -127,7 +125,7 @@ export default workflowTests(intake, [
 const screenCode = `import { useQuery } from "@grasp-os/sdk/react";
 import { useWorkflow } from "@grasp-os/sdk/screen";
 import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Intake() {
   const invoices = useQuery(api.invoices.list, {}) ?? [];
@@ -165,7 +163,7 @@ export default function Intake() {
 /** The App's files. */
 export const invoiceAppFiles: Record<string, string> = {
   "schema.ts": schema,
-  "operations/invoices.ts": operations,
+  "server/invoices.ts": operations,
   "app.ts": registration,
   "workflows/invoice-intake.ts": intakeCode,
   "workflows/invoice-intake.workflow-tests.ts": intakeTests,

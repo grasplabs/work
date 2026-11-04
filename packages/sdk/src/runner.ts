@@ -470,18 +470,20 @@ export const runFunction = async (
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const handler = fn.handler as (ctx: object, args: unknown) => unknown;
   // Who calls, read once as the call starts, for every kind. A host that
-  // tells it nothing fails only the function that reads it, with why.
+  // tells it nothing fails only the function that asks, with why.
   const whoCalls = await settledRead(
-    async () => await channel.people("caller", {})
+    async () => await channel.people("user", {})
   );
-  Object.defineProperty(ctx, "caller", {
+  Object.defineProperty(ctx, "auth", {
     enumerable: true,
-    get: (): unknown => {
-      if (!whoCalls.ok) {
-        throw whoCalls.error;
-      }
-      return whoCalls.value;
-    },
+    value: Object.freeze({
+      getUser: async (): Promise<unknown> => {
+        if (!whoCalls.ok) {
+          throw whoCalls.error;
+        }
+        return await Promise.resolve(whoCalls.value);
+      },
+    }),
   });
   const answer = await handler(Object.freeze(ctx), args);
   await notifications?.flush();
@@ -766,3 +768,8 @@ export const runMigration = (
     return { ok: true, rows };
   });
 };
+
+// The host's entry for every App (`.grasp/app.ts`, from the compiler's
+// `serverEntrySource`) registers its server functions with this, beside
+// the runner the host's main modules call.
+export { registerFunctions } from "./app.ts";

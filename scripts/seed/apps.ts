@@ -51,7 +51,7 @@ export const engineFiles = (
   return {
     "AGENTS.md": seed.agents,
     "schema.ts": `import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n`,
-    "app.ts": `import { app, permission, v } from "@grasp-os/sdk";\n\nimport schema from "./schema.ts";\n\n${declared}\nexport default app({\n  name: ${JSON.stringify(seed.name)},\n  schema,\n  access: { tables: {} },\n  operations: {},\n  screens: [${screenList.join(", ")}],\n  permissions: { workflows: [${seed.workflows.map(({ alias }) => alias).join(", ")}] },\n});\n`,
+    "app.ts": `import { app, permission, v } from "@grasp-os/sdk";\n\nimport schema from "./schema.ts";\n\n${declared}\nexport default app({\n  name: ${JSON.stringify(seed.name)},\n  schema,\n  access: { tables: {} },\n  screens: [${screenList.join(", ")}],\n  permissions: { workflows: [${seed.workflows.map(({ alias }) => alias).join(", ")}] },\n});\n`,
     ...screens,
     ...Object.fromEntries(
       seed.workflows.map(({ alias, tests }) => [

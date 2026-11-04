@@ -67,7 +67,9 @@ import { unique } from "./sign-in.ts";
 // follow the App's bindings as they are.
 
 /** A screen reading `key` of the `review` workflow's decisions. */
-const screenOf = (key: string): string => `import { workflows } from "#grasp";
+const screenOf = (
+  key: string
+): string => `import { workflows } from "@server/_generated/api";
 
 const decision = workflows.review.decisions.${key};
 export const valueSchema = decision.valueSchema;
@@ -85,8 +87,8 @@ export default defineSchema({
   invoices: defineTable({ amount: v.number() }),
 });
 `,
-  "operations/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const review = permission.workflow("review", {
   input: v.object({ amount: v.number() }),
@@ -100,14 +102,13 @@ export const count = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { count, review } from "./operations/invoices.ts";
+import { review } from "./server/invoices.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoices",
   schema,
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  operations: { invoices: { count } },
   screens: [],
   permissions: { workflows: [review] },
 });
@@ -197,7 +198,7 @@ const boundApp = async (): Promise<{
 };
 
 /** A screen sending the `review` workflow's `jobEvents`, its type literal. */
-const eventScreen = `import { workflows } from "#grasp";
+const eventScreen = `import { workflows } from "@server/_generated/api";
 
 const event = workflows.review.events.jobEvents;
 export const type: "grasp.job.completed" = event.type;
@@ -577,7 +578,7 @@ describe(
     it("are sealed into the release's references, typed for its screens, and stay as sealed when the binding goes", async () => {
       const { fixture, binding } = await boundApp();
       const release = await seal(fixture);
-      const references = await sealedText(release, generatedPaths.references);
+      const references = await sealedText(release, generatedPaths.api);
       const sealedFiles = await versionFiles(env, fixture.app, 1);
       const sealedBuild = async () =>
         await screenErrors(
@@ -1714,7 +1715,7 @@ describe(
     it("seal the events a screen sends, and the listen tasks waiting on them as typed waits", async () => {
       const fixture = await eventApp();
       const release = await seal(fixture);
-      const references = await sealedText(release, generatedPaths.references);
+      const references = await sealedText(release, generatedPaths.api);
       const sealed = release.workflows.find(({ alias }) => alias === "review");
 
       expect({

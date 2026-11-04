@@ -1,18 +1,7 @@
 import { app } from "@grasp-os/sdk";
 
-import { builder, writable } from "./operations/access.ts";
-import {
-  addFigures,
-  figures,
-  finish,
-  get,
-  grasp,
-  list,
-  map,
-  take,
-  write,
-} from "./operations/snapshots.ts";
 import schema from "./schema.ts";
+import { grasp, map } from "./server/snapshots.ts";
 
 // The board page: dated snapshots of the workflow map's numbers and what
 // runs, each shown on one page for the board, in the App's own store
@@ -36,16 +25,7 @@ export default app({
     tables: {
       snapshots: members,
       figures: members,
-      builders: { read: "appBuilders", write: "none" },
     },
-  },
-  operations: {
-    access: { writable },
-    snapshots: { list, get, figures, take, write },
-  },
-  internalOperations: {
-    access: { builder },
-    snapshots: { addFigures, finish },
   },
   screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
   permissions: { apps: [map, grasp] },

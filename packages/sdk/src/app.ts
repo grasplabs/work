@@ -47,21 +47,26 @@ import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 
 // `app`: how an App registers itself (spec 7.1, 7.5): its schema, the
-// access its tables need, its public and internal server functions by
-// path, how particular functions narrow that access, its screens and the
-// permissions it needs. Registering grants nothing: every requirement here
-// becomes usable only once the host authorizes it, and the host
-// intersects it with the caller, the App's grants and current revocations
-// on every read, commit and call.
+// access its tables need, how particular functions narrow that access,
+// its screens and the permissions it needs. Its server functions aren't
+// listed: as in Convex, each is an export of a file under `server/`, and
+// the file's path is its API (`server/tasks.ts`'s `list` is
+// `tasks.list`). The host hands the registration those modules
+// (`registerFunctions`, from the entry it generates for every App).
+// Registering grants nothing: every requirement here becomes usable only
+// once the host authorizes it, and the host intersects it with the
+// caller, the App's grants and current revocations on every read, commit
+// and call.
 //
-// The registration is checked whole as it is declared, so one that exists
-// is coherent:
-// - paths come from the maps' keys (`notes.create` for `{ notes: { create
-//   } }`), each a static data property: no getters, nothing computed when
-//   it is read;
-// - the public tree (`operations`) holds only public functions and the
-//   internal tree (`internalOperations`) only internal ones, no path is
-//   in both and no function is registered twice;
+// The registration is checked whole, so one that exists is coherent:
+// - paths come from the server modules' paths and their exports' names
+//   (`notes.create` for `server/notes.ts`'s `create`), each export read
+//   once, so what registers is never something else a later read would
+//   answer; exports that aren't server functions (helpers, constants) are
+//   passed over;
+// - a function's kind says whether it is public (`query`, `mutation`,
+//   `action`) or internal (`internalQuery`, …), and no function is
+//   exported at two paths;
 // - every function was declared for this App's schema, and what it `uses`
 //   is registered here too: a mutation only the App's queries and the
 //   workflows its `permissions` list, an action any of its functions and
@@ -86,9 +91,10 @@ import type { AnySchema } from "./value-schema.ts";
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
 //
-// What the host runs from is `inspectApp`: the registration as data
-// (descriptors, paths, the access each function may use), and the
-// handlers by path, which only the runner calls.
+// What the host runs from is `inspectApp` of what `registerFunctions`
+// answered: the registration as data (descriptors, paths, the access each
+// function may use), and the handlers by path, which only the runner
+// calls.
 
 /** The verbs a function may use on a table. */
 export interface TableVerbs {
@@ -110,10 +116,13 @@ export interface OperationAccess {
   readonly tables: Readonly<Record<string, Partial<TableVerbs>>>;
 }
 
-/** A nested map of registered functions: modules of exports, by name. */
-export interface OperationTree {
-  readonly [name: string]: AnyFunction | OperationTree;
-}
+/**
+ * An App's server modules, by their path under `server/` without `.ts`
+ * (`tasks`, `admin/users`): each module's exports, as its namespace.
+ */
+export type ServerModules = Readonly<
+  Record<string, Readonly<Record<string, unknown>>>
+>;
 
 /** One of an App's screens: a named route to a screen file. */
 export interface ScreenDefinition {
@@ -159,10 +168,6 @@ export interface AppDefinition<
   readonly schema: SchemaDefinition<Tables>;
   /** The access its tables need; a table or mode left out is `none`. */
   readonly access: SchemaAccess;
-  /** Its public functions, by path. */
-  readonly operations: OperationTree;
-  /** Its internal functions, which only its own server code calls. */
-  readonly internalOperations?: OperationTree;
   /** How particular functions narrow `access`, by path. */
   readonly operationAccess?: Readonly<Record<string, OperationAccess>>;
   /** Its screens (spec 8): named routes, each to a screen file. */
@@ -178,7 +183,7 @@ export interface AppDefinition<
   readonly permissions?: AppPermissions;
   /**
    * Its explicit migrations (spec 17.2), each a `migration` declared in
-   * `migrations/`: transforms of one of its tables' records to this
+   * `server/migrations/`: transforms of one of its tables' records to this
    * schema, which only the host runs.
    */
   readonly migrations?: readonly Migration[];
@@ -215,7 +220,7 @@ export interface AppPermissions {
    * Whether it reads the organization's people (`ctx.people`,
    * `usePeople`): names, emails and teams of every member. Shown to whoever
    * reviews its versions; no admin approves it. Without it, every read is
-   * refused. Who calls (`ctx.caller`) needs nothing.
+   * refused. Who calls (`ctx.auth.getUser()`) needs nothing.
    */
   readonly people?: boolean;
   /** What its screens may do with files. */
@@ -359,15 +364,35 @@ const deepFreeze = <Value>(value: Value): Value => {
   return value;
 };
 
-/** Every App `app` registered, with its inspection. */
+/**
+ * Every App `app` registered, as it declared itself, before its server
+ * functions are found (`registerFunctions`).
+ */
+const registrations = new WeakMap<object, Registration>();
+
+/** Every App `registerFunctions` registered whole, with its inspection. */
 const inspections = new WeakMap<object, AppInspection>();
+
+/** What `app` checked of a registration, for `registerFunctions`. */
+interface Registration {
+  readonly definition: AppDefinition<Readonly<Record<string, AnyTable>>>;
+  readonly manifest: SchemaManifest;
+  readonly resources: ReadonlyMap<string, AnyPermission>;
+  readonly browser: ReadonlyMap<string, BrowserPermission>;
+  readonly workflows: ReadonlyMap<string, WorkflowPermission>;
+  readonly people: boolean;
+  readonly screens: Readonly<Record<string, ScreenManifest>>;
+  readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
+  readonly preferences: ValueDescriptor | null;
+  readonly migrations: Readonly<Record<string, MigrationManifest>>;
+  readonly migrationsByName: ReadonlyMap<string, Migration>;
+  readonly answers: readonly SchemaAnswer[];
+}
 
 const appKeys: ReadonlySet<string> = new Set([
   "name",
   "schema",
   "access",
-  "operations",
-  "internalOperations",
   "operationAccess",
   "screens",
   "surfaces",
@@ -405,72 +430,90 @@ export const referenceKeys: ReadonlySet<string> = new Set([
   "then",
 ]);
 
-const requiredKeys = [
-  "name",
-  "schema",
-  "access",
-  "operations",
-  "screens",
-] as const;
+const requiredKeys = ["name", "schema", "access", "screens"] as const;
 
 /**
- * The functions of `tree`, by path, read only from static data properties
- * of plain objects (module namespaces included): never a getter, which
- * could answer something else each time it is read.
+ * Refuses `segments`, a function's path, where it can't be one: past the
+ * bounds of a path, holding a segment that isn't an identifier or that a
+ * reference answers itself, or starting at a segment the platform keeps.
+ * `where` names the module or export, for the message.
  */
-const walk = (
-  tree: unknown,
-  prefix: readonly string[],
-  found: Map<string, unknown>,
-  what: string
-): void => {
-  if (!isPlainObject(tree)) {
-    refuse(`\`${what}\` is a map of module exports.`);
-    return;
+const checkPath = (segments: readonly string[], where: string): string => {
+  const path = segments.join(".");
+  const named = segments.every((segment) =>
+    operationSegmentPattern.test(segment)
+  );
+  if (
+    !named ||
+    segments.length > operationPathMaxSegments ||
+    path.length > operationPathMaxLength
+  ) {
+    refuse(
+      `${where} doesn't make a function path of up to ${operationPathMaxSegments} identifiers (letters, digits and _, not starting with a digit), each folder and file name included${named ? `: \`${path}\`` : ""}.`
+    );
   }
-  for (const name of Object.keys(tree)) {
-    const segments = [...prefix, name];
-    const path = segments.join(".");
-    if (
-      !operationSegmentPattern.test(name) ||
-      segments.length > operationPathMaxSegments ||
-      path.length > operationPathMaxLength
-    ) {
-      refuse(
-        `\`${what}\` has a path that isn't up to ${operationPathMaxSegments} identifiers: ${operationSegmentPattern.test(name) ? `\`${path}\`` : "a key that isn't an identifier"}.`
+  const answered = segments.find((segment) => referenceKeys.has(segment));
+  if (answered !== undefined) {
+    refuse(
+      `${where} can't be a function's path: \`${answered}\` is a name a reference itself answers.`
+    );
+  }
+  const reservedFor = reservedSegments.get(segments[0] ?? "");
+  if (reservedFor !== undefined) {
+    refuse(
+      `${where} can't be a function's path: \`${segments[0] ?? ""}\` is the platform's, for ${reservedFor}.`
+    );
+  }
+  return path;
+};
+
+/**
+ * The server functions `modules` export, by path (each module's path
+ * under `server/`, then the export's name), each export read once.
+ * Exports that aren't server functions are passed over.
+ */
+const exportedFunctions = (modules: unknown): Map<string, unknown> => {
+  if (!isPlainObject(modules)) {
+    return refuse("An App's server modules are a map of module namespaces.");
+  }
+  const found = new Map<string, unknown>();
+  for (const module of Object.keys(modules).toSorted()) {
+    const where = `server/${module}.ts`;
+    const namespace: unknown = modules[module];
+    if (typeof namespace !== "object" || namespace === null) {
+      refuse(`${where} isn't a module.`);
+      continue;
+    }
+    const segments = module.split("/");
+    for (const name of Object.keys(namespace).toSorted()) {
+      // Read once: what registers is what this read answered, whatever a
+      // getter (a bundler's namespace has them) would answer later.
+      const value: unknown = Reflect.get(namespace, name);
+      if (!isServerFunction(value)) {
+        continue;
+      }
+      found.set(
+        checkPath([...segments, name], `\`${name}\` of ${where}`),
+        value
       );
-    }
-    if (referenceKeys.has(name)) {
-      refuse(
-        `\`${path}\` can't be registered: \`${name}\` is a name a reference itself answers, never a path segment.`
-      );
-    }
-    const reservedFor =
-      prefix.length === 0 ? reservedSegments.get(name) : undefined;
-    if (reservedFor !== undefined) {
-      refuse(
-        `\`${what}\` can't register \`${name}\`: that path is the platform's, for ${reservedFor}.`
-      );
-    }
-    const property = Object.getOwnPropertyDescriptor(tree, name);
-    if (property === undefined || !("value" in property)) {
-      refuse(`\`${path}\` is a getter; register a module export.`);
-      return;
-    }
-    const value: unknown = property.value;
-    if (isServerFunction(value)) {
-      found.set(path, value);
-    } else if (isPlainObject(value)) {
-      walk(value, segments, found, what);
-    } else {
-      refuse(
-        `\`${path}\` isn't a server function or a module of them; export helpers from another module.`
-      );
-    }
-    if (found.size > appMaxOperations) {
-      refuse(`An App registers at most ${appMaxOperations} functions.`);
+      if (found.size > appMaxOperations) {
+        refuse(`An App has at most ${appMaxOperations} functions.`);
+      }
     }
   }
+  // A function's path is a reference's place in `api`: never also a
+  // folder of others' (`server/notes.ts`'s `get` beside
+  // `server/notes/get.ts`).
+  const sorted = [...found.keys()].toSorted();
+  for (const [index, path] of sorted.entries()) {
+    const next = sorted[index + 1];
+    if (next?.startsWith(`${path}.`) === true) {
+      refuse(
+        `\`${path}\` clashes with another registered path, \`${next}\`: rename the module or the export.`
+      );
+    }
+  }
+  return found;
 };
 
 /** The keys of an App's `permissions`, and what each holds. */
@@ -1236,60 +1279,44 @@ const checkRegistration = (definition: unknown): void => {
 };
 
 /**
- * The functions found in the public and internal trees, by path, and the
- * path of each: every one in the tree of its visibility, declared for
- * `schema`, at one path only.
+ * The functions `found` holds, by path, and the path of each: every one
+ * declared for `schema`, exported at one path only.
  */
 const registeredFunctions = (
   schema: unknown,
-  publicFound: ReadonlyMap<string, unknown>,
-  internalFound: ReadonlyMap<string, unknown>
+  found: ReadonlyMap<string, unknown>
 ): {
   functions: Map<string, AnyFunction>;
   paths: Map<unknown, string>;
 } => {
   const functions = new Map<string, AnyFunction>();
   const paths = new Map<unknown, string>();
-  const register = (
-    found: ReadonlyMap<string, unknown>,
-    visibility: Visibility
-  ) => {
-    for (const [path, value] of found) {
-      if (!isServerFunction(value)) {
-        continue;
-      }
-      if (value.visibility !== visibility) {
-        refuse(
-          visibility === "public"
-            ? `\`${path}\` is internal: register it under \`internalOperations\`.`
-            : `\`${path}\` is public: register it under \`operations\`.`
-        );
-      }
-      if (functions.has(path)) {
-        refuse(`\`${path}\` is registered as public and as internal.`);
-      }
-      const known = paths.get(value);
-      if (known !== undefined) {
-        refuse(
-          `One function is registered twice, at \`${known}\` and \`${path}\`.`
-        );
-      }
-      if (functionState(value).schema !== schema) {
-        refuse(`\`${path}\` was declared for another schema than the App's.`);
-      }
-      functions.set(path, value);
-      paths.set(value, path);
+  for (const [path, value] of found) {
+    if (!isServerFunction(value)) {
+      continue;
     }
-  };
-  register(publicFound, "public");
-  register(internalFound, "internal");
+    const known = paths.get(value);
+    if (known !== undefined) {
+      refuse(
+        `One function is exported twice, as \`${known}\` and \`${path}\`: export it from one module only.`
+      );
+    }
+    if (functionState(value).schema !== schema) {
+      refuse(
+        `\`${path}\` was declared for another schema than the App's: declare it with the builders of server/_generated/server.`
+      );
+    }
+    functions.set(path, value);
+    paths.set(value, path);
+  }
   return { functions, paths };
 };
 
 /**
- * Registers an App, checked whole (see the header): throws
- * `AppDefinitionError` (or the schema's own error, for `access`) for a
- * registration that isn't coherent.
+ * Registers an App, checked whole (see the header) but for its server
+ * functions, which `registerFunctions` finds in its server modules:
+ * throws `AppDefinitionError` (or the schema's own error, for `access`)
+ * for a registration that isn't coherent.
  */
 export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
   definition: AppDefinition<Tables>
@@ -1308,32 +1335,69 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
   const screens = screensOf(definition.screens);
   const surfaces = surfacesOf(definition.surfaces, screens);
   const preferences = preferencesOf(definition.preferences);
-
-  const publicFound = new Map<string, unknown>();
-  const internalFound = new Map<string, unknown>();
-  walk(definition.operations, [], publicFound, "operations");
-  walk(
-    definition.internalOperations ?? {},
-    [],
-    internalFound,
-    "internalOperations"
-  );
-  if (publicFound.size + internalFound.size > appMaxOperations) {
-    refuse(`An App registers at most ${appMaxOperations} functions.`);
+  if (
+    definition.operationAccess !== undefined &&
+    !isPlainObject(definition.operationAccess)
+  ) {
+    refuse("`operationAccess` is a map of function paths to their access.");
   }
+  const { manifests: migrations, byName: migrationsByName } = migrationsOf(
+    definition.migrations,
+    manifest
+  );
+  const answers = readSchemaAnswers(definition.answers, manifest, refuse);
+
+  const made: App<Tables> = Object.freeze({ name, schema });
+  registrations.set(made, {
+    definition,
+    manifest,
+    resources,
+    browser,
+    workflows,
+    people,
+    screens,
+    surfaces,
+    preferences,
+    migrations,
+    migrationsByName,
+    answers,
+  });
+  return made;
+};
+
+/**
+ * The App `registered` (what `app` answered) with the server functions
+ * `modules` export (see the header), checked whole: what `inspectApp`
+ * reads. The host calls it from the entry it generates for every App,
+ * with each module under `server/` (never `server/_generated/` or
+ * `server/migrations/`); App code never does. Throws
+ * `AppDefinitionError` for functions that can't be registered.
+ */
+export const registerFunctions = <
+  const Tables extends Readonly<Record<string, AnyTable>>,
+>(
+  registered: App<Tables>,
+  modules: ServerModules
+): App<Tables> => {
+  const registration =
+    typeof registered === "object" && registered !== null
+      ? registrations.get(registered)
+      : undefined;
+  if (registration === undefined) {
+    return refuse("That isn't an App `app` registered.");
+  }
+  const { definition, manifest, resources, workflows } = registration;
   const { functions, paths } = registeredFunctions(
-    schema,
-    publicFound,
-    internalFound
+    definition.schema,
+    exportedFunctions(modules)
   );
 
   const overrides = definition.operationAccess ?? {};
-  if (!isPlainObject(overrides)) {
-    refuse("`operationAccess` is a map of registered paths to their access.");
-  }
   for (const path of Object.keys(overrides)) {
     if (!functions.has(path)) {
-      refuse(`\`operationAccess\` names \`${path}\`, which isn't registered.`);
+      refuse(
+        `\`operationAccess\` names \`${path}\`, which no server module exports.`
+      );
     }
   }
 
@@ -1363,39 +1427,38 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
     });
   }
 
-  const { manifests: migrations, byName: migrationsByName } = migrationsOf(
-    definition.migrations,
-    manifest
-  );
-
-  const answers = readSchemaAnswers(definition.answers, manifest, refuse);
-
-  const made: App<Tables> = Object.freeze({ name, schema });
+  const made: App<Tables> = Object.freeze({
+    name: registered.name,
+    schema: registered.schema,
+  });
   inspections.set(made, {
     manifest: deepFreeze({
-      name,
+      name: definition.name,
       schema: manifest,
       operations,
       resources: Object.fromEntries(resources),
-      browserResources: Object.fromEntries(browser),
+      browserResources: Object.fromEntries(registration.browser),
       workflows: Object.fromEntries(workflows),
-      screens,
-      surfaces,
-      preferences,
-      ...(people ? { people: true } : {}),
-      migrations,
-      ...(answers.length > 0 ? { answers } : {}),
+      screens: registration.screens,
+      surfaces: registration.surfaces,
+      preferences: registration.preferences,
+      ...(registration.people ? { people: true } : {}),
+      migrations: registration.migrations,
+      ...(registration.answers.length > 0
+        ? { answers: registration.answers }
+        : {}),
     }),
     functions,
-    migrations: migrationsByName,
+    migrations: new Map(registration.migrationsByName),
   });
   return made;
 };
 
 /**
- * What the host runs `registered` from; throws for anything `app` didn't
- * make. The manifest is frozen all the way down, and the handlers are a
- * copy each time, so nothing a caller does to them changes the App.
+ * What the host runs `registered` from; throws for anything
+ * `registerFunctions` didn't make. The manifest is frozen all the way
+ * down, and the handlers are a copy each time, so nothing a caller does
+ * to them changes the App.
  */
 export const inspectApp = (registered: unknown): AppInspection => {
   const inspection =
@@ -1403,7 +1466,9 @@ export const inspectApp = (registered: unknown): AppInspection => {
       ? inspections.get(registered)
       : undefined;
   if (inspection === undefined) {
-    return refuse("That isn't an App `app` registered.");
+    return refuse(
+      "That isn't an App registered with its server functions (`registerFunctions`)."
+    );
   }
   return Object.freeze({
     manifest: inspection.manifest,

@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { inspectApp } from "@grasp-os/sdk/host";
+import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
   definitionPackageFormatVersion,
@@ -30,6 +30,7 @@ import { z } from "zod";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
+import * as notesFunctions from "../packages/sdk/test/notes/server/notes.ts";
 import {
   packageProject,
   PackagingError,
@@ -51,7 +52,7 @@ const hash = (digit: string): string => digit.repeat(64);
  * A module of the App's own that reads a workflow's event reference, which
  * types only when the references carry what the seal resolved.
  */
-const confirmations = `import { workflows } from "#grasp";
+const confirmations = `import { workflows } from "@server/_generated/api";
 
 export const confirmed = workflows.archiveNotes.events.confirmed;
 `;
@@ -66,7 +67,7 @@ export const confirmed = workflows.archiveNotes.events.confirmed;
 const tally = `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
 import { FunctionResult } from "@grasp-os/sdk/workflow";
 
-import type * as notes from "../operations/notes.ts";
+import type * as notes from "../server/notes.ts";
 
 interface Notes {
   notes: typeof notes;
@@ -91,12 +92,12 @@ const notesScreen = `export default function Notes() {
 /** The Notes fixture's source, as an App version's tree holds it. */
 const notesFiles = (): Record<string, string> => ({
   ...Object.fromEntries(
-    ["app.ts", "schema.ts", "operations/notes.ts"].map((file) => [
+    ["app.ts", "schema.ts", "server/notes.ts"].map((file) => [
       file,
       readFileSync(path.join(notesDir, file), "utf-8"),
     ])
   ),
-  "operations/confirmations.ts": confirmations,
+  "server/confirmations.ts": confirmations,
   "workflows/tally.ts": tally,
   "screens/notes.tsx": notesScreen,
 });
@@ -164,7 +165,9 @@ const definitionOf = (
       generated: {},
     },
     files,
-    manifest: canonicalText(inspectApp(notes).manifest),
+    manifest: canonicalText(
+      inspectApp(registerFunctions(notes, { notes: notesFunctions })).manifest
+    ),
     store: null,
     bindings: {},
     workflows: {
@@ -456,12 +459,12 @@ describe(
           (file) => file.startsWith("vendor/") && /\.test|\/test\//u.test(file)
         ),
         sameSource: read("app/app.ts") === notesFiles()["app.ts"],
-        sealedContracts: read("app/.grasp/references.ts").includes(
+        sealedContracts: read("app/server/_generated/api.ts").includes(
           "notes.archive.confirmed"
         ),
         localIdentity:
-          read("app/.grasp/references.ts").includes('"local"') &&
-          !read("app/.grasp/references.ts").includes("app_0000"),
+          read("app/server/_generated/api.ts").includes('"local"') &&
+          !read("app/server/_generated/api.ts").includes("app_0000"),
         grasp: Object.keys(root.dependencies).filter((name) =>
           name.startsWith("@grasp-os/")
         ),
@@ -489,14 +492,15 @@ describe(
       }).toStrictEqual({
         app: [
           "app/.grasp/contracts.json",
-          "app/.grasp/references.ts",
-          "app/.grasp/server-references.ts",
-          "app/.grasp/server.ts",
           "app/app.ts",
-          "app/operations/confirmations.ts",
-          "app/operations/notes.ts",
           "app/schema.ts",
           "app/screens/notes.tsx",
+          "app/server/_generated/api.ts",
+          "app/server/_generated/dataModel.ts",
+          "app/server/_generated/internal.ts",
+          "app/server/_generated/server.ts",
+          "app/server/confirmations.ts",
+          "app/server/notes.ts",
           "app/tsconfig.screens.json",
           "app/tsconfig.server.json",
           "app/tsconfig.workflows.json",
@@ -562,7 +566,7 @@ describe(
           "export const half = (value: number): string => value / 2;\n",
         "app/workflows/lib/window.ts":
           "export const here = (): string => window.location.href;\n",
-        "app/operations/document.ts":
+        "app/server/document.ts":
           "export const title = (): string => document.title;\n",
         "app/workflows/lib/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
@@ -571,7 +575,7 @@ describe(
       // could steer the check, in a workflow, server code and a compute
       // module alike.
       const steering: Record<string, string> = {
-        "app/operations/ambient.ts":
+        "app/server/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
         "workflows/greet/1.0.0/code/dom.ts":
           '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
@@ -615,7 +619,7 @@ describe(
         failedCheck: {
           status: 1,
           problems: {
-            "app/operations/document.ts": ["TS2584"],
+            "app/server/document.ts": ["TS2584"],
             "app/workflows/lib/kit.ts": ["TS2307"],
             "app/workflows/lib/window.ts": ["TS2304"],
             "app/screens/typo.tsx": ["TS2322"],
@@ -718,28 +722,28 @@ describe(
     it("refuses a path that leaves its directory, collides once folded, a tool reads, or a file system can't hold, and writes nothing", async () => {
       const paths = [
         "../escape.ts",
-        "operations/../../escape.ts",
+        "server/../../escape.ts",
         "/etc/passwd",
         "C:/Windows/win.ini",
-        "operations\\notes.ts",
-        "operations//notes.ts",
+        "server\\notes.ts",
+        "server//notes.ts",
         "./app.ts",
         "nul\0.ts",
         "APP.ts",
-        "operationſ/notes.ts",
-        ".grasp/server.ts",
+        "ſerver/notes.ts",
+        "server/_generated/server.ts",
         "CON.ts",
-        "operations/lpt1",
+        "server/lpt1",
         "notes.ts.",
         "notes.ts ",
         "tab\u0009.ts",
         ".git/config",
-        "operations/.GIT/hooks/pre-commit",
+        "server/.GIT/hooks/pre-commit",
         ".npmrc",
         ".vscode/settings.json",
         // What a package manager run inside app/ would read or install into.
         "pnpm-workspace.yaml",
-        "operations/PNPM-LOCK.yaml",
+        "server/PNPM-LOCK.yaml",
         ".pnpmfile.cjs",
         ".pnpmfile.mjs",
         ".pnpmfile.js",

@@ -39,13 +39,12 @@ export const appFile = (
   migrated: boolean
 ): string => `import { app } from "@grasp-os/sdk";
 import schema from "./schema.ts";
-${migrated ? 'import derive from "./migrations/derive-category.ts";' : ""}
+${migrated ? 'import derive from "./server/migrations/derive-category.ts";' : ""}
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {},
   screens: [],
   migrations: [${migrated ? "derive" : ""}],
 });
@@ -64,7 +63,7 @@ export const migrationFile = (
   handler: string,
   fixtures = passingFixtures
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "../../schema.ts";
 
 export default migration({
   name: "derive-category",
@@ -92,7 +91,7 @@ export const migratedFiles = (
   schema = v2Schema
 ): Record<string, string> => ({
   "schema.ts": schema,
-  "migrations/derive-category.ts": migrationFile(
+  "server/migrations/derive-category.ts": migrationFile(
     fromSchema,
     toSchema,
     handler,

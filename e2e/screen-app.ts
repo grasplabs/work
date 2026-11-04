@@ -16,7 +16,7 @@ export default defineSchema({ notes: defineTable({ note: v.string().min(1).max(2
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+import { action, mutation, query } from "@server/_generated/server";
 
 /** Every note, each with who wrote it. */
 export const list = query({
@@ -51,15 +51,13 @@ export const platformShaped = query({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { add, list, lookLikeThePlatform, platformShaped } from "./operations/notes.ts";
+import { add, list, lookLikeThePlatform, platformShaped } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { list, add, lookLikeThePlatform, platformShaped } },
-  internalOperations: {},
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
 });
 `;
@@ -69,7 +67,7 @@ const screenCode = (
 ) => `import { useAction, useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 // The build's design lint refuses these by name (grasp/no-style-escapes);
 // spelled so it can't read them, as code evading it would, so this
@@ -227,7 +225,7 @@ export default function Notes() {
 /** The App's files, with every attempt aimed at `attacker`. */
 export const screenAppFiles = (attacker: string): Record<string, string> => ({
   "schema.ts": schema,
-  "operations/notes.ts": operations,
+  "server/notes.ts": operations,
   "app.ts": registration,
   "screens/notes.tsx": screenCode(attacker),
 });

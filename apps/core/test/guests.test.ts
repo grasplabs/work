@@ -73,8 +73,8 @@ const guestFiles = (
 
 export default defineSchema({});
 `,
-  "operations/guests.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/guests.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const guests = permission.guests({ operations: ${operations} });
 
@@ -125,15 +125,13 @@ export const revoke = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 
-import { guests, invite, list, read, revoke } from "./operations/guests.ts";
+import { guests } from "./server/guests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Guests",
   schema,
   access: { tables: {} },
-  operations: { guests: { invite, list, read, revoke } },
-  internalOperations: {},
   screens: [],
   permissions: { guests },
 });

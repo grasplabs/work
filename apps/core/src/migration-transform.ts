@@ -1,4 +1,8 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 import {
   migrationPlatformMessages,
   schemaFromDescriptor,
@@ -268,7 +272,7 @@ const platformMessages = new Set([
 const migrateMain = `import ${JSON.stringify(quietModule)};
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { runMigration } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
-import registered from ${JSON.stringify(appModuleName("app.ts"))};
+import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 import request from ${JSON.stringify(requestModule)};
 
 export class Migrate extends WorkerEntrypoint {

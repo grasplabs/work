@@ -2,16 +2,21 @@ import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
-import { inspectApp, readAppManifest } from "../src/host.ts";
+import { inspectApp, readAppManifest, registerFunctions } from "../src/host.ts";
 import { AppError, app, permission } from "../src/index.ts";
-import type { AppDefinition, WorkflowEventReference } from "../src/index.ts";
+import type {
+  AppDefinition,
+  ServerModules,
+  WorkflowEventReference,
+} from "../src/index.ts";
 import { readPermissionDeclaration } from "../src/permissions.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
-// How an App registers its server functions, and what inspection makes of
-// them (spec 7.1, 7.4, 7.5): pure checks of a declaration, so unit tests.
+// How an App registers itself and the server functions its modules under
+// `server/` export, and what inspection makes of them (spec 7.1, 7.4,
+// 7.5): pure checks of a declaration, so unit tests.
 // That the host enforces the result is tested through the host
 // (apps/core/test/operations.test.ts).
 
@@ -76,17 +81,30 @@ const registration: Registration = {
       people: { read: "appMembers" },
     },
   },
-  operations: { notes: { list, create, send } },
   screens: [],
 };
 
-/** Notes, with `changes` to its registration. */
-const notes = (changes: Partial<Registration> = {}) =>
-  app({ ...registration, ...changes });
+/** Notes' server modules: `server/notes.ts`. */
+const notesModules: ServerModules = { notes: { list, create, send } };
 
-/** Registers Notes with `changes` the types refuse. */
+/**
+ * Notes, with `changes` to its registration, and its functions from
+ * `modules`, as the host's entry registers them.
+ */
+const notes = (
+  changes: Partial<Registration> = {},
+  modules: ServerModules = notesModules
+) => registerFunctions(app({ ...registration, ...changes }), modules);
+
+/** Registers Notes, and its functions, with `changes` the types refuse. */
 const looseNotes = (changes: object) =>
-  looseApp({ ...registration, ...changes });
+  registerFunctions(
+    // SAFETY: `looseApp` answers what `app` does; `registerFunctions`
+    // refuses anything else at run time.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    looseApp({ ...registration, ...changes }) as ReturnType<typeof app>,
+    notesModules
+  );
 
 /**
  * A connector declaration of `contract`, read back as the host reads a
@@ -110,7 +128,7 @@ const refusal = (register: () => unknown): string => {
   throw new Error("The registration was accepted");
 };
 
-/** The reference `#grasp` generates for `workflow`'s `edited` event. */
+/** The reference `@server/_generated/api` generates for `workflow`'s `edited` event. */
 const eventOf = (workflow: string): WorkflowEventReference => ({
   kind: "workflowEvent",
   resourceId: "app",
@@ -210,12 +228,12 @@ describe("access", () => {
     [
       "an unknown path",
       { "notes.missing": { tables: {} } },
-      "isn't registered",
+      "no server module exports",
     ],
     [
-      "an internal-looking unknown path",
+      "a path no module could export",
       { secret: { tables: {} } },
-      "isn't registered",
+      "no server module exports",
     ],
     [
       "an unknown table",
@@ -444,71 +462,78 @@ describe("inspection", () => {
 });
 
 describe("paths", () => {
-  test("public and internal functions get distinct paths from their maps", () => {
+  test("each function's path is its module's and its export's, its visibility its kind's, and helpers are passed over", () => {
     const { manifest, functions } = inspectApp(
-      notes({ internalOperations: { jobs: { secret } } })
+      notes(
+        {},
+        {
+          notes: { list, create, send, fields: { title: v.string() } },
+          "admin/jobs": { secret, limit: 10 },
+        }
+      )
     );
     expect(Object.keys(manifest.operations).toSorted()).toStrictEqual([
-      "jobs.secret",
+      "admin.jobs.secret",
       "notes.create",
       "notes.list",
       "notes.send",
     ]);
-    expect(manifest.operations["jobs.secret"]?.visibility).toBe("internal");
+    expect(manifest.operations["admin.jobs.secret"]?.visibility).toBe(
+      "internal"
+    );
     expect(manifest.operations["notes.list"]?.visibility).toBe("public");
     expect(functions.get("notes.list")).toBe(list);
   });
 
   test.each([
     [
-      "an internal function in the public tree",
-      { operations: { secret } },
-      "is internal",
-    ],
-    [
-      "a public function in the internal tree",
-      { internalOperations: { list } },
-      "is public",
-    ],
-    [
-      "one path in both trees",
-      {
-        operations: { jobs: { secret: list } },
-        internalOperations: { jobs: { secret } },
-      },
-      "as public and as internal",
-    ],
-    [
       "one function at two paths",
-      { operations: { a: list, b: list } },
-      "registered twice",
+      { a: { list }, b: { list } },
+      "exported twice",
     ],
     [
-      "a helper beside the functions",
-      { operations: { notes: { list, fields: { title: v.string() } } } },
-      "isn't a server function",
+      "a module whose name isn't an identifier",
+      { "notes-list": { list } },
+      "doesn't make a function path",
+    ],
+    ["a path deeper than four", { "a/b/c/d": { list } }, "up to 4"],
+    [
+      "a module at a path the platform keeps",
+      { workflows: { list } },
+      "is the platform's",
     ],
     [
-      "a key that isn't an identifier",
-      { operations: { "notes-list": list } },
-      "isn't an identifier",
+      "an export named as a reference's own data",
+      { notes: { kind: list } },
+      "a reference itself answers",
     ],
-    [
-      "a path deeper than four",
-      { operations: { a: { b: { c: { d: { list } } } } } },
-      "up to 4",
-    ],
-  ])("%s is refused", (_case, changes, message) => {
-    expect(refusal(() => looseNotes(changes))).toContain(message);
+  ])("%s is refused", (_case, modules, message) => {
+    expect(refusal(() => notes({}, modules))).toContain(message);
   });
 
-  test("a getter is refused, so a path is read once", () => {
-    const operations = {};
-    Object.defineProperty(operations, "list", {
+  test("an export is read once, as it registers, whatever a getter would answer later", () => {
+    // A bundler's module namespace exposes exports as getters.
+    let reads = 0;
+    const module = {};
+    Object.defineProperty(module, "list", {
       enumerable: true,
-      get: () => list,
+      get: () => {
+        reads += 1;
+        return reads === 1 ? list : create;
+      },
     });
-    expect(refusal(() => notes({ operations }))).toContain("getter");
+    const registered = notes({}, { notes: module });
+    expect({
+      reads,
+      kind: inspectApp(registered).manifest.operations["notes.list"]?.kind,
+      runs: inspectApp(registered).functions.get("notes.list"),
+    }).toStrictEqual({ reads: 1, kind: "query", runs: list });
+  });
+
+  test("an App inspected without its server functions is refused", () => {
+    expect(refusal(() => inspectApp(app(registration)))).toContain(
+      "registerFunctions"
+    );
   });
 
   test("a function declared for another schema is refused", () => {
@@ -520,7 +545,7 @@ describe("paths", () => {
       returns: v.null(),
       handler: () => null,
     });
-    expect(refusal(() => notes({ operations: { foreign } }))).toContain(
+    expect(refusal(() => notes({}, { notes: { foreign } }))).toContain(
       "another schema"
     );
   });
@@ -540,15 +565,14 @@ describe("uses", () => {
       handler: () => null,
     });
     const { manifest } = inspectApp(
-      notes({
-        operations: { notes: { list, create, notify } },
-        internalOperations: { secret },
-        permissions: { connections: [mail] },
-      })
+      notes(
+        { permissions: { connections: [mail] } },
+        { notes: { list, create, notify }, jobs: { secret } }
+      )
     );
     expect(manifest.operations["notes.notify"]?.uses).toStrictEqual([
       { type: "function", path: "notes.list", kind: "query" },
-      { type: "function", path: "secret", kind: "query" },
+      { type: "function", path: "jobs.secret", kind: "query" },
       { type: "function", path: "notes.create", kind: "mutation" },
       { type: "resource", kind: "connections", alias: "mail" },
     ]);
@@ -562,9 +586,7 @@ describe("uses", () => {
       handler: () => null,
     });
     expect(
-      refusal(() =>
-        notes({ operations: { notes: { list, create, viaMutation } } })
-      )
+      refusal(() => notes({}, { notes: { list, create, viaMutation } }))
     ).toContain("may run the App's queries");
     const viaResource = server.mutation({
       args: {},
@@ -574,10 +596,10 @@ describe("uses", () => {
     });
     expect(
       refusal(() =>
-        notes({
-          operations: { viaResource },
-          permissions: { connections: [mail] },
-        })
+        notes(
+          { permissions: { connections: [mail] } },
+          { notes: { viaResource } }
+        )
       )
     ).toContain("only an action reaches `connections`");
   });
@@ -589,7 +611,7 @@ describe("uses", () => {
       uses: [mail],
       handler: () => null,
     });
-    expect(refusal(() => notes({ operations: { sendMail } }))).toContain(
+    expect(refusal(() => notes({}, { notes: { sendMail } }))).toContain(
       "don't list"
     );
     // The same alias declared again is another requirement, not this one.
@@ -599,18 +621,18 @@ describe("uses", () => {
     });
     expect(
       refusal(() =>
-        notes({
-          operations: { sendMail },
-          permissions: { connections: [lookalike] },
-        })
+        notes(
+          { permissions: { connections: [lookalike] } },
+          { notes: { sendMail } }
+        )
       )
     ).toContain("don't list");
     expect(
       refusal(() =>
-        notes({
-          operations: { list },
-          permissions: { connections: [mail, lookalike] },
-        })
+        notes(
+          { permissions: { connections: [mail, lookalike] } },
+          { notes: { list } }
+        )
       )
     ).toContain("alias `mail`");
   });
@@ -638,7 +660,7 @@ describe("uses", () => {
       uses: [orphan],
       handler: () => null,
     });
-    expect(refusal(() => notes({ operations: { caller } }))).toContain(
+    expect(refusal(() => notes({}, { notes: { caller } }))).toContain(
       "doesn't register"
     );
   });
@@ -660,10 +682,10 @@ describe("uses", () => {
       uses: [list, followUp],
       handler: () => null,
     });
-    const registered = notes({
-      operations: { notes: { list, start, stage } },
-      permissions: { workflows: [followUp] },
-    });
+    const registered = notes(
+      { permissions: { workflows: [followUp] } },
+      { notes: { list, start, stage } }
+    );
     const { manifest } = inspectApp(registered);
     const lookalike = permission.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
@@ -679,30 +701,32 @@ describe("uses", () => {
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
-      unlisted: refusal(() =>
-        notes({ operations: { notes: { list, start } } })
-      ).includes("don't list"),
+      unlisted: refusal(() => notes({}, { notes: { list, start } })).includes(
+        "don't list"
+      ),
       // The same alias declared again is another requirement, not this one.
       lookalike: refusal(() =>
-        notes({
-          operations: { notes: { list, start } },
-          permissions: { workflows: [lookalike] },
-        })
+        notes(
+          { permissions: { workflows: [lookalike] } },
+          { notes: { list, start } }
+        )
       ).includes("don't list"),
       sameAlias: refusal(() =>
-        notes({
-          operations: { notes: { list } },
-          permissions: {
-            workflows: [followUp],
-            apps: [
-              permission.app("followUp", {
-                functions: {
-                  "a.b": { kind: "query", args: {}, returns: v.null() },
-                },
-              }),
-            ],
+        notes(
+          {
+            permissions: {
+              workflows: [followUp],
+              apps: [
+                permission.app("followUp", {
+                  functions: {
+                    "a.b": { kind: "query", args: {}, returns: v.null() },
+                  },
+                }),
+              ],
+            },
           },
-        })
+          { notes: { list } }
+        )
       ).includes("alias `followUp`"),
     }).toStrictEqual({
       start: [{ type: "workflow", alias: "followUp" }],
@@ -732,10 +756,10 @@ describe("uses", () => {
       uses: [edited],
       handler: () => null,
     });
-    const registered = notes({
-      operations: { notes: { list, notify } },
-      permissions: { workflows: [followUp] },
-    });
+    const registered = notes(
+      { permissions: { workflows: [followUp] } },
+      { notes: { list, notify } }
+    );
     const { manifest } = inspectApp(registered);
     const byAction = server.action({
       args: {},
@@ -755,16 +779,16 @@ describe("uses", () => {
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
       byAction: refusal(() =>
-        notes({
-          operations: { notes: { list, byAction } },
-          permissions: { workflows: [followUp] },
-        })
+        notes(
+          { permissions: { workflows: [followUp] } },
+          { notes: { list, byAction } }
+        )
       ).includes("only a mutation notifies"),
       otherWorkflow: refusal(() =>
-        notes({
-          operations: { notes: { list, otherWorkflow } },
-          permissions: { workflows: [followUp] },
-        })
+        notes(
+          { permissions: { workflows: [followUp] } },
+          { notes: { list, otherWorkflow } }
+        )
       ).includes("don't list"),
       madeUp: refusal(() =>
         Reflect.apply(server.mutation, server, [
@@ -831,10 +855,10 @@ describe("uses", () => {
       handler: () => null,
     });
     const { manifest } = inspectApp(
-      notes({
-        operations: { notes: { list, start } },
-        permissions: { workflows: [followUp] },
-      })
+      notes(
+        { permissions: { workflows: [followUp] } },
+        { notes: { list, start } }
+      )
     );
     // A mutable copy, as JSON: what a manifest read back is.
     const operations: Record<string, { uses: unknown[] }> = {};
@@ -1075,9 +1099,7 @@ describe("the runner", () => {
         }
       },
     });
-    const registered = notes({
-      operations: { notes: { list, create, recover } },
-    });
+    const registered = notes({}, { notes: { list, create, recover } });
     // What crosses an isolate boundary: an Error named AppError, its class lost.
     const crossed = Object.assign(new Error("Notes are closed."), {
       name: "AppError",

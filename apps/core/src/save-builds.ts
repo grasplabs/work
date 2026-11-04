@@ -1,16 +1,11 @@
 import {
   appCodeFiles,
   buildFiles,
-  generatedFolder,
+  isGeneratedPath,
   workflowFiles,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import {
-  generatedPaths,
-  generateModules,
-  serverModuleSource,
-  symbolicModules,
-} from "@grasp-os/sdk/host";
+import { generateModules, symbolicModules } from "@grasp-os/sdk/host";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -25,6 +20,7 @@ import { z } from "zod";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
+import { hostModules } from "./host-modules.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
 import {
   buildScreens,
@@ -294,7 +290,7 @@ const checkedDraftCode = async (
 ): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
   // Whatever the draft holds under `.grasp/` is the host's to generate.
   const code = Object.fromEntries(
-    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
+    Object.entries(files).filter(([path]) => !isGeneratedPath(path))
   );
   const options = { profile: "preview", signal } as const;
   const inspected = await inspection();
@@ -305,7 +301,7 @@ const checkedDraftCode = async (
       {
         ...code,
         ...symbolicModules(),
-        [generatedPaths.server]: serverModuleSource,
+        ...hostModules,
       },
       app,
       options
@@ -333,7 +329,7 @@ const checkedDraftCode = async (
 
 /**
  * A draft's server code (`app.ts`, `schema.ts`, `values.ts`,
- * `operations/`, `migrations/`), checked as a check reports it: type
+ * `server/`), checked as a check reports it: type
  * errors and every gate a seal holds it to, against the references its
  * seal would generate (`checkedDraftCode`); its registration runs in the
  * sandbox to say what they are, none of its operations (server code with

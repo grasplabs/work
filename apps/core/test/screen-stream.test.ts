@@ -50,10 +50,10 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(500) }).index("by_updated", ["_updatedAt"]),
 });
 `,
-  "operations/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { action, doc, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+import { action, doc, mutation, query } from "@server/_generated/server";
 
-const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
+export const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
@@ -73,6 +73,20 @@ export const echo = action({
   returns: v.string(),
   handler: async (_ctx, args) => args.word,
 });
+
+export const waits = action({
+  args: { pauseMs: v.number().integer().min(0) },
+  returns: v.null(),
+  handler: async (_ctx, args) => {
+    await pause(args.pauseMs);
+    return null;
+  },
+});
+`,
+  "server/writer.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+import { create, list, pause } from "./notes.ts";
 
 export const draft = action({
   args: { topic: v.string().min(1), pauseMs: v.number().integer().min(0).default(50) },
@@ -133,15 +147,6 @@ export const counts = action({
   },
 });
 
-export const waits = action({
-  args: { pauseMs: v.number().integer().min(0) },
-  returns: v.null(),
-  handler: async (_ctx, args) => {
-    await pause(args.pauseMs);
-    return null;
-  },
-});
-
 export const wrong = action({
   args: {},
   returns: v.null(),
@@ -167,20 +172,17 @@ export const huge = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { counts, create, draft, echo, huge, list, quiet, slow, waits, wrong } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Writer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, create, echo, waits }, writer: { draft, slow, quiet, wrong, huge, counts } },
-  internalOperations: {},
   screens: [],
 });
 `,
   "screens/writer.tsx": `import { useStream } from "@grasp-os/sdk/react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Writer() {
   const draft = useStream(api.writer.draft);
@@ -189,7 +191,7 @@ export default function Writer() {
 `,
 };
 
-/** What a reference to `path` of `release` holds, as the App's `#grasp` has it. */
+/** What a reference to `path` of `release` holds, as the App's `@server/_generated/api` has it. */
 const referenceData = (release: Release, path: string) => {
   const operation = release.app.operations[path];
   const fingerprint = release.fingerprints[path];

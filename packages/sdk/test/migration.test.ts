@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { inspectApp, readAppManifest } from "../src/host.ts";
+import { inspectApp, readAppManifest, registerFunctions } from "../src/host.ts";
 import { app, migration } from "../src/index.ts";
 import { runMigration } from "../src/runner.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
@@ -44,18 +44,20 @@ const deriveCategory = migration({
   }),
 });
 
-/** Notes registered with `migrations`. */
+/** Notes registered with `migrations`, and no server functions. */
 const notes = (migrations: readonly unknown[]): unknown =>
-  // SAFETY: deliberately loose, for registrations the types refuse.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  (app as (definition: unknown) => unknown)({
-    name: "Notes",
-    schema,
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operations: {},
-    screens: [],
-    migrations,
-  });
+  registerFunctions(
+    // SAFETY: deliberately loose, for registrations the types refuse.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    (app as (definition: unknown) => ReturnType<typeof app>)({
+      name: "Notes",
+      schema,
+      access: { tables: { notes: { read: "owner", write: "owner" } } },
+      screens: [],
+      migrations,
+    }),
+    {}
+  );
 
 // SAFETY: deliberately loose, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
