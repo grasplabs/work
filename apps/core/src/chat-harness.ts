@@ -403,8 +403,14 @@ export class ChatHarness {
       {
         models: pi,
         registry,
-        // One code run at a time, as each is an isolate of its own.
-        settings: { toolExecution: "sequential" },
+        settings: {
+          // One code run at a time, as each is an isolate of its own.
+          toolExecution: "sequential",
+          // The model gateway's provider SDKs retry a request already, and
+          // the gateway says why one failed in the end (`model.rate_limited`
+          // and so on): pi retrying on top would multiply the attempts.
+          retry: { enabled: false },
+        },
         identity: { attribution: null },
         onWake,
       },
