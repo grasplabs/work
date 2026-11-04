@@ -25,24 +25,27 @@ import { useState } from "react";
 
 import { formatTime } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What a workflow keeps between its runs (core's workflow-state.ts): each
-// key with its value, the run that set it last and when, for anyone with
-// a role in it. Its builders may empty it; core records who did, and a
-// step that wrote before never writes again.
+// key with its value, the run that set it last and when, for its builders
+// and the organization's admins, as its runs' results are. They may empty
+// it; core records who did, and a step that wrote before never writes
+// again.
 
 /** Kilobytes, rounded up, as the page says a size. */
 const kilobytes = (bytes: number): number => Math.ceil(bytes / 1024);
 
-export const KeptState = ({
+const KeptEntries = ({
   workflow,
   loaded,
   editable,
 }: {
   workflow: string;
   loaded: WorkflowState;
-  /** Whether the reader builds it, and so may reset it. */
+  /** Whether the reader may reset it: one of its builders, or an admin. */
   editable: boolean;
 }) => {
   const { t } = useLingui();
@@ -147,5 +150,29 @@ export const KeptState = ({
       ) : null}
       <ErrorText>{failure}</ErrorText>
     </section>
+  );
+};
+
+/**
+ * What it keeps, as the page read it: nothing for a reader who may not
+ * read it (core's own read of it is for builders and admins).
+ */
+export const KeptState = ({
+  workflow,
+  read,
+  editable,
+}: {
+  workflow: string;
+  read: Loaded<WorkflowState> | undefined;
+  /** Whether the reader may reset it: one of its builders, or an admin. */
+  editable: boolean;
+}) => {
+  if (read === undefined) {
+    return null;
+  }
+  return read.state === "ready" ? (
+    <KeptEntries editable={editable} loaded={read.data} workflow={workflow} />
+  ) : (
+    <NotLoadedState page={read} />
   );
 };

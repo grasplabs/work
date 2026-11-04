@@ -2,6 +2,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import {
   workflowResourceErrors,
   workflowStateKeySchema,
@@ -39,8 +40,14 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   requires, in the batch, that run of that workflow, not ended, and the
 //   workflow live. A step's key names its run (`stepIdempotencyKey`), so a
 //   key of another run is refused. A run's snapshot is read by its own
-//   workflow's ID, which its start already holds; people read it only
-//   with a role in the workflow, and only its builders reset it.
+//   workflow's ID, which its start already holds. People read and reset it
+//   only as its builders or the organization's admins (never Grasp staff
+//   resetting it): what one person's run kept is no other user's, as its
+//   results aren't (workflows/resource-runs.ts, workflow-own.ts).
+// - What a restricted run read reaching other runs (restricted.ts): such a
+//   run shares nothing with the workflow's other runs, so it keeps no
+//   state. Its write is refused (`workflow.state_restricted`), by the
+//   run's pinned flag, read in the batch.
 // - Oversized values: keys are names (`workflowStateKeySchema`) and values
 //   JSON; one workflow's state takes at most `workflowStateMaxBytes` in
 //   all, counted in the batch that writes it, after its own writes and
@@ -107,7 +114,8 @@ export const workflowStateOf = async (
  * nothing, whatever it carries. For the run host, only after the step
  * succeeded and its record was accepted. Refused: values that aren't named
  * JSON (`workflow.state_invalid`), a state that would pass its cap
- * (`workflow.state_too_large`), a run that isn't one of a live workflow
+ * (`workflow.state_too_large`), a restricted run
+ * (`workflow.state_restricted`), a run that isn't one of a live workflow
  * (`workflow.run_unavailable`) or has ended (`workflow.run_ended`).
  */
 export const writeWorkflowState = async (
@@ -123,9 +131,12 @@ export const writeWorkflowState = async (
   if (!parsed.success) {
     throw workflowResourceErrors.create("workflow.state_invalid");
   }
+  // Each value as its canonical JSON text, which `json_each` hands back
+  // as it is: the one statement below writes every key.
   const entries = Object.entries(parsed.data).map(
     ([key, value]) => [key, canonicalJson(value)] as const
   );
+  const texts = JSON.stringify(Object.fromEntries(entries));
   if (entries.length === 0) {
     return;
   }
@@ -138,12 +149,18 @@ export const writeWorkflowState = async (
   }
   const db = drizzle(env.DB);
   const run = await db
-    .select({ workflowId: workflowResourceRuns.workflowResourceId })
+    .select({
+      workflowId: workflowResourceRuns.workflowResourceId,
+      restricted: workflowResourceRuns.restricted,
+    })
     .from(workflowResourceRuns)
     .where(eq(workflowResourceRuns.id, runId))
     .get();
   if (run === undefined) {
     throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+  if (run.restricted) {
+    throw workflowResourceErrors.create("workflow.state_restricted");
   }
   const { workflowId } = run;
   const writeId = crypto.randomUUID();
@@ -160,26 +177,26 @@ export const writeWorkflowState = async (
           sql`SELECT ${stepKey}, ${workflowId}, ${runId}, ${writeId}, 0, ${now}
             WHERE NOT EXISTS (SELECT 1 FROM workflow_state_writes WHERE step_key = ${stepKey})
               AND EXISTS (SELECT 1 FROM workflow_resource_runs WHERE id = ${runId}
-                AND workflow_resource_id = ${workflowId} AND ended_at IS NULL)
+                AND workflow_resource_id = ${workflowId} AND ended_at IS NULL
+                AND restricted = 0)
               AND EXISTS (SELECT 1 FROM workflow_resources WHERE id = ${workflowId}
                 AND deleted_at IS NULL)`
         )
         .onConflictDoNothing(),
-      ...entries.map(([key, text]) =>
-        db
-          .insert(workflowState)
-          .select(
-            sql`SELECT ${workflowId}, ${key}, ${text}, ${runId}, ${now} WHERE ${mine}`
-          )
-          .onConflictDoUpdate({
-            target: [workflowState.workflowResourceId, workflowState.key],
-            set: {
-              value: sql`excluded.value`,
-              runId: sql`excluded.run_id`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          })
-      ),
+      db
+        .insert(workflowState)
+        .select(
+          sql`SELECT ${workflowId}, key, value, ${runId}, ${now}
+            FROM json_each(${texts}) WHERE ${mine}`
+        )
+        .onConflictDoUpdate({
+          target: [workflowState.workflowResourceId, workflowState.key],
+          set: {
+            value: sql`excluded.value`,
+            runId: sql`excluded.run_id`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        }),
       // The cap, over what this write left with every other's: NULL past
       // it, which the column refuses, and the whole batch with it.
       db
@@ -233,6 +250,18 @@ export const writeWorkflowState = async (
     : workflowResourceErrors.create("workflow.run_ended");
 };
 
+/**
+ * Workflow `id` as `by` may read and reset its state: its builders and the
+ * organization's admins; `role.forbidden` for its other users.
+ */
+const requireStateReader = async (env: Env, by: Acting, id: unknown) => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  if (workflow.role !== "builder" && !isAdmin(by.role)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  return workflow;
+};
+
 /** `rows` as the workflow's page shows them. */
 const stateOf = (rows: Awaited<ReturnType<typeof rowsOf>>): WorkflowState => {
   const entries: WorkflowStateEntry[] = rows.map((row) => ({
@@ -250,19 +279,20 @@ const stateOf = (rows: Awaited<ReturnType<typeof rowsOf>>): WorkflowState => {
   };
 };
 
-/** What workflow `id` keeps between its runs, for anyone with a role in it. */
+/** What workflow `id` keeps between its runs, for its builders and admins. */
 export const readWorkflowState = async (
   env: Env,
   by: Acting,
   id: unknown
 ): Promise<WorkflowState> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const workflow = await requireStateReader(env, by, id);
   return stateOf(await rowsOf(env, workflow.id));
 };
 
 /**
- * Empties what workflow `id` keeps between its runs, for its builders, never
- * Grasp staff, audited. A step that wrote before writes nothing again.
+ * Empties what workflow `id` keeps between its runs, for its builders and
+ * admins, never Grasp staff, audited. A step that wrote before writes
+ * nothing again.
  */
 export const resetWorkflowState = async (
   env: Env,
@@ -270,7 +300,7 @@ export const resetWorkflowState = async (
   id: unknown
 ): Promise<WorkflowState> => {
   requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const workflow = await requireStateReader(env, by, id);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db

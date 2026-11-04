@@ -63,10 +63,11 @@ const counting = async () => {
   return { ada, uma, workflow };
 };
 
-/** A running run of `workflowId`, for `principal`. */
+/** A running run of `workflowId`, for `principal`, restricted for good if `restricted`. */
 const running = async (
   workflowId: string,
-  principal: Acting
+  principal: Acting,
+  restricted = false
 ): Promise<string> => {
   const id = crypto.randomUUID();
   const db = drizzle(env.DB);
@@ -81,6 +82,7 @@ const running = async (
     principalId: principal.userId,
     authorityGeneration: 0,
     inputHash: "input",
+    restricted,
     createdAt: new Date(),
   });
   await db.insert(workflowResourceRuns).values({
@@ -92,6 +94,7 @@ const running = async (
     principalId: principal.userId,
     status: "running",
     createdAt: new Date(),
+    restricted,
   });
   return id;
 };
@@ -129,10 +132,19 @@ const bytesFor = async (by: Acting, id: string): Promise<number> => {
 };
 
 describe("a workflow's state", () => {
-  it("is its own: a run writes only its own workflow's, and people read it only with a role in it", async () => {
+  it("is its own: a run writes only its own workflow's, and only its builders and admins read it", async () => {
     const { ada, uma, workflow } = await counting();
     const other = await counting();
     const stranger = await person("builder");
+    const admin = await person("admin");
+    // Another user of it, whose runs these aren't: what one person's run
+    // kept is no other user's to read, as its results aren't.
+    const ivy = await person("user");
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: ivy.userId,
+      role: "user",
+    });
     const run = await running(workflow.id, uma);
     const theirs = await running(other.workflow.id, other.uma);
     // A step's key names its run: one of another run is never taken.
@@ -148,7 +160,9 @@ describe("a workflow's state", () => {
       unknownRun: await write(crypto.randomUUID(), "count", { cursor: 1 }),
       ours: await workflowStateOf(env, workflow.id),
       theirs: await workflowStateOf(env, other.workflow.id),
-      forUma: await entriesFor(uma, workflow.id),
+      forUma: await outcome(readWorkflowState(env, uma, workflow.id)),
+      forIvy: await outcome(readWorkflowState(env, ivy, workflow.id)),
+      forAdmin: await entriesFor(admin, workflow.id),
       forStranger: await outcome(readWorkflowState(env, stranger, workflow.id)),
       resetByStranger: await outcome(
         resetWorkflowState(env, stranger, workflow.id)
@@ -160,7 +174,9 @@ describe("a workflow's state", () => {
       unknownRun: "workflow.run_unavailable",
       ours: { cursor: 5, seen: ["a", "b"] },
       theirs: {},
-      forUma: [
+      forUma: "role.forbidden",
+      forIvy: "role.forbidden",
+      forAdmin: [
         { key: "cursor", value: 5, runId: run },
         { key: "seen", value: ["a", "b"], runId: run },
       ],
@@ -191,7 +207,7 @@ describe("a workflow's state", () => {
   });
 
   it("holds 64 KB in all: past it, alone or with what other runs kept, a write is refused whole", async () => {
-    const { uma, workflow } = await counting();
+    const { ada, uma, workflow } = await counting();
     const first = await running(workflow.id, uma);
     const second = await running(workflow.id, uma);
     const half = "x".repeat(workflowStateMaxBytes / 2);
@@ -204,7 +220,7 @@ describe("a workflow's state", () => {
       // Overwriting a key counts its new value, not both.
       replaced: await write(second, "again", { one: "short" }),
       state: Object.keys(await workflowStateOf(env, workflow.id)),
-      bytes: await bytesFor(uma, workflow.id),
+      bytes: await bytesFor(ada, workflow.id),
     }).toStrictEqual({
       alone: "workflow.state_too_large",
       firstHalf: "ok",
@@ -253,6 +269,26 @@ describe("a workflow's state", () => {
     });
   });
 
+  it("takes nothing from a restricted run, so what it read never reaches the workflow's next run", async () => {
+    const { ada, uma, workflow } = await counting();
+    const run = await running(workflow.id, uma, true);
+
+    const refused = await write(run, "count", { lastInvoice: "secret" });
+    const next = await running(workflow.id, uma);
+
+    expect({
+      refused,
+      nextRunReads: await workflowStateOf(env, workflow.id),
+      kept: await entriesFor(ada, workflow.id),
+      laterWrite: await write(next, "count", { n: 1 }),
+    }).toStrictEqual({
+      refused: "workflow.state_restricted",
+      nextRunReads: {},
+      kept: [],
+      laterWrite: "ok",
+    });
+  });
+
   it("takes no write from a run that ended, or once its workflow is gone, and goes with its workflow", async () => {
     const { ada, uma, workflow } = await counting();
     const run = await running(workflow.id, uma);
@@ -286,7 +322,7 @@ describe("a workflow's state", () => {
     expect({
       byUser: await outcome(resetWorkflowState(env, uma, workflow.id)),
       byStaff: await outcome(resetWorkflowState(env, staff, workflow.id)),
-      state: await readWorkflowState(env, uma, workflow.id),
+      state: await readWorkflowState(env, ada, workflow.id),
       actions: events
         .map(({ action }) => action)
         .filter((action) => action.startsWith("workflow.state")),

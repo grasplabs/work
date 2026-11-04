@@ -214,6 +214,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed the parameters since you read them. Read them again, then retry.",
   "workflow.state_invalid":
     "That isn't state a step may keep: name each value with letters, digits and underscores, starting with a letter, and keep each value JSON.",
+  "workflow.state_restricted":
+    "A run in restricted mode keeps no state for later runs: what it read stays with it, so the step that set it failed.",
   "workflow.state_too_large":
     "The workflow's state would pass 64 KB, so the step that set it failed. Keep less in it, or reset it from the workflow's page.",
   "workflow.app_binding_invalid":
@@ -1436,9 +1438,9 @@ export interface WorkflowResourcesApi {
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
   setParams: (id: string, input: unknown) => Promise<WorkflowParams>;
-  /** What it keeps between its runs, for anyone with a role. */
+  /** What it keeps between its runs, for its builders and admins. */
   state: (id: string) => Promise<WorkflowState>;
-  /** Empties what it keeps between its runs; for builders, audited. */
+  /** Empties what it keeps between its runs; for builders and admins, audited. */
   resetState: (id: string) => Promise<WorkflowState>;
   /** Its active approvals, each named, for anyone with a role. */
   bindings: (id: string) => Promise<ListedWorkflowBindingApproval[]>;
