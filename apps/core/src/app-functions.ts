@@ -293,7 +293,20 @@ export const invocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    admitted = await operationRoles(env, by, app);
+    const roles = await operationRoles(env, by, app);
+    // Called through another App (`chain`): its person is a member of this
+    // App at most, never a builder, so the calling App's code, which this
+    // App's builders never reviewed, can't use what only they may do
+    // whenever one of them uses it (a confused deputy). The binding's
+    // review names no role the calls carry: there is only one.
+    admitted =
+      chain.length === 0
+        ? roles
+        : {
+            ...roles,
+            appMember: roles.appMember || roles.appBuilder,
+            appBuilder: false,
+          };
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
