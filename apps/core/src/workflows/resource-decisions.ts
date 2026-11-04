@@ -37,7 +37,8 @@ import { contractOf, requireShape } from "./resource-calls.ts";
 // The decisions a run of an independent workflow waits for: its
 // `grasp.decision` calls (platform specification 13.6), each on the
 // existing decision service (src/decisions/), through the decision binding
-// its start froze (GRA-941). The run host (resource-host.ts) opens one in
+// its start froze (GRA-941). A sealed run on the run host takes them the
+// same way (sealed-run.ts). The JSON host (resource-host.ts) opens one in
 // its task's enter step, waits for it durably, holding no isolate, and
 // takes its outcome in the task's call step. Threat model, and how each is
 // closed:
@@ -245,6 +246,19 @@ const decisionBinding = (
     throw callDenied();
   }
   return { ...binding, deciders: binding.target.deciders };
+};
+
+/**
+ * Decides again the authority of `run`'s decision binding `alias`
+ * (`requireCallAuthority`): `workflow.call_denied` once it is revoked, or
+ * isn't a decision binding of its start.
+ */
+export const requireDecisionAuthority = async (
+  env: Env,
+  run: CallingRun,
+  alias: string
+): Promise<void> => {
+  await requireCallAuthority(env, run, decisionBinding(run, alias));
 };
 
 /**
@@ -503,7 +517,11 @@ export const takeDecision = async (
     if (!outcome.answered) {
       throw workflowResourceErrors.create("workflow.decision_timed_out");
     }
-    if (!(await covers(env, binding.deciders, `person:${outcome.by}`))) {
+    // Never the run's own person (R8), whom its decision excludes too.
+    if (
+      outcome.by === run.principal ||
+      !(await covers(env, binding.deciders, `person:${outcome.by}`))
+    ) {
       throw callDenied();
     }
     const contract = await contractOf(env, binding);
