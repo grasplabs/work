@@ -100,7 +100,7 @@ export interface SessionCall {
   /**
    * Whether the isolate gets `AsyncLocalStorage` alone (`nodejs_als`), as
    * workflow code's run bindings need it: what core's Loader gives it off
-   * the sandbox host (workflows/code.ts, `sealedSandbox`), never the rest
+   * the sandbox host (workflows/sealed-isolate.ts, `sealedSandbox`), never the rest
    * of Node.js.
    */
   readonly asyncContext?: boolean;

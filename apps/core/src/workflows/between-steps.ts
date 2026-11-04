@@ -6,7 +6,7 @@ import { RpcTarget } from "cloudflare:workers";
 import type { IsolateHostCalls, Settled } from "./sealed-isolate.ts";
 
 // The time a run's code spends outside its steps, bounded per activation.
-// The run's call into its isolate (code.ts, `loadSealedIsolate`) holds the
+// The run's call into its isolate (sealed-isolate.ts, `loadSealedIsolate`) holds the
 // run's alarm handler and an isolate (on-prem, a sandbox session holding a
 // process) from its start until it ends or suspends. Inside a step, that
 // time is the step's: its attempt holds a share and its lineage's active
@@ -46,10 +46,10 @@ import type { IsolateHostCalls, Settled } from "./sealed-isolate.ts";
 //   that is refused (it never settles, as the engine fences a call), and
 //   no step of it runs. On-prem its session is aborted, ending its process.
 // - Waiting for a sandbox place on-prem: no code of the run runs then, so
-//   that time isn't counted; it is bounded on its own (code.ts,
+//   that time isn't counted; it is bounded on its own (sealed-isolate.ts,
 //   `runLoadWaitMs`).
 // - CPU time spent between steps: bounded apart, by the isolate's CPU limit
-//   (code.ts, `sealedSandbox`).
+//   (sealed-isolate.ts, `sealedSandbox`).
 //
 // It is a bound, never a charge: nothing is written, and no run is charged
 // more than its attempts used.
