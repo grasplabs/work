@@ -2611,9 +2611,13 @@ export class StoreHost {
               return cursor;
             },
           }),
+          // Rows only of a table a statement named already (`on`): never
+          // a table of its own, so a read that ran no statement on it (a
+          // search with no terms answers none without one) names none.
           answered: (table, answeredNow) => {
-            if (isSensitive(table)) {
-              answered.set(table, (answered.get(table) ?? 0) + answeredNow);
+            const sofar = answered.get(table);
+            if (sofar !== undefined) {
+              answered.set(table, sofar + answeredNow);
             }
           },
         };

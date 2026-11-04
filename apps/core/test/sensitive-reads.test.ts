@@ -140,6 +140,14 @@ export const find = query({
   },
 });
 
+/** Whom a search finds first, or none. */
+export const lookup = query({
+  args: { text: v.string() },
+  returns: v.string(),
+  handler: async (ctx, args) =>
+    (await ctx.db.search("salaries", args.text).first())?.person ?? "none",
+});
+
 /** Reads the salaries, then fails. */
 export const leak = query({
   args: {},
@@ -184,7 +192,7 @@ export const byPerson = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { bundle, bundles, byPerson, find, highest, leak, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
+import { bundle, bundles, byPerson, find, highest, leak, lookup, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -196,7 +204,7 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { pay: { bundle, bundles, byPerson, find, highest, leak, note, notes, pay, probe, salaries, stuff } },
+  operations: { pay: { bundle, bundles, byPerson, find, highest, leak, lookup, note, notes, pay, probe, salaries, stuff } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -562,6 +570,33 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
         // `unique` read two records to know there were more than one.
         { function: "pay.probe", reads: 1, rows: 2 },
       ],
+    });
+  });
+
+  it("records a search that ran and matched nothing, but not one with no words, which runs nothing", async () => {
+    const fixture = await payrollApp();
+    await payroll(fixture, 2);
+    const after = await logHead();
+
+    const empty = await call(fixture, "pay.lookup", { text: "" });
+    const emptyRecorded = await recordedOf(fixture.app, after);
+    const missed = await call(fixture, "pay.lookup", { text: "Nobody" });
+    const recorded = await readsOf(fixture.app, after, [
+      "function",
+      "reads",
+      "rows",
+    ]);
+
+    expect({
+      empty: valueOf(empty),
+      emptyRecorded,
+      missed: valueOf(missed),
+      recorded,
+    }).toStrictEqual({
+      empty: "none",
+      emptyRecorded: [],
+      missed: "none",
+      recorded: [{ function: "pay.lookup", reads: 1, rows: 0 }],
     });
   });
 
