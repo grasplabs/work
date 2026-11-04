@@ -1050,7 +1050,9 @@ const thinkingClock = () => {
  * turn, which the provider takes without its thinking: one of the turn
  * under way stops the turn instead (`readsUnderWay`).
  */
-const withheldAssistant = (message: AssistantMessage): AssistantMessage => {
+export const withheldAssistant = (
+  message: AssistantMessage
+): AssistantMessage => {
   const said = message.content.some(({ type }) => type === "text");
   return {
     ...message,
@@ -1309,6 +1311,10 @@ const outcomeOf = (
 /**
  * Runs one turn of a chat: the question, then model requests and code runs
  * until the model answers, fails, is cancelled or reaches {@link maxSteps}.
+ *
+ * Frozen until GRA-1544 deletes it: chats run here until the Workspace runs
+ * them on pi-durable (`chatAgent` in chat-agent.ts, which builds the same
+ * tools). Change the tools there, not here.
  */
 export const runTurn = async ({
   history,

@@ -13,7 +13,7 @@ import {
   Harness,
   MemoryStorage,
 } from "@earendil-works/pi-durable";
-import type { JsonObject } from "@earendil-works/pi-durable";
+import type { HarnessSettings, JsonObject } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   chatIdSchema,
@@ -27,7 +27,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
 import { instructions, withheldResult } from "../src/agent.ts";
-import { chatAgent } from "../src/chat-agent.ts";
+import { chatAgent, withheldSummary } from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
 import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 
@@ -36,8 +36,10 @@ import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 // code it runs in our isolate, and what a chat can no longer read never
 // reaching it. Starts from the ways it can fail: a revoked result read
 // again on a later request, or by the turn that read it; a guard that
-// fails open; a stale section kept in the prompt; and a turn cut off by a
-// limit Claude Code and Codex don't have.
+// fails open; a compaction that summarizes what was withheld, or keeps a
+// summary of what was revoked since; a code step a restart cut short that
+// loses the run it was; a stale section kept in the prompt; and a turn cut
+// off by a limit Claude Code and Codex don't have.
 
 const context = BACKGROUND_CONTEXT;
 
@@ -64,18 +66,87 @@ interface Runs {
   lines: string[];
 }
 
+const call = (name: string, args: JsonObject) =>
+  fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
+
+const says = (text: string) => fauxAssistantMessage(fauxText(text));
+
+/** The word code reads that a chat may later no longer read. */
+const secretWord = "marigold";
+
+/** Code whose result holds {@link secretWord}, which the code itself doesn't. */
+const readsSecretWord = 'export default async () => ["mari", "gold"].join("");';
+
+/** Whether a request is a compaction's summary, as `summarize` asks for one. */
+const isSummaryRequest = (messages: readonly Message[]): boolean => {
+  const [first] = messages;
+  return (
+    first?.role === "system" &&
+    typeof first.content === "string" &&
+    first.content.startsWith("You summarize a conversation")
+  );
+};
+
+/** A small window and early compaction, so a few long turns compact. */
+const compacting: HarnessSettings = {
+  compaction: {
+    reserveTokens: 1000,
+    keepRecentTokens: 300,
+    backgroundTokens: 0,
+  },
+};
+
+/** A storage a Harness's close leaves open, so another opens it after: a restart. */
+const surviving = (storage: MemoryStorage): MemoryStorage =>
+  new Proxy(storage, {
+    get: (target, key) => {
+      if (key === "close") {
+        return async () => {
+          await Promise.resolve();
+        };
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
 /**
  * A chat's agent on a Harness of its own, with a faux provider that
- * records every request's messages as it got them.
+ * records every request's messages as it got them. The model answers
+ * from a queue, or "ok"; a compaction's summary says only whether it saw
+ * {@link secretWord}.
  */
-const openChat = async (change: Partial<ChatAgent> = {}) => {
+const openChat = async (
+  change: Partial<ChatAgent> = {},
+  {
+    contextWindow = 200_000,
+    settings,
+  }: { contextWindow?: number; settings?: HarnessSettings } = {}
+) => {
   const faux = fauxProvider({
     provider: "grasp",
-    models: [{ id: "chat", contextWindow: 200_000, maxTokens: 4096 }],
+    models: [{ id: "chat", contextWindow, maxTokens: 500 }],
   });
   const models = createModels();
   models.setProvider(faux.provider);
   const requests: Message[][] = [];
+  const summaries: Message[][] = [];
+  const queue: FauxResponseStep[] = [];
+  const answer: FauxResponseStep = async (request, ...rest) => {
+    if (isSummaryRequest(request.messages)) {
+      summaries.push(structuredClone(request.messages));
+      return says(
+        JSON.stringify(request.messages).includes(secretWord)
+          ? `summary saw ${secretWord}`
+          : "summary saw nothing"
+      );
+    }
+    const step = queue.shift() ?? says("ok");
+    return typeof step === "function" ? await step(request, ...rest) : step;
+  };
+  faux.setResponses(Array.from({ length: 1000 }, () => answer));
   const stopped: Error[] = [];
   const runs: Runs = { opened: [], revoked: new Set(), lines: [] };
   const agent: ChatAgent = {
@@ -109,9 +180,26 @@ const openChat = async (change: Partial<ChatAgent> = {}) => {
     },
     ...change,
   };
-  const extension = chatAgent(agent);
-  const registry = createRegistry();
-  registry.install(extension);
+  const storage = surviving(new MemoryStorage());
+  let registry = createRegistry();
+  const open = async () => {
+    const extension = chatAgent(agent);
+    registry = createRegistry();
+    registry.install(extension);
+    const harness = await Harness.open(
+      storage,
+      { models, registry, ...(settings === undefined ? {} : { settings }) },
+      context
+    );
+    const root = await harness.root(context, {
+      agent: {
+        model: { provider: "grasp", modelId: "chat" },
+        extensions: [extension],
+      },
+    });
+    return { harness, root };
+  };
+  let opened = await open();
   /**
    * The chat's next turn, with what changed since: its extension
    * installed again under the same name, as the Workspace does each turn.
@@ -119,17 +207,6 @@ const openChat = async (change: Partial<ChatAgent> = {}) => {
   const next = (turn: Partial<ChatAgent>): void => {
     registry.install(chatAgent({ ...agent, ...turn }));
   };
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models, registry },
-    context
-  );
-  const root = await harness.root(context, {
-    agent: {
-      model: { provider: "grasp", modelId: "chat" },
-      extensions: [extension],
-    },
-  });
   /** A response the model gives, its request recorded as it got it. */
   const reply =
     (message: ReturnType<typeof fauxAssistantMessage>): FauxResponseStep =>
@@ -137,21 +214,42 @@ const openChat = async (change: Partial<ChatAgent> = {}) => {
       requests.push(structuredClone(request.messages));
       return message;
     };
-  const ask = async (question: string, responses: FauxResponseStep[]) => {
-    faux.appendResponses(responses);
-    const submitted = await root.submit(
+  /** Submits `question`, with the responses the model gives it. */
+  const submit = async (question: string, responses: FauxResponseStep[]) => {
+    queue.push(...responses);
+    return await opened.root.submit(
       { type: "input", content: question },
       context
     );
+  };
+  const ask = async (question: string, responses: FauxResponseStep[]) => {
+    const submitted = await submit(question, responses);
     return await submitted.wait(context);
   };
-  return { harness, ask, next, reply, requests, runs, stopped };
+  /**
+   * A restart: the Harness closes, cutting short what runs, and another
+   * opens the same storage and goes on with it, the model answering
+   * `responses`.
+   */
+  const restart = async (responses: FauxResponseStep[]): Promise<void> => {
+    await opened.harness.close(context);
+    queue.push(...responses);
+    opened = await open();
+    opened.harness.resume();
+    await opened.root.waitForIdle(context);
+  };
+  return {
+    ask,
+    submit,
+    next,
+    reply,
+    restart,
+    requests,
+    summaries,
+    runs,
+    stopped,
+  };
 };
-
-const call = (name: string, args: JsonObject) =>
-  fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
-
-const says = (text: string) => fauxAssistantMessage(fauxText(text));
 
 /** The text of every tool result `messages` hold, in order. */
 const resultsIn = (messages: readonly Message[]): string[] =>
@@ -410,5 +508,101 @@ describe("what a chat can no longer read", () => {
     expect(chat.stopped.map(({ message }) => message)).toStrictEqual([
       "revocations unreadable",
     ]);
+  });
+});
+
+/** A long question: a few of them, and their answers, fill the small window. */
+const longQuestion = (index: number): string => `q${index} ${"y".repeat(400)}`;
+
+/** Long turns, each answered at length, until the chat has compacted. */
+const fillUntilCompacted = async (
+  chat: Awaited<ReturnType<typeof openChat>>
+): Promise<void> => {
+  for (let index = 0; index < 8; index += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one turn after another
+    await chat.ask(longQuestion(index), [chat.reply(says("x".repeat(1500)))]);
+  }
+};
+
+describe("compaction", () => {
+  it("summarizes without what is withheld, and no later request carries it", async () => {
+    const withheld = new Set<string>();
+    const chat = await openChat(
+      { withheld: async () => await Promise.resolve(withheld) },
+      { contextWindow: 4000, settings: compacting }
+    );
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecretWord })),
+      chat.reply(says("Read")),
+    ]);
+    withheld.add("run-1");
+    await fillUntilCompacted(chat);
+    expect(chat.summaries.length).toBeGreaterThan(0);
+    expect(JSON.stringify(chat.summaries)).not.toContain(secretWord);
+    const after = JSON.stringify(chat.requests.slice(2));
+    expect(after).toContain("summary saw nothing");
+    expect(after).not.toContain(secretWord);
+  });
+
+  it("withholds a whole summary once a run it rests on is revoked", async () => {
+    const withheld = new Set<string>();
+    const chat = await openChat(
+      { withheld: async () => await Promise.resolve(withheld) },
+      { contextWindow: 4000, settings: compacting }
+    );
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecretWord })),
+      chat.reply(says("Read")),
+    ]);
+    await fillUntilCompacted(chat);
+    expect(JSON.stringify(chat.requests.at(-1))).toContain(
+      `summary saw ${secretWord}`
+    );
+    const before = {
+      requests: chat.requests.length,
+      summaries: chat.summaries.length,
+    };
+    withheld.add("run-1");
+    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    // What the model, and a compaction's summarizer, got since: the old
+    // summary only as a note, whether it was sent or folded into a new one.
+    const since = JSON.stringify([
+      ...chat.requests.slice(before.requests),
+      ...chat.summaries.slice(before.summaries),
+    ]);
+    expect(since).not.toContain(secretWord);
+    expect(since).toContain(withheldSummary);
+  });
+});
+
+describe("a restart", () => {
+  it("withholds the result of a code step it cut short once that run is revoked", async () => {
+    const withheld = new Set<string>();
+    const logged = Promise.withResolvers<boolean>();
+    const chat = await openChat({
+      withheld: async () => await Promise.resolve(withheld),
+      runs: {
+        open: () => "run-1",
+        close: async (_runId, status) => await Promise.resolve(status),
+        output: () => {
+          logged.resolve(true);
+        },
+      },
+    });
+    const submitted = chat.submit("Read", [
+      chat.reply(
+        call("executeCode", {
+          code: 'export default async () => { console.log(["mari", "gold"].join("")); await scheduler.wait(60_000); };',
+        })
+      ),
+    ]);
+    await logged.promise;
+    // Past pi's progress commits, which would store what the step logged.
+    await scheduler.wait(300);
+    withheld.add("run-1");
+    await chat.restart([chat.reply(says("Cut short"))]);
+    await submitted;
+    expect(chat.requests).toHaveLength(2);
+    expect(JSON.stringify(chat.requests.at(-1))).not.toContain(secretWord);
   });
 });

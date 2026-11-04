@@ -1,12 +1,15 @@
+import type { Context } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import {
+  AgentDoc,
+  CompactionTask,
   defineExtension,
   GenerationTask,
   hook,
   section,
 } from "@earendil-works/pi-durable";
-import type { Extension } from "@earendil-works/pi-durable";
+import type { Extension, HookApi } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -21,6 +24,8 @@ import {
   resultRunId,
   sectionNames,
   sectionsOf,
+  withheldAssistant,
+  withheldResult,
   withholdRuns,
 } from "./agent.ts";
 import type { CodeRuns, TurnContext } from "./agent.ts";
@@ -86,34 +91,266 @@ export const chatAgentName = (chatId: string): string => `grasp.chat.${chatId}`;
 const runsIn = (messages: readonly Message[]): Set<string> =>
   new Set(messages.flatMap((message) => resultRunId(message) ?? []));
 
+/** The text of a user message. */
+const userText = (message: Message): string => {
+  if (message.role !== "user") {
+    return "";
+  }
+  return typeof message.content === "string"
+    ? message.content
+    : message.content
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join("\n");
+};
+
+// A compaction's summary is the chat's own (`summarize`): it ends with the
+// code runs whose results it rests on, so a later revocation of any of them
+// withholds it whole. pi's summarizer can do neither: it reads the
+// transcript as stored, results the chat can no longer read included, and
+// says nothing of what it read.
+
+/** The line a summary ends with: the code runs it rests on. */
+const restsOnMark = "[Code runs this summary rests on:";
+
+const restsOnLine = (runs: ReadonlySet<string>): string =>
+  `${restsOnMark} ${[...runs].join(" ")}]`;
+
+const restsOnPattern = /\[Code runs this summary rests on:(?<runs>[^\]]*)\]/gu;
+
+/**
+ * The code runs a summary in `message` rests on, if it holds one: every
+ * line it ends with, its earlier summaries' included. A person who typed
+ * such a line only gets their message withheld with those runs.
+ */
+const restsOn = (message: Message): Set<string> | undefined => {
+  const lines = [...userText(message).matchAll(restsOnPattern)];
+  return lines.length === 0
+    ? undefined
+    : new Set(
+        lines.flatMap((line) =>
+          (line.groups?.runs ?? "").split(" ").filter((id) => id !== "")
+        )
+      );
+};
+
+/** What a summary resting on what the chat can no longer read reads as. */
+export const withheldSummary =
+  "(summary withheld: it rests on what this chat can no longer read)";
+
+/**
+ * `messages` with each summary that rests on a run in `withheld` read as
+ * a note, and what follows it in its turn as `withholdRuns` withholds what
+ * follows a result; and whether the turn under way starts at one, which
+ * stops it as a withheld result of its own would.
+ */
+const withholdSummaries = (
+  messages: readonly Message[],
+  withheld: ReadonlySet<string>
+): { messages: Message[]; underWay: boolean } => {
+  let after = false;
+  let underWay = false;
+  const shown = messages.map((message): Message => {
+    if (message.role === "user") {
+      const runs = restsOn(message);
+      after = runs !== undefined && [...runs].some((id) => withheld.has(id));
+      underWay = after;
+      return after
+        ? { ...message, content: [{ type: "text", text: withheldSummary }] }
+        : message;
+    }
+    if (!after) {
+      return message;
+    }
+    if (message.role === "toolResult") {
+      return { ...message, content: [{ type: "text", text: withheldResult }] };
+    }
+    return message.role === "assistant" ? withheldAssistant(message) : message;
+  });
+  return { messages: shown, underWay };
+};
+
+/** `messages` as one request may send them while `withheld` is withheld. */
+const withholding = (
+  messages: readonly Message[],
+  withheld: ReadonlySet<string>
+): { messages: Message[]; underWay: boolean } => {
+  const summaries = withholdSummaries(messages, withheld);
+  return {
+    messages: withholdRuns(summaries.messages, withheld),
+    underWay: summaries.underWay || readsUnderWay(summaries.messages, withheld),
+  };
+};
+
+/** Why a turn stops when what it may read can't be told. */
+const unreadable = (error: unknown): Error =>
+  error instanceof Error
+    ? error
+    : new Error("What this chat may read could not be told.");
+
+/**
+ * `messages` with every result and every summary blanked, and what the
+ * model wrote after a result in its turn: for when what is withheld
+ * can't be told. A plain pass that can't fail on any message.
+ */
+const blanked = (messages: readonly Message[]): Message[] => {
+  let after = false;
+  return messages.map((message): Message => {
+    if (message.role === "toolResult") {
+      after = true;
+      return { ...message, content: [{ type: "text", text: withheldResult }] };
+    }
+    if (message.role === "assistant") {
+      return after ? withheldAssistant(message) : message;
+    }
+    if (message.role !== "user") {
+      return message;
+    }
+    after = false;
+    const summary =
+      typeof message.content !== "string" &&
+      message.content.some(
+        (part) => part.type === "text" && part.text.includes(restsOnMark)
+      );
+    return summary
+      ? { ...message, content: [{ type: "text", text: withheldSummary }] }
+      : message;
+  });
+};
+
 /**
  * What a request may send of `messages`, and why the turn must stop, if
- * it must. Results of runs the chat can no longer read are withheld, and
- * each section is given only where it was given last, so a stale one
- * (memory a person lost) never reaches the model. A result of the turn
- * under way that is withheld stops the turn: the provider takes the
- * latest response whole. Should a check itself fail, every result is
- * withheld and the turn stops: a hook that throws is skipped, which would
- * send the request as it was.
+ * it must. Results of runs the chat can no longer read are withheld, so
+ * are summaries resting on them, and each section is given only where it
+ * was given last, so a stale one (memory a person lost) never reaches the
+ * model. One of these in the turn under way stops the turn: the provider
+ * takes the latest response whole. Never throws, as pi sends the request
+ * unchanged past a hook that throws: should anything fail, every result
+ * and every summary is blanked, with a plain map, and the turn stops.
  */
 const guarded = async (
   agent: Pick<ChatAgent, "withheld">,
   messages: readonly Message[]
 ): Promise<{ messages: Message[]; stop?: Error }> => {
   try {
-    const withheld = await agent.withheld();
+    const sent = withholding(messages, await agent.withheld());
     return {
-      messages: latestSections(withholdRuns(messages, withheld)),
-      ...(readsUnderWay(messages, withheld)
+      messages: latestSections(sent.messages),
+      ...(sent.underWay
         ? { stop: agentErrors.create("agent.history_revoked") }
         : {}),
     };
   } catch (error) {
-    return {
-      messages: latestSections(withholdRuns(messages, runsIn(messages))),
-      stop: error instanceof Error ? error : new Error(String(error)),
-    };
+    return { messages: blanked(messages), stop: unreadable(error) };
   }
+};
+
+/** Most tokens a summary takes, as pi's summarizer allows itself. */
+const summaryMaxTokens = 13_000;
+
+/** Most characters of a tool result a summary reads, as pi's summarizer does. */
+const summaryResultChars = 2000;
+
+/** The conversation a summary is made of, as plain text, system messages left out. */
+const transcriptOf = (messages: readonly Message[]): string =>
+  messages
+    .flatMap((message) => {
+      if (message.role === "user") {
+        return [`[Person]: ${userText(message)}`];
+      }
+      if (message.role === "toolResult") {
+        const text = message.content
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("\n");
+        return [`[Tool result]: ${text.slice(0, summaryResultChars)}`];
+      }
+      if (message.role === "assistant") {
+        return message.content.flatMap((part) => {
+          if (part.type === "text") {
+            return [`[Assistant]: ${part.text}`];
+          }
+          return part.type === "toolCall"
+            ? [
+                `[Assistant called ${part.name}]: ${JSON.stringify(part.arguments)}`,
+              ]
+            : [];
+        });
+      }
+      return [];
+    })
+    .join("\n\n");
+
+const summarySystem =
+  "You summarize a conversation between a person and an AI assistant, so the assistant can go on from the summary alone. Don't continue the conversation or answer anything in it: write only the summary.";
+
+const summaryAsk = (focus: string | undefined): string =>
+  [
+    "Summarize the conversation above as a checkpoint the assistant goes on from: what the person wants and asked, what was done and found (with exact IDs, file paths, names and error messages), what was decided, and what is still open. If it starts with an earlier summary, keep what it holds and fold the newer messages into it. Leave out what reads as withheld.",
+    ...(focus === undefined ? [] : [`Also: ${focus}`]),
+  ].join("\n\n");
+
+/**
+ * The summary of the part of a chat a compaction replaces, made from what
+ * a request may send of it now (`withholding`), ending with the code runs
+ * it rests on: those whose results it read, and those its earlier summary
+ * rested on, less any withheld now, whose content it never saw. Through
+ * the conversation's own model, as pi's summarizer would call it. None
+ * when the model gives no summary.
+ */
+const summarize = async (
+  agent: Pick<ChatAgent, "withheld">,
+  part: { messages: readonly Message[]; instructions?: string },
+  api: HookApi,
+  context: Context
+): Promise<string | undefined> => {
+  const withheld = await agent.withheld();
+  const agentState = await api.snapshot(AgentDoc, api.conversationId, context);
+  const ref = agentState?.model;
+  const model =
+    ref === undefined
+      ? undefined
+      : api.models.getModel(ref.provider, ref.modelId);
+  if (model === undefined) {
+    return undefined;
+  }
+  const covered = runsIn(part.messages);
+  for (const message of part.messages) {
+    for (const id of restsOn(message) ?? []) {
+      covered.add(id);
+    }
+  }
+  const restsOnNow = new Set([...covered].filter((id) => !withheld.has(id)));
+  const shown = withholding(part.messages, withheld).messages;
+  const now = Date.now();
+  const answer = await api.models.completeSimple(
+    model,
+    {
+      messages: [
+        { role: "system", content: summarySystem, timestamp: now },
+        {
+          role: "user",
+          content: `<conversation>\n${transcriptOf(shown)}\n</conversation>\n\n${summaryAsk(part.instructions)}`,
+          timestamp: now,
+        },
+      ],
+    },
+    {
+      maxTokens:
+        model.maxTokens > 0
+          ? Math.min(summaryMaxTokens, model.maxTokens)
+          : summaryMaxTokens,
+      ...(context.abortSignal === undefined
+        ? {}
+        : { signal: context.abortSignal }),
+    }
+  );
+  const text = answer.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("")
+    .trim();
+  if (answer.stopReason !== "stop" || text === "") {
+    return undefined;
+  }
+  return restsOnNow.size === 0 ? text : `${text}\n\n${restsOnLine(restsOnNow)}`;
 };
 
 /**
@@ -125,8 +362,8 @@ const guarded = async (
  * request.
  */
 export const chatAgent = (agent: ChatAgent): Extension => {
-  const { apis, scope, runs, assets, context } = agent;
-  const sections = sectionsOf(apis, context);
+  const { apis, scope, runs, assets } = agent;
+  const sections = sectionsOf(apis, agent.context);
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),
@@ -134,7 +371,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     ...(agent.thinking === undefined ? [] : [agent.thinking]),
     // A chat app's chat asks in words: the questions take the composer's
     // place, which only Grasp's own chat has.
-    ...(context.channel === undefined ? [askQuestions()] : []),
+    ...(agent.context.channel === undefined ? [askQuestions()] : []),
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
@@ -151,9 +388,26 @@ export const chatAgent = (agent: ChatAgent): Extension => {
         beforeRequest: async ({ messages }) => {
           const sent = await guarded(agent, messages);
           if (sent.stop !== undefined) {
-            agent.stop(sent.stop);
+            try {
+              agent.stop(sent.stop);
+            } catch {
+              // The request still goes out withheld.
+            }
           }
           return { messages: sent.messages };
+        },
+      }),
+      // Every compaction is summarized here, from what a request may send,
+      // or declined: pi's own summarizer, which a hook that throws falls
+      // back to, would read what the chat can no longer read.
+      hook(CompactionTask, {
+        beforeCompact: async (part, api, context) => {
+          try {
+            const summary = await summarize(agent, part, api, context);
+            return summary === undefined ? { decline: true } : { summary };
+          } catch {
+            return { decline: true };
+          }
         },
       }),
     ],

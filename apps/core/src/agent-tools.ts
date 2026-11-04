@@ -688,8 +688,8 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
  * `agentTool`, written in pi-agent-core's shape, as a pi-durable tool
  * (the chat agent's extension, chat-agent.ts): the same declaration,
  * input check and execution, called with the call's ID and its context's
- * abort signal. What it streams becomes the call's running output; its
- * content is the result the model reads, its details (JSON, which every
+ * abort signal. Its content is the result the model reads, its details
+ * (JSON, which every
  * tool here keeps them to) what the chat shows, and `terminate` ends the
  * run without another request. A throw is an error result, as in
  * pi-agent-core.
@@ -707,35 +707,23 @@ export const durableTool = <P extends TSchema>(
     ? {}
     : { executionMode: agentTool.executionMode }),
   execute: async (args, api, context) => {
-    // pi-durable rejects output once the call has ended; pi-agent-core
-    // dropped late updates, and so does this.
-    let settled = false;
-    try {
-      const result: AgentToolResult<unknown> = await agentTool.execute(
-        api.callId,
-        args,
-        context.abortSignal,
-        (update) => {
-          if (settled) {
-            return;
-          }
-          for (const part of update.content) {
-            if (part.type === "text") {
-              api.output(`${part.text}\n`);
-            }
-          }
-        }
-      );
-      const { content, details, isError, terminate } = result;
-      return {
-        output: content,
-        ...(isJsonValue(details) ? { details } : {}),
-        ...(isError === true ? { isError } : {}),
-        ...(terminate === true ? { control: { terminate } } : {}),
-      };
-    } finally {
-      settled = true;
-    }
+    // What a tool streams isn't mirrored into the call's running output: a
+    // call cut short by a restart becomes a result of that output alone,
+    // without the run its details name, which a revocation then couldn't
+    // withhold. The chat gets a code run's lines from the run itself
+    // (`CodeRuns.output`).
+    const result: AgentToolResult<unknown> = await agentTool.execute(
+      api.callId,
+      args,
+      context.abortSignal
+    );
+    const { content, details, isError, terminate } = result;
+    return {
+      output: content,
+      ...(isJsonValue(details) ? { details } : {}),
+      ...(isError === true ? { isError } : {}),
+      ...(terminate === true ? { control: { terminate } } : {}),
+    };
   },
 });
 
