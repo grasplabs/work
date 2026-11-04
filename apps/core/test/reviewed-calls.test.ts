@@ -183,8 +183,8 @@ const hostHeldTo = async (
       appCalls.push(
         typeof reference === "object" &&
           reference !== null &&
-          "contractId" in reference
-          ? String(reference.contractId)
+          "name" in reference
+          ? String(reference.name)
           : "?"
       );
       return await Promise.resolve({ ok: true, value: null });

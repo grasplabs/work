@@ -499,7 +499,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const forged = { ...references.runs, fingerprint: "0".repeat(64) };
     const unknown = {
       ...references.runs,
-      contractId: "workflows.other.queries.runs",
+      name: "workflows.other.queries.runs",
     };
     expect({
       forged: codeOf(await ask(bob, forged, { pagination: {} })),

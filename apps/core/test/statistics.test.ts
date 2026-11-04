@@ -1210,7 +1210,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
 /** A function of the Stats App, as a step names it. */
 const statsFunction = (name: string, kind = "action") =>
-  JSON.stringify({ contractId: `stats.${name}`, kind });
+  JSON.stringify({ name: `stats.${name}`, kind });
 
 /** The input of `stats.platformRead`, as a step passes it. */
 const statsInput = (value: unknown) =>
