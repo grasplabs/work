@@ -1,7 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
-import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
@@ -364,6 +364,33 @@ const requirePublished = async (
 };
 
 /**
+ * Why creating a trigger (at the address `chosen`, if one was) failed with
+ * `error`, as its creator is told: its address taken, over the cap, its
+ * workflow gone, or `error` itself.
+ */
+const creationRefusal = async (
+  env: Env,
+  error: unknown,
+  chosen: string | undefined
+): Promise<unknown> => {
+  // A new row's only unique column that can collide is its address.
+  if (chosen !== undefined && isUniqueViolation(error)) {
+    return workflowErrors.create("workflow.email_taken", { address: chosen });
+  }
+  if (notNullFailed(error, "trigger_resources.id")) {
+    if (chosen !== undefined) {
+      // Taken meanwhile answers as taken; over the cap otherwise.
+      await requireFreeAddresses(env, [chosen]);
+    }
+    return workflowResourceErrors.create("workflow.trigger_limit");
+  }
+  if (notNullFailed(error, "trigger_resource_versions.workflow_resource_id")) {
+    return workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  return error;
+};
+
+/**
  * Creates a trigger of `input.kind` that starts exactly version
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
  * build the workflow. It may start nothing until an admin grants it
@@ -488,23 +515,7 @@ export const createTriggerResource = async (
   try {
     await batch;
   } catch (error) {
-    // A new row's only unique column that can collide is its address.
-    if (chosen !== undefined && isUniqueViolation(error)) {
-      throw workflowErrors.create("workflow.email_taken", { address: chosen });
-    }
-    if (notNullFailed(error, "trigger_resources.id")) {
-      if (chosen !== undefined) {
-        // Taken meanwhile answers as taken; over the cap otherwise.
-        await requireFreeAddresses(env, [chosen]);
-      }
-      throw workflowResourceErrors.create("workflow.trigger_limit");
-    }
-    if (
-      notNullFailed(error, "trigger_resource_versions.workflow_resource_id")
-    ) {
-      throw workflowResourceErrors.create("workflow.resource_unavailable");
-    }
-    throw error;
+    throw await creationRefusal(env, error, chosen);
   }
   return {
     id,
