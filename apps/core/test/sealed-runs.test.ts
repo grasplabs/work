@@ -3786,6 +3786,42 @@ return null;`),
     });
   });
 
+  it("counts a draft's snapshot in its step's state cap, and leaves a live run's total to its write", async () => {
+    await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        keepFinish('{ count: 1, seen: "x".repeat(40000), kind: "visit" }')
+      ),
+      { keeps: finishKeeps }
+    );
+    const draftRun = await waitingRun(sealed);
+    const liveRun = await waitingRun(sealed);
+    // Emptied after both started: their snapshots still hold 40 KB.
+    await resetWorkflowState(env, sealed.by, sealed.workflow.id);
+    const extra = moduleOf(
+      `return ${taskStep("fetch", '{ output: null, state: { extra: "y".repeat(30000) } }')};`
+    );
+    const keeps = {
+      fetch: {
+        extra: { template: { slot: 0 }, value: sealedShape(v.string()) },
+      },
+    };
+    const draft = await ranAs(draftRun, extra, {
+      keeps,
+      calling: (frozen) => ({ ...frozen, candidate: new Map() }),
+    });
+    const live = await ranAs(liveRun, extra, { keeps });
+    expect({
+      draft: { ended: draft.ended, tampered: draft.tampered },
+      live: live.tampered,
+      kept: Object.keys(await workflowStateOf(env, sealed.workflow.id)),
+    }).toStrictEqual({
+      draft: { ended: "workflow.state_too_large", tampered: [] },
+      live: [],
+      kept: ["extra"],
+    });
+  });
+
   it("writes nothing for a draft's test run or a restricted run, which still checks its state; a restricted run's skip is audited", async () => {
     const as = async (calling: (frozen: CallingRun) => CallingRun) => {
       const runId = await waitingRun(sealed);

@@ -321,6 +321,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   test run with its row), and every activation hands the isolate that
 //   same snapshot (`sealedRunStart`), whatever other runs write since. A
 //   run an App's test started reads none: nothing of the organization's.
+//   A reset, or the workflow's deletion, leaves those copies with the runs
+//   that already started, until retention (a receipt's details) or the
+//   sweep of test runs removes them.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.
@@ -1767,11 +1770,17 @@ class SealedRun implements SealedRunKind {
         "state"
       );
     }
-    // Past what its workflow's state takes in all, with what the run's
-    // snapshot holds besides, it fails, a test run's too, which writes
-    // nothing: so a draft's test fails where its runs would (the write
-    // counts it again with what the state holds as it lands).
-    const merged = { ...this.run.state, ...Object.fromEntries(given) };
+    // Past what its workflow's state takes in all, it fails, a test run's
+    // too. A run that writes is counted by its write, with what the state
+    // holds as it lands (workflow-state.ts); one that never writes counts
+    // what its snapshot holds besides, so a draft's test fails where its
+    // runs would.
+    const { calling } = this.run;
+    const writes = calling.candidate === undefined && calling.fixture !== true;
+    const merged = {
+      ...(writes ? {} : this.run.state),
+      ...Object.fromEntries(given),
+    };
     const bytes = Object.entries(merged).reduce(
       (total, [key, each]) =>
         total +
