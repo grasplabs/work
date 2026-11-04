@@ -434,7 +434,7 @@ describe("the waits a screen is shown of a run on the run host", () => {
     ]);
   });
 
-  it("shows a decision's wait, after a reminder and again, by the ID its event names, as the key the release sealed", async () => {
+  it("shows a decision's wait, and its wait again, by the ID its event names, as the key the release sealed", async () => {
     const decision = crypto.randomUUID();
     const answer = "approve:task#answer";
     const keyed = await tasksByKey(
@@ -456,6 +456,7 @@ describe("the waits a screen is shown of a run on the run host", () => {
       sealed: shownWaits(
         [
           pendingOf(10, answer, "waitForEvent", event),
+          // A sealed decision has no reminder: never its wait.
           pendingOf(
             11,
             "approve:task#answer-after-reminder",
@@ -471,7 +472,7 @@ describe("the waits a screen is shown of a run on the run host", () => {
         decisionKeys: new Set(),
       }),
     }).toStrictEqual({
-      sealed: [shown, shown, shown],
+      sealed: [shown, shown],
       unsealed: [],
     });
   });
@@ -500,5 +501,31 @@ describe("the waits a screen is shown of a run on the run host", () => {
         sealedContext
       )
     ).toStrictEqual([]);
+  });
+
+  it("shows a held call's and a busy step's holds, and their runs again, as the task's whose step has the key", async () => {
+    const keyed = await tasksByKey(["fetch:task"], sealedContext.tasks);
+    const fetch = await waitKeyOf("fetch:task");
+    const unknown = "f".repeat(16);
+    expect(
+      shownWaits(
+        [
+          pendingOf(40, `${waitStep(fetch, "held", 1)}:0`, "waitForEvent"),
+          // The same hold's check: shown once.
+          pendingOf(41, `${waitStep(fetch, "held", 1)}:1:check`, "retry"),
+          pendingOf(42, `${waitStep(fetch, "held", 1)}:run`, "retry"),
+          pendingOf(43, waitStep(unknown, "busy", 1)),
+        ],
+        { ...sealedContext, keyed }
+      ).map((wait) =>
+        z
+          .object({ id: z.string(), taskId: z.string(), kind: z.string() })
+          .parse(wait)
+      )
+    ).toStrictEqual([
+      { id: "hold-40", taskId: "fetch", kind: "blocked" },
+      { id: "wait-42", taskId: "fetch", kind: "timer" },
+      { id: "hold-43", taskId: "$run", kind: "blocked" },
+    ]);
   });
 });

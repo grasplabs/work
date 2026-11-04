@@ -4,7 +4,7 @@ import type {
 } from "@grasp-os/workerflow/run";
 import { describe, expect, it } from "vite-plus/test";
 
-import { waitKeyOf, waitStepPrefix } from "../src/workflows/host.ts";
+import { waitKeyOf, waitStep, waitStepPrefix } from "../src/workflows/host.ts";
 import { traceReading } from "../src/workflows/resource-run-trace.ts";
 import type { SealedSteps } from "../src/workflows/sealed-steps.ts";
 
@@ -63,6 +63,23 @@ const done = (name: string): HistoryRecord[] => {
   return [
     recordOf("step_started", step, { attempt: 1 }),
     recordOf("step_completed", step, { attempt: 1 }),
+  ];
+};
+
+/** The engine's records of a `do` step `name` that failed for good. */
+const failed = (name: string): HistoryRecord[] => {
+  ordinals += 1;
+  const step = {
+    ordinal: ordinals,
+    name,
+    occurrence: 1,
+    kind: "do" as const,
+    eventType: null,
+  };
+  const error = { name: "Error", message: "declined", code: "connect.denied" };
+  return [
+    recordOf("step_started", step, { attempt: 1 }),
+    recordOf("step_errored", step, { attempt: 1, error }),
   ];
 };
 
@@ -212,6 +229,34 @@ describe("a run on the run host's trace", () => {
     }).toStrictEqual({
       sealed: [{ task: "linger", item: null, state: "waiting", attempts: 0 }],
       other: [{ task: "linger", item: null, state: "waiting", attempts: 0 }],
+    });
+  });
+
+  it("shows a call held for its person waiting, then an attempt more once it runs again, reached or failed", async () => {
+    const held = waitStep(await waitKeyOf("fetch:task"), "held", 1);
+    const steps: SealedSteps = new Map([
+      ["fetch", { steps: ["task"], scope: [] }],
+    ]);
+    const holding = [
+      // It ends its round held, then waits for its person.
+      ...done("fetch:task"),
+      ...done(`${held}:0:check`),
+      ...done(`${held}:waiting:held`),
+      ...waited(`${held}:0`, "waitForEvent", true),
+      ...done(`${held}:1:check`),
+    ];
+    const shown = async (end: HistoryRecord[]) => {
+      const traces = await traced([...holding, ...end], steps);
+      return traces.map(({ state, attempts }) => `${state}:${attempts}`);
+    };
+    expect({
+      waiting: await shown([]),
+      confirmed: await shown(done(`${held}:run`)),
+      declined: await shown(failed(`${held}:run`)),
+    }).toStrictEqual({
+      waiting: ["waiting:1"],
+      confirmed: ["reached:2"],
+      declined: ["failed:2"],
     });
   });
 });

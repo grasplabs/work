@@ -69,7 +69,7 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // placed by its build's table of tasks (sealed-steps.ts): a catch's retry
 // and a held call read as above, under core's prefix by the step's key;
 // a decision task's step opens its decision, then asks and waits in the
-// SDK's steps past it (`<task>:task#ask`, `#asked`, `#answer`, …) and
+// SDK's steps past it (`<task>:task#ask`, `#asked`, `#answer`) and
 // core's by that wait's key (`$grasp:wait:<key>:reached|woken|again`,
 // host.ts, `waitForDecision`): the task's step, waiting until its outcome
 // (`…:outcome`) is recorded, reached then.
@@ -123,10 +123,13 @@ const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
  * (`:timed_out`), failed with the step's error. On the run host, a
  * catch's retry of the step (`retry`) too: its decision (`:decide`), its
  * backoff (`:wait`) and its run again (`:run`), whose own waits go by its
- * name's key.
+ * name's key; and a call connect held for its person (`held`) or on an
+ * unknown outcome (`unknown`, host.ts, `#waitWhileHeld`): when it was
+ * first held, its first wait, its checks, its waits between them and its
+ * record of waiting, then its run again (`:run`).
  */
 const coreWait = new RegExp(
-  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?|retry:[1-9]\\d*:(?<retry>decide|wait|run))$`,
+  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?|(?:held|unknown):\\d+(?<held>:since|:first|:\\d+(?::check)?|:waiting:held|:run)|retry:[1-9]\\d*:(?<retry>decide|wait|run))$`,
   "u"
 );
 
@@ -141,18 +144,14 @@ const decisionWait = new RegExp(
 );
 
 /** A decision's own steps past its task step on the run host (the SDK's). */
-const sealedDecisionPart =
-  /^#(?:ask|asked|remind|reminded|answer|answer-after-reminder)$/u;
+const sealedDecisionPart = /^#(?:ask|asked|answer)$/u;
 
 /**
  * The wait a decision's ask leads to (the SDK's): core's steps of it go by
  * its key from the first, a look that may find it answered before it is
- * ever reached.
+ * ever reached. A sealed decision has no reminder (sealed-run.ts).
  */
-const answerAfter: Readonly<Record<string, string>> = {
-  "#ask": "#answer",
-  "#remind": "#answer-after-reminder",
-};
+const answerAfter: Readonly<Record<string, string>> = { "#ask": "#answer" };
 
 /**
  * What a step is of the task step it is part of: a round of it (its own
@@ -332,7 +331,17 @@ const placeOf = (name: string, steps?: SealedSteps): Place | undefined => {
       ? namedPlaceOf(name)
       : sealedPlaceOf(name, steps);
   }
-  const { key, retry } = waited;
+  const { key, retry, held } = waited;
+  if (held !== undefined) {
+    // Waiting for its person, or its outcome, until it runs again (an
+    // attempt more of the step), unless a check fails it.
+    return {
+      kind: "wait",
+      key,
+      role: held === ":run" ? "round" : "held",
+      keyed: false,
+    };
+  }
   if (retry !== undefined) {
     // A retry's run again is a round of the step, its backoff its own;
     // its decision tells nothing.

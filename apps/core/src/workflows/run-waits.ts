@@ -55,11 +55,12 @@ import type { SealedSteps } from "./sealed-steps.ts";
 //   rounds, under core's prefix by the retried step's key
 //   (`$grasp:wait:<key>:retry:<round>:wait`, host.ts, `#retried`), of the
 //   task whose step has that key in the run's journal;
-// - a person's decision: its wait (`<task>:task#answer`, or
-//   `#answer-after-reminder`, the SDK's), and its waits again under
-//   core's prefix by that wait's key (`$grasp:wait:<key>:again:<round>`,
+// - a person's decision: its wait (`<task>:task#answer`, the SDK's; a
+//   sealed decision has no reminder), and its waits again under core's
+//   prefix by that wait's key (`$grasp:wait:<key>:again:<round>`,
 //   host.ts, `waitForDecision`), by the decision's ID its event names;
-// - holds of the platform's, as above.
+// - holds of the platform's, as above, each of the task whose step has
+//   the key it goes by, or of the run if none has.
 //
 // What a wait shows is metadata only: a task's ID as its version's sealed
 // build names it (a step of any other name is left out: it could be made
@@ -120,8 +121,8 @@ const holdStep = new RegExp(
   "u"
 );
 
-/** Any of core's own steps of a wait. */
-const coreWaitStep = new RegExp(`^${waitPrefix}[0-9a-f]{16}:`, "u");
+/** Any of core's own steps of a wait, by the key of the step it is of. */
+const coreWaitStep = new RegExp(`^${waitPrefix}(?<key>[0-9a-f]{16}):`, "u");
 
 /** What each kind of hold is, as a screen reads it. */
 const holds = {
@@ -383,9 +384,14 @@ const taskWaitsOf = (
 /**
  * The waits one pending wait of core's own steps of a wait for load is:
  * its hold, once a held step (`holding`); a retry of its step's run again;
- * none otherwise.
+ * none otherwise. Each of the task `taskOf` names by its step's key, or
+ * of the run.
  */
-const coreWaitsOf = (wait: Pending, holding: Set<string>): Json[] => {
+const coreWaitsOf = (
+  wait: Pending,
+  holding: Set<string>,
+  taskOf?: (key: string) => string | undefined
+): Json[] => {
   if (wait.openedAt === null) {
     return [];
   }
@@ -398,13 +404,18 @@ const coreWaitsOf = (wait: Pending, holding: Set<string>): Json[] => {
       return [];
     }
     holding.add(hold.key);
-    return [holdWait(hold.kind, wait, "$run")];
+    return [holdWait(hold.kind, wait, taskOf?.(hold.key) ?? "$run")];
   }
-  return wait.type === "retry" &&
-    coreWaitStep.test(wait.name) &&
-    wait.deadline !== null
-    ? [retryWait(wait, "$run", "Retrying a step")]
-    : [];
+  const key = coreWaitStep.exec(wait.name)?.groups?.key;
+  if (wait.type !== "retry" || key === undefined || wait.deadline === null) {
+    return [];
+  }
+  const task = taskOf?.(key);
+  return [
+    task === undefined
+      ? retryWait(wait, "$run", "Retrying a step")
+      : retryWait(wait, task, task),
+  ];
 };
 
 /**
@@ -417,9 +428,6 @@ const keyedWait = new RegExp(
   `^${waitPrefix}(?<key>[0-9a-f]{16}):(?:retry:[1-9]\\d*:(?<retry>decide|wait|run)|again:[1-9]\\d*)$`,
   "u"
 );
-
-/** A decision's wait for its answer, past its task step (the SDK's). */
-const answerPart = /^#answer(?:-after-reminder)?$/u;
 
 /**
  * The waits one pending wait of core's own steps of a task's step on the
@@ -475,7 +483,7 @@ const sealedWaitsOf = (
   const step = sealedStepOf(wait.name, steps);
   const task = step === undefined ? undefined : context.tasks.get(step.task);
   if (step === undefined || task === undefined) {
-    return coreWaitsOf(wait, holding);
+    return coreWaitsOf(wait, holding, (key) => context.keyed?.get(key));
   }
   if (wait.type === "retry") {
     return [retryWait(wait, step.task, step.task)];
@@ -484,7 +492,7 @@ const sealedWaitsOf = (
   if (wait.type === "sleep") {
     return own && wait.deadline !== null ? [sleepWait(wait, step.task)] : [];
   }
-  if (step.kind === "task" && answerPart.test(step.part)) {
+  if (step.kind === "task" && step.part === "#answer") {
     return decisionOf(wait, step.task, task, context);
   }
   return own ? awaitedOf(wait, step.task, task, context) : [];
@@ -688,7 +696,7 @@ export const runWaits = async (
   );
   const { tasks, sealed } = await sealedTasks(env, run);
   const keyed =
-    sealed && pending.some((wait) => keyedWait.test(wait.name))
+    sealed && pending.some((wait) => coreWaitStep.test(wait.name))
       ? await keyedTasks(env, run.id, tasks)
       : undefined;
   return shownWaits(pending, {
