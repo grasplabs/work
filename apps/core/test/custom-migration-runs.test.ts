@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import { threwOnRecord } from "../src/migration-transform.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
 import {
@@ -64,9 +65,10 @@ const reportedRollback = async (
 //   "transforms every record once, then takes over as its release is
 //   made current"; the version still current loses writes before it is
 //   made current: same test (version 1's schema stays in force).
-// - A transform's failure lets the release run, or its message reaches
-//   no one who can act on it: "refuses the release while its transform
-//   fails, telling the App why".
+// - A transform's failure lets the release run, or reaches no one who can
+//   act on it, or carries a record its builders can't read into what they
+//   are told: "refuses the release while its transform fails, telling the
+//   App on which record and where".
 // - A transform that answers wrong rewrites real records, or its release
 //   runs, on App code's word that it works: "keeps a migration that fails
 //   on its fixtures off every record, and refuses its release" and
@@ -467,7 +469,7 @@ export default appTest({
     });
   });
 
-  it("refuses the release while its transform fails, telling the App why", async () => {
+  it("refuses the release while its transform fails, telling the App on which record and where", async () => {
     const { fixture, store } = await migrated(
       5,
       `(ctx, row) => {
@@ -490,7 +492,14 @@ export default appTest({
               table: "notes",
               migration: "derive-category",
               reason: "threw",
-              issues: ["No category for Note 4"],
+              // Each person's own notes: what the transform said of
+              // one isn't shown to the App's builders, where it threw is.
+              issues: [
+                threwOnRecord,
+                expect.stringMatching(
+                  /^It threw at migrations\/derive-category\.js, line \d+, column \d+$/u
+                ),
+              ],
             },
           },
         });

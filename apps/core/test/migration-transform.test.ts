@@ -6,6 +6,7 @@ import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
   transformBatch,
+  threwOnRecord,
   transformBatchMaxRows,
 } from "../src/migration-transform.ts";
 import type { TransformRow } from "../src/migration-transform.ts";
@@ -670,15 +671,19 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     });
   });
 
-  it("names the record whose transform threw", async () => {
-    await expect(run("throws")).resolves.toStrictEqual({
+  it("names the record whose transform threw, and where, but not what it said on a table each owner reads alone", async () => {
+    const outcome = await run("throws");
+
+    expect(outcome).toMatchObject({
       ok: false,
-      failure: {
-        id: "n2",
-        reason: "threw",
-        issues: ["Can't tell this one's category"],
-      },
+      failure: { id: "n2", reason: "threw" },
     });
+    expect(outcome.ok ? [] : outcome.failure.issues).toStrictEqual([
+      threwOnRecord,
+      expect.stringMatching(
+        /^It threw at migrations\/throws\.js, line \d+, column \d+$/u
+      ),
+    ]);
   });
 
   it("refuses a batch that mixes owners of a table with owner access, which only a caller's bug sends", async () => {
@@ -788,7 +793,8 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
 
 /**
  * Salaries read by the person each names and the team it is for, each
- * migration's table its own, with `fields`.
+ * migration's table its own, with `fields`; an `open-` migration's table
+ * has no rules, every member reading it.
  */
 const salariesSchema = (names: readonly string[], fields: string): string =>
   `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
@@ -799,9 +805,10 @@ ${fields}
 
 export default defineSchema({
 ${names
-  .map(
-    (name) =>
-      `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
+  .map((name) =>
+    name.startsWith("open-")
+      ? `  ${tableOf(name)}: defineTable(salaryFields),`
+      : `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
   )
   .join("\n")}
 });
@@ -835,6 +842,19 @@ const salaryHandlers = {
   // Hands every salary to its author, or to their team, to read.
   "hands-to-me": `(ctx, row) => ({ ...row, employee: "u_mallory", band: "low" })`,
   "moves-team": `(ctx, row) => ({ ...row, team: "t_mallory", band: "low" })`,
+  // Writes the salary into its failure, which the builder is shown.
+  "throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
+  // The same, past the stack too: a forged one, its line the salary.
+  "forges-stack": `(ctx, row) => {
+    const error = new Error(\`Salary: \${row.amount}\`);
+    error.stack = \`Error\\n    at handler (app~migrations~forges-stack.js:\${row.amount}:1)\\nSalary: \${row.amount}\`;
+    throw error;
+  }`,
+  "open-throws-amount": `(ctx, row) => {
+    throw new Error(\`Salary: \${row.amount}\`);
+  }`,
 } as const;
 
 /** What each salary migration's fixtures are: two people's, as records are. */
@@ -950,6 +970,50 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
       });
     }
   );
+
+  it("never shows what a transform threw on a record of a table with row rules: only the record, a fixed message and where", async () => {
+    const thrown = await runSalaries("throws-amount", [
+      salary("s1", "u_bob", "t_a", 91_234),
+    ]);
+    const forged = await runSalaries("forges-stack", [
+      salary("s1", "u_bob", "t_a", 91_234),
+    ]);
+    // On a table every member reads, what it threw is shown as it said.
+    const open = await runSalaries("open-throws-amount", [
+      salary("s1", "u_bob", "t_a", 91_234),
+    ]);
+
+    expect({
+      thrown,
+      forged,
+      open,
+      leaked: JSON.stringify([thrown, forged]).includes("91234"),
+    }).toStrictEqual({
+      thrown: {
+        ok: false,
+        failure: {
+          id: "s1",
+          reason: "threw",
+          issues: [
+            threwOnRecord,
+            expect.stringMatching(
+              /^It threw at migrations\/throws-amount\.js, line \d+, column \d+$/u
+            ),
+          ],
+        },
+      },
+      // A line past the module's end is no place it threw: left out.
+      forged: {
+        ok: false,
+        failure: { id: "s1", reason: "threw", issues: [threwOnRecord] },
+      },
+      open: {
+        ok: false,
+        failure: { id: "s1", reason: "threw", issues: ["Salary: 91234"] },
+      },
+      leaked: false,
+    });
+  });
 
   it("runs fixtures of different people a batch each as the release is sealed, and records a rule field's change as their failure", async () => {
     const { release } = await sealedSalaries();

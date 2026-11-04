@@ -1,5 +1,8 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import {
+  migrationPlatformMessages,
+  schemaFromDescriptor,
+} from "@grasp-os/sdk/host";
 import type { MigrationManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
@@ -66,6 +69,21 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   which pass the rules before and after. A transform answers only for
 //   the records of its own table it was handed, never another table's,
 //   so it can't move rows into a table whose rules admit more people.
+// - The transform writes a record's values into its failure
+//   (`throw new Error(row.amount)`), which the migration's builders are
+//   shown (store-host.ts, `schemaStatus`), though the table's access or
+//   rules keep the record from them. On a table whose access mode or row
+//   rules choose who reads a row (`audienceOf`), no text App code chose
+//   is surfaced: a handler's failure names the record, a fixed message
+//   (`threwOnRecord`) and where it threw, read from its stack only as a
+//   module of the release and a line within it (`locationOf`), never the
+//   stack's text; a failure outside a handler is a fixed message too.
+//   The SDK's own refusals (`migrationPlatformMessages`) are fixed texts
+//   and pass. What still tells something: which record failed, and the
+//   line it threw on, as much as a transform choosing where to throw
+//   tells anyway; a forged stack names no more than a place in the
+//   module. A table that every member reads keeps the message, and so do
+//   fixtures, the App's own data (`transformRows`).
 // - The transform answers differently each time: randomness and clocks
 //   are taken away while it runs and while its answer is serialized (sdk
 //   runner, `runMigration`). Best effort, not a boundary: a value captured
@@ -197,6 +215,40 @@ for (const name of Object.getOwnPropertyNames(console)) {
 }
 `;
 
+/** What the isolate's main module fails with for an answer past its bound. */
+const answerTooLarge = "The migration's answer is too large.";
+
+/** What a handler's failure says on a table whose rows reach some people only. */
+export const threwOnRecord = "The migration's transform threw on this record.";
+
+/** What a failure outside a handler says on such a table. */
+export const failedOutside =
+  "The migration's code failed outside its handler, as its modules loaded or as it answered.";
+
+/**
+ * The sandbox's own verdicts on a call (scripts/workerd-sandbox.ts, the
+ * Loader's limits), by a phrase of theirs, each as a fixed text. A message
+ * App code threw can hold the phrase too: then it is only ever told as
+ * the fixed text, which holds nothing of a row.
+ */
+const sandboxVerdicts: readonly (readonly [string, string])[] = [
+  [answerTooLarge, answerTooLarge],
+  ["ran past its time", "The App's code ran past its time."],
+  ["answered too much", "The App's code answered too much."],
+  ["of memory", "The App's code used more memory than it may."],
+  ["CPU time", "The App's code used more than its CPU time."],
+];
+
+/** `message` as a sandbox verdict's fixed text, when it holds one's phrase. */
+const verdictOf = (message: string): string =>
+  sandboxVerdicts.find(([phrase]) => message.includes(phrase))?.[1] ?? message;
+
+/** Fixed texts of the platform's own, shown for any table. */
+const platformMessages = new Set([
+  ...migrationPlatformMessages,
+  ...sandboxVerdicts.map(([, fixed]) => fixed),
+]);
+
 /**
  * The transform isolate's main module: the batch through the SDK's
  * runner, its answer as bounded JSON text. Untrusted like everything in
@@ -212,7 +264,7 @@ export class Migrate extends WorkerEntrypoint {
   run() {
     const text = JSON.stringify(runMigration(registered, request));
     if (typeof text !== "string" || text.length > ${transformAnswerMaxBytes}) {
-      throw new Error("The migration's answer is too large.");
+      throw new Error(${JSON.stringify(answerTooLarge)});
     }
     return text;
   }
@@ -389,13 +441,19 @@ const handedRows = (
   return { rows: handed };
 };
 
+/** The most of a failure's stack read for where it threw. */
+const stackMaxChars = 4000;
+
+/** A frame of a stack in an App module: its module, line and column. */
+const appFrame = /\b(?<module>app~[\w~.-]+\.js):(?<line>\d+):(?<column>\d+)/gu;
+
 /** What the isolate answered, read as the runner's answer, or why not. */
 const answerOf = (
   text: unknown,
   count: number
 ):
   | { ok: true; rows: unknown[] }
-  | { ok: false; index: number; message: string }
+  | { ok: false; index: number; message: string; stack: string }
   | undefined => {
   if (
     typeof text !== "string" ||
@@ -421,15 +479,86 @@ const answerOf = (
   }
   const index: unknown = Reflect.get(data, "index");
   const message: unknown = Reflect.get(data, "message");
+  const stack: unknown = Reflect.get(data, "stack");
   return ok === false &&
     typeof index === "number" &&
     Number.isInteger(index) &&
     index >= 0 &&
     index < count &&
     typeof message === "string"
-    ? { ok: false, index, message: message.slice(0, 500) }
+    ? {
+        ok: false,
+        index,
+        message: message.slice(0, 500),
+        stack: typeof stack === "string" ? stack.slice(0, stackMaxChars) : "",
+      }
     : undefined;
 };
+
+/**
+ * Where a handler threw, as `stack` (App code's, so hostile) names it:
+ * the first frame in one of `modules` (the release's compiled modules) at
+ * a line and column that module has, as its file, line and column; none
+ * when no frame is one. Only a module's name and a place within it are
+ * taken, never the stack's text, so it carries no more than where the
+ * transform chose to throw. The place is in the compiled module, which
+ * may join a file's lines: its column says where on the line.
+ */
+const locationOf = (
+  modules: Readonly<Record<string, string>>,
+  stack: string
+): string[] => {
+  for (const { groups } of stack.matchAll(appFrame)) {
+    const { module = "", line = "", column = "" } = groups ?? {};
+    const source = Object.hasOwn(modules, module) ? modules[module] : undefined;
+    const lineNumber = Number(line);
+    const columnNumber = Number(column);
+    const text = source?.split("\n")[lineNumber - 1];
+    if (
+      text !== undefined &&
+      Number.isSafeInteger(lineNumber) &&
+      lineNumber >= 1 &&
+      Number.isSafeInteger(columnNumber) &&
+      columnNumber >= 1 &&
+      columnNumber <= text.length + 1
+    ) {
+      // `app~migrations~split.js` is the App's `migrations/split` file,
+      // compiled.
+      const file = module.slice("app~".length).replaceAll("~", "/");
+      return [
+        `It threw at ${file}, line ${String(lineNumber)}, column ${String(columnNumber)}`,
+      ];
+    }
+  }
+  return [];
+};
+
+/**
+ * Whether what App code says as it fails on `of` of `table` is kept from
+ * those it is shown to: on records of a table whose access mode or row
+ * rules choose who reads a row (see the header). Never for fixtures,
+ * which are the App's own data.
+ */
+const hidesText = (
+  table: TransformTable,
+  of: "records" | "fixtures"
+): boolean => {
+  const audience = audienceOf(table);
+  return of === "records" && (audience.owner || audience.fields.length > 0);
+};
+
+/**
+ * What a failure says of `message` (App code's, unless one of the
+ * platform's own): all of it, or `fixed` and `location` only where
+ * `hidden` (`hidesText`).
+ */
+const failureIssues = (
+  hidden: boolean,
+  message: string,
+  fixed: string,
+  location: readonly string[] = []
+): string[] =>
+  !hidden || platformMessages.has(message) ? [message] : [fixed, ...location];
 
 /**
  * Refuses a batch only a caller's bug sends: past its bounds, holding a
@@ -462,20 +591,16 @@ const requireBatch = (
 };
 
 /**
- * Runs migration `name` of `release` on `rows` (at most
- * `transformBatchMaxRows`, `transformBatchMaxBytes` of JSON): each
- * record's fields after it, in order, the transform's output validated
- * against the target table and merged over the fields the target doesn't
- * declare; or the failure, naming the record. Throws
- * `SandboxUnavailableError` when the sandbox didn't answer, and an error
- * for a batch past its bounds or a migration the release doesn't declare,
- * which only a bug in the caller sends.
+ * `transformBatch` of `rows` that are records, or the migration's own
+ * fixtures: the App's data, so what its code threw on them is shown as it
+ * said, whatever the table.
  */
-export const transformBatch = async (
+const transformRows = async (
   env: SandboxedEnv,
   release: TransformRelease,
   name: string,
-  rows: readonly TransformRow[]
+  rows: readonly TransformRow[],
+  of: "records" | "fixtures"
 ): Promise<TransformOutcome> => {
   const declared = Object.hasOwn(release.app.migrations, name)
     ? release.app.migrations[name]
@@ -514,13 +639,20 @@ export const transformBatch = async (
       throw error;
     }
     // The App's code failed outside a handler (its modules threw as they
-    // loaded, or the sandbox ended it): no record is to blame.
+    // loaded, or the sandbox ended it): no record is to blame. The
+    // sandbox's message may carry what the App's code threw.
+    const message = (error instanceof Error ? error.message : "").slice(0, 500);
+    const hidden = hidesText(target, of);
     return {
       ok: false,
       failure: {
         id: null,
         reason: "invalid_answer",
-        issues: [(error instanceof Error ? error.message : "").slice(0, 500)],
+        issues: failureIssues(
+          hidden,
+          hidden ? verdictOf(message) : message,
+          failedOutside
+        ),
       },
     };
   }
@@ -541,7 +673,12 @@ export const transformBatch = async (
       failure: {
         id: rows[answer.index]?.id ?? "",
         reason: "threw",
-        issues: [answer.message],
+        issues: failureIssues(
+          hidesText(target, of),
+          answer.message,
+          threwOnRecord,
+          locationOf(release.modules, answer.stack)
+        ),
       },
     };
   }
@@ -592,6 +729,24 @@ export const transformBatch = async (
   }
   return { ok: true, rows: transformed };
 };
+
+/**
+ * Runs migration `name` of `release` on `rows` (at most
+ * `transformBatchMaxRows`, `transformBatchMaxBytes` of JSON): each
+ * record's fields after it, in order, the transform's output validated
+ * against the target table and merged over the fields the target doesn't
+ * declare; or the failure, naming the record. Throws
+ * `SandboxUnavailableError` when the sandbox didn't answer, and an error
+ * for a batch past its bounds or a migration the release doesn't declare,
+ * which only a bug in the caller sends.
+ */
+export const transformBatch = async (
+  env: SandboxedEnv,
+  release: TransformRelease,
+  name: string,
+  rows: readonly TransformRow[]
+): Promise<TransformOutcome> =>
+  await transformRows(env, release, name, rows, "records");
 
 /** The ID a fixture's record has as its migration runs on it. */
 const fixtureId = (index: number): string => `fixture-${index + 1}`;
@@ -667,7 +822,7 @@ const fixtureEvidence = async (
   for (const batch of batches.values()) {
     // One sandbox call at a time, as for each migration (below).
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const outcome = await transformBatch(env, release, name, batch);
+    const outcome = await transformRows(env, release, name, batch, "fixtures");
     if (!outcome.ok) {
       const { id, reason, issues } = outcome.failure;
       const index = rows.findIndex((row) => row.id === id);

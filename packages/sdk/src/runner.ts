@@ -4,7 +4,11 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
-import { migrationHandler } from "./migration.ts";
+import {
+  impureMessage,
+  migrationHandler,
+  promiseMessage,
+} from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
 import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
@@ -475,20 +479,50 @@ export interface MigrationRequest {
 
 /**
  * What a batch answered: each row's output, in order, or the row whose
- * handler threw, and what it said.
+ * handler threw, what it said and where (its stack, null when it has
+ * none). The host reads all of it as hostile.
  */
 export type MigrationAnswer =
   | { readonly ok: true; readonly rows: readonly unknown[] }
-  | { readonly ok: false; readonly index: number; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly index: number;
+      readonly message: string;
+      readonly stack: string | null;
+    };
 
 /** The longest message of a handler's failure a batch answers. */
 const failureMaxLength = 500;
 
+/** The longest stack of a handler's failure a batch answers. */
+const stackMaxLength = 4000;
+
 /** A function that refuses, for what a migration can't use. */
 const unavailable = (what: string) => (): never => {
-  throw new Error(
-    `A migration is pure: ${what} isn't available while it transforms rows.`
-  );
+  throw new Error(impureMessage(what));
+};
+
+/** The stack of what a handler threw, bounded; null when it has none. */
+const stackOf = (error: unknown): string | null => {
+  try {
+    const stack: unknown = error instanceof Error ? error.stack : undefined;
+    return typeof stack === "string" ? stack.slice(0, stackMaxLength) : null;
+  } catch {
+    // A stack whose getter throws: App code's, and it says nothing.
+    return null;
+  }
+};
+
+/** The message of what a handler threw, bounded. */
+const messageOf = (error: unknown): string => {
+  try {
+    const message: unknown = error instanceof Error ? error.message : undefined;
+    return typeof message === "string"
+      ? message.slice(0, failureMaxLength)
+      : "The handler threw";
+  } catch {
+    return "The handler threw";
+  }
 };
 
 /** What a global held before a transform: its own property, if it had one. */
@@ -707,19 +741,15 @@ export const runMigration = (
       try {
         const output = handler(ctx, row.fields);
         if (isThenable(output)) {
-          throw new Error(
-            "A migration's handler answers its row, not a promise: it has nothing to wait for."
-          );
+          throw new Error(promiseMessage);
         }
         rows.push(asJson(output));
       } catch (error) {
         return {
           ok: false,
           index,
-          message: (error instanceof Error
-            ? error.message
-            : "The handler threw"
-          ).slice(0, failureMaxLength),
+          message: messageOf(error),
+          stack: stackOf(error),
         };
       }
     }
