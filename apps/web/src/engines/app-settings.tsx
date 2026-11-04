@@ -24,7 +24,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ArchiveIcon, LinkIcon } from "lucide-react";
+import { ArchiveIcon, LinkIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
@@ -83,6 +83,7 @@ import type { ResourcesPage } from "./resource-bindings.tsx";
 import type { readStoreChanges } from "./store-changes.tsx";
 import { StoreChanges } from "./store-changes.tsx";
 import { useAppRead } from "./use-app-read.ts";
+import type { AppRead } from "./use-app-read.ts";
 
 // Everything about an App besides the App itself, in one place, grouped
 // plainly, a section at a time: what it is called and where it stands
@@ -138,21 +139,73 @@ const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
   }),
 };
 
-/** What a section shows of a read: a skeleton while it comes, why it didn't, or `children` once it did. */
+/**
+ * That a section shows what was read before, a latest re-read of one of
+ * its `reads` having failed: why, and a way to read every failed one
+ * again. Nothing while none failed.
+ */
+const RefreshFailed = ({
+  reads,
+}: {
+  reads: readonly (AppRead<unknown> | undefined)[];
+}) => {
+  const failed = reads.flatMap((read) => read?.refresh ?? []);
+  const [first] = failed;
+  if (first === undefined) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-3 text-sm">
+      <TriangleAlertIcon
+        aria-hidden="true"
+        className="text-status-attention size-4 flex-none"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="font-medium">
+          <Trans>Couldn&apos;t refresh. This may be out of date.</Trans>
+        </p>
+        <NotLoaded page={first.failure} />
+      </div>
+      <Button
+        onClick={() => {
+          for (const { retry } of failed) {
+            retry();
+          }
+        }}
+        size="sm"
+        variant="outline"
+      >
+        <Trans>Try again</Trans>
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * What a section shows of a read: a skeleton while it comes, why it
+ * didn't, or `children` once it did, over a note while a re-read failed
+ * unless the section notes that once for all its reads (`notedAbove`).
+ */
 export const Read = <T,>({
   read,
+  notedAbove = false,
   children,
 }: {
-  read: Loaded<T> | undefined;
+  read: AppRead<T> | undefined;
+  notedAbove?: boolean;
   children: (data: T) => ReactElement;
 }) => {
   if (read === undefined) {
     return <LoadingLines />;
   }
-  return read.state === "ready" ? (
-    children(read.data)
-  ) : (
-    <NotLoaded page={read} />
+  if (read.state !== "ready") {
+    return <NotLoaded page={read} />;
+  }
+  return (
+    <>
+      {notedAbove ? null : <RefreshFailed reads={[read]} />}
+      {children(read.data)}
+    </>
   );
 };
 
@@ -669,7 +722,8 @@ const Workflows = ({
   const runs = useAppRead(app.id, readRuns);
   return (
     <div className="flex flex-col gap-6">
-      <Read read={workflows}>
+      <RefreshFailed reads={[workflows, runs]} />
+      <Read notedAbove read={workflows}>
         {(rows) => (
           <WorkflowsTable
             empty={
@@ -686,7 +740,7 @@ const Workflows = ({
         <h3 className="font-medium" id="app-runs">
           <Trans>Runs</Trans>
         </h3>
-        <Read read={runs}>
+        <Read notedAbove read={runs}>
           {(page) => (
             <RunsLog
               empty={t`No runs yet.`}
@@ -800,7 +854,8 @@ const Connections = ({
   );
   return (
     <div className="flex flex-col gap-8">
-      <Read read={declared}>
+      <RefreshFailed reads={[declared, used, resources]} />
+      <Read notedAbove read={declared}>
         {({ integrations, catalog }) => (
           <AppIntegrations
             app={app}
@@ -814,7 +869,7 @@ const Connections = ({
         <h3 className="font-medium" id="app-used">
           <Trans>Connections in use</Trans>
         </h3>
-        <Read read={used}>
+        <Read notedAbove read={used}>
           {({ integrations, http }) =>
             integrations.length === 0 && http.length === 0 ? (
               <p className="text-muted-foreground">
@@ -854,7 +909,7 @@ const Connections = ({
         </Read>
       </section>
       <AppAccessRequests app={app} identity={identity} />
-      <Read read={resources}>
+      <Read notedAbove read={resources}>
         {(page) => <ResourceBindings decides={decides} page={page} />}
       </Read>
       <AppWorkflows app={app} identity={identity} />

@@ -12,7 +12,16 @@ import { useCore } from "../use-core.ts";
 // the same address (`router.invalidate()`, which the changes made in a
 // section call), so a change shows as it does on a loader's page. Only
 // the latest read's answer is kept, and none once the section is gone; a
-// re-read that fails leaves the last good answer in place.
+// re-read that fails leaves the last good answer in place, saying it
+// couldn't be refreshed, with a way to read it again.
+
+/**
+ * A read's answer, and, while it shows what was read before because the
+ * latest re-read failed, why that failed and a way to read again.
+ */
+export type AppRead<T> = Loaded<T> & {
+  refresh?: { failure: Loaded<unknown>; retry: () => void };
+};
 
 /**
  * What `read` answers for App `app`; undefined while it comes. `read` must
@@ -21,10 +30,17 @@ import { useCore } from "../use-core.ts";
 export const useAppRead = <T>(
   app: string,
   read: (session: Session, app: string) => Promise<T>
-): Loaded<T> | undefined => {
+): AppRead<T> | undefined => {
   const core = useCore();
   const router = useRouter();
-  const [value, setValue] = useState<{ app: string; read: Loaded<T> }>();
+  const [value, setValue] = useState<{
+    app: string;
+    read: Loaded<T>;
+    /** Why the latest re-read failed, while `read` is the one before. */
+    failed?: Loaded<unknown>;
+  }>();
+  // Read again (Try again) after a re-read failed.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let latest = 0;
     let gone = false;
@@ -42,7 +58,7 @@ export const useAppRead = <T>(
           answer.state !== "ready" &&
           before?.app === app &&
           before.read.state === "ready"
-            ? before
+            ? { ...before, failed: answer }
             : { app, read: answer }
         );
       }
@@ -57,7 +73,24 @@ export const useAppRead = <T>(
       gone = true;
       unsubscribe();
     };
-  }, [core, router, app, read]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `attempt` says when to read again
+  }, [core, router, app, read, attempt]);
   // Another App's answer is never this one's.
-  return value?.app === app ? value.read : undefined;
+  if (value?.app !== app) {
+    return undefined;
+  }
+  if (value.failed === undefined) {
+    return value.read;
+  }
+  return {
+    ...value.read,
+    refresh: {
+      failure: value.failed,
+      retry: () => {
+        // The note goes while it reads, and comes back if it fails again.
+        setValue({ app: value.app, read: value.read });
+        setAttempt(attempt + 1);
+      },
+    },
+  };
 };

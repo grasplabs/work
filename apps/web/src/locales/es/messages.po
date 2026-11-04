@@ -4473,6 +4473,10 @@ msgstr "No se pudo cargar quién puede responder por ella."
 msgid "Couldn't make {chosen} the owner of {named}"
 msgstr "No se pudo hacer a {chosen} responsable de {named}"
 
+#: src/engines/app-settings.tsx
+msgid "Couldn't refresh. This may be out of date."
+msgstr "No se pudo actualizar. Puede que no esté al día."
+
 #: src/workflows/figures.tsx
 msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
 msgstr "Contadas sobre los flujos de trabajo de las aplicaciones que puede abrir; aquí no se cuentan los flujos de trabajo independientes."
@@ -14502,6 +14506,7 @@ msgstr "Intentar"
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
 #: src/engines/app-owner.tsx
+#: src/engines/app-settings.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx

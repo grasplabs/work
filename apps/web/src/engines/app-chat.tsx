@@ -7,7 +7,7 @@ import { MessagesSquareIcon, XIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { appSlot, setActiveChat, useActiveChat } from "../chat/active-chat.ts";
-import { AskOrCompose } from "../chat/asked-questions.tsx";
+import { AskOrCompose, useAskProgress } from "../chat/asked-questions.tsx";
 import { BuildsFailure } from "../chat/builds.tsx";
 import type { ChatBuildsRead } from "../chat/builds.tsx";
 import type { useFollowedChat } from "../chat/chat-watch.ts";
@@ -173,16 +173,20 @@ export const AppChatPending = ({
 };
 
 /**
- * The box's state for App `app`'s chat: what is typed and attached, and
- * asking. Held by the workspace above the chat's panel, so hiding the
- * panel, or the window crossing into a sheet, keeps unsent work.
+ * The box's state for App `app`'s chat: what is typed and attached, how
+ * far the person got with the questions waiting for them, and asking.
+ * Held by the workspace above the chat's panel, so hiding the panel, or
+ * the window crossing into a sheet, keeps unsent work.
  */
 export const useAppAsk = (
   app: string,
   chatId: string | undefined,
   models: readonly string[],
   efforts: Record<string, ModelEfforts>
-) => useAsk(chatId, models, efforts, "here", appSlot(app));
+) => ({
+  ...useAsk(chatId, models, efforts, "here", appSlot(app)),
+  questions: useAskProgress(),
+});
 
 /** The chat that builds App `name`, followed as `followed`, asked in with `asking`. */
 export const AppChat = ({
@@ -191,7 +195,7 @@ export const AppChat = ({
   followed: { view, failure },
   builds,
   models,
-  asking: { composer, ask },
+  asking: { composer, ask, questions },
   onClose,
 }: {
   /** Closes the panel, when it stands over the page. */
@@ -259,6 +263,7 @@ export const AppChat = ({
         <AskOrCompose
           {...composer}
           compact
+          held={questions}
           label={t`Ask for a change`}
           messages={view.messages}
           onAnswer={(answers) => {

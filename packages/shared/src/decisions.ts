@@ -72,12 +72,13 @@ export interface DecisionView {
   workflowResource?: {
     id: WorkflowResourceId;
     name: string;
-    /**
-     * Present when core confirmed, as the decision was read for its page,
-     * that the reader may open the workflow's own page.
-     */
-    opens?: true;
   };
+  /**
+   * Present when core confirmed, as the decision was read for its page,
+   * that the reader may open the page of the workflow that asks: its
+   * App's workflow, or the independent workflow's own page.
+   */
+  opens?: true;
   /** The workflow's ID in its App, or an independent workflow's name. */
   workflow: WorkflowId;
   run: RunId;

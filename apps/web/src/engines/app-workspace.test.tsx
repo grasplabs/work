@@ -337,6 +337,21 @@ const choose = async (name: string, item: string): Promise<void> => {
   await press(found);
 };
 
+/** Picks the choice labelled `label` among the agent's questions. */
+const pick = async (label: string): Promise<void> => {
+  const found = [...document.querySelectorAll("label")].find(
+    (each) => each.textContent === label
+  );
+  const radio =
+    found === undefined
+      ? null
+      : document.querySelector<HTMLElement>(`#${CSS.escape(found.htmlFor)}`);
+  if (radio === null) {
+    throw new Error(`No choice ${label}`);
+  }
+  await press(radio);
+};
+
 /** The App's status badge, in the bar. */
 const status = (): string | null | undefined =>
   document.querySelector('[data-slot="badge"]')?.textContent;
@@ -538,6 +553,69 @@ describe(AppWorkspace, () => {
       hidden: null,
       kept: "Add a due date column",
     });
+  });
+
+  it("keeps how far the person got with the agent's questions while the chat is hidden and shown again", async () => {
+    let send: ((update: ChatUpdate) => void) | undefined;
+    // A chat of this test's own: the tab keeps one watch per chat.
+    await opened(
+      fakeApps("draft").apps,
+      identityOf(false),
+      "chat-asking",
+      async (_chat, _after, received) => {
+        send = received;
+        return await Promise.resolve(watching());
+      }
+    );
+    await settled();
+    if (box() === null && !says("Grasp asks")) {
+      await press(button("Chat"));
+    }
+    await act(async () => {
+      send?.({
+        messages: [
+          {
+            id: 1,
+            role: "assistant",
+            text: "A few questions first.",
+            citations: [],
+            code: [],
+            tools: [],
+            asked: {
+              callId: "call-1",
+              questions: [
+                { question: "How often?", choices: ["Daily", "Weekly"] },
+                { question: "To whom?", choices: ["Me", "My team"] },
+              ],
+            },
+            end: "done",
+            at: "2026-10-20T08:00:05.000Z",
+          },
+        ],
+        partial: null,
+        running: false,
+        stopped: null,
+        held: 0,
+        drafts: 0,
+      });
+      await Promise.resolve();
+    });
+    await settled();
+    await pick("Weekly");
+    await press(button("Next"));
+
+    await press(button("Chat"));
+    const hidden = says("Grasp asks");
+    await press(button("Chat"));
+    const step = says("Grasp asks, 2 of 2");
+    await press(button("Back"));
+
+    expect({
+      hidden,
+      step,
+      // The first question's answer is still picked: Next goes on.
+      answered: button("Next").disabled,
+    }).toStrictEqual({ hidden: false, step: true, answered: false });
   });
 
   it("offers a version a build job proposed after the turn, once the chat's drafts change", async () => {

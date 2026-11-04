@@ -163,7 +163,10 @@ const owed = async (runId: string): Promise<number> => {
 };
 
 describe("decisions", { timeout: 60_000 }, () => {
-  afterEach(endLiveResourceRuns);
+  afterEach(async () => {
+    await endLiveResourceRuns();
+    await endLiveRuns();
+  });
 
   it("say on their page whether the person answering may open the workflow that asks", async () => {
     const people = await owners();
@@ -182,11 +185,47 @@ describe("decisions", { timeout: 60_000 }, () => {
     const shared = await decider.api.decisions.get(decision);
 
     expect({
-      unshared: unshared.workflowResource,
-      shared: shared.workflowResource,
+      unshared: [unshared.workflowResource, unshared.opens],
+      shared: [shared.workflowResource, shared.opens],
     }).toStrictEqual({
-      unshared: { id: workflow.id, name: workflow.name },
-      shared: { id: workflow.id, name: workflow.name, opens: true },
+      unshared: [{ id: workflow.id, name: workflow.name }, undefined],
+      shared: [{ id: workflow.id, name: workflow.name }, true],
+    });
+  });
+
+  // Until App-owned TypeScript workflows go (GRA-1367).
+  it("say on their page whether the person answering may open the App whose workflow asks", async () => {
+    const { admin } = await owners();
+    const decider = await signedIn("user");
+    const app = await approvalApp(admin);
+    await admin.api.workflows.start(app, "approval", {
+      from: `person:${decider.userId}`,
+      timeout: week,
+    });
+    const decision = await vi.waitFor(
+      async () => {
+        const [waiting] = await decider.api.decisions.waiting();
+        if (waiting === undefined) {
+          throw new Error("No decision yet");
+        }
+        return waiting.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const notMember = await decider.api.decisions.get(decision);
+    await admin.api.apps.members.add(app, {
+      type: "person",
+      id: decider.userId,
+      role: "user",
+    });
+    const member = await decider.api.decisions.get(decision);
+
+    expect({
+      notMember: [notMember.app?.id, notMember.opens],
+      member: [member.app?.id, member.opens],
+    }).toStrictEqual({
+      notMember: [app, undefined],
+      member: [app, true],
     });
   });
 
