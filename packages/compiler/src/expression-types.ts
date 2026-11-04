@@ -5,11 +5,7 @@
  * there is an error at its line and column in the expression, as an
  * author wrote it.
  */
-import {
-  checkExpression,
-  checkRoots,
-  expressionCode,
-} from "@grasp-os/sdk/expression-check";
+import { checkExpression, checkRoots } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError } from "@grasp-os/sdk/expression-check";
 
 import { serverTarget, typeProgram } from "./type-check.ts";
@@ -67,7 +63,10 @@ const modulePath = "expressions.ts";
 /** Type text on lines of its own, so nothing in it reaches past its parentheses. */
 const typeCode = (text: string): string => `(\n${text}\n)`;
 
-const lineCount = (text: string): number => text.split("\n").length;
+/** JavaScript's line terminators, as TypeScript counts lines (and the SDK's check). */
+const lineBreak = /\r\n?|[\n\u2028\u2029]/u;
+
+const lineCount = (text: string): number => text.split(lineBreak).length;
 
 const fromSubset = ({
   code,
@@ -138,7 +137,10 @@ export const checkExpressionTypes = (
     }
     const head = `export const e${index} = (input: Input, steps: Steps, params: Params, run: Run${extraParameters})${returns} =>\n`;
     const first = lineCount(code + head) + 1;
-    code += `${head}${expressionCode(checked)};\n`;
+    // The source as written, so an error's position is the author's.
+    // It is only type-checked, never run: what runs is the code generated
+    // from its checked tree (`checked.code`), through the SDK's guards.
+    code += `${head}(\n${source}\n);\n`;
     placed.push({ name, first, last: first + lineCount(source) - 1 });
   }
   const scopeErrors: ExpressionTypeError[] = [];

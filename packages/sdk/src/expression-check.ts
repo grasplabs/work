@@ -3,72 +3,46 @@ import type { Expression, Node } from "@babel/types";
 import { messageOf } from "@grasp-os/shared/errors";
 import globals from "globals";
 
+import { literalKey, lowerExpression } from "./expression-lowering.ts";
+import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
+
+export { runtimeImport, runtimeNames } from "./expression-lowering.ts";
+
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
  * a value is computed from the run's data, such as
  * `steps.extract.output.lines.filter((line) => line.total > params.limit)`.
- * The generator writes each checked expression as it is into the
- * workflow's generated TypeScript (`expressionCode`), so it runs in the
- * workflow's isolate with no interpreter, under the isolate's CPU and
- * memory limits, as compute modules do.
+ * The generator writes each checked expression's code (`code`) into the
+ * workflow's generated TypeScript, so it runs in the workflow's isolate
+ * with no interpreter, under the isolate's CPU and memory limits, as
+ * compute modules do.
  *
- * An expression is parsed by Babel, as JavaScript in a module, and its
- * syntax tree held to an allowlist: reads of the workflow's own values
- * (`roots`) and of callback parameters, literals, operators, and calls of
- * the methods in `callbackMethods` and `plainMethods` only. Everything
- * else is refused, so what it can do is what the allowlist lets it, and
- * a syntax added to JavaScript later is refused until it is allowed here.
+ * Two lines of defence:
  *
- * What the allowlist relies on: the values it reads are JSON (a run's
- * input, a step's output, params), so they hold no functions, getters or
- * symbols of their own; whatever function an expression can reach is one
- * of the built-in prototypes', reached by name, and only the names below
- * are ever called. Work is bounded by the isolate, not here: with no
- * loops and no function that can call itself, an expression's work is at
- * most polynomial in its data (a `map` inside a `map`), and the isolate's
- * CPU limit stops it.
+ * 1. The check. An expression is parsed by Babel, as JavaScript in a
+ *    module, and its syntax tree held to an allowlist: reads of the
+ *    workflow's own values (`roots`) and of callback parameters,
+ *    literals, operators, and calls of the allowed methods by name.
+ *    Everything else is refused, with a position and a fix, and a syntax
+ *    added to JavaScript later is refused until it is allowed here.
+ * 2. The code. What runs is printed from the checked tree (`Lowering`),
+ *    with every member read and method call through the guards of
+ *    expression-runtime.ts, which give only own data and call only the
+ *    allowed built-ins on real arrays, strings and numbers. So no
+ *    expression holds a function value, whatever names its data's fields
+ *    have: none can file a built-in method under an allowed name
+ *    (`{ at: [].forEach }.at(…)`) or hand one to an implicit conversion
+ *    (`${{ toString: list.reverse }}`), which a check of names alone
+ *    can't refuse.
+ *
+ * Work is bounded by the isolate, not here: with no loops and no
+ * function that can call itself, an expression's work is at most
+ * polynomial in its data (a `map` inside a `map`), and the isolate's CPU
+ * limit stops it.
  */
 
 /** The workflow's values an expression may start from, by default. */
 export const expressionRoots = ["input", "steps", "params", "run"] as const;
-
-/**
- * Array methods that take a callback, which must be the call's only
- * argument and an arrow function written there (`callbackArrow`): never
- * a function value, which `map(fn, thisArg)` would call with `this` set
- * to anything, a data array's `push` included.
- */
-const callbackMethods = new Set([
-  "map",
-  "filter",
-  "some",
-  "every",
-  "find",
-  "findIndex",
-]);
-
-/**
- * Array, string and number methods that take only values, none of which
- * changes what it is called on or does work out of proportion to its
- * data (no `repeat` or `padStart`).
- */
-const plainMethods = new Set([
-  "includes",
-  "indexOf",
-  "slice",
-  "concat",
-  "join",
-  "at",
-  "split",
-  "trim",
-  "trimStart",
-  "trimEnd",
-  "toLowerCase",
-  "toUpperCase",
-  "startsWith",
-  "endsWith",
-  "toFixed",
-]);
 
 /**
  * Property names never read or written, however they're spelled: the way
@@ -137,8 +111,15 @@ export interface ExpressionError {
   column: number;
 }
 
+/**
+ * A checked expression: its source, as written, and the code generated
+ * from its syntax tree (`Lowering`), one parenthesized expression the
+ * generator writes where the value is computed, in a module that
+ * imports `runtimeImport`. Never write it right after an identifier on
+ * the line before: `name\n(…)` is a call.
+ */
 export type CheckedExpression =
-  | { ok: true; source: string }
+  | { ok: true; source: string; code: string }
   | { ok: false; errors: ExpressionError[] };
 
 const fixes: Record<ExpressionErrorCode, string> = {
@@ -150,7 +131,7 @@ const fixes: Record<ExpressionErrorCode, string> = {
     "Read the data's own fields; the prototype chain is out of reach.",
   "expression.computed-key":
     "Write the key as a string or number literal, or read the field by name.",
-  "expression.method": `Call one of: ${[...callbackMethods, ...plainMethods].join(", ")}.`,
+  "expression.method": `Call one of: ${[...allowedMethods].join(", ")}.`,
   "expression.callback":
     "Pass one arrow function with plain parameters and an expression body, e.g. (line) => line.total, as the only argument of map, filter, some, every, find or findIndex.",
   "expression.operator":
@@ -174,26 +155,18 @@ const located = (
   column,
 });
 
-/** A property's name as JavaScript reads it, when written as a literal. */
-const literalKey = (node: Node): string | undefined => {
-  if (node.type === "Identifier") {
-    return node.name;
-  }
-  if (node.type === "StringLiteral") {
-    return node.value;
-  }
-  if (node.type === "NumericLiteral") {
-    return String(node.value);
-  }
-  return undefined;
-};
-
-/** A callback as `callbackMethods` take it: `(a, b) => expression`. */
+/**
+ * A callback as `callbackMethods` take it: `(a, b) => expression`. Its
+ * parameters' names don't start with `$`, which the generated code's own
+ * names do (`runtimeNames`), so none can shadow them.
+ */
 const isCallbackArrow = (node: Node): boolean =>
   node.type === "ArrowFunctionExpression" &&
   !node.async &&
   node.body.type !== "BlockStatement" &&
-  node.params.every((param) => param.type === "Identifier");
+  node.params.every(
+    (param) => param.type === "Identifier" && !param.name.startsWith("$")
+  );
 
 class Checker {
   readonly errors: ExpressionError[] = [];
@@ -263,6 +236,14 @@ class Checker {
     }
     const method = callee.property.name;
     this.visit(callee.object, scope);
+    if (node.type === "OptionalCallExpression" && node.optional) {
+      this.fail(
+        node,
+        "expression.syntax",
+        `\`${method}?.()\`: an allowed method is always there; call it as \`${method}()\`.`
+      );
+      return;
+    }
     if (callbackMethods.has(method)) {
       const [callback] = node.arguments;
       if (
@@ -288,7 +269,7 @@ class Checker {
       }
       return;
     }
-    if (!plainMethods.has(method)) {
+    if (!allowedMethods.has(method)) {
       this.fail(
         callee.property,
         "expression.method",
@@ -474,8 +455,11 @@ const syntaxError = (source: string, error: unknown): ExpressionError => {
   );
 };
 
-/** A root's name: ASCII, unescaped, so it reads the same wherever it's written. */
-const plainName = /^[A-Za-z_$][\w$]*$/u;
+/**
+ * A root's name: ASCII, unescaped, so it reads the same wherever it's
+ * written, and not starting with `$`, as the generated code's names do.
+ */
+const plainName = /^[A-Za-z_][\w$]*$/u;
 
 /**
  * Every global name of the hosts JavaScript runs on, from one fixed list
@@ -575,16 +559,8 @@ export const checkExpression = (
   }
   const checker = new Checker(roots);
   checker.visit(parsed, roots);
-  return checker.errors.length === 0
-    ? { ok: true, source }
-    : { ok: false, errors: checker.errors };
+  if (checker.errors.length > 0) {
+    return { ok: false, errors: checker.errors };
+  }
+  return { ok: true, source, code: lowerExpression(parsed) };
 };
-
-/**
- * A checked expression as the generator writes it into generated code:
- * on lines of its own in parentheses, so a trailing `//` comment ends
- * before the code after it and the expression stays one, whatever is
- * around it. Its line `n` is line `n + 1` of what this returns.
- */
-export const expressionCode = (checked: { ok: true; source: string }): string =>
-  `(\n${checked.source}\n)`;

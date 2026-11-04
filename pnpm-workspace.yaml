@@ -110,6 +110,10 @@ catalog:
   # Frontend
   # Babel 7 until babel-plugin-react-compiler supports Babel 8.
   "@babel/core": 7.29.7
+  # Prints a checked workflow expression as the code that runs
+  # (@grasp-os/sdk/expression-check); the version @babel/core resolves.
+  "@babel/generator": 7.29.8
+  "@types/babel__generator": 7.27.0
   "@babel/parser": 7.29.9
   "@babel/standalone": 7.29.9
   "@babel/types": 7.29.8

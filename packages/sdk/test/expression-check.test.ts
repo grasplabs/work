@@ -29,7 +29,16 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { checkExpression, expressionCode } from "../src/expression-check.ts";
+import { checkExpression } from "../src/expression-check.ts";
+
+/** The code an expression runs as. */
+const generated = (source: string): string => {
+  const checked = checkExpression(source);
+  if (!checked.ok) {
+    throw new Error(`${source} is refused: ${checked.errors[0]?.code}`);
+  }
+  return checked.code;
+};
 
 /** The code of the first error an expression fails with, or `ok`. */
 const verdict = (source: string): string => {
@@ -70,10 +79,11 @@ describe("what a workflow expression may be", () => {
     ).toStrictEqual([]);
   });
 
-  it("gives the source back as it was written", () => {
+  it("gives the source back as it was written, and the code to run", () => {
     expect(checkExpression(" input.a ")).toStrictEqual({
       ok: true,
       source: " input.a ",
+      code: '($read(input, "a"))',
     });
   });
 });
@@ -360,15 +370,55 @@ describe("splicing into the generated code", () => {
     ).toStrictEqual(Array.from({ length: 7 }, () => "expression.syntax"));
   });
 
-  it("keeps a trailing comment from swallowing the code after it", () => {
-    const checked = checkExpression("input.a // the amount");
-    expect(checked.ok && expressionCode(checked)).toBe(
-      "(\ninput.a // the amount\n)"
-    );
+  it("generates code with no comment to swallow the code after it", () => {
+    const checked = checkExpression("input.a // the amount\n");
+    expect(checked.ok && checked.code).toBe('($read(input, "a"))');
   });
 
   it("refuses a regular expression, whose work no limit of ours bounds", () => {
     expect(verdict("/(a+)+$/.test(input.name)")).toBe("expression.syntax");
+  });
+});
+
+describe("the code generated from an expression", () => {
+  it("reads and calls only through the guards", () => {
+    expect(generated("input.lines.map((line) => line.amount).at(-1)")).toBe(
+      '($call($call($read(input, "lines"), "map", [line => ($read(line, "amount"))]), "at", [-(1)]))'
+    );
+  });
+
+  it("parenthesizes every operand, so TypeScript reads no type arguments", () => {
+    // `input.a<input.b, input.c>(input.d)`, a generic call, in TypeScript.
+    expect(generated("[input.a < input.b, input.c > (input.d)]")).toBe(
+      '([($read(input, "a")) < ($read(input, "b")), ($read(input, "c")) > ($read(input, "d"))])'
+    );
+  });
+
+  it("writes every object key as a computed string: `__proto__` stays a field", () => {
+    expect(generated("{ a: input.a, 'b c': 1, 2: null, ...input.d }")).toBe(
+      '({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$read(input, "d")\n})'
+    );
+  });
+
+  it("short-circuits a `?.` chain as JavaScript does", () => {
+    expect(generated("input.a?.b.c")).toBe(
+      '($opt($read(input, "a"), $0 => $read($read($0, "b"), "c")))'
+    );
+  });
+
+  it("can't be shadowed: no root or parameter starts with `$`", () => {
+    expect(verdict("input.lines.map(($read) => $read)")).toBe(
+      "expression.callback"
+    );
+    expect(() => checkExpression("1", { roots: ["$read"] })).toThrow(
+      "plain identifier"
+    );
+  });
+
+  it("calls no method optionally: `?.()` is refused", () => {
+    expect(verdict("input.lines.map?.((line) => line)")).toBe(
+      "expression.syntax"
+    );
   });
 });
 

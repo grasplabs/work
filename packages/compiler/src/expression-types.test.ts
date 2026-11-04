@@ -68,6 +68,10 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions } = check({
       field: { source: "steps.extract.output.statments" },
       step: { source: "input.customer +\n  steps.extrct.output" },
+      // A line separator ends a line, as TypeScript counts them.
+      separated: {
+        source: `input.customer +${String.fromCodePoint(0x20_28)}  steps.extrct.output`,
+      },
       callback: {
         source: "input.lines.some((line) => line.tag.includes('x'))",
       },
@@ -83,6 +87,7 @@ describe("type-checking a workflow's expressions", () => {
     ).toStrictEqual({
       field: [{ code: "TS2551", line: 1, column: 22 }],
       step: [{ code: "TS2551", line: 2, column: 9 }],
+      separated: [{ code: "TS2551", line: 2, column: 9 }],
       callback: [{ code: "TS2551", line: 1, column: 33 }],
       method: [{ code: "TS2551", line: 1, column: 16 }],
     });
