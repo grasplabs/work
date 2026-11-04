@@ -337,6 +337,27 @@ const sealedWorkflow = async () => {
             catch: { errors: { with: { status: 422 } } },
           },
         },
+        {
+          wrapped: {
+            try: [
+              {
+                shield: {
+                  try: [
+                    {
+                      boom: {
+                        raise: {
+                          error: { type: "urn:grasp:error:boom", status: 418 },
+                        },
+                      },
+                    },
+                  ],
+                  catch: { errors: { with: { status: 418 } } },
+                },
+              },
+            ],
+            catch: { errors: { with: { status: 418 } } },
+          },
+        },
       ],
     }),
     basedOn: null,
@@ -1305,13 +1326,33 @@ try {
       await waitingRun(sealed),
       moduleOf(`return ${taskStep("stop", "{ skipped: true }")};`)
     );
-    expect({ caught, uncaught, skipped }).toStrictEqual({
+    // Its code throws rather than records: its sealed error all the same.
+    const thrown = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("stop", '(() => { throw new Error("not raised"); })()')};`
+      )
+    );
+    // A catch further in with no conditions takes it: one further out,
+    // asked in its place, is offered nothing.
+    const passedOver = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("boom", "{ output: null }")};
+} catch (thrown) {
+  return { caught: (${catchStep("wrapped", "async () => true")}) ?? null };
+}`)
+    );
+    expect({ caught, uncaught, skipped, thrown, passedOver }).toStrictEqual({
       caught: {
         ended: { outer: stopped, asked: [stopped] },
         tampered: [],
       },
       uncaught: failedWith("workflow.raised"),
       skipped: { ended: { skipped: true }, tampered: [] },
+      thrown: failedWith("workflow.raised"),
+      passedOver: { ended: { caught: null }, tampered: [], untaken: true },
     });
   });
 
@@ -1378,6 +1419,16 @@ try {
   return { code: thrown.code };
 }`)
     );
+    // Its call took effect, then its code failed: no catch takes that.
+    const afterEffect = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(`
+try {
+  ${taskStep("fetch", '(async () => { await env.mail.call("mail.send", { to: input.who, subject: "x" }); throw new Error("after"); })()')};
+} catch (thrown) {
+  return { code: thrown.code, caught: (${catchStep("guarded", "async () => true")}) ?? null };
+}`)
+    );
     const relabelled = await ranAs(
       await waitingRun(sealed),
       moduleOf(`
@@ -1387,13 +1438,18 @@ try {
   return { code: thrown.code ?? null, caught: ${catchStep("guarded", "async () => true")} };
 }`)
     );
-    expect({ swallowed, rejected, relabelled }).toStrictEqual({
+    expect({ swallowed, rejected, afterEffect, relabelled }).toStrictEqual({
       swallowed: {
         ended: { code: "workflow.call_denied", caught: true },
         tampered: [],
       },
       rejected: {
         ended: { code: "workflow.call_denied" },
+        tampered: [],
+        untaken: true,
+      },
+      afterEffect: {
+        ended: { code: "workflow.failed_after_effect", caught: null },
         tampered: [],
         untaken: true,
       },
@@ -1466,14 +1522,24 @@ return ${taskStep("fetch", '(() => { rounds += 1; if (rounds < 3) throw new Erro
       ),
       { engine: retryingEngine(wrongCatch) }
     );
+    // Its retry's code fails where its policy has nothing to decide.
+    const failing = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return ${taskStep("fetch", '(() => { throw new Error("again"); })()', ', retry: async () => { throw new Error("no choice"); }')};`
+      ),
+      { engine: retryingEngine() }
+    );
     expect({
       notTransient,
       notTransientDecided: retrySteps(asked, "decide"),
+      failing,
       forged,
       forgedRan: retrySteps(wrongCatch, "run"),
     }).toStrictEqual({
       notTransient: failedWith("expression.failed"),
       notTransientDecided: 0,
+      failing: refusedAs("A retry with no conditions has nothing to fail on."),
       forged: refusedAs(`Task "outer"'s catch can't take the failure.`),
       forgedRan: 0,
     });

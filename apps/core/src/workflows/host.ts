@@ -1455,6 +1455,7 @@ export interface RetryDecision {
  */
 export interface RetryOffer {
   readonly error: Json;
+  /** `choice` is `undefined` when its code failed to choose. */
   decided: (choice: unknown, firstFailedAt: number) => RetryDecision;
 }
 
@@ -2444,8 +2445,8 @@ export class RunHost extends RpcTarget {
         chosen = fromIsolate(await call);
       } catch (error) {
         if (!isCpuLimitKill(error)) {
-          // Rejected rather than reported: it chose nothing.
-          return { retry: false, delayMs: 0, firstFailedAt: firstAt };
+          // Rejected rather than reported: the engine decides again.
+          throw error;
         }
         this.#isolateStopped = true;
         throw toStepError(forIsolate(error));
@@ -2453,11 +2454,9 @@ export class RunHost extends RpcTarget {
       if (!this.#holds(attempt)) {
         throw attemptTimedOut();
       }
-      if (!chosen.ok) {
-        return { retry: false, delayMs: 0, firstFailedAt: firstAt };
-      }
       try {
-        return offer.decided(chosen.value, firstAt);
+        // A choice its code failed to make is the kind's to judge too.
+        return offer.decided(chosen.ok ? chosen.value : undefined, firstAt);
       } catch (error) {
         // Tampering: the decision fails for good, and with it the step.
         const refused = await settle(

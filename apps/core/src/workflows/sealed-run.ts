@@ -518,6 +518,18 @@ const isolateFailure = (error: StepError): StepError => {
   };
 };
 
+/**
+ * What a step whose call took effect fails with when anything of it fails
+ * after: never a catch's to take (resource-errors.ts), as a catch would
+ * take it as a call that didn't.
+ */
+const failedAfterEffect: StepError = {
+  name: "Error",
+  message: workflowResourceErrors.create("workflow.failed_after_effect")
+    .message,
+  code: "workflow.failed_after_effect",
+};
+
 /** What a raise task's step fails with: its sealed error, the workflow's own. */
 const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
   name: "Error",
@@ -536,6 +548,34 @@ const unconditional = (
   conditions !== undefined &&
   conditions.when === undefined &&
   conditions.exceptWhen === undefined;
+
+/**
+ * Where among `tries` (innermost first) the innermost catch is that takes
+ * `error` whatever its code says: its filter has it, and it has no
+ * conditions; -1 for none.
+ */
+const forcedOf = (
+  tries: readonly Extract<SealedTask, { kind: "try" }>[],
+  error: CaughtError
+): number =>
+  tries.findIndex(
+    (around) =>
+      matchesFilter(error, around.catch.errors) && unconditional(around.catch)
+  );
+
+/**
+ * Whether `around`'s catch retries round `round` whatever its code says:
+ * its policy has rounds left and no conditions.
+ */
+const forcedRetry = (
+  around: Extract<SealedTask, { kind: "try" }> | undefined,
+  round: number
+): boolean => {
+  const policy = around?.catch.retry;
+  return (
+    policy !== undefined && round < policy.attempts && unconditional(policy)
+  );
+};
 
 /**
  * The backoff before round `round + 1` of `policy`, its jitter drawn here.
@@ -562,6 +602,24 @@ const backoffOf = (
 };
 
 /**
+ * Round `round + 1` of `policy` after its backoff, from `firstFailedAt`:
+ * none past its duration limit, nor a year.
+ */
+const scheduled = (
+  policy: NonNullable<Extract<SealedTask, { kind: "try" }>["catch"]["retry"]>,
+  round: number,
+  firstFailedAt: number
+): RetryDecision => {
+  const delayMs = backoffOf(policy, round);
+  const limited =
+    policy.limitMs !== undefined &&
+    Date.now() + delayMs - firstFailedAt > policy.limitMs;
+  return limited || delayMs > maxRetryDelayMs
+    ? { retry: false, delayMs: 0, firstFailedAt }
+    : { retry: true, delayMs, firstFailedAt };
+};
+
+/**
  * What the isolate's retry `choice` of round `round`, of a task in the
  * lists of `tries` (innermost first), decides. It names the try whose
  * catch takes `error` (decision 2: its `when`), which must be one of
@@ -580,19 +638,20 @@ export const retryDecided = (
   firstFailedAt: number
 ): RetryDecision => {
   const stop = { retry: false, delayMs: 0, firstFailedAt };
+  const forced = forcedOf(tries, error);
+  if (choice === undefined) {
+    // Its code failed to choose (an expression of a `when` that failed):
+    // no retry, unless a catch and its policy with no conditions had
+    // nothing for it to decide.
+    if (forcedRetry(tries[forced], round)) {
+      throw tampering("A retry with no conditions has nothing to fail on.");
+    }
+    return stop;
+  }
   const chosen = retryChoiceSchema.safeParse(choice);
   if (!chosen.success) {
     throw tampering("A retry's choice names a catch and whether it retries.");
   }
-  const takes = (index: number): boolean => {
-    const around = tries[index];
-    return (
-      around !== undefined &&
-      matchesFilter(error, around.catch.errors) &&
-      unconditional(around.catch)
-    );
-  };
-  const forced = tries.findIndex((_, index) => takes(index));
   const by = chosen.data?.by;
   const at = tries.findIndex(({ id }) => id === by);
   const around = tries[at];
@@ -611,23 +670,13 @@ export const retryDecided = (
   ) {
     throw tampering(`Task "${by ?? ""}"'s catch can't take the failure.`);
   }
+  if (!chosen.data.retry && forcedRetry(around, round)) {
+    throw tampering(`Task "${around.id}"'s catch retries the failure.`);
+  }
   const policy = around.catch.retry;
-  if (policy === undefined || round >= policy.attempts) {
-    return stop;
-  }
-  if (!chosen.data.retry) {
-    if (unconditional(policy)) {
-      throw tampering(`Task "${around.id}"'s catch retries the failure.`);
-    }
-    return stop;
-  }
-  const delayMs = backoffOf(policy, round);
-  const limited =
-    policy.limitMs !== undefined &&
-    Date.now() + delayMs - firstFailedAt > policy.limitMs;
-  return limited || delayMs > maxRetryDelayMs
-    ? stop
-    : { retry: true, delayMs, firstFailedAt };
+  return chosen.data.retry && policy !== undefined && round < policy.attempts
+    ? scheduled(policy, round, firstFailedAt)
+    : stop;
 };
 
 /**
@@ -771,6 +820,8 @@ class SealedRun implements SealedRunKind {
    * reports or swallows (`attemptSettled`).
    */
   readonly #hostFailures = new WeakMap<StepAttempt, StepError>();
+  /** The attempts a call of which took effect: it answered. */
+  readonly #effected = new WeakSet<StepAttempt>();
   /** The error each catch step's attempt was offered (`caughtOffer`). */
   readonly #offers = new WeakMap<StepAttempt, CaughtError>();
   /**
@@ -935,6 +986,20 @@ class SealedRun implements SealedRunKind {
     ) {
       return undefined;
     }
+    // A catch further in with no conditions takes it, whatever the code
+    // asks of this one.
+    const { error } = pending;
+    const takenFurtherIn = this.run.build.tasks.some(
+      (inner) =>
+        inner.kind === "try" &&
+        inner.pointer.startsWith(`${task.pointer}/try/`) &&
+        error.instance.startsWith(`${inner.pointer}/try/`) &&
+        matchesFilter(error, inner.catch.errors) &&
+        unconditional(inner.catch)
+    );
+    if (takenFurtherIn) {
+      return undefined;
+    }
     this.#offers.set(attempt, pending.error);
     return { ...pending.error };
   }
@@ -955,9 +1020,29 @@ class SealedRun implements SealedRunKind {
       return { ok: false, error: made };
     }
     if (!result.ok) {
-      return { ok: false, error: isolateFailure(result.error) };
+      return { ok: false, error: this.#reportedFailure(attempt, result.error) };
     }
     return await this.#recordChecked(attempt, result.value);
+  }
+
+  /**
+   * A failure only `attempt`'s code reports, `error`, as the host takes
+   * it: once a call of it took effect, `workflow.failed_after_effect`,
+   * which no catch takes, as a catch would take it as a call that didn't;
+   * of a raise's step, its sealed error, unless its `if` failed as an
+   * expression; otherwise as `isolateFailure` maps it.
+   */
+  #reportedFailure(attempt: StepAttempt, error: StepError): StepError {
+    if (this.#effected.has(attempt)) {
+      return failedAfterEffect;
+    }
+    const reported = isolateFailure(error);
+    const { task, kind } = this.#steps.get(attempt.step) ?? {};
+    return kind === "task" &&
+      task?.kind === "raise" &&
+      expressionErrors.codeOf(reported) === undefined
+      ? raisedBy(task)
+      : reported;
   }
 
   /**
@@ -1110,6 +1195,14 @@ class SealedRun implements SealedRunKind {
     return settled;
   }
 
+  /** `#call`'s answer, noted as an effect of `attempt` when it answered. */
+  #answered(attempt: StepAttempt, settled: Settled<unknown>): Settled<unknown> {
+    if (settled.ok) {
+      this.#effected.add(attempt);
+    }
+    return this.#noted(attempt, settled);
+  }
+
   readonly stepCompleted = nothingToRecord;
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
@@ -1125,7 +1218,7 @@ class SealedRun implements SealedRunKind {
       });
     const calls: AttemptCalls = {
       callConnection: async (binding, call) =>
-        this.#noted(
+        this.#answered(
           attempt,
           await this.#call(attempt, admission, binding, call)
         ),

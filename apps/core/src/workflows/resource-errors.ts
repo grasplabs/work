@@ -29,7 +29,9 @@ import type { StepError } from "./code.ts";
 // - A module relabelling a failure. What a step failed with is what the
 //   host answered one of its calls with (resource-host.ts, `hostError`),
 //   never what the isolate reports; one that failed without the host
-//   failing anything of it is `workflow.invalid`.
+//   failing anything of it is `workflow.invalid`. (A sealed run on the
+//   run host, whose isolate evaluates expressions, maps those failures
+//   otherwise: sealed-run.ts, `isolateFailure`.)
 // - A caught error carrying what the run read. A host error's title is
 //   the platform's own words for its code, or a fixed one for its type;
 //   it has no detail. The message a step failed with (which can hold
