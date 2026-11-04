@@ -48,6 +48,7 @@ import {
   ranAs,
   retryingEngine,
   reviewRun,
+  sealedRunOf,
   sealedWorkflow,
   standardErrors,
   waitingRun,
@@ -1489,6 +1490,13 @@ const keysOf = async (...types: string[]): Promise<string[]> =>
     types.map(async (type) => await eventTypeKey("replies", type))
   );
 
+/** The steps task `id` has in `run`'s build, its table `seal`ed in. */
+const sealedSteps = (
+  run: HostedSealedRun,
+  seal: (loaded: HostedSealedRun) => HostedSealedRun,
+  id: string
+) => seal(run).build.tasks.find((task) => task.id === id)?.steps;
+
 /** Sends nothing: the wait's deadline passes. */
 const nothingSent = async (): Promise<undefined> => {
   await Promise.resolve();
@@ -1634,6 +1642,73 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
         { step: engineStep("each", "task@1"), types: await keysOf(received) },
       ],
       sent: 2,
+    });
+  });
+
+  it("skips a wait whose own `if` doesn't hold, at the top level and in an item, and the next item's wait takes its event", async () => {
+    const skipped = await generated(
+      [replyWait({ if: { $expr: 'input.who !== "Ada"' } })],
+      {
+        schema: objectOf({ skipped: { type: "boolean" } }),
+        value: { skipped: { $expr: "steps.reply.output === null" } },
+      },
+      replies
+    );
+    const inItems = await generated(
+      [
+        {
+          id: "rounds",
+          type: "forEach",
+          items: { $expr: '["skip", "take"]' },
+          do: [
+            replyWait({
+              id: "each",
+              if: { $expr: 'item === "take"' },
+              event: { from: "replies", type: received },
+            }),
+          ],
+        },
+      ],
+      undefined,
+      replies
+    );
+    const topRun = await waitingRun(listening);
+    const itemRun = await waitingRun(listening);
+    const asked: Asked = [];
+    const sent: string[] = [];
+    const top = await ranAs(topRun, skipped.source, {
+      sealed: skipped.sealed,
+      engine: listeningEngine(topRun, nothingSent, asked),
+    });
+    const items = await ranAs(itemRun, inItems.source, {
+      sealed: inItems.sealed,
+      engine: listeningEngine(
+        itemRun,
+        async () => {
+          const event = await sendTo(listening, itemRun, received, "ada");
+          sent.push(event.id);
+          return event;
+        },
+        asked
+      ),
+    });
+    const loaded = await sealedRunOf(topRun);
+    expect({
+      top,
+      items,
+      steps: {
+        reply: sealedSteps(loaded, skipped.sealed, "reply"),
+        each: sealedSteps(loaded, inItems.sealed, "each"),
+      },
+      // Only the second item's wait reached the engine, and took its event.
+      asked: asked.map(({ step }) => step),
+      sent: sent.length,
+    }).toStrictEqual({
+      top: { ended: { skipped: true }, tampered: [] },
+      items: { ended: null, tampered: [] },
+      steps: { reply: ["enter", "task"], each: ["enter", "task"] },
+      asked: [engineStep("each", "task@1")],
+      sent: 1,
     });
   });
 

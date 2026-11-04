@@ -80,6 +80,7 @@ export type ProblemCode =
   | "workflow.wait_kind"
   | "workflow.invalid"
   | "workflow.duplicate_id"
+  | "workflow.duplicate"
   | "workflow.too_many_steps"
   | "workflow.lists_too_deep"
   | "workflow.unknown_binding"
@@ -347,6 +348,13 @@ const schemaProblem = (error: SchemaError): Problem => {
       message:
         "A wait waits for a time span, until a deadline, or for an event.",
       remedy: "Give it one of `for`, `until` and `event`.",
+    });
+  }
+  if (keyword === "uniqueItems") {
+    return as({
+      code: "workflow.duplicate",
+      message: "It names the same type twice.",
+      remedy: "Name each type once.",
     });
   }
   if (keyword === "format") {

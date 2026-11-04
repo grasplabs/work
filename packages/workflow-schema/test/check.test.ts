@@ -448,7 +448,7 @@ describe("checking a workflow", () => {
       badAlias: { "/steps/5/event/from": "workflow.invalid_alias" },
       noType: { "/steps/5/event": "workflow.missing_property" },
       noTypes: { "/steps/5/event/type": "workflow.out_of_bounds" },
-      twice: { "/steps/5/event/type": "workflow.invalid" },
+      twice: { "/steps/5/event/type": "workflow.duplicate" },
       tooMany: { "/steps/5/event/type": "workflow.out_of_bounds" },
       match: { "/steps/5/event/match": "workflow.unknown_property" },
       alsoFor: { "/steps/5": "workflow.wait_kind" },

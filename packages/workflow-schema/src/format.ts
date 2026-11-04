@@ -1,3 +1,4 @@
+import type { EventWait } from "@grasp-os/sdk/workflow";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
@@ -227,29 +228,21 @@ export interface EventFilter {
 }
 
 /**
- * An event wait's output: the first event of its filter sent to the run
- * (once the run started, or while it waited), as the host minted it, or
- * `{ timedOut: true }` when none came within its timeout. A timeout is an
- * outcome a later step reads (`steps.<id>.output.timedOut`), never a
- * failure; the event's data is `steps.<id>.output.event.data`. A wait the
- * host refuses (`workflow.event_denied`, `permission.person_inactive`)
- * fails the run, and no catch takes it: the host checks its binding again
- * on every replay, so a caught refusal would only come back.
+ * An event wait's output, as the SDK's `step.listen` answers it: the
+ * first event of its filter sent to the run (once the run started, or
+ * while it waited), as the host minted it, or `{ timedOut: true }` when
+ * none came within its timeout. A timeout is an outcome a later step reads
+ * (`steps.<id>.output.timedOut`), never a failure; the event's data is
+ * `steps.<id>.output.event.data`.
+ *
+ * Any failure of an event wait fails the run, and no `try` catches it:
+ * its binding revoked (`workflow.event_denied`), the run's person no
+ * longer active (`permission.person_inactive`), or a test run's wait
+ * limit (`workflow.candidate_wait_limit`). The host checks the binding
+ * again on every replay, so a catch would let a replay after a revocation
+ * take a path the run never took.
  */
-export type EventWaitOutput =
-  | {
-      readonly timedOut: false;
-      readonly event: {
-        readonly id: string;
-        readonly type: string;
-        readonly source: string;
-        readonly subject?: string;
-        /** When the run accepted it, ISO 8601. */
-        readonly time: string;
-        readonly data: Json;
-      };
-    }
-  | { readonly timedOut: true };
+export type EventWaitOutput = EventWait;
 
 /**
  * Waits: for a time span, until a deadline (ms since the epoch), or for an
@@ -400,7 +393,7 @@ export const forEachDescription = `Runs \`do\` for each of \`items\`, one item a
 
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
-  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. A wait refused (its binding revoked, or the run's person no longer active) fails the run: no `try` catches it, as the run checks its binding again on every replay.";
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,
