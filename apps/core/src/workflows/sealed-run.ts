@@ -115,8 +115,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (`generatedForRunHost`): until GRA-1514, every stored build's.
 // - A step the build doesn't have. Each engine step's name is one of the
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
-//   in no loop, `<task>:<step>@<i>/<j>…` inside items (`stepNameOf`),
-//   `workflow:input` and `workflow:output` where the workflow has them,
+//   in no loop, `<task>:<step>@<i>/<j>…` inside items (`stepNameOf`), a
+//   decision task's parts as the SDK's `#ask`, `#asked` and `#answer`
+//   after either, `workflow:input` and `workflow:output` where the workflow has them,
 //   and the SDK's `$params`. Any other name, one in another encoding of
 //   the same key included, or a step run otherwise than it runs (a task's
 //   step as a `do`, a sleeping task's own as its sleep, a try's catch as a

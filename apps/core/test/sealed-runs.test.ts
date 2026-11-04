@@ -959,6 +959,10 @@ const echoingMail = async (id: string, echo: string): Promise<void> => {
   });
 };
 
+/** Engine step `name` with key `key`, as the SDK names it. */
+const engineStep = (name: string, key: string): string =>
+  `${name}:${encodeURIComponent(key)}`;
+
 /** A refusal, saying `why`, that ends the run as tampering. */
 const refusedAs = (why: string) => ({
   ended: "workflow.invalid",
@@ -1974,7 +1978,8 @@ const decisionAnswers = v.union(v.null(), v.object({ comment: v.string() }));
  * A workflow of `by`'s, published and approved by `admin`: after an hour's
  * wait, task `review` asks its input's `reviewer` to approve its input's
  * invoice through decision binding `approval`, whose deciders are
- * `reviewer` and anyone with the builder role.
+ * `reviewer` and anyone with the builder role. Then loop `batch` asks
+ * the same of each of its invoices (`sign`), one after another.
  */
 const decisionWorkflow = async () => {
   const admin = await person("admin");
@@ -2041,6 +2046,25 @@ const decisionWorkflow = async () => {
               input: { invoice: "${ $workflow.input.invoice }" },
             },
             timeout: { after: { days: 7 } },
+          },
+        },
+        {
+          batch: {
+            for: { each: "inv", at: "invAt", in: '${ ["INV-1", "INV-2"] }' },
+            do: [
+              {
+                sign: {
+                  call: "grasp.decision",
+                  with: {
+                    binding: "approval",
+                    recipients: ["${ $workflow.input.reviewer }"],
+                    prompt: "Approve this one",
+                    input: { invoice: "${ $inv }" },
+                  },
+                  timeout: { after: { days: 7 } },
+                },
+              },
+            ],
           },
         },
       ],
@@ -2204,6 +2228,16 @@ const refusedPastTheSdk = (step: string) => ({
   untaken: true,
   refused: [{ step, errorCode: "workflow.invalid" }],
 });
+
+/**
+ * A run of loop `batch` over two invoices whose code is `body`, with
+ * `ask(at)` and `decide(at)` of task `sign` in item `at`.
+ */
+const signed = (body: string): string => `
+const { items } = await step.do("batch", { key: "enter", description: "Its items" }, async () => ({ items: ["INV-1", "INV-2"] }));
+const ask = (at) => step.do("sign", { key: "enter@" + at, description: "Its ask" }, async () => ({ recipients: [input.reviewer], prompt: "Approve this one", input: { invoice: items[at] } }));
+const decide = (at) => step.decision("sign", { key: "task@" + at, description: "Approve this one", from: input.reviewer, timeout: "365 days", ask: async () => undefined });
+${body}`;
 
 describe("a sealed run's decisions on the run host", () => {
   let reviewed: Reviewed;
@@ -2561,11 +2595,79 @@ describe("a sealed run's decisions on the run host", () => {
       asked: 1,
     });
   });
-});
 
-/** Engine step `name` with key `key`, as the SDK names it. */
-const engineStep = (name: string, key: string): string =>
-  `${name}:${encodeURIComponent(key)}`;
+  it("opens a decision in each item of a loop, each from its own item's ask", async () => {
+    const { reviewer } = reviewed;
+    // Each wait answers the decision still open: the first approved, the
+    // second refused.
+    const answering = (runId: string): Engine => {
+      const engine = newerEngine();
+      return {
+        leaseOf: engine.leaseOf,
+        step: {
+          ...engine.step,
+          waitForEvent: async () => {
+            const decisions = await decisionsOf(runId);
+            const open = decisions.find(({ status }) => status === "open");
+            if (open === undefined) {
+              throw new Error("No decision to wait for");
+            }
+            await answered(reviewer, open.id, {
+              approved: decisions.length === 1,
+            });
+            return { payload: null };
+          },
+        },
+      };
+    };
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const ran = await ranAs(
+      runId,
+      reviewModuleOf(
+        signed(
+          "const approved = []; for (let at = 0; at < items.length; at += 1) { await ask(at); approved.push((await decide(at)).approved); } return approved;"
+        )
+      ),
+      { engine: answering(runId) }
+    );
+    const decisions = await decisionsOf(runId);
+    // Item 1 opens its decision without its own ask: item 0's isn't its.
+    const otherRunId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const otherAsk = await ranAs(
+      otherRunId,
+      reviewModuleOf(
+        signed("await ask(0); await decide(0); return await decide(1);")
+      ),
+      { engine: answering(otherRunId) }
+    );
+    expect({
+      ran,
+      decisions: decisions.map(({ step, input, status }) => ({
+        step,
+        input: z.json().parse(JSON.parse(input)),
+        status,
+      })),
+      otherAsk,
+    }).toStrictEqual({
+      ran: { ended: [true, false], tampered: [] },
+      decisions: [
+        {
+          step: engineStep("sign", "task@0"),
+          input: { invoice: "INV-1" },
+          status: "approved",
+        },
+        {
+          step: engineStep("sign", "task@1"),
+          input: { invoice: "INV-2" },
+          status: "rejected",
+        },
+      ],
+      otherAsk: refusedAs(
+        'Task "sign" opens its decision as its enter step recorded it.'
+      ),
+    });
+  });
+});
 
 /** Loop `rows`'s enter step, recording `items`, as `items`. */
 const enterRows = (items: string): string =>
