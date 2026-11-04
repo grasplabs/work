@@ -259,8 +259,11 @@ const defaults = {
    * cost the App no CPU time.
    */
   maxSessionMs: 15 * 60_000,
-  /** The most CPU time a session may ask for: a workflow step's 30 s. */
-  maxCpuMs: 30_000,
+  /**
+   * The most CPU time a session may ask for: a compiler call's 60 s
+   * (`compilerTaskCpuMs`), the most any asks; a workflow step asks 30 s.
+   */
+  maxCpuMs: 60_000,
   maxWaitMs: 5000,
   maxWaiting: 32,
   // An App's source is at most a million characters (`appLimits`), built

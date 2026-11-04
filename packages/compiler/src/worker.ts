@@ -87,19 +87,16 @@ import type {
   Handed,
   IncrementalBuild,
   Increments,
+  ModuleRecord,
 } from "./increments.ts";
-import type { CodeFolder } from "./inputs.ts";
 import {
   appCodeLimitErrors,
   buildFiles,
-  componentsFolder,
   declarationFile,
   limitErrors,
   computeModuleErrors,
   openWorkflowErrors,
   screenFile,
-  strayFileMessage,
-  strayFilesIn,
   workflowFiles,
   workflowsFolder,
 } from "./inputs.ts";
@@ -118,6 +115,8 @@ import { lint } from "./lint.ts";
 import { startEsbuild } from "./packages/build.ts";
 import { previewEntries } from "./preview-entry.ts";
 import type { Bundle } from "./preview-entry.ts";
+import { problem, screenRefusals, strayProblems } from "./refusals.ts";
+import type { Location } from "./refusals.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -166,12 +165,6 @@ const framedLine = /^> *(?<line>\d+) \|/mu;
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-interface Location {
-  file?: string;
-  line?: number;
-  column?: number;
-}
-
 /** Where Babel says an error is: its syntax errors carry `loc`, columns from 0. */
 const locationOf = (error: unknown): Location => {
   if (typeof error !== "object" || error === null || !("loc" in error)) {
@@ -217,47 +210,6 @@ const compileMessage = (message: string): string =>
   message.includes("Handle Import expressions")
     ? "import() can't be used inside a component or hook: import the module at the top of the file."
     : message;
-
-/** An error, which fails the build. */
-const problem = (
-  rule: string,
-  message: string,
-  at: Location = {}
-): Diagnostic => ({ ...at, rule, severity: "error", message });
-
-/** Two App files that would share a module name, e.g. `a.ts` and `a.tsx`. */
-const nameClashes = (paths: string[]): Diagnostic[] => {
-  const byName = new Map<string, string>();
-  const clashes: Diagnostic[] = [];
-  for (const path of paths) {
-    const other = byName.get(appModuleName(path));
-    if (other === undefined) {
-      byName.set(appModuleName(path), path);
-    } else {
-      clashes.push(
-        problem("file-names", `Rename it or ${other}; they can't both exist.`, {
-          file: path,
-        })
-      );
-    }
-  }
-  return clashes;
-};
-
-/**
- * What `files` hold in `folders` that isn't their code, each refused by
- * name under `rule`: nothing there is ever silently left out of a build.
- */
-const strayProblems = (
-  files: Readonly<Record<string, string>>,
-  folders: readonly CodeFolder[],
-  rule: string
-): Diagnostic[] =>
-  folders.flatMap((folder) =>
-    strayFilesIn(files, folder).map((file) =>
-      problem(rule, strayFileMessage(file, folder), { file })
-    )
-  );
 
 /**
  * An error's message without the file Babel names in it (as `/<path>`):
@@ -388,6 +340,38 @@ const declarationImportErrors = (
           ),
         ];
   });
+};
+
+/**
+ * The transform of the screen source `path`, as a build keeps it, or why
+ * it can't be (`compileFile`), in a build whose modules are `known` and
+ * whose types may name `typeFiles`.
+ */
+const transformSource = (
+  path: string,
+  source: string,
+  {
+    known,
+    typeFiles,
+  }: { known: ReadonlySet<string>; typeFiles: ReadonlySet<string> },
+  flags: { unparsed: Set<string>; untyped: Set<string> },
+  preview: boolean
+): { record: ModuleRecord } | { errors: Diagnostic[] } => {
+  const result = compileFile(path, source, known, typeFiles, flags, preview);
+  if (!("code" in result)) {
+    return result;
+  }
+  return {
+    record: {
+      path,
+      code: result.code,
+      app: [...result.imported.app],
+      kit: [...result.imported.kit],
+      // The references' classes are the host's, never a screen's.
+      candidates:
+        path === screenReferences.path ? [] : extractCandidates(source),
+    },
+  };
 };
 
 /** These modules and every module they import, through `importsOf`. */
@@ -614,29 +598,14 @@ export const buildScreensIncrementally = async (
   if (tooMuch.length > 0) {
     return done({ ok: false, diagnostics: tooMuch });
   }
-  const strays = strayProblems(app, [componentsFolder], "screens");
-  if (strays.length > 0) {
-    return done({ ok: false, diagnostics: strays });
+  const refused = screenRefusals(app);
+  if (refused.length > 0) {
+    return done({ ok: false, diagnostics: refused });
   }
   // Only screens, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
   const { sources, known: paths, typeFiles: typed } = screenSources(app);
-  if (!paths.some((path) => screenFile.test(path))) {
-    return done({
-      ok: false,
-      diagnostics: [
-        problem(
-          "screens",
-          "The App has no screens: add one as screens/<name>.tsx."
-        ),
-      ],
-    });
-  }
-  const clashes = nameClashes(paths);
-  if (clashes.length > 0) {
-    return done({ ok: false, diagnostics: clashes });
-  }
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
   const typeFiles = new Set(typed);
@@ -664,40 +633,31 @@ export const buildScreensIncrementally = async (
         ] as const
     )
   );
+  const take = (record: ModuleRecord): void => {
+    const name = appModuleName(record.path);
+    modules[name] = record.code;
+    imports.set(name, { app: new Set(record.app), kit: new Set(record.kit) });
+    candidates.push(...record.candidates);
+  };
   for (const [path, source, key] of keyed) {
-    const name = appModuleName(path);
     // A transform is reused only under the key this build works out for
     // it: one handed over under another, or shaped otherwise, is not.
     const kept = moduleRecordOf(ownRecord(reuse.modules, key), path);
     if (kept !== undefined) {
-      modules[name] = kept.code;
-      imports.set(name, { app: new Set(kept.app), kit: new Set(kept.kit) });
-      candidates.push(...kept.candidates);
+      take(kept);
       metrics.reused += 1;
       continue;
     }
-    const result = compileFile(
+    const result = transformSource(
       path,
       source,
-      known,
-      typeFiles,
+      { known, typeFiles },
       { unparsed, untyped },
       preview
     );
-    if ("code" in result) {
-      // The references' classes are the host's, never a screen's.
-      const own =
-        path === screenReferences.path ? [] : extractCandidates(source);
-      modules[name] = result.code;
-      imports.set(name, result.imported);
-      candidates.push(...own);
-      fresh.modules[key] = {
-        path,
-        code: result.code,
-        app: [...result.imported.app],
-        kit: [...result.imported.kit],
-        candidates: own,
-      };
+    if ("record" in result) {
+      take(result.record);
+      fresh.modules[key] = result.record;
       metrics.compiled += 1;
     } else {
       errors.push(...result.errors);
@@ -764,6 +724,44 @@ export const buildScreensIncrementally = async (
         }
       : {}),
   });
+};
+
+/**
+ * Transforms part of a screens build's sources (`batch`), in a build whose
+ * modules are `known` and whose types may name `typeFiles`: each as
+ * `buildScreensIncrementally` would, under the key it would work out for
+ * it, so the build reuses it. What a first build of a large App does a
+ * part at a time, each part one call within a call's CPU time (core's
+ * screens.ts). Only `known` sources are transformed, whatever else is
+ * passed. A file that doesn't compile is left out: the build compiles it
+ * again and says why, with every gate.
+ */
+const transformScreens = async (
+  batch: Record<string, string>,
+  { known, typeFiles }: { known: string[]; typeFiles: string[] },
+  preview: boolean
+): Promise<Record<string, ModuleRecord>> => {
+  const sets = { known: new Set(known), typeFiles: new Set(typeFiles) };
+  const flags = { unparsed: new Set<string>(), untyped: new Set<string>() };
+  const records = await Promise.all(
+    Object.entries(batch)
+      .filter(([path]) => sets.known.has(path))
+      .map(async ([path, source]) => {
+        const result = transformSource(path, source, sets, flags, preview);
+        if (!("record" in result)) {
+          return [];
+        }
+        const key = await moduleKey({
+          path,
+          source,
+          known,
+          typeFiles,
+          preview,
+        });
+        return [[key, result.record] as const];
+      })
+  );
+  return Object.fromEntries(records.flat());
 };
 
 /** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
@@ -1546,6 +1544,25 @@ export default class AppCompiler extends WorkerEntrypoint {
       ...incrementalTargets[known],
       reuse: incrementsOf(reuse),
     });
+  }
+
+  /**
+   * Transforms part of a screens build's sources (`target`: `screens`, or
+   * a preview's) as `buildIncrementally` would (`transformScreens`): the
+   * records it makes, by key, for core to keep and the build to reuse.
+   */
+  async transform(
+    target: IncrementalTarget,
+    batch: Record<string, string>,
+    paths: { known: string[]; typeFiles: string[] }
+  ): Promise<Record<string, ModuleRecord>> {
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
+    const known = knownTarget(incrementalTargets, target, "transform");
+    return await transformScreens(
+      batch,
+      paths,
+      incrementalTargets[known].preview
+    );
   }
 
   /**

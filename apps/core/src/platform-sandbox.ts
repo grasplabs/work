@@ -7,6 +7,7 @@ import {
   startAppCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 
 import {
@@ -51,13 +52,14 @@ import {
 //   a full cgroup sends to any process) is never kept as the input's
 //   verdict. A process that ended itself (V8 at its heap limit) is
 //   `memory`: the supervisor tells the two apart by how it died.
-// - On Cloudflare every App's screens compile in one warm, shared
-//   isolate, whose limits are theirs together: one App's heavy builds
-//   could get another's screen kept as failed. A stop there is tried once
-//   more in a fresh isolate of the build's own, and only that is kept.
+// - On Cloudflare an App's builds share one warm isolate (one per App and
+//   release, so another App's builds never share its limits), and one of
+//   its heavy builds could get another of its screens kept as failed. A
+//   stop there is tried once more in a fresh isolate of the build's own,
+//   and only that is kept.
 // - The input is made to stop the same way on Cloudflare and on-prem but
 //   is judged differently, so one path recompiles a screen on every view
-//   at 20 s of CPU, or refuses a package the other accepts. Both run
+//   at 60 s of CPU, or refuses a package the other accepts. Both run
 //   through one runner (`platformRunner`), whose stops map to the same
 //   verdicts.
 // - One shared build multiplies under load: every request waiting on one
@@ -102,7 +104,7 @@ import {
 // pool (App code's too), and tie the supervisor to the release's build
 // output. Handing them over on a local socket costs milliseconds; loading
 // the compiler, about a second per build that isn't cached. Cloudflare
-// keeps the compiler warm in its Loader (`startAppCompiler`).
+// keeps each App's compiler warm in its Loader (`startAppCompiler`).
 
 /** What builds run as on the sandbox host: one owner of their own. */
 export const builderOwner = "platform:builder";
@@ -263,14 +265,14 @@ export type PlatformProgram = "compiler" | "package-builder";
 
 /**
  * The wall-clock time a call of each program may take on the sandbox host,
- * loading it included: past its CPU time (20 s and 30 s), which bounds
- * the work. The compiler's is past the build wait too (screens.ts), so a
- * late build still lands in the cache; the builder's takes in the reads
- * of its tarballs and the writes of its artifact.
+ * loading it included: past its CPU time (`compilerTaskCpuMs`, 60 s, for
+ * both), which bounds the work. The compiler's is past the build wait too
+ * (screens.ts), so a late build still lands in the cache; the builder's
+ * takes in the reads of its tarballs and the writes of its artifact.
  */
 const programWallMs: Record<PlatformProgram, number> = {
-  compiler: 30_000,
-  "package-builder": 60_000,
+  compiler: 75_000,
+  "package-builder": 90_000,
 };
 
 /** What a runner reads from core's env. */
@@ -294,12 +296,14 @@ export interface PlatformRunner {
   /**
    * What `method` of `program` answers for `args`: values, and functions
    * the program may call back. Throws as {@link runPlatformCode} does,
-   * wherever it runs.
+   * wherever it runs. With `once`, a stop is thrown as it is, never tried
+   * again in a fresh isolate: for a caller whose own retry it is.
    */
   readonly run: (
     program: PlatformProgram,
     method: string,
-    args: readonly unknown[]
+    args: readonly unknown[],
+    options?: { readonly once?: boolean }
   ) => Promise<unknown>;
   /**
    * The longest one call of `program` may take here, from reading its code
@@ -321,30 +325,31 @@ const loaderCall = async (
   await boundedInCore(async () => await callStub(entrypoint, method, args));
 
 /**
- * The runner in core's own Loader. The compiler runs warm in its named
- * isolate, which every App's builds share, so its limits are theirs
- * together: one heavy build beside another can stop both. A stop there is
- * tried once more in a fresh isolate of the build's own
- * (`loadAppCompiler`), whose stop is the build's alone, and only that
- * is answered: a build is never kept as failed for what another did. The
- * builder runs in a fresh isolate per runner, so nothing one App's
- * packages leave in memory is there for the next, and its stops are its
- * own already.
+ * The runner in core's own Loader. The compiler runs warm in an isolate
+ * named for `whose` builds (`startAppCompiler`), so no other App's builds
+ * share its limits; the App's own builds do, and one heavy build beside
+ * another can stop both. A stop there is tried once more in a fresh
+ * isolate of the build's own (`loadAppCompiler`), whose stop is the
+ * build's alone, and only that is answered: a build is never kept as
+ * failed for what another did. The builder runs in a fresh isolate per
+ * runner, so nothing one App's packages leave in memory is there for the
+ * next, and its stops are its own already.
  */
-const inCore = (env: PlatformEnv): PlatformRunner => {
+const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   let builder: ReturnType<typeof startPackageBuilder> | undefined;
   const compile = async (
     method: string,
-    args: readonly unknown[]
+    args: readonly unknown[],
+    once: boolean
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startAppCompiler(quietLoader(env.LOADER), env.ASSETS),
+        startAppCompiler(quietLoader(env.LOADER), env.ASSETS, whose),
         method,
         args
       );
     } catch (error) {
-      if (!(error instanceof PlatformBoundError)) {
+      if (once || !(error instanceof PlatformBoundError)) {
         throw error;
       }
       return await loaderCall(
@@ -356,18 +361,24 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
   };
   return {
     inCore: true,
-    run: async (program, method, args) => {
+    run: async (program, method, args, options) => {
       if (program === "compiler") {
-        return await compile(method, args);
+        return await compile(method, args, options?.once === true);
       }
       builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);
       return await loaderCall(await builder, method, args);
     },
     // No wall-clock bound in core: the runtime bounds each call's CPU.
-    // Two calls at most (a compile tried again), each as long as one may
-    // take on the sandbox host.
+    // Two calls at most (a compile tried again). The compiler's is bound
+    // by its CPU time alone, as it computes and waits on nothing; the
+    // builder's as long as one may take on the sandbox host, as it waits
+    // on reads of its tarballs.
     callMs: (program) =>
-      2 * (platformCodeReadMs + sessionCallMs(programWallMs[program])),
+      2 *
+      (platformCodeReadMs +
+        (program === "compiler"
+          ? platformLimits.compilerTaskCpuMs
+          : sessionCallMs(programWallMs[program]))),
   };
 };
 
@@ -495,5 +506,5 @@ export const platformRunner = (
   whose: string
 ): PlatformRunner => {
   const host = sessionHost(env);
-  return host === undefined ? inCore(env) : onHost(env, host, whose);
+  return host === undefined ? inCore(env, whose) : onHost(env, host, whose);
 };

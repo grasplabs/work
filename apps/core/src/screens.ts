@@ -15,7 +15,11 @@ import {
   limitErrors,
   computeModuleErrors,
   computePackagesFile,
+  moduleRecordOf,
   openWorkflowErrors,
+  screenIncrementKeys,
+  screenRefusals,
+  screenSources,
   workflowBindingsPath,
   workflowBuildFiles,
 } from "@grasp-os/compiler";
@@ -27,6 +31,7 @@ import type {
   InspectTarget,
   ComputeModulesBuild,
   IncrementalBuild,
+  Increments,
   OpenWorkflowBuild,
   ScreenBuild,
   WorkflowBuild,
@@ -65,6 +70,7 @@ import {
   keepIncrements,
   readIncrements,
 } from "./module-cache.ts";
+import type { IncrementKeys } from "./module-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
@@ -152,7 +158,8 @@ interface FailedBuild {
 
 /** What building reads from core's env. */
 export type BuildEnv = PlatformEnv &
-  CacheEnv & {
+  CacheEnv &
+  Pick<Env, "BUILD_BATCH_CPU_MS"> & {
     /** Where builds are cached: core's R2 bucket, in the EU. */
     FILES: Pick<R2Bucket, "get" | "put">;
   };
@@ -327,26 +334,213 @@ const incrementalShaped = (
   value.metrics !== null;
 
 /**
+ * The CPU time, in ms, Babel with the React Compiler takes for one
+ * character of screen source on Cloudflare, at most: measured on a laptop
+ * (2026-11-04) at 5–9 µs (a 60-screen App's 820,000 characters in 4.2–6.9
+ * s), and Cloudflare runs 2–5× slower than a laptop.
+ */
+const transformCpuMsPerCharacter = 0.045;
+
+/**
+ * The CPU time on Cloudflare a batch of transforms is sized to: a few
+ * seconds, so a first build answers in steps and a stop costs little, far
+ * below a call's ceiling (`compilerTaskCpuMs`, 60 s), which only stops
+ * failures and leaves room for a cold isolate's start (loading Babel, the
+ * React Compiler and the kit) and a machine slower than measured.
+ */
+const batchCpuMs = 4000;
+
+/**
+ * The most characters of source one batch of transforms takes
+ * (`transformInBatches`): about 89,000 (`batchCpuMs`), or fewer where
+ * tests size batches to less CPU time (`BUILD_BATCH_CPU_MS`). One file
+ * larger than that (up to the 200,000 a file may have) is a batch of its
+ * own, still well within a call's CPU time.
+ */
+const batchCharacters = (env: BuildEnv): number => {
+  const set = Number(env.BUILD_BATCH_CPU_MS);
+  const cpuMs =
+    Number.isInteger(set) && set > 0 && set < batchCpuMs ? set : batchCpuMs;
+  return Math.floor(cpuMs / transformCpuMsPerCharacter);
+};
+
+/**
+ * `sources` in batches of at most `characters` each, in order: a source
+ * larger than that is a batch of its own.
+ */
+const batchesOf = (
+  sources: readonly (readonly [string, string])[],
+  characters: number
+): Record<string, string>[] => {
+  const batches: Record<string, string>[] = [];
+  let batch: Record<string, string> = {};
+  let size = 0;
+  for (const [path, source] of sources) {
+    if (Object.keys(batch).length > 0 && size + source.length > characters) {
+      batches.push(batch);
+      batch = {};
+      size = 0;
+    }
+    batch[path] = source;
+    size += source.length;
+  }
+  if (Object.keys(batch).length > 0) {
+    batches.push(batch);
+  }
+  return batches;
+};
+
+/**
+ * Transforms what a screens build of `files` (`target`) would and `reuse`
+ * lacks, a batch at a time, before the build: the whole of a large App's
+ * first build (after a release, every App's) is many times one call's CPU
+ * time, and the runtime stops a call past it. Each batch is one compiler
+ * call, handed only its own sources, sized well within a call's CPU time
+ * (`batchCharacters`); what each made is kept at once (module-cache.ts),
+ * so a build stopped part way resumes where it stopped. A batch stopped at
+ * a bound is split and each half tried again; one file stopped alone is
+ * left to the build, which says why. Nothing when all that's missing fits
+ * in one batch, the build transforms it itself; nor when the build is
+ * refused before anything compiles (`screenRefusals`). The build's lease is
+ * renewed as each batch starts (`renew`). What the batches made, by key,
+ * for the build to reuse, and how many calls they took.
+ */
+const transformInBatches = async (
+  env: BuildEnv,
+  runner: PlatformRunner,
+  {
+    files,
+    target,
+    keys,
+    reuse,
+    leaseMs,
+    renew,
+  }: {
+    files: AppFiles;
+    target: string;
+    keys: IncrementKeys;
+    reuse: Increments;
+    leaseMs: number;
+    renew: () => Promise<void>;
+  }
+): Promise<{ made: Increments["modules"]; calls: number }> => {
+  const made: Increments["modules"] = {};
+  let calls = 0;
+  const app = buildFiles(files);
+  // Refused in milliseconds by the build itself: no batch is spent first.
+  if (screenRefusals(app).length > 0) {
+    return { made, calls };
+  }
+  const { sources, known, typeFiles } = screenSources(app);
+  const missing = sources.filter(
+    ([path]) => !Object.hasOwn(reuse.modules, keys.modules[path] ?? "")
+  );
+  const characters = batchCharacters(env);
+  if (
+    missing.reduce((sum, [, source]) => sum + source.length, 0) <= characters
+  ) {
+    return { made, calls };
+  }
+  const pathOf = new Map(
+    Object.entries(keys.modules).map(([path, key]) => [key, path])
+  );
+  const transform = async (batch: Record<string, string>): Promise<void> => {
+    // The build holds its lease while its batches run, each a lease's
+    // time from its start: one that died gives it up as one call would.
+    await renew();
+    let answer: unknown;
+    calls += 1;
+    try {
+      // Once: a stop splits the batch, which is its retry, and nothing of
+      // a stopped batch is kept as failed.
+      answer = await runner.run(
+        "compiler",
+        "transform",
+        [target, batch, { known, typeFiles }],
+        { once: true }
+      );
+    } catch (error) {
+      if (!(error instanceof PlatformBoundError)) {
+        throw error;
+      }
+      const entries = Object.entries(batch);
+      if (entries.length < 2) {
+        return;
+      }
+      const half = Math.ceil(entries.length / 2);
+      await transform(Object.fromEntries(entries.slice(0, half)));
+      await transform(Object.fromEntries(entries.slice(half)));
+      return;
+    }
+    const fresh: Increments = { modules: {}, checks: {} };
+    for (const [key, value] of Object.entries(
+      typeof answer === "object" && answer !== null ? answer : {}
+    )) {
+      const record = moduleRecordOf(value, pathOf.get(key) ?? "");
+      if (record !== undefined) {
+        fresh.modules[key] = record;
+      }
+    }
+    await keepIncrements(env, keys, fresh, leaseMs);
+    Object.assign(made, fresh.modules);
+  };
+  for (const batch of batchesOf(missing, characters)) {
+    // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
+    await transform(batch);
+  }
+  return { made, calls };
+};
+
+/**
  * A screens build of `files` (spec 19.2, GRA-958), reusing what earlier
  * builds kept of each file (module-cache.ts): the compiler checks each
  * against the key it works out itself, and redoes the rest with every
- * gate; what it made now is kept for the next. Its metrics: putting it
- * together from what was kept, the compiler's run, and how much of each
- * part was done now or reused.
+ * gate; what it made now is kept for the next. A first build of a large
+ * App transforms its files in batches first (`transformInBatches`). Its
+ * metrics: putting it together from what was kept, the batches, the
+ * compiler's run, and how much of each part was done now or reused.
  */
 const compiledIncrementally = async (
   env: BuildEnv,
   runner: PlatformRunner,
   files: AppFiles,
-  profile: BuildProfile,
-  checks: boolean,
-  leaseMs: number
+  {
+    profile,
+    checks,
+    leaseMs,
+    renew,
+  }: {
+    profile: BuildProfile;
+    checks: boolean;
+    leaseMs: number;
+    /** Renews the build's lease: as each batch starts, and before the build's own call. */
+    renew: () => Promise<void>;
+  }
 ): Promise<{ built: unknown; cache: boolean }> => {
   const preview = profile === "preview";
   const [, target] = compilerCallOf("screen", profile, checks);
   const started = Date.now();
-  const reuse = await readIncrements(env, files, preview, buildRefreshMs);
+  // Hashed once: every read and write of its records uses them.
+  const keys = await screenIncrementKeys(files, preview);
+  const earlier = await readIncrements(env, keys, buildRefreshMs);
   const read = Date.now();
+  const batched = await transformInBatches(env, runner, {
+    files,
+    target,
+    keys,
+    reuse: earlier,
+    leaseMs,
+    renew,
+  });
+  const reuse: Increments = {
+    modules: { ...earlier.modules, ...batched.made },
+    checks: earlier.checks,
+  };
+  if (batched.calls > 0) {
+    // A lease's time for the build's own call, after its batches.
+    await renew();
+  }
+  const transformed = Date.now();
   let answer: unknown;
   const result = await compiled(runner, "screen", files, profile, async () => {
     answer = await runner.run("compiler", "buildIncrementally", [
@@ -363,15 +557,19 @@ const compiledIncrementally = async (
   });
   const ran = Date.now();
   const kept = incrementalShaped(answer)
-    ? await keepIncrements(env, files, preview, answer.fresh, leaseMs)
+    ? await keepIncrements(env, keys, answer.fresh, leaseMs)
     : 0;
   log.info("build.compile", {
     kind: "screen",
     profile,
     // Putting the build together: what was kept read, and kept now.
     assemblyMs: read - started + (Date.now() - ran),
+    // The batches' transforms, their calls, and the modules they made.
+    batchMs: transformed - read,
+    batchCalls: batched.calls,
+    batched: Object.keys(batched.made).length,
     // The compiler's run: transforms, checks and the CSS.
-    executionMs: ran - read,
+    executionMs: ran - transformed,
     ...(incrementalShaped(answer)
       ? (answer.metrics satisfies BuildMetrics)
       : {}),
@@ -465,7 +663,7 @@ export const throughKeptCache = async (
   env: CacheEnv,
   cacheKey: string,
   leaseMs: number,
-  build: () => Promise<Built>,
+  build: (renew: () => Promise<void>) => Promise<Built>,
   signal?: AbortSignal
 ): Promise<CachedAnswer> => {
   const answer = await throughCache(
@@ -625,17 +823,15 @@ const cachedBuild = async <Build>(
         cacheKey,
         // Held as long as a build may take, and a little more.
         leaseMs,
-        async () => {
+        async (renew) => {
           const answer =
             kind === "screen"
-              ? await compiledIncrementally(
-                  env,
-                  runner,
-                  files,
+              ? await compiledIncrementally(env, runner, files, {
                   profile,
                   checks,
-                  leaseMs
-                )
+                  leaseMs,
+                  renew,
+                })
               : await compiled(runner, kind, files, profile);
           if (!isBuild(answer.built)) {
             throw new TypeError(

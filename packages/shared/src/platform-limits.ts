@@ -45,8 +45,15 @@ export const platformLimits = {
   serverInvocationCpuMs: 10 * second,
   /** One server invocation's wall time. */
   serverInvocationWallMs: 60 * second,
-  /** One compiler task's CPU time. */
-  compilerTaskCpuMs: 20 * second,
+  /**
+   * One compiler task's CPU time: a ceiling that only stops a failure,
+   * never what a build is sized to (core's screens.ts sizes a first build's
+   * batches to a few seconds each). The risk it takes: App code built to
+   * hold the type checker (a type that recurses without end) now burns up
+   * to this much CPU per call before it is stopped. Still bounded, and
+   * billed per CPU millisecond.
+   */
+  compilerTaskCpuMs: 60 * second,
   /** One workflow attempt's CPU time. */
   workflowAttemptCpuMs: 30 * second,
   /** One workflow attempt's active wall time, by default. */

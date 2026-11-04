@@ -251,6 +251,24 @@ const takeLease = async (
   return taken?.holder === holder;
 };
 
+/**
+ * Holds `key`'s lease for `holder` another `ms` from now, if it still
+ * holds it: a build of many calls renews it as each starts, so it holds it
+ * throughout, while one that died still gives it up a lease's time after
+ * its last renewal.
+ */
+const renewLease = async (
+  env: CacheEnv,
+  key: string,
+  holder: string,
+  ms: number
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(buildReceipts)
+    .set({ leaseExpiresAt: new Date(Date.now() + ms) })
+    .where(and(eq(buildReceipts.key, key), eq(buildReceipts.holder, holder)));
+};
+
 /** Gives `key`'s lease back if `holder` holds it; logged, never thrown. */
 const giveBack = async (
   env: CacheEnv,
@@ -350,13 +368,14 @@ export type CacheOutcome = "hit" | "shared" | "built" | "quarantined";
  * otherwise built by `build` under the key's lease, and kept (`options`)
  * when it may be, or the build another isolate holding the lease kept
  * meanwhile. A build waited for at most `leaseMs`, the lease's own time:
- * past it, the lease is taken over.
+ * past it, the lease is taken over. A build of many calls renews the
+ * lease (`renew`, another `leaseMs` from then) as each starts.
  */
 export const throughCache = async (
   env: CacheEnv,
   key: string,
   leaseMs: number,
-  build: () => Promise<Built>,
+  build: (renew: () => Promise<void>) => Promise<Built>,
   options: () => R2PutOptions,
   signal?: AbortSignal
 ): Promise<{
@@ -406,7 +425,9 @@ export const throughCache = async (
     if (kept.state === "hit") {
       return { text: kept.text, outcome: "shared" };
     }
-    const built = await build();
+    const built = await build(async () => {
+      await renewLease(env, key, holder, leaseMs);
+    });
     const quarantined = await isQuarantined(env, key);
     if (built.cache && !quarantined) {
       try {

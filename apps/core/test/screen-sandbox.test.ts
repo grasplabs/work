@@ -272,9 +272,11 @@ describe(
       const together = read.toSorted();
       // The warm one: started once, then found loaded by its name, so the
       // second build reads nothing.
-      await checked(startAppCompiler(env.LOADER, assets));
+      await checked(startAppCompiler(env.LOADER, assets, "app-test"));
       const started = read.length;
-      const warm = await checked(startAppCompiler(env.LOADER, assets));
+      const warm = await checked(
+        startAppCompiler(env.LOADER, assets, "app-test")
+      );
       const warmRead = read.slice(started);
       // Nothing was kept: a fresh isolate after them reads it all again.
       const before = read.length;
