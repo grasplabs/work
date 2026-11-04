@@ -2598,6 +2598,14 @@ export class StoreHost {
    * running (`sdk_schema_backfills`). A target abandoned before under the
    * same hash goes on from the run after its last, so none of its runs is
    * taken for this one's (store-backfill.ts names runs by target and run).
+   *
+   * Refused (`migration.busy`, retryable) while the store owes rules
+   * (`sdk_rules_owed`): a target activates from the contract it was
+   * planned on, so owed rules would wait on its backfill (`applyRules`),
+   * a version already current running under the old rules and every other
+   * activation refused as busy, for as long as the backfill runs, or for
+   * good once it fails. Owed rules are settled within a make-current, or
+   * by the alarm, so a seal asked again soon goes through.
    */
   #makePending(
     change: ContractChange,
@@ -2606,6 +2614,13 @@ export class StoreHost {
     byName: ReadonlyMap<string, string>,
     now: number
   ): void {
+    const owing = this.#db
+      .select({ owedId: rulesOwed.owedId })
+      .from(rulesOwed)
+      .get();
+    if (owing !== undefined) {
+      throw migrationErrors.create("migration.busy", { retryable: true });
+    }
     const [abandoned] = this.#db
       .select({ attempt: max(abandonedTargets.attempt) })
       .from(abandonedTargets)

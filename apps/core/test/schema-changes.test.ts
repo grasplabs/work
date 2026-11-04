@@ -790,6 +790,17 @@ export default defineSchema({
 });
 `;
 
+/** The Notes App's schema with a category that defaults to general. */
+const categorised = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  notes: defineTable({
+    title: v.string().min(1).max(200),
+    category: v.string().default("general"),
+  }),
+});
+`;
+
 /** The Notes App's registration, its notes shared as `read` says. */
 const notesApp = (read: NotesAccess) => `import { app } from "@grasp-os/sdk";
 import schema from "./schema.ts";
@@ -1073,6 +1084,72 @@ describe("making the release current", { timeout: 180_000 }, () => {
       released,
       current: await currentOf(fixture.app),
     }).toStrictEqual({ held: "migration.busy", released: "ok", current: 3 });
+  });
+
+  it("holds no other activation back once one is refused with its questions", async () => {
+    const { fixture, store, owned } = await sharedNext();
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "schema.ts": shortTitles },
+      "Shorter titles"
+    );
+    await seal(fixture, 3);
+    // Version 1, still current, writes a title version 3 doesn't take
+    // after its dry run: making version 3 current is refused.
+    await insert(store, owned, { title: "x".repeat(150) }, "ada");
+    const refused = await failure(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+    // Another version, made current at once.
+    const other = await failure(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 2)
+    );
+
+    expect({
+      refused,
+      other,
+      current: await currentOf(fixture.app),
+    }).toStrictEqual({
+      refused: "migration.required",
+      other: "ok",
+      current: 2,
+    });
+  });
+
+  it("refuses a backfill that would start while rules are owed, so none waits on it", async () => {
+    const { fixture, store, owned } = await sharedNext();
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "schema.ts": categorised, "app.ts": notesApp("owner") },
+      "Categories"
+    );
+    // Version 3 adds a defaulted category the notes lack, under the rules
+    // the contract holds, sealed while version 2's activation is in
+    // flight: its backfill would hold the contract, and the rules version
+    // 2 owes with it, for as long as it runs.
+    let meanwhile = "";
+    const racing = racingDb(async () => {
+      meanwhile = await failure(async () => await seal(fixture, 3));
+    }, makingCurrent);
+    await setCurrentVersion(
+      { ...env, DB: racing },
+      fixture.owner,
+      fixture.app,
+      2
+    );
+    const applied = await titles(store, owned, "grace");
+    // Sealed again once version 2's rules are in force.
+    const sealedAgain = await failure(async () => await seal(fixture, 3));
+
+    expect({ meanwhile, applied, sealedAgain }).toStrictEqual({
+      meanwhile: "migration.busy",
+      applied: ["Ada's", "Grace's"],
+      sealedAgain: "ok",
+    });
   });
 
   it("applies the rules as the version is made current", async () => {

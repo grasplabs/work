@@ -1655,8 +1655,8 @@ export const makeCurrent = async (
   const owed: OwedRules = { id: crypto.randomUUID(), kind: "app" };
   let owing: StoreId[] = [];
   if (sealedLayout) {
-    // Last before the batch: a ready explicit migration's store switches
-    // to its contract now, and a change that checks records (a narrowing,
+    // Last before the batch (with it, below): a ready explicit
+    // migration's store switches to its contract, and a change that checks records (a narrowing,
     // a field required) is applied (store-backfill.ts), after every gate
     // above, so no refused gate leaves the version still current locked
     // out of its store. That goes first because applying can still be
@@ -1682,7 +1682,6 @@ export const makeCurrent = async (
     await requireReleaseAsReported(env, appId, number, candidate);
     const bound = await storeBindings(env, appId, number);
     owing = bound.map(({ storeId }) => storeId);
-    await requireStoreSchemaActive(env, appId, number, { activate: owed });
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
@@ -1805,7 +1804,15 @@ export const makeCurrent = async (
         ])
     );
   let made: Awaited<ReturnType<typeof batch>>;
+  // The store's activation (`requireStoreSchemaActive`, the last step
+  // before the batch) and the batch share one ending: refused, failed or
+  // committed, the rules of the version D1 has current are applied and
+  // what the store owed is settled, so a refusal never leaves the store
+  // holding other activations back (`migration.busy`).
   try {
+    if (sealedLayout) {
+      await requireStoreSchemaActive(env, appId, number, { activate: owed });
+    }
     made = await batch();
   } finally {
     await applyRulesAfterCommit(env, owed, appId, owing);
