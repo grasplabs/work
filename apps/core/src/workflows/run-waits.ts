@@ -586,10 +586,18 @@ const sealedTasks = async (
   }
 };
 
+/** A catch's retry's run again of a step, by the step's key (host.ts). */
+const retryRun = new RegExp(
+  `^${waitPrefix}(?<key>[0-9a-f]{16}):retry:[1-9]\\d*:run$`,
+  "u"
+);
+
 /**
- * The task of each of `names`, engine steps of a run on the run host, as
- * its build's table places it (`steps`), by the key core names its own
- * steps of it by (`waitKeyOf`): `WaitContext.keyed`.
+ * The task of each of `names`, engine steps of a run on the run host in
+ * the order its journal reached them, as its build's table places it
+ * (`steps`), by the key core names its own steps of it by (`waitKeyOf`):
+ * `WaitContext.keyed`. A catch's retry's run again goes by a key of its
+ * own (host.ts, `#waitBefore`), its task's, after its step.
  */
 export const tasksByKey = async (
   names: readonly string[],
@@ -597,10 +605,14 @@ export const tasksByKey = async (
 ): Promise<ReadonlyMap<string, string>> => {
   const keyed = new Map<string, string>();
   for (const name of names) {
-    const step = sealedStepOf(name, steps);
-    if (step !== undefined) {
+    const retried = retryRun.exec(name)?.groups?.key;
+    const task =
+      retried === undefined
+        ? sealedStepOf(name, steps)?.task
+        : keyed.get(retried);
+    if (task !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
-      keyed.set(await waitKeyOf(name), step.task);
+      keyed.set(await waitKeyOf(name), task);
     }
   }
   return keyed;

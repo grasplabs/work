@@ -504,8 +504,11 @@ describe("the waits a screen is shown of a run on the run host", () => {
   });
 
   it("shows a held call's and a busy step's holds, and their runs again, as the task's whose step has the key", async () => {
-    const keyed = await tasksByKey(["fetch:task"], sealedContext.tasks);
     const fetch = await waitKeyOf("fetch:task");
+    // Its catch's retry's run again, whose own holds go by its own key.
+    const again = `${waitStep(fetch, "retry", 2)}:run`;
+    const keyed = await tasksByKey(["fetch:task", again], sealedContext.tasks);
+    const retried = await waitKeyOf(again);
     const unknown = "f".repeat(16);
     expect(
       shownWaits(
@@ -515,6 +518,11 @@ describe("the waits a screen is shown of a run on the run host", () => {
           pendingOf(41, `${waitStep(fetch, "held", 1)}:1:check`, "retry"),
           pendingOf(42, `${waitStep(fetch, "held", 1)}:run`, "retry"),
           pendingOf(43, waitStep(unknown, "busy", 1)),
+          pendingOf(
+            44,
+            `${waitStep(retried, "unknown", 1)}:first`,
+            "waitForEvent"
+          ),
         ],
         { ...sealedContext, keyed }
       ).map((wait) =>
@@ -526,6 +534,7 @@ describe("the waits a screen is shown of a run on the run host", () => {
       { id: "hold-40", taskId: "fetch", kind: "blocked" },
       { id: "wait-42", taskId: "fetch", kind: "timer" },
       { id: "hold-43", taskId: "$run", kind: "blocked" },
+      { id: "hold-44", taskId: "fetch", kind: "blocked" },
     ]);
   });
 });
