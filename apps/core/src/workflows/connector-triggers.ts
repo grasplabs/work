@@ -142,6 +142,11 @@ export const refusedForGood: ReadonlySet<string> = new Set([
   // An input holding files where nothing hands the run any, or more than a
   // start hands it: the same input is refused so again.
   "file.start_files",
+  // A message's attachments past the workflow's run-file bytes: dropped,
+  // audited, rather than failing every delivery until its sender gives up
+  // unheard. Anyone may mail a trigger, so its runs' files can fill the
+  // workflow's room; the hourly limit bounds how fast.
+  "file.workflow_quota",
 ]);
 
 const hourMs = 60 * 60 * 1000;

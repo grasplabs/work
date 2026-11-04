@@ -274,6 +274,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "dependency", text: msg`Changed a request for packages` },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
+  {
+    action: "workflow.email.attachment.sent",
+    text: msg`Handed an email attachment to a run`,
+  },
   { action: "workflow.run.fix_asked", text: msg`Asked the agent to fix a run` },
   { action: "workflow.run", text: msg`Ran a workflow` },
   { action: "workflow.step", text: msg`Ran a step of a workflow` },

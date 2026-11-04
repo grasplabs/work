@@ -191,8 +191,9 @@ export interface HandedFiles {
  * Copies the files of `input` (canonical JSON, checked against
  * `descriptor`) into run `runId` of workflow `workflowId`, through
  * `files`: none when it holds none. `file.start_files` when it holds a
- * file but no App's screen starts it, no run is admitted with it, or
- * more than a start hands its run. The input as it is when it holds none.
+ * file but its start has no files to hand (`files` undefined), no run is
+ * admitted with it, or it holds more than a start hands its run. The
+ * input as it is when it holds none.
  */
 export const handFiles = async (
   env: Env,

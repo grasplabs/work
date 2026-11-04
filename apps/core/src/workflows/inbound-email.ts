@@ -171,7 +171,11 @@ import type { StartFiles } from "./start-files.ts";
 //   `file` there; only one a run file may be, its type shown by its bytes
 //   (never the label its sender gave it), its name one a run file may
 //   have, and not inline; at most `runFileLimits.startFiles` of a
-//   message, within the run's and the workflow's limits. Its
+//   message, within the run's and the workflow's limits. Anyone with
+//   the address can fill the workflow's run-file room (5 GiB), at most
+//   `triggeredRunsPerHour` messages of 10 MiB an hour; past it a message
+//   with a file to copy is refused for good and audited
+//   (`file.workflow_quota`), never retried unheard. Its
 //   reference in the message, `attachment-<index>`, names an attachment
 //   of that message alone, and becomes the run file's own ID; the run
 //   reads it only through its workflow's own files binding, and it goes

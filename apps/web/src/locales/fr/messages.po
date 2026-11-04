@@ -6223,6 +6223,10 @@ msgstr "La moitié de mon lundi part dans les factures. La plupart n’ont pas d
 msgid "handbook/leave"
 msgstr "manuel/conges"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "A transmis une pièce jointe d’e-mail à une exécution"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Transmis à celui-ci"

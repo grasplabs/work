@@ -6223,6 +6223,10 @@ msgstr "Medio lunes se me va en facturas. A la mayoría les falta el número de 
 msgid "handbook/leave"
 msgstr "manual/permisos"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "Entregó un adjunto de correo a una ejecución"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Se le entrega"

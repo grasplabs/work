@@ -1435,6 +1435,47 @@ describe(
       });
     });
 
+    it("past the workflow's room for run files refuse their message for good, audited, keeping no copy", async () => {
+      const { trigger, workflow, address } = await emailTrigger();
+      // The workflow's other runs hold all of its room but four bytes.
+      await env.DB.prepare(
+        "INSERT INTO workflow_run_files (id, run_id, workflow_resource_id, opened_by, open_key, name, type, size, state, created_at) VALUES (?, ?, ?, 'test', ?, 'big.pdf', 'application/pdf', ?, 'done', ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          workflow,
+          unique(),
+          runFileLimits.workflowBytes - 4,
+          Date.now()
+        )
+        .run();
+      const before = await storedObjects();
+
+      const delivered = await deliver(address, invoiceMail({ to: address }));
+      const again = await deliver(address, invoiceMail({ to: address }));
+      const { results: copies } = await env.DB.prepare(
+        "SELECT state FROM workflow_run_files WHERE workflow_resource_id = ? AND name = 'inv-7.pdf'"
+      )
+        .bind(workflow)
+        .all<{ state: string }>();
+
+      expect({
+        delivered: [delivered.rejected, again.rejected],
+        runs: await runCount(trigger.id),
+        codes: await refusalsOf(trigger.id),
+        copies: copies.map(({ state }) => state),
+        left: await addedSince(before),
+      }).toStrictEqual({
+        delivered: [undefined, undefined],
+        runs: 0,
+        // Once: the message delivered again is settled already.
+        codes: ["file.workflow_quota"],
+        copies: [],
+        left: [],
+      });
+    });
+
     it("are no one else's by their reference: a start by hand naming one is refused", async () => {
       const { builder, workflow } = await emailTrigger();
 

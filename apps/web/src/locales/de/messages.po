@@ -6223,6 +6223,10 @@ msgstr "Mein halber Montag geht für Rechnungen drauf. Meist fehlt die Bestellnu
 msgid "handbook/leave"
 msgstr "handbuch/urlaub"
 
+#: src/activity/audit-words.ts
+msgid "Handed an email attachment to a run"
+msgstr "Einen E-Mail-Anhang an einen Lauf übergeben"
+
 #: src/workflows/diagram-doors.tsx
 msgid "Handed over to it"
 msgstr "Dorthin übergeben"
