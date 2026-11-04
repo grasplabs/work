@@ -997,23 +997,31 @@ describe("chat agent turns", () => {
     const { stub, chat, personId, provider } = await newChatOn(
       [model, openai],
       { ...says("Hi."), cache: { read: 900, write: 100 } },
-      says("Hi again.")
+      says("Hi again."),
+      says("Hi once more.")
     );
     await stub.ask(chat.id, { text: "Hi.", model });
     await stub.ask(chat.id, { text: "Hi again.", model: openai });
+    await stub.ask(chat.id, { text: "Hi once more.", model: openai });
 
-    // OpenAI's responses carry the chat as their cache key. (Anthropic's
-    // cache markers are pi's default either way; its session headers stop
-    // at connect.)
-    const responses = provider.requests.at(-1);
+    // OpenAI's responses carry the chat's conversation as their cache key,
+    // the same on every turn (pi's session). (Anthropic's cache markers are
+    // pi's default either way; its session headers stop at connect.)
+    const responses = provider.requests.at(-2);
+    const [key, next] = provider.requests
+      .slice(-2)
+      .map(
+        ({ body }) =>
+          z.looseObject({ prompt_cache_key: z.string() }).parse(body)
+            .prompt_cache_key
+      );
     expect({
       responses:
         responses && new URL(responses.url).pathname.endsWith("/responses"),
-      key: z
-        .looseObject({ prompt_cache_key: z.string() })
-        .parse(responses?.body).prompt_cache_key,
-    }).toStrictEqual({ responses: true, key: chat.id });
-    const calls = await modelCallsBy(personId, 2);
+      stable: key === next,
+      keyed: (key ?? "").length > 0,
+    }).toStrictEqual({ responses: true, stable: true, keyed: true });
+    const calls = await modelCallsBy(personId, 3);
     expect(
       calls.map(({ model: used, detail }) => ({
         inputTokens: used?.inputTokens,
@@ -1023,6 +1031,7 @@ describe("chat agent turns", () => {
     ).toStrictEqual([
       // The cache's tokens are among the prompt's.
       { inputTokens: 1200, cacheReadTokens: 900, cacheWriteTokens: 100 },
+      { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
       { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
     ]);
 
@@ -1051,6 +1060,7 @@ describe("chat agent turns", () => {
     }).toStrictEqual({
       cached: [
         { requests: 1, inputTokens: 1200, cacheReadTokens: 900, share: 0.75 },
+        { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
         { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
       ],
       cancelled: [],
