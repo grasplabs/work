@@ -76,11 +76,11 @@ export class ChatSession extends DurableObject<Env> {
     await harness.note(text);
   }
 
-  /** Stops the turn under way, if there is one. */
-  async abort(): Promise<void> {
+  /** Stops the turn under way, if there is one, or turn `turnId` as it starts. */
+  async abort(turnId?: string): Promise<void> {
     const harness = await this.#harness();
     await this.#arm({ ...harness.wake(), active: true });
-    await harness.abort();
+    await harness.abort(turnId);
   }
 
   /** Deletes everything the chat's agent kept: the chat is being deleted. */

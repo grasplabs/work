@@ -52,6 +52,7 @@ import {
   rebase,
   recallTextOf,
 } from "./chat-agent.ts";
+import { coreMessageProvider } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { workspace } from "./durable-objects.ts";
 import { models } from "./models.ts";
@@ -183,9 +184,9 @@ const recallStepOf = (
           arguments: { code: recall.code },
         },
       ],
-      api: "openai-responses",
-      provider: gateway,
-      model: "recall",
+      api: coreMessageProvider,
+      provider: coreMessageProvider,
+      model: coreMessageProvider,
       usage: noUsage,
       stopReason: "toolUse",
       timestamp,
@@ -234,6 +235,18 @@ const liveSchema = z.object({
  */
 const atWorkAfter = (message: Message): boolean =>
   message.role !== "assistant" || message.stopReason === "toolUse";
+
+/** How the chat ends a turn stopped before the model said anything: core's own. */
+const cancelledMessage = (): AssistantMessage => ({
+  role: "assistant",
+  content: [],
+  api: coreMessageProvider,
+  provider: coreMessageProvider,
+  model: coreMessageProvider,
+  usage: noUsage,
+  stopReason: "aborted",
+  timestamp: Date.now(),
+});
 
 /** What pi keeps of a tool result's diagnostics, beside the rendered block. */
 const diagnosticsDataSchema = z.object({
@@ -363,6 +376,8 @@ export class ChatHarness {
   #shown = "null";
   /** Whether the Workspace was told the agent is at work. */
   #told: boolean | undefined;
+  /** Turns stopped before they started (`abort`), by turn ID. */
+  readonly #cancelled = new Set<string>();
   /** The latest telling under way (`#tell`). */
   #telling: Promise<void> = Promise.resolve();
   /** The thinking of the response streaming in, as `thinkingClock` times it. */
@@ -446,7 +461,7 @@ export class ChatHarness {
   }
 
   /** Whether the agent is at work, as the chat's latest message says. */
-  async #atWork(): Promise<boolean> {
+  async #latestShown(): Promise<Message | undefined> {
     const page = await this.#conversation.entries(
       { order: "descending" },
       8,
@@ -456,10 +471,10 @@ export class ChatHarness {
     for (const entry of page.items) {
       const latest = shownOf(entry).at(-1);
       if (latest !== undefined) {
-        return atWorkAfter(latest.message);
+        return latest.message;
       }
     }
-    return false;
+    return undefined;
   }
 
   /** Takes in one of the agent's events (`watchEvents`). */
@@ -567,7 +582,12 @@ export class ChatHarness {
       }
       throw error;
     }
+    console.log("DEBUGSUBMITTED", this.#cancelled.has(request.turnId));
+    if (this.#cancelled.delete(request.turnId)) {
+      await this.#conversation.abort(context);
+    }
     const settled = await submitted.wait(context);
+    console.log("DEBUGSETTLED", JSON.stringify(settled));
     this.#copySoon();
     await this.#copying;
     const end = await this.#endOf(settled);
@@ -575,10 +595,20 @@ export class ChatHarness {
       await this.#conversation.waitForIdle(context);
       await this.#rebaseIfNeeded(request, room);
     }
+    const latest = await this.#latestShown();
+    // A turn stopped before the model said anything ends in the chat as
+    // cancelled all the same: pi keeps no response of it.
+    if (end.outcome === "cancelled" && latest?.role !== "assistant") {
+      await this.#host(request.scope).keepTurnMessages(request.scope.chatId, [
+        { message: cancelledMessage() },
+      ]);
+    }
     // A turn that ended without a last word of the model's (cancelled,
-    // failed, stopped) is over too.
-    // Told before the turn returns, so its Workspace shows it ended.
-    await this.#tell(end.outcome === "answered" && (await this.#atWork()));
+    // failed, stopped) is over too. Told before the turn returns, so its
+    // Workspace shows it ended.
+    await this.#tell(
+      end.outcome === "answered" && latest !== undefined && atWorkAfter(latest)
+    );
     return end;
   }
 
@@ -672,8 +702,16 @@ export class ChatHarness {
     }, context);
   }
 
-  /** Stops the turn under way, if any: its request or tool call in flight ends. */
-  async abort(): Promise<void> {
+  /**
+   * Stops the turn under way, if any: its request or tool call in flight
+   * ends. With `turnId`, that turn's too if it hasn't started yet: a stop
+   * that came first stops it as it starts.
+   */
+  async abort(turnId?: string): Promise<void> {
+    if (turnId !== undefined) {
+      this.#cancelled.add(turnId);
+      console.log("DEBUGCANCEL", turnId);
+    }
     await this.#conversation.abort(context);
   }
 

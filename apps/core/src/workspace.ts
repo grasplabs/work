@@ -2623,18 +2623,23 @@ export class Workspace extends DurableObject<Env> {
   cancel(chatId: unknown, personId: string): boolean {
     const { id } = this.#ownChat(chatId, personId);
     const turn = this.#turns.get(id);
-    if (turn !== undefined) {
+    // Running as its ChatSession says, too: a turn this object's restart
+    // left there.
+    const running = this.#isRunning(id);
+    if (running) {
       this.ctx.waitUntil(
         chatSession(
           this.env,
           this.#scopeOf(this.#chat(id)).workspaceId,
           id
-        ).abort()
+        ).abort(turn?.id)
       );
+    }
+    if (turn !== undefined) {
       // The build jobs it submitted are the turn's work: they end with it.
       this.#terminateJobs(this.#jobs.cancelRunning(id, turn.id));
     }
-    return turn !== undefined;
+    return running;
   }
 
   /**
