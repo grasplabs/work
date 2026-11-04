@@ -34,7 +34,7 @@ import {
   runModule,
 } from "../src/workflows/code.ts";
 import type { StepError } from "../src/workflows/code.ts";
-import { RunHost } from "../src/workflows/host.ts";
+import { cpuLimitKill, RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
 import {
   sealedAdmission,
@@ -367,18 +367,18 @@ const settledSchema = z.union([
 
 /** Memory of a run's tried-once calls and model calls, this test's own. */
 const memoryOfTest = (): SealedRunMemory => {
-  const unstarted = new Set<string>();
+  const sent = new Set<string>();
   const failures = new Map<string, StepError>();
   const models: string[] = [];
   return {
-    triedOnce: {
-      markUnstarted: (key, attempt) => {
-        unstarted.add(`${attempt}:${key}`);
+    sentCalls: {
+      markSent: (key, attempt) => {
+        sent.add(`${attempt}:${key}`);
       },
-      markStarted: (key, attempt) => {
-        unstarted.delete(`${attempt}:${key}`);
+      unmarkSent: (key, attempt) => {
+        sent.delete(`${attempt}:${key}`);
       },
-      unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
+      sent: (key, attempt) => sent.has(`${attempt}:${key}`),
       keepFailure: (key, attempt, error) => {
         failures.set(`${attempt}:${key}`, error);
       },
@@ -807,17 +807,18 @@ describe("a sealed build's run on the run host", () => {
       moduleOf(greet(greeting))
     );
     const afterAnswered = provider.requests.length;
-    // The call went out, then its attempt timed out: the engine tries the
-    // step again, and the call doesn't go out again.
+    // The call went out, then its attempt failed for a reason trying
+    // again may fix: the engine tries the step again, and the call doesn't
+    // go out again; the later attempts fail as that one did.
     replies.push(hello, hello);
     const retried = await ranAs(
       await waitingRun(sealed),
       moduleOf(`
 return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => {
   await env.summary.call("grasp.model", ${greeting});
-  const slow = new Error("Too slow");
-  slow.name = "TimeoutError";
-  throw slow;
+  const failed = new Error("The answer didn't come through");
+  failed.code = "model.failed";
+  throw failed;
 });
 `),
       { engine: retryingEngine() }
@@ -842,10 +843,38 @@ return await step.do("greet", { key: "task", description: "Its task", retries: {
     }).toStrictEqual({
       answered: { ended: { line: "Hello Ada" }, tampered: [] },
       afterAnswered: 1,
-      retried: failedWith("operation.deadline_exceeded"),
+      retried: failedWith("model.failed"),
       sentByRetried: 1,
       unbilled: { ended: { line: "Hello Ada" }, tampered: [] },
       sentByUnbilled: 2,
+    });
+  });
+
+  it("sends a model call whose step's first attempt was cut off in its admission", async () => {
+    const provider = await answeringProvider(() => hello, {
+      models: [allowedModel],
+    });
+    let admissions = 0;
+    const ran = await ranAs(
+      await waitingRun(sealed),
+      moduleOf(
+        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.summary.call("grasp.model", ${greeting}));`
+      ),
+      {
+        engine: retryingEngine(),
+        admitAttempt: () => async () => {
+          admissions += 1;
+          // Cut off as it was admitted, as an activation evicted then.
+          if (admissions === 1) {
+            throw cpuLimitKill();
+          }
+          return await admittedFreely();
+        },
+      }
+    );
+    expect({ ran, sent: provider.requests.length }).toStrictEqual({
+      ran: { ended: { line: "Hello Ada" }, tampered: [] },
+      sent: 1,
     });
   });
 

@@ -492,7 +492,10 @@ export const holdsPlaceholder = (value: unknown): boolean => {
       }
       seen.add(node);
       const items: unknown[] = Object.values(node);
-      pending.push(...items);
+      // One at a time: a spread of a large list would overflow the stack.
+      for (const item of items) {
+        pending.push(item);
+      }
     }
   }
   return false;

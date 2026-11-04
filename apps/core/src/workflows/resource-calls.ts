@@ -688,6 +688,7 @@ const callStoreOperation = async (
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   effect.requireHolds();
+  effect.sending?.();
   const answer = await callApprovedStoreOperation(
     env,
     {
@@ -1132,8 +1133,9 @@ export const makeCall = async (
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
-    // A model call goes out as its request is sent (`callModel`).
-    if (call.name !== "grasp.model") {
+    // A model call goes out as its request is sent (`callModel`), and a
+    // store operation once its own checks passed (`callStoreOperation`).
+    if (call.name !== "grasp.model" && call.name !== "grasp.operation") {
       effect.sending?.();
     }
     switch (call.name) {

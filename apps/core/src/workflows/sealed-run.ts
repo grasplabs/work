@@ -1,5 +1,6 @@
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -31,12 +32,7 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
-import {
-  forIsolate,
-  modelCallLimitOf,
-  settle,
-  unbilledAiWaitOf,
-} from "./host.ts";
+import { modelCallLimitOf, settle, unbilledAiWaitOf } from "./host.ts";
 import type {
   HostControls,
   HostHooks,
@@ -54,7 +50,7 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 import { decisionRunOf } from "./resource-decisions.ts";
 import { boundedJson } from "./resource-host.ts";
-import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import type { ActionModelCalls } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { receiptOf, runOf, workflowOwnerOf } from "./resource-runs.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
@@ -107,9 +103,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   froze: never anywhere else, in no other kind of call. The value goes to
 //   connect alone, and an answer that echoes it is refused
 //   (resource-calls.ts, `BuiltCall.sensitive`), so it never reaches the
-//   step's record. An error reaches the isolate as its code and fixed
-//   message only (host.ts, `forIsolate`): connect words each of its own by
-//   code, never with what the tool said, and its details stay in core. The audit log keeps the arguments as the isolate sent
+//   step's record. A connector's error reaches the isolate as its code
+//   and that code's fixed message only (`fixedMessage`), never what the
+//   connector or its tool said. The audit log keeps the arguments as the isolate sent
 //   them, placeholders and not values, as a digest: it names things and
 //   never carries their content (@grasp-os/shared/audit).
 // - Authority that changed since the start. Every call is decided again as
@@ -119,9 +115,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   active member before every step.
 // - An effect repeated. A store operation's, a model's and an action's
 //   call goes out at most once per step, whatever its attempts
-//   (`TriedOnceMarks`, marked as it goes out, after every check of its
-//   own; a later attempt fails as the one that sent it did, and one that
-//   provably billed nothing may be sent again); a connector's is keyed in connect under its step's key,
+//   (`SentCalls`, marked sent just before it leaves, after every check of
+//   its own; a later attempt fails as the one that sent it did, and one
+//   that provably billed nothing may be sent again); a connector's is keyed in connect under its step's key,
 //   and a call connect holds for the person ends its step as held, which
 //   runs again once they decided.
 // - A run past what it may spend. Its model calls, its actions' included,
@@ -148,13 +144,30 @@ export interface HostedSealedRun extends HostedRun {
   readonly maxModelCalls: number;
 }
 
+/**
+ * The attempts of a run's steps whose call is tried once that sent it, by
+ * the engine's key of the step and the attempt's number, and what each
+ * such attempt failed with: kept with the run, written before the call
+ * leaves (run-object storage commits before outgoing I/O), so an attempt
+ * that died before it sent anything, in its admission say, leaves none.
+ */
+export interface SentCalls {
+  /** Marks that attempt `attempt` of step `key` sent its call. */
+  markSent: (key: string, attempt: number) => void;
+  /** Takes the mark back: the call provably billed nothing. */
+  unmarkSent: (key: string, attempt: number) => void;
+  /** Whether that attempt sent its call. */
+  sent: (key: string, attempt: number) => boolean;
+  /** Keeps what an attempt that sent its call failed with. */
+  keepFailure: (key: string, attempt: number, error: StepError) => void;
+  /** What that attempt failed with, if it was kept. */
+  failureOf: (key: string, attempt: number) => StepError | undefined;
+}
+
 /** What a sealed run's kind keeps with the run, across its activations. */
 export interface SealedRunMemory {
-  /**
-   * Which attempts of its steps whose call is tried once never sent it,
-   * and what one that did failed with (resource-host.ts, `TriedOnceMarks`).
-   */
-  triedOnce: TriedOnceMarks;
+  /** Its tried-once calls that went out (`SentCalls`). */
+  sentCalls: SentCalls;
   /** The model calls it made, its actions' included. */
   modelCalls: ActionModelCalls;
   /** The run's own sandbox session on-prem, once open: its actions' parent. */
@@ -281,9 +294,11 @@ const triedOnceCalls: ReadonlySet<SealedCall["name"]> = new Set([
 ]);
 
 /**
- * What a tried-once call's attempt failed with when an earlier attempt
- * sent it and kept nothing it failed with: left open (its activation died,
- * the engine timed it out), as the engine's timeout would fail the step.
+ * What a tried-once call's attempt fails with when an earlier attempt sent
+ * it and nothing it failed with was kept: that attempt was left open (its
+ * activation died, or the engine gave up on it as it ran past its time,
+ * the only failures the host doesn't hear of: `RunKind.attemptFailed`),
+ * as the engine's timeout failed it.
  */
 const leftOpen: StepError = {
   name: "TimeoutError",
@@ -305,6 +320,22 @@ const triedBefore = (failure: StepError): Error =>
         ? "operation.deadline_exceeded"
         : "internal.unexpected")
   );
+
+/**
+ * `error`, a connector call's failure, with its code's own fixed message
+ * (and no details): so nothing a connector or its tool said, a sensitive
+ * argument quoted included, reaches the isolate through it.
+ */
+const fixedMessage = (error: unknown): unknown => {
+  if (!isExpectedError(error)) {
+    return error;
+  }
+  return namedError(
+    error.name,
+    expectedMessageOf(error.code) ?? "The connector call failed.",
+    error.code
+  );
+};
 
 /** A refusal of what the build's code never sends: the run fails with it. */
 const tampering = (message: string): Error => {
@@ -482,10 +513,6 @@ class SealedRun implements RunKind {
   readonly stepCompleted = nothingToRecord;
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
-    // Its code starts: until it sends its call, a later attempt may too.
-    if (this.#triesOnce(attempt)) {
-      this.#memory.triedOnce.markUnstarted(attempt.key, attempt.number);
-    }
     // Every call but a binding's is one the build's code never makes.
     const refused = async (label: string): Promise<Settled<never>> =>
       await settle(async () => {
@@ -517,26 +544,26 @@ class SealedRun implements RunKind {
     );
   }
 
-  /** Whether `attempt`'s step makes a call tried once. */
-  #triesOnce(attempt: StepAttempt): boolean {
-    const { task, kind } = this.#steps.get(attempt.step) ?? {};
-    return (
-      kind === "task" &&
-      task?.kind === "call" &&
-      triedOnceCalls.has(task.call.name)
-    );
+  /**
+   * Keeps what `attempt` failed with when it sent its call tried once: a
+   * later attempt of its step fails with it.
+   */
+  attemptFailed(attempt: StepAttempt, error: StepError): void {
+    const calls = this.#memory.sentCalls;
+    if (calls.sent(attempt.key, attempt.number)) {
+      calls.keepFailure(attempt.key, attempt.number, error);
+    }
   }
 
   /**
    * Refuses `attempt` of a step whose call is tried once when an earlier
-   * attempt of it may have sent it: every one not marked as never having
-   * sent it (`TriedOnceMarks.unstarted`), an attempt cut off before its
-   * code ran included. It fails as the one that sent it did.
+   * attempt of it sent it (`SentCalls`). It fails as the one that sent it
+   * did.
    */
   #requireNoneSent(attempt: StepAttempt): void {
-    const marks = this.#memory.triedOnce;
+    const marks = this.#memory.sentCalls;
     for (let earlier = 1; earlier < attempt.number; earlier += 1) {
-      if (!marks.unstarted(attempt.key, earlier)) {
+      if (marks.sent(attempt.key, earlier)) {
         throw triedBefore(marks.failureOf(attempt.key, earlier) ?? leftOpen);
       }
     }
@@ -676,7 +703,7 @@ class SealedRun implements RunKind {
     value: Json,
     sensitive: Json[]
   ): Promise<Json> {
-    const marks = this.#memory.triedOnce;
+    const marks = this.#memory.sentCalls;
     const once = triedOnceCalls.has(call.name);
     const effect: Effect = {
       key: stepIdempotencyKey(this.run.runId, attempt.step),
@@ -689,7 +716,7 @@ class SealedRun implements RunKind {
       ...(once
         ? {
             sending: () => {
-              marks.markStarted(attempt.key, attempt.number);
+              marks.markSent(attempt.key, attempt.number);
             },
           }
         : {}),
@@ -705,16 +732,14 @@ class SealedRun implements RunKind {
         effect
       );
     } catch (error) {
-      if (once && !marks.unstarted(attempt.key, attempt.number)) {
-        if (
-          call.name === "grasp.model" &&
-          unbilledAiWaitOf(error) !== undefined
-        ) {
-          // Provably billed nothing: the step's next run may ask again.
-          marks.markUnstarted(attempt.key, attempt.number);
-        } else {
-          marks.keepFailure(attempt.key, attempt.number, forIsolate(error));
-        }
+      // Provably billed nothing: a later attempt may ask again. Any other
+      // failure is kept as the attempt's own (`attemptFailed`).
+      if (
+        once &&
+        call.name === "grasp.model" &&
+        unbilledAiWaitOf(error) !== undefined
+      ) {
+        marks.unmarkSent(attempt.key, attempt.number);
       }
       throw error;
     }
@@ -746,7 +771,7 @@ class SealedRun implements RunKind {
           // Held for the person: the step waits, and runs again once they
           // decided, connect answering what they decided under its key.
           attempt.held ||= connectErrors.codeOf(error) === "connect.held";
-          throw error;
+          throw fixedMessage(error);
         }
       }
       case "grasp.operation": {
