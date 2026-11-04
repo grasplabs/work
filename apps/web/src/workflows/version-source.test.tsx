@@ -47,7 +47,7 @@ const published = (version: number): WorkflowResourceVersion => ({
   bindings: [],
   actions: [],
   modelSteeredWrites: [],
-  build: { executable: true, hash: "build" },
+  build: { hash: "build" },
   author: "ada",
   createdAt: "2026-10-30T09:00:00.000Z",
 });

@@ -193,8 +193,6 @@ const definitionOf = (
         profile: "grasp-open-workflow/1",
       },
       files: greeting(),
-      withheldDefaults: [],
-      withheldConstraints: [],
       workflows: {},
       bindings: {},
       packages: null,

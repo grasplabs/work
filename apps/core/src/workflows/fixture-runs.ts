@@ -195,9 +195,6 @@ export const startFixtureRun = async (
   }
   const workflow = workflowResourceIdSchema.parse(pin.workflowId);
   const found = await pinned(env, workflow, pin.version);
-  if (found.buildHash === null) {
-    throw workflowResourceErrors.create("workflow.protocol_unsupported");
-  }
   const input = acceptedInput(found.inputDescriptor, declared.value);
   const params = await fixtureParams(
     env,

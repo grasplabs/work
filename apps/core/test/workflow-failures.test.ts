@@ -704,7 +704,7 @@ describe("raise and catch, as the build seals them", () => {
     const { files } = await workflowSource(env, by, workflow.id, 1);
     const source = files[".grasp/workflow.ts"] ?? "";
     expect({
-      executable: version.build.executable,
+      executable: version.build.hash !== undefined,
       catches: [...source.matchAll(/flow\.catch\((?<id>"[^"]*")/gu)].map(
         (match) => match.groups?.id
       ),

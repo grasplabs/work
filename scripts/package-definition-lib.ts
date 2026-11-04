@@ -1068,8 +1068,6 @@ export const planProject = async (
           key,
           {
             provenance: workflow.provenance,
-            withheldDefaults: workflow.withheldDefaults,
-            withheldConstraints: workflow.withheldConstraints,
             packages:
               workflow.packages === null
                 ? null

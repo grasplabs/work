@@ -140,7 +140,7 @@ describe("the agent building an independent workflow", () => {
         notes: [started.note, run.note],
         problems: saved.problems,
         test: { status: run.status, output: run.output },
-        published: { version: published.version, executable: published.executable },
+        published: { version: published.version },
         bound: { app: bound.app, alias: bound.alias, version: bound.version },
       };
     };`;
@@ -163,7 +163,7 @@ describe("the agent building an independent workflow", () => {
       ],
       problems: [],
       test: { status: "completed", output: { status: "done" } },
-      published: { version: 1, executable: true },
+      published: { version: 1 },
       bound: { app, alias: "summary", version: 1 },
     });
     // What it changed, each the agent's, acting for the person.

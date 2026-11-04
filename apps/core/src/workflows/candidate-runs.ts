@@ -327,9 +327,6 @@ export const startCandidateRun = async (
     checkpoint.source,
     checkpoint.modules
   );
-  if (!built.compiled.build.executable) {
-    throw workflowResourceErrors.create("workflow.candidate_unexecutable");
-  }
   const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
   const paramsText = candidateParams(built.contract, params);
   const runId = crypto.randomUUID();
@@ -405,13 +402,11 @@ export const startCandidateRun = async (
       }),
     ]);
   } catch (error) {
-    await releaseBuild(
-      env,
-      { id: reservation, version: 1 },
-      built.compiled
-    ).catch((releaseError: unknown) => {
-      log.warn("workflow.build_release_failed", errorFields(releaseError));
-    });
+    await releaseBuild(env, { id: reservation, version: 1 }).catch(
+      (releaseError: unknown) => {
+        log.warn("workflow.build_release_failed", errorFields(releaseError));
+      }
+    );
     if (notNullFailed(error, "workflow_candidate_runs.workflow_resource_id")) {
       if ((await liveWorkflow(env, workflow.id)) === undefined) {
         throw workflowResourceErrors.create("workflow.resource_unavailable");

@@ -141,8 +141,6 @@ const agentDraft = (draft: WorkflowDraft): AgentWorkflowDraft => ({
 export interface AgentWorkflowVersion {
   version: number;
   definitionVersion: string;
-  /** Whether a run can execute it (`build.executable`). */
-  executable: boolean;
   /** Each binding it declares; a catalog binding waits for an admin's approval. */
   bindings: { alias: string; kind: string; contractId: string | null }[];
 }
@@ -363,7 +361,6 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
         return {
           version: published.version,
           definitionVersion: published.definitionVersion,
-          executable: published.build.executable,
           bindings: published.bindings.map(({ alias, kind, contractId }) => ({
             alias,
             kind,
@@ -568,7 +565,6 @@ workflowBuild: {
   publish(workflow: string, publication: { revision: number; basedOn: number | null }): Promise<{
     version: number;
     definitionVersion: string;
-    executable: boolean;
     bindings: { alias: string; kind: string; contractId: string | null }[];
   }>;
   /** Binds an exact published version to an App the person builds, replacing that alias's binding. */

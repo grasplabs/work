@@ -88,7 +88,7 @@ const versionTwo: WorkflowResourceVersion = {
   ],
   actions: [],
   modelSteeredWrites: [],
-  build: { executable: true, hash: "build" },
+  build: { hash: "build" },
   author: "user-ada",
   createdAt: "2026-11-04T09:00:00.000Z",
 };

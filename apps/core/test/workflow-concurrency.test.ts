@@ -93,7 +93,7 @@ describe("items and branches at once", { timeout: 60_000 }, () => {
     const started = Date.now();
     const run = await ranFor(by, workflow.id);
     expect({
-      executable: version.build.executable,
+      executable: version.build.hash !== undefined,
       end: endOf(run),
       // At once: about the longest wait, not their sum.
       atOnce: Date.now() - started < 5500,

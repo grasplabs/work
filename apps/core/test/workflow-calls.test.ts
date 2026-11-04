@@ -266,7 +266,7 @@ const published = async (by: Identity, draft: Draft) => {
     ...(draft.modules === undefined ? {} : { modules: draft.modules }),
   });
   const [version] = await workflowVersions(env, by, workflow.id);
-  return { workflow, executable: version?.build.executable };
+  return { workflow, executable: version?.build.hash !== undefined };
 };
 
 /** Starts version 1 of workflow `id` for `by`, on `startEnv`: its run's ID. */
@@ -3609,29 +3609,6 @@ describe("a workflow's own limits", () => {
       requests: 1,
       early: true,
       cutOff: true,
-    });
-  });
-
-  it("refuses to lower an active time nothing holds yet, by pointer", async () => {
-    const by = await person("builder");
-    const { executable, workflow } = await published(by, {
-      limits: { maxActiveMs: 60_000 },
-      tasks: [{ finish: { set: { status: "done" } } }],
-    });
-    const [version] = await workflowVersions(env, by, workflow.id);
-    expect({
-      executable,
-      unsupported:
-        version?.build.executable === false ? version.build.unsupported : [],
-    }).toStrictEqual({
-      executable: false,
-      unsupported: [
-        {
-          pointer: "/document/metadata/grasp/limits/maxActiveMs",
-          taskId: null,
-          feature: "limits.maxActiveMs",
-        },
-      ],
     });
   });
 });
