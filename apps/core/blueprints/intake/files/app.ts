@@ -1,4 +1,4 @@
-import { app, resource, v } from "@grasp-os/sdk";
+import { app, permission, v } from "@grasp-os/sdk";
 
 import { guests, invite, notes, overview, revoke } from "./operations/chats.ts";
 import {
@@ -49,7 +49,7 @@ const line = v.object({
  * The notes `extract` reads, as text, and a chat's as its lines (none for
  * pasted notes), and the claims it found in them.
  */
-export const extract = resource.workflow("extract", {
+export const extract = permission.workflow("extract", {
   input: v.object({
     notes: v.string().min(1).max(notesMax),
     lines: v.array(line),
@@ -91,5 +91,5 @@ export default app({
   },
   internalOperations: {},
   screens: [{ name: "intake", path: "/", source: "screens/intake.tsx" }],
-  uses: [extract, guests],
+  permissions: { workflows: [extract], guests },
 });

@@ -34,8 +34,8 @@ import { aiStepProblem, workflowAiSteps } from "./resource-bindings.ts";
 //   it, in the statement that makes it current. A deleted default store is
 //   replaced by a new one for the versions sealed after it.
 //
-// It also refuses a version whose workflow AI steps go through a model
-// resource its sealed release doesn't declare as a text model
+// It also refuses a version whose workflow AI steps go through an `ai`
+// permission its sealed release doesn't declare
 // (`requireDeclaredModels`), so its builder hears it now rather than from
 // failed runs. Only a report: every attempt is still checked against the
 // release and the binding as they are then (`stepModelBinding`), which

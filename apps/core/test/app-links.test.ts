@@ -37,12 +37,12 @@ const declared = [
 /** The Notes App, its screen declaring `help` links and `attachments` files. */
 const linkedFiles = (origins: readonly string[] | null = declared) => ({
   ...notesFiles,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
-${origins === null ? "" : `export const help = resource.links("help", { origins: ${JSON.stringify(origins)} });\n`}
-export const attachments = resource.files("attachments", { operations: ["read"] });
+${origins === null ? "" : `export const help = permission.links({ origins: ${JSON.stringify(origins)} });\n`}
+export const attachments = permission.files({ operations: ["read"] });
 
 export default app({
   name: "Notes",
@@ -51,7 +51,7 @@ export default app({
   operations: { notes: { list, get, create, update, remove, echo, stamp, big } },
   internalOperations: {},
   screens: [],
-  uses: [${origins === null ? "" : "help, "}attachments],
+  permissions: { ${origins === null ? "" : "links: help, "}files: attachments },
 });
 `,
 });
@@ -259,8 +259,8 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const { app, version, builder, screen } = await openedApp();
     const url = "https://help.example.com/guide?customer=ada#billing";
 
-    const checked = await screen.channel.check("help", url);
-    const opened = await screen.channel.open("help", url, "activation");
+    const checked = await screen.channel.check("links", url);
+    const opened = await screen.channel.open("links", url, "activation");
 
     expect({
       checked,
@@ -277,7 +277,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
         {
           actor: { type: "person", userId: builder.userId },
           detail: {
-            resource: "help",
+            resource: "links",
             origin: "https://help.example.com",
             version,
             intent: "activation",
@@ -309,10 +309,10 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const decided: Record<string, unknown> = {};
     for (const [name, url] of Object.entries(cases)) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, as a person clicks
-      decided[name] = await outcomeOf(screen.channel.check("help", url));
+      decided[name] = await outcomeOf(screen.channel.check("links", url));
     }
     const punycode = await screen.channel.check(
-      "help",
+      "links",
       "https://bücher.example/katalog"
     );
 
@@ -351,7 +351,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const fetched = vi.spyOn(globalThis, "fetch");
     const url = "https://help.example.com/out?to=https://evil.test/";
     try {
-      const opened = await screen.channel.open("help", url, "confirmation");
+      const opened = await screen.channel.open("links", url, "confirmation");
       expect({
         opened: opened.url,
         fetched: fetched.mock.calls.filter(([target]) =>
@@ -370,7 +370,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const url = "https://help.example.com/";
 
     expect({
-      files: await outcomeOf(screen.channel.check("attachments", url)),
+      files: await outcomeOf(screen.channel.check("files", url)),
       none: await outcomeOf(screen.channel.check("elsewhere", url)),
     }).toStrictEqual({ files: "link.not_allowed", none: "link.not_allowed" });
   });
@@ -385,17 +385,17 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     });
     const theirs = await screenOf(colleague, app);
     const url = "https://help.example.com/";
-    const before = await outcomeOf(theirs.channel.check("help", url));
+    const before = await outcomeOf(theirs.channel.check("links", url));
     await builder.api.apps.members.remove(app, {
       type: "person",
       id: colleague.userId,
     });
-    const roleLost = await outcomeOf(theirs.channel.check("help", url));
+    const roleLost = await outcomeOf(theirs.channel.check("links", url));
 
     // A version without the declaration, opened.
     await released(builder, app, linkedFiles(null));
     const reopened = await screenOf(builder, app);
-    const undeclared = await outcomeOf(reopened.channel.check("help", url));
+    const undeclared = await outcomeOf(reopened.channel.check("links", url));
 
     expect({
       before,
@@ -411,14 +411,14 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   it("opens nothing for anyone once its App is archived, builders included, and opens again once it is restored", async () => {
     const { app, builder, screen } = await openedApp();
     const url = "https://help.example.com/";
-    const before = await outcomeOf(screen.channel.check("help", url));
+    const before = await outcomeOf(screen.channel.check("links", url));
     await builder.api.apps.archive(app);
     const archived = {
-      check: await outcomeOf(screen.channel.check("help", url)),
-      open: await outcomeOf(screen.channel.open("help", url, "activation")),
+      check: await outcomeOf(screen.channel.check("links", url)),
+      open: await outcomeOf(screen.channel.open("links", url, "activation")),
     };
     await builder.api.apps.restore(app);
-    const restored = await outcomeOf(screen.channel.check("help", url));
+    const restored = await outcomeOf(screen.channel.check("links", url));
 
     expect({ before, archived, restored }).toStrictEqual({
       before: "opened",
@@ -448,9 +448,9 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     };
 
     expect({
-      check: await across(async () => await screen.channel.check("help", url)),
+      check: await across(async () => await screen.channel.check("links", url)),
       open: await across(
-        async () => await screen.channel.open("help", url, "activation")
+        async () => await screen.channel.open("links", url, "activation")
       ),
     }).toStrictEqual({ check: "app.archived", open: "app.archived" });
   });
@@ -466,7 +466,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
 
     await expect(
       outcomeOf(
-        screen.channel.open("help", "https://help.example.com/", "activation")
+        screen.channel.open("links", "https://help.example.com/", "activation")
       )
     ).resolves.not.toBe("opened");
   });
@@ -475,11 +475,11 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const { app, screen } = await openedApp(linkedFiles(), { ordinary: false });
     const url = "https://help.example.com/?q=what-the-page-read";
 
-    const checked = await screen.channel.check("help", url);
+    const checked = await screen.channel.check("links", url);
     const clicked = await outcomeOf(
-      screen.channel.open("help", url, "activation")
+      screen.channel.open("links", url, "activation")
     );
-    const confirmed = await screen.channel.open("help", url, "confirmation");
+    const confirmed = await screen.channel.open("links", url, "confirmation");
     const recorded = await linksOpened(app);
 
     expect({
@@ -502,11 +502,11 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     await appHost(env, appIdSchema.parse(app)).restrict();
     const url = "https://help.example.com/";
 
-    const checked = await screen.channel.check("help", url);
+    const checked = await screen.channel.check("links", url);
     const clicked = await outcomeOf(
-      screen.channel.open("help", url, "activation")
+      screen.channel.open("links", url, "activation")
     );
-    const confirmed = await screen.channel.open("help", url, "confirmation");
+    const confirmed = await screen.channel.open("links", url, "confirmation");
 
     const recorded = await linksOpened(app);
     expect({
@@ -529,32 +529,32 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const body = { url: "https://help.example.com/" };
 
     expect({
-      noLease: await screen.raw("help", "check", body, {
+      noLease: await screen.raw("links", "check", body, {
         [screenLeaseHeader]: "",
       }),
-      forgedLease: await screen.raw("help", "check", body, {
+      forgedLease: await screen.raw("links", "check", body, {
         [screenLeaseHeader]: `${screen.lease.split(".")[0]}.AAAA`,
       }),
-      crossSite: await screen.raw("help", "check", body, {
+      crossSite: await screen.raw("links", "check", body, {
         "sec-fetch-site": "cross-site",
       }),
-      someoneElse: await screen.raw("help", "check", body, {
+      someoneElse: await screen.raw("links", "check", body, {
         [screenPersonHeader]: `${builder.userId}x`,
       }),
-      openWithoutIntent: await screen.raw("help", "open", body),
-      unknownIntent: await screen.raw("help", "open", {
+      openWithoutIntent: await screen.raw("links", "open", body),
+      unknownIntent: await screen.raw("links", "open", {
         ...body,
         intent: "wish",
       }),
-      extraField: await screen.raw("help", "check", {
+      extraField: await screen.raw("links", "check", {
         ...body,
         target: "_top",
       }),
-      otherOrigin: await screen.raw("help", "check", body, {
+      otherOrigin: await screen.raw("links", "check", body, {
         origin: "https://evil.test",
       }),
-      noOrigin: await screen.raw("help", "check", body, { origin: "none" }),
-      ownPage: await screen.raw("help", "check", body),
+      noOrigin: await screen.raw("links", "check", body, { origin: "none" }),
+      ownPage: await screen.raw("links", "check", body),
     }).toStrictEqual({
       noLease: { status: 403, code: "request.forbidden" },
       forgedLease: { status: 403, code: "request.forbidden" },
@@ -576,7 +576,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
 
     await expect(
       screen.raw(
-        "help",
+        "links",
         "check",
         { url: "https://help.example.com/" },
         {},
@@ -596,7 +596,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     try {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one after another, as a loop in a screen sends them
-        const { status } = await screen.raw("help", "check", body);
+        const { status } = await screen.raw("links", "check", body);
         statuses.push(status);
       }
     } finally {

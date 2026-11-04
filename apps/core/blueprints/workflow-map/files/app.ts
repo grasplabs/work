@@ -33,5 +33,4 @@ export default app({
   },
   internalOperations: { access: { builder } },
   screens: [{ name: "map", path: "/", source: "screens/map.tsx" }],
-  uses: [],
 });

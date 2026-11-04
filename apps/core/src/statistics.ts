@@ -3,8 +3,7 @@ import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { isPlatformMeasure } from "@grasp-os/shared/platform-measures";
@@ -13,16 +12,13 @@ import {
   statisticErrors,
   statisticMaxApps,
   statisticMaxGroups,
-  statisticPointSchema,
   statisticQuerySchema,
-  statisticRowsPerDay,
 } from "@grasp-os/shared/statistics";
 import type {
   StatisticAnswer,
   StatisticGroup,
 } from "@grasp-os/shared/statistics";
-import { runOfStepKey } from "@grasp-os/shared/workflows";
-import { and, asc, count, eq, gte, max, min, sql, sum } from "drizzle-orm";
+import { and, asc, count, eq, max, min, sql, sum } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -33,7 +29,6 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole, teamsOf } from "./auth/identity.ts";
 import {
   apps as appsTable,
-  appStatistics,
   appWorkflowBindings,
   improvementSignalComputations,
   improvementSignals,
@@ -42,165 +37,32 @@ import { inList } from "./db/d1.ts";
 import { authorize } from "./permissions.ts";
 import { runView } from "./workflows/run-view.ts";
 
-// Statistics (@grasp-os/shared/statistics): an App's functions record
-// named measures with a few dimensions, and read aggregates of them over
-// the last days, through their statistics resource (resource-statistics.ts). Points
-// are added up as they come, by the UTC day (`app_statistics`), so a read
-// never counts more rows than a day holds for each day it covers.
-//
-// An App reads its own measures only, with no permission. The platform's
-// (`platform.` ones) it reads only under a permission an admin grants it
-// (`{ type: "platform" }`, action `statistics`), for one App at a time,
-// whose runs the person its call acts for may see added up: an admin, or
-// a builder of that App, as for the improvement signals (signals-rpc.ts). They are worked out from the
+// The platform's statistics (@grasp-os/shared/statistics): the measures
+// the platform publishes (`platform.` ones), read by an App's code through
+// the platform's own functions (`permission.grasp`, resource-grasp.ts),
+// only under a permission an admin grants it (`{ type: "platform" }`,
+// action `statistics`), for Apps whose runs the person its call acts for
+// may see added up: an admin, or a builder of that App, as for the
+// improvement signals (signals-rpc.ts). They are worked out from the
 // platform's own tables as they are read, by their indexes: counts and
-// sums, never a run or who started it. Each such read is audited, and
-// each refused one with why; an App's reads and points of its own aren't,
-// as its own storage isn't. What an App reads here it may show to anyone
-// who uses it, even people who can't open the counted App: the grant
-// exists to publish these counts company-wide, and the admin's grant
-// screen says so before they approve.
+// sums, never a run or who started it. Each read is audited, and each
+// refused one with why. What an App reads here it may show to anyone who
+// uses it, even people who can't open the counted App: the grant exists to
+// publish these counts company-wide, and the admin's grant screen says so
+// before they approve.
+//
+// An App's own measures are its own tables: `app_statistics` and
+// `app_statistic_steps`, which held them before, are read and written by
+// nothing now, and dropped in a later release (expand, then contract).
 
-/** Days the added-up points are kept: a year's reads, and a margin. */
-export const statisticRetentionDays = 400;
-
-/** Rows past the retention one statement of a sweep deletes. */
-const sweptPerStatement = 1000;
-
-/** How long one sweep goes on deleting, in milliseconds. */
-const sweepBudgetMs = 5000;
-
+/** A day, in milliseconds. */
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** The UTC day of `date`, `YYYY-MM-DD`. */
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
-/** Whether the run of the step `stepKey` hasn't ended. */
-const runGoesOn = async (env: Env, stepKey: string): Promise<boolean> => {
-  const live = await env.DB.prepare(
-    "SELECT 1 FROM workflow_runs WHERE id = ? AND ended_at IS NULL"
-  )
-    .bind(runOfStepKey(stepKey) ?? "")
-    .first();
-  return live !== null;
-};
-
-/** A workflow run's step, and the attempt of it a point comes from. */
-export interface StepAttemptRef {
-  /** The step's idempotency key (`stepIdempotencyKey`). */
-  key: string;
-  /** The attempt, as the run's engine names it. */
-  attempt: string;
-}
-
-/**
- * Records one point (`statisticPointSchema`) of App `app`'s, on the UTC
- * day of `now`: added to that day's row of its measure and dimensions,
- * one statement. A point that would make a new row once the App has
- * `statisticRowsPerDay` rows that day is refused (`statistics.too_many`);
- * two landing at once may each make the last one, so the bound is that
- * or a few over.
- *
- * A point of a workflow run's step (`step`) isn't added up here: it is
- * kept with its attempt (`app_statistic_steps`), and the points of the
- * attempt that completes the step are added up then, once, by the run's
- * engine (`commitStepStatistics`, statistic-steps.ts). So a step that
- * runs again, after a retry, a replay or a held side effect, counts once,
- * and a step that never completes counts nothing. The day's bound is
- * checked when they are added up, where a point past it is left out; here
- * the call succeeds, and is refused only once one attempt holds as many
- * rows for the App as a day does. Nothing is kept for a run that has
- * ended (a late call of an attempt the engine gave up on): its points
- * can't be added up any more, and the run's rows were deleted as it
- * ended.
- */
-export const recordStatistic = async (
-  env: Env,
-  app: AppId,
-  input: unknown,
-  { now = new Date(), step }: { now?: Date; step?: StepAttemptRef } = {}
-): Promise<void> => {
-  const { measure, value, dimensions } = statisticErrors.parse(
-    "statistics.invalid",
-    statisticPointSchema,
-    input
-  );
-  const day = dayOf(now);
-  const key = canonicalJson(dimensions);
-  const statement =
-    step === undefined
-      ? env.DB.prepare(
-          `INSERT INTO app_statistics (app_id, measure, day, dimensions, count, sum, min, max)
-           SELECT ?1, ?2, ?3, ?4, 1, ?5, ?5, ?5
-           WHERE EXISTS (
-               SELECT 1 FROM app_statistics
-               WHERE app_id = ?1 AND measure = ?2 AND day = ?3 AND dimensions = ?4
-             )
-             OR (
-               SELECT count(*) FROM (
-                 SELECT 1 FROM app_statistics WHERE app_id = ?1 AND day = ?3 LIMIT ?6
-               )
-             ) < ?6
-           ON CONFLICT (app_id, measure, day, dimensions) DO UPDATE SET
-             count = count + 1,
-             sum = sum + excluded.sum,
-             min = min(min, excluded.min),
-             max = max(max, excluded.max)`
-        ).bind(app, measure, day, key, value, statisticRowsPerDay)
-      : env.DB.prepare(
-          `INSERT INTO app_statistic_steps
-             (step_key, attempt, app_id, measure, day, dimensions, count, sum, min, max, committed)
-           SELECT ?7, ?8, ?1, ?2, ?3, ?4, 1, ?5, ?5, ?5, 0
-           WHERE EXISTS (
-               SELECT 1 FROM workflow_runs WHERE id = ?9 AND ended_at IS NULL
-             )
-             AND (
-               EXISTS (
-                 SELECT 1 FROM app_statistic_steps
-                 WHERE step_key = ?7 AND attempt = ?8 AND app_id = ?1
-                   AND measure = ?2 AND day = ?3 AND dimensions = ?4
-               )
-               OR (
-                 SELECT count(*) FROM (
-                   SELECT 1 FROM app_statistic_steps
-                   WHERE step_key = ?7 AND attempt = ?8 AND app_id = ?1 LIMIT ?6
-                 )
-               ) < ?6
-             )
-           ON CONFLICT (step_key, attempt, app_id, measure, day, dimensions) DO UPDATE SET
-             count = count + 1,
-             sum = sum + excluded.sum,
-             min = min(min, excluded.min),
-             max = max(max, excluded.max)`
-        ).bind(
-          app,
-          measure,
-          day,
-          key,
-          value,
-          statisticRowsPerDay,
-          step.key,
-          step.attempt,
-          runOfStepKey(step.key) ?? ""
-        );
-  const result = await statement.run();
-  if (result.meta.changes === 0) {
-    // Nothing kept: for a run that has ended, as it should be.
-    if (step !== undefined && !(await runGoesOn(env, step.key))) {
-      return;
-    }
-    throw statisticErrors.create("statistics.too_many", {
-      maxRows: statisticRowsPerDay,
-    });
-  }
-};
-
 /** A read, its input checked. */
 type Query = z.output<typeof statisticQuerySchema>;
-
-/** A dimension of an App's own point, by name. */
-const dimension = (name: string): SQL =>
-  sql`json_extract(${appStatistics.dimensions}, ${`$.${name}`})`;
 
 /** The values a row is grouped by, as one JSON array. */
 const groupsOf = (grouped: readonly (SQL | SQLiteColumn)[]): SQL<string> =>
@@ -253,60 +115,6 @@ const answerOf = (
     groups,
     truncated: rows.length > statisticMaxGroups,
   };
-};
-
-/** The window of the last `days` UTC days before `now`, today included. */
-const windowOf = (now: Date, days: number) => ({
-  to: dayOf(now),
-  from: dayOf(new Date(now.getTime() - (days - 1) * dayMs)),
-});
-
-/** App `app`'s own measure, as `query` asks, over `from` to `to`. */
-const ownMeasure = async (
-  env: Env,
-  app: AppId,
-  query: Query,
-  from: string,
-  to: string
-): Promise<StatisticAnswer> => {
-  const { measure, where, groupBy } = query;
-  const grouped = groupBy.map((name) => dimension(name));
-  const rows = await drizzle(env.DB)
-    .select({
-      groups: groupsOf(grouped),
-      count: sql<number>`sum(${appStatistics.count})`,
-      sum: sum(appStatistics.sum).mapWith(Number),
-      min: min(appStatistics.min),
-      max: max(appStatistics.max),
-    })
-    .from(appStatistics)
-    .where(
-      and(
-        eq(appStatistics.appId, app),
-        eq(appStatistics.measure, measure),
-        gte(appStatistics.day, from),
-        sql`${appStatistics.day} <= ${to}`,
-        ...Object.entries(where).map(
-          ([name, value]) => sql`${dimension(name)} = ${value}`
-        )
-      )
-    )
-    .groupBy(...grouped)
-    // Without a group, no points still makes one row: none, then.
-    .having(sql`count(*) > 0`)
-    // By the groups' values, never their counts: pages stay put.
-    .orderBy(...grouped.map((group) => asc(group)))
-    .limit(statisticMaxGroups + 1)
-    .offset(query.offset);
-  return answerOf(
-    measure,
-    from,
-    to,
-    groupBy,
-    rows.map((row) =>
-      groupRowSchema.parse({ ...row, groups: groupValues(row.groups) })
-    )
-  );
 };
 
 /** A column a platform measure's dimension is read from. */
@@ -566,9 +374,9 @@ export interface PlatformRead {
   days?: number;
 }
 
-/** A read's input, as far as it asks for a platform measure. */
+/** A read's input, as far as it is shaped as one. */
 const platformReadSchema = z.looseObject({
-  measure: z.string().startsWith("platform."),
+  measure: z.unknown().optional(),
   days: z.unknown().optional(),
   where: z.looseObject({ app: z.unknown().optional() }).optional(),
   apps: z.array(z.unknown()).optional(),
@@ -576,23 +384,24 @@ const platformReadSchema = z.looseObject({
 
 /**
  * The platform read `input` asks for, as far as it says, valid or not:
- * any measure named `platform.` (an App's own measure never has a dot).
- * Undefined for a read of an App's own measure. Only a known measure and
- * a valid App ID are kept, never other text of the App's.
+ * a read of no shape at all names nothing but its refusal. Only a measure
+ * the platform publishes and a valid App ID are kept, never other text of
+ * the App's: any other measure is `platform.unknown`, so a refused read is
+ * audited without it.
  */
-export const platformReadOf = (input: unknown): PlatformRead | undefined => {
+export const platformReadOf = (input: unknown): PlatformRead => {
   const parsed = platformReadSchema.safeParse(input);
-  if (!parsed.success) {
-    return undefined;
-  }
-  const { measure, days, where, apps } = parsed.data;
+  const { measure, days, where, apps } = parsed.success ? parsed.data : {};
   const app = appIdSchema.safeParse(where?.app);
   const named = (apps ?? []).slice(0, statisticMaxApps).flatMap((entry) => {
     const id = appIdSchema.safeParse(entry);
     return id.success ? [id.data] : [];
   });
   return {
-    measure: isPlatformMeasure(measure) ? measure : "platform.unknown",
+    measure:
+      typeof measure === "string" && isPlatformMeasure(measure)
+        ? measure
+        : "platform.unknown",
     ...(app.success ? { app: app.data } : {}),
     ...(apps === undefined ? {} : { apps: named }),
     ...(typeof days === "number" && Number.isInteger(days) ? { days } : {}),
@@ -716,15 +525,14 @@ const endOf = (query: Query, now: Date): Date =>
     : new Date(Math.min(Date.parse(query.until), now.getTime()));
 
 /**
- * Reads statistics (`statisticQuerySchema`) for the App whose code acts as
- * `authority`: a measure of its own, over the last `days` UTC days before
- * `now`, today included; or, under the permission `platform` (its ID), one
- * the platform publishes of an App whose runs the person it acts for may
- * see (see above). A platform measure without it is `permission.denied`.
- * Every platform read is audited, allowed or refused, and why, naming
- * `actor` as reading (`auditPlatformRead`).
+ * Reads a platform measure (`statisticQuerySchema`) for the App whose code
+ * acts as `authority`, under the permission `platform` (its ID), of the
+ * Apps whose runs the person it acts for may see (see above), over exactly
+ * the last `days` × 24 hours before `now`. Without the permission it is
+ * `permission.denied`. Every read is audited, allowed or refused, and why,
+ * naming `actor` as reading (`auditPlatformRead`).
  */
-export const readStatistics = async (
+export const readPlatformStatistics = async (
   env: Env,
   authority: Authority,
   input: unknown,
@@ -733,18 +541,6 @@ export const readStatistics = async (
   actor: AuditActor = delegateActorOf(authority)
 ): Promise<StatisticAnswer> => {
   const read = platformReadOf(input);
-  if (read === undefined) {
-    const query = statisticErrors.parse(
-      "statistics.invalid",
-      statisticQuerySchema,
-      input
-    );
-    if (authority.subject.type !== "app") {
-      throw permissionErrors.create("permission.denied");
-    }
-    const { from, to } = windowOf(endOf(query, now), query.days);
-    return await ownMeasure(env, authority.subject.appId, query, from, to);
-  }
   let query: Query;
   let measure: PlatformMeasure;
   let counted: { visible: string[]; unavailable?: string[] };
@@ -789,33 +585,4 @@ export const readStatistics = async (
     endOf(query, now)
   );
   return unavailable === undefined ? answer : { ...answer, unavailable };
-};
-
-/**
- * Deletes rows past the retention, `sweptPerStatement` at a time, by the
- * index of their day, until none are left or `budgetMs` has passed: what a
- * clock run leaves, the next deletes.
- */
-export const sweepStatistics = async (
-  env: Env,
-  now = new Date(),
-  budgetMs = sweepBudgetMs
-): Promise<void> => {
-  const before = dayOf(
-    new Date(now.getTime() - statisticRetentionDays * dayMs)
-  );
-  const ends = Date.now() + budgetMs;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
-    const { meta } = await env.DB.prepare(
-      `DELETE FROM app_statistics WHERE rowid IN (
-         SELECT rowid FROM app_statistics WHERE day < ? LIMIT ?
-       )`
-    )
-      .bind(before, sweptPerStatement)
-      .run();
-    if (meta.changes < sweptPerStatement || Date.now() >= ends) {
-      return;
-    }
-  }
 };

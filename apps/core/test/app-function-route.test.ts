@@ -63,7 +63,6 @@ export default app({
   operations: { notes: { create, titles } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/notes.tsx": `export default function Notes() {

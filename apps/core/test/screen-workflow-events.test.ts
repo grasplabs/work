@@ -67,9 +67,9 @@ export default defineSchema({
   invoices: defineTable({ amount: v.number() }),
 });
 `,
-  "operations/invoices.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const review = resource.workflow("review", {
+export const review = permission.workflow("review", {
   input: v.object({ jobId: v.string() }),
   output: v.object({ status: v.string() }),
 });
@@ -84,7 +84,7 @@ export default app({
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
   operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [review],
+  permissions: { workflows: [review] },
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

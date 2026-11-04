@@ -437,7 +437,7 @@ export interface VersionReview {
   handsFilesToWorkflows: boolean | null;
   /**
    * Whether its server code and screens read the organization's people
-   * (`app({ people: true })`, GRA-1474): every member's name, email and
+   * (`permissions: { people: true }`, GRA-1474): every member's name, email and
    * teams, for whoever uses it. No admin approves it; its reviewer sees
    * it. Null when its manifest can't be read.
    */
@@ -1094,7 +1094,7 @@ export const appErrors = defineErrorFamily({
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":
-    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (resource.workflow).",
+    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (permissions.workflows, permission.workflow).",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.no_draft": "This chat has no draft of that App to preview.",

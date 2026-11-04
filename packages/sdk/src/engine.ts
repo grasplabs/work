@@ -81,7 +81,7 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * and their connector requests from connect's stored answers, never doing
  * it again. A model request has no such key: it is sent again, and charged
  * again, each time the step runs again. Make the calls one after another
- * (calls made at once count in the order they reach core). An action's `ctx.resources` resolve
+ * (calls made at once count in the order they reach core). An action's permissions (`ctx.ai`, `ctx.connections`, …) resolve
  * through the App's approved bindings, as the run: a model request counts
  * against the binding's caps and the run's budgets, and a side effect held
  * for the person holds the step, as the run's own do.
@@ -101,9 +101,7 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * actions on; elsewhere it is refused), and the run waits with it, using
  * none of the step's retries. After their decision the step's
  * function runs again from the top, so work before the call repeats:
- * keep it idempotent. (The statistics points an App method records are:
- * they are added up when the step completes, once, however often it
- * runs; a step that fails adds none.) Confirmed, the call answers as it would have; a
+ * keep it idempotent. Confirmed, the call answers as it would have; a
  * decline, or a drop (its connection disconnected, the person removed),
  * fails the call with `connect.declined`, which isn't retried: a final
  * answer, which the step's code (or the App's) may catch and handle like

@@ -169,9 +169,9 @@ export default defineSchema({
   invoices: defineTable({ amount: v.number() }),
 });
 `,
-  "operations/invoices.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const approval = resource.workflow("approval", {
+export const approval = permission.workflow("approval", {
   input: v.object({ amount: v.number() }),
   output: v.object({ status: v.string() }),
 });
@@ -186,7 +186,7 @@ export default app({
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
   operations: {},
   screens: [],
-  uses: [approval],
+  permissions: { workflows: [approval] },
 });
 `,
   "tests/fixtures/desk.json": JSON.stringify({

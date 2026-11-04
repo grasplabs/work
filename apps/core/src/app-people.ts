@@ -43,7 +43,7 @@ import { inList } from "./db/d1.ts";
 //   only itself: the App's server code decides with `ctx.caller`, which
 //   no screen reaches.
 // - Any App, or an agent through one, harvests the organization: only an
-//   App that declares it reads the directory (`app({ people: true })`,
+//   App that declares it reads the directory (`permissions: { people: true }`,
 //   which its versions' review shows); any other read is refused
 //   (`permission.denied`) and recorded (`app.people.refused`). An agent
 //   reads it only through such an App.

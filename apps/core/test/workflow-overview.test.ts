@@ -45,17 +45,17 @@ type Person = Awaited<ReturnType<typeof personApi>>;
  * above a limit, and books the invoice; its test approves the review.
  */
 const approveFiles = {
-  // The text model resource its AI step goes through: a version whose
-  // steps go through one it doesn't declare isn't made current.
+  // The `ai` permission its AI step goes through: a version whose steps
+  // go through one it doesn't declare isn't made current.
   "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 
 import schema from "./schema.ts";
 
-export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+export const reader = permission.ai({ maxOutputTokens: 6000 });
 
 export default app({
   name: "Invoices",
@@ -64,7 +64,7 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [reader],
+  permissions: { ai: reader },
 });
 `,
   "workflows/approve.ts": `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
@@ -81,7 +81,7 @@ export default workflow(
   async (step, { input, params }) => {
     const extracted = await step.llm("extract", {
       description: "Read the invoice's total",
-      binding: "reader",
+      binding: "ai",
       instructions: "Read the total in cents.",
       input: input.text,
       schema: z.object({ total: z.int() }),

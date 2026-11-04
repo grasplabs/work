@@ -5,7 +5,7 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { AppError, resource } from "../src/index.ts";
+import { AppError, permission } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type {
   ActionCtx,
@@ -147,7 +147,7 @@ query({ args: {}, returns: v.null(), reads: ["notes"], handler: () => null });
 // @ts-expect-error -- no `writes` list
 mutation({ args: {}, returns: v.null(), writes: [], handler: () => null });
 
-// A query reads, and nothing else: no writer, no uses, no resources.
+// A query reads, and nothing else: no writer, no uses, no permissions.
 query({
   args: { id: v.id("notes") },
   returns: v.null(),
@@ -158,7 +158,8 @@ query({
     expectTypeOf(ctx.db).not.toHaveProperty("replace");
     expectTypeOf(ctx.db).not.toHaveProperty("delete");
     expectTypeOf(ctx).not.toHaveProperty("runQuery");
-    expectTypeOf(ctx).not.toHaveProperty("resources");
+    expectTypeOf(ctx).not.toHaveProperty("connections");
+    expectTypeOf(ctx).not.toHaveProperty("ai");
     // No `ctx.data`, and no notifications.
     expectTypeOf(ctx).not.toHaveProperty("data");
     expectTypeOf(ctx).not.toHaveProperty("notify");
@@ -219,9 +220,11 @@ mutation({
     expectTypeOf(ctx.runQuery(get, { id: args.id })).resolves.toExtend<{
       title: string;
     } | null>();
-    // No resources (so no network), queries only, no `ctx.data`, and no
+    // No permissions (so no network), queries only, no `ctx.data`, and no
     // event to notify a run with that it doesn't list.
-    expectTypeOf(ctx).not.toHaveProperty("resources");
+    expectTypeOf(ctx).not.toHaveProperty("connections");
+    expectTypeOf(ctx).not.toHaveProperty("ai");
+    expectTypeOf(ctx).not.toHaveProperty("workflows");
     expectTypeOf(ctx).not.toHaveProperty("runMutation");
     expectTypeOf(ctx).not.toHaveProperty("runAction");
     expectTypeOf(ctx).not.toHaveProperty("data");
@@ -244,18 +247,15 @@ mutation({
 });
 
 // An action has no database, and calls only what it lists.
-const mail = resource.connector("mail", {
+const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
-const help = resource.knowledge("help", {
+const brain = permission.brain({
   operations: ["search"],
   collections: ["handbook"],
 });
-const summarizer = resource.model("summarizer", {
-  structuredOutput: v.object({ summary: v.string() }),
-  maxOutputTokens: 500,
-});
+const ai = permission.ai({ maxOutputTokens: 500 });
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -265,7 +265,7 @@ const secret = internalQuery({
 action({
   args: { noteId: v.id("notes"), to: v.string().email() },
   returns: v.object({ summary: v.string() }),
-  uses: [get, create, mail, help, summarizer, secret],
+  uses: [get, create, mail, brain, ai, secret],
   handler: async (ctx, args) => {
     expectTypeOf(ctx).toExtend<ActionCtx<readonly [typeof get]>>();
     // No database, and no notifications of runs: it tells people only.
@@ -286,21 +286,25 @@ action({
     ).resolves.toEqualTypeOf<Id<"notes">>();
     // Internal functions of the App are its own server code's to call.
     expectTypeOf(ctx.runQuery(secret, {})).resolves.toEqualTypeOf<string>();
-    await ctx.resources.mail.call("send", {
+    await ctx.connections.mail.call("send", {
       mailbox: "team@acme.test",
       subject: "Hello",
       body: "Hi.",
       to: [args.to],
     });
     // @ts-expect-error -- an action the declaration doesn't list
-    await ctx.resources.mail.call("delete", {});
-    expectTypeOf(
-      ctx.resources.help.search({ text: "a" })
-    ).resolves.toEqualTypeOf<{ title: string; excerpt: string }[]>();
-    // Only the declared operations and resources.
-    expectTypeOf(ctx.resources.help).not.toHaveProperty("read");
-    expectTypeOf(ctx.resources).not.toHaveProperty("calendar");
-    return await ctx.resources.summarizer.generate({ prompt: "Summarize" });
+    await ctx.connections.mail.call("delete", {});
+    expectTypeOf(ctx.brain.search({ text: "a" })).resolves.toEqualTypeOf<
+      { title: string; excerpt: string }[]
+    >();
+    // Only the declared operations and permissions.
+    expectTypeOf(ctx.brain).not.toHaveProperty("read");
+    expectTypeOf(ctx.connections).not.toHaveProperty("calendar");
+    expectTypeOf(ctx).not.toHaveProperty("guests");
+    return await ctx.ai.generate({
+      prompt: "Summarize",
+      output: v.object({ summary: v.string() }),
+    });
   },
 });
 action({
@@ -309,7 +313,8 @@ action({
   handler: async (ctx) => {
     // @ts-expect-error -- a function it doesn't list in `uses`
     await ctx.runQuery(get, { id: noteId });
-    expectTypeOf(ctx.resources).not.toHaveProperty("mail");
+    expectTypeOf(ctx.connections).not.toHaveProperty("mail");
+    expectTypeOf(ctx).not.toHaveProperty("ai");
     return null;
   },
 });
@@ -323,17 +328,17 @@ action({
 });
 
 // Workflows (spec 7.4, 9.5): an action starts one it lists, and a mutation
-// stages a start of one it lists for after it commits. Neither reaches the
-// engine, and neither starts what it doesn't list.
-const followUp = resource.workflow("followUp", {
+// stages a start of one it lists for after it commits, each by its alias.
+// Neither reaches the engine, and neither starts what it doesn't list.
+const followUp = permission.workflow("followUp", {
   input: v.object({
     noteId: v.id("notes"),
     reason: v.string().default("new"),
   }),
   output: v.null(),
 });
-const unlisted = resource.workflow("unlisted", {
-  input: v.object({}),
+const optional = permission.workflow("optional", {
+  input: v.string().default("ready"),
   output: v.null(),
 });
 declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
@@ -341,34 +346,34 @@ declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
 action({
   args: { noteId: v.id("notes") },
   returns: v.null(),
-  uses: [followUp, get, mail],
+  uses: [followUp, optional, get, mail],
   handler: async (ctx, args) => {
     // Its input as a caller passes it: the default may be left out.
-    const handle = await ctx.startWorkflow(followUp, { noteId: args.noteId });
+    const handle = await ctx.workflows.followUp.start({ noteId: args.noteId });
     expectTypeOf(handle).toEqualTypeOf<RunHandle>();
+    // An input with a default may be left out altogether.
+    await ctx.workflows.optional.start();
     // @ts-expect-error -- input the declaration doesn't take
-    await ctx.startWorkflow(followUp, { note: args.noteId });
-    // @ts-expect-error -- a workflow the action doesn't list in `uses`
-    await ctx.startWorkflow(unlisted, {});
-    // @ts-expect-error -- a query is no workflow
-    await ctx.startWorkflow(get, { id: args.noteId });
-    // @ts-expect-error -- nor is a connector
-    await ctx.startWorkflow(mail, {});
-    // @ts-expect-error -- nor an engine workflow of the App's
-    await ctx.startWorkflow(engineWorkflow, {});
-    // A workflow is no resource client, and there is no engine.
-    expectTypeOf(ctx.resources).not.toHaveProperty("followUp");
+    await ctx.workflows.followUp.start({ note: args.noteId });
+    // @ts-expect-error -- `followUp` needs its input
+    await ctx.workflows.followUp.start();
+    // Only what it lists: no other workflow, and no connection or query.
+    expectTypeOf(ctx.workflows).not.toHaveProperty("unlisted");
+    expectTypeOf(ctx.workflows).not.toHaveProperty("mail");
+    expectTypeOf(ctx.workflows).not.toHaveProperty("get");
+    // A workflow is no connection, and there is no engine.
+    expectTypeOf(ctx.connections).not.toHaveProperty("followUp");
     expectTypeOf(ctx).not.toHaveProperty("engine");
     expectTypeOf(ctx).not.toHaveProperty("afterCommit");
     return null;
   },
 });
 action({
-  args: { noteId: v.id("notes") },
+  args: {},
   returns: v.null(),
-  handler: async (ctx, args) => {
-    // @ts-expect-error -- it lists no workflow
-    await ctx.startWorkflow(followUp, { noteId: args.noteId });
+  handler: (ctx) => {
+    // It lists no workflow.
+    expectTypeOf(ctx.workflows).not.toHaveProperty("followUp");
     return null;
   },
 });
@@ -388,25 +393,23 @@ mutation({
     const id = await ctx.db.insert("notes", { title: args.title });
     // Staged with the insert, started once both have committed.
     expectTypeOf(
-      ctx.afterCommit.start(followUp, { noteId: id })
+      ctx.afterCommit.workflows.followUp.start({ noteId: id })
     ).resolves.toBeVoid();
     // @ts-expect-error -- input the declaration doesn't take
-    await ctx.afterCommit.start(followUp, { noteId: 1 });
-    // @ts-expect-error -- a workflow the mutation doesn't list in `uses`
-    await ctx.afterCommit.start(unlisted, {});
-    // @ts-expect-error -- a query is no workflow
-    await ctx.afterCommit.start(get, { id });
+    await ctx.afterCommit.workflows.followUp.start({ noteId: 1 });
+    // Only what it lists.
+    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("optional");
     // A mutation never starts anything while it runs.
-    expectTypeOf(ctx).not.toHaveProperty("startWorkflow");
+    expectTypeOf(ctx).not.toHaveProperty("workflows");
     return id;
   },
 });
 mutation({
   args: { noteId: v.id("notes") },
   returns: v.null(),
-  handler: async (ctx, args) => {
-    // @ts-expect-error -- it lists no workflow
-    await ctx.afterCommit.start(followUp, { noteId: args.noteId });
+  handler: async (ctx) => {
+    // It lists no workflow.
+    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("followUp");
     // Tells people once it commits, whatever it lists.
     await ctx.afterCommit.notifyPeople("person", { title: "Done" });
     // @ts-expect-error -- a title is required
@@ -414,47 +417,10 @@ mutation({
     return null;
   },
 });
-// A choice of workflows keeps each one's input: never another's, and
-// optional only for one that takes none.
-const counted = resource.workflow("counted", {
-  input: v.number(),
-  output: v.null(),
-});
-const optional = resource.workflow("optional", {
-  input: v.string().default("ready"),
-  output: v.null(),
-});
-declare const pick: boolean;
-action({
-  args: {},
-  returns: v.null(),
-  uses: [counted, optional],
-  handler: async (ctx) => {
-    await ctx.startWorkflow(optional);
-    // @ts-expect-error -- `counted` needs a number, which "text" isn't
-    await ctx.startWorkflow(pick ? counted : optional, "text");
-    // @ts-expect-error -- `counted` needs its input
-    await ctx.startWorkflow(pick ? counted : optional);
-    return null;
-  },
-});
-mutation({
-  args: {},
-  returns: v.null(),
-  uses: [counted, optional],
-  handler: async (ctx) => {
-    await ctx.afterCommit.start(optional);
-    // @ts-expect-error -- `counted` needs a number, which "text" isn't
-    await ctx.afterCommit.start(pick ? counted : optional, "text");
-    // @ts-expect-error -- `counted` needs its input
-    await ctx.afterCommit.start(pick ? counted : optional);
-    return null;
-  },
-});
 
 // A query starts nothing, now or after.
 expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("afterCommit");
-expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("startWorkflow");
+expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("workflows");
 
 // `doc` is a whole record of the pinned schema.
 expectTypeOf(doc("notes").shape._rev).toExtend<unknown>();

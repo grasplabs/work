@@ -1082,11 +1082,6 @@ const sentCallSchema = z.union([
   z.tuple([z.string(), z.unknown(), z.undefined()]),
 ]);
 
-/** What a sealed run's step completing records: nothing of its own. */
-const nothingToRecord = async (): Promise<void> => {
-  await Promise.resolve();
-};
-
 class SealedRun implements SealedRunKind {
   readonly #env: Env;
   readonly #host: HostControls;
@@ -1913,8 +1908,6 @@ class SealedRun implements SealedRunKind {
     }
     return this.#noted(attempt, settled);
   }
-
-  readonly stepCompleted = nothingToRecord;
 
   attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
     // Every call but a binding's is one the build's code never makes.

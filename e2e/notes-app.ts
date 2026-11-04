@@ -126,16 +126,13 @@ export const detachFile = mutation({
 });
 `;
 
-const registration = `import { app, resource } from "@grasp-os/sdk";
+const registration = `import { app, permission } from "@grasp-os/sdk";
 import { attachFile, create, detachFile, get, importHalfway, insert, list, remove, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
-export const attachments = resource.files("attachments", {
+export const files = permission.files({
   operations: ["upload", "read", "attach", "delete"],
 });
-
-/** Files read through another resource: the same files, nothing else. */
-export const photos = resource.files("photos", { operations: ["read"] });
 
 export default app({
   name: "Notes",
@@ -144,7 +141,7 @@ export default app({
   operations: { notes: { list, get, create, update, remove, importHalfway, attachFile, detachFile } },
   internalOperations: { notes: { insert } },
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-  uses: [attachments, photos],
+  permissions: { files },
 });
 `;
 
@@ -154,7 +151,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
 import { useState } from "react";
-import { api, resources } from "#grasp";
+import { api, permissions } from "#grasp";
 import type { Note } from "./note-editor.tsx";
 
 /** One attached file: its preview, name and size, to download or remove. */
@@ -167,7 +164,7 @@ function Attachment({
   file: FileRef;
   onOutcome: (outcome: string) => void;
 }) {
-  const shown = useFile(resources.attachments, file);
+  const shown = useFile(permissions.files, file);
   const client = useClient();
   const detach = useMutation(api.notes.detachFile);
   // Deleted: the row is gone too once the note's change reaches the list.
@@ -185,7 +182,7 @@ function Attachment({
       return;
     }
     try {
-      await client.files.delete(resources.attachments, file);
+      await client.files.delete(permissions.files, file);
       onOutcome(\`Removed \${shown.name}.\`);
     } catch (error) {
       onOutcome(\`Removed from the note, not deleted: \${error instanceof GraspError ? error.message : "it failed"}\`);
@@ -193,7 +190,7 @@ function Attachment({
   };
   const download = async () => {
     try {
-      await client.files.download(resources.attachments, file);
+      await client.files.download(permissions.files, file);
     } catch (error) {
       onOutcome(\`Not downloaded: \${error instanceof GraspError ? error.message : "it failed"}\`);
     }
@@ -223,7 +220,7 @@ function Attachment({
  * the note was read, each shown with its preview.
  */
 export function Attachments({ note }: { note: Note }) {
-  const upload = useUpload(resources.attachments);
+  const upload = useUpload(permissions.files);
   const attach = useMutation(api.notes.attachFile);
   const [outcome, setOutcome] = useState("");
   const send = async (picked: File) => {
@@ -479,7 +476,7 @@ export const notesAppFiles = (): Record<string, string> => ({
 const unaskedScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
-import { resources } from "#grasp";
+import { permissions } from "#grasp";
 
 /** A file nobody may read: what is downloaded matters less than whether. */
 const someFile = { id: "00000000-0000-4000-8000-000000000000" };
@@ -494,7 +491,7 @@ export default function Notes() {
   const [asked, setAsked] = useState("waiting");
   const download = async (onOutcome: (outcome: string) => void) => {
     try {
-      await client.files.download(resources.attachments, someFile);
+      await client.files.download(permissions.files, someFile);
       onOutcome("downloaded");
     } catch (error) {
       onOutcome(error instanceof GraspError ? error.code : "failed");
@@ -523,24 +520,19 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
 import { useState } from "react";
-import { resources } from "#grasp";
+import { permissions } from "#grasp";
 
-/** One file, through the resource chosen, or none while hidden. */
+/** One file, or none while hidden. */
 function Shown({
   file,
-  viaPhotos,
   hidden,
   renders,
 }: {
   file: FileRef;
-  viaPhotos: boolean;
   hidden: boolean;
   renders: number;
 }) {
-  const shown = useFile(
-    viaPhotos ? resources.photos : resources.attachments,
-    hidden ? "skip" : file
-  );
+  const shown = useFile(permissions.files, hidden ? "skip" : file);
   if (hidden) {
     return <p>The file is hidden</p>;
   }
@@ -557,12 +549,11 @@ function Shown({
   );
 }
 
-/** A file uploaded, then shown through one resource or the other. */
+/** A file uploaded, then shown. */
 export default function Notes() {
-  const upload = useUpload(resources.attachments);
+  const upload = useUpload(permissions.files);
   const client = useClient();
   const [file, setFile] = useState<FileRef | null>(null);
-  const [viaPhotos, setViaPhotos] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [renders, setRenders] = useState(0);
   const [outcome, setOutcome] = useState("");
@@ -589,7 +580,6 @@ export default function Notes() {
         type="file"
       />
       <output aria-label="Upload">{outcome}</output>
-      <Button onClick={() => setViaPhotos(true)}>Through photos</Button>
       <Button onClick={() => setRenders((count) => count + 1)}>
         Render again
       </Button>
@@ -599,7 +589,7 @@ export default function Notes() {
       <Button
         onClick={() => {
           if (file !== null) {
-            client.files.delete(resources.attachments, file).then(
+            client.files.delete(permissions.files, file).then(
               () => {
                 setDeletion("deleted");
               },
@@ -616,7 +606,6 @@ export default function Notes() {
       {file === null ? null : (
         <Shown
           file={file}
-          viaPhotos={viaPhotos}
           hidden={hidden}
           renders={renders}
         />
@@ -627,8 +616,8 @@ export default function Notes() {
 `;
 
 /**
- * The Notes App with a screen that shows an uploaded file through one
- * resource or another, for what `useFile` shows when either changes.
+ * The Notes App with a screen that shows an uploaded file, for what
+ * `useFile` shows as it renders, hides and deletes it.
  */
 export const fileViewFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
@@ -648,19 +637,16 @@ const linksRegistration = registration
   .replace(
     "export default app({",
     `/** The help site its screens may link to, and nothing else. */
-export const help = resource.links("help", { origins: ["https://help.example.com"] });
+export const help = permission.links({ origins: ["https://help.example.com"] });
 
 export default app({`
   )
-  .replace(
-    "uses: [attachments, photos],",
-    "uses: [attachments, photos, help],"
-  );
+  .replace("permissions: { files },", "permissions: { files, links: help },");
 
 const linksScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { resources } from "#grasp";
+import { permissions } from "#grasp";
 
 /**
  * A screen that opens its help site on a click, opens it a while after
@@ -671,7 +657,7 @@ export default function Notes() {
   const [outcome, setOutcome] = useState("waiting");
   const open = async (url: string) => {
     try {
-      await client.links.open(resources.help, { url });
+      await client.links.open(permissions.links, { url });
       setOutcome("opened");
     } catch (error) {
       setOutcome(error instanceof GraspError ? error.code : "failed");
@@ -718,8 +704,8 @@ export const navigationFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
   "app.ts": registration
     .replace(
-      'import { app, resource } from "@grasp-os/sdk";',
-      'import { app, resource, v } from "@grasp-os/sdk";'
+      'import { app, permission } from "@grasp-os/sdk";',
+      'import { app, permission, v } from "@grasp-os/sdk";'
     )
     .replace(
       '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
@@ -839,8 +825,8 @@ export const hoppingFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
   "app.ts": registration
     .replace(
-      'import { app, resource } from "@grasp-os/sdk";',
-      'import { app, resource, v } from "@grasp-os/sdk";'
+      'import { app, permission } from "@grasp-os/sdk";',
+      'import { app, permission, v } from "@grasp-os/sdk";'
     )
     .replace(
       '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',

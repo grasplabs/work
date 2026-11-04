@@ -1893,7 +1893,7 @@ describe("grasp.operation calls of JSON workflows", () => {
  * An App of `by`'s, version 1 approved, binding version 1 of workflow
  * `workflowId` as `flow`, with a `start` grant of its own from `admin`; in
  * restricted mode when `restricted`. `start` starts it as App code does
- * (an action's `ctx.startWorkflow`), for `by`, made by `agent`'s call
+ * (an action's `ctx.workflows.<alias>.start`), for `by`, made by `agent`'s call
  * when given: its run's ID.
  */
 const startingApp = async (

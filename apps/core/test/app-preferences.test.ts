@@ -67,7 +67,6 @@ export default app({
   operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   ${preferences === "" ? "" : `preferences: ${preferences},`}
-  uses: [],
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

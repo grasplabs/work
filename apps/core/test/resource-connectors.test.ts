@@ -49,10 +49,10 @@ const mailFiles = (
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const mail = resource.connector("mail", {
+export const mail = permission.connection("mail", {
   contract: "${contract}",
   actions: ${actions},
 });
@@ -62,7 +62,7 @@ export const send = action({
   returns: v.object({ mailbox: v.string(), sent: v.boolean() }),
   uses: [mail],
   handler: async (ctx, args) => {
-    const sent = await ctx.resources.mail.call("send", {
+    const sent = await ctx.connections.mail.call("send", {
       mailbox: "team@acme.test",
       subject: args.subject,
       body: "Hello.",
@@ -80,7 +80,7 @@ export const inbox = action({
   returns: v.number(),
   uses: [mail],
   handler: async (ctx) => {
-    const listed = await ctx.resources.mail.call("list", { mailbox: "team@acme.test" });
+    const listed = await ctx.connections.mail.call("list", { mailbox: "team@acme.test" });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.messages)
       ? listed.messages.length
       : -1;
@@ -93,7 +93,7 @@ export const sendFresh = action({
   returns: v.boolean(),
   uses: [mail],
   handler: async (ctx) => {
-    await ctx.resources.mail.call("send", {
+    await ctx.connections.mail.call("send", {
       mailbox: "team@acme.test",
       subject: crypto.randomUUID(),
       body: "Hello.",
@@ -109,7 +109,7 @@ export const probe = action({
   returns: v.string(),
   uses: [mail],
   handler: async (ctx) => {
-    const client = ctx.resources.mail;
+    const client = ctx.connections.mail;
     const listed = await client.call("list", { mailbox: "team@acme.test" });
     const prototype = Object.getPrototypeOf(client) ?? {};
     return [
@@ -130,7 +130,7 @@ export const careless = action({
   uses: [mail],
   handler: async (ctx) => {
     // What its contract requires left out, past the types on purpose.
-    await ctx.resources.mail.call("send", { mailbox: "team@acme.test" } as never);
+    await ctx.connections.mail.call("send", { mailbox: "team@acme.test" } as never);
     return "sent";
   },
 });
@@ -146,7 +146,7 @@ export default app({
   operations: { mail: { send, inbox, careless, sendFresh, probe } },
   internalOperations: {},
   screens: [],
-  uses: [mail],
+  permissions: { connections: [mail] },
 });
 `,
 });
@@ -161,9 +161,9 @@ const unknownContractFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { resource } from "@grasp-os/sdk";
+  "operations/mail.ts": `import { permission } from "@grasp-os/sdk";
 
-export const mail = resource.connector("mail", {
+export const mail = permission.connection("mail", {
   contract: "grasp.mail@1" as never,
   actions: ["send", "list"] as never,
 });
@@ -179,7 +179,7 @@ export default app({
   operations: {},
   internalOperations: {},
   screens: [],
-  uses: [mail],
+  permissions: { connections: [mail] },
 });
 `,
 });
@@ -187,10 +187,10 @@ export default app({
 /** The Mailer, with a second alias of the same contract: its archive. */
 const archiveFiles = (): Record<string, string> => ({
   ...mailFiles(),
-  "operations/archive.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/archive.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const archive = resource.connector("archive", {
+export const archive = permission.connection("archive", {
   contract: "microsoft-365.mail@1",
   actions: ["send", "list"],
 });
@@ -200,7 +200,7 @@ export const archived = action({
   returns: v.boolean(),
   uses: [archive],
   handler: async (ctx) => {
-    await ctx.resources.archive.call("list", { mailbox: "team@acme.test" });
+    await ctx.connections.archive.call("list", { mailbox: "team@acme.test" });
     return true;
   },
 });
@@ -217,17 +217,17 @@ export default app({
   operations: { mail: { send, inbox, careless, sendFresh, probe }, archive: { archived } },
   internalOperations: {},
   screens: [],
-  uses: [mail, archive],
+  permissions: { connections: [mail, archive] },
 });
 `,
 });
 
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
 const unusedMailFiles = (): Record<string, string> => ({
-  "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
 import { query } from "#grasp/server";
 
-export const mail = resource.connector("mail", {
+export const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send", "list"],
 });
@@ -245,7 +245,7 @@ export default app({
   operations: { mail: { ping } },
   internalOperations: {},
   screens: [],
-  uses: [mail],
+  permissions: { connections: [mail] },
 });
 `,
 });
@@ -1178,10 +1178,10 @@ const crmFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/crm.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const crm = resource.connector("crm", {
+export const crm = permission.connection("crm", {
   contract: "composio.crm@1",
   actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],
 });
@@ -1191,7 +1191,7 @@ export const contacts = action({
   returns: v.number(),
   uses: [crm],
   handler: async (ctx) => {
-    const listed = await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
+    const listed = await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.contacts)
       ? listed.contacts.length
       : -1;
@@ -1204,7 +1204,7 @@ export const sloppy = action({
   returns: v.number(),
   uses: [crm],
   handler: async (ctx) => {
-    await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5, archived: true });
+    await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5, archived: true });
     return 0;
   },
 });
@@ -1214,7 +1214,7 @@ export const create = action({
   returns: v.string(),
   uses: [crm],
   handler: async (ctx, args) => {
-    const created = await ctx.resources.crm.call("CRM_CREATE_CONTACT", { email: args.email });
+    const created = await ctx.connections.crm.call("CRM_CREATE_CONTACT", { email: args.email });
     return typeof created === "string" ? created : "";
   },
 });
@@ -1230,7 +1230,7 @@ export default app({
   operations: { crm: { contacts, create, sloppy } },
   internalOperations: {},
   screens: [],
-  uses: [crm],
+  permissions: { connections: [crm] },
 });
 `,
 });
@@ -1241,15 +1241,15 @@ const twoCrmFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/crm.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const crm = resource.connector("crm", {
+export const crm = permission.connection("crm", {
   contract: "composio.crm@1",
   actions: ["CRM_LIST_CONTACTS"],
 });
 
-export const backup = resource.connector("backup", {
+export const backup = permission.connection("backup", {
   contract: "composio.crm@1",
   actions: ["CRM_LIST_CONTACTS"],
 });
@@ -1259,8 +1259,8 @@ export const contacts = action({
   returns: v.number(),
   uses: [crm, backup],
   handler: async (ctx) => {
-    await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
-    await ctx.resources.backup.call("CRM_LIST_CONTACTS", { limit: 5 });
+    await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
+    await ctx.connections.backup.call("CRM_LIST_CONTACTS", { limit: 5 });
     return 0;
   },
 });
@@ -1276,7 +1276,7 @@ export default app({
   operations: { crm: { contacts } },
   internalOperations: {},
   screens: [],
-  uses: [crm, backup],
+  permissions: { connections: [crm, backup] },
 });
 `,
 });

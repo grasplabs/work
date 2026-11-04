@@ -59,10 +59,10 @@ export default defineSchema({
   notes: defineTable({ title: v.string() }),
 });
 `,
-  "operations/review.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/review.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, mutation } from "#grasp/server";
 
-export const review = resource.workflow("review", {
+export const review = permission.workflow("review", {
   input: v.object({ doc: v.file() }),
   output: v.object({ status: v.string() }),
 });
@@ -72,7 +72,7 @@ export const startReview = action({
   args: { file: v.string() },
   returns: v.object({ startId: v.string(), runId: v.string().nullable(), version: v.number().integer() }),
   uses: [review],
-  handler: async (ctx, args) => await ctx.startWorkflow(review, { doc: { id: args.file } }),
+  handler: async (ctx, args) => await ctx.workflows.review.start({ doc: { id: args.file } }),
 });
 
 /** Notes the file, and has the review started once that commits. */
@@ -82,16 +82,16 @@ export const stageReview = mutation({
   uses: [review],
   handler: async (ctx, args) => {
     await ctx.db.insert("notes", { title: args.file });
-    await ctx.afterCommit.start(review, { doc: { id: args.file } });
+    await ctx.afterCommit.workflows.review.start({ doc: { id: args.file } });
     return null;
   },
 });
 `,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 import { review, stageReview, startReview } from "./operations/review.ts";
 import schema from "./schema.ts";
 
-export const attachments = resource.files("attachments", {
+export const attachments = permission.files({
   operations: ["upload", "read", "delete"],
 });
 
@@ -101,7 +101,7 @@ export default app({
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
   operations: { review: { startReview, stageReview } },
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [attachments, review],
+  permissions: { files: attachments, workflows: [review] },
 });
 `,
   "screens/desk.tsx": `export default function Desk() {
@@ -269,7 +269,7 @@ const uploaded = async (
   bytes: Uint8Array<ArrayBuffer>
 ): Promise<string> =>
   await screen.channel.upload(
-    "attachments",
+    "files",
     new Blob([bytes], { type: "image/png" }),
     "scan.png",
     {
@@ -861,7 +861,7 @@ describe(
       await calledAs(fixture.builder, fixture, "review.stageReview", {
         file: theirs,
       });
-      await builderScreen.channel.delete("attachments", theirs);
+      await builderScreen.channel.delete("files", theirs);
       const entries = await dispatched(fixture);
       const runs = await env.DB.prepare(
         "SELECT count(*) AS runs FROM workflow_resource_runs WHERE workflow_resource_id = ?"
@@ -976,8 +976,8 @@ describe(
                   'import schema from "./schema.ts";\nimport * as extra from "./operations/extra.ts";'
                 )
                 .replace(
-                  "uses: [attachments, review],",
-                  "uses: [attachments, review, ...Object.values(extra)],"
+                  "permissions: { files: attachments, workflows: [review] },",
+                  "permissions: { files: attachments, workflows: [review, ...Object.values(extra)] },"
                 ),
             ];
           }
@@ -985,10 +985,10 @@ describe(
         })
       );
       many["operations/extra.ts"] = [
-        'import { resource, v } from "@grasp-os/sdk";',
+        'import { permission, v } from "@grasp-os/sdk";',
         ...extras.map(
           (name) =>
-            `export const ${name} = resource.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() });`
+            `export const ${name} = permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() });`
         ),
       ].join("\n");
       const { version } = await fixture.builder.api.apps.files.commit(

@@ -79,7 +79,6 @@ const teamApp = app({
   },
   operations: { addShared, addStaff, countShared, countStaff, auditStaff },
   screens: [],
-  uses: [],
 });
 
 const { manifest } = inspectApp(teamApp);

@@ -44,7 +44,7 @@ export default defineSchema({
   mottos: defineTable({ text: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, resource, v } from "@grasp-os/sdk";
+  "operations/notes.ts": `import { AppError, permission, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "#grasp/server";
 
 export const create = mutation({
@@ -79,7 +79,7 @@ export const setMotto = mutation({
   handler: async (ctx, args) => await ctx.db.insert("mottos", args),
 });
 
-export const help = resource.knowledge("help", {
+export const help = permission.brain({
   operations: ["search"],
   collections: ["handbook"],
 });
@@ -88,7 +88,7 @@ export const searchHelp = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
   uses: [help],
-  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text, limit: 5 }),
+  handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
 });
 
 export const count = internalQuery({
@@ -113,7 +113,7 @@ export default app({
   operations: { notes: { create, titles, find, setMotto, searchHelp } },
   internalOperations: { notes: { count } },
   screens: [],
-  uses: [help],
+  permissions: { brain: help },
 });
 `,
   "tests/fixtures/notes.json": JSON.stringify({
@@ -368,7 +368,6 @@ export default app({
   operations: { deals: { add, titles } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
       "tests/fixtures/deals.json": JSON.stringify({

@@ -386,6 +386,49 @@ describe("an App's surfaces", () => {
     });
   });
 
+  it("leave out of the sidebar an App whose sealed release no longer reads back, and list the others", async () => {
+    const { app: readable, builder } = await surfacedApp("Readable");
+    const { id: unreadable } = await builder.api.apps.create({
+      name: "Unreadable",
+    });
+    const { version } = await builder.api.apps.files.commit(
+      unreadable,
+      surfacedFiles(),
+      "First"
+    );
+    await builder.api.apps.versions.setCurrent(unreadable, version);
+    // Its contracts no longer read back, as a release sealed before an
+    // SDK's hard cut: one App's, never the listing's, failure.
+    const row = await env.DB.prepare(
+      "SELECT manifest FROM sdk_release_manifests WHERE app_id = ?"
+    )
+      .bind(unreadable)
+      .first<{ manifest: string }>();
+    const { artifacts } = z
+      .object({
+        artifacts: z.array(z.object({ path: z.string(), sha256: z.string() })),
+      })
+      .parse(JSON.parse(row?.manifest ?? "{}"));
+    const contracts = artifacts.find(({ path }) =>
+      path.endsWith("contracts.json")
+    );
+    if (contracts === undefined) {
+      throw new Error("The release has its contracts");
+    }
+    await env.FILES.put(
+      artifactKey(contracts.sha256),
+      '{"manifest":{"uses":[]}}'
+    );
+    const sidebar = await builder.api.screens.sidebar();
+    expect(
+      Object.fromEntries(
+        sidebar
+          .filter(({ app }) => app === readable || app === unreadable)
+          .map(({ app, entries }) => [app, entries.length])
+      )
+    ).toStrictEqual({ [readable]: 1 });
+  });
+
   it("list a sealed App's sidebar entries from its manifest alone, its other artifacts not read", async () => {
     const { app, builder } = await surfacedApp();
     // One of its modules no longer matches its hash: loading the whole

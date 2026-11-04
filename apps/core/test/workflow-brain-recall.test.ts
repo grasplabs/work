@@ -391,7 +391,7 @@ describe("a workflow's recall through the Brain binding", () => {
     );
     await requestGranted(idp, admin, brainFor(app));
     await release(admin, app, {
-      ...sampleApp({ models: { extractor: 6000 } }),
+      ...sampleApp({ ai: 6000 }),
       ...withBrain(
         workflowFiles(
           "asker",
@@ -404,7 +404,7 @@ describe("a workflow's recall through the Brain binding", () => {
   try {
     const answer = await step.llm("extract", {
       description: "Read the total",
-      binding: "extractor",
+      binding: "ai",
       instructions: "Read the total in cents.",
       input: "Total 12.34 EUR",
       schema: z.object({ total: z.int() }),
@@ -429,7 +429,7 @@ describe("a workflow's recall through the Brain binding", () => {
       },
       { text: JSON.stringify({ total: 1234 }), inputTokens: 5, outputTokens: 2 }
     );
-    await bindModel(app, "extractor", model);
+    await bindModel(app, model);
     /** A run killed while asleep after its recall, then resumed. */
     const crashed = async (between?: () => Promise<void>) => {
       const { id } = await admin.api.workflows.start(app, "asker");

@@ -52,10 +52,10 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, mutation } from "#grasp/server";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
   output: v.object({ status: v.string() }),
 });
@@ -66,7 +66,7 @@ export const submit = mutation({
   uses: [followUp],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { who: args.who });
-    await ctx.afterCommit.start(followUp, { who: args.who });
+    await ctx.afterCommit.workflows.followUp.start({ who: args.who });
     return id;
   },
 });
@@ -79,7 +79,7 @@ export const kickOff = action({
     version: v.number().integer(),
   }),
   uses: [followUp],
-  handler: async (ctx, args) => await ctx.startWorkflow(followUp, { who: args.who }),
+  handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -92,7 +92,7 @@ export default app({
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
   operations: { requests: { submit, kickOff } },
   screens: [],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 `,
 });

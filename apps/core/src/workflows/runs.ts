@@ -62,7 +62,6 @@ import {
   workflowRuns,
 } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
-import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { queuedRuns } from "./admission.ts";
 import type { RunWait } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
@@ -445,15 +444,6 @@ const failStart = async (
       { reason, error: "workflow.run_failed" },
       sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`
     )),
-    // A start that reached the engine late may have run steps whose App
-    // calls kept statistics points before this write ended the run, failed
-    // or cancelled: forgotten with its end, as no notification after it
-    // finds the run unended to forget them.
-    stepStatisticsForgotten(
-      db,
-      row.id,
-      sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.endedAt} IS NOT NULL)`
-    ),
     // A pause or resume admitted while it was starting has nothing left
     // to apply to: superseded, so the repair doesn't send it for ever. A
     // cancel admitted meanwhile is what ended it.
@@ -1293,9 +1283,8 @@ const outcomeOf = (
  * end is audited with its row, once: completed; failed, with its report
  * (its own, or one saying it stopped) and its owner notified; cancelled,
  * which a cancel has audited already, unless the engine ended it without
- * one. Screens are told of every change of status, and a run that ended
- * forgets the statistics points of its steps that never completed. An
- * ended run's outcome is captured for the Brain with its end.
+ * one. Screens are told of every change of status. An ended run's
+ * outcome is captured for the Brain with its end.
  */
 export const projectStatus = async (
   env: Env,
@@ -1365,13 +1354,9 @@ export const projectStatus = async (
         ]
       : []),
     ...controlsSettledBy(db, row.id, engine, at),
-    // Its end and the cleanup of the statistics points its steps never
-    // added up are written together: a retried notification finds the
-    // row ended, so nothing would be left to clean up after it. Its outcome's capture for the Brain goes with its end too: a run
-    // never ends without it (brain-capture.ts).
-    ...(ended
-      ? [stepStatisticsForgotten(db, row.id), runCaptured(db, row.id, at)]
-      : []),
+    // Its outcome's capture for the Brain goes with its end: a run never
+    // ends without it (brain-capture.ts).
+    ...(ended ? [runCaptured(db, row.id, at)] : []),
   ]);
   if (changed) {
     // Its compensation's start changes its summary too.

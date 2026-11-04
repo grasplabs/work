@@ -5,10 +5,11 @@ import { identifierMaxLength } from "./identifier.ts";
 import { appIdSchema, identifierSchema, permissionIdSchema } from "./ids.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): which provider serves
-// each resource an App of spec 8's layout declares for its actions. A
+// each permission an App of spec 8's layout declares for its actions. A
 // declaration in App code is a requirement and grants nothing; an admin's
 // binding, together with the live grant it names, is what lets an action
-// reach a model, a connection, knowledge collections or a template.
+// reach a model (`ai`), a connection, the Brain's collections, another
+// App, the platform's own functions (`grasp`) or guest chats.
 //
 // A binding is the host's record, never part of a sealed manifest: it is
 // approved after a release is sealed and can be revoked at any time. It pins
@@ -27,31 +28,27 @@ const modelNameSchema = z
   .regex(/^[a-z0-9-]+\/\S+$/u);
 
 /**
- * What a binding binds an alias to, by the declaration's kind:
+ * What a binding binds an alias to, by the permission's kind:
  *
- * - `model`: one model the deployment allows, called through the model
- *   gateway (its rules and accounting apply on every call);
- * - `connector`: one of the App's connection permissions, checked on every
- *   call, through connect;
- * - `knowledge`: one of the App's collection permissions for each
- *   collection the declaration names, read as a delegate on every call;
- * - `template`: one immutable version of a published template;
- * - `store`: one of the App's store permissions: another business store's
- *   public operations, run by the App that owns the store, checked on
- *   every call (core's store-operations.ts);
- * - `statistics`: the platform's statistics, for the App's own measures,
- *   with no permission: the admin's approval is what grants them. For a
- *   declaration that reads the platform's measures, one of the App's
- *   `{ type: "platform" }` permissions to read them (`statistics`),
- *   checked on every read; a declaration of its own measures only takes
- *   none;
- * - `guests`: one of the App's `{ type: "platform" }` permissions to invite
- *   guests (`guests`), checked on every call, and by every guest's link of
- *   a chat invited through it, which the binding's revocation stops too.
- * - `app`: another App, whose current release serves each declared public
- *   function exactly as declared: each call runs as the person the
- *   calling App's call acts for, under that App's own roles (core's
- *   resource-apps.ts). The admin's approval is the grant.
+ * - `model` (`ai`): one model the deployment allows, called through the
+ *   model gateway (its rules and accounting apply on every call);
+ * - `connector` (`connections`): one of the App's connection permissions,
+ *   checked on every call, through connect;
+ * - `knowledge` (`brain`): one of the App's collection permissions for
+ *   each collection the declaration names, read as a delegate on every
+ *   call;
+ * - `app` (`apps`): another App, whose current release serves each
+ *   declared public function exactly as declared: each call runs as the
+ *   person the calling App's call acts for, under that App's own roles
+ *   (core's resource-apps.ts). The admin's approval is the grant;
+ * - `grasp` (`apps`, alias `grasp`): the platform's own read-only
+ *   functions, under one of the App's `{ type: "platform" }` permissions
+ *   to read the platform's statistics (`statistics`), checked on every
+ *   call;
+ * - `guests` (`guests`): one of the App's `{ type: "platform" }`
+ *   permissions to invite guests (`guests`), checked on every call, and by
+ *   every guest's link of a chat invited through it, which the binding's
+ *   revocation stops too.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -72,17 +69,8 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
       }),
   }),
   z.strictObject({
-    kind: z.literal("template"),
-    templateId: identifierSchema,
-    version: z.int().min(1),
-  }),
-  z.strictObject({
-    kind: z.literal("store"),
+    kind: z.literal("grasp"),
     permissionId: permissionIdSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("statistics"),
-    permissionId: permissionIdSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("guests"),
@@ -140,10 +128,8 @@ export interface ResourceBinding {
  * - `contract_changed`: its binding's target serves another contract, or
  *   the same one changed, since it was approved;
  * - `grant_lost`: its binding's target can't be bound any more: the
- *   permission it names was revoked, the deployment no longer allows its
- *   model, its template version can't be served, or a statistics binding
- *   names a permission its declaration doesn't read with, or none for
- *   one that does;
+ *   permission it names was revoked, or the deployment no longer allows
+ *   its model;
  * - `unchecked`: the review couldn't ask connect about its binding within
  *   its limit, so it is never reported served; the next request checks it
  *   live.
@@ -172,41 +158,31 @@ export interface CollectionChoice {
   name: string | null;
 }
 
-/** One of the App's store permissions, as a store resource's choice. */
-export interface StoreChoice {
-  permissionId: string;
-  storeId: string;
-}
-
 /**
- * One of the App's `{ type: "platform" }` permissions, as a statistics or
- * guests resource's choice: to read the platform's statistics, or to
- * invite guests.
+ * One of the App's `{ type: "platform" }` permissions, as the platform's
+ * functions' (`grasp`) or a guests permission's choice: to read the
+ * platform's statistics, or to invite guests.
  */
 export interface PlatformChoice {
   permissionId: string;
 }
 
-/** Another App, as an app resource's choice. */
+/** Another App, as an apps permission's choice. */
 export interface AppChoice {
   appId: string;
   name: string;
 }
 
 /**
- * What an admin may bind a declared resource to now, by its kind:
+ * What an admin may bind a declared permission to now, by its kind:
  *
  * - `model`: the models the deployment allows;
  * - `connector`: the App's own active connection permissions that serve
  *   the declared contract and allow the tool of every declared action;
  * - `knowledge`: the App's own active permissions to read a collection,
  *   one for each declared collection;
- * - `template`: the published versions of the declared contract;
- * - `store`: the App's own active store permissions whose store serves
- *   every declared operation, of exactly the declared shape, and allows it;
- * - `statistics`: for a declaration that reads the platform's measures
- *   (`platform`), the App's own active permissions to read them, one of
- *   which it needs; none, and nothing to choose, for its own measures;
+ * - `grasp`: the App's own active permissions to read the platform's
+ *   statistics;
  * - `guests`: the App's own active permissions to invite guests.
  * - `app`: other Apps the admin may see whose current release serves every
  *   declared function, public and exactly as declared.
@@ -220,9 +196,7 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "model"; models: string[] }
   | { kind: "connector"; permissions: ConnectorChoice[] }
   | { kind: "knowledge"; permissions: CollectionChoice[] }
-  | { kind: "template"; versions: PublishedTemplate[] }
-  | { kind: "store"; permissions: StoreChoice[] }
-  | { kind: "statistics"; platform: boolean; permissions: PlatformChoice[] }
+  | { kind: "grasp"; permissions: PlatformChoice[] }
   | { kind: "guests"; permissions: PlatformChoice[] }
   | { kind: "app"; apps: AppChoice[] }
 );
@@ -244,27 +218,26 @@ export interface BindingLabel {
   collections: Record<string, string | null>;
 }
 
-/** A resource the App's current version declares for its actions. */
+/**
+ * A permission the App's current version declares for its actions, by
+ * what it binds to (`kind`).
+ */
 export interface DeclaredResource {
   alias: string;
   kind: BindingTarget["kind"];
-  /** A connector's or a template's contract; null for the other kinds. */
+  /** A connection's contract; null for the other kinds. */
   contract: string | null;
-  /** A connector's declared actions; empty for the other kinds. */
+  /** A connection's declared actions; empty for the other kinds. */
   actions: string[];
   /**
-   * Knowledge's declared operations, a store's or an App's functions, by
-   * path, or statistics'; empty for the other kinds.
+   * The Brain's declared operations, another App's or the platform's
+   * functions, by path, or guests'; empty for the other kinds.
    */
   operations: string[];
-  /** The platform's measures a statistics resource reads; empty otherwise. */
-  measures: string[];
-  /** Knowledge's declared collections, by the names App code uses. */
+  /** The Brain's declared collections, by the names App code uses. */
   collections: string[];
-  /** A model's output token ceiling; null for the other kinds. */
+  /** AI's output token ceiling; null for the other kinds. */
   maxOutputTokens: number | null;
-  /** Whether a model answers in a structure the App declares. */
-  structuredOutput: boolean;
   /** The paths of the App's actions that use it. */
   usedBy: string[];
   state: BindingState;
@@ -308,8 +281,7 @@ export interface ResourceBindingsApi {
    * the alias must be declared, as an action resource of the target's
    * kind, by the reviewed version, which must still be current, and the
    * target must be one the App may use (its own active permission, a model
-   * the deployment allows, a published template version of the declared
-   * contract).
+   * the deployment allows, another App that serves what it declares).
    *
    * What is approved is the declaration as the reviewed version seals it,
    * and it carries over to later versions that declare it identically,
@@ -391,5 +363,5 @@ export const resourceBindingErrors = defineErrorFamily({
   "resource.model_too_small":
     "That model can't give an answer as long as this resource declares within its window. Choose a model with a larger window, or ask the App's builder for a smaller bound.",
   "resource.target_invalid":
-    "That can't serve this resource: it isn't the App's own active grant, a model this deployment allows, or a published version of the declared template.",
+    "That can't serve this permission: it isn't the App's own active grant, a model this deployment allows, or an App that serves what it declares.",
 });

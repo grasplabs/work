@@ -99,7 +99,6 @@ const ordersApp = registerApp({
   access: { tables: { orders: { read: "appMembers", write: "appMembers" } } },
   operations: { orders: { tell, place, ping } },
   screens: [],
-  uses: [],
 });
 
 const { manifest } = inspectApp(ordersApp);

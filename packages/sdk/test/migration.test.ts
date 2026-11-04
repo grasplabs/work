@@ -54,7 +54,6 @@ const notes = (migrations: readonly unknown[]): unknown =>
     access: { tables: { notes: { read: "owner", write: "owner" } } },
     operations: {},
     screens: [],
-    uses: [],
     migrations,
   });
 

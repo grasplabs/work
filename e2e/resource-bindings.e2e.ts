@@ -4,74 +4,35 @@ import type { Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// An engine's declared resources and their bindings, end to end in a real
-// browser: a builder's engine declares a template its action reads; an
-// admin finds it unbound on the engine's page, publishes a version of
-// its contract, binds it and revokes the binding, while the builder sees
-// each state and nothing to act on. That the action's next request is
-// refused once the binding is revoked, and served while it stands, is
-// core's own test, at the request's boundary (resource-bindings.test.ts):
-// the review this page shows resolves a binding exactly as that request
-// does.
+// An engine's declared permissions and their bindings, end to end in a
+// real browser: a builder's engine declares `ai`, which its action asks;
+// an admin finds it unbound on the engine's page, binds it to a model and
+// revokes the binding, while the builder sees each state and nothing to
+// act on. That the action's next request is refused once the binding is
+// revoked, and served while it stands, is core's own test, at the
+// request's boundary (resource-bindings.test.ts): the review this page
+// shows resolves a binding exactly as that request does.
 
-/** The engine's files: an action that reads a template of `contract`. */
-const deskFiles = (contract: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
-  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
-
-export const letter = resource.template("letter", { contract: ${JSON.stringify(contract)} });
-
-export const read = action({
-  args: {},
-  returns: v.number(),
-  uses: [letter],
-  handler: async (ctx) => {
-    const template = await ctx.resources.letter.read();
-    return template.version;
-  },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { letter, read } from "./operations/desk.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { desk: { read } },
-  internalOperations: {},
-  screens: [],
-  uses: [letter],
-});
-`,
-});
-
-/** The engine's files: an action that asks a model, `writer`. */
+/** The engine's files: an action that asks its `ai`. */
 const writerFiles = (): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const writer = resource.model("writer", { maxOutputTokens: 200 });
+export const ai = permission.ai({ maxOutputTokens: 200 });
 
 export const draft = action({
   args: {},
   returns: v.string(),
-  uses: [writer],
-  handler: async (ctx) =>
-    await ctx.resources.writer.generate({ prompt: "Draft a greeting." }),
+  uses: [ai],
+  handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, writer } from "./operations/desk.ts";
+import { ai, draft } from "./operations/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -81,7 +42,7 @@ export default app({
   operations: { desk: { draft } },
   internalOperations: {},
   screens: [],
-  uses: [writer],
+  permissions: { ai },
 });
 `,
 });
@@ -106,7 +67,7 @@ const engineOf = async (
   }
 };
 
-/** The App's resource `alias`, under Connections in its settings. */
+/** The App's permission `alias`, under Connections in its settings. */
 const resourceOn = async (page: Page, app: string, alias: string) => {
   await page.goto(`/apps/${app}/settings?section=connections`);
   return page
@@ -114,96 +75,49 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
     .getByRole("article", { name: alias });
 };
 
-/** The App's `letter` resource, under Connections in its settings. */
-const letterOn = async (page: Page, app: string) =>
-  await resourceOn(page, app, "letter");
-
 const unbound = "The App's actions can't use it until an admin binds it.";
 
-test("an admin binds an engine's declared template and revokes it; its builder only sees", async ({
+test("an admin binds an engine's AI to a model, with no budget of its own, and revokes it; its builder only sees", async ({
   pageOf,
 }) => {
   const { builder, admin } = peopleIn("resourceBindings");
-  // Templates are the organization's: a contract of this run's own.
-  const contract = `grasp.desk-${crypto.randomUUID().slice(0, 8)}@1`;
-  const app = await engineOf(builder, deskFiles(contract));
+  const app = await engineOf(builder, writerFiles());
 
-  // Declared, and so far bound to nothing, with nothing published yet.
+  // Declared, and so far bound to nothing.
   const deciding = await pageOf(admin);
-  const letter = await letterOn(deciding, app);
-  await expect(letter).toContainText(unbound);
-  await expect(letter).toContainText(contract);
-  await expect(letter).toContainText("desk.read");
-  await expect(letter).toContainText(
-    `Nothing is published for ${contract} yet. Publish it first.`
-  );
+  const ai = await resourceOn(deciding, app, "ai");
+  await expect(ai).toContainText(unbound);
+  await expect(ai).toContainText("desk.draft");
+  const form = ai.getByRole("form", { name: "Bind ai" });
+  // A model binding is the model alone: no cap or alert to set.
+  await expect(form.getByLabel(/US dollars|percent/u)).toHaveCount(0);
+  await form.getByRole("button", { name: "Bind ai" }).click();
+  await expect(ai).toContainText("Bound to");
+  await expect(ai).not.toContainText(unbound);
+  await expect(
+    form.getByRole("button", { name: "Replace the binding of ai" })
+  ).toBeVisible();
 
-  // The admin publishes a version of the contract and binds the letter.
-  await letter.getByLabel("Content, as JSON").fill("{not json");
-  await letter
-    .getByRole("button", { name: `Publish a version of ${contract}` })
-    .click();
-  await expect(letter.getByRole("alert")).toHaveText("That isn't valid JSON.");
-  await letter
-    .getByLabel("Content, as JSON")
-    .fill(JSON.stringify({ greeting: "Dear" }));
-  await letter
-    .getByRole("button", { name: `Publish a version of ${contract}` })
-    .click();
-  await expect(letter.getByLabel("Template version")).toContainText(
-    "version 1"
-  );
-  await letter.getByRole("button", { name: "Bind letter" }).click();
-  await expect(letter).toContainText("Bound to");
-  await expect(letter).not.toContainText(unbound);
-
-  // The builder sees it bound, and nothing to bind, publish or revoke.
+  // The builder sees it bound, and nothing to bind or revoke.
   const building = await pageOf(builder);
-  const seen = await letterOn(building, app);
+  const seen = await resourceOn(building, app, "ai");
   await expect(seen).toContainText("Bound to");
   await expect(seen.getByRole("button")).toHaveCount(0);
   await expect(seen.getByRole("form")).toHaveCount(0);
 
   // Revoked, once confirmed: unbound again, for the admin and the builder
   // alike.
-  await letter
-    .getByRole("button", { name: "Revoke the binding of letter" })
-    .click();
+  await ai.getByRole("button", { name: "Revoke the binding of ai" }).click();
   const confirm = deciding.getByRole("dialog", {
-    name: "Revoke the binding of letter?",
+    name: "Revoke the binding of ai?",
   });
   await confirm.getByRole("button", { name: "Revoke", exact: true }).click();
-  await expect(letter).toContainText(unbound);
-  await expect(letter).not.toContainText("Bound to");
+  await expect(ai).toContainText(unbound);
+  await expect(ai).not.toContainText("Bound to");
   await building.reload();
   await expect(
     building
       .getByRole("region", { name: "Resources" })
-      .getByRole("article", { name: "letter" })
+      .getByRole("article", { name: "ai" })
   ).toContainText(unbound);
-});
-
-test("an admin binds an engine's model, with no budget of its own, and it stays bound", async ({
-  pageOf,
-}) => {
-  const { builder, admin } = peopleIn("resourceBindings");
-  const app = await engineOf(builder, writerFiles());
-  const page = await pageOf(admin);
-  const writer = await resourceOn(page, app, "writer");
-  await expect(writer).toContainText(unbound);
-  const form = writer.getByRole("form", { name: "Bind writer" });
-  // A model binding is the model alone: no cap or alert to set.
-  await expect(form.getByLabel(/US dollars|percent/u)).toHaveCount(0);
-
-  await form.getByRole("button", { name: "Bind writer" }).click();
-  await expect(writer).toContainText("Bound to");
-  await expect(
-    form.getByRole("button", { name: "Replace the binding of writer" })
-  ).toBeVisible();
-  await page.reload();
-  await expect(
-    page
-      .getByRole("region", { name: "Resources" })
-      .getByRole("article", { name: "writer" })
-  ).toContainText("Bound to");
 });

@@ -77,11 +77,6 @@ import {
   requireMigrationsTarget,
 } from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
-import {
-  declaredStoreResources,
-  projectStoreResource,
-  storeResourceAlias,
-} from "./resource-declarations.ts";
 import { screenArtifact, versionScreens } from "./screens.ts";
 import type { BuildProfile, BuiltScreen } from "./screens.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
@@ -1083,7 +1078,14 @@ const sealedAppManifest = async (
   try {
     const contracts = contractsSchema.parse(JSON.parse(text));
     return readAppManifest(JSON.stringify(contracts.manifest));
-  } catch {
+  } catch (error) {
+    // A release sealed by an SDK whose manifest this one no longer reads
+    // (a hard cut) as much as one damaged: a listing skips it, logged.
+    log.warn("release.contracts_unreadable", {
+      appId: app,
+      version,
+      ...errorFields(error),
+    });
     throw versionErrors.create("version.artifact_corrupt", {
       path: generatedPaths.contracts,
     });
@@ -1596,7 +1598,6 @@ export const sealRelease = async (
     { tree: row.tree, store, screens }
   );
   const { manifest, final, sdk, schema } = built;
-  const storeResources = await declaredStoreResources(manifest);
   await requireAsTombstoned(env, { app, version }, hash);
 
   // Reserved first, so no retention sweep deletes bytes this release will
@@ -1677,34 +1678,6 @@ export const sealRelease = async (
                   AND operation_manifest_hash = ${store.operationManifestHash})`,
             }),
           ]),
-      // Each store it declares, in the binding inventory (spec 24): by its
-      // declaration's hash until an approval resolves it, then the store
-      // the active approval of the same declaration resolves, which serves
-      // this release too (resource-bindings.ts).
-      ...storeResources.map(({ alias, hash: declared }) =>
-        db.insert(sdkResourceBindings).values({
-          resourceId: app,
-          resourceVersion: version,
-          alias: storeResourceAlias(alias),
-          kind: "storeResource" as const,
-          targetId: declared,
-          schemaHash: declared,
-          manifestHash: hash,
-          contractId: null,
-          targetVersion: null,
-        })
-      ),
-      ...storeResources.map(({ alias, hash: declared }) =>
-        projectStoreResource(db, {
-          app,
-          version,
-          alias,
-          declared,
-          approval: sql`(SELECT id FROM app_resource_bindings
-            WHERE app_id = ${app} AND alias = ${alias} AND kind = 'store'
-              AND status = 'active' AND declaration_hash = ${declared})`,
-        })
-      ),
       outboxed(db, {
         actor: request.by.actor ?? actorOf(request.by),
         action: "app.release.sealed",

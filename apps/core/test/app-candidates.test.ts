@@ -63,7 +63,6 @@ export default app({
   operations: { hello: { hello } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 });

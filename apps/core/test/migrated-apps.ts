@@ -47,7 +47,6 @@ export default app({
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {},
   screens: [],
-  uses: [],
   migrations: [${migrated ? "derive" : ""}],
 });
 `;

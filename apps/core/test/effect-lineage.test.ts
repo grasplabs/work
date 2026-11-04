@@ -408,10 +408,10 @@ const relayFiles = (
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const mail = resource.connector("mail", {
+export const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
@@ -421,7 +421,7 @@ export const relay = action({
   returns: v.boolean(),
   uses: [mail],
   handler: async (ctx, args) => {
-    const sent = await ctx.resources.mail.call("send", {
+    const sent = await ctx.connections.mail.call("send", {
       mailbox: "${mailbox}",
       subject: args.subject,
       body: "Again.",
@@ -442,7 +442,7 @@ export default app({
   operations: { mail: { relay } },
   internalOperations: {},
   screens: [],
-  uses: [mail],
+  permissions: { connections: [mail] },
 });
 `,
   "workflows/loop.ts": `import { emailMessage, type Json, workflow } from "@grasp-os/sdk/workflow";

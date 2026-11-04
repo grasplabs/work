@@ -152,11 +152,6 @@ interface __BaseEnv_Env {
    */
   DEFINITION_EXPORT_MAX_BYTES?: string;
   /**
-   * Tests only: lower bounds on an App's statistics points, `perCall/
-   * perMinute` (src/app.ts, `claimStatisticMinute`).
-   */
-  STATISTICS_POINT_LIMITS?: string;
-  /**
    * Tests only: lower bounds on an App's statistics reads, `perCall/
    * perMinute` (src/app.ts, `claimStatisticMinute`).
    */

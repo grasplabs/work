@@ -68,14 +68,14 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, resource, v } from "@grasp-os/sdk";
+  "operations/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, permission, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "#grasp/server";
 
 // ${marker}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const writer = resource.model("writer", { maxOutputTokens: 100 });
+export const writer = permission.ai({ maxOutputTokens: 100 });
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -261,7 +261,7 @@ export const consult = action({
   args: {},
   returns: v.string(),
   uses: [writer],
-  handler: async (ctx) => await ctx.resources.writer.generate({ prompt: "Hi" }),
+  handler: async (ctx) => await ctx.ai.generate({ prompt: "Hi" }),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -275,7 +275,7 @@ export default app({
   operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows, alsoBroken, handledThenFailed, patient, throwsTheFirst, callsThrowsTheFirst } },
   internalOperations: {},
   screens: [],
-  uses: [writer],
+  permissions: { ai: writer },
 });
 `,
   "screens/desk.tsx": `import { useQuery } from "@grasp-os/sdk/react";
@@ -310,18 +310,23 @@ const preferencesDeclared = v.object({
 /** `files` with the App declaring those preferences. */
 export const withPreferences = (
   files: Record<string, string>
-): Record<string, string> => ({
-  ...files,
-  "app.ts": (files["app.ts"] ?? "")
-    .replace(
-      'import { app } from "@grasp-os/sdk";',
-      'import { app, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      "  uses: [writer],",
-      `  preferences: ${preferencesSource},\n  uses: [writer],`
-    ),
-});
+): Record<string, string> => {
+  const registration = files["app.ts"] ?? "";
+  const anchor = "  permissions: { ai: writer },";
+  // A fixture that lost its anchor would silently drop the preferences.
+  if (!registration.includes(anchor)) {
+    throw new Error(`app.ts has no "${anchor}" to declare preferences at.`);
+  }
+  return {
+    ...files,
+    "app.ts": registration
+      .replace(
+        'import { app } from "@grasp-os/sdk";',
+        'import { app, v } from "@grasp-os/sdk";'
+      )
+      .replace(anchor, `  preferences: ${preferencesSource},\n${anchor}`),
+  };
+};
 
 /**
  * The reference to the preference operation `name` of a release of `app`
@@ -358,7 +363,6 @@ export default app({
   operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   preferences: ${preferencesSource},
-  uses: [],
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

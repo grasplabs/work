@@ -2,7 +2,7 @@ import {
   AppError,
   paginationOptionsValidator,
   paginationResultValidator,
-  resource,
+  permission,
   v,
 } from "@grasp-os/sdk";
 
@@ -23,23 +23,21 @@ import type { MapFigure } from "./freeze.ts";
 
 // The board page's snapshots: listed, opened with their figures, taken,
 // and their narrative and decision written. `take` reads the workflow
-// map's numbers (`map`, an App an admin binds the resource to) and the
-// platform's counts of what runs (`statistics`, under the permission an
-// admin grants), as the person taking it, and writes what it froze: each
+// map's numbers (`map`, an App an admin binds the permission to) and the
+// platform's counts of what runs (`grasp`, the platform's own read-only
+// functions, under the permission an admin grants), as the person taking
+// it, and writes what it froze: each
 // workflow's figures first, then the snapshot, which lists them, so a
 // snapshot is never seen with part of them. What it froze, only `take`
 // writes; `write` changes the narrative and the decision alone.
 
 /** The workflow map, as the page reads its numbers. */
-export const map = resource.app("map", {
+export const map = permission.app("map", {
   functions: { "figures.list": mapFigures },
 });
 
 /** The platform's counts of runs and improvement signals. */
-export const statistics = resource.statistics("statistics", {
-  operations: ["read"],
-  platform: ["platform.workflow_runs", "platform.improvement_signals"],
-});
+export const grasp = permission.grasp();
 
 /** Workflows one page of the map holds: as many as it gives. */
 const mapPage = 50;
@@ -171,7 +169,7 @@ export const take = action({
     decisionNeeded: v.string().trim().max(decisionMax).default(""),
   },
   returns: v.id("snapshots"),
-  uses: [builder, addFigures, finish, map, statistics],
+  uses: [builder, addFigures, finish, map, grasp],
   handler: async (ctx, args) => {
     await ctx.runQuery(builder, {});
     const read: MapFigure[] = [];
@@ -180,7 +178,7 @@ export const take = action({
     do {
       const page: { items: MapFigure[]; nextCursor: string | null } =
         // oxlint-disable-next-line no-await-in-loop -- each page starts after the last
-        await ctx.resources.map.call("figures.list", {
+        await ctx.apps.map.call("figures.list", {
           pagination: { pageSize: mapPage, cursor },
         });
       // The map pages in an order no save changes; a workflow it answered
@@ -201,7 +199,7 @@ export const take = action({
     const frozen = await freeze(
       read,
       async (statisticQuery) =>
-        await ctx.resources.statistics.read(statisticQuery),
+        await ctx.apps.grasp.call("statistics.read", statisticQuery),
       now.toISOString()
     );
     const takeId = crypto.randomUUID();

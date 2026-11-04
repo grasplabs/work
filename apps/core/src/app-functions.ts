@@ -72,7 +72,6 @@ import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
   AppFunctionCall,
-  BindingCaller,
   InvocationProvenance,
   InvocationSources,
   RunOrigin,
@@ -294,7 +293,20 @@ export const invocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    admitted = await operationRoles(env, by, app);
+    const roles = await operationRoles(env, by, app);
+    // Called through another App (`chain`): its person is a member of this
+    // App at most, never a builder, so the calling App's code, which this
+    // App's builders never reviewed, can't use what only they may do
+    // whenever one of them uses it (a confused deputy). The binding's
+    // review names no role the calls carry: there is only one.
+    admitted =
+      chain.length === 0
+        ? roles
+        : {
+            ...roles,
+            appMember: roles.appMember || roles.appBuilder,
+            appBuilder: false,
+          };
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
@@ -427,11 +439,6 @@ export interface RunCaller {
   readonly requireHolds: () => void;
   /** Hears each side effect connect held for the person (`BindingCaller.held`). */
   readonly held: (key: string) => void;
-  /**
-   * The step the call comes from, and its attempt, which the statistics
-   * points it records are kept by (`BindingCaller.step`).
-   */
-  readonly step?: NonNullable<BindingCaller["step"]>;
 }
 
 /**
@@ -482,15 +489,7 @@ const keyedUnderRun =
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  {
-    run,
-    requestId,
-    deadline,
-    stillCurrent,
-    requireHolds,
-    held,
-    step,
-  }: RunCaller,
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
   operation: string,
   callApp?: AppFunctionCall
 ): Promise<Invocation> => {
@@ -561,7 +560,6 @@ export const runInvocationFor = async (
     shareSubject: run.shareSubject,
     requireHolds,
     admit: authorize,
-    ...(step === undefined ? {} : { step }),
     chain: [app],
     ...(callApp === undefined ? {} : { callApp }),
     fromRun: true,

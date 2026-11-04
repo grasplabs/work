@@ -371,7 +371,6 @@ const notesApp = app({
     "notes.peek": { tables: { notes: { insert: true } } },
   },
   screens: [],
-  uses: [],
 });
 
 const { manifest } = inspectApp(notesApp);

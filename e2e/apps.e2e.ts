@@ -47,7 +47,6 @@ export default app({
   operations: { counter: { count, addOne } },
   internalOperations: {},
   screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
-  uses: [],
 });
 `;
 

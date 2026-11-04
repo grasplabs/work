@@ -1,6 +1,6 @@
 import { collections } from "@grasp-os/brain/schema";
 import { workflowIdOf } from "@grasp-os/compiler";
-import type { AnyResource } from "@grasp-os/sdk";
+import type { AnyPermission } from "@grasp-os/sdk";
 import { aiStepCalls } from "@grasp-os/sdk/describe";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
@@ -55,7 +55,7 @@ import {
   requireStillAdmin,
   stillAdminSql,
 } from "./permissions.ts";
-import { unchecked } from "./resource-adapter.ts";
+import { targetKindOf, unchecked } from "./resource-adapter.ts";
 import type {
   BindingCaller,
   ContractAsks,
@@ -74,28 +74,20 @@ import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
-import {
-  declarationHash,
-  projectStoreResource,
-  unprojectStoreResource,
-} from "./resource-declarations.ts";
+import { declarationHash } from "./resource-declarations.ts";
+import { graspAdapter } from "./resource-grasp.ts";
 import { guestsAdapter } from "./resource-guests.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
-import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
+import { modelAdapter, modelAnswers } from "./resource-model.ts";
 import { platformGrantsOf } from "./resource-platform.ts";
 import type { PlatformAction } from "./resource-platform.ts";
-import { statisticsAdapter } from "./resource-statistics.ts";
-import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
-import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
-import { liveStoreSql } from "./store-deletion.ts";
-import { auditStoreRefusal } from "./store-operations.ts";
-import type { StoreGrant } from "./store-operations.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
-// an App of spec 8's layout reach a model, a connection, knowledge, a
-// template, another store or the platform's statistics through
-// `ctx.resources.<alias>`. Threat model, and how each is
-// closed:
+// an App of spec 8's layout reach what its permissions declare: a model
+// (`ctx.ai`), a connection (`ctx.connections.<alias>`), the Brain
+// (`ctx.brain`), another App or the platform's own functions
+// (`ctx.apps.<alias>`) and guest chats (`ctx.guests`). Threat model, and
+// how each is closed:
 //
 // - A declaration self-grants: a declaration is App code's requirement and
 //   nothing more. An alias resolves only through an active row here, which
@@ -122,6 +114,13 @@ import type { StoreGrant } from "./store-operations.ts";
 // - A binding of one App serves another: rows are found by the release's
 //   own App, never by anything the caller sends; the adapter acts for the
 //   invocation's authority, the App and the person core resolved.
+// - A binding the review misses: a request resolves only an alias the
+//   release's manifest declares, of the kind its row was approved for,
+//   which the operation host checks the calling function lists in its
+//   `uses` first (operations.ts). The review lists exactly the manifest's
+//   declarations, and every active row of an alias it doesn't declare as
+//   `undeclared`, which serves nothing: no binding reaches a version
+//   without being listed with it.
 // - An approval races a version change: the admin names the version they
 //   reviewed; the batch writes only while it is still current, as a
 //   permission grant does (`app.conflict` otherwise).
@@ -137,9 +136,7 @@ const adapters: {
   model: modelAdapter,
   knowledge: knowledgeAdapter,
   connector: connectorAdapter,
-  template: templateAdapter,
-  store: storeAdapter,
-  statistics: statisticsAdapter,
+  grasp: graspAdapter,
   guests: guestsAdapter,
   app: appAdapter,
 };
@@ -151,11 +148,11 @@ const adapters: {
 const bindWith = async (
   env: Env,
   app: AppId,
-  declaration: AnyResource,
+  declaration: AnyPermission,
   target: BindingTarget,
   asks?: ContractAsks
 ): Promise<ServedBinding | undefined | typeof unchecked> => {
-  if (declaration["~resource"] !== target.kind) {
+  if (targetKindOf(declaration) !== target.kind) {
     return undefined;
   }
   const adapter = adapters[target.kind];
@@ -170,7 +167,7 @@ const bindWith = async (
 const boundBy = async (
   env: Env,
   app: AppId,
-  declaration: AnyResource,
+  declaration: AnyPermission,
   target: BindingTarget
 ): Promise<ServedBinding | undefined> => {
   const served = await bindWith(env, app, declaration, target);
@@ -233,7 +230,7 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
   if (target.kind === "model") {
     return { model: target.model };
   }
-  if (target.kind === "connector" || target.kind === "store") {
+  if (target.kind === "connector") {
     return { permissionId: target.permissionId };
   }
   if (target.kind === "knowledge") {
@@ -245,18 +242,10 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
       ? { permissionIds: joined }
       : { permissionCount: ids.length };
   }
-  if (target.kind === "guests") {
-    return { permissionId: target.permissionId };
-  }
   if (target.kind === "app") {
     return { appId: target.appId };
   }
-  if (target.kind === "statistics") {
-    return target.permissionId === undefined
-      ? {}
-      : { permissionId: target.permissionId };
-  }
-  return { templateId: target.templateId, templateVersion: target.version };
+  return { permissionId: target.permissionId };
 };
 
 type Admin = Identity & Pick<Acting, "actor">;
@@ -292,17 +281,12 @@ const activeRow = async (
     .get();
 
 /**
- * The longest single request model resource `declaration` asks for, as an
- * action spends its bound (`tokensOfBound`), whoever uses it: a binding
- * outlives the release it was approved for while the declaration stays
- * the same, and a later one may add an action. A workflow's AI step asks
- * for half of it.
+ * The longest single request an `ai` permission asks for: its whole bound,
+ * as a request for text spends it (`tokensOfBound`), whoever uses it. A
+ * request that asks for a value, and a workflow's AI step, ask for half.
  */
-const longestAsk = ({
-  maxOutputTokens,
-  structuredOutput,
-}: DeclarationOf<"model">): number =>
-  tokensOfBound(maxOutputTokens, structuredOutput !== null).maxTokens;
+const longestAsk = ({ maxOutputTokens }: DeclarationOf<"model">): number =>
+  maxOutputTokens;
 
 /**
  * Refuses binding model resource `declaration` to `model` unless the model
@@ -348,7 +332,7 @@ export const approveResourceBinding = async (
   const declaration = Object.hasOwn(release.app.resources, alias)
     ? release.app.resources[alias]
     : undefined;
-  if (declaration === undefined || declaration["~resource"] !== target.kind) {
+  if (declaration === undefined || targetKindOf(declaration) !== target.kind) {
     throw resourceBindingErrors.create("resource.undeclared");
   }
   const served = await boundBy(env, found.id, declaration, target);
@@ -357,7 +341,7 @@ export const approveResourceBinding = async (
   }
   // A model the deployment allows, which can serve the declaration only
   // when it can give the answers it asks for.
-  if (declaration["~resource"] === "model" && target.kind === "model") {
+  if (declaration["~permission"] === "ai" && target.kind === "model") {
     requireModelAnswers(declaration, target.model);
   }
   const previous = await activeRow(env, found.id, alias);
@@ -381,19 +365,7 @@ export const approveResourceBinding = async (
   // Written only while `by` is still an admin and the reviewed version
   // still current, both read by the statements themselves.
   const stillReviewed = sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${found.id}) IS ${reviewed.version}`;
-  // A store resource's store, too, only while it is live and no deletion
-  // has it closing: so a deletion that found no consumer resolving to it
-  // (data-stores.ts) never races an approval that does.
-  const allowed = and(
-    stillAdminSql(by),
-    stillReviewed,
-    target.kind === "store"
-      ? liveStoreSql(
-          sql`(SELECT object_id FROM permissions WHERE id = ${target.permissionId})`,
-          Date.now()
-        )
-      : undefined
-  );
+  const allowed = and(stillAdminSql(by), stillReviewed);
   const db = drizzle(env.DB);
   // The alias's binding until now, if it had one, is revoked in the same
   // batch; without one, the update names no row and its event isn't kept.
@@ -431,29 +403,6 @@ export const approveResourceBinding = async (
           ...targetDetail(target),
         })
       ),
-      // The binding inventory (spec 24): the rows the replaced approval
-      // resolved name their declaration alone again, and those of every
-      // release kept whose declaration this one serves name its store.
-      ...(previous === undefined
-        ? []
-        : [
-            unprojectStoreResource(
-              db,
-              previous.id,
-              sql`EXISTS (SELECT 1 FROM app_resource_bindings WHERE id = ${row.id})`
-            ),
-          ]),
-      ...(target.kind === "store"
-        ? [
-            projectStoreResource(db, {
-              app: found.id,
-              alias,
-              declared: row.declarationHash,
-              approval: sql`(SELECT id FROM app_resource_bindings
-                WHERE id = ${row.id} AND status = 'active')`,
-            }),
-          ]
-        : []),
     ]);
   } catch (error) {
     // Another approval of the alias took its place first: the unique
@@ -520,14 +469,6 @@ export const revokeResourceBinding = async (
     outboxedIfChanged(
       db,
       bindingEntry(by, "app.resource_binding.revoked", found, {})
-    ),
-    // The rows it resolved in the binding inventory name their
-    // declaration alone again.
-    unprojectStoreResource(
-      db,
-      found.id,
-      sql`EXISTS (SELECT 1 FROM app_resource_bindings
-        WHERE id = ${found.id} AND status = 'revoked')`
     ),
   ]);
   const [row] = revoked;
@@ -610,11 +551,11 @@ type Resolution =
 const resolved = async (
   env: Env,
   app: AppId,
-  declaration: AnyResource,
+  declaration: AnyPermission,
   row: Row,
   asks?: ContractAsks
 ): Promise<Resolution> => {
-  if (row.kind !== declaration["~resource"]) {
+  if (row.kind !== targetKindOf(declaration)) {
     return { state: "declaration_changed", why: "kind" };
   }
   const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
@@ -661,13 +602,6 @@ const reviewAppCandidatesMax = 100;
 /** How many of a review's candidate Apps' releases are read at once. */
 const reviewAppChecksAtOnce = 10;
 
-/**
- * The most distinct store permissions one review resolves for choices,
- * across all its store resources: each reads the grant, the store and its
- * App's current release.
- */
-const reviewStoreChecksMax = 20;
-
 const actionListSchema = z.array(z.string());
 
 /**
@@ -677,7 +611,7 @@ const actionListSchema = z.array(z.string());
 const appGrants = async (
   env: Env,
   app: AppId,
-  objectType: "connection" | "collection" | "store"
+  objectType: "connection" | "collection"
 ): Promise<{ rows: ConnectionGrantRow[]; truncated: boolean }> => {
   const rows = await drizzle(env.DB)
     .select({
@@ -708,24 +642,13 @@ const appGrants = async (
 interface ReviewGrants {
   readonly connections: Awaited<ReturnType<typeof appGrants>>;
   readonly collections: Awaited<ReturnType<typeof appGrants>>;
-  readonly stores: Awaited<ReturnType<typeof appGrants>>;
   /** The collections' names, by ID. */
   readonly names: ReadonlyMap<string, string>;
   readonly contracts: ContractReader;
   /**
-   * The App's store permission `permissionId` as it stands now, resolved
-   * once per review for every store resource's choices; `unchecked` past
-   * the review's bound on distinct permissions (`reviewStoreChecksMax`).
-   * Every resource lists the App's permissions in the same order, so each
-   * is offered the same checked ones.
-   */
-  readonly storeGrant: (
-    permissionId: string
-  ) => Promise<StoreGrant | undefined | typeof unchecked>;
-  /**
    * The App's own active `{ type: "platform" }` permissions of `action`,
-   * newest first, at most `choicesMax`: read once for each action, when a
-   * statistics or guests resource asks.
+   * newest first, at most `choicesMax`: read once for each action, when
+   * the platform's functions (`grasp`) or a guests permission asks.
    */
   readonly platform: (
     action: PlatformAction
@@ -792,10 +715,9 @@ const reviewGrants = async (
   app: AppId,
   contracts: ContractReader
 ): Promise<ReviewGrants> => {
-  const [connections, collectionGrants, stores] = await Promise.all([
+  const [connections, collectionGrants] = await Promise.all([
     appGrants(env, app, "connection"),
     appGrants(env, app, "collection"),
-    appGrants(env, app, "store"),
   ]);
   const readable = collectionGrants.rows.filter(
     ({ actions }) =>
@@ -803,7 +725,6 @@ const reviewGrants = async (
       true
   );
   const ids = [...new Set(readable.map(({ objectId }) => objectId))];
-  const storeGrants = new Map<string, Promise<StoreGrant | undefined>>();
   const named =
     ids.length === 0
       ? []
@@ -831,21 +752,8 @@ const reviewGrants = async (
     },
     connections,
     collections: { rows: readable, truncated: collectionGrants.truncated },
-    stores,
     names: new Map(named.map(({ id, name }) => [id, name])),
     contracts,
-    storeGrant: async (permissionId) => {
-      const known = storeGrants.get(permissionId);
-      if (known !== undefined) {
-        return await known;
-      }
-      if (storeGrants.size >= reviewStoreChecksMax) {
-        return unchecked;
-      }
-      const resolving = appStoreGrant(env, app, permissionId);
-      storeGrants.set(permissionId, resolving);
-      return await resolving;
-    },
   };
 };
 
@@ -856,10 +764,11 @@ const reviewGrants = async (
  */
 const choicesFor = async (
   env: Env,
-  declaration: AnyResource,
+  declaration: AnyPermission,
   grants: ReviewGrants
 ): Promise<BindingChoices> => {
-  if (declaration["~resource"] === "model") {
+  const kind = targetKindOf(declaration);
+  if (declaration["~permission"] === "ai") {
     const { models: allowed } = await modelSettings(env);
     return {
       kind: "model",
@@ -870,19 +779,7 @@ const choicesFor = async (
       truncated: false,
     };
   }
-  if (declaration["~resource"] === "template") {
-    const versions = await templateVersionsOf(
-      env,
-      declaration.contract,
-      choicesMax + 1
-    );
-    return {
-      kind: "template",
-      versions: versions.slice(0, choicesMax),
-      truncated: versions.length > choicesMax,
-    };
-  }
-  if (declaration["~resource"] === "connector") {
+  if (declaration["~permission"] === "connections") {
     const { rows, truncated } = grants.connections;
     const serving = await Promise.all(
       rows.map(
@@ -903,30 +800,20 @@ const choicesFor = async (
         truncated || serving.some(([, serves]) => serves === undefined),
     };
   }
-  if (declaration["~resource"] === "statistics") {
-    const platform = declaration.platform.length > 0;
-    const granted = platform
-      ? await grants.platform("statistics")
-      : { ids: [], truncated: false };
+  if (kind === "grasp" || kind === "guests") {
+    const granted = await grants.platform(
+      kind === "grasp" ? "statistics" : "guests"
+    );
     return {
-      kind: "statistics",
-      platform,
+      kind,
       permissions: granted.ids.map((permissionId) => ({ permissionId })),
       truncated: granted.truncated,
     };
   }
-  if (declaration["~resource"] === "guests") {
-    const granted = await grants.platform("guests");
-    return {
-      kind: "guests",
-      permissions: granted.ids.map((permissionId) => ({ permissionId })),
-      truncated: granted.truncated,
-    };
-  }
-  if (declaration["~resource"] === "app") {
+  if (declaration["~permission"] === "apps") {
     // Every candidate's release, read once for the review, checked in
     // memory: an older App that serves the declaration is offered as a
-    // newer one is, however many app resources the App declares.
+    // newer one is, however many other Apps the App declares.
     const [others, declared] = await Promise.all([
       grants.apps(),
       declaredFingerprints(declaration),
@@ -940,30 +827,6 @@ const choicesFor = async (
       .map(({ appId, name }) => ({ appId, name }));
     return { kind: "app", apps: serving, truncated: others.truncated };
   }
-  if (declaration["~resource"] === "store") {
-    const { rows, truncated } = grants.stores;
-    // Only those approving accepts: the store serves every declared
-    // operation, exactly, and the permission allows each. Each permission
-    // is resolved once for the whole review (`storeGrant`), and matched
-    // with each declaration in memory.
-    const serving = await Promise.all(
-      rows.map(async (row) => {
-        const grant = await grants.storeGrant(row.id);
-        if (grant === unchecked || grant === undefined) {
-          return [row, grant] as const;
-        }
-        return [row, await grantServes(grant, declaration)] as const;
-      })
-    );
-    return {
-      kind: "store",
-      permissions: serving
-        .filter(([, serves]) => serves === true)
-        .map(([row]) => ({ permissionId: row.id, storeId: row.objectId })),
-      truncated:
-        truncated || serving.some(([, serves]) => serves === unchecked),
-    };
-  }
   return {
     kind: "knowledge",
     permissions: grants.collections.rows.map((row) => ({
@@ -975,7 +838,7 @@ const choicesFor = async (
   };
 };
 
-/** A workflow's AI step, and the model resource it goes through. */
+/** A workflow's AI step, and the `ai` permission it goes through. */
 export interface WorkflowAiStep {
   /** The workflow's file, `workflows/<id>.ts`. */
   readonly file: string;
@@ -1014,13 +877,12 @@ export const workflowAiSteps = (
 
 /**
  * Why `step` can't go through `resources`: the release's declarations,
- * none for an App without one. Only a model resource without a structured
- * output serves an AI step (`stepModelBinding`), as the step brings its own
- * schema, and only a `binding` written as a literal can be checked.
- * Undefined when it can.
+ * none for an App without one. Only the App's `ai` permission serves an AI
+ * step (`stepModelBinding`), as the step brings its own schema, and only a
+ * `binding` written as a literal can be checked. Undefined when it can.
  */
 export const aiStepProblem = (
-  resources: Readonly<Record<string, AnyResource>>,
+  resources: Readonly<Record<string, AnyPermission>>,
   { workflow, step, binding }: WorkflowAiStep
 ): string | undefined => {
   const which =
@@ -1035,13 +897,10 @@ export const aiStepProblem = (
     : undefined;
   const named = `${which} goes through "${binding}"`;
   if (declared === undefined) {
-    return `${named}, which this version declares no resource as: declare it with \`resource.model("${binding}", …)\` in app.ts, or name a text model resource it declares.`;
+    return `${named}, which this version declares no permission as: declare \`permissions: { ai: permission.ai({ … }) }\` in app.ts and name it \`"ai"\`.`;
   }
-  if (declared["~resource"] !== "model") {
-    return `${named}, a ${declared["~resource"]} resource: an AI step goes through a text model resource.`;
-  }
-  if (declared.structuredOutput !== null) {
-    return `${named}, a model resource with a structured output: an AI step brings its own schema, so it goes through a text model resource (no \`output\`).`;
+  if (declared["~permission"] !== "ai") {
+    return `${named}, a ${declared["~permission"]} permission: an AI step goes through the App's \`ai\` permission, \`"ai"\`.`;
   }
   return undefined;
 };
@@ -1191,41 +1050,37 @@ const targetLabels = async (
 };
 
 /**
- * Knowledge's, statistics' or guests' declared operations, or a store's paths; none
- * for other kinds.
+ * The Brain's or guests' declared operations, or another App's (or the
+ * platform's) functions, by path; none for other kinds.
  */
-const operationsOf = (declaration: AnyResource): string[] => {
+const operationsOf = (declaration: AnyPermission): string[] => {
   if (
-    declaration["~resource"] === "knowledge" ||
-    declaration["~resource"] === "statistics" ||
-    declaration["~resource"] === "guests"
+    declaration["~permission"] === "brain" ||
+    declaration["~permission"] === "guests"
   ) {
     return [...declaration.operations];
   }
-  if (declaration["~resource"] === "app") {
-    return Object.keys(declaration.functions).toSorted();
-  }
-  return declaration["~resource"] === "store"
-    ? Object.keys(declaration.operations).toSorted()
+  return declaration["~permission"] === "apps"
+    ? Object.keys(declaration.functions).toSorted()
     : [];
 };
 
 /** What a review says of `declaration`, apart from how it is bound. */
-const declaredOf = (declaration: AnyResource) => {
-  const kind = declaration["~resource"];
-  return {
-    alias: declaration.alias,
-    kind,
-    contract:
-      kind === "connector" || kind === "template" ? declaration.contract : null,
-    actions: kind === "connector" ? [...declaration.actions] : [],
-    operations: operationsOf(declaration),
-    collections: kind === "knowledge" ? [...declaration.collections] : [],
-    measures: kind === "statistics" ? [...declaration.platform] : [],
-    maxOutputTokens: kind === "model" ? declaration.maxOutputTokens : null,
-    structuredOutput: kind === "model" && declaration.structuredOutput !== null,
-  };
-};
+const declaredOf = (declaration: AnyPermission) => ({
+  alias: declaration.alias,
+  kind: targetKindOf(declaration),
+  contract:
+    declaration["~permission"] === "connections" ? declaration.contract : null,
+  actions:
+    declaration["~permission"] === "connections"
+      ? [...declaration.actions]
+      : [],
+  operations: operationsOf(declaration),
+  collections:
+    declaration["~permission"] === "brain" ? [...declaration.collections] : [],
+  maxOutputTokens:
+    declaration["~permission"] === "ai" ? declaration.maxOutputTokens : null,
+});
 
 /**
  * What the App's current version declares for its actions, each with its
@@ -1325,7 +1180,7 @@ export const resourceBindingsFor = (
     appCalls: given.appCalls ?? { used: 0 },
   };
   return async (
-    declaration: AnyResource
+    declaration: AnyPermission
   ): Promise<BoundResource | undefined> => {
     const row = await activeRow(env, caller.app, declaration.alias);
     if (row === undefined) {
@@ -1345,35 +1200,13 @@ export const resourceBindingsFor = (
           state: resolution.state,
         });
       }
-      // A shared store's binding that no longer serves (its grant lost, the
-      // store's contract changed, an operation gone or no longer public):
-      // recorded, with the consumer and the binding, as its refused calls
-      // are (store-operations.ts).
-      if (declaration["~resource"] === "store") {
-        const target = bindingTargetSchema.safeParse(
-          jsonOrUndefined(row.target)
-        );
-        await auditStoreRefusal(env, {
-          actor: caller.actor,
-          consumer: {
-            subject: { type: "app", id: caller.app },
-            version: caller.authority.appVersion ?? 0,
-            permissionId:
-              target.data?.kind === "store" ? target.data.permissionId : row.id,
-          },
-          operation: `binding:${declaration.alias}`,
-          storeId: null,
-          reason: resolution.state,
-        });
-      }
       return undefined;
     }
     const { served } = resolution;
     return {
-      kind: declaration["~resource"],
+      kind: declaration["~permission"],
       contract:
-        declaration["~resource"] === "connector" ||
-        declaration["~resource"] === "template"
+        declaration["~permission"] === "connections"
           ? declaration.contract
           : null,
       call: async (method, args, context) =>
@@ -1408,8 +1241,8 @@ export interface StepModel {
 /**
  * The model binding a workflow's AI step of App `app`, at the version
  * `version` its run is pinned to, goes through (`step.llm`'s `binding`):
- * `alias` must name a model resource that release declares, without a
- * structured output (the step brings its own schema), whose active
+ * `alias` must name the `ai` permission that release declares (the step
+ * brings its own schema), whose active
  * binding serves it now, as a request of the App's own would resolve it
  * (`resolved`): approved for exactly that declaration, its model still
  * allowed, its caps readable. Anything else, an App with no release
@@ -1441,10 +1274,7 @@ export const stepModelBinding = async (
   const declaration = Object.hasOwn(release.app.resources, alias)
     ? release.app.resources[alias]
     : undefined;
-  if (
-    declaration?.["~resource"] !== "model" ||
-    declaration.structuredOutput !== null
-  ) {
+  if (declaration?.["~permission"] !== "ai") {
     throw notServed();
   }
   const row = await activeRow(env, app, alias);

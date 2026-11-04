@@ -54,7 +54,6 @@ export default app({
   operations: { asks: { remember, recipients } },
   internalOperations: {},
   screens: [{ name: "asks", path: "/", source: "screens/asks.tsx" }],
-  uses: [],
 });
 `;
 

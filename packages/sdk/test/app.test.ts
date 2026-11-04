@@ -3,9 +3,9 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
 import { inspectApp, readAppManifest } from "../src/host.ts";
-import { AppError, app, resource } from "../src/index.ts";
+import { AppError, app, permission } from "../src/index.ts";
 import type { AppDefinition, WorkflowEventReference } from "../src/index.ts";
-import { readResourceDeclaration } from "../src/resources.ts";
+import { readPermissionDeclaration } from "../src/permissions.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
@@ -78,7 +78,6 @@ const registration: Registration = {
   },
   operations: { notes: { list, create, send } },
   screens: [],
-  uses: [],
 };
 
 /** Notes, with `changes` to its registration. */
@@ -95,16 +94,12 @@ const looseNotes = (changes: object) =>
  * string arrives only as data.
  */
 const connectorOf = (contract: string) =>
-  readResourceDeclaration({
-    "~resource": "connector",
+  readPermissionDeclaration({
+    "~permission": "connections",
     alias: "mail",
     contract,
     actions: ["send"],
   });
-
-/** A store declaration of `operations`, read back as the host reads a manifest's. */
-const declare = (operations: unknown) => () =>
-  readResourceDeclaration({ "~resource": "store", alias: "crm", operations });
 
 const refusal = (register: () => unknown): string => {
   try {
@@ -247,147 +242,154 @@ describe("access", () => {
   });
 });
 
-describe("resources", () => {
+describe("permissions", () => {
   test("are frozen all the way down, so nothing checked can change before registration", () => {
-    const model = resource.model("summarizer", {
-      structuredOutput: v.object({ summary: v.string() }),
-      maxOutputTokens: 100,
-    });
-    const knowledge = resource.knowledge("help", {
+    const brain = permission.brain({
       operations: ["search"],
       collections: ["handbook"],
     });
-    const connector = resource.connector("mail", {
+    const connection = permission.connection("mail", {
       contract: "microsoft-365.mail@1",
       actions: ["send"],
     });
-    const template = resource.template("letter", {
-      contract: "grasp.letter@1",
-    });
-    const fields =
-      model.structuredOutput?.kind === "object"
-        ? model.structuredOutput.fields
-        : {};
+    const ai = permission.ai({ maxOutputTokens: 100 });
     expect({
-      operation: Reflect.set(knowledge.operations, 0, "read"),
-      added: Reflect.set(knowledge.operations, 1, "read"),
-      collection: Reflect.set(knowledge.collections, 0, "secret"),
-      action: Reflect.set(connector.actions, 0, "delete"),
-      output: Reflect.set(fields, "extra", { kind: "string" }),
-      outputKind: Reflect.set(model.structuredOutput ?? {}, "kind", "string"),
-      contract: Reflect.set(template, "contract", "grasp.other@1"),
+      operation: Reflect.set(brain.operations, 0, "read"),
+      added: Reflect.set(brain.operations, 1, "read"),
+      collection: Reflect.set(brain.collections, 0, "secret"),
+      action: Reflect.set(connection.actions, 0, "delete"),
+      tokens: Reflect.set(ai, "maxOutputTokens", 100_000),
     }).toStrictEqual({
       operation: false,
       added: false,
       collection: false,
       action: false,
-      output: false,
-      outputKind: false,
-      contract: false,
+      tokens: false,
     });
-    expect([
-      knowledge.operations,
-      connector.actions,
-      model.structuredOutput?.kind,
-    ]).toStrictEqual([["search"], ["send"], "object"]);
+    expect([brain.operations, connection.actions, ai.alias]).toStrictEqual([
+      ["search"],
+      ["send"],
+      "ai",
+    ]);
   });
 
-  test("a store declaration reads back as code declared it, and calls only a store's queries and mutations", () => {
-    const store = resource.store("crm", {
-      operations: {
-        "contacts.list": {
-          kind: "query",
-          args: { limit: v.number().optional() },
-          returns: v.array(v.string()),
-        },
-        "contacts.add": {
-          kind: "mutation",
-          args: { name: v.string() },
-          returns: v.null(),
-        },
-      },
+  test("each kind sits under its own key, each alias once", () => {
+    const mail = permission.connection("mail", {
+      contract: "microsoft-365.mail@1",
+      actions: ["send"],
     });
-    // As a manifest holds it: data, read back through the same checks.
-    const read = readResourceDeclaration(structuredClone(store));
-    const shape = {
-      kind: "query",
-      args: store.operations["contacts.list"]?.args,
-      returns: store.operations["contacts.list"]?.returns,
-    };
-    expect({
-      read: JSON.stringify(read) === JSON.stringify(store),
-      frozen: Reflect.set(store.operations, "contacts.remove", shape),
-    }).toStrictEqual({ read: true, frozen: false });
-    expect(
-      [
-        refusal(declare({ "contacts.ping": { ...shape, kind: "action" } })),
-        refusal(declare({ "contacts..list": shape })),
-        refusal(declare({ "a.b.c.d.e": shape })),
-        refusal(declare({})),
-        refusal(
-          declare({ "contacts.list": { ...shape, args: shape.returns } })
-        ),
-        refusal(declare({ "contacts.list": { ...shape, extra: true } })),
-      ].map((message) => message.length > 0)
-    ).toStrictEqual([true, true, true, true, true, true]);
-    expect(
-      refusal(declare({ "contacts.ping": { ...shape, kind: "action" } }))
-    ).toContain("never its actions");
-  });
-});
-
-/** Declares statistics with `config`, one the types may refuse. */
-const statistics = (config: unknown) => () =>
-  // SAFETY: a config the types refuse, checked at run time.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  resource.statistics("stats", config as { operations: ["read"] });
-
-describe("a statistics declaration", () => {
-  test("reads back as code declared it, and reads only the platform's measures it lists, with `read`", () => {
-    const own = resource.statistics("stats", { operations: ["record"] });
-    const platform = resource.statistics("platform", {
-      operations: ["read"],
-      platform: ["platform.workflow_runs"],
+    const ai = permission.ai({ maxOutputTokens: 100 });
+    const followUp = permission.workflow("mail", {
+      input: v.object({}),
+      output: v.null(),
     });
+    const { manifest } = inspectApp(
+      notes({ permissions: { ai, connections: [mail], people: true } })
+    );
     expect({
-      own: JSON.stringify(readResourceDeclaration(structuredClone(own))),
-      platform: JSON.stringify(
-        readResourceDeclaration(structuredClone(platform))
-      ),
-      frozen: Reflect.set(platform.platform, 1, "platform.improvement_signals"),
-      ownPlatform: own.platform,
+      resources: Object.keys(manifest.resources).toSorted(),
+      people: manifest.people,
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
     }).toStrictEqual({
-      own: JSON.stringify(own),
-      platform: JSON.stringify(platform),
-      frozen: false,
-      ownPlatform: [],
+      resources: ["ai", "mail"],
+      people: true,
+      readBack: true,
     });
     expect(
       [
-        statistics({
-          operations: ["record"],
-          platform: ["platform.workflow_runs"],
-        }),
-        statistics({ operations: ["read"], platform: ["platform.everything"] }),
-        statistics({ operations: ["read"], platform: [] }),
-        statistics({
-          operations: ["read"],
-          platform: ["platform.workflow_runs", "platform.workflow_runs"],
-        }),
-        statistics({ operations: ["write"] }),
-        statistics({ operations: ["read"], measures: [] }),
-      ].map((declaration) => refusal(declaration).length > 0)
-    ).toStrictEqual([true, true, true, true, true, true]);
+        // A kind the App can't hold.
+        refusal(() => looseNotes({ permissions: { model: ai } })),
+        // A declaration under another kind's key.
+        refusal(() => looseNotes({ permissions: { connections: [ai] } })),
+        refusal(() => looseNotes({ permissions: { ai: mail } })),
+        // One where a list goes, and a list where one goes.
+        refusal(() => looseNotes({ permissions: { connections: mail } })),
+        refusal(() => looseNotes({ permissions: { ai: [ai] } })),
+        // A declaration `permission` didn't make.
+        refusal(() =>
+          looseNotes({ permissions: { connections: [{ ...mail }] } })
+        ),
+        refusal(() => looseNotes({ permissions: { people: "yes" } })),
+        // The superseded keys.
+        refusal(() => looseNotes({ uses: [] })),
+        refusal(() => looseNotes({ people: true })),
+      ].map((message) => message.length > 0)
+    ).toStrictEqual([true, true, true, true, true, true, true, true, true]);
+    expect(
+      refusal(() =>
+        notes({ permissions: { connections: [mail], workflows: [followUp] } })
+      )
+    ).toContain("alias `mail`");
+  });
+
+  test("the fixed aliases are each one kind's", () => {
+    const connection = permission.connection("ai", {
+      contract: "microsoft-365.mail@1",
+      actions: ["send"],
+    });
+    expect(
+      refusal(() => notes({ permissions: { connections: [connection] } }))
+    ).toContain("`ai` is the alias of the App's `ai` permission");
+    expect(
+      refusal(() =>
+        readPermissionDeclaration({
+          "~permission": "ai",
+          alias: "writer",
+          maxOutputTokens: 10,
+        })
+      )
+    ).toContain("always `ai`");
+  });
+
+  test("the platform's own functions are `grasp`'s, exactly", () => {
+    const grasp = permission.grasp();
+    const shape = structuredClone(grasp.functions["statistics.read"]);
+    expect({
+      read:
+        JSON.stringify(readPermissionDeclaration(structuredClone(grasp))) ===
+        JSON.stringify(grasp),
+      alias: grasp.alias,
+      paths: Object.keys(grasp.functions),
+    }).toStrictEqual({
+      read: true,
+      alias: "grasp",
+      paths: ["statistics.read"],
+    });
+    expect(
+      [
+        // Another App can't pose as the platform, in code or in a manifest.
+        refusal(() =>
+          permission.app("grasp", {
+            functions: {
+              "statistics.read": {
+                kind: "query",
+                args: {},
+                returns: v.null(),
+              },
+            },
+          })
+        ),
+        refusal(() =>
+          readPermissionDeclaration({
+            "~permission": "apps",
+            alias: "grasp",
+            functions: { "statistics.write": shape },
+          })
+        ),
+      ].map((message) => message.includes("grasp"))
+    ).toStrictEqual([true, true]);
   });
 });
 
-/** Reads an app declaration of `functions` back, as a manifest holds it. */
+/** Reads an apps declaration of `functions` back, as a manifest holds it. */
 const declareApp = (functions: unknown) => () =>
-  readResourceDeclaration({ "~resource": "app", alias: "crm", functions });
+  readPermissionDeclaration({ "~permission": "apps", alias: "crm", functions });
 
-describe("an app declaration", () => {
+describe("an apps declaration", () => {
   test("reads back as code declared it, and calls another App's queries, mutations and actions only", () => {
-    const crm = resource.app("crm", {
+    const crm = permission.app("crm", {
       functions: {
         "contacts.find": {
           kind: "query",
@@ -399,17 +401,19 @@ describe("an app declaration", () => {
     });
     const shape = structuredClone(crm.functions["contacts.find"]);
     expect({
-      read: JSON.stringify(readResourceDeclaration(structuredClone(crm))),
+      read: JSON.stringify(readPermissionDeclaration(structuredClone(crm))),
       frozen: Reflect.set(crm.functions, "contacts.drop", shape),
     }).toStrictEqual({ read: JSON.stringify(crm), frozen: false });
     expect(
       [
         declareApp({ "contacts.find": { ...shape, kind: "stream" } }),
         declareApp({ "contacts..find": shape }),
+        declareApp({ "a.b.c.d.e": shape }),
         declareApp({}),
+        declareApp({ "contacts.find": { ...shape, args: shape?.returns } }),
         declareApp({ "contacts.find": { ...shape, extra: true } }),
       ].map((declaration) => refusal(declaration).length > 0)
-    ).toStrictEqual([true, true, true, true]);
+    ).toStrictEqual([true, true, true, true, true, true]);
   });
 });
 
@@ -523,7 +527,7 @@ describe("paths", () => {
 });
 
 describe("uses", () => {
-  const mail = resource.connector("mail", {
+  const mail = permission.connection("mail", {
     contract: "microsoft-365.mail@1",
     actions: ["send"],
   });
@@ -539,14 +543,14 @@ describe("uses", () => {
       notes({
         operations: { notes: { list, create, notify } },
         internalOperations: { secret },
-        uses: [mail],
+        permissions: { connections: [mail] },
       })
     );
     expect(manifest.operations["notes.notify"]?.uses).toStrictEqual([
       { type: "function", path: "notes.list", kind: "query" },
       { type: "function", path: "secret", kind: "query" },
       { type: "function", path: "notes.create", kind: "mutation" },
-      { type: "resource", kind: "connector", alias: "mail" },
+      { type: "resource", kind: "connections", alias: "mail" },
     ]);
   });
 
@@ -569,11 +573,16 @@ describe("uses", () => {
       handler: () => null,
     });
     expect(
-      refusal(() => notes({ operations: { viaResource }, uses: [mail] }))
-    ).toContain("only an action uses resources");
+      refusal(() =>
+        notes({
+          operations: { viaResource },
+          permissions: { connections: [mail] },
+        })
+      )
+    ).toContain("only an action reaches `connections`");
   });
 
-  test("an action's resource must be one the App lists", () => {
+  test("an action's permission must be one the App lists", () => {
     const sendMail = server.action({
       args: {},
       returns: v.null(),
@@ -581,18 +590,28 @@ describe("uses", () => {
       handler: () => null,
     });
     expect(refusal(() => notes({ operations: { sendMail } }))).toContain(
-      "doesn't list"
+      "don't list"
     );
     // The same alias declared again is another requirement, not this one.
-    const lookalike = resource.connector("mail", {
+    const lookalike = permission.connection("mail", {
       contract: "microsoft-365.mail@1",
       actions: ["send"],
     });
     expect(
-      refusal(() => notes({ operations: { sendMail }, uses: [lookalike] }))
-    ).toContain("doesn't list");
+      refusal(() =>
+        notes({
+          operations: { sendMail },
+          permissions: { connections: [lookalike] },
+        })
+      )
+    ).toContain("don't list");
     expect(
-      refusal(() => notes({ operations: { list }, uses: [mail, lookalike] }))
+      refusal(() =>
+        notes({
+          operations: { list },
+          permissions: { connections: [mail, lookalike] },
+        })
+      )
     ).toContain("alias `mail`");
   });
 
@@ -601,16 +620,10 @@ describe("uses", () => {
     const longest = `${"a".repeat(254)}@1`;
     const tooLong = `${"a".repeat(255)}@1`;
     const read = connectorOf(longest);
-    expect({
-      template: resource.template("letter", { contract: longest }).contract,
-      connector: "contract" in read ? read.contract : null,
-    }).toStrictEqual({ template: longest, connector: longest });
-    expect(
-      [
-        refusal(() => resource.template("letter", { contract: tooLong })),
-        refusal(() => connectorOf(tooLong)),
-      ].map((message) => message.includes("at most 256 characters"))
-    ).toStrictEqual([true, true]);
+    expect("contract" in read ? read.contract : null).toBe(longest);
+    expect(refusal(() => connectorOf(tooLong))).toContain(
+      "at most 256 characters"
+    );
   });
 
   test("a function the App doesn't register can't be used", () => {
@@ -631,7 +644,7 @@ describe("uses", () => {
   });
 
   test("a workflow is started by an action or staged by a mutation, only one the App lists, and reads back as declared", () => {
-    const followUp = resource.workflow("followUp", {
+    const followUp = permission.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
       output: v.object({ done: v.boolean() }),
     });
@@ -649,10 +662,10 @@ describe("uses", () => {
     });
     const registered = notes({
       operations: { notes: { list, start, stage } },
-      uses: [followUp],
+      permissions: { workflows: [followUp] },
     });
     const { manifest } = inspectApp(registered);
-    const lookalike = resource.workflow("followUp", {
+    const lookalike = permission.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
       output: v.object({ done: v.boolean() }),
     });
@@ -661,22 +674,34 @@ describe("uses", () => {
       stage: manifest.operations["notes.stage"]?.uses,
       declared: manifest.workflows.followUp?.input,
       declaredOutput: manifest.workflows.followUp?.output,
-      // A workflow is neither an action's resource nor a screen's.
+      // A workflow is neither an action's permission nor a screen's.
       resources: Object.keys(manifest.resources),
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
       unlisted: refusal(() =>
         notes({ operations: { notes: { list, start } } })
-      ).includes("doesn't list"),
+      ).includes("don't list"),
       // The same alias declared again is another requirement, not this one.
       lookalike: refusal(() =>
-        notes({ operations: { notes: { list, start } }, uses: [lookalike] })
-      ).includes("doesn't list"),
+        notes({
+          operations: { notes: { list, start } },
+          permissions: { workflows: [lookalike] },
+        })
+      ).includes("don't list"),
       sameAlias: refusal(() =>
         notes({
           operations: { notes: { list } },
-          uses: [followUp, resource.template("followUp", { contract: "a@1" })],
+          permissions: {
+            workflows: [followUp],
+            apps: [
+              permission.app("followUp", {
+                functions: {
+                  "a.b": { kind: "query", args: {}, returns: v.null() },
+                },
+              }),
+            ],
+          },
         })
       ).includes("alias `followUp`"),
     }).toStrictEqual({
@@ -696,7 +721,7 @@ describe("uses", () => {
   });
 
   test("a workflow's event is notified by a mutation only, of a workflow the App lists, and reads back as declared", () => {
-    const followUp = resource.workflow("followUp", {
+    const followUp = permission.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
       output: v.object({ done: v.boolean() }),
     });
@@ -709,7 +734,7 @@ describe("uses", () => {
     });
     const registered = notes({
       operations: { notes: { list, notify } },
-      uses: [followUp],
+      permissions: { workflows: [followUp] },
     });
     const { manifest } = inspectApp(registered);
     const byAction = server.action({
@@ -732,15 +757,15 @@ describe("uses", () => {
       byAction: refusal(() =>
         notes({
           operations: { notes: { list, byAction } },
-          uses: [followUp],
+          permissions: { workflows: [followUp] },
         })
       ).includes("only a mutation notifies"),
       otherWorkflow: refusal(() =>
         notes({
           operations: { notes: { list, otherWorkflow } },
-          uses: [followUp],
+          permissions: { workflows: [followUp] },
         })
-      ).includes("doesn't list"),
+      ).includes("don't list"),
       madeUp: refusal(() =>
         Reflect.apply(server.mutation, server, [
           {
@@ -770,19 +795,19 @@ describe("uses", () => {
 
   test("a workflow's input is there, or its default, when a start leaves it out", () => {
     const optional = refusal(() =>
-      resource.workflow("followUp", {
+      permission.workflow("followUp", {
         input: v.string().optional(),
         output: v.null(),
       })
     );
-    const defaulted = resource.workflow("followUp", {
+    const defaulted = permission.workflow("followUp", {
       input: v.string().default("Today"),
       output: v.null(),
     });
     // Declared without the output a run gives, it is refused, whatever
     // the types let through.
     const noOutput = refusal(() =>
-      Reflect.apply(resource.workflow, resource, [
+      Reflect.apply(permission.workflow, permission, [
         "followUp",
         { input: v.object({}) },
       ])
@@ -795,7 +820,7 @@ describe("uses", () => {
   });
 
   test("a manifest can't make a workflow out of something else", () => {
-    const followUp = resource.workflow("followUp", {
+    const followUp = permission.workflow("followUp", {
       input: v.object({}),
       output: v.null(),
     });
@@ -806,7 +831,10 @@ describe("uses", () => {
       handler: () => null,
     });
     const { manifest } = inspectApp(
-      notes({ operations: { notes: { list, start } }, uses: [followUp] })
+      notes({
+        operations: { notes: { list, start } },
+        permissions: { workflows: [followUp] },
+      })
     );
     // A mutable copy, as JSON: what a manifest read back is.
     const operations: Record<string, { uses: unknown[] }> = {};
@@ -837,7 +865,7 @@ describe("uses", () => {
       asResource: altered((copy) => {
         copy.resources = copy.workflows;
         copy.workflows = {};
-      }).includes("isn't an action's resource"),
+      }).includes("isn't an action's permission"),
       // A query that starts one.
       byQuery: altered((copy) => {
         copy.operations["notes.list"]?.uses.push({

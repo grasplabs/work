@@ -117,7 +117,7 @@ function RichText({
   /** The Markdown, as a rich text field saved it. */
   value: string;
   /**
-   * The App's links resource its links open through (`resources.site`):
+   * The App's links permission its links open through (`permissions.links`):
    * a link is then a button that opens its address there. Without it,
    * links show their address as text.
    */

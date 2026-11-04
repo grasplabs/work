@@ -41,7 +41,6 @@ export default app({
   operations: { attacks: { secret, html } },
   internalOperations: {},
   screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx" }`).join(", ")}],
-  uses: [],
 });
 `;
 

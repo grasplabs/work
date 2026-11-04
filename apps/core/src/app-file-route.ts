@@ -96,7 +96,7 @@ import { routeMember } from "./staff-audit.ts";
 //   lost role, a detachment or a deletion fences the bytes still to come.
 // - A screen does what its App didn't declare: each request needs its
 //   resource's operation (`upload`, `read` or `delete`) in the sealed
-//   release's `resource.files` declaration, never in what the request says.
+//   release's `permission.files` declaration, never in what the request says.
 // - A flood: each request but a chunk counts against the person's
 //   requests of the App's screens (`admitted`); each chunk against a
 //   chunk budget of its own (`AppHost.admitChunk`), charged before it is
@@ -417,7 +417,7 @@ const resolved = async (
     ? release.app.browserResources[resource]
     : undefined;
   if (
-    declared?.["~resource"] !== "files" ||
+    declared?.["~permission"] !== "files" ||
     !declared.operations.includes(operation)
   ) {
     throw fileErrors.create("file.operation_denied");

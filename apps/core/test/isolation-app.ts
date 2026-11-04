@@ -135,7 +135,6 @@ export default app({
   operations: { notes: { create, titles, hold, useKept, keepAfter, late, poison, probe } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

@@ -77,7 +77,6 @@ export default app({
   operations: { notes: { create, titles } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 });
@@ -107,7 +106,6 @@ export default app({
   operations: { hello: { hello } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };
@@ -254,7 +252,6 @@ export default app({
   operations: { notes: { create, rename, retitle, rows } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   };

@@ -19,9 +19,8 @@ import type {
 } from "@grasp-os/shared/screens";
 import {
   statisticErrors,
-  statisticLimitsOf,
+  statisticReadLimitsOf,
 } from "@grasp-os/shared/statistics";
-import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { DurableObject } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -112,8 +111,8 @@ export class App extends DurableObject<Env> {
     { readonly userId: string; readonly onRevoked: AccessWatcher }
   >();
 
-  /** Statistics points the App recorded, and reads, in the current minute. */
-  #statisticsMinute = { minute: 0, point: 0, read: 0 };
+  /** The platform's statistics the App read in the current minute. */
+  #statisticsMinute = { minute: 0, read: 0 };
 
   /** The minute a read refused past its bounds was last audited. */
   #limitedAuditMinute = -1;
@@ -659,30 +658,26 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Counts one statistics `use` of a sealed function's statistics resource
-   * (resource-statistics.ts) against the App's minute, all the App's
-   * calls together. `statistics.rate_limited` past
-   * it. Each call's own bound is core's (the invocation's counts).
+   * Counts one read of the platform's statistics by a sealed function
+   * (resource-grasp.ts) against the App's minute, all the App's calls
+   * together. `statistics.rate_limited` past it. Each call's own bound is
+   * core's (the invocation's counts).
    */
-  claimStatisticMinute(use: StatisticUse): void {
+  claimStatisticMinute(): void {
     const minute = Math.floor(Date.now() / 60_000);
     if (this.#statisticsMinute.minute !== minute) {
-      this.#statisticsMinute = { minute, point: 0, read: 0 };
+      this.#statisticsMinute = { minute, read: 0 };
     }
-    const { perCall, perMinute } = statisticLimitsOf(
-      use,
-      use === "point"
-        ? this.env.STATISTICS_POINT_LIMITS
-        : this.env.STATISTICS_READ_LIMITS
+    const { perCall, perMinute } = statisticReadLimitsOf(
+      this.env.STATISTICS_READ_LIMITS
     );
-    if (this.#statisticsMinute[use] >= perMinute) {
+    if (this.#statisticsMinute.read >= perMinute) {
       throw statisticErrors.create("statistics.rate_limited", {
-        use,
         perCall,
         perMinute,
       });
     }
-    this.#statisticsMinute[use] += 1;
+    this.#statisticsMinute.read += 1;
   }
 
   /**

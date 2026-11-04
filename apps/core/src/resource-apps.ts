@@ -40,7 +40,10 @@ import { consumerFailure, declaredFingerprint } from "./store-operations.ts";
 // - The wrong identity: every call runs the called function as a screen's
 //   call of it runs (`callAppFunctionFrom`), for the person the calling
 //   invocation acts for, their role and teams read here from core, never
-//   anything App code sends. So the called App's own role check applies,
+//   anything App code sends, and as a member of the called App at most,
+//   never a builder (`invocationFor`, app-functions.ts): the calling App's
+//   code can't use what only the called App's builders may do whenever one
+//   of them uses it. So the called App's own role check applies,
 //   and what it writes is that person's; nothing of the calling App's
 //   grants reaches it, nor anything of the called App's beyond its answer.
 // - Calls going round, too deep or too many: every invocation carries the

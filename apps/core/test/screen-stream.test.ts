@@ -177,7 +177,6 @@ export default app({
   operations: { notes: { list, create, echo, waits }, writer: { draft, slow, quiet, wrong, huge, counts } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/writer.tsx": `import { useStream } from "@grasp-os/sdk/react";

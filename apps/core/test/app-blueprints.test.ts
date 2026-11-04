@@ -83,7 +83,6 @@ export default app({
   operations: { notes: { add, list } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
 };

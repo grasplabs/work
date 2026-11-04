@@ -45,7 +45,6 @@ const { manifest } = inspectApp(
       },
     },
     screens: [],
-    uses: [],
   })
 );
 const release = {

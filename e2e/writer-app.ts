@@ -55,7 +55,6 @@ export default app({
   operations: { writer: { draft, outline } },
   internalOperations: {},
   screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
-  uses: [],
 });
 `;
 

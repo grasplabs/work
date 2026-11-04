@@ -73,10 +73,10 @@ const guestFiles = (
 
 export default defineSchema({});
 `,
-  "operations/guests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/guests.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const guests = resource.guests("guests", { operations: ${operations} });
+export const guests = permission.guests({ operations: ${operations} });
 
 // What the declaration may leave out, called past its types on purpose:
 // the call is what refuses it.
@@ -99,28 +99,28 @@ export const invite = action({
   args: { json: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).invite(JSON.parse(args.json))),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).invite(JSON.parse(args.json))),
 });
 
 export const list = action({
   args: {},
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx) => await outcome(async () => await loose(ctx.resources.guests).list()),
+  handler: async (ctx) => await outcome(async () => await loose(ctx.guests).list()),
 });
 
 export const read = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).read(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).read(args.id)),
 });
 
 export const revoke = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).revoke(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).revoke(args.id)),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -135,7 +135,7 @@ export default app({
   operations: { guests: { invite, list, read, revoke } },
   internalOperations: {},
   screens: [],
-  uses: [guests],
+  permissions: { guests },
 });
 `,
 });

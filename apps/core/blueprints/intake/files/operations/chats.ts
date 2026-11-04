@@ -1,4 +1,4 @@
-import { AppError, resource, v } from "@grasp-os/sdk";
+import { AppError, permission, v } from "@grasp-os/sdk";
 
 import { action } from "#grasp/server";
 
@@ -7,7 +7,7 @@ import { reviewer } from "./drafts.ts";
 
 // Stakeholder chats: the intake invites someone on the team who isn't a
 // member to a short chat about their work, through the platform's guest
-// chats (the `guests` resource, which an admin binds to the `GUESTS`
+// chats (the `guests` permission, which an admin binds to the `GUESTS`
 // permission), guided by the Grasp skill `interview-a-stakeholder`. What
 // they write comes back as notes (`notes`), which the screen has the
 // `extract` workflow read like any other, into a draft someone reviews.
@@ -20,7 +20,7 @@ import { reviewer } from "./drafts.ts";
 // revokes a chat. The workflow reads no chat itself: only what the screen
 // read here and gave it.
 
-export const guests = resource.guests("guests", {
+export const guests = permission.guests({
   operations: ["invite", "list", "read", "revoke"],
 });
 
@@ -109,7 +109,7 @@ export const overview = action({
       throw error;
     }
     try {
-      const chats = await ctx.resources.guests.list();
+      const chats = await ctx.guests.list();
       return { writable: true, chats: chats.map(listed) };
     } catch (error) {
       if (codeOf(error) === "resource.unavailable") {
@@ -130,7 +130,7 @@ export const invite = action({
   uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
-    const invited = await ctx.resources.guests.invite({
+    const invited = await ctx.guests.invite({
       name: args.name,
       skill: interviewSkill,
       days: args.days,
@@ -146,7 +146,7 @@ export const revoke = action({
   uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
-    return listed(await ctx.resources.guests.revoke(args.id));
+    return listed(await ctx.guests.revoke(args.id));
   },
 });
 
@@ -172,7 +172,7 @@ export const notes = action({
   uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
-    const read: Transcript = await ctx.resources.guests.read(args.chat);
+    const read: Transcript = await ctx.guests.read(args.chat);
     if (!read.messages.some(({ role }) => role === "guest")) {
       throw new AppError(
         "intake.empty_chat",

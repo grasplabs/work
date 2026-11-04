@@ -66,7 +66,6 @@ export default app({
   operations: { notes: { titles } },
   internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [],
 });
 `,
   "screens/desk.tsx": desk(marker),

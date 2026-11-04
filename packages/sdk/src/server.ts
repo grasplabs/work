@@ -2,6 +2,21 @@ import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
 import type { Caller, PeopleDirectory } from "./people.ts";
+import { isPermission, isWorkflowPermission } from "./permissions.ts";
+import type {
+  AiClient,
+  AiPermission,
+  AnyPermission,
+  AppClientOf,
+  AppPermission,
+  BrainClientOf,
+  BrainPermission,
+  ConnectionClientOf,
+  ConnectionPermission,
+  GuestsClientOf,
+  GuestsPermission,
+  WorkflowPermission,
+} from "./permissions.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
 import type {
   ArgsOf,
@@ -13,12 +28,6 @@ import type {
   StreamingFunction,
   WorkflowEventReference,
 } from "./references.ts";
-import { isResource, isWorkflowResource } from "./resources.ts";
-import type {
-  AnyResource,
-  ResourceClient,
-  WorkflowResource,
-} from "./resources.ts";
 import { tablesOf } from "./schema.ts";
 import type { AnyTable, SchemaDefinition } from "./schema.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -56,10 +65,11 @@ import type {
 //   likewise (`ctx.afterCommit.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
-//   and reaches outside capabilities only through `ctx.resources`, for
-//   the resources its `uses` lists, starts only the workflows it lists
-//   (`ctx.startWorkflow`), and tells people through the platform's
-//   notifications (`ctx.notifyPeople`).
+//   and reaches outside the App only through the permissions its `uses`
+//   lists (`ctx.ai`, `ctx.connections`, `ctx.brain`, `ctx.apps`,
+//   `ctx.guests`), starts only the workflows it lists (`ctx.workflows`),
+//   and tells people through the platform's notifications
+//   (`ctx.notifyPeople`).
 // The host enforces each of these again at run time, whatever App code
 // sends it; the types here make the mistakes fail to compile first.
 //
@@ -101,11 +111,12 @@ export type AnyReference = FunctionReference;
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
 /**
- * What a function's `uses` may list: functions of the App, resources, the
- * workflows it starts, and the events of the App's workflows it notifies
- * runs of (`workflows.<workflow>.events.<alias>`, a mutation's only).
+ * What a function's `uses` may list: functions of the App, permissions,
+ * the workflows it starts, and the events of the App's workflows it
+ * notifies runs of (`workflows.<workflow>.events.<alias>`, a mutation's
+ * only).
  */
-export type Use = AnyReference | AnyResource | AnyWorkflow | AnyWorkflowEvent;
+export type Use = AnyReference | AnyPermission | AnyWorkflow | AnyWorkflowEvent;
 
 /** Any generated event reference, whatever its data. */
 export type AnyWorkflowEvent = WorkflowEventReference<
@@ -137,7 +148,7 @@ type Notify<Uses extends readonly Use[]> = <Event extends UsedEvent<Uses>>(
 
 /** Any workflow declaration, whatever its input. */
 // oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
-export type AnyWorkflow = WorkflowResource<string, any>;
+export type AnyWorkflow = WorkflowPermission<string, any>;
 
 /** The workflows among `Uses`. */
 type UsedWorkflow<Uses extends readonly Use[]> = Extract<
@@ -147,7 +158,7 @@ type UsedWorkflow<Uses extends readonly Use[]> = Extract<
 
 /** The input a caller starts workflow `Workflow` with. */
 export type WorkflowInput<Workflow> =
-  Workflow extends WorkflowResource<string, infer Input> ? Input : never;
+  Workflow extends WorkflowPermission<string, infer Input> ? Input : never;
 
 /**
  * A workflow start the host admitted: durable from the moment it resolves,
@@ -169,23 +180,24 @@ export interface RunHandle {
 }
 
 /**
- * What a start of `Workflow` takes: the workflow and its input, which may
- * be left out where the input schema takes none (its default, say). Over a
- * union, each workflow with its own input: never one's input for another,
- * nor optional for one that needs it.
+ * What a start of `Workflow` takes: its input, which may be left out where
+ * the input schema takes none (its default, say).
  */
-type StartArgs<Workflow> = Workflow extends unknown
-  ? undefined extends WorkflowInput<Workflow>
-    ? [workflow: Workflow, input?: WorkflowInput<Workflow>]
-    : [workflow: Workflow, input: WorkflowInput<Workflow>]
-  : never;
+type StartArgs<Workflow> =
+  undefined extends WorkflowInput<Workflow>
+    ? [input?: WorkflowInput<Workflow>]
+    : [input: WorkflowInput<Workflow>];
 
-/** `ctx.startWorkflow`: one of the workflows `Uses` lists, with its input. */
-type StartWorkflow<Uses extends readonly Use[]> = <
-  Workflow extends UsedWorkflow<Uses>,
->(
-  ...args: StartArgs<Workflow>
-) => Promise<RunHandle>;
+/**
+ * `ctx.workflows` (and a mutation's `ctx.afterCommit.workflows`): each
+ * workflow `Uses` lists, by its alias, started with its input, answering
+ * `Started`.
+ */
+export type Workflows<Uses extends readonly Use[], Started> = {
+  readonly [Workflow in UsedWorkflow<Uses> as Workflow["alias"]]: {
+    readonly start: (...input: StartArgs<Workflow>) => Promise<Started>;
+  };
+};
 
 /**
  * What App code tells people (`ctx.notifyPeople`,
@@ -234,14 +246,12 @@ type NotifyPeople<Told> = (
  */
 export interface AfterCommit<Uses extends readonly Use[]> {
   /**
-   * Starts one of the workflows `Uses` lists with `input`, once the
-   * mutation has committed: staged with its writes, in the same
+   * Each workflow `Uses` lists, by alias: `start(input)` starts it once
+   * the mutation has committed, staged with its writes, in the same
    * transaction, and started from the store's outbox exactly once. A
    * mutation that fails, is rolled back or is superseded starts nothing.
    */
-  readonly start: <Workflow extends UsedWorkflow<Uses>>(
-    ...args: StartArgs<Workflow>
-  ) => Promise<void>;
+  readonly workflows: Workflows<Uses, void>;
   /**
    * Tells people about what the mutation did, once it has committed
    * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
@@ -288,12 +298,42 @@ type RunAction<Uses extends readonly Use[]> = <
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
-/** `ctx.resources`: a client for each resource `Uses` lists, by alias. */
-export type Resources<Uses extends readonly Use[]> = {
-  readonly [
-    Resource in Extract<Uses[number], AnyResource> as Resource["alias"]
-  ]: ResourceClient<Resource>;
-};
+/** `Value` under `Key`, or nothing at all when it is `never`. */
+type Present<Key extends string, Value> = [Value] extends [never]
+  ? unknown
+  : Readonly<Record<Key, Value>>;
+
+/** The `ai` permission among `Uses`, as `ctx.ai`. */
+type AiOf<Uses extends readonly Use[]> = [
+  Extract<Uses[number], AiPermission>,
+] extends [never]
+  ? never
+  : AiClient;
+
+/**
+ * What an action reaches through the permissions its `Uses` lists, each
+ * only when listed: `ai`, `brain` and `guests`, and the connections and
+ * other Apps by alias.
+ */
+export type PermissionClients<Uses extends readonly Use[]> = {
+  /** Each connection `Uses` lists, by alias. */
+  readonly connections: {
+    readonly [
+      Connection in Extract<
+        Uses[number],
+        ConnectionPermission
+      > as Connection["alias"]
+    ]: ConnectionClientOf<Connection>;
+  };
+  /** Each other App `Uses` lists, by alias (the platform's: `grasp`). */
+  readonly apps: {
+    readonly [
+      Called in Extract<Uses[number], AppPermission> as Called["alias"]
+    ]: AppClientOf<Called>;
+  };
+} & Present<"ai", AiOf<Uses>> &
+  Present<"brain", BrainClientOf<Extract<Uses[number], BrainPermission>>> &
+  Present<"guests", GuestsClientOf<Extract<Uses[number], GuestsPermission>>>;
 
 /**
  * What every handler has, whatever its kind: who is calling, and the
@@ -311,7 +351,7 @@ export interface CallerCtx {
   readonly caller: Caller;
   /**
    * The organization's members, read-only, for an App that declares it
-   * (`app({ people: true })`; `permission.denied` otherwise): by ID, by
+   * (`app({ permissions: { people: true } })`; `permission.denied` otherwise): by ID, by
    * name or email, or by team, at most 100 a read, each with only their
    * name, email and teams. A visitor's call is refused it
    * (`visitor.not_granted`).
@@ -350,9 +390,9 @@ export interface MutationCtx<
 }
 
 /**
- * What an action's handler has: the functions and resources it `uses`.
- * No database: what it reads and writes goes through the App's queries
- * and mutations, each committed on its own.
+ * What an action's handler has besides its permissions
+ * (`PermissionClients`): the functions it `uses`, its workflows and the
+ * platform's notifications.
  *
  * An action is not atomic across its calls. A query it runs and a
  * mutation it runs after are two invocations: nothing fences the
@@ -370,23 +410,22 @@ export interface MutationCtx<
  * anew. Keep what an action changes, and in what order, a function of its
  * input.
  */
-export interface ActionCtx<
+export interface ActionBaseCtx<
   Uses extends readonly Use[] = readonly [],
 > extends CallerCtx {
   readonly runQuery: RunQuery<Uses>;
   readonly runMutation: RunMutation<Uses>;
   readonly runAction: RunAction<Uses>;
-  readonly resources: Resources<Uses>;
   /**
-   * Starts one of the workflows its `uses` lists, resolving once the host
-   * has admitted the start durably, not once the run ends. Called again
-   * under the same idempotency key, the action gets the same start back,
-   * matched by its place among the action's starts, as its mutations and
-   * resource requests are by theirs. Keep that order a function of the
-   * input: starts made at once, in whichever order they happen to land
-   * (`Promise.race`), can swap places on the second call.
+   * Each workflow its `uses` lists, by alias: `start(input)` resolves once
+   * the host has admitted the start durably, not once the run ends.
+   * Called again under the same idempotency key, the action gets the same
+   * start back, matched by its place among the action's starts, as its
+   * mutations and permission requests are by theirs. Keep that order a
+   * function of the input: starts made at once, in whichever order they
+   * happen to land (`Promise.race`), can swap places on the second call.
    */
-  readonly startWorkflow: StartWorkflow<Uses>;
+  readonly workflows: Workflows<Uses, RunHandle>;
   /**
    * Tells people now (`NotifyPeople`), resolving once they are told: how
    * many were. Called again under the same idempotency key, it tells
@@ -399,13 +438,24 @@ export interface ActionCtx<
 }
 
 /**
+ * What an action's handler has: the functions, permissions and workflows
+ * it `uses`. No database: what it reads and writes goes through the App's
+ * queries and mutations, each committed on its own.
+ */
+export type ActionCtx<Uses extends readonly Use[] = readonly []> =
+  ActionBaseCtx<Uses> & PermissionClients<Uses>;
+
+/**
  * What a streaming action's handler has (spec 10.7.6): an action's
  * context, and `emit`.
  */
-export interface StreamActionCtx<
+export type StreamActionCtx<
   Uses extends readonly Use[] = readonly [],
   Progress = unknown,
-> extends ActionCtx<Uses> {
+> = ActionCtx<Uses> & StreamEmit<Progress>;
+
+/** A streaming action's `emit`. */
+export interface StreamEmit<Progress> {
   /**
    * Publishes `progress` as the action's latest snapshot, for the screen
    * that runs it: validated against the action's `stream` schema, and no
@@ -495,7 +545,7 @@ export interface ActionDefinition<
 > {
   readonly args: Shape;
   readonly returns: Returns;
-  /** The functions, resources and workflows it calls; none unless listed. */
+  /** The functions, permissions and workflows it calls; none unless listed. */
   readonly uses?: Uses;
   /** Declared only by a streaming action (`StreamActionDefinition`). */
   readonly stream?: undefined;
@@ -518,7 +568,7 @@ export interface StreamActionDefinition<
 > {
   readonly args: Shape;
   readonly returns: Returns;
-  /** The functions and resources it calls; none unless listed. */
+  /** The functions, permissions and workflows it calls; none unless listed. */
   readonly uses?: Uses;
   /** Its progress snapshots: each one whole, bounded like a result. */
   readonly stream: Stream;
@@ -592,16 +642,16 @@ const usesOf = (uses: unknown): readonly Use[] => {
   for (const use of list) {
     if (
       !isServerFunction(use) &&
-      !isResource(use) &&
-      !isWorkflowResource(use) &&
+      !isPermission(use) &&
+      !isWorkflowPermission(use) &&
       referenceData(use) === undefined &&
       eventReferenceData(use) === undefined
     ) {
       return refuse(
-        "`uses` lists the App's server functions, their generated references, `resource` declarations and its workflows' generated event references, never IDs or names."
+        "`uses` lists the App's server functions, their generated references, `permission` declarations and its workflows' generated event references, never IDs or names."
       );
     }
-    // SAFETY: one of those just checked: a definition, a resource or
+    // SAFETY: one of those just checked: a definition, a permission or
     // workflow declaration, or a function reference read as data.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     checked.push(use as Use);

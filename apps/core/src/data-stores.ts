@@ -493,8 +493,7 @@ const boundSql = (id: StoreId): SQL =>
  * The consumers whose active approval resolves to store `id`, in the
  * binding inventory (spec 24): each live workflow with an active approval
  * that serves one of its operation bindings with the store's operation
- * (workflow-bindings.ts), and each App with an active approval that binds
- * one of its declared store resources to it (resource-bindings.ts).
+ * (workflow-bindings.ts).
  * Revoking the approvals, or deleting the workflow, lets the store go.
  */
 const consumersSql = (id: StoreId): SQL =>
@@ -504,12 +503,7 @@ const consumersSql = (id: StoreId): SQL =>
         ON approval.id = bound.approval_id AND approval.status = 'active'
       JOIN workflow_resources AS consumer
         ON consumer.id = bound.resource_id AND consumer.deleted_at IS NULL
-      WHERE bound.kind = 'operation' AND bound.target_id = ${id}
-    UNION
-    SELECT bound.resource_id FROM sdk_resource_bindings AS bound
-      JOIN app_resource_bindings AS approval
-        ON approval.id = bound.approval_id AND approval.status = 'active'
-      WHERE bound.kind = 'storeResource' AND bound.target_id = ${id}))`;
+      WHERE bound.kind = 'operation' AND bound.target_id = ${id}))`;
 
 /**
  * Marks store `id` closing at `now` for the deletion `owner`, in one

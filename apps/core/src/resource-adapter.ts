@@ -1,4 +1,5 @@
-import type { AnyResource } from "@grasp-os/sdk";
+import { graspAlias } from "@grasp-os/sdk";
+import type { AnyPermission } from "@grasp-os/sdk";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -16,10 +17,10 @@ import type { ResourceContext } from "./operations.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
 // How a resource binding reaches its provider (resource-bindings.ts): one
-// adapter per kind of declaration. An adapter runs in core, never in App
-// code, and reaches its provider only through the platform's own way out:
-// the model gateway, connect, Knowledge's delegate reads, the template
-// records. Whatever it answers is checked again by the operation host
+// adapter per kind of target a permission binds to. An adapter runs in
+// core, never in App code, and reaches its provider only through the
+// platform's own way out: the model gateway, connect, the Brain's delegate
+// reads, another App's functions, the platform's own reads. Whatever it answers is checked again by the operation host
 // against the declaration's contract before App code sees it.
 
 /**
@@ -173,20 +174,8 @@ export interface BindingCaller {
    */
   readonly admit?: () => Promise<unknown>;
   /**
-   * For a workflow run's call: the step it was made from, by the step's
-   * idempotency key and the attempt (its lease ID, never the isolate's),
-   * which statistics points it records are kept by until that attempt
-   * completes the step (statistics.ts, `recordStatistic`). `recording`
-   * runs before a point is kept, so the step adds them up then.
-   */
-  readonly step?: {
-    readonly key: string;
-    readonly attempt: string;
-    readonly recording: () => void;
-  };
-  /**
    * What the invocation has used of the bounds an adapter holds it to per
-   * invocation, by the adapter's own names (resource-statistics.ts): one
+   * invocation, by the adapter's own names (resource-grasp.ts): one
    * map for the whole invocation, whichever of its requests resolved its
    * binding (`resourceBindingsFor` makes it).
    */
@@ -280,11 +269,46 @@ export type AppFunctionCall = (
   readonly provenance: InvocationProvenance | null;
 }>;
 
-/** A declaration of one kind, as an adapter is given it. */
-export type DeclarationOf<Kind extends AnyResource["~resource"]> = Extract<
-  AnyResource,
-  { "~resource": Kind }
+/** The permission each kind of binding target serves. */
+interface PermissionOfTarget {
+  readonly model: "ai";
+  readonly connector: "connections";
+  readonly knowledge: "brain";
+  readonly app: "apps";
+  readonly grasp: "apps";
+  readonly guests: "guests";
+}
+
+/** The declaration a target of `Kind` serves, as its adapter is given it. */
+export type DeclarationOf<Kind extends BindingTarget["kind"]> = Extract<
+  AnyPermission,
+  { "~permission": PermissionOfTarget[Kind] }
 >;
+
+/**
+ * The kind of target `declaration` binds to: AI to a model, a connection
+ * to a connection permission, the Brain to collection permissions, guests
+ * to the platform's guests permission, and another App to that App, but
+ * the platform's own functions (`grasp`) to its statistics permission.
+ */
+export const targetKindOf = (
+  declaration: AnyPermission
+): BindingTarget["kind"] => {
+  const kind = declaration["~permission"];
+  if (kind === "ai") {
+    return "model";
+  }
+  if (kind === "connections") {
+    return "connector";
+  }
+  if (kind === "brain") {
+    return "knowledge";
+  }
+  if (kind === "guests") {
+    return "guests";
+  }
+  return declaration.alias === graspAlias ? "grasp" : "app";
+};
 
 /** A binding target of one kind. */
 export type TargetOf<Kind extends BindingTarget["kind"]> = Extract<
@@ -355,8 +379,8 @@ export const unchecked = "unchecked";
 export interface ResourceAdapter<Kind extends BindingTarget["kind"]> {
   /**
    * `target` for `declaration`, if `app` may bind it now: the App's own
-   * active grant, a model the deployment allows, a published template
-   * version of the declared contract; with the contract it serves now.
+   * active grant, a model the deployment allows, another App that serves
+   * what it declares; with the contract it serves now.
    * Undefined otherwise. Asked as an admin approves the binding, and
    * again for every request, so a drifted contract or a lost grant stops
    * it. A review passes its `asks`, so what it asks connect is shared and

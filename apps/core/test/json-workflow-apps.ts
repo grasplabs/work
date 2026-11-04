@@ -328,9 +328,9 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const ${alias} = resource.workflow(${JSON.stringify(alias)}, {
+export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {
   input: v.object({ who: v.string().trim().min(1) }),
   output: v.object({ status: v.string() }),
 });
@@ -345,7 +345,7 @@ export default app({
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
   operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [${alias}],
+  permissions: { workflows: [${alias}] },
 });
 `,
   "screens/desk.tsx": `export default function Desk() {

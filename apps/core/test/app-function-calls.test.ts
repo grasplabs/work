@@ -74,10 +74,10 @@ const crmFiles = (
 
 export default defineSchema({ notes: defineTable({ text: v.string() }) });
 `,
-  "operations/crm.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "#grasp/server";
 
-export const followUp = resource.workflow("followUp", {
+export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string() }),
   output: v.object({ status: v.string() }),
 });
@@ -89,7 +89,7 @@ export const kick = action({
   uses: [followUp],
   handler: async (ctx) => {
     try {
-      await ctx.startWorkflow(followUp, { who: "Ada" });
+      await ctx.workflows.followUp.start({ who: "Ada" });
       return "started";
     } catch (error) {
       return "error:" + String(Reflect.get(Object(error), "code"));
@@ -104,7 +104,7 @@ export const kickLater = mutation({
   uses: [followUp],
   handler: async (ctx) => {
     await ctx.db.insert("notes", { text: "kicked" });
-    await ctx.afterCommit.start(followUp, { who: "Ada" });
+    await ctx.afterCommit.workflows.followUp.start({ who: "Ada" });
     return null;
   },
 });
@@ -155,7 +155,7 @@ export default app({
   operations: { notes: { add, mine, shout, kick, kickLater, later } },
   internalOperations: { notes: { hidden } },
   screens: [],
-  uses: [followUp],
+  permissions: { workflows: [followUp] },
 });
 `,
 });
@@ -179,10 +179,10 @@ const deskFiles = (extra = ""): Record<string, string> => ({
 
 export default defineSchema({});
 `,
-  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const crm = resource.app("crm", {
+export const crm = permission.app("crm", {
   functions: {
     "notes.add": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
     "notes.mine": { kind: "query", args: {}, returns: v.array(v.string()) },
@@ -199,42 +199,42 @@ export const add = action({
   args: { text: v.string() },
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("notes.add", { text: args.text })),
+  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("notes.add", { text: args.text })),
 });
 
 export const mine = action({
   args: {},
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("notes.mine", {})),
+  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("notes.mine", {})),
 });
 
 export const shout = action({
   args: { text: v.string() },
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("notes.shout", { text: args.text })),
+  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("notes.shout", { text: args.text })),
 });
 
 export const kick = action({
   args: {},
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("notes.kick", {})),
+  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("notes.kick", {})),
 });
 
 export const kickLater = action({
   args: {},
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("notes.kickLater", {})),
+  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("notes.kickLater", {})),
 });
 
 export const later = action({
   args: { text: v.string() },
   returns: v.string(),
   uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("notes.later", { text: args.text })),
+  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("notes.later", { text: args.text })),
 });
 ${extra}`,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -248,7 +248,7 @@ export default app({
   operations: { desk: { add, mine, shout, kick, kickLater, later } },
   internalOperations: {},
   screens: [],
-  uses: [crm],
+  permissions: { apps: [crm] },
 });
 `,
 });
@@ -259,10 +259,10 @@ const relayFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/relay.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/relay.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const next = resource.app("next", {
+export const next = permission.app("next", {
   functions: { "relay.go": { kind: "action", args: {}, returns: v.string() } },
 });
 
@@ -272,7 +272,7 @@ export const go = action({
   uses: [next],
   handler: async (ctx) => {
     try {
-      return "+" + (await ctx.resources.next.call("relay.go", {}));
+      return "+" + (await ctx.apps.next.call("relay.go", {}));
     } catch (error) {
       const details = Object(Reflect.get(Object(error), "details"));
       return "+error:" + String(Reflect.get(Object(error), "code")) + ":" + String(Reflect.get(details, "limit"));
@@ -291,7 +291,7 @@ export default app({
   operations: { relay: { go } },
   internalOperations: {},
   screens: [],
-  uses: [next],
+  permissions: { apps: [next] },
 });
 `,
 };
@@ -306,10 +306,10 @@ const fanFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/fan.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/fan.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const next = resource.app("next", {
+export const next = permission.app("next", {
   functions: {
     "fan.go": { kind: "action", args: { width: v.number(), depth: v.number() }, returns: v.string() },
   },
@@ -327,7 +327,7 @@ export const go = action({
     let refused = "";
     for (let call = 0; call < args.width; call += 1) {
       try {
-        const answer = await ctx.resources.next.call("fan.go", { width: args.width, depth: args.depth - 1 });
+        const answer = await ctx.apps.next.call("fan.go", { width: args.width, depth: args.depth - 1 });
         const [count, inner] = answer.split(";");
         leaves += Number(count);
         refused ||= inner ?? "";
@@ -351,7 +351,7 @@ export default app({
   operations: { fan: { go } },
   internalOperations: {},
   screens: [],
-  uses: [next],
+  permissions: { apps: [next] },
 });
 `,
 };
@@ -362,10 +362,10 @@ const inviterFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/inviter.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/inviter.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const guests = resource.guests("guests", { operations: ["invite"] });
+export const guests = permission.guests({ operations: ["invite"] });
 
 export const invite = action({
   args: {},
@@ -373,7 +373,7 @@ export const invite = action({
   uses: [guests],
   handler: async (ctx) => {
     try {
-      const chat = await ctx.resources.guests.invite({ name: "Anna", skill: "interview-a-stakeholder" });
+      const chat = await ctx.guests.invite({ name: "Anna", skill: "interview-a-stakeholder" });
       return chat.link.length > 0 ? "invited" : "no link";
     } catch (error) {
       return "error:" + String(Reflect.get(Object(error), "code"));
@@ -392,7 +392,7 @@ export default app({
   operations: { inviter: { invite } },
   internalOperations: {},
   screens: [],
-  uses: [guests],
+  permissions: { guests },
 });
 `,
 };
@@ -406,10 +406,10 @@ const askerFiles = (fn: string): Record<string, string> => ({
 
 export default defineSchema({});
 `,
-  "operations/asker.ts": `import { resource, v } from "@grasp-os/sdk";
+  "operations/asker.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const next = resource.app("next", {
+export const next = permission.app("next", {
   functions: { "${fn}": { kind: "action", args: {}, returns: v.string() } },
 });
 
@@ -419,7 +419,7 @@ export const go = action({
   uses: [next],
   handler: async (ctx) => {
     try {
-      return await ctx.resources.next.call("${fn}", {});
+      return await ctx.apps.next.call("${fn}", {});
     } catch (error) {
       return "refused:" + String(Reflect.get(Object(error), "code"));
     }
@@ -437,7 +437,7 @@ export default app({
   operations: { asker: { go } },
   internalOperations: {},
   screens: [],
-  uses: [next],
+  permissions: { apps: [next] },
 });
 `,
 });

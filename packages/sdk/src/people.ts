@@ -12,7 +12,7 @@ import type { Infer, InferInput } from "./values.ts";
 // fools only itself, and every decision that matters is the server's.
 //
 // The directory is read-only and bounded, and only an App that declares it
-// (`app({ people: true })`) reads it: a member finds people by ID, by name
+// (`app({ permissions: { people: true } })`) reads it: a member finds people by ID, by name
 // or email, or by team, at most `peopleLimits.pageMax` a read, and each
 // person comes with their name, email and teams, nothing else. A visitor
 // (someone outside the organization an App was shared with) is told who
@@ -215,7 +215,7 @@ export interface PageOptions {
 
 /**
  * The organization's people, read-only, for the members of an App that
- * declares it (`app({ people: true })`; `permission.denied` otherwise),
+ * declares it (`app({ permissions: { people: true } })`; `permission.denied` otherwise),
  * never for a visitor (`visitor.not_granted`). Each read answers at most
  * 100.
  */

@@ -33,7 +33,7 @@ interface StatisticQuery {
   apps: string[];
   offset: number;
   until: string;
-  groupBy: string[];
+  groupBy: ("app" | "workflow" | "kind")[];
 }
 
 /** What a statistics read answers, as the page reads it. */
@@ -44,7 +44,7 @@ interface StatisticAnswer {
   computation?: string | null;
 }
 
-/** The platform's statistics, as the page's resource reads them. */
+/** The platform's statistics, as the page reads them (`ctx.apps.grasp`). */
 export type ReadStatistics = (
   query: StatisticQuery
 ) => Promise<StatisticAnswer>;
@@ -79,7 +79,7 @@ const kindOrder = [
 
 /**
  * The refusal of a statistics read, in the host's words, that leaves a
- * snapshot without what runs: a statistics resource no admin bound, or a
+ * snapshot without what runs: the platform's functions no admin bound, or a
  * caller no longer a member (`resource.unavailable`). An App the caller may
  * not see, or that is gone, comes back in a read's `unavailable`, never as
  * a refusal of a read of several Apps. Anything else fails the snapshot: a
@@ -326,7 +326,7 @@ const frozenOf = (
  * each with its hours, and the improvement signals of the App workflows
  * they link to, each kind's highest, in the platform's order of kinds,
  * highest first. Refused with `board.too_many_workflows` past
- * `figuresMax`. Without a statistics resource (`read` undefined), every
+ * `figuresMax`. Without the platform's statistics (`read` undefined), every
  * linked App's runs are unavailable.
  */
 export const freeze = async (

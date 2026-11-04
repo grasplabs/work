@@ -165,17 +165,13 @@ export const unpin = mutation({
   },
 });
 `,
-  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+  "app.ts": `import { app, permission } from "@grasp-os/sdk";
 import { attachFile, create, detachFile, get, keepTwice, pin, pinById, remove, renew, stash, stashMany, unpin } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
-export const attachments = resource.files("attachments", {
+export const files = permission.files({
   operations: ["upload", "read", "attach", "delete"],
 });
-
-export const photos = resource.files("photos", { operations: ["read"] });
-
-export const avatars = resource.files("avatars", { operations: ["upload", "read"] });
 
 export default app({
   name: "Notes",
@@ -190,15 +186,15 @@ export default app({
   operations: { notes: { get, create, attachFile, detachFile, remove, renew, keepTwice, stash, stashMany, pin, pinById, unpin } },
   internalOperations: {},
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-  uses: [attachments, photos, avatars],
+  permissions: { files },
 });
 `,
   "screens/notes.tsx": `import { useFile, useUpload } from "@grasp-os/sdk/react";
-import { resources } from "#grasp";
+import { permissions } from "#grasp";
 
 export default function Notes() {
-  const upload = useUpload(resources.attachments);
-  const shown = useFile(resources.attachments, upload.status === "completed" ? upload.file : "skip");
+  const upload = useUpload(permissions.files);
+  const shown = useFile(permissions.files, upload.status === "completed" ? upload.file : "skip");
   return <p>{upload.status} {shown?.name ?? ""}</p>;
 }
 `,
@@ -299,14 +295,13 @@ const apiOf = (release: Release) => ({
   >(release, "notes.unpin"),
 });
 
-/** The App's `resources`, as its screens import them from `#grasp`. */
-export const resources = {
-  attachments: {
+/** The App's `permissions`, as its screens import them from `#grasp`. */
+export const permissions = {
+  files: {
     kind: "files",
-    alias: "attachments",
+    alias: "files",
     operations: ["upload", "read", "attach", "delete"],
   },
-  photos: { kind: "files", alias: "photos", operations: ["read"] },
 } as const satisfies Record<string, FilesReference>;
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -463,7 +458,7 @@ export const upload = async (
   channel: FileChannel,
   blob: Blob,
   name = "photo.png",
-  resource = "attachments"
+  resource = "files"
 ): Promise<string> =>
   await channel.upload(resource, blob, name, {
     cancel: never,
@@ -592,11 +587,11 @@ export const answerOf = async (response: Response): Promise<unknown> => {
 };
 
 /**
- * Raw requests of `screen`'s file channel for `app`'s `attachments`, as
+ * Raw requests of `screen`'s file channel for `app`'s `files`, as
  * a page that doesn't follow the protocol would send them.
  */
 export const rawChannel = (screen: Screen, app: string) => {
-  const base = `${appFilesPath}/${app}/attachments/uploads`;
+  const base = `${appFilesPath}/${app}/files/uploads`;
   const leased = { [screenLeaseHeader]: screen.lease };
   return {
     begin: async (body: unknown) =>

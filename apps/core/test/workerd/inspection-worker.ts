@@ -106,7 +106,6 @@ const notesManifest = (() => {
     access: { tables: { notes: { read: "owner", write: "owner" } } },
     operations: {},
     screens: [],
-    uses: [],
     migrations: [
       migration({
         name: "m",

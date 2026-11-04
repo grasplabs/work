@@ -44,7 +44,6 @@ export default app({
     { name: "board", path: "/", source: "screens/board.tsx" },
     { name: "list", path: "/list", source: "screens/list.tsx" },
   ],
-  uses: [],
 });
 `,
   "screens/board.tsx": screenSaying("The board"),

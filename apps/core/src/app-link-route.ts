@@ -34,7 +34,7 @@ import { routeMember } from "./staff-audit.ts";
 
 // Core's link channel (spec 10.7.7, 32.3): whether a running App's screen,
 // through its page, may open a URL through one of its App's
-// `resource.links` declarations, and the record of each it opens. Core
+// `permission.links` declarations, and the record of each it opens. Core
 // never fetches or follows the URL: the page opens it in a context of its
 // own, with no opener and no referrer, and the frame hears only that it
 // was opened. `<appLinksPath>/<app>/<alias>/…`:
@@ -61,7 +61,7 @@ import { routeMember } from "./staff-audit.ts";
 //   checks the lease's build still gets the App's data before and after. A check and its open each decide anew, so a
 //   revocation while the person reads the confirmation opens nothing.
 // - A screen opens what its App didn't declare: the origins are the
-//   current release's `resource.links` declaration's, never what the
+//   current release's `permission.links` declaration's, never what the
 //   request says; a resource of another kind, or none, opens nothing.
 // - A screen sends what it read out in a URL: no admin reviews a screen's
 //   code, so unless an admin classified the App's data `ordinary`
@@ -216,7 +216,7 @@ const decided = async (
   const declared = Object.hasOwn(release.app.browserResources, resource)
     ? release.app.browserResources[resource]
     : undefined;
-  if (declared?.["~resource"] !== "links") {
+  if (declared?.["~permission"] !== "links") {
     throw linkErrors.create("link.not_allowed");
   }
   const target = linkTargetOf(url, declared.origins);

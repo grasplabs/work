@@ -307,7 +307,6 @@ export default app({
   },
   internalOperations: { notes: { count } },
   screens: [],
-  uses: [],
 });
 `,
 });

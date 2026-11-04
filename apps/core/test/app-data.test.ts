@@ -130,7 +130,6 @@ export default app({
   operations: { notes: { create, label, pay, pin, remove, rename } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/notes.tsx": `export default function Notes() {

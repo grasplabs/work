@@ -67,7 +67,6 @@ export default app({
   operations: { tally: { add, count } },
   internalOperations: {},
   screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
-  uses: [],
 });
 `,
   "screens/tally.tsx": tallyScreen("Add one"),

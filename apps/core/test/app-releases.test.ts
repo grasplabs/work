@@ -113,7 +113,6 @@ export default app({
   operations: { notes: { get, create, tally } },
   internalOperations: { notes: { count } },
   screens: [],
-  uses: [],
 });
 `,
 });
@@ -359,7 +358,6 @@ export default app({
   access: {},
   operations: { hello: { hello } },
   screens: [],
-  uses: [],
 });
 `,
 });

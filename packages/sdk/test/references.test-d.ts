@@ -22,7 +22,7 @@ import type { workflows } from "./notes/.grasp/references.ts";
 import {
   api,
   preferences,
-  resources,
+  permissions,
   screens,
 } from "./notes/.grasp/references.ts";
 import { internal } from "./notes/.grasp/server-references.ts";
@@ -166,19 +166,19 @@ void query(internal.notes.count, {});
 // @ts-expect-error the api has no internal function
 void api.notes.count;
 
-// A screen's route input, and the literal resources.
+// A screen's route input, and the literal permissions.
 expectTypeOf<ScreenInputOf<typeof screens.note>>().toEqualTypeOf<{
   id: Id<"notes">;
 }>();
 expectTypeOf(screens.note.name).toEqualTypeOf<"note">();
-expectTypeOf(resources.attachments.operations).toEqualTypeOf<
+expectTypeOf(permissions.files.operations).toEqualTypeOf<
   readonly ["upload", "read", "attach"]
 >();
-expectTypeOf(resources.help.origins).toEqualTypeOf<
+expectTypeOf(permissions.links.origins).toEqualTypeOf<
   readonly ["https://help.example.com"]
 >();
-// @ts-expect-error a resource the App doesn't declare
-void resources.mail;
+// @ts-expect-error a permission the App doesn't declare
+void permissions.mail;
 
 // Preferences: `get` and `update`, a query and a mutation like any other,
 // answering every declared field and `_rev`; a patch names only fields

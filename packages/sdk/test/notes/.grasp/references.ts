@@ -6920,12 +6920,12 @@ export const workflows: {
   },
 } as const);
 
-export const resources: {
-  readonly attachments: FilesReference<"attachments", readonly ["upload", "read", "attach"]>;
-  readonly help: LinksReference<"help", readonly ["https://help.example.com"]>;
+export const permissions: {
+  readonly files: FilesReference<"files", readonly ["upload", "read", "attach"]>;
+  readonly links: LinksReference<"links", readonly ["https://help.example.com"]>;
 } = frozen({
-  attachments: {
-    "alias": "attachments",
+  files: {
+    "alias": "files",
     "kind": "files",
     "operations": [
       "upload",
@@ -6933,8 +6933,8 @@ export const resources: {
       "attach"
     ]
   },
-  help: {
-    "alias": "help",
+  links: {
+    "alias": "links",
     "kind": "links",
     "origins": [
       "https://help.example.com"

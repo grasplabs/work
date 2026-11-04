@@ -153,7 +153,6 @@ export default app({
   operations: { notes: { add, count, create, fill, keepDeep, write } },
   internalOperations: {},
   screens: [],
-  uses: [],
 });
 `,
   "screens/notes.tsx": `export default function Notes() {
