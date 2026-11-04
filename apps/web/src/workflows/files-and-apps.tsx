@@ -352,7 +352,9 @@ export const FilesAndApps = ({
   const rereads = useRef(0);
   useEffect(() => {
     const left = new AbortController();
-    // A read started now, whose answer an approval's own read supersedes.
+    // A read started now, whose answer any later read supersedes: an
+    // approval's, or this effect's next.
+    rereads.current += 1;
     const started = rereads.current;
     const latest = async <T,>(
       part: (session: Session) => Promise<T>,
