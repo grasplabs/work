@@ -2707,12 +2707,6 @@ export const dependencyRequests = sqliteTable(
     >(),
   },
   (table) => [
-    // The requests a person asked for that wait on them (`waiting`, and a
-    // chat's card).
-    index("dependency_requests_requested_idx").on(
-      table.requestedBy,
-      table.status
-    ),
     // One request waits per subject: a second pending row is refused.
     uniqueIndex("dependency_requests_pending_idx")
       .on(table.subjectType, table.subjectId)

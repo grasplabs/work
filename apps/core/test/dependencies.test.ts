@@ -1085,6 +1085,104 @@ describe("dependency approval", () => {
     });
   });
 
+  it("takes two builders asking at once as one request that waits on both", async () => {
+    const { builder, app } = await builderWithApp();
+    const coBuilder = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+
+    const [mine, theirs] = await Promise.all([
+      proposeAs(builder, proposalFor(app)),
+      proposeAs(coBuilder, proposalFor(app)),
+    ]);
+
+    expect({
+      same: theirs.id === mine.id,
+      waiting: [await waitingFor(builder.api), await waitingFor(coBuilder.api)],
+    }).toStrictEqual({ same: true, waiting: [[mine.id], [mine.id]] });
+  });
+
+  it("asks again as it lands when the request it would join was decided meanwhile", async () => {
+    const { builder, app } = await builderWithApp();
+    const coBuilder = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const request = await proposeAs(builder, proposalFor(app));
+    const identity = await coBuilder.api.whoami();
+    // Approved just before the co-builder's ask joins it.
+    let raced = false;
+    const db = racingDb(async () => {
+      if (!raced) {
+        raced = true;
+        await approve(builder.api, request);
+      }
+    });
+
+    const joined = await proposeForTests(
+      { ...env, DB: db },
+      identity,
+      proposalFor(app)
+    );
+
+    // Not an ask added to a decided request: the approval that now stands.
+    expect({ id: joined.id, status: joined.status }).toStrictEqual({
+      id: request.id,
+      status: "approved",
+    });
+  });
+
+  it("no longer shows an asker the card or the inbox item once they stop building the App", async () => {
+    const { builder, app } = await builderWithApp();
+    const coBuilder = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const chats = await personalChatsOf(coBuilder.userId);
+    const { chat } = await chats.newChat();
+    const identity = await coBuilder.api.whoami();
+    // Asked for by the co-builder's chat agent.
+    const request = await proposeForTests(
+      env,
+      {
+        ...identity,
+        actor: { ...chats.agent, onBehalfOf: identity.userId },
+        via: {
+          ...chats.agent,
+          onBehalfOf: identity.userId,
+          workspaceId: chats.id,
+          chatId: chat.id,
+        },
+      },
+      proposalFor(app)
+    );
+    const shown = async () => {
+      const { requests } = await coBuilder.api.chats.packageRequests(chat.id);
+      return {
+        card: requests.map(({ id }) => id),
+        inbox: await waitingFor(coBuilder.api),
+      };
+    };
+    const before = await shown();
+
+    await builder.api.apps.members.remove(app, {
+      type: "person",
+      id: coBuilder.userId,
+    });
+
+    expect({ before, after: await shown() }).toStrictEqual({
+      before: { card: [request.id], inbox: [request.id] },
+      after: { card: [], inbox: [] },
+    });
+  });
+
   it("refuses a builder once the App is no longer theirs to build: unshared, off the team or out of the organization", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();

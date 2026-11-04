@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "87d4009e-71a4-46da-af11-2b29d28d7918",
+  "id": "113257d3-1e41-475f-9217-c07d6f1aef04",
   "prevId": "2eff0f57-ac10-4218-a7c3-49d3ef78fbd6",
   "tables": {
     "access_revocations": {
@@ -4968,14 +4968,6 @@
         }
       },
       "indexes": {
-        "dependency_requests_requested_idx": {
-          "name": "dependency_requests_requested_idx",
-          "columns": [
-            "requested_by",
-            "status"
-          ],
-          "isUnique": false
-        },
         "dependency_requests_pending_idx": {
           "name": "dependency_requests_pending_idx",
           "columns": [

@@ -655,11 +655,23 @@ const attempt = async (
     waiting.targets === targets &&
     (await sameReview(db, waiting.id, snapshot))
   ) {
-    // It waits on whoever asked for it again too, from wherever they did.
+    // It waits on whoever asked for it again too, from wherever they did,
+    // while it still waits: replaced or decided meanwhile, the batch fails
+    // whole (`failUnless`), and the next attempt goes by how things stand.
     return {
       request: waiting,
       lock,
-      statements: [...live, ...lockFirst, askedBy(db, waiting.id, by)],
+      statements: [
+        ...live,
+        failUnless(
+          db,
+          subject,
+          graphHash,
+          sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${waiting.id} AND ${dependencyRequests.status} = 'pending')`
+        ),
+        ...lockFirst,
+        askedBy(db, waiting.id, by),
+      ],
     };
   }
   const row = newRequest(checked, by, latest?.id ?? null, generation);
