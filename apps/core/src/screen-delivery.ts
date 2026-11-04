@@ -43,7 +43,11 @@ import { appHost } from "./durable-objects.ts";
 // second App's own grants). The one way
 // out its App declares, a link to its own listed sites, opens only once
 // the person confirmed it with the whole URL shown, unless an admin
-// classified the App's data `ordinary` (app-link-route.ts). Every call it makes is
+// classified the App's data `ordinary` (app-link-route.ts). What a page
+// puts on the clipboard (a copy behind a click) or in a drag can carry
+// data the person doesn't see, but only if the person then pastes or
+// drops it elsewhere themselves: accepted, as no browser offers a block
+// that keeps copying usable. Every call it makes is
 // the person's and recorded as such.
 //
 // What the gate still refuses, read on every call and every push:
