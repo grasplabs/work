@@ -17,6 +17,12 @@ import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import { serveStandIn } from "./workerd-stand-in.ts";
 import { cleanUp, tempDir } from "./workerd-test-server.ts";
 
+/** jq's WebAssembly, which core loads into every workflow isolate. */
+const jqWasm = path.join(
+  import.meta.dirname,
+  "../packages/workflow-expressions/src/jq.wasm"
+);
+
 /** How long core may take to answer another request meanwhile. */
 const ANSWER_MS = 500;
 
@@ -51,7 +57,13 @@ describe("a workflow's code read on the on-prem sandbox", () => {
       memoryLimitBytes: 64 * 1024 ** 3,
       log: () => {},
     });
-    coreUrl = await serveStandIn("workflow-code-worker.ts", supervisor.socket);
+    coreUrl = await serveStandIn(
+      "workflow-code-worker.ts",
+      supervisor.socket,
+      {},
+      {},
+      { JQ_WASM: jqWasm }
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -150,7 +162,13 @@ describe("a workflow's code read on the on-prem sandbox", () => {
       log: () => {},
     });
     try {
-      const url = await serveStandIn("workflow-code-worker.ts", killing.socket);
+      const url = await serveStandIn(
+        "workflow-code-worker.ts",
+        killing.socket,
+        {},
+        {},
+        { JQ_WASM: jqWasm }
+      );
       const spins = await tests("spins", url);
       expect({ failed: spins.failures.length, keep: spins.keep }).toStrictEqual(
         { failed: 1, keep: false }

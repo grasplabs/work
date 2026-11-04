@@ -267,7 +267,6 @@ const packageJsonSchema = z.object({
   devDependencies: z.record(z.string(), z.string()),
 });
 
-const exact = /^\d+\.\d+\.\d+$/u;
 const exactOrPrerelease =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 const sha512 = /^sha512-[A-Za-z0-9+/]{86}==$/u;
@@ -430,7 +429,13 @@ describe(
         readFileSync(path.join(out, file), "utf-8");
 
       const root = packageJsonSchema.parse(JSON.parse(read("package.json")));
-      const vendored = ["brain", "sdk", "ui", "shared"].map((name) =>
+      const vendored = [
+        "brain",
+        "sdk",
+        "ui",
+        "shared",
+        "workflow-expressions",
+      ].map((name) =>
         packageJsonSchema
           .pick({ dependencies: true })
           .parse(JSON.parse(read(`vendor/@grasp-os/${name}/package.json`)))
@@ -460,7 +465,10 @@ describe(
         grasp: Object.keys(root.dependencies).filter((name) =>
           name.startsWith("@grasp-os/")
         ),
-        notExact: versions.filter(([, version]) => !exact.test(version)),
+        // An exact version, a prerelease's included (jq-wasm's), never a range.
+        notExact: versions.filter(
+          ([, version]) => !exactOrPrerelease.test(version)
+        ),
         unnoticed: versions
           .map(([name]) => name)
           .filter((name) => !notices.includes(`| ${name} |`)),
@@ -510,6 +518,7 @@ describe(
           "@grasp-os/shared",
           "@grasp-os/sdk",
           "@grasp-os/ui",
+          "@grasp-os/workflow-expressions",
         ],
         notExact: [],
         unnoticed: [],
@@ -524,6 +533,7 @@ describe(
           "vendor/@grasp-os/sdk",
           "vendor/@grasp-os/shared",
           "vendor/@grasp-os/ui",
+          "vendor/@grasp-os/workflow-expressions",
         ],
       });
     });

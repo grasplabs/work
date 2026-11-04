@@ -64,13 +64,15 @@ const budgetQueues = new WeakMap<object, Promise<unknown>>();
 
 /**
  * Runs `run` with fuel drawn from `budget` (`give` says how much, from
- * what is left): taken before it runs and what it didn't spend given back
- * after. Evaluations sharing a budget run one after the other, so one
- * never fails for fuel another only holds while it runs: what each spends
- * is what the same expressions spend run in turn.
+ * what is left once `charge` is taken): taken before it runs and what it
+ * didn't spend given back after. Evaluations sharing a budget run one
+ * after the other, their charges taken in turn too, so one never fails
+ * for fuel another only holds while it runs: what each spends is what the
+ * same expressions spend run in turn.
  */
 const drawing = async (
   budget: { fuel: number } | undefined,
+  charge: number,
   give: (left: number) => number,
   run: (given: number) => Promise<JqRun>
 ): Promise<JqRun> => {
@@ -80,6 +82,7 @@ const drawing = async (
   const before = budgetQueues.get(budget) ?? Promise.resolve();
   const turn = (async (): Promise<JqRun> => {
     await before.catch(() => null);
+    budget.fuel = Math.max(0, budget.fuel - charge);
     const given = give(budget.fuel);
     budget.fuel -= given;
     const ran = await run(given);
@@ -108,6 +111,7 @@ const fail = (
  */
 const budgetedRun = async (
   budget: { fuel: number } | undefined,
+  charge: number,
   site: ExpressionSite,
   program: string,
   stdin: string
@@ -115,6 +119,7 @@ const budgetedRun = async (
   let given = runFuel;
   const run = await drawing(
     budget,
+    charge,
     (left) => Math.max(0, Math.min(left, runFuel)),
     async (fuel) => {
       given = fuel;
@@ -645,7 +650,12 @@ export const evaluateExpression = async <S extends Stage>(
    * Running out of it is `expression.budget_exhausted`, never retried:
    * the same expressions spend the same fuel every time.
    */
-  budget?: { fuel: number }
+  budget?: { fuel: number },
+  /**
+   * What the evaluation costs `budget` before jq runs, taken in its turn
+   * among the evaluations sharing it: none if unset.
+   */
+  charge = 0
 ): Promise<Json> => {
   if (!compiledExpressions.has(expression)) {
     throw expressionError(
@@ -664,6 +674,7 @@ export const evaluateExpression = async <S extends Stage>(
 
   const run = await budgetedRun(
     budget,
+    charge,
     site,
     programFor(expression.source, variableNamesOf(expression)),
     stdin

@@ -1,6 +1,8 @@
 import {
   appModuleName,
   compilerVersion,
+  jqWasm,
+  jqWasmModule,
   kitModuleName,
   workflowSdkModules,
   workflowIdOf,
@@ -38,7 +40,11 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../sandbox-session.ts";
-import type { SessionCall, SessionOptions } from "../sandbox-session.ts";
+import type {
+  PlatformModule,
+  SessionCall,
+  SessionOptions,
+} from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
@@ -254,6 +260,32 @@ export const codeSession = async (
 };
 
 /**
+ * jq's WebAssembly, as every workflow isolate (a run's, and its
+ * workflow's metadata, tests and dry runs) has it besides its modules: the
+ * workflow SDK's `evaluate` imports it by `jqWasmModule`, and a step that
+ * evaluates runs in tests and dry runs too. In core's Loader a module of
+ * its own, spread last so no module of the App's takes its name; on-prem
+ * one of the release's platform modules, which the sandbox host reads
+ * apart (sandbox-session.ts) and refuses an App module named as. It goes
+ * with every isolate, whether its code evaluates or not: about 1 MB, read
+ * from the assets once per core isolate. Accepted, as once App-owned
+ * workflows are gone (GRA-1367) every workflow is code generated from a
+ * JSON workflow, which evaluates its data flow with it.
+ */
+const jqModules = async (
+  env: Pick<Env, "ASSETS">
+): Promise<{
+  loader: Record<string, { wasm: ArrayBuffer }>;
+  platform: Record<string, PlatformModule>;
+}> => {
+  const wasm = await jqWasm(env.ASSETS);
+  return {
+    loader: { [jqWasmModule]: { wasm } },
+    platform: { [jqWasmModule]: { type: "wasm", bytes: new Uint8Array(wasm) } },
+  };
+};
+
+/**
  * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
  * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
  * `owner`, its CPU time and memory bounded by the supervisor, which plain
@@ -264,7 +296,11 @@ export const codeSession = async (
 export const isolateCall = async (
   env: Pick<
     Env,
-    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+    | "ASSETS"
+    | "LOADER"
+    | "RUNTIME_PROFILE"
+    | "SANDBOX_HOST"
+    | "SANDBOX_IN_PROCESS"
   >,
   {
     key,
@@ -291,12 +327,14 @@ export const isolateCall = async (
   // starts.
   signal?.throwIfAborted();
   const host = sessionHost(env);
+  const jq = await jqModules(env);
   if (host !== undefined) {
     return await codeSession(
       host,
       {
         mainModule,
         modules: await modules(),
+        platformModules: jq.platform,
         entrypoint,
         method,
         args: args.map((value) => ({ value })),
@@ -313,7 +351,7 @@ export const isolateCall = async (
     .get(key, async () => ({
       ...workflowSandbox,
       mainModule,
-      modules: await modules(),
+      modules: { ...(await modules()), ...jq.loader },
       env: {},
     }))
     .getEntrypoint(entrypoint);
@@ -1059,7 +1097,8 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
     return {
       run: async (host, start) => {
         // Read before the clock starts: none of the run's code runs yet.
-        const loaded = await modules();
+        const [own, jq] = await Promise.all([modules(), jqModules(env)]);
+        const loaded = { ...own, ...jq.loader };
         const entrypoint = quietLoader(env.LOADER)
           .get(null, () => ({
             ...workflowSandbox,
@@ -1092,9 +1131,11 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         ended: ended.promise,
       };
       const clock = betweenSteps(budgetMs);
+      const [own, jq] = await Promise.all([modules(), jqModules(env)]);
       const call = {
         mainModule,
-        modules: await modules(),
+        modules: own,
+        platformModules: jq.platform,
         entrypoint: "Run",
         method: "run",
         args: [
@@ -1390,7 +1431,11 @@ export interface TestOutcome {
 export const testOutcomeOf = async (
   env: Pick<
     Env,
-    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+    | "ASSETS"
+    | "LOADER"
+    | "RUNTIME_PROFILE"
+    | "SANDBOX_HOST"
+    | "SANDBOX_IN_PROCESS"
   >,
   app: AppId,
   id: WorkflowId,

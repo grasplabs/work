@@ -19,13 +19,14 @@ import {
 import { fakeProviderFor } from "../model-provider.ts";
 import {
   endLiveRuns,
+  finished,
   liveStatus,
   sleeping,
   whileEngineRefuses,
   woken,
 } from "../runs.ts";
 import { signedInApi, unique } from "../sign-in.ts";
-import { workflowFiles } from "../workflow-apps.ts";
+import { evaluating, workflowFiles } from "../workflow-apps.ts";
 
 // An independent JSON workflow's runs on-prem, in their sessions: one per
 // load, owned by the workflow, let go of while a run waits, and waited for
@@ -222,5 +223,17 @@ describe("an App workflow's runs on-prem", runTime, () => {
       cancelled: cancelled.startsWith("cancelled"),
       steps: await stepsOf(run.id),
     }).toStrictEqual({ cancelled: true, steps: [] });
+  });
+
+  it("evaluates its expressions in its session, with the release's jq", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Prices" });
+    await release(builder, app, evaluating("{ total: (. // [] | add) }"));
+    const run = await builder.api.workflows.start(app, "priced", [300, 900]);
+    await finished(run.id, runTime.timeout);
+    await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject({
+      status: "completed",
+      output: { total: 1200 },
+    });
   });
 });

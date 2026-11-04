@@ -128,6 +128,7 @@ export const releaseFiles = [
   compilerAssets.packageBuilder,
   compilerAssets.esbuildWasm,
   compilerAssets.reference,
+  compilerAssets.jqWasm,
 ].toSorted();
 
 /**

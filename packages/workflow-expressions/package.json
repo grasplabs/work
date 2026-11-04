@@ -22,6 +22,6 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
-    "@grasp-os/sdk": "workspace:*"
+    "zod": "catalog:"
   }
 }

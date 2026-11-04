@@ -1,3 +1,9 @@
+// The `.wasm` import's type, for every program that checks this file: the
+// workflow SDK's `evaluate` brings it into App workflows' type check too,
+// which reads only what the files it checks import or reference. An
+// ambient module can't be imported, so it is referenced.
+// oxlint-disable-next-line typescript/triple-slash-reference -- see above
+/// <reference path="./wasm.d.ts" />
 import type { loadJq as LoadJq } from "jq-wasm";
 
 import { jqProvenance } from "./provenance.ts";

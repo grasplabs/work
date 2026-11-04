@@ -3,8 +3,9 @@
  * core's `apps.definition` exports) into a standalone project a developer
  * builds outside Grasp: the App's source with the references generated
  * from its sealed registration, the workflow versions it binds, and the
- * checkout's own SDK, UI kit and shared packages under `vendor/`, with
- * their licence and the notices of every direct dependency.
+ * checkout's own SDK, UI kit, Brain, shared and workflow-expressions
+ * packages under `vendor/`, with their licence and the notices of every
+ * direct dependency.
  *
  * Threat model (GRA-713), and how each is closed:
  *
@@ -99,7 +100,13 @@ import {
 import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
-const vendored = ["brain", "shared", "sdk", "ui"] as const;
+const vendored = [
+  "brain",
+  "shared",
+  "sdk",
+  "ui",
+  "workflow-expressions",
+] as const;
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = ["react", "react-dom"] as const;
@@ -195,15 +202,21 @@ export const safePath = (relative: string, where: string): string => {
   return relative;
 };
 
+/**
+ * A file's contents: text, or bytes for a vendored source that isn't text
+ * (the jq WebAssembly the SDK's `evaluate` runs).
+ */
+type Contents = string | Uint8Array;
+
 /** A project as planned: every file by its path, before any is written. */
 interface Plan {
-  readonly files: Map<string, string>;
-  /** Adds `text` at `file` (already safe), once, whatever its case. */
-  readonly add: (file: string, text: string) => void;
+  readonly files: Map<string, Contents>;
+  /** Adds `contents` at `file` (already safe), once, whatever its case. */
+  readonly add: (file: string, contents: Contents) => void;
 }
 
 const newPlan = (): Plan => {
-  const files = new Map<string, string>();
+  const files = new Map<string, Contents>();
   const seen = new Set<string>();
   return {
     files,
@@ -693,9 +706,10 @@ const planVendored = (
     })
   );
   for (const file of sourcesUnder(path.join(dir, "src"))) {
+    // As bytes: the sources are copied exactly, binaries included.
     project.add(
       `${base}/src/${file}`,
-      readFileSync(path.join(dir, "src", file), "utf-8")
+      readFileSync(path.join(dir, "src", file))
     );
   }
   return {
@@ -905,7 +919,7 @@ const appLock = (
 /** The project's files for `input`, planned and checked; nothing written. */
 export const planProject = async (
   input: PackagingInput
-): Promise<Map<string, string>> => {
+): Promise<Map<string, Contents>> => {
   const definition = readDefinition(input.definition);
   const project = newPlan();
   await planApp(project, definition.app);

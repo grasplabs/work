@@ -448,6 +448,37 @@ export default workflowTests(definition, [
 });
 
 /**
+ * A workflow, `priced`, whose one step evaluates jq `source` on the run's
+ * input with the workflow SDK's `evaluate`, as its result. Its test runs
+ * the step on no input, evaluating it there too, unless `mocks` mock it.
+ */
+export const evaluating = (
+  source: string,
+  mocks: Record<string, unknown> = {}
+): Record<string, string> => {
+  const files = workflowFiles(
+    "priced",
+    `  const order = z.json().parse(input ?? null);
+  return await step.do("price", { description: "Price the order" }, async () =>
+    await evaluate(
+      { source: ${JSON.stringify(source)}, stage: "taskDefinition", pointer: "/do/0/price/set", scope: ["price"] },
+      { input: order, variables: { context: {}, input: order, task: { name: "price" }, workflow: { input: order }, params: {} } },
+      { budget: expressionBudget() }
+    ));`,
+    mocks
+  );
+  return Object.fromEntries(
+    Object.entries(files).map(([path, text]) => [
+      path,
+      text.replace(
+        "import { type Json,",
+        "import { evaluate, expressionBudget, type Json,"
+      ),
+    ])
+  );
+};
+
+/**
  * A new App of `builder`'s: the sample App (`sampleApp`), and `files`,
  * current.
  */

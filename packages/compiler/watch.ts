@@ -36,6 +36,8 @@ const watched: Watched[] = [
   { dir: path.join(packages, "ui"), only: ["components.json", "package.json"] },
   { dir: path.join(packages, "sdk/src") },
   { dir: path.join(packages, "shared/src") },
+  // The workflow SDK's evaluator and its jq.wasm, bundled into its modules.
+  { dir: path.join(packages, "workflow-expressions/src") },
   { dir: path.join(root, "src") },
   { dir: root, only: ["build.ts"] },
 ];

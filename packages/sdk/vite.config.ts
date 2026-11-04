@@ -6,5 +6,14 @@ import { defineProject } from "vite-plus";
 export default defineProject({
   // Fails the suite when it isn't running in workerd.
   test: { setupFiles: ["../../scripts/assert-workerd.ts"] },
-  plugins: [cloudflareTest({ miniflare: { compatibilityDate: "2026-09-15" } })],
+  plugins: [
+    cloudflareTest({
+      miniflare: {
+        compatibilityDate: "2026-09-15",
+        // jq's WebAssembly (`evaluate`), a compiled module as a run's
+        // isolate loads it.
+        modulesRules: [{ type: "CompiledWasm", include: ["**/*.wasm"] }],
+      },
+    }),
+  ],
 });
