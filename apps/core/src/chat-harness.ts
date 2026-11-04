@@ -363,6 +363,8 @@ export class ChatHarness {
   #shown = "null";
   /** Whether the Workspace was told the agent is at work. */
   #told: boolean | undefined;
+  /** The latest telling under way (`#tell`). */
+  #telling: Promise<void> = Promise.resolve();
   /** The thinking of the response streaming in, as `thinkingClock` times it. */
   readonly #thinking = thinkingClock();
   /** Each response's thinking time, by its entry, until it is copied. */
@@ -471,34 +473,35 @@ export class ChatHarness {
   }
 
   /**
-   * Tells the chat's Workspace whether its agent is at work, once each time
-   * that changes, as the Harness says (`Wake.active`, which also keeps the
-   * object's alarm armed): through a restart of either object, until the
-   * turn ends, the chat shows it running.
+   * Tells the chat's Workspace whether its agent is at work, as the chat's
+   * transcript here says, once each time that changes: through a restart of
+   * either object, the chat shows its turn running until it ends. Settles
+   * once the Workspace was told, the same value told already included.
    */
-  #tell(running: boolean): void {
+  async #tell(running: boolean): Promise<void> {
     if (this.#told === running) {
+      await this.#telling;
       return;
     }
     this.#told = running;
-    this.#ctx.waitUntil(
-      (async () => {
-        const request = await this.#request();
-        if (request === undefined) {
-          return;
-        }
-        try {
-          await this.#host(request.scope).turnRunning(
-            request.scope.chatId,
-            running
-          );
-        } catch (error) {
-          // Told again at the next change, or as the object wakes.
-          this.#told = undefined;
-          throw error;
-        }
-      })()
-    );
+    this.#telling = (async () => {
+      const request = await this.#request();
+      if (request === undefined) {
+        return;
+      }
+      try {
+        await this.#host(request.scope).turnRunning(
+          request.scope.chatId,
+          running
+        );
+      } catch (error) {
+        // Told again at the next change, or as the object wakes.
+        this.#told = undefined;
+        throw error;
+      }
+    })();
+    this.#ctx.waitUntil(this.#telling);
+    await this.#telling;
   }
 
   /** When the Harness next needs the object (`Harness.wake`). */
@@ -574,7 +577,8 @@ export class ChatHarness {
     }
     // A turn that ended without a last word of the model's (cancelled,
     // failed, stopped) is over too.
-    this.#tell(end.outcome === "answered" && (await this.#atWork()));
+    // Told before the turn returns, so its Workspace shows it ended.
+    await this.#tell(end.outcome === "answered" && (await this.#atWork()));
     return end;
   }
 
@@ -893,7 +897,7 @@ export class ChatHarness {
     if (shown.length > 0) {
       await this.#host(scope).keepTurnMessages(scope.chatId, shown);
       const latest = shown.at(-1);
-      this.#tell(latest !== undefined && atWorkAfter(latest.message));
+      await this.#tell(latest !== undefined && atWorkAfter(latest.message));
     }
     const through = last;
     await this.#conversation.commit(async (tx) => {
