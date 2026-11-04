@@ -1148,6 +1148,14 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         measure: "platform.everything",
         days: 7,
       });
+      // No platform measure at all: audited all the same, never with the
+      // App's own text. No query object at all is the host's to refuse,
+      // before it reaches the platform.
+      results.notPlatform = await platformRead(reader, admin.userId, {
+        measure: "secret plans",
+        days: 7,
+      });
+      results.notAQuery = await platformRead(reader, admin.userId, "secret");
       // Two calls past the bound of one in the same minute, audited once;
       // one in the next minute, audited again.
       const minute = Math.floor(held / 60_000) * 60_000;
@@ -1176,6 +1184,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         // A measure the platform doesn't publish: refused as it is read,
         // and audited as every refused read is.
         unknown: { error: "resource.invalid_args" },
+        notPlatform: { error: "resource.invalid_args" },
+        notAQuery: { error: "resource.not_allowed" },
         limited: limited("call"),
         limitedAgain: limited("call"),
         nextMinute: limited("call"),
@@ -1186,11 +1196,11 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           measure: "platform.workflow_runs",
           refused: "statistics.invalid",
         },
-        {
+        ...Array.from({ length: 2 }, () => ({
           app: undefined,
           measure: "platform.unknown",
           refused: "statistics.invalid",
-        },
+        })),
         {
           app: watched,
           measure: "platform.workflow_runs",

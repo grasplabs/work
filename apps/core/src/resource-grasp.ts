@@ -135,15 +135,11 @@ const auditLimited = async (
   caller: BindingCaller,
   query: unknown
 ): Promise<void> => {
-  const read = platformReadOf(query);
-  if (
-    read !== undefined &&
-    (await appHost(env, caller.app).limitedReadAuditDue())
-  ) {
+  if (await appHost(env, caller.app).limitedReadAuditDue()) {
     await auditPlatformRead(
       env,
       caller.authority,
-      read,
+      platformReadOf(query),
       "statistics.rate_limited",
       caller.actor
     );

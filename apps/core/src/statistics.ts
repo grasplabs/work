@@ -374,9 +374,9 @@ export interface PlatformRead {
   days?: number;
 }
 
-/** A read's input, as far as it asks for a platform measure. */
+/** A read's input, as far as it is shaped as one. */
 const platformReadSchema = z.looseObject({
-  measure: z.string().startsWith("platform."),
+  measure: z.unknown().optional(),
   days: z.unknown().optional(),
   where: z.looseObject({ app: z.unknown().optional() }).optional(),
   apps: z.array(z.unknown()).optional(),
@@ -384,23 +384,24 @@ const platformReadSchema = z.looseObject({
 
 /**
  * The platform read `input` asks for, as far as it says, valid or not:
- * any measure named `platform.` (an App's own measure never has a dot).
- * Undefined for a read of an App's own measure. Only a known measure and
- * a valid App ID are kept, never other text of the App's.
+ * a read of no shape at all names nothing but its refusal. Only a measure
+ * the platform publishes and a valid App ID are kept, never other text of
+ * the App's: any other measure is `platform.unknown`, so a refused read is
+ * audited without it.
  */
-export const platformReadOf = (input: unknown): PlatformRead | undefined => {
+export const platformReadOf = (input: unknown): PlatformRead => {
   const parsed = platformReadSchema.safeParse(input);
-  if (!parsed.success) {
-    return undefined;
-  }
-  const { measure, days, where, apps } = parsed.data;
+  const { measure, days, where, apps } = parsed.success ? parsed.data : {};
   const app = appIdSchema.safeParse(where?.app);
   const named = (apps ?? []).slice(0, statisticMaxApps).flatMap((entry) => {
     const id = appIdSchema.safeParse(entry);
     return id.success ? [id.data] : [];
   });
   return {
-    measure: isPlatformMeasure(measure) ? measure : "platform.unknown",
+    measure:
+      typeof measure === "string" && isPlatformMeasure(measure)
+        ? measure
+        : "platform.unknown",
     ...(app.success ? { app: app.data } : {}),
     ...(apps === undefined ? {} : { apps: named }),
     ...(typeof days === "number" && Number.isInteger(days) ? { days } : {}),
@@ -540,9 +541,6 @@ export const readPlatformStatistics = async (
   actor: AuditActor = delegateActorOf(authority)
 ): Promise<StatisticAnswer> => {
   const read = platformReadOf(input);
-  if (read === undefined) {
-    throw statisticErrors.create("statistics.invalid");
-  }
   let query: Query;
   let measure: PlatformMeasure;
   let counted: { visible: string[]; unavailable?: string[] };

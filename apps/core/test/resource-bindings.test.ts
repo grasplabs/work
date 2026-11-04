@@ -1448,16 +1448,19 @@ describe("model binding spend", { timeout: 120_000 }, () => {
 
 /**
  * An App whose actions use its `ai` (unless `withWriter` is false), with
- * `maxOutputTokens`, and the Brain's `collections`; with `sneak`, one more
- * action that reaches for the Brain past its types without listing it.
+ * `maxOutputTokens`, and the Brain's `collections` (unless `withBrain` is
+ * false); with `sneak`, one more action that reaches for the Brain past
+ * its types without listing it.
  */
 const deskFiles = ({
   withWriter = true,
+  withBrain = true,
   maxOutputTokens = 300,
   collections = ["handbook", "salaries"],
   sneak = false,
 }: {
   withWriter?: boolean;
+  withBrain?: boolean;
   maxOutputTokens?: number;
   collections?: readonly string[];
   sneak?: boolean;
@@ -1468,10 +1471,21 @@ import { action } from "#grasp/server";
 
 ${withWriter ? `export const ai = permission.ai({ maxOutputTokens: ${maxOutputTokens} });` : ""}
 
-export const brain = permission.brain({
+${
+  withBrain
+    ? `export const brain = permission.brain({
   operations: ["search"],
   collections: ${JSON.stringify(collections)},
 });
+
+export const find = action({
+  args: { text: v.string().min(1) },
+  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
+  uses: [brain],
+  handler: async (ctx, args) => await ctx.brain.search({ text: args.text }),
+});`
+    : ""
+}
 
 ${
   withWriter
@@ -1484,13 +1498,6 @@ ${
     : ""
 }
 
-export const find = action({
-  args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [brain],
-  handler: async (ctx, args) => await ctx.brain.search({ text: args.text }),
-});
-
 export const sneak = action({
   args: {},
   returns: v.string(),
@@ -1501,17 +1508,17 @@ export const sneak = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { ${withWriter ? "ai, draft, " : ""}brain, find, sneak } from "./operations/desk.ts";
+import { ${withWriter ? "ai, draft, " : ""}${withBrain ? "brain, find, " : ""}sneak } from "./operations/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { desk: { ${withWriter ? "draft, " : ""}find${sneak ? ", sneak" : ""} } },
+  operations: { desk: { ${[...(withWriter ? ["draft"] : []), ...(withBrain ? ["find"] : []), ...(sneak ? ["sneak"] : [])].join(", ")} } },
   internalOperations: {},
   screens: [],
-  permissions: { ${withWriter ? "ai, " : ""}brain },
+  permissions: { ${[...(withWriter ? ["ai"] : []), ...(withBrain ? ["brain"] : [])].join(", ")} },
 });
 `,
 });
@@ -1729,8 +1736,9 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
 
   it("lists every binding a version can reach, and refuses a request through any it doesn't list as served", async () => {
     // The attack: a binding an admin approved for one version reaches a
-    // later one the review shows otherwise. Version 2 widens `ai` and
-    // drops `brain`, keeping code that reaches for it.
+    // later one the review shows otherwise. Version 2 widens `ai`; version
+    // 3 declares it as approved again and drops `brain`, whose binding
+    // stays active, keeping code that reaches for it.
     const desk = await deskApp();
     const { sealed, admin } = desk;
     await bindDesk(desk);
@@ -1748,26 +1756,35 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     });
     const dropped = await nextVersion(
       next,
-      deskFiles({ withWriter: false, sneak: true }),
+      deskFiles({ withBrain: false, sneak: true }),
       3
     );
     const review = await reviewResourceBindings(env, admin, sealed.app);
+    const brainBinding = review.undeclared.find(
+      ({ alias }) => alias === "brain"
+    );
     expect({
       // Version 3: its own declarations, each with how it is bound, and
       // every other active binding listed as serving nothing.
       declared: review.resources.map(({ alias, state }) => [alias, state]),
       undeclared: review.undeclared.map(({ alias }) => alias),
+      brainStillActive: brainBinding?.status,
       widened: outcomeOf(widened),
       sent: provider.requests.length,
       // Code that reaches for a permission its version doesn't list has
-      // nothing to reach it with.
+      // nothing to reach it with, though the binding is still active.
       sneak: outcomeOf(await call(env, dropped, "desk.sneak", {})),
+      // Nor does a call through the last version's reference to the
+      // function that read through it reach the binding.
+      find: outcomeOf(await call(env, next, "desk.find", { text: "leave" })),
     }).toStrictEqual({
-      declared: [["brain", "served"]],
-      undeclared: ["ai"],
+      declared: [["ai", "served"]],
+      undeclared: ["brain"],
+      brainStillActive: "active",
       widened: { failed: "resource.unavailable" },
       sent: 0,
       sneak: "absent",
+      find: { failed: "operation.not_found" },
     });
   });
 
