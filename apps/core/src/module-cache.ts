@@ -3,9 +3,8 @@ import {
   compilerVersion,
   incrementSchema,
   moduleRecordOf,
-  screenIncrementKeys,
 } from "@grasp-os/compiler";
-import type { Increments } from "@grasp-os/compiler";
+import type { Increments, screenIncrementKeys } from "@grasp-os/compiler";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
 
@@ -79,18 +78,23 @@ const readRecord = async (
 };
 
 /**
- * What earlier builds kept that a screens build of `files` may reuse,
- * as records by content key: each one its receipt vouches for and shaped
- * as a record of its own file. One written longer ago than
+ * The keys of what a screens build may reuse and keep, by path
+ * (`screenIncrementKeys`): worked out once per build, as they hash every
+ * file, and handed to each read and write of its records.
+ */
+export type IncrementKeys = Awaited<ReturnType<typeof screenIncrementKeys>>;
+
+/**
+ * What earlier builds kept that a screens build whose records have `keys`
+ * may reuse, as records by content key: each one its receipt vouches for
+ * and shaped as a record of its own file. One written longer ago than
  * `refreshAfterMs` is written again, as a build in use is.
  */
 export const readIncrements = async (
   env: CacheEnv,
-  files: Readonly<Record<string, string>>,
-  preview: boolean,
+  keys: IncrementKeys,
   refreshAfterMs: number
 ): Promise<Increments> => {
-  const keys = await screenIncrementKeys(files, preview);
   const found: Increments = { modules: {}, checks: {} };
   const wanted = [
     ...Object.entries(keys.modules).map(
@@ -118,19 +122,17 @@ export const readIncrements = async (
 };
 
 /**
- * Keeps what a screens build of `files` made now (`fresh`), each under
- * its key's lease, held for `leaseMs`: only a record of one of the build's
- * own files under the key `files` gives it, so nothing is kept under a
- * key it doesn't stand for. How many were kept.
+ * Keeps what a screens build whose records have `keys` made now
+ * (`fresh`), each under its key's lease, held for `leaseMs`: only a record
+ * of one of the build's own files under the key `keys` gives it, so
+ * nothing is kept under a key it doesn't stand for. How many were kept.
  */
 export const keepIncrements = async (
   env: CacheEnv,
-  files: Readonly<Record<string, string>>,
-  preview: boolean,
+  keys: IncrementKeys,
   fresh: Increments,
   leaseMs: number
 ): Promise<number> => {
-  const keys = await screenIncrementKeys(files, preview);
   const toKeep = [
     ...Object.entries(fresh.modules).flatMap(([key, record]) =>
       keys.modules[record.path] === key &&

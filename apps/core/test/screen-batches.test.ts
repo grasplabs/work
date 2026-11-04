@@ -436,6 +436,44 @@ describe("a first screens build of a large App", () => {
     });
   }, 120_000);
 
+  it("hashes an App's files as often however many batches its build takes", async () => {
+    // Core's hashes during a build of an App of its own in batches sized
+    // to `cpuMs`: its keys, its records', its build's.
+    const hashesIn = async (cpuMs: string) => {
+      const { loader, calls } = recordingLoader();
+      const files = syntheticApp(6, 1);
+      const digest = vi.spyOn(crypto.subtle, "digest");
+      try {
+        const built = await buildScreens(
+          {
+            ...env,
+            LOADER: loader,
+            RUNTIME_PROFILE: "cloudflare",
+            BUILD_BATCH_CPU_MS: cpuMs,
+          },
+          files,
+          `app-${unique()}`
+        );
+        expect(built.ok).toBeTruthy();
+        return {
+          hashes: digest.mock.calls.length,
+          batches: calls.filter(({ method }) => method === "transform").length,
+        };
+      } finally {
+        digest.mockRestore();
+      }
+    };
+
+    // A batch per file, then about a batch per three.
+    const many = await hashesIn("10");
+    const few = await hashesIn("600");
+
+    expect({
+      fewerBatches: few.batches < many.batches,
+      sameHashes: many.hashes === few.hashes,
+    }).toStrictEqual({ fewerBatches: true, sameHashes: true });
+  }, 120_000);
+
   it("refuses an App its paths refuse before it spends a batch", async () => {
     const files = {
       ...syntheticApp(8, 4),

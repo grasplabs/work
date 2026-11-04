@@ -70,6 +70,7 @@ import {
   keepIncrements,
   readIncrements,
 } from "./module-cache.ts";
+import type { IncrementKeys } from "./module-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
@@ -410,14 +411,14 @@ const transformInBatches = async (
   {
     files,
     target,
-    preview,
+    keys,
     reuse,
     leaseMs,
     renew,
   }: {
     files: AppFiles;
     target: string;
-    preview: boolean;
+    keys: IncrementKeys;
     reuse: Increments;
     leaseMs: number;
     renew: () => Promise<void>;
@@ -431,9 +432,8 @@ const transformInBatches = async (
     return { made, calls };
   }
   const { sources, known, typeFiles } = screenSources(app);
-  const { modules: keys } = await screenIncrementKeys(files, preview);
   const missing = sources.filter(
-    ([path]) => !Object.hasOwn(reuse.modules, keys[path] ?? "")
+    ([path]) => !Object.hasOwn(reuse.modules, keys.modules[path] ?? "")
   );
   const characters = batchCharacters(env);
   if (
@@ -442,7 +442,7 @@ const transformInBatches = async (
     return { made, calls };
   }
   const pathOf = new Map(
-    Object.entries(keys).map(([path, key]) => [key, path])
+    Object.entries(keys.modules).map(([path, key]) => [key, path])
   );
   const transform = async (batch: Record<string, string>): Promise<void> => {
     // The build holds its lease while its batches run, each a lease's
@@ -481,7 +481,7 @@ const transformInBatches = async (
         fresh.modules[key] = record;
       }
     }
-    await keepIncrements(env, files, preview, fresh, leaseMs);
+    await keepIncrements(env, keys, fresh, leaseMs);
     Object.assign(made, fresh.modules);
   };
   for (const batch of batchesOf(missing, characters)) {
@@ -520,12 +520,14 @@ const compiledIncrementally = async (
   const preview = profile === "preview";
   const [, target] = compilerCallOf("screen", profile, checks);
   const started = Date.now();
-  const earlier = await readIncrements(env, files, preview, buildRefreshMs);
+  // Hashed once: every read and write of its records uses them.
+  const keys = await screenIncrementKeys(files, preview);
+  const earlier = await readIncrements(env, keys, buildRefreshMs);
   const read = Date.now();
   const batched = await transformInBatches(env, runner, {
     files,
     target,
-    preview,
+    keys,
     reuse: earlier,
     leaseMs,
     renew,
@@ -555,7 +557,7 @@ const compiledIncrementally = async (
   });
   const ran = Date.now();
   const kept = incrementalShaped(answer)
-    ? await keepIncrements(env, files, preview, answer.fresh, leaseMs)
+    ? await keepIncrements(env, keys, answer.fresh, leaseMs)
     : 0;
   log.info("build.compile", {
     kind: "screen",
