@@ -316,10 +316,12 @@ test("an App's own chat writes its screen, and its workspace previews it", async
     // for the one ahead; on staging that wait and the load took longer
     // than a live screen's whole wait for its build. Here the preview's
     // first load reaches core that late: the page still waits for it.
-    let heldFrom: number | undefined;
+    let heldAsks = 0;
     await page.routeWebSocket("**/rpc", (socket) => {
       const toCore = socket.connectToServer();
-      // Held in order: a connection's messages name what came before.
+      // Each preview's connection is held from its own first ask, in
+      // order: a connection's messages name what came before.
+      let heldFrom: number | undefined;
       let holding: string[] | undefined;
       socket.onMessage((message) => {
         const text = String(message);
@@ -331,13 +333,14 @@ test("an App's own chat writes its screen, and its workspace previews it", async
           toCore.send(text);
           return;
         }
-        const held = [text];
-        holding = held;
+        const queued = [text];
+        holding = queued;
         heldFrom ??= Date.now();
+        heldAsks += 1;
         setTimeout(
           () => {
             holding = undefined;
-            for (const each of held) {
+            for (const each of queued) {
               toCore.send(each);
             }
           },
@@ -366,7 +369,7 @@ test("an App's own chat writes its screen, and its workspace previews it", async
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
       timeout: behindAnotherLoadMs + 30_000,
     });
-    expect(heldFrom).toBeDefined();
+    expect(heldAsks).toBeGreaterThan(0);
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
   } finally {
