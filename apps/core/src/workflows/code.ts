@@ -15,6 +15,7 @@ import type { AppFiles } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import {
@@ -583,8 +584,10 @@ export class Run extends WorkerEntrypoint {
         runId,
         params,
         env: bindings({ connections, collections, brains }),
-        do: async (name, options, fn) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)))),
+        do: async (name, options, fn, retry) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)), ...(typeof retry === "function" ? [async (error) => await settled(async () => await retry(error))] : []))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
+        sleepUntil: async (name, until) => unwrapped(await host.sleepUntil(name, until)),
+        caught: async (name, options, takes) => unwrapped(await host.caught(name, options, async (attempt, error) => await inAttempt(attempt, async () => await settled(async () => await takes(error))))),
         callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),
         openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
         decisionRecipients: async (decision, reminder) => unwrapped(await currentAttempt().decisionRecipients(decision, reminder)),
@@ -786,12 +789,27 @@ export interface RunHostCalls<Attempt = AttemptHost> {
      * that attempt: an App run's `AttemptHost`, or an independent
      * workflow's (resource-host.ts).
      */
-    fn: (attempt: Attempt) => Promise<unknown>
+    fn: (attempt: Attempt) => Promise<unknown>,
+    /**
+     * A sealed run's choice of a retry after the step failed (host.ts,
+     * `RunHost.#retried`): its retry function, run outside any attempt.
+     */
+    retry?: (error: Json) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
   sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
   /**
+   * A `try` task's catch step: a sealed run's (host.ts, `RunHost.caught`);
+   * an App's run has none.
+   */
+  caught?: (
+    name: unknown,
+    options: unknown,
+    fn: (attempt: Attempt, error: Json) => Promise<unknown>
+  ) => Promise<Settled<unknown>>;
+  /**
    * A durable sleep until a deadline its step recorded: an independent
-   * workflow's (resource-host.ts); an App's run has none.
+   * workflow's (resource-host.ts) or a sealed run's (host.ts); an App's
+   * run has none.
    */
   sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
   /**
@@ -989,6 +1007,33 @@ const stepCodeFailure = async (
 };
 
 /**
+ * Runs `fn`, a step's function in the isolate, with `attempt` passed as a
+ * capability of its calls alone, live while `fn` runs and the session's
+ * call is open (`passedCapability`). A function that fails rather than
+ * answering fails its step as `stepCodeFailure` says.
+ */
+const inSession = async <Attempt extends object>(
+  session: RunSession,
+  methods: readonly string[],
+  attempt: Attempt,
+  fn: (passed: Attempt) => Promise<unknown>
+): Promise<unknown> => {
+  let live = true;
+  try {
+    return await fn(
+      // SAFETY: what the sandbox host makes of a passed capability for
+      // the isolate: `fn` is the isolate's, over the session.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      passedCapability(attempt, methods, () => live && session.live()) as never
+    );
+  } catch (error) {
+    throw await stepCodeFailure(error, session);
+  } finally {
+    live = false;
+  }
+};
+
+/**
  * `host` as the run's capability in a session: its calls, and the
  * attempt host each step's function gets, passed as a capability of its
  * calls alone, live while that function runs and the session's call is
@@ -1001,29 +1046,52 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
   /** The calls each attempt host passes: an App run's, unless given. */
   methods: readonly string[] = attemptMethods
 ): RunHostCalls<Attempt> => ({
-  do: async (name, options, fn) => {
+  do: async (name, options, fn, retry) => {
     if (typeof fn !== "function") {
-      return await host.do(name, options, fn);
+      return await host.do(name, options, fn, retry);
     }
-    return await host.do(name, options, async (attempt) => {
-      let live = true;
-      try {
-        return await fn(
-          // SAFETY: what the sandbox host makes of a passed capability
-          // for the isolate: `fn` is the isolate's, over the session.
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          passedCapability(
-            attempt,
-            methods,
-            () => live && session.live()
-          ) as never
-        );
-      } catch (error) {
-        throw await stepCodeFailure(error, session);
-      } finally {
-        live = false;
-      }
-    });
+    return await host.do(
+      name,
+      options,
+      async (attempt) =>
+        await inSession(
+          session,
+          methods,
+          attempt,
+          async (passed) => await fn(passed)
+        ),
+      typeof retry === "function"
+        ? async (failure) => {
+            try {
+              return await retry(failure);
+            } catch (error) {
+              throw await stepCodeFailure(error, session);
+            }
+          }
+        : undefined
+    );
+  },
+  caught: async (name, options, fn) => {
+    if (host.caught === undefined) {
+      return {
+        ok: false,
+        error: { name: "Error", message: "This run has no catches." },
+      };
+    }
+    if (typeof fn !== "function") {
+      return await host.caught(name, options, fn);
+    }
+    return await host.caught(
+      name,
+      options,
+      async (attempt, error) =>
+        await inSession(
+          session,
+          methods,
+          attempt,
+          async (passed) => await fn(passed, error)
+        )
+    );
   },
   sleep: async (name, duration) => await host.sleep(name, duration),
   sleepUntil: async (name, until) =>
@@ -1176,6 +1244,7 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
                 "do",
                 "sleep",
                 "sleepUntil",
+                "caught",
                 "listen",
                 "child",
                 "waitForDecision",

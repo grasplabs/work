@@ -30,7 +30,12 @@ import type {
   ReturnOf,
   StreamingFunction,
 } from "./references.ts";
-import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
+import {
+  generatedStepOptionSchemas,
+  namePattern,
+  nameRule,
+  stepOptionSchemas,
+} from "./steps.ts";
 
 /**
  * Workflow SDK: the only API workflow code sees. A workflow declares its
@@ -326,6 +331,15 @@ export interface DoOptions<Input extends StepInput = StepInput>
    */
   locked?: boolean;
   /**
+   * A generated workflow's only (its sealed build's run host asks it; any
+   * other ignores it): once the step failed, past its retries, with a
+   * failure a catch's retry policy around it may try again, which `try`
+   * task's catch takes `error` (`by`), and whether that catch's retry
+   * `when` holds; null when none takes it. The host holds the answer to
+   * the policy, and runs the step again after its backoff.
+   */
+  retry?: (error: CaughtError) => Promise<RetryChoice | null>;
+  /**
    * What the step works on, as JSON; the function gets it back as `input`.
    * It's recorded with the step, and a dry run shows it for a side-effect
    * step it doesn't run, so a side-effect step must give it (`null` when it
@@ -429,6 +443,44 @@ export interface SleepOptions extends StepOptions {
 }
 
 /**
+ * An error a generated workflow's catch takes, as its run host maps the
+ * failure (spec 13.7): its type and status, the task it came from
+ * (`instance`), and the platform's words for it.
+ */
+export interface CaughtError {
+  readonly type: string;
+  readonly status: number;
+  readonly instance: string;
+  readonly title?: string;
+  readonly detail?: string;
+}
+
+const caughtErrorSchema = z.strictObject({
+  type: z.string(),
+  status: z.int(),
+  instance: z.string(),
+  title: z.string().optional(),
+  detail: z.string().optional(),
+});
+
+/** What a catch step answers: the error its catch took, if any. */
+const caughtJournalSchema = z.union([
+  z.strictObject({ caught: z.literal(false) }),
+  z.strictObject({ caught: z.literal(true), error: caughtErrorSchema }),
+]);
+
+/** Which `try` task's catch takes a failure, and whether it retries it. */
+export interface RetryChoice {
+  by: string;
+  retry: boolean;
+}
+
+/** A sleep until a deadline an earlier step recorded, in ms since the epoch. */
+export interface SleepUntilOptions extends StepOptions {
+  until: number;
+}
+
+/**
  * Runs steps, one after another. Names and options are literals in the
  * code, so the step list can be read from it; a step name runs once per run
  * unless each run of it has its own `key`. A step never starts while another
@@ -480,6 +532,24 @@ export interface StepRunner {
   decision: (name: string, options: DecisionOptions) => Promise<Decision>;
   /** Durably pauses the run. */
   sleep: (name: string, options: SleepOptions) => Promise<void>;
+  /**
+   * A generated workflow's only: durably pauses the run until `until`,
+   * the deadline an earlier step recorded, at once once past. Its run host
+   * sleeps only until exactly that deadline.
+   */
+  sleepUntil: (name: string, options: SleepUntilOptions) => Promise<void>;
+  /**
+   * A generated workflow's only: a `try` task's catch, after a failure in
+   * its list. Its run host offers `takes` the error, mapped by the host,
+   * when the catch may take it, and `takes` says whether it does (the
+   * catch's `when`). Answers the error it took, if it took one; the
+   * failure goes on otherwise, which the code throws on.
+   */
+  caught: (
+    name: string,
+    options: StepOptions,
+    takes: (error: CaughtError) => Promise<boolean>
+  ) => Promise<CaughtError | undefined>;
 }
 
 // What the runner implements: the same steps, with their options checked at
@@ -495,6 +565,12 @@ interface UntypedStepRunner {
   llm: (name: string, options: unknown) => Promise<unknown>;
   decision: (name: string, options: unknown) => Promise<Decision>;
   sleep: (name: string, options: unknown) => Promise<void>;
+  sleepUntil: (name: string, options: unknown) => Promise<void>;
+  caught: (
+    name: string,
+    options: unknown,
+    takes: (error: CaughtError) => Promise<boolean>
+  ) => Promise<CaughtError | undefined>;
 }
 
 /**
@@ -1067,7 +1143,7 @@ const createRunner = (
         if (typeof fn !== "function") {
           throw invalidCall(`Step "${name}" needs a function to run`);
         }
-        const { input, retries, timeout } = options;
+        const { input, retries, timeout, retry } = options;
         const sideEffect = options.sideEffect === true;
         return await engine.do(
           step,
@@ -1078,7 +1154,10 @@ const createRunner = (
                   idempotencyKey: idempotencyKeyOf(engine, step),
                   input,
                 })
-              : await fn({ input })
+              : await fn({ input }),
+          retry === undefined
+            ? undefined
+            : async (error) => await retry(caughtErrorSchema.parse(error))
         );
       }),
 
@@ -1223,6 +1302,47 @@ const createRunner = (
         await engine.sleep(start(name, key), duration);
       });
     },
+
+    sleepUntil: async (name, rawOptions) => {
+      await exclusive(`Step "${name}"`, async () => {
+        const { key, until } = optionsOf(
+          generatedStepOptionSchemas.sleepUntil,
+          name,
+          rawOptions
+        );
+        if (engine.sleepUntil === undefined) {
+          throw invalidCall(
+            `Step "${name}" sleeps until a deadline, which only a generated workflow does`
+          );
+        }
+        await engine.sleepUntil(start(name, key), until);
+      });
+    },
+
+    caught: async (name, rawOptions, takes) =>
+      await exclusive(`Step "${name}"`, async () => {
+        const { key } = optionsOf(
+          generatedStepOptionSchemas.caught,
+          name,
+          rawOptions
+        );
+        if (engine.caught === undefined) {
+          throw invalidCall(
+            `Step "${name}" is a catch, which only a generated workflow runs`
+          );
+        }
+        if (typeof takes !== "function") {
+          throw invalidCall(`Step "${name}" needs a function to decide`);
+        }
+        const journal = caughtJournalSchema.parse(
+          await engine.caught(
+            start(name, key),
+            {},
+            async (error) => await takes(caughtErrorSchema.parse(error))
+          )
+        );
+        return journal.caught ? journal.error : undefined;
+      }),
   };
 
   // Not a step of its own: bytes can't be recorded, so the step it runs in

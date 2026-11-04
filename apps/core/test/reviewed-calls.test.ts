@@ -724,6 +724,37 @@ queueMicrotask(() => {
     });
   });
 
+  it("refuse a sealed run's own steps, a catch and a sleep until a deadline, as tampering", async () => {
+    const steps: WorkflowCalls = {
+      steps: { send: ["APP"] },
+      kinds: { send: "exact" },
+      models: {},
+      keyed: [],
+      all: ["APP"],
+    };
+    const caught = await hostHeldTo(steps);
+    let asked = false;
+    const catching = await caught.host.caught("send", {}, async () => {
+      asked = true;
+      return await Promise.resolve({ ok: true, value: true });
+    });
+    const sleeping = await hostHeldTo(steps);
+    const slept = await sleeping.host.sleepUntil("send", Date.now());
+    expect({
+      catching: codeOf(catching),
+      asked,
+      caughtTampered: caught.tampered,
+      slept: codeOf(slept),
+      sleptTampered: sleeping.tampered,
+    }).toStrictEqual({
+      catching: "workflow.step_not_reviewed",
+      asked: false,
+      caughtTampered: ["workflow.step_not_reviewed"],
+      slept: "workflow.step_not_reviewed",
+      sleptTampered: ["workflow.step_not_reviewed"],
+    });
+  });
+
   it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },

@@ -66,7 +66,13 @@ import {
   settle,
   stepNameSchema,
 } from "./host.ts";
-import type { HostControls, HostedRun, RunKind, StepAttempt } from "./host.ts";
+import type {
+  HostControls,
+  HostedRun,
+  HostStepUse,
+  RunKind,
+  StepAttempt,
+} from "./host.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
 import type { AttemptAdmission } from "./quotas.ts";
@@ -408,7 +414,14 @@ class AppRun implements RunKind {
    * name may run (`stepReviewed`), and the run's history names none of
    * them.
    */
-  stepRefusal(step: string, use: StepUse): Error | undefined {
+  stepRefusal(step: string, use: HostStepUse): Error | undefined {
+    // A sealed run's own: an App's workflow never sleeps until a deadline
+    // its step recorded, nor runs a JSON workflow's catch.
+    if (use === "sleepUntil" || use === "caught") {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" isn't one an App's workflow runs that way: run steps only as the workflow's function writes them.`;
+      return error;
+    }
     if (!stepReviewed(this.run.calls, step)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;

@@ -17,7 +17,6 @@ import {
   stepIdempotencyKey,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
-import type { StepUse } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -36,11 +35,19 @@ import type { AttemptCalls } from "./attempt-host.ts";
 import { runModules } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
-import { modelCallLimitOf, settle, unbilledAiWaitOf } from "./host.ts";
+import {
+  forIsolate,
+  modelCallLimitOf,
+  settle,
+  unbilledAiWaitOf,
+} from "./host.ts";
 import type {
   HostControls,
   HostHooks,
   HostedRun,
+  HostStepUse,
+  RetryDecision,
+  RetryOffer,
   RunKind,
   StepAttempt,
 } from "./host.ts";
@@ -53,6 +60,14 @@ import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 import { decisionRunOf } from "./resource-decisions.ts";
+import {
+  failureOf,
+  matchesFilter,
+  notCaught,
+  raisedCode,
+  retryable,
+} from "./resource-errors.ts";
+import type { CaughtError, Failure } from "./resource-errors.ts";
 import { boundedJson } from "./resource-host.ts";
 import type { ActionModelCalls } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
@@ -130,6 +145,39 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   are held to its ceiling (`maxModelCalls`) as they go out; each call is
 //   one of its lineage's host calls; its attempts are admitted as its
 //   workflow's (`sealedAdmission`, `workflow-resource:<id>`).
+// - A catch taking what it mustn't (spec 13.7). The host keeps its own
+//   record of the failure no catch took yet (`#pending`), mapped by
+//   resource-errors.ts from what it knows. A failure the host made keeps
+//   its mapping: an attempt one of whose calls the host failed or refused
+//   fails with that, whatever its code reports, or swallows. One only the
+//   isolate reports is an expression's, a task's data's, or the task's
+//   own runtime failure (`isolateFailure`): never one no catch may take,
+//   so never a host's relabelled. While one is pending, the only step
+//   that runs is a `try`'s catch (`RunHost.caught`): its code is offered
+//   the error only when that catch may take it (one a catch may take, of
+//   a task in its try's list, with every property of its sealed
+//   `errors.with`) and decides by its `when` (decision 2); saying it took
+//   what it wasn't offered is tampering. The step journals the error it
+//   took, so a replay binds the same one. A run whose code goes on past a
+//   failure no catch took is refused at its next step, or as it ends
+//   (`failureUntaken`).
+// - A retry past its limits. The host runs a step's rounds (host.ts,
+//   `#retried`), only after a failure that may be tried again
+//   (`retryable`) of a task in the list of a try whose catch has a retry
+//   policy with rounds left. The isolate only chooses which catch takes
+//   the failure and whether its retry's `when` holds; the host holds that
+//   to a try around the task whose filter the error has, and computes the
+//   backoff and the limits itself, recorded (`#retryDecided`).
+// - A raise forged or swallowed. A raise's step fails with the error its
+//   build sealed, by the host, unless its record says the task was
+//   skipped (its `if`, decision 2).
+// - Waking early, or a replay waiting otherwise. A literal wait sleeps
+//   exactly its sealed length; a deadline's wait until exactly the
+//   deadline its task's enter step recorded, at most a year ahead. The
+//   isolate computes that deadline as it does any expression (decision
+//   1), and leaving a wait out is flow, as an `if` is.
+// - An attempt longer than sealed. Each is held to its task's timeout and
+//   its tries' retry attempt durations (`timeoutOf`).
 
 /**
  * Whether `sdk` is the one a sealed build's generated module must import:
@@ -368,6 +416,159 @@ const tampering = (message: string): Error => {
   return error;
 };
 
+/** The `try` tasks of `build` whose list holds `task`, innermost first. */
+const triesAround = (
+  build: LoadedBuild,
+  task: SealedTask
+): Extract<SealedTask, { kind: "try" }>[] =>
+  build.tasks
+    .filter(
+      (around): around is Extract<SealedTask, { kind: "try" }> =>
+        around.kind === "try" &&
+        task.pointer.startsWith(`${around.pointer}/try/`)
+    )
+    .toSorted((a, b) => b.pointer.length - a.pointer.length);
+
+/** Whether `task`'s own step sleeps: a wait, or a `grasp.sleepUntil` call. */
+const sleepsOf = (task: SealedTask): boolean =>
+  task.kind === "wait" ||
+  (task.kind === "call" && task.call.name === "grasp.sleepUntil");
+
+/**
+ * Whether `task` sleeps until a deadline its enter step records: a wait
+ * of an expression's duration, or a `grasp.sleepUntil` call.
+ */
+const sleepsUntil = (task: SealedTask): boolean =>
+  (task.kind === "wait" && task.duration !== undefined) ||
+  (task.kind === "call" && task.call.name === "grasp.sleepUntil");
+
+/** The furthest ahead a deadline may be, as the engine sleeps: a year. */
+const maxDeadlineMs = 365 * 86_400_000;
+
+/** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
+const maxRetryDelayMs = 365 * 86_400_000;
+
+/** A task's step that records that its `if` skipped it. */
+const skippedSchema = z.strictObject({ skipped: z.literal(true) });
+
+/** What a deadline's enter step records, when not skipped. */
+const deadlineRecordSchema = z.object({ until: z.int().min(0) });
+
+/** What a catch step journals (`RunHost.caught`): what it took, if any. */
+const caughtJournalSchema = z.union([
+  z.strictObject({ caught: z.literal(false) }),
+  z.strictObject({ caught: z.literal(true), error: z.json() }),
+]);
+
+/**
+ * Which catch takes a failure, as a retry function chooses it: the `try`
+ * task whose catch does (`by`), and whether its retry's `when` holds; or
+ * none.
+ */
+const retryChoiceSchema = z
+  .strictObject({ by: z.string(), retry: z.boolean() })
+  .nullable();
+
+/** The codes of a task's own data that didn't fit its schema. */
+const dataCodes: ReadonlySet<string> = new Set([
+  "workflow.task_data_invalid",
+  "workflow.output_invalid",
+]);
+
+/**
+ * `error`, a failure only the isolate reports, as the host takes it: an
+ * expression's or a task's data's by its code, any other the task's own
+ * runtime failure, with no code. Never a timeout, a host's code or one no
+ * catch may take: the host keeps what it made itself (`#hostFailures`).
+ */
+const isolateFailure = (error: StepError): StepError => {
+  const { code } = error;
+  const kept =
+    code !== undefined &&
+    (code.startsWith("expression.") || dataCodes.has(code));
+  return {
+    name: "Error",
+    message: error.message,
+    ...(kept ? { code } : {}),
+  };
+};
+
+/** What a raise task's step fails with: its sealed error, the workflow's own. */
+const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
+  name: "Error",
+  message:
+    task.error.title ?? workflowResourceErrors.create(raisedCode).message,
+  code: raisedCode,
+});
+
+/**
+ * What the isolate's retry `choice` of round `round`, of a task in the
+ * lists of `tries`, decides: none, unless it names one of them, whose
+ * filter `error` has (anything else is tampering), whose catch retries
+ * with rounds left. Its backoff is the policy's, jitter drawn here, and
+ * none past its duration limit, from `firstFailedAt`.
+ */
+const retryDecided = (
+  tries: readonly Extract<SealedTask, { kind: "try" }>[],
+  error: CaughtError,
+  round: number,
+  choice: unknown,
+  firstFailedAt: number
+): RetryDecision => {
+  const stop = { retry: false, delayMs: 0, firstFailedAt };
+  const chosen = retryChoiceSchema.safeParse(choice);
+  if (!chosen.success) {
+    throw tampering("A retry's choice names a catch and whether it retries.");
+  }
+  if (chosen.data === null) {
+    return stop;
+  }
+  const { by } = chosen.data;
+  const around = tries.find(({ id }) => id === by);
+  if (around === undefined || !matchesFilter(error, around.catch.errors)) {
+    throw tampering(`Task "${by}"'s catch can't take the failure.`);
+  }
+  const policy = around.catch.retry;
+  if (!chosen.data.retry || policy === undefined || round >= policy.attempts) {
+    return stop;
+  }
+  let factor = 1;
+  if (policy.backoff === "linear") {
+    factor = round;
+  } else if (policy.backoff === "exponential") {
+    factor = 2 ** (round - 1);
+  }
+  const { jitter } = policy;
+  const delayMs =
+    policy.delayMs * factor +
+    (jitter === undefined
+      ? 0
+      : Math.round(
+          jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
+        ));
+  const limited =
+    policy.limitMs !== undefined &&
+    Date.now() + delayMs - firstFailedAt > policy.limitMs;
+  return limited || delayMs > maxRetryDelayMs
+    ? stop
+    : { retry: true, delayMs, firstFailedAt };
+};
+
+/**
+ * What a deadline's enter step whose record is `value` fails with, if its
+ * deadline isn't one: a time in ms since the epoch, at most a year ahead.
+ */
+const deadlineUnfit = (value: unknown): StepError | undefined => {
+  const until = deadlineRecordSchema.safeParse(value).data?.until;
+  return until !== undefined && until - Date.now() <= maxDeadlineMs
+    ? undefined
+    : forIsolate(
+        workflowResourceErrors.create("workflow.call_invalid", {
+          issues: ["until: Give a time in milliseconds at most a year ahead."],
+        })
+      );
+};
+
 /** Whether `value` is a list. */
 const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
 
@@ -481,13 +682,29 @@ const nothingToRecord = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-class SealedRun implements RunKind {
+class SealedRun implements SealedRunKind {
   readonly #env: Env;
   readonly #host: HostControls;
   readonly #memory: SealedRunMemory;
   readonly #steps: ReadonlyMap<string, SealedStep>;
   /** The attempts that made their call: each makes one. */
   readonly #called = new WeakSet<StepAttempt>();
+  /**
+   * The first failure the host made of each attempt's calls (a call it
+   * failed, or refused): the attempt fails with it, whatever its code
+   * reports or swallows (`attemptSettled`).
+   */
+  readonly #hostFailures = new WeakMap<StepAttempt, StepError>();
+  /** The error each catch step's attempt was offered (`caughtOffer`). */
+  readonly #offers = new WeakMap<StepAttempt, CaughtError>();
+  /**
+   * The failure no catch took yet, fresh or replayed, as this activation
+   * reaches the steps (`stepEnded`): while there is one, only a catch
+   * step runs.
+   */
+  #pending: Failure | undefined;
+  /** Each sleeping task's deadline, as its enter step recorded it. */
+  readonly #deadlines = new Map<string, number>();
   readonly run: HostedSealedRun;
   readonly audit: RunKind["audit"];
   readonly decisionRun: RunKind["decisionRun"];
@@ -526,12 +743,247 @@ class SealedRun implements RunKind {
     }
   }
 
-  /** Refuses a step the sealed table doesn't have, or not as a `do`. */
-  stepRefusal(step: string, use: StepUse): Error | undefined {
-    if (use === "do" && (step === paramsStep || this.#steps.has(step))) {
+  /**
+   * Whether a failure no catch took is pending as the run's code ends: a
+   * run whose code ends well with one went on past it, and fails.
+   */
+  get failureUntaken(): boolean {
+    return this.#pending !== undefined;
+  }
+
+  /**
+   * Refuses a step the sealed table doesn't have, or not as it runs: a
+   * task's step as a `do`, but a sleeping task's own as its sleep (of
+   * exactly its sealed length, or until exactly its recorded deadline)
+   * and a try's catch as a catch. While a failure no catch took is
+   * pending, any step but a catch.
+   */
+  stepRefusal(
+    step: string,
+    use: HostStepUse,
+    time?: number
+  ): Error | undefined {
+    if (this.#pending !== undefined && use !== "caught") {
+      return tampering(
+        "A run goes on past a failure only once a catch took it."
+      );
+    }
+    const runs =
+      step === paramsStep ? use === "do" : this.#runsAs(step, use, time);
+    return runs
+      ? undefined
+      : tampering(`Step "${step}" isn't one the build seals.`);
+  }
+
+  /** `stepRefusal`'s check of a step of the sealed table, `step`. */
+  #runsAs(step: string, use: HostStepUse, time: number | undefined): boolean {
+    const sealed = this.#steps.get(step);
+    if (sealed === undefined) {
+      return false;
+    }
+    const { task, kind } = sealed;
+    const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
+    if (use === "do") {
+      return kind !== "catch" && !sleeps;
+    }
+    if (use === "caught") {
+      return kind === "catch" && task?.kind === "try";
+    }
+    if (use === "sleep") {
+      return sleeps && task?.kind === "wait" && time === task.milliseconds;
+    }
+    if (use === "sleepUntil") {
+      return (
+        sleeps &&
+        task !== undefined &&
+        sleepsUntil(task) &&
+        time !== undefined &&
+        time === this.#deadlines.get(task.id)
+      );
+    }
+    return false;
+  }
+
+  /**
+   * The longest an attempt of `step` may take: its task's timeout, and
+   * each retry policy's attempt duration of the tries around it.
+   */
+  timeoutOf(step: string): number | undefined {
+    const task = this.#steps.get(step)?.task;
+    if (task === undefined) {
       return undefined;
     }
-    return tampering(`Step "${step}" isn't one the build seals.`);
+    const limits = [
+      ...(task.timeoutMs === undefined ? [] : [task.timeoutMs]),
+      ...triesAround(this.run.build, task).flatMap((around) =>
+        around.catch.retry?.attemptMs === undefined
+          ? []
+          : [around.catch.retry.attemptMs]
+      ),
+    ];
+    return limits.length === 0 ? undefined : Math.min(...limits);
+  }
+
+  /**
+   * The error a catch step's `attempt` offers its code: the failure
+   * pending, if its catch may take it (one a catch may take, of a task in
+   * its try's list, with every property of its `errors.with`).
+   */
+  caughtOffer(attempt: StepAttempt): Json | undefined {
+    const task = this.#steps.get(attempt.step)?.task;
+    const pending = this.#pending;
+    if (
+      task?.kind !== "try" ||
+      pending?.catchable !== true ||
+      !pending.error.instance.startsWith(`${task.pointer}/try/`) ||
+      !matchesFilter(pending.error, task.catch.errors)
+    ) {
+      return undefined;
+    }
+    this.#offers.set(attempt, pending.error);
+    return { ...pending.error };
+  }
+
+  /**
+   * What `attempt` settled with, as the host takes it: the failure the
+   * host made of its calls, if any; a failure only its code reports, as
+   * `isolateFailure` maps it; a catch's answer as what it journals; a
+   * raise not skipped as its sealed error; a deadline's enter step only
+   * with a deadline at most a year ahead.
+   */
+  async attemptSettled(
+    attempt: StepAttempt,
+    result: Settled<unknown>
+  ): Promise<Settled<unknown>> {
+    const made = this.#hostFailures.get(attempt);
+    if (made !== undefined) {
+      return { ok: false, error: made };
+    }
+    if (!result.ok) {
+      return { ok: false, error: isolateFailure(result.error) };
+    }
+    return await this.#recordChecked(attempt, result.value);
+  }
+
+  /** `attemptSettled`'s checks of what `attempt`'s step records, `value`. */
+  async #recordChecked(
+    attempt: StepAttempt,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    const { task, kind } = this.#steps.get(attempt.step) ?? {};
+    if (kind === "catch") {
+      const offered = this.#offers.get(attempt);
+      if (typeof value !== "boolean" || (value && offered === undefined)) {
+        return await this.#refused(
+          attempt,
+          "A catch takes only the error it was offered."
+        );
+      }
+      return {
+        ok: true,
+        value:
+          value && offered !== undefined
+            ? { caught: true, error: offered }
+            : { caught: false },
+      };
+    }
+    const skipped = skippedSchema.safeParse(value).success;
+    if (kind === "task" && task?.kind === "raise" && !skipped) {
+      return { ok: false, error: raisedBy(task) };
+    }
+    const unfit =
+      kind === "enter" && task !== undefined && sleepsUntil(task) && !skipped
+        ? deadlineUnfit(value)
+        : undefined;
+    return unfit === undefined
+      ? { ok: true, value }
+      : { ok: false, error: unfit };
+  }
+
+  /**
+   * Notes how step `step` ended, fresh or replayed: a catch that took the
+   * failure pending ends it; a deadline's enter step's deadline is kept
+   * for its sleep; a failure, past its retries, is pending, as a catch
+   * would see it (a catch step's own, or one of no task's, none may take).
+   */
+  stepEnded(step: string, outcome: Settled<unknown>): void {
+    const sealed = this.#steps.get(step);
+    const task = sealed?.task;
+    if (!outcome.ok) {
+      this.#pending =
+        task === undefined || sealed?.kind === "catch"
+          ? notCaught()
+          : failureOf(outcome.error, task, false);
+      return;
+    }
+    if (sealed?.kind === "catch") {
+      if (caughtJournalSchema.parse(outcome.value).caught) {
+        this.#pending = undefined;
+      }
+      return;
+    }
+    if (sealed?.kind === "enter" && task !== undefined && sleepsUntil(task)) {
+      const until = deadlineRecordSchema.safeParse(outcome.value).data?.until;
+      if (until !== undefined) {
+        this.#deadlines.set(task.id, until);
+      }
+    }
+  }
+
+  /**
+   * The retry the host may run of step `step` after round `round` failed
+   * with `error`: of a task in the list of a try whose catch retries with
+   * rounds left, after a failure that may be tried again (`retryable`).
+   */
+  retryOffer(
+    step: string,
+    error: StepError,
+    round: number
+  ): RetryOffer | undefined {
+    const sealed = this.#steps.get(step);
+    const task = sealed?.task;
+    if (task === undefined || sealed?.kind === "catch") {
+      return undefined;
+    }
+    const tries = triesAround(this.run.build, task);
+    const roundsLeft = tries.some(
+      (around) => round < (around.catch.retry?.attempts ?? 0)
+    );
+    const failure = failureOf(error, task, false);
+    if (!roundsLeft || !failure.catchable || !retryable(failure, task)) {
+      return undefined;
+    }
+    return {
+      error: { ...failure.error },
+      decided: (choice, firstFailedAt) =>
+        retryDecided(tries, failure.error, round, choice, firstFailedAt),
+    };
+  }
+
+  /** Refuses `attempt` as tampering, `message` its refusal: its failure. */
+  async #refused(
+    attempt: StepAttempt,
+    message: string
+  ): Promise<Settled<never>> {
+    return await settle(
+      async () =>
+        await this.#host.refuseIn(attempt, tampering(message), "caught")
+    );
+  }
+
+  /**
+   * Answers `settled`, a host call's of `attempt`, noted as the host's
+   * failure of it when it is one, and the first.
+   */
+  #noted<Answer extends Settled<unknown> | undefined>(
+    attempt: StepAttempt,
+    settled: Answer
+  ): Answer {
+    const answer: Settled<unknown> | undefined = settled;
+    if (answer?.ok === false && !this.#hostFailures.has(attempt)) {
+      this.#hostFailures.set(attempt, answer.error);
+    }
+    return settled;
   }
 
   readonly stepCompleted = nothingToRecord;
@@ -549,7 +1001,10 @@ class SealedRun implements RunKind {
       });
     const calls: AttemptCalls = {
       callConnection: async (binding, call) =>
-        await this.#call(attempt, admission, binding, call),
+        this.#noted(
+          attempt,
+          await this.#call(attempt, admission, binding, call)
+        ),
       callModel: async () => await refused(attemptCallLabels.callModel),
       callCollection: async () =>
         await refused(attemptCallLabels.callCollection),
@@ -563,8 +1018,13 @@ class SealedRun implements RunKind {
     };
     return new AttemptHost(
       calls,
-      async (call) => await this.#host.leaseRefusal(attempt, call),
-      async (call) => await this.#host.hostCallRefusal(attempt, admission, call)
+      async (call) =>
+        this.#noted(attempt, await this.#host.leaseRefusal(attempt, call)),
+      async (call) =>
+        this.#noted(
+          attempt,
+          await this.#host.hostCallRefusal(attempt, admission, call)
+        )
     );
   }
 
@@ -997,8 +1457,14 @@ class SealedRun implements RunKind {
 /** The kind of run a sealed build's is, for the host (`RunHost`) to serve. */
 export const sealedRun =
   (env: Env, run: HostedSealedRun, memory: SealedRunMemory) =>
-  (host: HostControls): RunKind =>
+  (host: HostControls): SealedRunKind =>
     new SealedRun(env, run, memory, host);
+
+/** A sealed run's kind, and what its run's end checks of it. */
+export interface SealedRunKind extends RunKind {
+  /** Whether a failure no catch took is pending (`SealedRun`). */
+  readonly failureUntaken: boolean;
+}
 
 /**
  * Run `runId` as its activation runs it, from its row and its start's
