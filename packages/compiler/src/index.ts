@@ -273,9 +273,10 @@ export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
 const referenceRead = reader<Readonly<Record<string, string>>>(true);
 
 /**
- * The SDK's and the UI kit's sources, as App code is type-checked against
- * them, by path (`@grasp-os/sdk/src/app.ts`): what a chat's agent reads to
- * write an App. One set per release.
+ * The SDK's and the UI kit's sources, by path (`@grasp-os/sdk/src/app.ts`):
+ * what a chat's agent reads to write an App. The check reads the type
+ * chunks the release rolls up from these same sources. One set per
+ * release.
  */
 export const referenceFiles = async (
   assets: Fetcher

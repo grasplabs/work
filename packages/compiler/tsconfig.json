@@ -8,6 +8,7 @@
     "build.ts",
     "build-lock.ts",
     "build-harness.ts",
+    "build-heap.ts",
     "build-*.test.ts",
     "watch.ts"
   ]

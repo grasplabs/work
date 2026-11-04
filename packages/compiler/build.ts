@@ -21,6 +21,9 @@ import {
 import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 
+import { rolldown } from "rolldown";
+import type { Plugin as RolldownPlugin } from "rolldown";
+import { dts } from "rolldown-plugin-dts";
 import ts from "typescript";
 import shadcnPreset from "ultracite/oxlint/shadcn";
 import { build } from "vite-plus";
@@ -53,7 +56,7 @@ import {
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
-import { compilerOptions, serverLibs } from "./src/type-check.ts";
+import { compilerOptions, libLocation, serverLibs } from "./src/type-check.ts";
 
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
@@ -62,13 +65,13 @@ const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 /**
  * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
- * workflow's `emailMessage`, a run's errors), so the kit's types hold
- * them, or a check would read each as `any`.
+ * workflow's `emailMessage`, a run's errors), so the kit's type chunks
+ * carry what they name of it, or a check would read each as `any`.
  */
 const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
 /**
  * The Brain's contract, which the SDK re-exports (`@grasp-os/sdk/brain`)
- * and Knowledge's types come from: kept for the same reason.
+ * and Knowledge's types come from: carried for the same reason.
  */
 const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
 /**
@@ -78,6 +81,14 @@ const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
 const expressions = realpathSync(
   path.join(sdk, "node_modules/@grasp-os/workflow-expressions")
 );
+/** The platform's own packages the kit's types come from, by name. */
+const ownPackages: Readonly<Record<string, string>> = {
+  "@grasp-os/sdk": sdk,
+  "@grasp-os/ui": ui,
+  "@grasp-os/shared": shared,
+  "@grasp-os/brain": brain,
+  "@grasp-os/workflow-expressions": expressions,
+};
 const require = createRequire(path.join(root, "package.json"));
 
 /** React as the kit's modules, App modules and packages import it. */
@@ -635,23 +646,35 @@ const withoutDocComments = (source: string): string => {
 
 const declaration = /\.d\.[cm]?ts$/u;
 
+/** A module that imports each of `specifiers`, which a program starts from. */
+const importing = (specifiers: readonly string[]): string =>
+  specifiers.map((specifier) => `import "${specifier}";`).join("\n");
+
 /**
- * The files a type check of App code reads, by the path the isolate knows
- * them by (see src/type-check.ts): TypeScript loads everything App code may
- * import, with the options the isolate checks with, and every file it reads
- * is kept. Packages are flattened into `/node_modules/<name>`, the kit's
- * sources too; two versions of one package would clash, and fail the build.
+ * How the kit is loaded at build time: the options App code is checked
+ * with, and the worker lib too, what an App's server code is checked
+ * against (type-check.ts `serverTarget`), which no screen is. Third-party
+ * declarations can have errors that don't matter here.
+ */
+const kitOptions: ts.CompilerOptions = {
+  ...compilerOptions,
+  skipLibCheck: true,
+  lib: [...(compilerOptions.lib ?? []), ...serverLibs],
+};
+
+/**
+ * The files a type check of the kit's sources reads, by the path the
+ * isolate knows them by (see src/type-check.ts): TypeScript loads
+ * everything App code may import, with the options the isolate checks
+ * with, and every file it reads is kept. Packages are flattened into
+ * `/node_modules/<name>`, the platform's own as their sources: what the
+ * agent's reference holds, and what the type chunks are made of
+ * (`typeChunks`). Two versions of one package would clash, and fail the
+ * build.
  */
 const collectTypes = (specifiers: string[]): Record<string, string> => {
   const entry = path.join(root, "kit-types.ts");
-  // Third-party declarations can have errors that don't matter here. The
-  // worker lib too: what an App's server code is checked against
-  // (type-check.ts `serverTarget`), which no screen is.
-  const options = {
-    ...compilerOptions,
-    skipLibCheck: true,
-    lib: [...(compilerOptions.lib ?? []), ...serverLibs],
-  };
+  const options = kitOptions;
   const host = ts.createCompilerHost(options);
   const read = new Map<string, string>();
   const readFile = host.readFile.bind(host);
@@ -665,11 +688,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
   const getSourceFile = host.getSourceFile.bind(host);
   host.getSourceFile = (file, ...rest) =>
     file === entry
-      ? ts.createSourceFile(
-          file,
-          specifiers.map((specifier) => `import "${specifier}";`).join("\n"),
-          ts.ScriptTarget.Latest
-        )
+      ? ts.createSourceFile(file, importing(specifiers), ts.ScriptTarget.Latest)
       : getSourceFile(file, ...rest);
   const program = ts.createProgram([entry], options, host);
   const [error] = ts.getPreEmitDiagnostics(program);
@@ -682,17 +701,13 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
   for (const [file, content] of read) {
     const real = realpathSync(file);
     const inPackage = real.split("/node_modules/").at(-1) ?? real;
+    const own = Object.entries(ownPackages).find(([, dir]) =>
+      real.startsWith(`${dir}/`)
+    );
     let name: string;
-    if (real.startsWith(`${ui}/`)) {
-      name = `/node_modules/@grasp-os/ui${real.slice(ui.length)}`;
-    } else if (real.startsWith(`${sdk}/`)) {
-      name = `/node_modules/@grasp-os/sdk${real.slice(sdk.length)}`;
-    } else if (real.startsWith(`${shared}/`)) {
-      name = `/node_modules/@grasp-os/shared${real.slice(shared.length)}`;
-    } else if (real.startsWith(`${brain}/`)) {
-      name = `/node_modules/@grasp-os/brain${real.slice(brain.length)}`;
-    } else if (real.startsWith(`${expressions}/`)) {
-      name = `/node_modules/@grasp-os/workflow-expressions${real.slice(expressions.length)}`;
+    if (own !== undefined) {
+      const [packageName, dir] = own;
+      name = `/node_modules/${packageName}${real.slice(dir.length)}`;
     } else if (inPackage === real) {
       // The compiler's own package.json, read for the entry.
       continue;
@@ -706,6 +721,420 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
     types[name] = kept;
   }
   return types;
+};
+
+/**
+ * The type chunks: the platform's own packages as App code type-checks
+ * against them, rolled up into one declaration file per module it may
+ * import (`@grasp-os/sdk/react`, `@grasp-os/ui/components/button`, the
+ * server, workflow and compute modules, …) and chunks for what those
+ * share, with the packages they reach inlined. A check parses only the
+ * chunks the modules it imports reach, never the sources of everything
+ * those name: any import of the SDK used to bring all of
+ * `@grasp-os/shared` with it, and the parsed sources stay in the isolate
+ * for its life (`kitCache` in src/type-check.ts).
+ */
+
+/** Whether `file` is one of the platform's own packages' sources. */
+const isOwnSource = (file: string): boolean =>
+  Object.values(ownPackages).some((dir) => file.startsWith(`${dir}/src/`));
+
+/** A specifier of one of the platform's own packages: its name and subpath. */
+const ownSpecifier = /^(?<name>@grasp-os\/[^/]+)(?:\/(?<subpath>.+))?$/u;
+
+/** The name and subpath (`""` for the root) of an own package's specifier. */
+const ownModuleOf = (
+  specifier: string
+): { name: string; subpath: string } | undefined => {
+  const groups = ownSpecifier.exec(specifier)?.groups;
+  return groups?.name === undefined
+    ? undefined
+    : { name: groups.name, subpath: groups.subpath ?? "" };
+};
+
+/**
+ * What `subpath` (`.`, `./components/button`) is among `exported`: by its
+ * own key, or by a pattern's (`./components/*`).
+ */
+const exportTarget = (
+  exported: ReturnType<typeof exportsOf>,
+  subpath: string
+): string | undefined => {
+  const exact = Object.hasOwn(exported, subpath)
+    ? exported[subpath]
+    : undefined;
+  if (typeof exact === "string") {
+    return exact;
+  }
+  for (const [key, target] of Object.entries(exported)) {
+    const [prefix = "", suffix] = key.split("*");
+    if (
+      suffix !== undefined &&
+      typeof target === "string" &&
+      subpath.startsWith(prefix) &&
+      subpath.endsWith(suffix)
+    ) {
+      return target.replace(
+        "*",
+        subpath.slice(prefix.length, subpath.length - suffix.length)
+      );
+    }
+  }
+  return undefined;
+};
+
+/** The source file an own package's specifier names, by its exports. */
+const ownSourceOf = (specifier: string): string | undefined => {
+  const named = ownModuleOf(specifier);
+  if (named === undefined) {
+    return undefined;
+  }
+  const dir = Object.hasOwn(ownPackages, named.name)
+    ? ownPackages[named.name]
+    : undefined;
+  const target =
+    dir === undefined
+      ? undefined
+      : exportTarget(
+          exportsOf(dir),
+          named.subpath === "" ? "." : `./${named.subpath}`
+        );
+  if (dir === undefined || target === undefined) {
+    throw new Error(`The kit's types have no module ${specifier}`);
+  }
+  return path.join(dir, target);
+};
+
+const typescriptSource = /\.tsx?$/u;
+
+/** Where a source's declaration goes: `app.ts` → `app.d.ts`. */
+const declarationOf = (source: string): string =>
+  source.replace(typescriptSource, ".d.ts");
+
+/**
+ * The declarations of the platform's own sources that `specifiers` reach,
+ * by `declarationOf` their source, as TypeScript emits them with the
+ * options the kit is loaded with, without checking them again:
+ * `collectTypes` did. Declaration files among the sources are as they are.
+ */
+const emitOwnDeclarations = (
+  specifiers: readonly string[]
+): Map<string, string> => {
+  const options: ts.CompilerOptions = {
+    ...kitOptions,
+    noEmit: false,
+    declaration: true,
+    emitDeclarationOnly: true,
+    noCheck: true,
+  };
+  const entry = path.join(root, "kit-declarations.ts");
+  const host = ts.createCompilerHost(options);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (file, ...rest) =>
+    file === entry
+      ? ts.createSourceFile(file, importing(specifiers), ts.ScriptTarget.Latest)
+      : getSourceFile(file, ...rest);
+  // TypeScript emits nothing for a file it reaches through node_modules,
+  // a library's. The platform's own packages are reached that way too,
+  // through the workspace's links, but are sources.
+  host.resolveModuleNameLiterals = (
+    literals,
+    containingFile,
+    redirectedReference,
+    resolveOptions
+  ) =>
+    literals.map(({ text }) => {
+      const resolved = ts.resolveModuleName(
+        text,
+        containingFile,
+        resolveOptions,
+        host,
+        undefined,
+        redirectedReference
+      );
+      const { resolvedModule } = resolved;
+      return resolvedModule !== undefined &&
+        isOwnSource(resolvedModule.resolvedFileName)
+        ? {
+            ...resolved,
+            resolvedModule: {
+              ...resolvedModule,
+              isExternalLibraryImport: false,
+            },
+          }
+        : resolved;
+    });
+  const program = ts.createProgram([entry], options, host);
+  const declarations = new Map<string, string>();
+  for (const file of program.getSourceFiles()) {
+    if (!isOwnSource(file.fileName)) {
+      continue;
+    }
+    if (file.isDeclarationFile) {
+      declarations.set(file.fileName, file.text);
+    } else {
+      program.emit(
+        file,
+        (name, text) => {
+          declarations.set(name, text);
+        },
+        undefined,
+        true
+      );
+    }
+  }
+  return declarations;
+};
+
+/**
+ * Where a type chunk goes in the kit's types, under `/node_modules/`: at
+ * the source of its main module (`@grasp-os/sdk/src/react` for the chunk
+ * of `@grasp-os/sdk/react`), so a diagnostic that names a module
+ * (`typeof import("/node_modules/@grasp-os/sdk/src/react")`) names it as
+ * a check of the sources did, with no hash that changes from release to
+ * release. A chunk the entries share takes `.shared.d.ts` there.
+ */
+const chunkPathOf = (declarationFile: string): string => {
+  const own = Object.entries(ownPackages).find(([, dir]) =>
+    declarationFile.startsWith(`${dir}/`)
+  );
+  if (own === undefined) {
+    throw new Error(`${declarationFile} is none of the platform's own`);
+  }
+  const [name, dir] = own;
+  return `${name}${declarationFile.slice(dir.length, -".d.ts".length)}`;
+};
+
+/**
+ * Resolves the own declarations' imports among them: by package and its
+ * exports, or by relative path, as the sources name each other (`./x.ts`,
+ * `./x.js`, `./x`, `./dir`).
+ */
+const ownDeclarations = (declarations: Map<string, string>): RolldownPlugin => {
+  const found = (file: string, importer: string, source: string): string => {
+    if (!declarations.has(file)) {
+      throw new Error(`No declaration of ${source} for ${importer}`);
+    }
+    return file;
+  };
+  return {
+    name: "kit-own-declarations",
+    resolveId: {
+      order: "pre",
+      handler: (source, importer) => {
+        const named = ownSourceOf(source);
+        if (named !== undefined) {
+          return found(declarationOf(named), importer ?? "the kit", source);
+        }
+        if (importer === undefined || !source.startsWith(".")) {
+          return declarations.has(source) ? source : null;
+        }
+        const target = path.resolve(path.dirname(importer), source);
+        const candidates = [
+          declarationOf(target),
+          target.replace(/\.js$/u, ".d.ts"),
+          target,
+          `${target}.d.ts`,
+          path.join(target, "index.d.ts"),
+        ];
+        return found(
+          candidates.find((file) => declarations.has(file)) ?? target,
+          importer,
+          source
+        );
+      },
+    },
+    load: (id) => declarations.get(id) ?? null,
+  };
+};
+
+/**
+ * The type chunks of the own modules among `specifiers`, by their path in
+ * the kit's types (`/node_modules/@grasp-os/sdk/src/react.d.ts`), with a
+ * package.json for each own package that exports its modules' chunks
+ * and nothing else. Other packages stay imports, resolved among the
+ * kit's types.
+ */
+const rollUpTypes = async (
+  specifiers: readonly string[]
+): Promise<Record<string, string>> => {
+  const own = specifiers.filter((specifier) => ownModuleOf(specifier));
+  const entries = new Map(
+    own.map((specifier) => [
+      specifier,
+      declarationOf(ownSourceOf(specifier) ?? specifier),
+    ])
+  );
+  const declarations = emitOwnDeclarations(own);
+  const bundle = await rolldown({
+    input: Object.fromEntries(
+      [...entries.values()].map((file) => [chunkPathOf(file), file])
+    ),
+    cwd: root,
+    // The declarations plugin is this build's work by design: its timings
+    // aren't worth a warning at every release.
+    checks: { bundlerTimings: false },
+    external: (id) =>
+      !id.startsWith(".") &&
+      !path.isAbsolute(id) &&
+      ownModuleOf(id) === undefined,
+    plugins: [
+      ownDeclarations(declarations),
+      dts({ dtsInput: true, tsconfig: false }),
+    ],
+  });
+  const chunks: Record<string, string> = {};
+  try {
+    const { output } = await bundle.generate({
+      format: "es",
+      entryFileNames: "[name].d.ts",
+      // A shared chunk goes beside its main module (rolldown names it by
+      // that module's file), as `.shared.d.ts`: never an entry's name,
+      // which the module may have (`index`, `workflow`). A chunk with no
+      // module has nothing but its name to go by.
+      chunkFileNames: ({ name, moduleIds }) => {
+        const main =
+          moduleIds.find((id) => path.basename(id) === `${name}.ts`) ??
+          moduleIds[0];
+        return main === undefined
+          ? "@grasp-os/sdk/src/[name].shared.d.ts"
+          : `${chunkPathOf(main)}.shared.d.ts`;
+      },
+    });
+    for (const file of output) {
+      if (file.type === "chunk") {
+        chunks[`/node_modules/${file.fileName}`] = withoutDocComments(
+          file.code
+        );
+      }
+    }
+  } finally {
+    await bundle.close();
+  }
+  const manifests: Record<string, Record<string, string>> = {};
+  for (const [specifier, file] of entries) {
+    const { name, subpath } = ownModuleOf(specifier) ?? {
+      name: "",
+      subpath: "",
+    };
+    manifests[name] = {
+      ...manifests[name],
+      [subpath === "" ? "." : `./${subpath}`]:
+        `.${chunkPathOf(file).slice(name.length)}.d.ts`,
+    };
+  }
+  for (const [name, exported] of Object.entries(manifests)) {
+    chunks[`/node_modules/${name}/package.json`] = JSON.stringify({
+      name,
+      type: "module",
+      exports: exported,
+    });
+  }
+  return chunks;
+};
+
+/**
+ * What of `files` a program that imports each of `specifiers` reads, as
+ * the isolate's check reads them (src/type-check.ts), and its first
+ * error, if any: in the program, its entry or a type chunk.
+ */
+const readByKit = (
+  files: Readonly<Record<string, string>>,
+  specifiers: readonly string[]
+): { read: Set<string>; error: ts.Diagnostic | undefined } => {
+  const entry = "/kit-types.ts";
+  // Type chunks are checked too; the third-party declarations aren't.
+  const options = { ...kitOptions, skipLibCheck: false };
+  const read = new Set<string>();
+  const directories = new Set(
+    Object.keys(files).flatMap((file) =>
+      file
+        .split("/")
+        .slice(1, -1)
+        .map((_, index, parts) => `/${parts.slice(0, index + 1).join("/")}`)
+    )
+  );
+  const readFile = (file: string): string | undefined => {
+    if (!Object.hasOwn(files, file)) {
+      return undefined;
+    }
+    read.add(file);
+    return files[file];
+  };
+  const host: ts.CompilerHost = {
+    getSourceFile: (file, languageVersion) => {
+      const text = file === entry ? importing(specifiers) : readFile(file);
+      return text === undefined
+        ? undefined
+        : ts.createSourceFile(file, text, languageVersion);
+    },
+    getDefaultLibFileName: (libOptions) =>
+      `${libLocation}/${ts.getDefaultLibFileName(libOptions)}`,
+    getDefaultLibLocation: () => libLocation,
+    writeFile: () => {
+      // Nothing is emitted.
+    },
+    getCurrentDirectory: () => "/",
+    getCanonicalFileName: (file) => file,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (file) => file === entry || Object.hasOwn(files, file),
+    readFile,
+    directoryExists: (directory) =>
+      directory === "/" || directories.has(directory.replace(/\/+$/u, "")),
+    getDirectories: () => [],
+  };
+  const program = ts.createProgram([entry], options, host);
+  const checked = program
+    .getSourceFiles()
+    .filter(
+      (file) =>
+        file.fileName === entry ||
+        Object.keys(ownPackages).some((name) =>
+          file.fileName.startsWith(`/node_modules/${name}/`)
+        )
+    );
+  const [error] = [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...checked.flatMap((file) => [
+      ...program.getSyntacticDiagnostics(file),
+      ...program.getSemanticDiagnostics(file),
+    ]),
+  ];
+  return { read, error };
+};
+
+/**
+ * The kit's types with the type chunks in place of the platform's own
+ * sources (`sources`, as `collectTypes` collected them for `specifiers`),
+ * and of everything else only what a check of the chunks reads: the
+ * libraries that only the sources' insides imported go with them. Fails
+ * the build should the chunks not type-check, or leave any of
+ * `specifiers` unresolved.
+ */
+const typeChunks = async (
+  sources: Readonly<Record<string, string>>,
+  specifiers: readonly string[]
+): Promise<Record<string, string>> => {
+  const libraries = Object.fromEntries(
+    Object.entries(sources).filter(
+      ([file]) =>
+        !Object.keys(ownPackages).some((name) =>
+          file.startsWith(`/node_modules/${name}/`)
+        )
+    )
+  );
+  const files = { ...libraries, ...(await rollUpTypes(specifiers)) };
+  const { read, error } = readByKit(files, specifiers);
+  if (error !== undefined) {
+    throw new Error(
+      `The kit's type chunks don't type-check: ${error.file?.fileName ?? ""} ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(files).filter(([file]) => read.has(file))
+  );
 };
 
 const componentsJsonSchema = z.looseObject({
@@ -1044,6 +1473,24 @@ const buildAppCompiler = async (
     sdkRoot,
   ];
   const stylesheets = collectStylesheets();
+  // Generated workflow code and compute modules are type-checked against
+  // their SDK entries too, and an App's server code against the SDK's
+  // server side.
+  const typed = [
+    ...imports,
+    "lucide-react",
+    ...openWorkflowSdkImports,
+    ...computeSdkImports,
+    // An App's server code is type-checked against what it and its
+    // generated modules import (app-code.ts).
+    ...serverSdkImports,
+    "@grasp-os/sdk/database",
+    // And its tests, against the SDK's testing module (app-code.ts).
+    "@grasp-os/sdk/testing",
+    // And its workflows, against the SDK's workflow modules.
+    ...sdkImports,
+  ];
+  const typeSources = collectTypes(typed);
   const kit: Kit = {
     imports,
     icons: iconNames,
@@ -1051,28 +1498,14 @@ const buildAppCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     previewModuleImports,
-    // Generated workflow code and compute modules are type-checked against
-    // their SDK entries too, and an App's server code against the SDK's
-    // server side.
-    types: collectTypes([
-      ...imports,
-      "lucide-react",
-      ...openWorkflowSdkImports,
-      ...computeSdkImports,
-      // An App's server code is type-checked against what it and its
-      // generated modules import (app-code.ts).
-      ...serverSdkImports,
-      "@grasp-os/sdk/database",
-      // And its tests, against the SDK's testing module (app-code.ts).
-      "@grasp-os/sdk/testing",
-      // And its workflows, against the SDK's workflow modules.
-      ...sdkImports,
-    ]),
+    types: await typeChunks(typeSources, typed),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),
   };
   const kitJson = JSON.stringify(kit);
+  // The sources the type chunks are made of, which the agent reads.
+  const referenceJson = JSON.stringify(referenceOf(typeSources));
   const compiler = await buildCompiler();
   const packageBuilder = await buildPackageBuilder();
   // The WebAssembly the builder's esbuild runs, as the package ships it.
@@ -1095,10 +1528,13 @@ const buildAppCompiler = async (
   );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
   // Everything a build depends on: the compiler, what it knows of the kit,
-  // and the kit's and the SDK's modules the App's modules import.
+  // and the kit's and the SDK's modules the App's modules import; and the
+  // agent's reference, which a change to the sources' comments alone
+  // changes.
   const version = createHash("sha256")
     .update(compiler)
     .update(kitJson)
+    .update(referenceJson)
     .update(kitModules.version)
     .update(kitPreviewModules.version)
     .update(workflowSdkModules.version)
@@ -1117,7 +1553,7 @@ const buildAppCompiler = async (
     [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
-    [compilerAssets.reference]: JSON.stringify(referenceOf(kit.types)),
+    [compilerAssets.reference]: referenceJson,
     [compilerAssets.jqWasm]: jqWasm,
   });
   // Core imports only the version; the rest it reads from its static

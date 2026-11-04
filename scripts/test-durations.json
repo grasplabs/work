@@ -10,6 +10,7 @@
   "@grasp-os/brain test/transcripts.test.ts": 1.2,
   "@grasp-os/chat test/state.test.ts": 0.4,
   "@grasp-os/chat test/workerd.test.ts": 0.6,
+  "@grasp-os/compiler build-heap.test.ts": 30,
   "@grasp-os/compiler build-lock-race.test.ts": 60,
   "@grasp-os/compiler build-lock-wait.test.ts": 37,
   "@grasp-os/compiler build-rebuilds.test.ts": 75,

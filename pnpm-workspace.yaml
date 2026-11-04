@@ -24,6 +24,10 @@ catalog:
   "@shadcn/lint": 0.1.5
   "@secretlint/secretlint-rule-preset-recommend": 13.0.5
   "@types/node": 26.6.2
+  # Roll up the App compiler's type chunks at release time
+  # (packages/compiler).
+  rolldown: 1.2.16
+  rolldown-plugin-dts: 0.29.0
   # Signs the release upload to R2's S3 API (scripts/release).
   aws4fetch: 1.0.20
   secretlint: 13.0.5
