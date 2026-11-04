@@ -88,6 +88,26 @@ export const allowedMethods: ReadonlySet<string> = new Set([
   ...numberMethods.keys(),
 ]);
 
+/** The longest a name stands in a failure's message, as the expression wrote it. */
+const maxNameInMessage = 64;
+
+/**
+ * Why an expression failed as it ran: `expression.failed`, the code the
+ * run host keeps, with a message it shows as written (capped, as display
+ * text only). The message is built from the expression's own text alone,
+ * the field or method name it wrote, never from a value it read: a key is
+ * always a literal of the expression (expression-check.ts,
+ * `expression.computed-key`). A `TypeError`, as JavaScript would throw.
+ */
+export class ExpressionFailedError extends TypeError {
+  override readonly name = "ExpressionFailedError";
+  readonly code = "expression.failed";
+}
+
+/** `name`, as the expression wrote it, short enough for a message. */
+const named = (name: string): string =>
+  name.length > maxNameInMessage ? `${name.slice(0, maxNameInMessage)}…` : name;
+
 /**
  * `object[key]` of an expression: an own data property's value, or
  * `undefined` where there is none, as JavaScript gives a missing field.
@@ -100,7 +120,10 @@ export const readMember = (
 ): Json | undefined => {
   const name = String(key);
   if (object === null || object === undefined) {
-    throw new TypeError(`Cannot read "${name}" of ${String(object)}.`);
+    // `null` or `undefined`, the only values a message names.
+    throw new ExpressionFailedError(
+      `Cannot read "${named(name)}" of ${String(object)}.`
+    );
   }
   if (typeof object !== "object" && typeof object !== "string") {
     return undefined;
@@ -111,7 +134,9 @@ export const readMember = (
   }
   const value: unknown = descriptor.value;
   if (!("value" in descriptor) || typeof value === "function") {
-    throw new TypeError(`Cannot read "${name}": not a data field.`);
+    throw new ExpressionFailedError(
+      `Cannot read "${named(name)}": not a data field.`
+    );
   }
   // SAFETY: an own data field, no function, of a run's JSON values (the
   // run host's contract) or of what the expression built from them.
@@ -148,15 +173,35 @@ export const callMethod = (
 ): Json | undefined => {
   const method = methodsOf(receiver).get(name);
   if (method === undefined) {
-    throw new TypeError(`\`${name}\` can't be called on this value.`);
+    throw new ExpressionFailedError(
+      `\`${named(name)}\` can't be called on this value.`
+    );
   }
   const fits = callbackMethods.has(name)
     ? args.length === 1 && typeof args[0] === "function"
     : args.every((arg) => typeof arg !== "function");
   if (!fits) {
-    throw new TypeError(`\`${name}\` was given the wrong arguments.`);
+    throw new ExpressionFailedError(
+      `\`${named(name)}\` was given the wrong arguments.`
+    );
   }
-  const result: unknown = Reflect.apply(method, receiver, args);
+  let result: unknown;
+  try {
+    result = Reflect.apply(method, receiver, args);
+  } catch (error) {
+    // A callback's own failure is already the expression's.
+    if (error instanceof ExpressionFailedError) {
+      throw error;
+    }
+    // A built-in's own message may quote the value (`toFixed`'s digits):
+    // the method's name only.
+    throw new ExpressionFailedError(
+      `\`${named(name)}\` failed on this value.`,
+      {
+        cause: error,
+      }
+    );
+  }
   // SAFETY: an allowed built-in's result on JSON values and what the
   // expression's own callbacks answered, which are built from them.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
