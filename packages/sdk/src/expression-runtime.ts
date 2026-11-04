@@ -187,13 +187,18 @@ export type ExpressionValue =
 /**
  * An expression's whole value as JSON, as `JSON.stringify` writes it:
  * `undefined`, which JSON has no value for, is `null` on its own and in a
- * list, and an object's member set to it is left out. It takes any value
+ * list, and an object's member set to it is left out; a number JSON can't
+ * write (`NaN`, `±Infinity`) is `null`, and `-0` is `0`. It takes any value
  * an expression evaluates to, so generated code runs every expression,
  * whatever its shape, through this one call.
  */
 export const jsonValue = (value: ExpressionValue): Json => {
   if (value === undefined) {
     return null;
+  }
+  if (typeof value === "number") {
+    // `+ 0` makes `-0` `0`, as JSON writes it.
+    return Number.isFinite(value) ? value + 0 : null;
   }
   if (Array.isArray(value)) {
     return value.map((item: ExpressionValue) => jsonValue(item));

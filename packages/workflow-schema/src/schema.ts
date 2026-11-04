@@ -1,4 +1,6 @@
 import type { Schema } from "@cfworker/json-schema";
+import { blockedProperties } from "@grasp-os/sdk/expression-check";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import {
   aliasPattern,
@@ -175,6 +177,7 @@ export const workflowSchema: Schema = {
           type: "string",
           maxLength: formatLimits.idLength,
           pattern: stepIdPattern,
+          not: { enum: [...blockedProperties] },
         },
         type: { enum: stepTypes },
         title: {
@@ -208,15 +211,22 @@ export const workflowSchema: Schema = {
       additionalProperties: false,
     },
     // JSON in which any part may be an expression; an object with `$expr`
-    // is always one, so no literal object holds that key.
+    // is always one, so no literal object holds that key. Its lists and
+    // objects are as large as a sealed call's template takes one.
     value: {
       anyOf: [
         ref("expression"),
         { type: ["null", "boolean", "number", "string"] },
-        { type: "array", items: ref("value") },
+        {
+          type: "array",
+          maxItems: sealedBuildLimits.templateItems,
+          items: ref("value"),
+        },
         {
           type: "object",
           not: { required: ["$expr"] },
+          maxProperties: sealedBuildLimits.templateItems,
+          propertyNames: { maxLength: sealedBuildLimits.templateKeyLength },
           additionalProperties: ref("value"),
         },
       ],

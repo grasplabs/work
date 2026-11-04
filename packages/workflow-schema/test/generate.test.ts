@@ -90,7 +90,7 @@ const hostileArguments = (): Record<string, string> => {
   return Object.fromEntries(entries);
 };
 
-/** `steps`, each one, at every level, titled anew. */
+/** `steps`, each one, at every level (`catch.do` too), titled anew. */
 const retitled = (steps: unknown): unknown =>
   Array.isArray(steps)
     ? steps.map((step: Record<string, unknown>) => ({
@@ -101,6 +101,14 @@ const retitled = (steps: unknown): unknown =>
             list in step ? [[list, retitled(step[list])]] : []
           )
         ),
+        ...(typeof step.catch === "object" && step.catch !== null
+          ? {
+              catch: {
+                ...step.catch,
+                ...("do" in step.catch ? { do: retitled(step.catch.do) } : {}),
+              },
+            }
+          : {}),
       }))
     : steps;
 
@@ -189,9 +197,6 @@ describe("generating a workflow", () => {
 
   it("seals each step's task as the run host checks it", () => {
     const generated = generateWorkflow(checked(everyStep()), "workflow");
-    const slotOf = (pointer: string) =>
-      generated.expressions.find((expression) => expression.pointer === pointer)
-        ?.slot;
     expect({
       tasks: generated.tasks.map(({ id, kind, pointer, steps }) => ({
         id,
@@ -206,6 +211,12 @@ describe("generating a workflow", () => {
       stop: generated.tasks.find(({ id }) => id === "stop")?.error,
       guarded: generated.tasks.find(({ id }) => id === "guarded")?.catch,
       params: generated.params,
+      // Each slot, in the order the code evaluates them.
+      slots: generated.expressions.map(({ slot, pointer, result }) => [
+        slot,
+        pointer,
+        result,
+      ]),
     }).toStrictEqual({
       tasks: [
         { id: "linger", kind: "wait", pointer: "/steps/0", steps: ["task"] },
@@ -243,12 +254,13 @@ describe("generating a workflow", () => {
         operation: "mail.send",
         arguments: {
           object: [
-            ["to", { slot: slotOf("/steps/1/arguments/to") }],
+            ["to", { slot: 0 }],
             ["subject", { param: "token" }],
-            ...["priority", "cc", "headers", "tone", "shout"].map(
-              (name) =>
-                [name, { slot: slotOf(`/steps/1/arguments/${name}`) }] as const
-            ),
+            ["priority", { slot: 1 }],
+            ["cc", { slot: 2 }],
+            ["headers", { slot: 3 }],
+            ["tone", { slot: 4 }],
+            ["shout", { slot: 5 }],
           ],
         },
       },
@@ -258,14 +270,11 @@ describe("generating a workflow", () => {
         instructions: { literal: "Greet them." },
         input: {
           object: [
-            ["who", { slot: slotOf("/steps/2/input/who") }],
+            ["who", { slot: 6 }],
             [
               "tags",
               {
-                array: [
-                  { literal: "vip" },
-                  { slot: slotOf("/steps/2/input/tags/1") },
-                ],
+                array: [{ literal: "vip" }, { slot: 7 }],
               },
             ],
           ],
@@ -275,16 +284,35 @@ describe("generating a workflow", () => {
       linger: 3_600_000,
       pause: {
         name: "grasp.sleepUntil",
-        timestamp: { slot: slotOf("/steps/3/then/0/until") },
+        timestamp: { slot: 9 },
       },
       stop: { type: "urn:grasp:error:stop", status: 422, title: "Stopped." },
       guarded: {
         variable: "error",
         errors: { status: 500 },
-        retry: { attempts: 3, delayMs: 1000, backoff: "constant" },
+        when: 10,
+        retry: { attempts: 3, delayMs: 1000, backoff: "constant", when: 11 },
       },
       // The sensitive token is never handed to the run's code.
       params: ["greeting"],
+      slots: [
+        [0, "/steps/1/arguments/to", "json"],
+        [1, "/steps/1/arguments/priority", "json"],
+        [2, "/steps/1/arguments/cc", "json"],
+        [3, "/steps/1/arguments/headers", "json"],
+        [4, "/steps/1/arguments/tone", "json"],
+        [5, "/steps/1/arguments/shout", "json"],
+        [6, "/steps/2/input/who", "json"],
+        [7, "/steps/2/input/tags/1", "json"],
+        [8, "/steps/3/condition", "boolean"],
+        [9, "/steps/3/then/0/until", "json"],
+        [10, "/steps/4/catch/when", "boolean"],
+        [11, "/steps/4/catch/retry/when", "boolean"],
+        [12, "/steps/4/try/0/arguments/to", "json"],
+        [13, "/steps/4/catch/do/0/arguments/to", "json"],
+        [14, "/steps/4/catch/do/0/arguments/subject", "json"],
+        [15, "/output/value/line", "json"],
+      ],
     });
   });
 

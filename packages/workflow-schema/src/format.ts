@@ -10,6 +10,8 @@
 // `type` in the union, nothing else changing (forEach, decision, fork,
 // race, event waits and child runs come so).
 
+import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
+
 /**
  * The format's published JSON Schema, by its versioned URL: every document
  * names it as its `$schema`, the common way (as a tsconfig.json or a
@@ -239,12 +241,22 @@ export interface WorkflowDocument {
   readonly steps: readonly Step[];
 }
 
-/** The format's bounds: what one workflow may hold. */
+/**
+ * The format's bounds: what one workflow may hold. What it generates is
+ * bounded besides by what a sealed build holds (`sealedBuildLimits`).
+ */
 export const formatLimits = {
   /** Steps in all, at every level. */
   steps: 200,
   /** Lists one inside another (`then`, `try`, `catch.do`). */
   depth: 8,
+  /**
+   * Levels of the whole document, its leaves included, measured without
+   * recursion before its schema is applied, which recurses. The deepest
+   * list's step is 24 levels in (3 a list: `catch`, `do`, the step), so a
+   * value or a schema there still nests as deep as the SDK takes one (32).
+   */
+  documentDepth: 64,
   /** One expression's source. */
   expressionLength: 2048,
   idLength: 64,
@@ -253,7 +265,32 @@ export const formatLimits = {
   bindings: 64,
 } as const;
 
-/** What a step ID and a parameter name may be: lower-case words, dashes. */
+const unitMs: Readonly<Record<DurationUnit, number>> = {
+  second: 1000,
+  minute: 60_000,
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 604_800_000,
+};
+
+const isUnit = (unit: string): unit is DurationUnit =>
+  durationUnits.includes(unit);
+
+/** A duration in milliseconds: the schema checked its shape. */
+export const durationMs = (duration: Duration): number => {
+  const [count = "", unit = ""] = duration.split(" ");
+  const singular = unit.replace(/s$/u, "");
+  if (!isUnit(singular)) {
+    throw new Error(`Not a duration: ${duration}`);
+  }
+  return Number(count) * unitMs[singular];
+};
+
+/**
+ * What a step ID may be: lower-case words joined by dashes, and none of
+ * the names an expression may never read (`constructor`, `prototype`), so
+ * `steps.<id>.output` reads every step.
+ */
 export const stepIdPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
 
 /**
@@ -268,8 +305,7 @@ export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
 
 /**
  * A workflow's own module and export, `local:code/<path>.ts#<export>`: its
- * module as the host keeps the workflow's modules
- * (`@grasp-os/shared/workflow-modules`).
+ * module's path as the host keeps the workflow's modules
+ * (`workflowModulePattern`), then an export's name.
  */
-export const localContractPattern =
-  "^local:(code/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.ts)#([A-Za-z_$][A-Za-z0-9_$]*)$";
+export const localContractPattern = `^local:(${workflowModulePattern.source.slice(1, -1)})#([A-Za-z_$][A-Za-z0-9_$]*)$`;

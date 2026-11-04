@@ -1,8 +1,15 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
+import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { tasksFileSchema } from "../src/workflow-builds.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
@@ -10,6 +17,8 @@ import {
   allowedModel,
   checkedCalls,
   hello,
+  objectSchema,
+  person,
   ranAs,
   retryingEngine,
   sdkWorkflow,
@@ -17,6 +26,23 @@ import {
   waitingRun,
 } from "./sealed-run-harness.ts";
 import type { Sealed } from "./sealed-run-harness.ts";
+import { unique } from "./sign-in.ts";
+
+/**
+ * What an engine ran of try `guarded` around step `fail`, by `tries`:
+ * the retry rounds its policy decided and ran, and whether the catch took
+ * the failure and ran its `tell`.
+ */
+const guardedRan = (tries: ReadonlyMap<string, number>) => {
+  const keys = [...tries.keys()];
+  return {
+    decided: keys.filter((key) => key.endsWith(":decide")).length,
+    retried: keys.filter((key) => key.endsWith(":run")).length,
+    failed: tries.get("key:fail:task"),
+    caught: tries.has("key:guarded:catch"),
+    told: tries.has("key:tell:task"),
+  };
+};
 
 // grasp-workflow/1's generated code, run end to end on the run host
 // (sealed-run.ts) with the sealed table its generator made: a real
@@ -59,11 +85,13 @@ const objectOf = (properties: Record<string, unknown>) => ({
  */
 const generated = (
   steps: unknown[],
-  output?: { schema: unknown; value: unknown }
+  output?: { schema: unknown; value: unknown },
+  bindings: Record<string, unknown> = declared.bindings
 ) => {
   const result = checkWorkflow({
     $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-    ...declared,
+    params: declared.params,
+    bindings,
     ...(output === undefined ? {} : { output }),
     steps,
   });
@@ -280,6 +308,267 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     expect({ ended: ran.ended, tampered: ran.tampered }).toStrictEqual({
       ended: "workflow.raised",
       tampered: [],
+    });
+  });
+});
+
+/** A module of calculations: `total` sums, `broken` always fails. */
+const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
+
+export const total = compute({
+  input: v.array(v.number()).max(100),
+  output: v.number(),
+  handler: (amounts) => amounts.reduce((all, amount) => all + amount, 0),
+});
+
+export const broken = compute({
+  input: v.number(),
+  output: v.number(),
+  handler: () => {
+    throw new Error("Never adds up");
+  },
+});
+`;
+
+/** An action that answers whom it noted, reaching nothing. */
+const noteModule = `import { action, v } from "@grasp-os/sdk/action";
+
+export const note = action({
+  args: { to: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [],
+  handler: async (_ctx, { to }) => ({ status: \`noted \${to}\` }),
+});
+`;
+
+/** The bindings of `localWorkflow`'s workflow, as grasp-workflow/1 declares them. */
+const local = {
+  total: { kind: "compute", contract: "local:code/total.ts#total" },
+  broken: { kind: "compute", contract: "local:code/total.ts#broken" },
+  note: { kind: "action", contract: "local:code/note.ts#note" },
+};
+
+/** Task `name`, calling the workflow's own `binding` with `args`. */
+const operationTask = (
+  name: string,
+  binding: string,
+  args: unknown
+): Record<string, unknown> => ({
+  [name]: { call: "grasp.operation", with: { binding, arguments: args } },
+});
+
+/**
+ * A workflow of a builder's whose bindings reach its own modules, compute
+ * `total` and `broken` and action `note`, published with them: after an
+ * hour's wait, it calls each.
+ */
+const localWorkflow = async () => {
+  const by = await person("builder");
+  const workflow = await createWorkflowResource(env, by, `local-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: {
+              ...local,
+              // The profile has an action as an operation of the
+              // workflow's own module.
+              note: { ...local.note, kind: "operation" },
+            },
+          },
+        },
+      },
+      input: { schema: objectSchema({ who: { type: "string" } }) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        { linger: { wait: "PT1H" } },
+        {
+          add: {
+            call: "grasp.compute",
+            with: { binding: "total", arguments: [1, 2, 3] },
+          },
+        },
+        {
+          fail: {
+            call: "grasp.compute",
+            with: { binding: "broken", arguments: 1 },
+          },
+        },
+        operationTask("tell", "note", { to: "${ $workflow.input.who }" }),
+        { finish: { set: { status: "done" } } },
+      ],
+    }),
+    basedOn: null,
+    modules: { "code/total.ts": totalModule, "code/note.ts": noteModule },
+  });
+  return { by, workflow };
+};
+
+describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
+  let owned: Awaited<ReturnType<typeof localWorkflow>>;
+
+  beforeAll(async () => {
+    owned = await localWorkflow();
+  });
+
+  afterAll(endLiveResourceRuns);
+
+  it("calls a compute and an action binding as sealed, refusing none", async () => {
+    const { source, sealed: withTable } = generated(
+      [
+        { id: "linger", type: "wait", for: "1 hour" },
+        {
+          id: "add",
+          type: "do",
+          binding: "total",
+          arguments: [1, { $expr: "input.who.length" }, 3],
+        },
+        {
+          id: "tell",
+          type: "do",
+          binding: "note",
+          arguments: { to: { $expr: "input.who" } },
+        },
+      ],
+      {
+        schema: objectOf({
+          total: { type: "number" },
+          told: { type: "string" },
+        }),
+        value: {
+          total: { $expr: "steps.add.output" },
+          told: { $expr: "steps.tell.output.status" },
+        },
+      },
+      local
+    );
+    const runId = await waitingRun(owned);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      checked: checked.map(({ step, call, binding }) => ({
+        step,
+        call,
+        binding,
+      })),
+    }).toStrictEqual({
+      // Ada's name is 3 long.
+      ran: {
+        ended: { total: 7, told: "noted Ada" },
+        tampered: [],
+      },
+      checked: [
+        { step: "add:task", call: "grasp.compute", binding: "total" },
+        { step: "tell:task", call: "grasp.action", binding: "note" },
+      ],
+    });
+  });
+
+  it("decides a catch's and a retry's `when` as booleans, retrying while the retry's holds", async () => {
+    const tries = new Map<string, number>();
+    const { source, sealed: withTable } = generated(
+      [
+        {
+          id: "guarded",
+          type: "try",
+          try: [{ id: "fail", type: "do", binding: "broken", arguments: 1 }],
+          catch: {
+            when: { $expr: "error.status >= 400" },
+            retry: {
+              attempts: 3,
+              delay: "1 second",
+              backoff: "constant",
+              // A number: the choice the host reads takes a boolean.
+              when: { $expr: "error.status" },
+            },
+            do: [
+              {
+                id: "tell",
+                type: "do",
+                binding: "note",
+                arguments: { to: { $expr: "error.type" } },
+              },
+            ],
+          },
+        },
+      ],
+      undefined,
+      local
+    );
+    const ran = await ranAs(await waitingRun(owned), source, {
+      engine: retryingEngine(tries),
+      sealed: withTable,
+    });
+    expect({ ran, guarded: guardedRan(tries) }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      // Rounds 2 and 3 of its 3 attempts, each decided, then caught.
+      guarded: {
+        decided: 2,
+        retried: 2,
+        failed: 1,
+        caught: true,
+        told: true,
+      },
+    });
+  });
+
+  it("takes a retry `when` that throws as not retrying, the failure recorded and caught", async () => {
+    const tries = new Map<string, number>();
+    const { source, sealed: withTable } = generated(
+      [
+        {
+          id: "guarded",
+          type: "try",
+          try: [{ id: "fail", type: "do", binding: "broken", arguments: 1 }],
+          catch: {
+            retry: {
+              attempts: 3,
+              delay: "1 second",
+              backoff: "constant",
+              // Reads past a field that isn't there: it throws.
+              when: { $expr: "error.missing.deeper === 1" },
+            },
+            do: [
+              {
+                id: "tell",
+                type: "do",
+                binding: "note",
+                arguments: { to: { $expr: "error.type" } },
+              },
+            ],
+          },
+        },
+      ],
+      undefined,
+      local
+    );
+    const ran = await ranAs(await waitingRun(owned), source, {
+      engine: retryingEngine(tries),
+      sealed: withTable,
+    });
+    expect({ ran, guarded: guardedRan(tries) }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      // Its decision failed: no round runs, and the failure is the
+      // step's own, which the catch takes.
+      guarded: {
+        decided: 1,
+        retried: 0,
+        failed: 1,
+        caught: true,
+        told: true,
+      },
     });
   });
 });

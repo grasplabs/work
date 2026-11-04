@@ -11,6 +11,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
@@ -669,7 +670,7 @@ const sleepsUntil = (task: SealedTask): boolean =>
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
 
 /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
-const maxDeadlineMs = 365 * 86_400_000;
+const maxDeadlineMs = sealedBuildLimits.deadlineMs;
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
 const maxRetryDelayMs = 365 * 86_400_000;
@@ -2600,9 +2601,23 @@ export const sealedRunModules = ({
 };
 
 /**
+ * The aliases of the build's calls to the workflow's own modules (its
+ * compute and action bindings): sealed with the build, which no approval
+ * freezes, so the start has them from its table.
+ */
+const localAliases = (run: HostedSealedRun): string[] =>
+  run.build.tasks.flatMap((task) =>
+    task.kind === "call" &&
+    (task.call.name === "grasp.compute" || task.call.name === "grasp.action")
+      ? [task.call.binding]
+      : []
+  );
+
+/**
  * What a sealed run's main module starts with: its input, only the
- * parameters the build lists as not sensitive, and its frozen catalog
- * bindings by alias, each a binding whose `call` goes to the host.
+ * parameters the build lists as not sensitive, and its bindings by alias,
+ * its frozen catalog ones and its own modules', each a binding whose
+ * `call` goes to the host, which holds every call to the sealed table.
  */
 export const sealedRunStart = (run: HostedSealedRun) => ({
   runId: run.runId,
@@ -2612,7 +2627,9 @@ export const sealedRunStart = (run: HostedSealedRun) => ({
     )
   ),
   input: run.input,
-  connections: [...run.calling.bindings.keys()],
+  connections: [
+    ...new Set([...run.calling.bindings.keys(), ...localAliases(run)]),
+  ],
   collections: [],
   brains: [],
 });
