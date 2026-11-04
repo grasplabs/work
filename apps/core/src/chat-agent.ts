@@ -1,9 +1,11 @@
 import type { Context } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import { retryAssistantCall } from "@earendil-works/pi-ai/utils/retry";
 import {
   AgentDoc,
   CompactionTask,
+  DEFAULT_RETRY_POLICY,
   defineExtension,
   GenerationTask,
   hook,
@@ -76,12 +78,25 @@ export interface ChatAgent {
    * asked before every model request.
    */
   withheld: () => Promise<ReadonlySet<string>>;
+  /** What the chat's summaries rest on, kept by the host (`SummaryRecords`). */
+  summaries: SummaryRecords;
   /**
    * Stops the turn, for `reason`: a hook can't end a run itself, so the
    * host aborts the chat's conversation (`Conversation.abort`). The request
    * being prepared goes out withheld as the hook left it, or not at all.
    */
   stop: (reason: Error) => void;
+}
+
+/**
+ * The code runs each of a chat's compaction summaries rests on, by the ID
+ * its text names: kept by the host, as a hook can't write to pi's storage
+ * and the model needn't read them. A summary whose record is missing rests
+ * on everything.
+ */
+export interface SummaryRecords {
+  keep: (id: string, runs: readonly string[]) => Promise<void>;
+  runs: (id: string) => Promise<readonly string[] | undefined>;
 }
 
 /** The extension's name: one per chat, so each conversation selects only its own. */
@@ -103,35 +118,53 @@ const userText = (message: Message): string => {
         .join("\n");
 };
 
-// A compaction's summary is the chat's own (`summarize`): it ends with the
-// code runs whose results it rests on, so a later revocation of any of them
-// withholds it whole. pi's summarizer can do neither: it reads the
-// transcript as stored, results the chat can no longer read included, and
-// says nothing of what it read.
+// A compaction's summary is the chat's own (`summarize`): it ends with an
+// ID the host keeps the code runs it rests on by (`SummaryRecords`), so a
+// later revocation of any of them withholds it whole. pi's summarizer can
+// do neither: it reads the transcript as stored, results the chat can no
+// longer read included, and says nothing of what it read.
 
-/** The line a summary ends with: the code runs it rests on. */
-const restsOnMark = "[Code runs this summary rests on:";
+const summaryMark = "[Summary ";
 
-const restsOnLine = (runs: ReadonlySet<string>): string =>
-  `${restsOnMark} ${[...runs].join(" ")}]`;
+const summaryLine = (id: string): string => `${summaryMark}${id}]`;
 
-const restsOnPattern = /\[Code runs this summary rests on:(?<runs>[^\]]*)\]/gu;
+const summaryPattern = /\[Summary (?<id>[0-9a-f-]{36})\]/gu;
+
+/** The IDs of the summaries `message` holds: its own, and any it was folded from. */
+const summaryIds = (message: Message): string[] =>
+  [...userText(message).matchAll(summaryPattern)].flatMap(
+    (line) => line.groups?.id ?? []
+  );
+
+/** What a summary rests on: those runs, or anything, when its record is missing. */
+type RestsOn = ReadonlySet<string> | "everything";
 
 /**
- * The code runs a summary in `message` rests on, if it holds one: every
- * line it ends with, its earlier summaries' included. A person who typed
- * such a line only gets their message withheld with those runs.
+ * What each summary `messages` hold rests on, by its ID. A person who
+ * typed such a line only gets their message withheld with what it names.
  */
-const restsOn = (message: Message): Set<string> | undefined => {
-  const lines = [...userText(message).matchAll(restsOnPattern)];
-  return lines.length === 0
-    ? undefined
-    : new Set(
-        lines.flatMap((line) =>
-          (line.groups?.runs ?? "").split(" ").filter((id) => id !== "")
-        )
-      );
+const summariesIn = async (
+  records: SummaryRecords,
+  messages: readonly Message[]
+): Promise<Map<string, RestsOn>> => {
+  const ids = new Set(messages.flatMap(summaryIds));
+  const found = await Promise.all(
+    [...ids].map(async (id) => {
+      const runs = await records.runs(id);
+      return [id, runs === undefined ? "everything" : new Set(runs)] as const;
+    })
+  );
+  return new Map(found);
 };
+
+/** Whether a summary resting on `on` must be withheld while `withheld` is. */
+const restsOnWithheld = (
+  on: RestsOn | undefined,
+  withheld: ReadonlySet<string>
+): boolean =>
+  on === "everything"
+    ? withheld.size > 0
+    : [...(on ?? [])].some((id) => withheld.has(id));
 
 /** What a summary resting on what the chat can no longer read reads as. */
 export const withheldSummary =
@@ -145,14 +178,16 @@ export const withheldSummary =
  */
 const withholdSummaries = (
   messages: readonly Message[],
-  withheld: ReadonlySet<string>
+  withheld: ReadonlySet<string>,
+  summaries: ReadonlyMap<string, RestsOn>
 ): { messages: Message[]; underWay: boolean } => {
   let after = false;
   let underWay = false;
   const shown = messages.map((message): Message => {
     if (message.role === "user") {
-      const runs = restsOn(message);
-      after = runs !== undefined && [...runs].some((id) => withheld.has(id));
+      after = summaryIds(message).some((id) =>
+        restsOnWithheld(summaries.get(id), withheld)
+      );
       underWay = after;
       return after
         ? { ...message, content: [{ type: "text", text: withheldSummary }] }
@@ -172,9 +207,10 @@ const withholdSummaries = (
 /** `messages` as one request may send them while `withheld` is withheld. */
 const withholding = (
   messages: readonly Message[],
-  withheld: ReadonlySet<string>
+  withheld: ReadonlySet<string>,
+  records: ReadonlyMap<string, RestsOn>
 ): { messages: Message[]; underWay: boolean } => {
-  const summaries = withholdSummaries(messages, withheld);
+  const summaries = withholdSummaries(messages, withheld, records);
   return {
     messages: withholdRuns(summaries.messages, withheld),
     underWay: summaries.underWay || readsUnderWay(summaries.messages, withheld),
@@ -209,7 +245,7 @@ const blanked = (messages: readonly Message[]): Message[] => {
     const summary =
       typeof message.content !== "string" &&
       message.content.some(
-        (part) => part.type === "text" && part.text.includes(restsOnMark)
+        (part) => part.type === "text" && part.text.includes(summaryMark)
       );
     return summary
       ? { ...message, content: [{ type: "text", text: withheldSummary }] }
@@ -228,11 +264,15 @@ const blanked = (messages: readonly Message[]): Message[] => {
  * and every summary is blanked, with a plain map, and the turn stops.
  */
 const guarded = async (
-  agent: Pick<ChatAgent, "withheld">,
+  agent: Pick<ChatAgent, "withheld" | "summaries">,
   messages: readonly Message[]
 ): Promise<{ messages: Message[]; stop?: Error }> => {
   try {
-    const sent = withholding(messages, await agent.withheld());
+    const sent = withholding(
+      messages,
+      await agent.withheld(),
+      await summariesIn(agent.summaries, messages)
+    );
     return {
       messages: latestSections(sent.messages),
       ...(sent.underWay
@@ -290,14 +330,17 @@ const summaryAsk = (focus: string | undefined): string =>
 
 /**
  * The summary of the part of a chat a compaction replaces, made from what
- * a request may send of it now (`withholding`), ending with the code runs
- * it rests on: those whose results it read, and those its earlier summary
- * rested on, less any withheld now, whose content it never saw. Through
- * the conversation's own model, as pi's summarizer would call it. None
- * when the model gives no summary.
+ * a request may send of it now (`withholding`), ending with its ID. What
+ * it rests on is kept by that ID: the runs whose results it read, and
+ * those its earlier summary rested on, less any withheld now, whose
+ * content it never saw. An earlier summary that rests on everything (its
+ * record lost) leaves this one without a record, so it does too. Through
+ * the conversation's own model, as pi's summarizer would call it, its
+ * retryable errors retried as pi retries a model request. None when the
+ * model gives no summary.
  */
 const summarize = async (
-  agent: Pick<ChatAgent, "withheld">,
+  agent: Pick<ChatAgent, "withheld" | "summaries">,
   part: { messages: readonly Message[]; instructions?: string },
   api: HookApi,
   context: Context
@@ -312,36 +355,47 @@ const summarize = async (
   if (model === undefined) {
     return undefined;
   }
+  const earlier = await summariesIn(agent.summaries, part.messages);
   const covered = runsIn(part.messages);
-  for (const message of part.messages) {
-    for (const id of restsOn(message) ?? []) {
-      covered.add(id);
+  let everything = false;
+  for (const on of earlier.values()) {
+    if (on === "everything") {
+      everything = true;
+    } else {
+      for (const id of on) {
+        covered.add(id);
+      }
     }
   }
-  const restsOnNow = new Set([...covered].filter((id) => !withheld.has(id)));
-  const shown = withholding(part.messages, withheld).messages;
+  const shown = withholding(part.messages, withheld, earlier).messages;
   const now = Date.now();
-  const answer = await api.models.completeSimple(
-    model,
-    {
-      messages: [
-        { role: "system", content: summarySystem, timestamp: now },
-        {
-          role: "user",
-          content: `<conversation>\n${transcriptOf(shown)}\n</conversation>\n\n${summaryAsk(part.instructions)}`,
-          timestamp: now,
-        },
-      ],
-    },
-    {
-      maxTokens:
-        model.maxTokens > 0
-          ? Math.min(summaryMaxTokens, model.maxTokens)
-          : summaryMaxTokens,
-      ...(context.abortSignal === undefined
-        ? {}
-        : { signal: context.abortSignal }),
-    }
+  const ask = async () =>
+    await api.models.completeSimple(
+      model,
+      {
+        messages: [
+          { role: "system", content: summarySystem, timestamp: now },
+          {
+            role: "user",
+            content: `<conversation>\n${transcriptOf(shown)}\n</conversation>\n\n${summaryAsk(part.instructions)}`,
+            timestamp: now,
+          },
+        ],
+      },
+      {
+        maxTokens:
+          model.maxTokens > 0
+            ? Math.min(summaryMaxTokens, model.maxTokens)
+            : summaryMaxTokens,
+        ...(context.abortSignal === undefined
+          ? {}
+          : { signal: context.abortSignal }),
+      }
+    );
+  const answer = await retryAssistantCall(
+    ask,
+    DEFAULT_RETRY_POLICY,
+    context.abortSignal
   );
   const text = answer.content
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
@@ -350,7 +404,14 @@ const summarize = async (
   if (answer.stopReason !== "stop" || text === "") {
     return undefined;
   }
-  return restsOnNow.size === 0 ? text : `${text}\n\n${restsOnLine(restsOnNow)}`;
+  const id = crypto.randomUUID();
+  if (!everything) {
+    await agent.summaries.keep(
+      id,
+      [...covered].filter((run) => !withheld.has(run))
+    );
+  }
+  return `${text}\n\n${summaryLine(id)}`;
 };
 
 /**

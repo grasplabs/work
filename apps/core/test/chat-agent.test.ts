@@ -123,7 +123,13 @@ const openChat = async (
   {
     contextWindow = 200_000,
     settings,
-  }: { contextWindow?: number; settings?: HarnessSettings } = {}
+    failedSummaries = 0,
+  }: {
+    contextWindow?: number;
+    settings?: HarnessSettings;
+    /** How many summary requests fail first, as an overloaded provider does. */
+    failedSummaries?: number;
+  } = {}
 ) => {
   const faux = fauxProvider({
     provider: "grasp",
@@ -137,6 +143,12 @@ const openChat = async (
   const answer: FauxResponseStep = async (request, ...rest) => {
     if (isSummaryRequest(request.messages)) {
       summaries.push(structuredClone(request.messages));
+      if (summaries.length <= failedSummaries) {
+        return fauxAssistantMessage([], {
+          stopReason: "error",
+          errorMessage: "529 overloaded",
+        });
+      }
       return says(
         JSON.stringify(request.messages).includes(secretWord)
           ? `summary saw ${secretWord}`
@@ -148,6 +160,7 @@ const openChat = async (
   };
   faux.setResponses(Array.from({ length: 1000 }, () => answer));
   const stopped: Error[] = [];
+  const records = new Map<string, readonly string[]>();
   const runs: Runs = { opened: [], revoked: new Set(), lines: [] };
   const agent: ChatAgent = {
     apis: [notes],
@@ -175,6 +188,13 @@ const openChat = async (
     codeTimeoutMs: 10_000,
     history: [],
     withheld: async () => await Promise.resolve(new Set<string>()),
+    summaries: {
+      keep: async (id, kept) => {
+        records.set(id, kept);
+        await Promise.resolve();
+      },
+      runs: async (id) => await Promise.resolve(records.get(id)),
+    },
     stop: (reason) => {
       stopped.push(reason);
     },
@@ -246,6 +266,7 @@ const openChat = async (
     restart,
     requests,
     summaries,
+    records,
     runs,
     stopped,
   };
@@ -572,6 +593,52 @@ describe("compaction", () => {
     ]);
     expect(since).not.toContain(secretWord);
     expect(since).toContain(withheldSummary);
+  });
+});
+
+describe("compaction, further", () => {
+  it("keeps what a summary rests on out of the model's text, by an ID", async () => {
+    const chat = await openChat(
+      {},
+      { contextWindow: 4000, settings: compacting }
+    );
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecretWord })),
+      chat.reply(says("Read")),
+    ]);
+    await fillUntilCompacted(chat);
+    expect([...chat.records.values()].flat()).toContain("run-1");
+    expect(JSON.stringify(chat.requests.at(-1))).not.toContain("run-1");
+  });
+
+  it("withholds a summary whose record is lost once anything is withheld", async () => {
+    const withheld = new Set<string>();
+    const chat = await openChat(
+      { withheld: async () => await Promise.resolve(withheld) },
+      { contextWindow: 4000, settings: compacting }
+    );
+    await chat.ask("Read", [
+      chat.reply(call("executeCode", { code: readsSecretWord })),
+      chat.reply(says("Read")),
+    ]);
+    await fillUntilCompacted(chat);
+    chat.records.clear();
+    withheld.add("another-run");
+    const before = chat.requests.length;
+    await chat.ask("Again?", [chat.reply(says("Withheld"))]);
+    const since = JSON.stringify(chat.requests.slice(before));
+    expect(since).not.toContain(secretWord);
+    expect(since).toContain(withheldSummary);
+  });
+
+  it("retries a summary a transient provider error failed, as pi retries a request", async () => {
+    const chat = await openChat(
+      {},
+      { contextWindow: 4000, settings: compacting, failedSummaries: 1 }
+    );
+    await fillUntilCompacted(chat);
+    expect(chat.summaries.length).toBeGreaterThan(1);
+    expect(JSON.stringify(chat.requests.at(-1))).toContain("summary saw");
   });
 });
 
