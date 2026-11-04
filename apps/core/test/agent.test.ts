@@ -1723,7 +1723,8 @@ describe("chat agent code run leases", () => {
           String(record?.id)
         )
       )
-    ).resolves.toStrictEqual({ call: "ended" });
+      // Closed as withheld: nothing more of it is admitted.
+    ).resolves.toStrictEqual({ call: "revoked" });
   });
 
   it("admits nothing a run does while its end reads revocations", async () => {
@@ -1824,7 +1825,7 @@ describe("chat agent code run leases", () => {
     ).toStrictEqual([]);
   });
 
-  it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {
+  it("ends a run's lease a Workspace restart cuts short: its record says interrupted, its later calls are refused, and the turn goes on in its ChatSession", async () => {
     const { id, stub, chat, provider, ask } = await newChat(
       codeStep(
         "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); return (await env.chat.info()).chatId; };"
@@ -1860,8 +1861,16 @@ describe("chat agent code run leases", () => {
         )
       )
     ).resolves.toStrictEqual({ call: "ended", first: false });
-    // Not run again: one step asked for, no result, no second request.
-    await scheduler.wait(6000);
+    // The turn goes on in the chat's ChatSession, as its heartbeat alarm
+    // finds it: the run's later call is refused, so its step fails, and
+    // the model answers. Not run again.
+    await runDurableObjectAlarm(chatSession(env, id, chat.id));
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(2);
+      },
+      { timeout: 15_000 }
+    );
     const [calls, results, runs] = await Promise.all([
       toolCallIds(woken, chat.id),
       codeResults(woken, chat.id),
@@ -1869,10 +1878,9 @@ describe("chat agent code run leases", () => {
     ]);
     expect({
       calls: calls.length,
-      results: results.length,
+      failed: results.map(({ isError }) => isError),
       runs: runs.length,
-      requests: provider.requests.length,
-    }).toStrictEqual({ calls: 1, results: 0, runs: 1, requests: 1 });
+    }).toStrictEqual({ calls: 1, failed: [true], runs: 1 });
   });
 });
 
