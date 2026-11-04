@@ -20,8 +20,10 @@ export type PreviewBuilt = PreviewBundle | PreviewUpdate;
 // A build runs as the asker's callback, which this object awaits, and
 // its answer goes to every ask that shares it. Kept only while it runs:
 // once it settled, however it settled, the next ask builds anew (core's
-// build cache answers the same files at once), so a failed build never
-// stands in for the next.
+// build cache answers the same files at once, a failed build too), so a
+// failed build never stands in for the next. An ask that only shared a
+// build that failed asks again once (`build`): the asker that started it
+// may have gone mid-build, taking its callback with it.
 
 /** The build running for one preview, and the revision it builds. */
 interface Building {
@@ -48,18 +50,47 @@ export class PreviewBuilds {
     if (revision !== now) {
       throw appErrors.create("app.preview_outdated");
     }
+    const joined = this.#building.get(key)?.revision === revision;
+    try {
+      return await this.#shared(key, revision, build);
+    } catch (error) {
+      // A build this ask only joined runs as another asker's callback,
+      // which goes when that asker does (a tab closed mid-build): its
+      // failure may be nothing of this ask's. So, once, it asks again: the
+      // first ask to do so builds anew, and the others share that build.
+      // One that started the build hears how it failed.
+      if (!joined) {
+        throw error;
+      }
+      return await this.#shared(key, revision, build);
+    }
+  }
+
+  /**
+   * The build running for `key` at `revision`, or one `build` starts now,
+   * kept until it settles, however it settles.
+   */
+  async #shared(
+    key: string,
+    revision: number,
+    build: () => Promise<PreviewBuilt>
+  ): Promise<PreviewBuilt> {
     const running = this.#building.get(key);
     if (running?.revision === revision) {
       return await running.built;
     }
-    const building: Building = { revision, built: build() };
-    this.#building.set(key, building);
-    try {
-      return await building.built;
-    } finally {
-      if (this.#building.get(key) === building) {
-        this.#building.delete(key);
+    const building: { current?: Building } = {};
+    const run = async (): Promise<PreviewBuilt> => {
+      try {
+        return await build();
+      } finally {
+        if (this.#building.get(key) === building.current) {
+          this.#building.delete(key);
+        }
       }
-    }
+    };
+    building.current = { revision, built: run() };
+    this.#building.set(key, building.current);
+    return await building.current.built;
   }
 }

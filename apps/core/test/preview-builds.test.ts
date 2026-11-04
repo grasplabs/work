@@ -108,8 +108,40 @@ describe("a chat's preview's builds", () => {
       })
     );
     expect({ failed, next, started }).toStrictEqual({
+      // The ask that only shared it asked again, once, and that failed too.
       failed: ["Error: The build failed.", "Error: The build failed."],
       next: "built",
+      started: 3,
+    });
+  });
+
+  it("builds again, once and shared, for the asks that shared a build whose asker went away", async () => {
+    const builds = new PreviewBuilds();
+    const gone = Promise.withResolvers<null>();
+    let started = 0;
+    // The first asker's tab closes mid-build: its callback is gone.
+    const startersBuild = async (): Promise<PreviewUpdate> => {
+      started += 1;
+      await gone.promise;
+      throw new Error("Network connection lost.");
+    };
+    const ownBuild = async (): Promise<PreviewUpdate> => {
+      started += 1;
+      return await Promise.resolve(builtAt(2, "built again"));
+    };
+    const asks = [
+      outcomeOf(builds.build("chat:app:update", 2, 2, startersBuild)),
+      outcomeOf(builds.build("chat:app:update", 2, 2, ownBuild)),
+      outcomeOf(builds.build("chat:app:update", 2, 2, ownBuild)),
+    ];
+    gone.resolve(null);
+    expect({ answers: await Promise.all(asks), started }).toStrictEqual({
+      // The one that went away hears nothing; the other two, one build.
+      answers: [
+        "Error: Network connection lost.",
+        "built again",
+        "built again",
+      ],
       started: 2,
     });
   });
