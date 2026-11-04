@@ -27,8 +27,9 @@ import type { ShownVersion } from "./draft-versions.tsx";
  * picks; of the draft's earlier `version` when they opened one, read-only,
  * at that version's first screen (the screens to pick are the latest's).
  * Each of the draft's writes comes into the frame it has open, keeping
- * what the screen holds; another screen or version starts it afresh, as
- * its key says.
+ * what the screen holds, and starts afresh one that failed to start
+ * (screen-frame.tsx); another screen or version starts it afresh, as its
+ * key says.
  */
 export const DraftPreview = ({
   chatId,

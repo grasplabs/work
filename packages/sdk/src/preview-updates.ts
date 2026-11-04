@@ -31,7 +31,11 @@
  * screen-frame.ts says why. This receiver is the preview kit's, never a
  * production screen's.
  */
-import type { PreviewApplied, PreviewPart } from "./screen-runtime.ts";
+import type {
+  PreviewApplied,
+  PreviewPart,
+  ScreenComponent,
+} from "./screen-runtime.ts";
 
 /** What the receiver works with: Refresh, the frame, and the page. */
 export interface PreviewFrame {
@@ -43,6 +47,12 @@ export interface PreviewFrame {
   discard: () => void;
   /** Swaps the registered components in: false once Refresh can't go on. */
   refresh: () => boolean;
+  /**
+   * Shows `screen`, the evaluated module's default export, as the screen,
+   * rendering it at once: what Refresh can't swap in, a screen renamed in
+   * an update (screen-runtime.ts `ShownScreen`).
+   */
+  show: (screen: ScreenComponent) => void;
   /** How many render errors React met so far. */
   renderFailures: () => number;
   /** Waits for what the swap rendered to settle (effects, a boundary). */
@@ -54,6 +64,19 @@ export interface PreviewFrame {
   /** The SHA-256 of `bytes`, in hex. */
   sha256: (bytes: Uint8Array) => Promise<string>;
 }
+
+/**
+ * Whether `value` is a component React can render as the screen: a
+ * function, as the compiler makes every screen's default export one.
+ */
+const isScreen = (value: unknown): value is ScreenComponent =>
+  typeof value === "function";
+
+/** A module's default export, whatever it is: the screen, in a screen's module. */
+const defaultOf = (evaluated: unknown): unknown =>
+  typeof evaluated === "object" && evaluated !== null
+    ? Reflect.get(evaluated, "default")
+    : undefined;
 
 /** An update the frame applied, kept to swap back to. */
 interface Version {
@@ -143,8 +166,16 @@ export const previewReceiver = (
   ): Promise<"rendered" | "unevaluated" | "broken" | "reset"> => {
     const failuresBefore = frame.renderFailures();
     evaluations += 1;
+    let screen: ScreenComponent;
     try {
-      await frame.evaluate(moduleAddress(code, evaluations));
+      const evaluated = await frame.evaluate(moduleAddress(code, evaluations));
+      const found = defaultOf(evaluated);
+      if (!isScreen(found)) {
+        throw new TypeError(
+          "The screen's module has no default export to render."
+        );
+      }
+      screen = found;
     } catch (error) {
       frame.discard();
       frame.report(error);
@@ -154,6 +185,8 @@ export const previewReceiver = (
     if (!frame.refresh()) {
       return "reset";
     }
+    // What Refresh swapped is shown; a screen of another name only so.
+    frame.show(screen);
     await frame.settle();
     return frame.renderFailures() === failuresBefore ? "rendered" : "broken";
   };

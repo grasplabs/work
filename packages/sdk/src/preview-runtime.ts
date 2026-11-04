@@ -22,6 +22,7 @@ import { commit, discard, refresh } from "./preview-refresh.ts";
 import { previewReceiver } from "./preview-updates.ts";
 import type {
   ScreenBridge,
+  ScreenComponent,
   ScreenHooks,
   ScreenStart,
 } from "./screen-runtime.ts";
@@ -100,6 +101,8 @@ export const runScreen = async (
     throw new Error("The preview kit has no screen runtime.");
   }
   let failures = 0;
+  // What shows another component as the screen, once the screen rendered.
+  const showing: { screen?: (screen: ScreenComponent) => void } = {};
   let following = false;
   const rendersNothing = (root: HTMLElement): void => {
     if (root.childNodes.length === 0) {
@@ -125,6 +128,9 @@ export const runScreen = async (
       commit,
       discard,
       refresh,
+      show: (shown) => {
+        showing.screen?.(shown);
+      },
       renderFailures: () => failures,
       settle: nextTask,
       setCss: (css) => {
@@ -149,5 +155,8 @@ export const runScreen = async (
       failures += 1;
     },
     mounted: follow,
+    shows: (show) => {
+      showing.screen = show;
+    },
   });
 };

@@ -46,8 +46,11 @@ const rendersOf = (url: string): string =>
  * A frame whose modules "render" what their code says: what is on
  * screen, the CSS, what was evaluated and reported. Like a browser's
  * module map, it evaluates one address once: importing it again hands
- * back the module made then, and registers nothing anew.
+ * back the module made then, and registers nothing anew. Each module's
+ * default export is a screen, as the compiler makes one.
  */
+const screen = (): null => null;
+
 const fakeFrame = () => {
   const evaluated: string[] = [];
   const reported: string[] = [];
@@ -60,7 +63,7 @@ const fakeFrame = () => {
       await Promise.resolve();
       seen.evaluated.push(url);
       if (modules.has(url)) {
-        return {};
+        return { default: screen };
       }
       modules.add(url);
       const code = rendersOf(url);
@@ -68,7 +71,7 @@ const fakeFrame = () => {
         throw new SyntaxError("Unexpected token");
       }
       staged = code;
-      return {};
+      return { default: screen };
     },
     commit: () => {
       if (staged === "") {
@@ -88,6 +91,7 @@ const fakeFrame = () => {
       staged = "";
     },
     refresh: () => true,
+    show: () => {},
     renderFailures: () => failures,
     settle: async () => {
       await Promise.resolve();

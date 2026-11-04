@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
+import { frameKey } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
@@ -48,6 +49,9 @@ const sealedManifestSchema = z
     artifacts: z.array(z.object({ path: z.string(), sha256: z.string() })),
   })
   .loose();
+
+/** What the test reads of a staged frame's manifest. */
+const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
 
 /** The desk screen of the notes App, saying `word` before its titles. */
 const deskSaying = (word: string): string =>
@@ -388,6 +392,35 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
         problems: [{ source: "server", at: "notes.broken" }],
       },
     });
+  });
+
+  it("stages a build again whose manifest was staged in an earlier format, and opens it at once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    const app = appIdSchema.parse(id);
+    await release(builder, app, {
+      "screens/desk.tsx": `export default function Desk() {
+  return <main>Desk</main>;
+}
+`,
+    });
+    const opened = await builder.api.screens.open(app, "desk");
+    const staged = await env.FILES.get(frameKey(opened.artifact));
+    const current = stagedFrameSchema.parse(await staged?.json());
+    // As a deploy before this format left it: no `preview`, at the key of
+    // its own format, and none of this one's.
+    const { preview: _preview, ...earlier } = current;
+    await env.FILES.delete(frameKey(opened.artifact));
+    await env.FILES.put(
+      `screen-frames/${opened.artifact}.json`,
+      JSON.stringify(earlier)
+    );
+    const again = await builder.api.screens.open(app, "desk");
+    const frame = await loadFrame(again);
+    expect({
+      sameBuild: again.artifact === opened.artifact,
+      status: frame?.status,
+    }).toStrictEqual({ sameBuild: true, status: 200 });
   });
 
   it("opens a version of the App only from the person's own chat", async () => {

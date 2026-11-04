@@ -125,6 +125,8 @@ export class PreviewUpdates {
   #closed = false;
   /** The revision the frame is trying now, while it is handed one. */
   #trying: number | undefined;
+  /** Whether the frame reported a problem while trying the update it is handed. */
+  #troubled = false;
   /** The revision the chat named that an ask was last made again for. */
   #reasked: number | undefined;
   #health: PreviewHealth = "working";
@@ -171,6 +173,11 @@ export class PreviewUpdates {
 
   /** The frame reported a problem: it is being fixed. */
   problem(): void {
+    // Raised while the frame tries an update: that update has it, even
+    // once it is applied (it rendered nothing, or logged an error).
+    if (this.#trying !== undefined) {
+      this.#troubled = true;
+    }
     this.#say("fixing");
   }
 
@@ -281,6 +288,7 @@ export class PreviewUpdates {
     }
     let answer: PreviewApplied = "refused";
     this.#trying = update.revision;
+    this.#troubled = false;
     try {
       for (const part of partsOf(update)) {
         // oxlint-disable-next-line no-await-in-loop -- parts in order
@@ -310,7 +318,11 @@ export class PreviewUpdates {
       this.#shown = update.revision;
       this.#host.moved(update.revision);
     }
-    this.#say("working");
+    // Working once an update shows without a problem of its own: one it
+    // reported as it came in keeps the problem being fixed.
+    if (!this.#troubled) {
+      this.#say("working");
+    }
     return true;
   }
 

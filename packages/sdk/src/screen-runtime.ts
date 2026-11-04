@@ -17,8 +17,9 @@ import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenMounted, ScreenProblem } from "@grasp-os/shared/screens";
 import { RpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
-import { Component, createElement, useEffect } from "react";
+import { Component, createElement, useEffect, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
 import { clientInternals, GraspClient } from "./client-core.ts";
@@ -176,7 +177,50 @@ export interface ScreenHooks {
   loaded?: () => void;
   renderFailed?: () => void;
   mounted?: (page: RpcStub<ScreenBridge>, root: HTMLElement) => void;
+  /**
+   * Handed, once the screen is first rendered, what shows another
+   * component as the screen (`ShownScreen`): a preview's update whose
+   * screen is a component of another name.
+   */
+  shows?: (show: (screen: ScreenComponent) => void) => void;
 }
+
+/** A screen: its module's default export. */
+export type ScreenComponent = ComponentType<{ input: unknown }>;
+
+/**
+ * The screen a preview shows, which its updates may replace: React Fast
+ * Refresh swaps a component for the next of its family (its file and
+ * name), so a screen renamed in an update (`Desk` to `RenamedDesk`) is a
+ * family nothing renders. Its new default export is shown here instead.
+ * One of the same family is kept as it is, its state too: React keeps a
+ * component whose type changed within its family (Refresh's
+ * `resolveFamily`); one of another family mounts afresh, as a renamed
+ * component would. Shown synchronously (`flushSync`), as Refresh renders,
+ * so what fails in it fails the update that showed it.
+ */
+export const ShownScreen = ({
+  first,
+  input,
+  onShow,
+}: {
+  first: ScreenComponent;
+  input: unknown;
+  onShow: (show: (screen: ScreenComponent) => void) => void;
+}) => {
+  // A component is a function, which `useState` would call: held in one.
+  const [shown, setShown] = useState<{ screen: ScreenComponent }>(() => ({
+    screen: first,
+  }));
+  useEffect(() => {
+    onShow((screen) => {
+      flushSync(() => {
+        setShown({ screen });
+      });
+    });
+  }, [onShow]);
+  return createElement(shown.screen, { input });
+};
 
 let connected: RpcStub<ScreenBridge> | undefined;
 
@@ -723,7 +767,7 @@ export const runScreen = async (
       files: portFileTransport(filePort),
       links: portLinkTransport(linkPort),
     });
-    const { mounted } = hooks;
+    const { mounted, shows } = hooks;
     createRoot(root, {
       onUncaughtError: (error) => {
         hooks.renderFailed?.();
@@ -756,7 +800,13 @@ export const runScreen = async (
               clientInternals(client).retryFailed();
             },
           },
-          createElement(loaded.default, { input }),
+          shows === undefined
+            ? createElement(loaded.default, { input })
+            : createElement(ShownScreen, {
+                first: loaded.default,
+                input,
+                onShow: shows,
+              }),
           createElement(Mounted, {
             start,
             ...(mounted === undefined

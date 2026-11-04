@@ -352,8 +352,18 @@ const frameRefreshMs = frameKeepMs / 2;
 const framesPrefix = "screen-frames/";
 const modulesPrefix = "screen-modules/";
 
-const frameKey = (artifact: string): string =>
-  `${framesPrefix}${artifact}.json`;
+/**
+ * The format of a staged manifest (`frameManifestSchema`), in its key: a
+ * manifest staged in another format is under another key, so no open
+ * finds it, and the build is staged again in this one, rather than read
+ * as a manifest it isn't. Raised with each change of the format: `2`
+ * says whether a build is a preview's. What is left under an older key
+ * goes with the sweep (`sweepScreenFrames`), which reads the whole prefix.
+ */
+const frameManifestFormat = 2;
+
+export const frameKey = (artifact: string): string =>
+  `${framesPrefix}${artifact}.v${frameManifestFormat}.json`;
 
 const moduleKey = (hash: string): string => `${modulesPrefix}${hash}.js`;
 
