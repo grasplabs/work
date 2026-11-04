@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkWorkflow } from "../src/check.ts";
-import { everyStep } from "./fixtures.ts";
+import { decision, everyStep, withDecisions, withLoops } from "./fixtures.ts";
 
 // Checking grasp-workflow/1: its JSON Schema through the standard
 // validator, then only what a schema can't say. Each way a document can be
@@ -314,6 +314,85 @@ describe("checking a workflow", () => {
       empty: ["/params/token"],
       plainWithout: ["/params/token"],
       sensitiveWithout: "ok",
+    });
+  });
+
+  it("holds a decision to its binding, its recipients and its prompt, with no ask or reminder", () => {
+    expect({
+      ok: problemsAt(
+        withDecisions(
+          decision(),
+          decision({
+            id: "all",
+            recipients: { $expr: "input.who" },
+            timeout: "3 days",
+          })
+        )
+      ),
+      binding: problemsAt(withDecisions(decision({ binding: "mail" }))),
+      none: problemsAt(withDecisions(decision({ recipients: [] }))),
+      unknown: problemsAt(withDecisions(decision({ recipients: ["boss"] }))),
+      role: problemsAt(withDecisions(decision({ recipients: ["role:owner"] }))),
+      many: problemsAt(
+        withDecisions(
+          decision({
+            recipients: Array.from({ length: 17 }, (_, i) => `person:p${i}`),
+          })
+        )
+      ),
+      long: problemsAt(withDecisions(decision({ prompt: "x".repeat(501) }))),
+      secret: problemsAt(
+        withDecisions(decision({ prompt: { $expr: "params.token" } }))
+      ),
+      later: problemsAt(
+        withDecisions(decision({ input: { $expr: "steps.approve.output" } }))
+      ),
+      // The host asks, once: no action of the workflow's, no reminder.
+      ask: problemsAt(withDecisions(decision({ ask: { binding: "mail" } }))),
+      remindAfter: problemsAt(
+        withDecisions(decision({ remindAfter: "1 day" }))
+      ),
+    }).toStrictEqual({
+      ok: "ok",
+      binding: ["/steps/5/binding"],
+      none: ["/steps/5/recipients"],
+      unknown: ["/steps/5/recipients/0"],
+      role: ["/steps/5/recipients/0"],
+      many: ["/steps/5/recipients"],
+      long: ["/steps/5/prompt"],
+      secret: ["/steps/5/prompt/$expr"],
+      later: ["/steps/5/input/$expr"],
+      ask: ["/steps/5/ask"],
+      remindAfter: ["/steps/5/remindAfter"],
+    });
+  });
+
+  it("lets `item` be read only in a loop's items, and their steps only there", () => {
+    expect({
+      ok: problemsAt(withLoops()),
+      outside: problemsAt(
+        withLoops({ id: "late", type: "wait", until: { $expr: "item.due" } })
+      ),
+      inItems: problemsAt(
+        withLoops({
+          id: "late",
+          type: "wait",
+          until: { $expr: "steps.hold.output" },
+        })
+      ),
+      items: problemsAt(
+        withLoops({
+          id: "again",
+          type: "forEach",
+          items: { $expr: "item" },
+          do: [{ id: "nap", type: "wait", for: "1 hour" }],
+        })
+      ),
+    }).toStrictEqual({
+      ok: "ok",
+      outside: ["/steps/6/until/$expr"],
+      inItems: ["/steps/6/until/$expr"],
+      items: ["/steps/6/items/$expr"],
     });
   });
 

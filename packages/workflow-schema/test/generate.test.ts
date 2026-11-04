@@ -2,7 +2,13 @@ import { parse } from "@babel/parser";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow } from "../src/generate.ts";
-import { checked, everyStep } from "./fixtures.ts";
+import {
+  checked,
+  decision,
+  everyStep,
+  withDecisions,
+  withLoops,
+} from "./fixtures.ts";
 
 // The generator, from its threat model: no text of a document becomes
 // code, whatever it holds (quotes, `*\/`, `${`, backticks, line
@@ -115,6 +121,70 @@ const retitled = (steps: unknown): unknown =>
 /** Any value, as a matcher. */
 const anything: unknown = expect.anything();
 
+/** What a node of a module's syntax tree has that this file reads. */
+interface Node {
+  readonly type: string;
+  readonly start?: number | null;
+  readonly end?: number | null;
+  readonly name?: unknown;
+  readonly callee?: unknown;
+  readonly test?: unknown;
+}
+
+const isNode = (value: unknown): value is Node =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  typeof value.type === "string";
+
+/**
+ * Where `source`, a generated module, evaluates anything between its
+ * steps: every call of an expression's guards (`$read`, `$call`, `$opt`)
+ * in no function but the workflow's own, and the test of each `if`
+ * statement there, as written. A step's function is the second function down.
+ */
+const betweenSteps = (
+  source: string
+): { guards: string[]; conditions: string[] } => {
+  const guards: string[] = [];
+  const conditions: string[] = [];
+  const guardNames = new Set(["$read", "$call", "$opt"]);
+  const text = (node: unknown): string =>
+    isNode(node) ? source.slice(node.start ?? 0, node.end ?? 0) : "";
+  const visit = (node: unknown, functions: number): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, functions);
+      }
+      return;
+    }
+    if (!isNode(node)) {
+      return;
+    }
+    const inside =
+      node.type === "ArrowFunctionExpression" ? functions + 1 : functions;
+    if (
+      inside < 2 &&
+      node.type === "CallExpression" &&
+      isNode(node.callee) &&
+      typeof node.callee.name === "string" &&
+      guardNames.has(node.callee.name)
+    ) {
+      guards.push(text(node));
+    }
+    if (inside < 2 && node.type === "IfStatement") {
+      conditions.push(text(node.test).replaceAll(/\d+/gu, ""));
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key !== "loc" && key !== "start" && key !== "end") {
+        visit(value, inside);
+      }
+    }
+  };
+  visit(parse(source, { sourceType: "module" }).program, 0);
+  return { guards, conditions };
+};
+
 describe("generating a workflow", () => {
   it("keeps every string, key and title of the document data", () => {
     const document = everyStep();
@@ -160,8 +230,8 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("makes no name of an ID, imports only the workflow SDK, and has no loop", () => {
-    const generated = generateWorkflow(checked(everyStep()), "workflow");
+  it("makes no name of an ID, imports only the workflow SDK, and loops only over recorded items", () => {
+    const generated = generateWorkflow(checked(withLoops()), "workflow");
     const { body } = parse(generated.source, { sourceType: "module" }).program;
     const imports = body.flatMap((statement) =>
       statement.type === "ImportDeclaration" ? [statement.source.value] : []
@@ -180,18 +250,124 @@ describe("generating a workflow", () => {
         "guarded",
         "fetch",
         "notice",
+        "pages",
+        "rows",
+        "hold",
+        "guard",
+        "mail",
       ].filter((id) => names.has(id)),
       loops: [
         "ForStatement",
         "WhileStatement",
         "DoWhileStatement",
         "ForInStatement",
-        "ForOfStatement",
       ].filter((type) => types.has(type)),
+      // One `for … of` a forEach, over what its enter step recorded.
+      over: [
+        ...generated.source.matchAll(
+          /for \(const \[\w+, \w+\] of (?<over>.+)\) \{$/gmu
+        ),
+      ].map((match) => (match.groups?.over ?? "").replaceAll(/\d+/gu, "")),
     }).toStrictEqual({
       imports: ["@grasp-os/sdk/workflow"],
       ids: [],
       loops: [],
+      over: [
+        "z.array(z.json()).parse(decided.items).entries()",
+        "z.array(z.json()).parse(decided.items).entries()",
+      ],
+    });
+  });
+
+  it("keys a loop's steps by the items around them, and scopes their tasks", () => {
+    const generated = generateWorkflow(checked(withLoops()), "workflow");
+    const slotOf = (pointer: string) =>
+      generated.expressions.find((expression) => expression.pointer === pointer)
+        ?.slot;
+    const tasks = generated.tasks.filter(({ pointer }) =>
+      pointer.startsWith("/steps/5")
+    );
+    /** The keys `id`'s steps are named with, its loops' indexes as `i`. */
+    const keysOf = (id: string) =>
+      [
+        ...generated.source.matchAll(
+          new RegExp(`\\("${id}", \\{ key: (?<key>[^,]+),`, "gu")
+        ),
+      ].map((match) => (match.groups?.key ?? "").replaceAll(/index\d+/gu, "i"));
+    expect({
+      tasks: tasks.map(({ id, kind, steps, scope, branches, loop }) => ({
+        id,
+        kind,
+        steps,
+        scope,
+        branches,
+        ...(loop === undefined ? {} : { loop }),
+      })),
+      keys: {
+        pages: keysOf("pages"),
+        rows: keysOf("rows"),
+        hold: keysOf("hold"),
+        mail: keysOf("mail"),
+        guard: keysOf("guard"),
+      },
+    }).toStrictEqual({
+      tasks: [
+        {
+          id: "pages",
+          kind: "for",
+          steps: ["enter"],
+          scope: [],
+          branches: [],
+          loop: {
+            in: { slot: slotOf("/steps/5/items") },
+            each: "item",
+            at: "index",
+            concurrency: 1,
+          },
+        },
+        {
+          id: "rows",
+          kind: "for",
+          steps: ["enter", "item"],
+          scope: ["pages"],
+          branches: [null],
+          loop: {
+            in: { slot: slotOf("/steps/5/do/0/items") },
+            each: "item",
+            at: "index",
+            concurrency: 1,
+            while: slotOf("/steps/5/do/0/while"),
+          },
+        },
+        {
+          id: "hold",
+          kind: "call",
+          steps: ["enter", "task"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+        {
+          id: "guard",
+          kind: "try",
+          steps: ["catch"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+        {
+          id: "mail",
+          kind: "call",
+          steps: ["task"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+      ],
+      keys: {
+        pages: ['"enter"'],
+        rows: ['"enter@" + i', '"item@" + i + "/" + i'],
+        hold: ['"enter@" + i + "/" + i', '"task@" + i + "/" + i'],
+        mail: ['"task@" + i + "/" + i'],
+        guard: ['"catch@" + i + "/" + i'],
+      },
     });
   });
 
@@ -222,6 +398,7 @@ describe("generating a workflow", () => {
         { id: "linger", kind: "wait", pointer: "/steps/0", steps: ["task"] },
         { id: "send", kind: "call", pointer: "/steps/1", steps: ["task"] },
         { id: "greet", kind: "call", pointer: "/steps/2", steps: ["task"] },
+        { id: "known", kind: "switch", pointer: "/steps/3", steps: ["task"] },
         {
           id: "pause",
           kind: "call",
@@ -329,6 +506,108 @@ describe("generating a workflow", () => {
     expect(generateWorkflow(checked(renamed), "workflow")).toStrictEqual(
       generateWorkflow(checked(document), "workflow")
     );
+  });
+
+  it("seals a decision's whom, what and on what, and asks from its record", () => {
+    const generated = generateWorkflow(
+      checked(
+        withDecisions(
+          decision({ if: { $expr: 'input.who !== "Ada"' } }),
+          decision({ id: "later", timeout: "2 days" })
+        )
+      ),
+      "workflow"
+    );
+    const slotOf = (pointer: string) =>
+      generated.expressions.find((expression) => expression.pointer === pointer)
+        ?.slot;
+    const approve = generated.tasks.find(({ id }) => id === "approve");
+    expect({
+      approve: approve && {
+        kind: approve.kind,
+        steps: approve.steps,
+        call: approve.call,
+      },
+      later: generated.tasks.find(({ id }) => id === "later")?.call,
+      // The if decides in the enter step, recorded, its recipients parsed
+      // as deciders; the task step asks from what that step recorded,
+      // never from a fresh evaluation, described by its ID.
+      decidesInEnter:
+        /step\.do\("approve", \{ key: "enter"[^\n]*\? \{ \["recipients"\]: z\.array\(decider\)[^\n]* : \{ skipped: true \}\)\);/u.test(
+          generated.source
+        ),
+      asksFromRecord:
+        /step\.decision\("approve", \{ key: "task", description: "approve", from: decided\d+\.recipients\[0\], timeout: "365 days"/u.test(
+          generated.source
+        ),
+    }).toStrictEqual({
+      approve: {
+        kind: "call",
+        steps: ["enter", "task"],
+        call: {
+          name: "grasp.decision",
+          binding: "approvers",
+          recipients: {
+            array: [
+              { literal: "person:ada" },
+              { slot: slotOf("/steps/5/recipients/1") },
+            ],
+          },
+          prompt: { literal: "Approve this?" },
+          input: {
+            object: [["who", { slot: slotOf("/steps/5/input/who") }]],
+          },
+          timeoutMs: 365 * 86_400_000,
+        },
+      },
+      later: {
+        name: "grasp.decision",
+        binding: "approvers",
+        recipients: {
+          array: [
+            { literal: "person:ada" },
+            { slot: slotOf("/steps/6/recipients/1") },
+          ],
+        },
+        prompt: { literal: "Approve this?" },
+        input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
+        timeoutMs: 2 * 86_400_000,
+      },
+      decidesInEnter: true,
+      asksFromRecord: true,
+    });
+  });
+
+  it("evaluates every expression inside a recorded step, none between steps", () => {
+    const generated = generateWorkflow(
+      checked(
+        withDecisions(decision({ if: { $expr: "input.who.length > 2" } }), {
+          id: "late",
+          type: "wait",
+          if: { $expr: "input.who.length > 3" },
+          for: "1 minute",
+        })
+      ),
+      "workflow"
+    );
+    const nested = generateWorkflow(checked(withLoops()), "workflow");
+    const { guards, conditions } = betweenSteps(generated.source);
+    const inLoops = betweenSteps(nested.source);
+    expect({
+      guards: [...guards, ...inLoops.guards],
+      // Only what a step recorded decides the code's flow.
+      conditions: [
+        ...new Set([...conditions, ...inLoops.conditions]),
+      ].toSorted(),
+    }).toStrictEqual({
+      guards: [],
+      conditions: [
+        '"skipped" in decided',
+        "!holds.while",
+        "caught === undefined",
+        "decided.then",
+      ].toSorted(),
+    });
   });
 
   it("generates the same module from the same document", () => {

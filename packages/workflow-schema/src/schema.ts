@@ -5,10 +5,12 @@ import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import {
   aliasPattern,
   bindingKinds,
+  forEachDescription,
   formatLimits,
   localContractPattern,
   paramKinds,
   paramNamePattern,
+  recipientPattern,
   stepIdPattern,
   workflowSchemaUrl,
 } from "./format.ts";
@@ -66,6 +68,53 @@ const stepKinds = {
     },
     ["binding", "instructions", "input", "output"]
   ),
+  decision: stepOf(
+    "decision",
+    {
+      binding: ref("alias"),
+      recipients: {
+        anyOf: [
+          ref("expression"),
+          {
+            type: "array",
+            minItems: 1,
+            maxItems: formatLimits.recipients,
+            items: {
+              anyOf: [
+                ref("expression"),
+                { type: "string", pattern: recipientPattern },
+              ],
+            },
+          },
+        ],
+      },
+      prompt: {
+        anyOf: [
+          ref("expression"),
+          {
+            type: "string",
+            minLength: 1,
+            maxLength: formatLimits.promptLength,
+          },
+        ],
+      },
+      input: ref("value"),
+      timeout: ref("duration"),
+    },
+    ["binding", "recipients", "prompt", "input"]
+  ),
+  forEach: {
+    description: forEachDescription,
+    ...stepOf(
+      "forEach",
+      {
+        items: ref("expression"),
+        while: ref("expression"),
+        do: ref("steps"),
+      },
+      ["items", "do"]
+    ),
+  },
   wait: {
     ...stepOf("wait", { for: ref("duration"), until: ref("expression") }, []),
     oneOf: [{ required: ["for"] }, { required: ["until"] }],

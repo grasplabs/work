@@ -1,9 +1,5 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { v } from "@grasp-os/sdk";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { runInDurableObject } from "cloudflare:test";
@@ -15,25 +11,11 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from "vite-plus/test";
 import { z } from "zod";
 
-import {
-  answerDecision,
-  confirmDecision,
-  reviewDecision,
-} from "../src/decisions/decisions.ts";
-import {
-  approveWorkflowBinding,
-  revokeWorkflowBinding,
-} from "../src/workflow-bindings.ts";
+import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
@@ -50,13 +32,18 @@ import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
-import { admittedFreely, liveStatus } from "./runs.ts";
+import { admittedFreely } from "./runs.ts";
 import {
   activationOf,
   allowedModel,
+  answerAs,
   anyText,
   checkedCalls,
-  descriptorOf,
+  codeOf,
+  deadlinePasses,
+  decidingEngine,
+  decisionsOf,
+  decisionWorkflow,
   echoingMail,
   engineStep,
   failedWith,
@@ -67,12 +54,12 @@ import {
   moduleOf,
   modulesOfTest,
   newerEngine,
-  objectSchema,
   person,
   ranAs,
   refusalsOf,
   refusedAs,
   retryingEngine,
+  reviewRun,
   sdkWorkflow,
   sealedRunOf,
   sealedWorkflow,
@@ -83,7 +70,13 @@ import {
   toolAnswers,
   waitingRun,
 } from "./sealed-run-harness.ts";
-import type { Engine, Journaled, Sealed, Tries } from "./sealed-run-harness.ts";
+import type {
+  Engine,
+  Journaled,
+  Reviewed,
+  Sealed,
+  Tries,
+} from "./sealed-run-harness.ts";
 import { unique } from "./sign-in.ts";
 
 // A run of a sealed build of a generated JSON workflow on the run host
@@ -1379,142 +1372,6 @@ return { status: line };`);
 // taken from the run's own person, a wait for another decision or cut
 // short, an answer after the deadline, and a replay asking again.
 
-/** What a decision's answer may carry: nothing, or a comment. */
-const decisionAnswers = v.union(v.null(), v.object({ comment: v.string() }));
-
-/**
- * A workflow of `by`'s, published and approved by `admin`: after an hour's
- * wait, task `review` asks its input's `reviewer` to approve its input's
- * invoice through decision binding `approval`, whose deciders are
- * `reviewer` and anyone with the builder role. Then loop `batch` asks
- * the same of each of its invoices (`sign`), one after another.
- */
-const decisionWorkflow = async () => {
-  const admin = await person("admin");
-  const by = await person("builder");
-  const reviewer = await person("user");
-  const builder = await person("builder");
-  const contract = `approval-${unique()}`;
-  await publishCatalogContract(env, admin, {
-    key: contract,
-    kind: "decision",
-    input: descriptorOf(v.object({ invoice: v.string() })),
-    response: descriptorOf(decisionAnswers),
-  });
-  const workflow = await createWorkflowResource(env, by, `review-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { approval: { kind: "decision", contract } },
-          },
-        },
-      },
-      input: {
-        schema: objectSchema({
-          reviewer: { type: "string" },
-          invoice: { type: "string" },
-        }),
-      },
-      output: {
-        schema: objectSchema({
-          answered: { type: "boolean" },
-          approved: { type: "boolean" },
-          by: { type: "string" },
-          value: {
-            anyOf: [
-              { type: "null" },
-              {
-                type: "object",
-                properties: { comment: { type: "string" } },
-                required: ["comment"],
-                additionalProperties: false,
-              },
-            ],
-          },
-        }),
-      },
-      do: [
-        { linger: { wait: "PT1H" } },
-        {
-          review: {
-            call: "grasp.decision",
-            with: {
-              binding: "approval",
-              recipients: ["${ $workflow.input.reviewer }"],
-              prompt: "Approve the invoice",
-              input: { invoice: "${ $workflow.input.invoice }" },
-            },
-            timeout: { after: { days: 7 } },
-          },
-        },
-        {
-          batch: {
-            for: { each: "inv", at: "invAt", in: '${ ["INV-1", "INV-2"] }' },
-            do: [
-              {
-                sign: {
-                  call: "grasp.decision",
-                  with: {
-                    binding: "approval",
-                    recipients: ["${ $workflow.input.reviewer }"],
-                    prompt: "Approve this one",
-                    input: { invoice: "${ $inv }" },
-                  },
-                  timeout: { after: { days: 7 } },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    }),
-    basedOn: null,
-  });
-  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "approval",
-    target: {
-      kind: "decision",
-      deciders: [`person:${reviewer.userId}`, "role:builder"],
-    },
-    reviewed: { version: 1 },
-  });
-  return { admin, by, reviewer, builder, workflow, approval };
-};
-
-type Reviewed = Awaited<ReturnType<typeof decisionWorkflow>>;
-
-/** A run of `reviewed` its builder started for `reviewer`, waiting its hour. */
-const reviewRun = async (
-  { by, workflow }: Reviewed,
-  reviewer: string
-): Promise<string> => {
-  const { runId } = await startWorkflow(
-    env,
-    { type: "person", person: by },
-    workflow.id,
-    { version: 1, input: { reviewer, invoice: "INV-7" }, key: unique() }
-  );
-  if (runId === null) {
-    throw new Error("The start admitted no run");
-  }
-  await vi.waitFor(
-    async () => {
-      await expect(liveStatus(runId)).resolves.toBe("waiting");
-    },
-    { timeout: 30_000, interval: 100 }
-  );
-  return runId;
-};
-
 /** A module of the test's own whose run on input `{ reviewer, invoice }` is `body`. */
 const reviewModuleOf = (body: string): string => `
 import { workflow, z } from ${sdkWorkflow};
@@ -1540,23 +1397,6 @@ const told = [];
 const decided = await step.decision("review", { key: "task", description: entered.prompt, from: ${from}, timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
 return { decided, told };`;
 
-/** The decisions run `runId` opened, as their rows have them. */
-const decisionsOf = async (runId: string) => {
-  const rows = await env.DB.prepare(
-    "SELECT id, step, deciders, description, input, status FROM workflow_decisions WHERE resource_run_id = ? ORDER BY opened_at"
-  )
-    .bind(runId)
-    .all<{
-      id: string;
-      step: string;
-      deciders: string;
-      description: string;
-      input: string;
-      status: string;
-    }>();
-  return rows.results;
-};
-
 /** How many times run `runId` asked the people of a decision, as audited. */
 const asksAudited = async (runId: string): Promise<number> => {
   const events = await allEvents();
@@ -1564,66 +1404,6 @@ const asksAudited = async (runId: string): Promise<number> => {
     ({ action, detail }) =>
       action === "workflow.decision.asked" && detail?.run === runId
   ).length;
-};
-
-/** `who`'s answer to `decision`, as the decision page gives it. */
-const answered = async (
-  who: Identity,
-  decision: string,
-  answer: { approved: boolean; payload?: { comment: string } | null }
-): Promise<void> => {
-  const review = await reviewDecision(env, who, decision, answer);
-  if (review.state === "recorded") {
-    return;
-  }
-  const { confirmation } = await confirmDecision(
-    env,
-    who,
-    decision,
-    review.decision.revision,
-    review.response
-  );
-  await answerDecision(env, who, decision, review.response, confirmation);
-};
-
-/** A decision's wait that ends as its deadline passes. */
-const deadlinePasses = async (): Promise<never> => {
-  const timedOut = new Error("Execution timed out");
-  timedOut.name = "WorkflowTimeoutError";
-  return await Promise.reject(timedOut);
-};
-
-/**
- * `engine`, each of its waits for a decision's event running `waiting`
- * on the run's only decision, then ending as woken, or as `waiting`
- * throws.
- */
-const decidingEngine = (
-  runId: string,
-  waiting: (decision: string) => Promise<void>,
-  engine: Engine = newerEngine()
-): Engine => ({
-  leaseOf: engine.leaseOf,
-  step: {
-    ...engine.step,
-    waitForEvent: async () => {
-      const [opened] = await decisionsOf(runId);
-      if (opened === undefined) {
-        throw new Error("No decision to wait for");
-      }
-      await waiting(opened.id);
-      return { payload: null };
-    },
-  },
-});
-
-/** The code a refused or failed step's error carries, as a run's code sees it. */
-const codeOf = async (work: () => Promise<unknown>): Promise<unknown> => {
-  try {
-    return await work();
-  } catch (error) {
-    return error instanceof Error ? Reflect.get(error, "code") : error;
-  }
 };
 
 /**
@@ -1664,7 +1444,7 @@ describe("a sealed run's decisions on the run host", () => {
       reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
       {
         engine: decidingEngine(runId, async (decision) => {
-          await answered(reviewer, decision, {
+          await answerAs(reviewer, decision, {
             approved: true,
             payload: { comment: "Fine" },
           });
@@ -1809,7 +1589,7 @@ describe("a sealed run's decisions on the run host", () => {
 } };`,
       {
         engine: decidingEngine(cutShort, async (decision) => {
-          await answered(reviewer, decision, { approved: false });
+          await answerAs(reviewer, decision, { approved: false });
         }),
       }
     );
@@ -1827,7 +1607,7 @@ describe("a sealed run's decisions on the run host", () => {
       timedOut,
       status: closed?.status,
       lateAnswer: await codeOf(async () => {
-        await answered(reviewer, closed?.id ?? "", { approved: true });
+        await answerAs(reviewer, closed?.id ?? "", { approved: true });
       }),
     }).toStrictEqual({
       described: "Approve the invoice",
@@ -1862,7 +1642,7 @@ describe("a sealed run's decisions on the run host", () => {
         engine: decidingEngine(own, async (decision) => {
           // The run's person holds the role the decision asks: still never.
           refused = await codeOf(async () => {
-            await answered(by, decision, { approved: true });
+            await answerAs(by, decision, { approved: true });
           });
           await deadlinePasses();
         }),
@@ -1874,7 +1654,7 @@ describe("a sealed run's decisions on the run host", () => {
       reviewModuleOf(`${enterReview(reviewAsks)} ${decideReview()}`),
       {
         engine: decidingEngine(revoked, async (decision) => {
-          await answered(builder, decision, { approved: true });
+          await answerAs(builder, decision, { approved: true });
           await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
         }),
       }
@@ -1987,7 +1767,7 @@ describe("a sealed run's decisions on the run host", () => {
       engine: decidingEngine(
         runId,
         async (decision) => {
-          await answered(reviewer, decision, { approved: true });
+          await answerAs(reviewer, decision, { approved: true });
         },
         journalingEngine(journal, [])
       ),
@@ -2030,7 +1810,7 @@ describe("a sealed run's decisions on the run host", () => {
             if (open === undefined) {
               throw new Error("No decision to wait for");
             }
-            await answered(reviewer, open.id, {
+            await answerAs(reviewer, open.id, {
               approved: decisions.length === 1,
             });
             return { payload: null };

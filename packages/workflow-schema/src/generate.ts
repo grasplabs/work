@@ -4,7 +4,9 @@ import { runtimeNames } from "@grasp-os/sdk/expression-check";
 
 import type { CheckedWorkflow } from "./check.ts";
 import {
+  decisionTimeout,
   durationMs,
+  formatLimits,
   isPlain,
   isValueList,
   localContractPattern,
@@ -35,7 +37,11 @@ import type {
 // fails unless it records `{ skipped: true }`; a try's catch asks
 // `step.caught` and throws the failure on when its catch doesn't take it;
 // a step in a try whose catch retries offers `retry`, which names the
-// catch that takes a failure and whether it retries.
+// catch that takes a failure and whether it retries. Every expression is
+// evaluated inside a recorded step (`#decided`), never between steps: a
+// step's `if` in its first step, which records `{ skipped: true }` where
+// it doesn't hold; an `if` step's condition in its own task step; the
+// output in `workflow:output`.
 //
 // Threat model (as the generator before it, @grasp-os/open-workflow's
 // generate.ts), and how each is closed:
@@ -52,9 +58,13 @@ import type {
 //   variables come from a counter (`thrown3`, `caught3`, `until3`), and a
 //   step's result is kept as `steps[<literal>]` on an object with no
 //   prototype.
-// - Code that loops or reaches past the SDK. The module has no loop
-//   statement, and imports `@grasp-os/sdk/workflow` and nothing else (the
-//   compiler refuses any other import of generated code all the same).
+// - Code that loops or reaches past the SDK. The only loop statement is a
+//   `forEach`'s `for … of` over the items its enter step recorded, which
+//   the host bounds: at most 1,000 an enter, each item's steps one at a
+//   time, and every one counted against the run's step ceiling, which is
+//   what ends a long loop (`workflow.too_many_steps`). The module imports
+//   `@grasp-os/sdk/workflow` and nothing else (the compiler refuses any
+//   other import of generated code all the same).
 // - A sensitive value reaching the run's code. A sensitive parameter is
 //   only ever `sensitiveParam(<name>)` in a connector call's arguments,
 //   sealed there as a `param` the host fills in; the code declares only
@@ -106,6 +116,14 @@ export type SealedCall =
       readonly input: Template;
       readonly outputSchema: ValueDescriptor;
     }
+  | {
+      readonly name: "grasp.decision";
+      readonly binding: string;
+      readonly recipients: Template;
+      readonly prompt: Template;
+      readonly input: Template;
+      readonly timeoutMs: number;
+    }
   | { readonly name: "grasp.sleepUntil"; readonly timestamp: Template };
 
 /** A try task's catch, as the host decides it (core's sealed catch). */
@@ -124,14 +142,28 @@ export interface SealedCatch {
 /** One task of the module, as the host checks its steps (core's `SealedTask`). */
 export interface SealedTask {
   readonly id: string;
-  readonly kind: "call" | "wait" | "try" | "raise";
+  readonly kind: "call" | "wait" | "try" | "raise" | "for" | "switch";
   readonly pointer: string;
   /** Its engine steps, `<id>:<step>`: a wait sleeps in its `task` step. */
-  readonly steps: readonly ("task" | "enter" | "catch")[];
-  /** The loops and forks around it: none in this version of the format. */
+  readonly steps: readonly StepKey[];
+  /** The loops around it, outermost first (no forks in this format yet). */
   readonly scope: readonly string[];
-  readonly branches: readonly (number | null)[];
+  /** Beside `scope`: null for each loop, as the host has a fork's branch. */
+  readonly branches: readonly null[];
   readonly schemas: Readonly<Record<string, never>>;
+  /**
+   * A loop's items, as its enter step records them (`in`, which the host
+   * reads from that record, not from here), the names its items' code
+   * reads them by, and the slot of its `while`, which its item steps
+   * record. Its items run one at a time.
+   */
+  readonly loop?: {
+    readonly in: Template;
+    readonly each: string;
+    readonly at: string;
+    readonly concurrency: 1;
+    readonly while?: number;
+  };
   readonly call?: SealedCall;
   readonly milliseconds?: number;
   readonly catch?: SealedCatch;
@@ -173,8 +205,11 @@ export interface Generation {
   readonly tasks: readonly SealedTask[];
   readonly expressions: readonly SealedExpression[];
   readonly spans: readonly TaskSpan[];
-  /** The workflow's own input and output steps: none, its code has them. */
-  readonly workflow: { readonly input: false; readonly output: false };
+  /**
+   * The workflow's own input and output steps: no input step, its code
+   * reads its input; an output step where it has an output.
+   */
+  readonly workflow: { readonly input: false; readonly output: boolean };
   /** The parameters its code reads: those that aren't sensitive. */
   readonly params: readonly string[];
   readonly limits: Readonly<Record<string, never>>;
@@ -208,23 +243,18 @@ const paramCall = (param: PlainParam): string => {
   return `${param.kind}({ ${options.join(", ")} })`;
 };
 
-/**
- * A step's options: its engine step's key, its description, and `extra`.
- * The description is the step's ID, its stable key, never its title: a
- * title is a label, renamed freely, so renaming a step changes nothing
- * that runs or is sealed. What shows a run reads the titles from the
- * document by ID.
- */
-const optionsOf = (
-  step: Step,
-  key: "task" | "enter" | "catch",
-  extra: readonly string[] = []
-): string =>
-  `{ ${[
-    `key: ${literal(key)}`,
-    `description: ${literal(step.id)}`,
-    ...extra,
-  ].join(", ")} }`;
+/** The engine steps of a task, by the key its step names it with. */
+type StepKey = "task" | "enter" | "item" | "leave" | "catch";
+
+/** What a loop's items' code reads its item and its index by. */
+const loopItem = "item";
+const loopIndex = "index";
+
+/** A `forEach` around the code being generated: its task, its index's name. */
+interface Loop {
+  readonly id: string;
+  readonly index: string;
+}
 
 /** `templates`' literals, if every one is a literal. */
 const literalsOf = (templates: readonly Template[]): Json[] | undefined => {
@@ -292,6 +322,8 @@ class Generator {
     `jsonValue as ${runtimeNames.json}`,
   ]);
   #counter = 0;
+  /** The `forEach` loops around the code being generated, outermost first. */
+  #loops: readonly Loop[] = [];
 
   constructor(workflow: CheckedWorkflow) {
     this.#workflow = workflow;
@@ -304,6 +336,37 @@ class Generator {
   #next(): number {
     this.#counter += 1;
     return this.#counter;
+  }
+
+  /**
+   * The code of an engine step's key: `key` itself at the top level, and
+   * inside loop items `key@i1/i2/…`, one index per loop around it,
+   * outermost first, as the run host names an item's steps. The indexes
+   * are the code's own counters, never text of the document.
+   */
+  #key(key: StepKey): string {
+    if (this.#loops.length === 0) {
+      return literal(key);
+    }
+    return [
+      literal(`${key}@`),
+      this.#loops.map(({ index }) => index).join(' + "/" + '),
+    ].join(" + ");
+  }
+
+  /**
+   * A step's options: its engine step's key, its description, and `extra`.
+   * The description is the step's ID, its stable key, never its title: a
+   * title is a label, renamed freely, so renaming a step changes nothing
+   * that runs or is sealed. What shows a run reads the titles from the
+   * document by ID.
+   */
+  #options(step: Step, key: StepKey, extra: readonly string[] = []): string {
+    return `{ ${[
+      `key: ${this.#key(key)}`,
+      `description: ${literal(step.id)}`,
+      ...extra,
+    ].join(", ")} }`;
   }
 
   /** The code of the expression at `pointer`, recorded for review. */
@@ -320,7 +383,8 @@ class Generator {
       slot,
       pointer,
       source: code,
-      loopVariables: [],
+      // `item` in a loop's items: the innermost loop's, for review.
+      loopVariables: this.#loops.length === 0 ? [] : [loopItem],
       ...entry,
     });
     return { code, slot };
@@ -445,27 +509,63 @@ class Generator {
   }
 
   #task(task: Omit<SealedTask, "scope" | "branches" | "schemas">): void {
-    this.#tasks.push({ ...task, scope: [], branches: [], schemas: {} });
+    this.#tasks.push({
+      ...task,
+      scope: this.#loops.map(({ id }) => id),
+      branches: this.#loops.map(() => null),
+      schemas: {},
+    });
   }
 
-  /** Wraps `emit` in the step's `if`; skipped, its output is null. */
-  #guarded(step: Placed, depth: number, emit: (depth: number) => void): void {
-    if (step.if === undefined) {
-      emit(depth);
+  /**
+   * Step `key` of `step`, deciding it: it records `record` where the
+   * step's `if` holds, and `{ skipped: true }` where it doesn't (its
+   * output null). `then` emits what runs past it, at its depth, reading
+   * the record by the name it is given.
+   *
+   * Every expression of the workflow is evaluated so, inside a recorded
+   * step, never in the code between steps: its `if`, its values, an `if`
+   * step's condition, the workflow's output. An expression that throws
+   * (a field of `null` read, say) fails that step, a failure the host
+   * records and a catch around it takes, as any task's. Thrown between
+   * steps, it would reach the host as no step's: a catch of it would be
+   * a catch with no failure to take, which in a loop's item that ran no
+   * step yet even starts the item, and the host refuses either.
+   */
+  #decided(
+    step: Placed,
+    depth: number,
+    key: StepKey,
+    record: string,
+    then: (depth: number, recorded: string) => void,
+    extra: readonly string[] = []
+  ): void {
+    const recorded = `decided${this.#next()}`;
+    const guard =
+      step.if === undefined
+        ? undefined
+        : this.#expression(`${step.pointer}/if`, {
+            taskId: step.id,
+            stage: "taskIf",
+            result: "boolean",
+          }).code;
+    const records =
+      guard === undefined ? record : `${guard} ? ${record} : { skipped: true }`;
+    this.#line(
+      depth,
+      `const ${recorded} = await step.do(${literal(step.id)}, ${this.#options(step, key, extra)}, async () => (${records}));`
+    );
+    if (guard === undefined) {
+      then(depth, recorded);
       return;
     }
-    const { code } = this.#expression(`${step.pointer}/if`, {
-      taskId: step.id,
-      stage: "taskIf",
-      result: "boolean",
-    });
-    this.#line(depth, `if (${code}) {`);
-    emit(depth + 1);
-    this.#line(depth, "} else {");
+    this.#line(depth, `if ("skipped" in ${recorded}) {`);
     this.#line(
       depth + 1,
       `steps[${literal(step.id)}] = { output: null, skipped: true };`
     );
+    this.#line(depth, "} else {");
+    then(depth + 1, recorded);
     this.#line(depth, "}");
   }
 
@@ -486,13 +586,19 @@ class Generator {
         ? {}
         : { timeoutMs: durationMs(step.timeout) }),
     });
-    this.#guarded(step, depth, (inner) => {
-      const retry = this.#retryOf(tries, inner);
-      this.#line(
-        inner,
-        `steps[${literal(step.id)}] = await step.do(${literal(step.id)}, ${optionsOf(step, "task", retry === undefined ? [] : [`retry: ${retry}`])}, async () => ({ output: z.json().parse(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments})) }));`
-      );
-    });
+    // Its `if` is decided in its task step, with its call: skipped, the
+    // step makes none.
+    const retry = this.#retryOf(tries, depth);
+    this.#decided(
+      step,
+      depth,
+      "task",
+      `{ output: z.json().parse(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments})) }`,
+      (inner, recorded) => {
+        this.#line(inner, `steps[${literal(step.id)}] = ${recorded};`);
+      },
+      retry === undefined ? [] : [`retry: ${retry}`]
+    );
   }
 
   #do(
@@ -550,6 +656,147 @@ class Generator {
     });
   }
 
+  /**
+   * A decision: its enter step records whom it asks, what and on what, as
+   * its `if` holds (`{ skipped: true }` otherwise, as a raise's); the host
+   * matches that record against the sealed templates and asks the
+   * recorded prompt. The recipients are recorded as deciders
+   * (`person:<id>`, `team:<id>`, `role:<role>`), parsed so, as the host
+   * takes nothing else: a bare user ID fails the enter step, where it is
+   * written. Its task step then asks from the first recipient, exactly
+   * the recorded one, and waits for the answer: `{ timedOut: true }` once
+   * its timeout passes. Its description is the step's ID, as every
+   * step's: the host reads neither it nor the timeout, and the format has
+   * no `ask` and no `remindAfter` (the schema refuses both), since telling
+   * people is the host's, so the SDK's `ask` does nothing here.
+   */
+  #decision(
+    step: Placed<Extract<Step, { type: "decision" }>>,
+    depth: number
+  ): void {
+    const entry: ExpressionEntry = {
+      taskId: step.id,
+      stage: "taskDefinition",
+      result: "json",
+    };
+    const recipients = this.#value(
+      step.recipients,
+      `${step.pointer}/recipients`,
+      entry
+    );
+    const prompt = this.#value(step.prompt, `${step.pointer}/prompt`, entry);
+    const input = this.#value(step.input, `${step.pointer}/input`, entry);
+    const timeout = step.timeout ?? decisionTimeout;
+    this.#task({
+      id: step.id,
+      kind: "call",
+      pointer: step.pointer,
+      steps: ["enter", "task"],
+      call: {
+        name: "grasp.decision",
+        binding: step.binding,
+        recipients: recipients.template,
+        prompt: prompt.template,
+        input: input.template,
+        timeoutMs: durationMs(timeout),
+      },
+    });
+    this.#imports.add("decider");
+    const record = [
+      `["recipients"]: z.array(decider).nonempty().max(${formatLimits.recipients}).parse(${recipients.code})`,
+      `["prompt"]: z.string().min(1).max(${formatLimits.promptLength}).parse(${prompt.code})`,
+      `["input"]: z.json().parse(${input.code})`,
+    ];
+    this.#decided(
+      step,
+      depth,
+      "enter",
+      `{ ${record.join(", ")} }`,
+      (inner, entered) => {
+        this.#line(
+          inner,
+          `steps[${literal(step.id)}] = { output: await step.decision(${literal(step.id)}, ${this.#options(step, "task", [`from: ${entered}.recipients[0]`, `timeout: ${literal(timeout)}`, "ask: async () => {}"])}) };`
+        );
+      }
+    );
+  }
+
+  /**
+   * A loop: its enter step records its items (`{ skipped: true }` when its
+   * `if` doesn't hold), and its items run over that record, one at a
+   * time, in order, each item's steps keyed by its index. With a `while`,
+   * each item starts with its item step, which records whether it holds,
+   * and the loop stops where it doesn't.
+   */
+  #forEach(
+    step: Placed<Extract<Step, { type: "forEach" }>>,
+    tries: readonly PlacedTry[],
+    depth: number
+  ): void {
+    const items = this.#expression(`${step.pointer}/items`, {
+      taskId: step.id,
+      stage: "taskDefinition",
+      result: "json",
+    });
+    const number = this.#next();
+    const index = `index${number}`;
+    const around = this.#loops;
+    const inside = [...around, { id: step.id, index }];
+    // `while` reads the item, so its slot is recorded among its items'.
+    this.#loops = inside;
+    const holds =
+      step.while === undefined
+        ? undefined
+        : this.#expression(`${step.pointer}/while`, {
+            taskId: step.id,
+            stage: "taskIf",
+            result: "boolean",
+          });
+    this.#loops = around;
+    this.#task({
+      id: step.id,
+      kind: "for",
+      pointer: step.pointer,
+      steps: holds === undefined ? ["enter"] : ["enter", "item"],
+      loop: {
+        in: { slot: items.slot },
+        each: loopItem,
+        at: loopIndex,
+        concurrency: 1,
+        ...(holds === undefined ? {} : { while: holds.slot }),
+      },
+    });
+    this.#decided(
+      step,
+      depth,
+      "enter",
+      `{ items: ${items.code} }`,
+      (inner, entered) => {
+        this.#loops = inside;
+        // Over the recorded items, never a fresh evaluation: the host
+        // holds the items to what the enter step recorded, and fails a
+        // record that isn't a list of at most 1,000
+        // (`workflow.collection_invalid`), so this parse only types them.
+        this.#line(
+          inner,
+          `for (const [${index}, item${number}] of z.array(z.json()).parse(${entered}.items).entries()) {`
+        );
+        this.#line(inner + 1, `const ${loopItem} = item${number};`);
+        if (holds !== undefined) {
+          this.#line(
+            inner + 1,
+            `const holds${number} = await step.do(${literal(step.id)}, ${this.#options(step, "item")}, async () => ({ while: Boolean(${holds.code}) }));`
+          );
+          this.#line(inner + 1, `if (!holds${number}.while) break;`);
+        }
+        this.#list(step.do, `${step.pointer}/do`, tries, inner + 1);
+        this.#line(inner, "}");
+        this.#loops = around;
+        this.#line(inner, `steps[${literal(step.id)}] = { output: null };`);
+      }
+    );
+  }
+
   #wait(
     step: Placed<Extract<Step, { type: "wait" }>>,
     tries: readonly PlacedTry[],
@@ -558,20 +805,27 @@ class Generator {
     const done = `steps[${literal(step.id)}] = { output: null };`;
     if ("for" in step) {
       const milliseconds = durationMs(step.for);
+      const sleep = (inner: number): void => {
+        this.#line(
+          inner,
+          `await step.sleep(${literal(step.id)}, ${this.#options(step, "task", [`duration: ${literal(milliseconds)}`])});`
+        );
+        this.#line(inner, done);
+      };
+      // A sleep records nothing: its `if`, if any, is decided in an enter
+      // step before it.
       this.#task({
         id: step.id,
         kind: "wait",
         pointer: step.pointer,
-        steps: ["task"],
+        steps: step.if === undefined ? ["task"] : ["enter", "task"],
         milliseconds,
       });
-      this.#guarded(step, depth, (inner) => {
-        this.#line(
-          inner,
-          `await step.sleep(${literal(step.id)}, ${optionsOf(step, "task", [`duration: ${literal(milliseconds)}`])});`
-        );
-        this.#line(inner, done);
-      });
+      if (step.if === undefined) {
+        sleep(depth);
+        return;
+      }
+      this.#decided(step, depth, "enter", "{ output: null }", sleep);
       return;
     }
     const { code, slot } = this.#expression(`${step.pointer}/until`, {
@@ -586,43 +840,61 @@ class Generator {
       steps: ["enter", "task"],
       call: { name: "grasp.sleepUntil", timestamp: { slot } },
     });
-    const until = `until${this.#next()}`;
-    this.#guarded(step, depth, (inner) => {
-      // Its deadline may fail to evaluate in its enter step, as a call may
-      // fail: a retry around it decides it as any call's.
-      const retry = this.#retryOf(tries, inner);
-      this.#line(
-        inner,
-        `const ${until} = await step.do(${literal(step.id)}, ${optionsOf(step, "enter", retry === undefined ? [] : [`retry: ${retry}`])}, async () => ({ output: null, until: ${code} }));`
-      );
-      this.#line(
-        inner,
-        `await step.sleepUntil(${literal(step.id)}, ${optionsOf(step, "task", [`until: z.number().parse(${until}.until)`])});`
-      );
-      this.#line(inner, done);
-    });
+    // Its deadline may fail to evaluate in its enter step, as a call may
+    // fail: a retry around it decides it as any call's.
+    const retry = this.#retryOf(tries, depth);
+    this.#decided(
+      step,
+      depth,
+      "enter",
+      `{ output: null, until: ${code} }`,
+      (inner, entered) => {
+        this.#line(
+          inner,
+          `await step.sleepUntil(${literal(step.id)}, ${this.#options(step, "task", [`until: z.number().parse(${entered}.until)`])});`
+        );
+        this.#line(inner, done);
+      },
+      retry === undefined ? [] : [`retry: ${retry}`]
+    );
   }
 
+  /**
+   * An `if` step: a task of its own (`switch`), whose task step decides
+   * its condition, and its `if`, recorded.
+   */
   #if(
     step: Placed<Extract<Step, { type: "if" }>>,
     tries: readonly PlacedTry[],
     depth: number
   ): void {
     const { code } = this.#expression(`${step.pointer}/condition`, {
-      taskId: null,
+      taskId: step.id,
       stage: "taskIf",
       result: "boolean",
     });
-    this.#guarded(step, depth, (inner) => {
-      this.#line(inner, `if (${code}) {`);
-      this.#list(step.then, `${step.pointer}/then`, tries, inner + 1);
-      if (step.else !== undefined) {
-        this.#line(inner, "} else {");
-        this.#list(step.else, `${step.pointer}/else`, tries, inner + 1);
-      }
-      this.#line(inner, "}");
-      this.#line(inner, `steps[${literal(step.id)}] = { output: null };`);
+    this.#task({
+      id: step.id,
+      kind: "switch",
+      pointer: step.pointer,
+      steps: ["task"],
     });
+    this.#decided(
+      step,
+      depth,
+      "task",
+      `{ then: Boolean(${code}) }`,
+      (inner, decided) => {
+        this.#line(inner, `if (${decided}.then) {`);
+        this.#list(step.then, `${step.pointer}/then`, tries, inner + 1);
+        if (step.else !== undefined) {
+          this.#line(inner, "} else {");
+          this.#list(step.else, `${step.pointer}/else`, tries, inner + 1);
+        }
+        this.#line(inner, "}");
+        this.#line(inner, `steps[${literal(step.id)}] = { output: null };`);
+      }
+    );
   }
 
   /** A try's catch, as sealed: its filter and the slots of its conditions. */
@@ -671,17 +943,18 @@ class Generator {
       id: step.id,
       kind: "try",
       pointer: step.pointer,
-      steps: ["catch"],
+      // Its `if`, if any, is decided in an enter step before its list.
+      steps: step.if === undefined ? ["catch"] : ["enter", "catch"],
       catch: sealed,
     });
     const number = this.#next();
-    this.#guarded(step, depth, (inner) => {
+    const body = (inner: number): void => {
       this.#line(inner, "try {");
       this.#list(step.try, `${step.pointer}/try`, [step, ...tries], inner + 1);
       this.#line(inner, `} catch (thrown${number}) {`);
       this.#line(
         inner + 1,
-        `const caught${number} = await step.caught(${literal(step.id)}, ${optionsOf(step, "catch")}, async (error) => ${when === undefined ? "true" : `Boolean(${when})`});`
+        `const caught${number} = await step.caught(${literal(step.id)}, ${this.#options(step, "catch")}, async (error) => ${when === undefined ? "true" : `Boolean(${when})`});`
       );
       this.#line(
         inner + 1,
@@ -695,7 +968,12 @@ class Generator {
       }
       this.#line(inner, "}");
       this.#line(inner, `steps[${literal(step.id)}] = { output: null };`);
-    });
+    };
+    if (step.if === undefined) {
+      body(depth);
+      return;
+    }
+    this.#decided(step, depth, "enter", "{ output: null }", body);
   }
 
   #raise(step: Placed<Extract<Step, { type: "raise" }>>, depth: number): void {
@@ -706,21 +984,10 @@ class Generator {
       steps: ["task"],
       error: { ...step.error },
     });
-    // Its `if` decides whether it is skipped, as its record says: the host
-    // fails its step unless it says so.
-    const runs =
-      step.if === undefined
-        ? "true"
-        : this.#expression(`${step.pointer}/if`, {
-            taskId: step.id,
-            stage: "taskIf",
-            result: "boolean",
-          }).code;
-    this.#line(
-      depth,
-      `await step.do(${literal(step.id)}, ${optionsOf(step, "task")}, async () => (${runs} ? { output: null } : { skipped: true }));`
-    );
-    this.#line(depth, `steps[${literal(step.id)}] = { output: null };`);
+    // The host fails its step unless its record says its `if` skipped it.
+    this.#decided(step, depth, "task", "{ output: null }", (inner) => {
+      this.#line(inner, `steps[${literal(step.id)}] = { output: null };`);
+    });
   }
 
   #step(
@@ -737,6 +1004,14 @@ class Generator {
       }
       case "agent": {
         this.#agent({ ...step, pointer }, tries, depth);
+        break;
+      }
+      case "decision": {
+        this.#decision({ ...step, pointer }, depth);
+        break;
+      }
+      case "forEach": {
+        this.#forEach({ ...step, pointer }, tries, depth);
         break;
       }
       case "wait": {
@@ -789,15 +1064,22 @@ class Generator {
     this.#line(1, "const run = { id: runId };");
     this.#line(1, "const steps = Object.create(null);");
     this.#list(document.steps, "/steps", [], 1);
-    const output =
-      document.output === undefined
-        ? "null"
-        : this.#value(document.output.value, "/output/value", {
-            taskId: null,
-            stage: "workflowOutputAs",
-            result: "json",
-          }).code;
-    this.#line(1, `return ${output};`);
+    if (document.output === undefined) {
+      this.#line(1, "return null;");
+    } else {
+      // Its output too is evaluated in a step: the workflow's own
+      // `workflow:output`.
+      const { code } = this.#value(document.output.value, "/output/value", {
+        taskId: null,
+        stage: "workflowOutputAs",
+        result: "json",
+      });
+      this.#line(
+        1,
+        `const ended = await step.do("workflow", { key: "output", description: "workflow" }, async () => ({ output: z.json().parse(${code}) }));`
+      );
+      this.#line(1, "return ended.output;");
+    }
     const prelude = [
       "// Generated from a grasp-workflow/1 document on every save: not edited by hand.",
       `import { ${[...this.#imports].toSorted().join(", ")} } from ${literal(generatedImport)};`,
@@ -817,7 +1099,7 @@ class Generator {
         from: span.from + offset,
         to: span.to + offset,
       })),
-      workflow: { input: false, output: false },
+      workflow: { input: false, output: document.output !== undefined },
       params: params.map(([name]) => name),
       limits: {},
     };

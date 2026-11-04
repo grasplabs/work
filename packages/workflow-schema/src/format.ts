@@ -1,3 +1,4 @@
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 // grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
 // `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
 // other's results explicitly (`steps.extract.output`), and everything a
@@ -7,9 +8,8 @@
 // (generate.ts). schema.ts defines it; check.ts checks it.
 //
 // A step kind joins the format as its SDK call joins the run host: a new
-// `type` in the union, nothing else changing (forEach, decision, fork,
-// race, event waits and child runs come so).
-
+// `type` in the union, nothing else changing (decision and forEach came so;
+// fork, race, event waits and child runs come so).
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 
 /**
@@ -114,6 +114,7 @@ export const bindingKinds = [
   "model",
   "compute",
   "action",
+  "decision",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
@@ -166,6 +167,49 @@ export interface AgentStep extends StepBase {
   /** A JSON Schema the answer must match. */
   readonly output: Json;
   readonly timeout?: Duration;
+}
+
+/**
+ * Asks people to decide, through a decision binding, and waits for the
+ * answer: its output is `{ timedOut: false, approved, by, payload }`, or
+ * `{ timedOut: true }` when nobody answered within `timeout`. A timeout
+ * never means approval.
+ */
+export interface DecisionStep extends StepBase {
+  readonly type: "decision";
+  readonly binding: string;
+  /**
+   * Who is asked, 1 to 16 of `person:<user ID>`, `team:<team ID>` and
+   * `role:<role>`: a list, any item of which may be an expression, or an
+   * expression for the whole list. The first decides (the SDK's `from`).
+   */
+  readonly recipients: Value;
+  /** What they are asked, at most 500 characters. */
+  readonly prompt: Value;
+  /** What they decide on, as the binding's contract takes it. */
+  readonly input: Value;
+  /** How long it waits for an answer: a year if not given. */
+  readonly timeout?: Duration;
+}
+
+/**
+ * Runs `do` for each of `items`, one item at a time, in order: `item` is
+ * in scope in its steps and in `while`. Its own output is `null`; a step
+ * inside it is read only by the steps after it in the same item.
+ *
+ * What bounds a loop is the run's step ceiling (`loopBounds`): every step
+ * of every item counts toward it, so a loop of many items, or of items
+ * of many steps, can reach it well before its last item. A run that does
+ * fails with `workflow.too_many_steps`, which says to split the work over
+ * more runs (a run per page of items, say).
+ */
+export interface ForEachStep extends StepBase {
+  readonly type: "forEach";
+  /** A list of items, as its run records them first. */
+  readonly items: Expression;
+  /** Goes on to each next item only while this holds. */
+  readonly while?: Expression;
+  readonly do: readonly Step[];
 }
 
 /** Waits: for a time span, or until a deadline (ms since the epoch). */
@@ -224,7 +268,15 @@ export interface RaiseStep extends StepBase {
   };
 }
 
-export type Step = DoStep | AgentStep | WaitStep | IfStep | TryStep | RaiseStep;
+export type Step =
+  | DoStep
+  | AgentStep
+  | DecisionStep
+  | ForEachStep
+  | WaitStep
+  | IfStep
+  | TryStep
+  | RaiseStep;
 
 export type StepType = Step["type"];
 
@@ -248,7 +300,7 @@ export interface WorkflowDocument {
 export const formatLimits = {
   /** Steps in all, at every level. */
   steps: 200,
-  /** Lists one inside another (`then`, `try`, `catch.do`). */
+  /** Lists one inside another (`then`, `try`, `catch.do`, a loop's `do`). */
   depth: 8,
   /**
    * Levels of the whole document, its leaves included, measured without
@@ -261,6 +313,10 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
+  /** A decision's prompt, which the decision service shows uncut. */
+  promptLength: 500,
+  /** The people, teams and roles one decision asks. */
+  recipients: 16,
   params: 64,
   bindings: 64,
 } as const;
@@ -285,6 +341,28 @@ export const durationMs = (duration: Duration): number => {
   }
   return Number(count) * unitMs[singular];
 };
+
+/**
+ * What bounds a `forEach`, from the platform's limits: the steps one run
+ * takes in all, every item's counted, and the items one list may hold.
+ */
+export const loopBounds = {
+  runSteps: platformLimits.workflowSteps,
+  items: platformLimits.workflowCollectionItems,
+} as const;
+
+/** What a `forEach` is, to whoever writes one: the schema's description. */
+export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${loopBounds.runSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${loopBounds.items.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
+
+/**
+ * Who a decision asks: a person or a team by ID, or everyone with a role,
+ * as the platform's deciders are (`@grasp-os/shared/decisions`).
+ */
+export const recipientPattern =
+  "^(?:person:[A-Za-z0-9_-]{1,128}|role:(?:admin|builder|user)|team:[A-Za-z0-9_-]{1,128})$";
+
+/** How long a decision waits when its step names no timeout. */
+export const decisionTimeout = "365 days";
 
 /**
  * What a step ID may be: lower-case words joined by dashes, and none of

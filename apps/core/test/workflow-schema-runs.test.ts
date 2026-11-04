@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
@@ -10,22 +11,31 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { countedStep } from "../src/workflows/host.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
 import {
   allowedModel,
+  answerAs,
   checkedCalls,
+  codeOf,
+  deadlinePasses,
+  decidingEngine,
+  decisionsOf,
+  decisionWorkflow,
   hello,
   objectSchema,
   person,
   ranAs,
   retryingEngine,
+  reviewRun,
   sdkWorkflow,
   sealedWorkflow,
+  standardErrors,
   waitingRun,
 } from "./sealed-run-harness.ts";
-import type { Sealed } from "./sealed-run-harness.ts";
+import type { Reviewed, Sealed } from "./sealed-run-harness.ts";
 import { unique } from "./sign-in.ts";
 
 /**
@@ -226,6 +236,221 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         { step: "greet:task", call: "grasp.model", binding: "summary" },
         { step: "fetch:task", call: "grasp.connector", binding: "mail" },
       ],
+    });
+  });
+
+  it("runs a loop's items in order, a catch taking an item's raise, and stops where its `while` doesn't hold", async () => {
+    const { source, sealed: withTable } = generated([
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "input.rows" },
+        while: { $expr: 'item !== "stop"' },
+        do: [
+          {
+            id: "notify",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: { to: { $expr: "item" }, subject: "row" },
+          },
+          {
+            id: "guard",
+            type: "try",
+            try: [
+              {
+                id: "check",
+                type: "raise",
+                if: { $expr: 'item === "b"' },
+                error: { type: "urn:grasp:error:bad", status: 409 },
+              },
+            ],
+            catch: { errors: { status: 409 } },
+          },
+        ],
+      },
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      // Its rows as its input, in place of the started run's.
+      sealed: (run) =>
+        withTable({ ...run, input: { rows: ["a", "b", "stop", "c"] } }),
+    });
+    const { sent } = await sealed.mail.did();
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      sent: sent.filter(({ subject }) => subject === "row"),
+      checked: checked.map(({ step }) => step),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      // Item 2 is "stop": its item step records `while: false`, and no
+      // step of it, nor of item 3, runs.
+      sent: [
+        { to: "a", subject: "row" },
+        { to: "b", subject: "row" },
+      ],
+      checked: [
+        `notify:${encodeURIComponent("task@0")}`,
+        `notify:${encodeURIComponent("task@1")}`,
+      ],
+    });
+  });
+
+  it("passes over an item whose steps were all skipped by their `if`, and runs the item after it", async () => {
+    const { source, sealed: withTable } = generated([
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "input.rows" },
+        do: [
+          {
+            id: "notify",
+            type: "do",
+            if: { $expr: 'item !== "skip"' },
+            binding: "mail",
+            operation: "mail.send",
+            arguments: { to: { $expr: "item" }, subject: "passed over" },
+          },
+          {
+            id: "late",
+            type: "wait",
+            if: { $expr: 'item !== "skip"' },
+            for: "1 second",
+          },
+        ],
+      },
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: (run) => withTable({ ...run, input: { rows: ["skip", "a"] } }),
+    });
+    const { sent } = await sealed.mail.did();
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      sent: sent.filter(({ subject }) => subject === "passed over"),
+      checked: checked.map(({ step }) => step),
+    }).toStrictEqual({
+      // Item 0 ran no step; item 1 starts past it, nothing refused.
+      ran: { ended: null, tampered: [] },
+      sent: [{ to: "a", subject: "passed over" }],
+      checked: [`notify:${encodeURIComponent("task@1")}`],
+    });
+  });
+
+  it("fails the step of an `if` that throws as an item's first, which a catch in the item takes, refusing nothing", async () => {
+    const { source, sealed: withTable } = generated([
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "input.rows" },
+        do: [
+          {
+            id: "guard",
+            type: "try",
+            try: [
+              {
+                id: "notify",
+                type: "do",
+                // Item 0 is null: reading its `to` throws.
+                if: { $expr: 'item.to !== ""' },
+                binding: "mail",
+                operation: "mail.send",
+                arguments: { to: { $expr: "item.to" }, subject: "throwing" },
+              },
+            ],
+            catch: {
+              do: [
+                {
+                  id: "report",
+                  type: "do",
+                  binding: "mail",
+                  operation: "mail.send",
+                  arguments: {
+                    to: "ops",
+                    subject: { $expr: 'error.type + " | " + error.title' },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: (run) =>
+        withTable({ ...run, input: { rows: [null, { to: "a" }] } }),
+    });
+    const { sent } = await sealed.mail.did();
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      sent: sent.filter(
+        ({ to, subject }) => subject === "throwing" || to === "ops"
+      ),
+      checked: checked.map(({ step }) => step),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      // The failure the host recorded of item 0's step: an expression's
+      // (`expression.failed`), its type and the code's words; then item 1
+      // runs. (Its guard's own message once the host keeps it.)
+      sent: [
+        {
+          to: "ops",
+          subject: `${standardErrors}expression | The expression failed.`,
+        },
+        { to: "a", subject: "throwing" },
+      ],
+      checked: [
+        `report:${encodeURIComponent("task@0")}`,
+        `notify:${encodeURIComponent("task@1")}`,
+      ],
+    });
+  });
+
+  it("ends a loop that reaches the run's step ceiling, saying to split the work", async () => {
+    const { source, sealed: withTable } = generated([
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "input.rows" },
+        do: [
+          {
+            id: "notify",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: { to: { $expr: "item" }, subject: "ceiling" },
+          },
+        ],
+      },
+    ]);
+    const engine = retryingEngine();
+    const ran = await ranAs(await waitingRun(sealed), source, {
+      // A ceiling of 3 steps in place of the platform's: the loop's
+      // enter step and two items' mail fit, the third item's doesn't.
+      engine: { ...engine, step: countedStep(engine.step, 3) },
+      sealed: (run) =>
+        withTable({ ...run, input: { rows: ["a", "b", "c", "d"] } }),
+    });
+    const { sent } = await sealed.mail.did();
+    expect({
+      ran,
+      sent: sent
+        .filter(({ subject }) => subject === "ceiling")
+        .map(({ to }) => to),
+    }).toStrictEqual({
+      ran: {
+        ended: "workflow.too_many_steps",
+        why: workflowErrors.create("workflow.too_many_steps").message,
+        tampered: [],
+      },
+      sent: ["a", "b"],
     });
   });
 
@@ -608,6 +833,192 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         caught: true,
         told: true,
       },
+    });
+  });
+});
+
+/** `decisionWorkflow`'s decision binding, as a document declares it. */
+const approval = {
+  approval: { kind: "decision", contract: "grasp.approvals@1" },
+};
+
+/** A decision of binding `approval` on input `{ reviewer, invoice }`. */
+const review = (change: Record<string, unknown> = {}) => ({
+  id: "review",
+  type: "decision",
+  binding: "approval",
+  recipients: [{ $expr: "input.reviewer" }, "role:builder"],
+  prompt: "Approve the invoice",
+  input: { invoice: { $expr: "input.invoice" } },
+  timeout: "7 days",
+  ...change,
+});
+
+/** What a run ends with: how decision `review` ended, as later steps read it. */
+const decided = {
+  schema: objectOf({
+    timedOut: { type: "boolean" },
+    approved: { type: "boolean" },
+    by: { type: "string" },
+    comment: { type: "string" },
+  }),
+  value: {
+    timedOut: { $expr: "steps.review.output.timedOut" },
+    approved: { $expr: "steps.review.output.approved === true" },
+    by: { $expr: 'steps.review.output.by ?? ""' },
+    comment: { $expr: 'steps.review.output.payload?.comment ?? ""' },
+  },
+};
+
+// A decision's generated code on the run host (#1923): the deciders its
+// enter step records, `from` exactly the first of them, the run's own
+// person never answering, a timeout answering `{ timedOut: true }`, and
+// a decision in each item of a loop under that item's keys.
+describe("a grasp-workflow/1 decision's generated code on the run host", () => {
+  let reviewed: Reviewed;
+
+  beforeAll(async () => {
+    reviewed = await decisionWorkflow();
+  });
+
+  afterAll(endLiveResourceRuns);
+
+  it("asks whom its enter step recorded, never takes the answer of the run's own person, and answers a decider's", async () => {
+    const { by, reviewer } = reviewed;
+    const { source, sealed: withTable } = generated(
+      [review()],
+      decided,
+      approval
+    );
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    let starter: unknown;
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: decidingEngine(runId, async (decision) => {
+        // The run's person holds the role it asks: still never.
+        starter = await codeOf(async () => {
+          await answerAs(by, decision, { approved: true });
+        });
+        await answerAs(reviewer, decision, {
+          approved: true,
+          payload: { comment: "Fine" },
+        });
+      }),
+    });
+    const decisions = await decisionsOf(runId);
+    expect({
+      ran,
+      starter,
+      decisions: decisions.map(({ step, description, status }) => ({
+        step,
+        description,
+        status,
+      })),
+    }).toStrictEqual({
+      ran: {
+        ended: {
+          timedOut: false,
+          approved: true,
+          by: reviewer.userId,
+          comment: "Fine",
+        },
+        tampered: [],
+      },
+      starter: "decision.forbidden",
+      // The recorded prompt, whatever the code described it as.
+      decisions: [
+        {
+          step: "review:task",
+          description: "Approve the invoice",
+          status: "approved",
+        },
+      ],
+    });
+  });
+
+  it("answers `{ timedOut: true }` once its timeout passes, and fails a bare user ID where its enter step records it", async () => {
+    const { reviewer } = reviewed;
+    const { source, sealed: withTable } = generated(
+      [review()],
+      decided,
+      approval
+    );
+    const lapsed = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const timedOut = await ranAs(lapsed, source, {
+      sealed: withTable,
+      engine: decidingEngine(lapsed, deadlinePasses),
+    });
+    const bare = await reviewRun(reviewed, reviewer.userId);
+    const bareId = await ranAs(bare, source, {
+      sealed: withTable,
+      engine: retryingEngine(),
+    });
+    expect({
+      timedOut,
+      bareId: { tampered: bareId.tampered, failed: "why" in bareId },
+      opened: await decisionsOf(bare),
+    }).toStrictEqual({
+      timedOut: {
+        ended: { timedOut: true, approved: false, by: "", comment: "" },
+        tampered: [],
+      },
+      // Its code's own failure, not the host's refusal: nothing opened.
+      bareId: { tampered: [], failed: true },
+      opened: [],
+    });
+  });
+
+  it("asks a decision in each item of a loop, under that item's keys", async () => {
+    const { reviewer } = reviewed;
+    const { source, sealed: withTable } = generated(
+      [
+        {
+          id: "batch",
+          type: "forEach",
+          items: { $expr: '["INV-1", "INV-2"]' },
+          do: [
+            review({
+              id: "sign",
+              prompt: "Approve this one",
+              input: { invoice: { $expr: "item" } },
+            }),
+          ],
+        },
+      ],
+      undefined,
+      approval
+    );
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: decidingEngine(runId, async () => {
+        // Each item's own decision, the latest opened.
+        const opened = await decisionsOf(runId);
+        await answerAs(reviewer, opened.at(-1)?.id ?? "", { approved: true });
+      }),
+    });
+    const decisions = await decisionsOf(runId);
+    expect({
+      ran,
+      decisions: decisions.map(({ step, input, status }) => ({
+        step,
+        input,
+        status,
+      })),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      decisions: [
+        {
+          step: `sign:${encodeURIComponent("task@0")}`,
+          input: JSON.stringify({ invoice: "INV-1" }),
+          status: "approved",
+        },
+        {
+          step: `sign:${encodeURIComponent("task@1")}`,
+          input: JSON.stringify({ invoice: "INV-2" }),
+          status: "approved",
+        },
+      ],
     });
   });
 });

@@ -288,6 +288,13 @@ export const number = param("number");
 export const text = param("text");
 /** A person or group, e.g. who reviews; required by `step.decision`. */
 export const person = param("person");
+/**
+ * Who a decision asks, as `step.decision`'s `from` takes it: a person
+ * (`person:<user ID>`), a role (`role:admin`) or a team (`team:<team
+ * ID>`). Generated code parses the recipients it records with it, so a
+ * bare user ID fails where it is written, not at the run host.
+ */
+export const decider = paramValueSchemas.person;
 /** A schedule, as five cron fields; what a schedule trigger runs on. */
 export const schedule = param("schedule");
 /** A template, e.g. for an email. */

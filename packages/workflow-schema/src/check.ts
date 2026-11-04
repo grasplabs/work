@@ -441,10 +441,11 @@ interface Walk {
   count: number;
 }
 
-/** Where an expression stands: the steps that ran, and a catch's error. */
+/** Where an expression stands: the steps that ran, a catch's error, a loop's item. */
 interface Place {
   readonly steps: ReadonlySet<string>;
   readonly error: boolean;
+  readonly item: boolean;
 }
 
 const problem = (
@@ -515,10 +516,12 @@ const checkExpressionAt = (
     );
     return;
   }
-  const checked = checkExpression(
-    expression.$expr,
-    place.error ? { roots: ["error"] } : {}
-  );
+  const checked = checkExpression(expression.$expr, {
+    roots: [
+      ...(place.error ? (["error"] as const) : []),
+      ...(place.item ? (["item"] as const) : []),
+    ],
+  });
   if (!checked.ok) {
     for (const { code, message, fix } of checked.errors) {
       problem(walk, at, code, message, fix);
@@ -803,7 +806,7 @@ const checkTry = (
   list: ListCheck
 ): void => {
   list(step.try, join(pointer, "try"), place);
-  const caught: Place = { steps: place.steps, error: true };
+  const caught: Place = { ...place, error: true };
   const at = join(pointer, "catch");
   if (step.catch.when !== undefined) {
     checkExpressionAt(walk, step.catch.when, join(at, "when"), caught);
@@ -853,6 +856,15 @@ const checkStep = (
       checkAgent(walk, step, pointer, place);
       break;
     }
+    case "decision": {
+      // The schema holds the recipients' and prompt's literals to their
+      // shapes; what an expression gives the host holds as it decides.
+      bindingFor(walk, step.binding, ["decision"], pointer);
+      for (const field of ["recipients", "prompt", "input"] as const) {
+        checkValue(walk, step[field], join(pointer, field), place, false);
+      }
+      break;
+    }
     case "wait": {
       if ("until" in step) {
         checkExpressionAt(walk, step.until, join(pointer, "until"), place);
@@ -876,6 +888,15 @@ const checkStep = (
     }
     case "try": {
       checkTry(walk, step, pointer, place, list);
+      break;
+    }
+    case "forEach": {
+      checkExpressionAt(walk, step.items, join(pointer, "items"), place);
+      const inItem: Place = { ...place, item: true };
+      if (step.while !== undefined) {
+        checkExpressionAt(walk, step.while, join(pointer, "while"), inItem);
+      }
+      list(step.do, join(pointer, "do"), inItem);
       break;
     }
     case "raise": {
@@ -999,7 +1020,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
   if (document.input !== undefined) {
     checkSchema(walk, document.input, "/input");
   }
-  const top: Place = { steps: new Set(), error: false };
+  const top: Place = { steps: new Set(), error: false, item: false };
   checkSteps(walk, document.steps, "/steps", top, 1);
   if (walk.count > formatLimits.steps) {
     problem(
@@ -1016,7 +1037,11 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       walk,
       document.output.value,
       "/output/value",
-      { steps: new Set(document.steps.map(({ id }) => id)), error: false },
+      {
+        steps: new Set(document.steps.map(({ id }) => id)),
+        error: false,
+        item: false,
+      },
       false
     );
   }
