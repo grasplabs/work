@@ -42,7 +42,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
-import { triggerStartRequest } from "./permissions.ts";
+import { revokedWith, triggerStartRequest } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
@@ -839,7 +839,11 @@ export const revokeWebhookSecret = async (
 /**
  * Deletes trigger `id` for `by`, who manages it: it starts nothing more,
  * and its permissions, asked for or granted, are revoked by `by` with it,
- * so no request of a trigger that is gone waits for an admin.
+ * each audited, so no request of a trigger that is gone waits for an
+ * admin. A request that landed after they were read is revoked too, in
+ * the same batch (its request audited, `trigger.deleted` its end); one
+ * after the batch lands nothing, as a request names only a live trigger
+ * (`requestPermission`).
  */
 export const deleteTriggerResource = async (
   env: Env,
@@ -849,6 +853,17 @@ export const deleteTriggerResource = async (
   const trigger = await requireTriggerManager(env, by, id);
   const now = new Date();
   const db = drizzle(env.DB);
+  const held = await db
+    .select()
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "trigger"),
+        eq(permissions.subjectId, trigger.id),
+        ne(permissions.status, "revoked")
+      )
+    )
+    .all();
   await auditedBatch(env, db, [
     db
       .update(triggerResources)
@@ -860,6 +875,7 @@ export const deleteTriggerResource = async (
         )
       ),
     outboxedIfChanged(db, entry(by, "trigger.deleted", trigger.id)),
+    ...revokedWith(db, by, held, now),
     db
       .update(permissions)
       .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })

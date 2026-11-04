@@ -86,8 +86,7 @@ const minuteMs = 60_000;
  * `start_invalid` an input the version no longer takes; `packages_revoked`
  * an approval of the version's packages withdrawn; `paused` a workflow
  * paused (workflow-lifecycle.ts), whose occurrences are skipped and never
- * counted toward stopping, as `start_denied`'s are while the trigger's
- * `start` waits for an admin. A trigger disabled,
+ * counted toward stopping. A trigger disabled,
  * deleted or moved meanwhile (`trigger_unavailable`) is read as due no
  * more, so it is let be.
  */
@@ -111,7 +110,7 @@ interface DueSchedule {
   attempts: number;
   /**
    * Its `start` still waits for an admin, asked for as it was created and
-   * neither granted nor refused: a refusal then is no failure of its own.
+   * neither granted nor refused: its occurrences are skipped, untried.
    */
   awaitingStart: boolean;
   workflowId: string;
@@ -198,8 +197,7 @@ type Failure =
  * occurrence stays due, tried again later. Refusals and the workflow's
  * own failures count: at `maxFailedStarts` it stops, audited once, its
  * owner told. Core's own failures only back off, and a paused workflow's
- * occurrence, or one refused while the trigger's `start` waits for an
- * admin, is skipped without counting: neither ever stops it.
+ * occurrence is skipped without counting: pausing it never stops it.
  */
 const recordFailure = async (
   env: Env,
@@ -207,13 +205,9 @@ const recordFailure = async (
   now: Date,
   failure: Failure
 ): Promise<void> => {
-  // A paused workflow, or a start an admin hasn't decided yet, skips the
-  // occurrence without counting: a schedule never stops while it waits.
   const counts =
     failure.kind === "failed" ||
-    (failure.kind === "refused" &&
-      failure.code !== "workflow.paused" &&
-      !(failure.code === "workflow.start_denied" && schedule.awaitingStart));
+    (failure.kind === "refused" && failure.code !== "workflow.paused");
   const failedStarts = counts
     ? schedule.failedStarts + 1
     : schedule.failedStarts;
@@ -318,6 +312,28 @@ const movedOn = async (
 };
 
 /**
+ * Moves `schedule` on from its occurrence, untried, while its trigger's
+ * `start` waits for an admin: to its next occurrence after `now`, its
+ * counts as they were, nothing audited. Waiting is no failure, and the
+ * trigger's page says it waits, so no refusal is tried, counted toward
+ * stopping, or logged for each occurrence. Only over the schedule read.
+ */
+const skipped = async (
+  env: Env,
+  schedule: DueSchedule,
+  now: Date
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(triggerSchedules)
+    .set({
+      nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
+      attempts: 0,
+      lastAttemptAt: null,
+    })
+    .where(asRead(schedule));
+};
+
+/**
  * One clock run's turn at `schedule`'s due occurrence, as a small state
  * machine, so whatever stopped an earlier turn (core dying anywhere) and
  * whatever changed since (a grant revoked, the trigger disabled or moved,
@@ -329,9 +345,10 @@ const movedOn = async (
  *    authority it had then, is sent to the engine by the start repair
  *    (resource-runs.ts) if it wasn't; no grant, capacity or permission
  *    read now holds a started occurrence back.
- * 2. Not started: a start is tried, admitted only while the occurrence
- *    is still the schedule's next (`stillNext`) and, being keyed by the
- *    occurrence, once. Admitted, it moves on.
+ * 2. Not started: while the trigger's `start` waits for an admin, it is
+ *    skipped, untried (`skipped`). Otherwise a start is tried, admitted
+ *    only while the occurrence is still the schedule's next (`stillNext`)
+ *    and, being keyed by the occurrence, once. Admitted, it moves on.
  * 3. The try failed: recorded only while no start of it was admitted
  *    (`unadmitted`); one admitted meanwhile moves on instead.
  */
@@ -342,6 +359,10 @@ const startScheduled = async (
 ): Promise<void> => {
   if (await admitted(env, schedule)) {
     await movedOn(env, schedule, now);
+    return;
+  }
+  if (schedule.awaitingStart) {
+    await skipped(env, schedule, now);
     return;
   }
   try {

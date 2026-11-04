@@ -737,7 +737,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("skip occurrences without counting while their start waits for an admin, and start the next once granted", async () => {
+  it("skip occurrences untried, uncounted and unlogged while their start waits for an admin, and start the next once granted", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
     const waiting = await scheduleTrigger(admin, workflow.id, {
@@ -751,6 +751,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       await startDueScheduleTriggers(env);
     }
     const whileWaiting = await scheduleOf(waiting.id);
+    const loggedWhileWaiting = await allEvents();
     await grantStart(admin, waiting.id);
     const occurrence = lastMinute();
     await dueAt(waiting.id, occurrence, whileWaiting?.failedStarts ?? 0);
@@ -762,6 +763,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       whileWaiting: {
         goesOn: whileWaiting?.nextAt !== null,
         failedStarts: whileWaiting?.failedStarts,
+        refusals: loggedWhileWaiting.filter(
+          ({ action, target }) =>
+            (action === "trigger.schedule.refused" &&
+              target?.id === waiting.id) ||
+            (action === "workflow.start.refused" && target?.id === workflow.id)
+        ).length,
       },
       granted: {
         movedOn: (granted?.nextAt ?? 0) > occurrence.getTime(),
@@ -769,7 +776,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       },
       runs: runs.map(({ key }) => key),
     }).toStrictEqual({
-      whileWaiting: { goesOn: true, failedStarts: 0 },
+      whileWaiting: { goesOn: true, failedStarts: 0, refusals: 0 },
       granted: { movedOn: true, failedStarts: 0 },
       runs: [keyOf(waiting.id, 1, occurrence)],
     });
@@ -817,13 +824,25 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       )
     );
 
+    const logged = await allEvents();
+    const revokedOf = (permission: string | undefined) =>
+      logged
+        .filter(
+          ({ action, target }) =>
+            action === "permission.revoked" && target?.id === permission
+        )
+        .map(({ actor }) => (actor.type === "person" ? actor.userId : actor));
+
     expect({
       granted: await statusesOf(granted.id),
+      grantRevokedBy: revokedOf(granted.permission),
       askedAgain,
       racing: await statusesOf(racing.id),
     }).toStrictEqual({
       // The start it asked for as it was created, granted, then revoked.
       granted: [{ status: "revoked", revokedBy: admin.userId }],
+      // Audited as revoked, by whoever deleted the trigger.
+      grantRevokedBy: [admin.userId],
       askedAgain: "permission.invalid",
       racing: [{ status: "revoked", revokedBy: admin.userId }],
     });

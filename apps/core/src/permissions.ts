@@ -64,6 +64,7 @@ import {
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { tellKept } from "./access-revocations.ts";
@@ -1030,6 +1031,31 @@ export const requestPermission = async (
   }
   return permission;
 };
+
+/**
+ * The statements revoking `held`, permissions of a subject going away (a
+ * trigger deleted), for `by` at `revokedAt`, for the batch that removes
+ * it: each audited as `permission.revoked` only if it was still
+ * unrevoked as it ran.
+ */
+export const revokedWith = (
+  db: DrizzleD1Database,
+  by: Acting,
+  held: readonly Row[],
+  revokedAt: Date
+) =>
+  held.flatMap((row) => [
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt })
+      .where(
+        and(eq(permissions.id, row.id), ne(permissions.status, "revoked"))
+      ),
+    outboxedIfChanged(
+      db,
+      changeEntry(by, "permission.revoked", toPermission(row))
+    ),
+  ]);
 
 /**
  * What a blueprint of App `app` declares as it is marked
