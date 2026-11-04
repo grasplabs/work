@@ -34,6 +34,7 @@ export type {
   AppInspection,
   AppManifest,
   OperationManifest,
+  ServerModules,
   UseManifest,
 } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";

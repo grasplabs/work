@@ -16,8 +16,9 @@ import type {
   AppManifest,
   BoundWorkflow,
   WorkflowBindingExtras,
+  ServerModules,
 } from "../src/host.ts";
-import type { AnyOperationReference, ServerModules } from "../src/index.ts";
+import type { AnyOperationReference } from "../src/index.ts";
 import { app, permission, v } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";

@@ -40,7 +40,12 @@ import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 import { bindingNameSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
-import { hasAppPathSegments, workflowFiles } from "./inputs.ts";
+import {
+  generatedServerFolder,
+  hasAppPathSegments,
+  hostGeneratedFolder,
+  workflowFiles,
+} from "./inputs.ts";
 import type { CodeFolder } from "./inputs.ts";
 import { kitModuleName, appModuleName } from "./kit.ts";
 
@@ -63,20 +68,6 @@ export type AppCodeKind =
   | "migration"
   | "generated"
   | "test";
-
-/** Where the generated modules App code imports are, as Convex has them. */
-export const generatedServerFolder = "server/_generated/";
-
-/** Where the host's own generated files are, which App code never imports. */
-export const hostGeneratedFolder = ".grasp/";
-
-/**
- * Whether `path` is one the host generates (`server/_generated/`,
- * `.grasp/`): never an App's own file, so an App's files never hold one.
- */
-export const isGeneratedPath = (path: string): boolean =>
-  path.startsWith(generatedServerFolder) ||
-  path.startsWith(hostGeneratedFolder);
 
 /**
  * The modules generated for an App, by the specifier its code imports
@@ -160,7 +151,7 @@ export const serverCodeFolders: readonly CodeFolder[] = [
  * The module path of each of `files`' server modules, as their functions'
  * paths begin (`server/admin/users.ts` is `admin/users`), sorted.
  */
-export const serverModulePaths = (files: Iterable<string>): string[] =>
+const serverModulePaths = (files: Iterable<string>): string[] =>
   [...files]
     .filter((path) => isServerModule(path))
     .map((path) => path.slice("server/".length, -".ts".length))

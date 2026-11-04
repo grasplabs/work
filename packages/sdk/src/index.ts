@@ -12,7 +12,6 @@ export type {
   AppPermissions,
   OperationAccess,
   ScreenDefinition,
-  ServerModules,
   TableVerbs,
 } from "./app.ts";
 export { AppError } from "./app-error.ts";

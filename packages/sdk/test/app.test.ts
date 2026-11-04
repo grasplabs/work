@@ -3,12 +3,9 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
 import { inspectApp, readAppManifest, registerFunctions } from "../src/host.ts";
+import type { ServerModules } from "../src/host.ts";
 import { AppError, app, permission } from "../src/index.ts";
-import type {
-  AppDefinition,
-  ServerModules,
-  WorkflowEventReference,
-} from "../src/index.ts";
+import type { AppDefinition, WorkflowEventReference } from "../src/index.ts";
 import { readPermissionDeclaration } from "../src/permissions.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
