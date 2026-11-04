@@ -62,7 +62,6 @@ import { Route as ShellAppsAppEditRouteImport } from './routes/_shell.apps.$app_
 import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
-import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as ShellSettingsPackagesWorkflowsWorkflowRouteImport } from './routes/_shell.settings.packages.workflows.$workflow'
 import { Route as ShellWorkflowsAppWorkflowRunsRunRouteImport } from './routes/_shell.workflows.$app.$workflow_.runs.$run'
@@ -335,12 +334,6 @@ const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
   path: '/links/$app/$surface',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellSettingsPackagesIndexRoute =
-  ShellSettingsPackagesIndexRouteImport.update({
-    id: '/packages/',
-    path: '/packages/',
-    getParentRoute: () => ShellSettingsRoute,
-  } as any)
 const ShellWorkflowsAppWorkflowRoute =
   ShellWorkflowsAppWorkflowRouteImport.update({
     id: '/workflows/$app/$workflow',
@@ -414,7 +407,6 @@ export interface FileRoutesByFullPath {
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
@@ -470,7 +462,6 @@ export interface FileRoutesByTo {
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/settings/packages': typeof ShellSettingsPackagesIndexRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
@@ -530,7 +521,6 @@ export interface FileRoutesById {
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/_shell/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/_shell/workflows/$app/$workflow_/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
@@ -590,7 +580,6 @@ export interface FileRouteTypes {
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/workflows/$app/$workflow'
-    | '/settings/packages/'
     | '/settings/packages/workflows/$workflow'
     | '/workflows/$app/$workflow/runs/$run'
   fileRoutesByTo: FileRoutesByTo
@@ -646,7 +635,6 @@ export interface FileRouteTypes {
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/workflows/$app/$workflow'
-    | '/settings/packages'
     | '/settings/packages/workflows/$workflow'
     | '/workflows/$app/$workflow/runs/$run'
   id:
@@ -705,7 +693,6 @@ export interface FileRouteTypes {
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/links/$app/$surface'
     | '/_shell/workflows/$app/$workflow'
-    | '/_shell/settings/packages/'
     | '/_shell/settings/packages/workflows/$workflow'
     | '/_shell/workflows/$app/$workflow_/runs/$run'
   fileRoutesById: FileRoutesById
@@ -1098,13 +1085,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/settings/packages/': {
-      id: '/_shell/settings/packages/'
-      path: '/packages'
-      fullPath: '/settings/packages/'
-      preLoaderRoute: typeof ShellSettingsPackagesIndexRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/workflows/$app/$workflow': {
       id: '/_shell/workflows/$app/$workflow'
       path: '/workflows/$app/$workflow'
@@ -1164,7 +1144,6 @@ interface ShellSettingsRouteChildren {
   ShellSettingsStephenRoute: typeof ShellSettingsStephenRoute
   ShellSettingsWorkspaceRoute: typeof ShellSettingsWorkspaceRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
-  ShellSettingsPackagesIndexRoute: typeof ShellSettingsPackagesIndexRoute
   ShellSettingsPackagesWorkflowsWorkflowRoute: typeof ShellSettingsPackagesWorkflowsWorkflowRoute
 }
 
@@ -1183,7 +1162,6 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsStephenRoute: ShellSettingsStephenRoute,
   ShellSettingsWorkspaceRoute: ShellSettingsWorkspaceRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
-  ShellSettingsPackagesIndexRoute: ShellSettingsPackagesIndexRoute,
   ShellSettingsPackagesWorkflowsWorkflowRoute:
     ShellSettingsPackagesWorkflowsWorkflowRoute,
 }

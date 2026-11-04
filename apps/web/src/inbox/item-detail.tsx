@@ -899,6 +899,7 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
     asked: t`Answer in the brain`,
     decision: t`Review and answer`,
     revoked: t`Remove the package`,
+    advisory: t`Review the packages`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
   };

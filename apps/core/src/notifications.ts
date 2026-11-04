@@ -7,7 +7,7 @@ import {
 import type {
   Notification,
   NotificationCursor,
-  PackageRevokedNotification,
+  PackageNotificationSubject,
   NotificationPage,
   NotificationsApi,
 } from "@grasp-os/shared/notifications";
@@ -43,7 +43,6 @@ import {
   workflowResources,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { holdsApproveSql } from "./dependencies/approvers.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -59,13 +58,14 @@ import { rowsOf } from "./sharing.ts";
 // connector-source-notices.ts as connect's audit events reach core), or
 // that packages of an App or workflow they build or approved were revoked
 // as malware (`package_revoked`, written by dependencies/requests.ts in
-// the batch that revokes them), or what an App's server code told them
+// the batch that revokes them) or have a new advisory (`package_advisory`,
+// written by the re-scan there), or what an App's server code told them
 // (`app_message`, written by app-notifications.ts). A question is listed
 // while it is open:
 // once anyone answers or closes it, it goes from the list by itself; a
 // stopped trigger while it is still theirs and not deleted; a revocation
-// while they can still open the App or workflow, or approve packages, who
-// see every App's and workflow's approvals anyway; an App's message while
+// or an advisory while they can still open the App or workflow; an App's
+// message while
 // they can still open the App.
 //
 // A workflow's failure tells who it acted for (who started the run, or,
@@ -198,26 +198,35 @@ export const eventsStopNoticed = (
 };
 
 /**
- * Packages of an App or workflow revoked as malware, and whom it tells:
- * its builders and the people who approved them.
+ * Packages of an App or workflow revoked as malware (`package_revoked`),
+ * or with a new advisory (`package_advisory`), and whom it tells: its
+ * builders and the people who approved them.
  */
-export interface RevocationNotice {
+export interface PackageNotice {
+  type: "package_revoked" | "package_advisory";
   subject: { type: "app" | "workflow"; id: string };
   package: { name: string; version: string };
   advisory: string;
   personIds: readonly string[];
-  /** That the revocation is recorded, as SQL on what the batch wrote before. */
+  /** That what it tells is recorded, as SQL on what the batch wrote before. */
   recorded: SQL;
 }
 
 /**
- * The statements that tell each of `personIds` the packages were revoked,
- * in the batch that revokes them, each only while they are a member of
- * the organization.
+ * The statements that tell each of `personIds` of the packages, in the
+ * batch that records it, each only while they are a member of the
+ * organization.
  */
-export const revocationNoticed = (
+export const packageNoticed = (
   db: DrizzleD1Database,
-  { subject, package: revoked, advisory, personIds, recorded }: RevocationNotice
+  {
+    type,
+    subject,
+    package: revoked,
+    advisory,
+    personIds,
+    recorded,
+  }: PackageNotice
 ) => {
   const now = Date.now();
   const app = subject.type === "app" ? subject.id : null;
@@ -226,7 +235,7 @@ export const revocationNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, ${type}, ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
       )
   );
 };
@@ -244,8 +253,8 @@ const workflowFoundBy = (person: Identity): SQL =>
 /**
  * `person`'s notifications: of Apps they can still open, of gaps still
  * open, of triggers still theirs, of the sources connect stopped hearing
- * for them, and of revocations of Apps or workflows they can still open,
- * or of any while they approve packages. Read with `apps`, `brain_records` and `brain_gap_states`
+ * for them, and of revocations and advisories of Apps or workflows they
+ * can still open. Read with `apps`, `brain_records` and `brain_gap_states`
  * joined on the row (`appOn`, `gapOn`, `gapStateOn`).
  */
 const visibleTo = (env: Env, person: Identity): SQL | undefined =>
@@ -269,17 +278,17 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
       ),
       eq(notifications.type, "events_stopped"),
       and(
-        eq(notifications.type, "package_revoked"),
+        inList(notifications.type, ["package_revoked", "package_advisory"]),
         or(
           and(
             isNotNull(apps.id),
-            or(appsFoundBy(env, person), holdsApproveSql(person.userId)),
+            appsFoundBy(env, person),
             isNull(apps.removedAt)
           ),
           and(
             isNotNull(workflowResources.id),
             isNull(workflowResources.deletedAt),
-            or(workflowFoundBy(person), holdsApproveSql(person.userId))
+            workflowFoundBy(person)
           )
         )
       )
@@ -302,7 +311,11 @@ const triggerOn = eq(triggerResources.id, notifications.triggerId);
  * workflow, or the one whose packages were revoked.
  */
 const workflowOn = and(
-  inList(notifications.type, ["trigger_stopped", "package_revoked"]),
+  inList(notifications.type, [
+    "trigger_stopped",
+    "package_revoked",
+    "package_advisory",
+  ]),
   eq(workflowResources.id, notifications.workflowId)
 );
 
@@ -314,6 +327,7 @@ interface ListedRow {
     | "gap_asked"
     | "trigger_stopped"
     | "package_revoked"
+    | "package_advisory"
     | "events_stopped"
     | "app_message";
   app: string | null;
@@ -350,10 +364,10 @@ const askedGapOf = (
   return record.success && record.data.type === "gap" ? record.data : null;
 };
 
-/** The subject of a `package_revoked` row, by its name now. */
-const revokedSubjectOf = (
+/** The subject of a package row, by its name now. */
+const packageSubjectOf = (
   row: ListedRow
-): PackageRevokedNotification["subject"] | null => {
+): PackageNotificationSubject | null => {
   if (row.app !== null && row.appName !== null) {
     return { type: "app", app: row.app, appName: row.appName };
   }
@@ -367,9 +381,12 @@ const revokedSubjectOf = (
   return null;
 };
 
-/** The `package_revoked` notification a listed row holds, if it reads. */
-const revokedOf = (row: ListedRow): Notification[] => {
-  const subject = revokedSubjectOf(row);
+/** The package notification a listed row of `type` holds, if it reads. */
+const packageOf = (
+  row: ListedRow,
+  type: "package_revoked" | "package_advisory"
+): Notification[] => {
+  const subject = packageSubjectOf(row);
   const { packageName, packageVersion, advisory } = row;
   return subject === null ||
     packageName === null ||
@@ -379,7 +396,7 @@ const revokedOf = (row: ListedRow): Notification[] => {
     : [
         {
           id: row.id,
-          type: "package_revoked",
+          type,
           subject,
           package: { name: packageName, version: packageVersion },
           advisory,
@@ -446,8 +463,8 @@ const notificationOf = (row: ListedRow): Notification[] => {
           },
         ];
   }
-  if (row.type === "package_revoked") {
-    return revokedOf(row);
+  if (row.type === "package_revoked" || row.type === "package_advisory") {
+    return packageOf(row, row.type);
   }
   if (row.type === "app_message") {
     return appMessageOf(row);

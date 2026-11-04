@@ -37,8 +37,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // The npm packages approved for an engine, and taking an approval back
 // (spec 19.3.1): retiring it, so nothing new is built with the packages
 // while what was built keeps working, or revoking it, so nothing of them
-// runs any more. Core decides who may (those it lets approve packages,
-// `decides`) and checks it again as the decision lands, on the impact
+// runs any more. Core decides who may (its builders, on their own
+// session: `decides`) and checks it again as the decision lands, on the impact
 // this page showed: the dialog reads it first and names it, so a change
 // since (another approval, the policy) is refused rather than decided
 // unseen.

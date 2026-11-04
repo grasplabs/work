@@ -2686,13 +2686,27 @@ export const dependencyRequests = sqliteTable(
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
     /**
-     * When an approval in force was last found clean of malware reported
-     * since (OSV.dev and the registry's advisories), by the periodic
-     * re-check (`recheckMalware`, requests.ts): null until it was.
+     * When an approval in force was last re-scanned against OSV.dev and
+     * the registry's advisories, by the regular re-scan
+     * (`rescanPackages`, requests.ts): null until it was.
      */
     malwareCheckedAt: timestamp("malware_checked_at"),
+    /**
+     * The advisories the re-scan found of an approval in force since it was
+     * approved and told its builders of (`rescanPackages`), by ID: each is
+     * told once. Null until one was.
+     */
+    advisoriesNoticed: text("advisories_noticed", { mode: "json" }).$type<
+      string[]
+    >(),
   },
   (table) => [
+    // The requests a person asked for that wait on them (`waiting`, and a
+    // chat's card).
+    index("dependency_requests_requested_idx").on(
+      table.requestedBy,
+      table.status
+    ),
     // One request waits per subject: a second pending row is refused.
     uniqueIndex("dependency_requests_pending_idx")
       .on(table.subjectType, table.subjectId)
@@ -2712,7 +2726,7 @@ export const dependencyRequests = sqliteTable(
       table.graphHash,
       table.status
     ),
-    // The approvals the malware re-check is due to read: by when each was
+    // The approvals the re-scan is due to read: by when each was
     // last found clean, never checked first. Led by that time, not the
     // status, so the approvers' list of what is in force keeps reading the
     // subject index in its order.
@@ -2761,7 +2775,7 @@ export const adminCommands = sqliteTable("admin_commands", {
 /**
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
- * each time who holds `dependencies.approve` changes. A decision lands
+ * each time an approval is retired or revoked. A decision lands
  * only under the generation its person reviewed, and a build is admitted
  * only under the one it read: what was checked before a change isn't
  * acted on after it.
@@ -2770,34 +2784,6 @@ export const dependencyPolicy = sqliteTable("dependency_policy", {
   id: text().primaryKey(),
   generation: integer().notNull(),
 });
-
-/**
- * Who holds `dependencies.approve` (src/dependencies/approvers.ts): a
- * member (`subject_type` `person`, `subject_id` their user ID) or a team.
- * One row per grant, never deleted, so who granted and who revoked stays
- * readable; only its status and the revoke columns ever change. Whether
- * the member or team is still there is read from the organization's own
- * tables each time.
- */
-export const dependencyApprovers = sqliteTable(
-  "dependency_approvers",
-  {
-    id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["person", "team"] }).notNull(),
-    subjectId: text("subject_id").notNull(),
-    status: text({ enum: ["active", "revoked"] }).notNull(),
-    grantedBy: text("granted_by").notNull(),
-    grantedAt: timestamp("granted_at").notNull(),
-    revokedBy: text("revoked_by"),
-    revokedAt: timestamp("revoked_at"),
-  },
-  (table) => [
-    // A member or team holds it once: a second live grant is refused.
-    uniqueIndex("dependency_approvers_live_idx")
-      .on(table.subjectType, table.subjectId)
-      .where(sql`status = 'active'`),
-  ]
-);
 
 /**
  * The exact lock (`grasp.lock.json`) the resolver produced for one of an
@@ -3342,6 +3328,7 @@ export const notifications = sqliteTable(
         "gap_asked",
         "trigger_stopped",
         "package_revoked",
+        "package_advisory",
         "events_stopped",
         "app_message",
       ],

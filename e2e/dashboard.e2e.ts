@@ -379,17 +379,12 @@ test("an admin sees the latest activity, with the way to the audit trail", async
   await expect(page).toHaveURL(/\/settings\/audit$/u);
 });
 
-test("someone given the permission approves the packages proposed for an engine, and an admin without it isn't asked", async ({
+test("the builder who asked approves the packages proposed for their engine, and an admin who didn't ask isn't asked", async ({
   pageOf,
 }) => {
-  const { admin, builder, approver } = peopleIn("dependencyApproval");
-  const asAdmin = apiOf(admin);
+  const { admin, builder } = peopleIn("dependencyApproval");
   const asBuilder = apiOf(builder);
   const { id: app } = await asBuilder.api.apps.create({ name: "Totals" });
-  await asAdmin.api.dependencies.grantApprover({
-    type: "person",
-    userId: approver.userId,
-  });
   const origin = "https://registry.npmjs.org";
   const request = await seedDependencyRequest({
     app,
@@ -447,7 +442,7 @@ test("someone given the permission approves the packages proposed for an engine,
     },
   });
 
-  // An admin manages who approves, and is asked nothing without it.
+  // An admin, though they build every App, didn't ask: it waits on who did.
   const adminPage = await pageOf(admin);
   await adminPage.goto("/dashboard");
   await expect(
@@ -457,7 +452,7 @@ test("someone given the permission approves the packages proposed for an engine,
     adminPage.getByRole("article", { name: "Packages for Totals" })
   ).toHaveCount(0);
 
-  const page = await pageOf(approver);
+  const page = await pageOf(builder);
   await page.goto("/dashboard");
   let card = await toCard(page, "Packages for Totals");
   // Skipped, it goes to the back of the pile, and is still there to do.
@@ -517,6 +512,5 @@ test("someone given the permission approves the packages proposed for an engine,
       return approved?.id;
     })
     .toBe(request.id);
-  asAdmin.core[Symbol.dispose]();
   asBuilder.core[Symbol.dispose]();
 });

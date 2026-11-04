@@ -5,20 +5,18 @@ import { seedDependencyRequest } from "./dependency-request.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // An App's approved npm packages, and taking an approval back: its
-// builders see them under Packages in its settings; someone who may approve
-// packages sees them too, and only them when they aren't one of the
-// engine's members, and retires or revokes them after reading what that
-// ends. The approval is written as a person's decision leaves it
-// (dependency-request.ts): a local stack can't resolve from the registry.
+// builders see them under Packages in its settings, and retire or revoke
+// them after reading what that ends. The approval is written as a
+// builder's decision leaves it (dependency-request.ts): a local stack
+// can't resolve from the registry.
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
 
-/** An engine of `builder`'s with one approved package, and `approver` given the permission. */
+/** An engine of `builder`'s with one approved package, shared with `approver` as a builder. */
 const engineWithPackages = async (
   scene:
     | "enginePackages"
-    | "enginePackagesBuilder"
     | "enginePackagesRefresh"
     | "enginePackagesFresh"
     | "enginePackagesTab"
@@ -27,12 +25,12 @@ const engineWithPackages = async (
   name: string
 ) => {
   const people = peopleIn(scene);
-  const asAdmin = apiOf(people.admin);
   const asBuilder = apiOf(people.builder);
   const { id: app } = await asBuilder.api.apps.create({ name });
-  const grant = await asAdmin.api.dependencies.grantApprover({
+  await asBuilder.api.apps.members.add(app, {
     type: "person",
-    userId: people.approver.userId,
+    id: people.approver.userId,
+    role: "builder",
   });
   const request = await seedDependencyRequest({
     app,
@@ -56,9 +54,8 @@ const engineWithPackages = async (
       platformPeers: {},
     },
   });
-  asAdmin.core[Symbol.dispose]();
   asBuilder.core[Symbol.dispose]();
-  return { ...people, app, request, grant: grant.id };
+  return { ...people, app, request };
 };
 
 /** Retires `request`'s graph as `person` through the API: someone else, for the page. */
@@ -79,7 +76,7 @@ const retireElsewhere = async (
   as.core[Symbol.dispose]();
 };
 
-test("someone who may approve packages and isn't a member sees only an engine's packages, and retires them", async ({
+test("a builder of the App retires its packages, and every builder sees why", async ({
   pageOf,
 }) => {
   const { builder, approver, app } = await engineWithPackages(
@@ -89,16 +86,9 @@ test("someone who may approve packages and isn't a member sees only an engine's 
 
   const page = await pageOf(approver);
   await page.goto(`/apps/${app}/settings?section=packages`);
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Charts" })
-  ).toBeVisible(pageRead);
-  // Only the packages: none of the App's settings.
-  await expect(
-    page.getByRole("navigation", { name: "Settings sections" })
-  ).toHaveCount(0);
   const table = page.getByRole("table", { name: "Approved packages" });
   const row = table.getByRole("row").filter({ hasText: "charts@3.1.0" });
-  await expect(row).toContainText("Approved");
+  await expect(row).toContainText("Approved", pageRead);
   await row
     .getByRole("button", { name: "Retire the packages for Charts" })
     .click();
@@ -118,7 +108,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
   await expect(row).toContainText("Retired");
   await expect(row).toContainText("Replaced by the platform's chart.");
 
-  // A builder sees them under Packages in its settings, and ends nothing.
+  // Its other builder sees them under Packages in its settings, ended.
   const builderPage = await pageOf(builder);
   await builderPage.goto(`/apps/${app}/settings?section=packages`);
   const builderRow = builderPage
@@ -126,33 +116,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
     .getByRole("row")
     .filter({ hasText: "charts@3.1.0" });
   await expect(builderRow).toContainText("Retired", pageRead);
-  await expect(builderRow.getByRole("button")).toHaveCount(0);
-});
-
-test("someone who may approve packages and builds other engines sees only this one's packages", async ({
-  pageOf,
-}) => {
-  // An approver's organization role doesn't decide it: core lets them
-  // list the packages of an engine they aren't a member of.
-  const { approver, app } = await engineWithPackages(
-    "enginePackagesBuilder",
-    "Ledger"
-  );
-
-  const page = await pageOf(approver);
-  await page.goto(`/apps/${app}/settings?section=packages`);
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Ledger" })
-  ).toBeVisible(pageRead);
-  await expect(
-    page.getByRole("navigation", { name: "Settings sections" })
-  ).toHaveCount(0);
-  await expect(
-    page
-      .getByRole("table", { name: "Approved packages" })
-      .getByRole("row")
-      .filter({ hasText: "charts@3.1.0" })
-  ).toContainText("Approved");
+  await expect(builderRow).toContainText("Replaced by the platform's chart.");
 });
 
 test("reads the packages again when a decision fails, keeping why", async ({
@@ -316,7 +280,7 @@ test("stays busy until the list was read again, so a decision is never sent twic
 test("says the list may be out of date when it can't be read again", async ({
   pageOf,
 }) => {
-  const { admin, approver, app, grant } = await engineWithPackages(
+  const { builder, approver, app } = await engineWithPackages(
     "enginePackagesStale",
     "Travel"
   );
@@ -330,11 +294,14 @@ test("says the list may be out of date when it can't be read again", async ({
   });
   await dialog.getByLabel("Why").fill("Replaced.");
 
-  // The permission taken away meanwhile: the decision is refused, and the
-  // list, which this approver read only by it, can't be read again.
-  const asAdmin = apiOf(admin);
-  await asAdmin.api.dependencies.revokeApprover(grant);
-  asAdmin.core[Symbol.dispose]();
+  // No longer a builder of the App meanwhile: the decision is refused,
+  // and the list, which they read as one, can't be read again.
+  const asBuilder = apiOf(builder);
+  await asBuilder.api.apps.members.remove(app, {
+    type: "person",
+    id: approver.userId,
+  });
+  asBuilder.core[Symbol.dispose]();
   await dialog.getByRole("button", { name: "Retire", exact: true }).click();
   await expect(dialog.getByRole("alert")).toBeVisible();
   await dialog.getByRole("button", { name: "Cancel" }).click();

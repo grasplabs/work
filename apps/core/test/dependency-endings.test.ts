@@ -11,7 +11,6 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { revokeApprover } from "../src/dependencies/approvers.ts";
 import {
   endDependency,
   proposeForTests,
@@ -37,10 +36,10 @@ import {
 // admitting anything new (a new pin, a resolve that finds the approval
 // standing, a build that pins after the fence) or breaking what was built
 // before; a build racing the decision with no clear winner; the wrong
-// person deciding (a role, staff, an agent acting for a holder, someone
-// who lost the permission meanwhile); a decision on an impact that
-// changed since it was read; history overwritten; an approver's
-// approvals taken back with their permission. Packages come from
+// person deciding (someone who doesn't build the App, staff, an agent
+// acting for its builder, someone removed meanwhile); a decision on an
+// impact that changed since it was read; history overwritten. Packages
+// come from
 // connect's strict fake of the npm registry, built and served through
 // core's real path.
 
@@ -51,15 +50,8 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** An admin who holds `dependencies.approve`, by their own grant. */
-const approvingAdmin = async (): Promise<Person> => {
-  const admin = await personApi("admin");
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: admin.userId,
-  });
-  return admin;
-};
+/** An admin, who builds every App, so decides and ends its packages. */
+const approvingAdmin = async (): Promise<Person> => await personApi("admin");
 
 /** One small package of ES modules, for both targets. */
 const smallPackage = async (): Promise<string> => {
@@ -835,25 +827,24 @@ describe("a build racing the decision", () => {
 });
 
 describe("who ends an approval, and on what", () => {
-  it("lets only a person who holds the permission end one: no role, no staff, no agent acting for a holder", async () => {
+  it("lets only a builder of the App end one: not another App's builder, staff, nor an agent acting for its builder", async () => {
     const admin = await approvingAdmin();
     const approved = await approvedApp(admin);
-    const otherAdmin = await personApi("admin");
+    const otherBuilder = await personApi("builder");
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core: staffCore } = await openRpc(staffSession);
     const staff = staffCore.authenticate();
-    const { policyGeneration, endings } = await admin.api.dependencies.impact(
-      approved.request.id
-    );
+    const { policyGeneration, endings } =
+      await approved.builder.api.dependencies.impact(approved.request.id);
     const ending = {
       reviewed: {
         graphHash: approved.request.graphHash,
         policyGeneration,
-        approvalsDigest: endings.revoke.digest,
+        approvalsDigest: endings.retire.digest,
       },
-      reason: "Unsafe.",
+      reason: "Replaced.",
     };
-    const identity = await admin.api.whoami();
+    const identity = await approved.builder.api.whoami();
     // As core names an agent acting for a person (agent-builds.ts).
     const acting = {
       ...identity,
@@ -865,68 +856,71 @@ describe("who ends an approval, and on what", () => {
     };
 
     const refused = {
-      otherAdmin: await outcome(
-        otherAdmin.api.dependencies.revoke(approved.request.id, ending)
-      ),
-      builder: await outcome(
-        approved.builder.api.dependencies.retire(approved.request.id, ending)
+      otherBuilder: await outcome(
+        otherBuilder.api.dependencies.retire(approved.request.id, ending)
       ),
       staff: await outcome(
         staff.dependencies.revoke(approved.request.id, ending)
       ),
       agent: await outcome(
-        endDependency(env, acting, approved.request.id, "revoked", ending)
+        endDependency(env, acting, approved.request.id, "retired", ending)
       ),
-      // Nor does anyone without it read what ending one would touch.
-      builderImpact: await outcome(
-        approved.builder.api.dependencies.impact(approved.request.id)
+      // Nor does anyone who doesn't build it read what ending one touches.
+      otherImpact: await outcome(
+        otherBuilder.api.dependencies.impact(approved.request.id)
       ),
       noReason: await outcome(
-        admin.api.dependencies.revoke(approved.request.id, {
+        approved.builder.api.dependencies.retire(approved.request.id, {
           ...ending,
           reason: " ",
         })
       ),
     };
-    const status = await approved.builder.api.dependencies.status({
+    const before = await approved.builder.api.dependencies.status({
       app: approved.app,
     });
+    // Its own builder ends it.
+    const [retired] = await approved.builder.api.dependencies.retire(
+      approved.request.id,
+      ending
+    );
 
     expect(refused).toStrictEqual({
-      otherAdmin: "dependency.forbidden",
-      builder: "dependency.forbidden",
+      otherBuilder: "dependency.not_found",
       staff: "role.forbidden",
       agent: "dependency.forbidden",
-      builderImpact: "dependency.not_found",
+      otherImpact: "dependency.not_found",
       noReason: "dependency.invalid",
     });
-    expect(status.approved?.status).toBe("approved");
+    expect(before.approved?.status).toBe("approved");
+    expect(retired).toMatchObject({
+      status: "retired",
+      ended: { by: { userId: approved.builder.userId } },
+    });
   });
 
-  it("decides in one write: a grant lost, a policy change or another approval of the graph just before it lands refuses it", async () => {
+  it("decides in one write: leaving the organization, a policy change or another approval of the graph just before it lands refuses it", async () => {
     const admin = await approvingAdmin();
-    const adminIdentity = await admin.api.whoami();
     const racedBy = async (
-      first: (raced: {
-        approver: Person;
-        grant: string;
-        approved: Approved;
-      }) => Promise<unknown>
+      first: (raced: { ender: Person; approved: Approved }) => Promise<unknown>
     ) => {
-      const approver = await personApi("user");
-      const { id: grant } = await admin.api.dependencies.grantApprover({
-        type: "person",
-        userId: approver.userId,
-      });
       const approved = await approvedApp(admin, ["browser"]);
-      const identity = await approver.api.whoami();
-      const { policyGeneration, endings } =
-        await approver.api.dependencies.impact(approved.request.id);
+      // A co-builder ends it, so the owner can still act on the App.
+      const ender = await personApi("builder");
+      await approved.builder.api.apps.members.add(approved.app, {
+        type: "person",
+        id: ender.userId,
+        role: "builder",
+      });
+      const identity = await ender.api.whoami();
+      const { policyGeneration, endings } = await ender.api.dependencies.impact(
+        approved.request.id
+      );
       let raced = false;
       const db = racingDb(async () => {
         if (!raced) {
           raced = true;
-          await first({ approver, grant, approved });
+          await first({ ender, approved });
         }
       });
       const result = await outcome(
@@ -950,15 +944,13 @@ describe("who ends an approval, and on what", () => {
       return { result, status: still?.status };
     };
 
-    const grantLost = await racedBy(async ({ grant }) => {
-      await revokeApprover(env, adminIdentity, grant);
+    const removed = await racedBy(async ({ ender }) => {
+      await admin.api.members.remove(ender.userId);
     });
     const policyChanged = await racedBy(async () => {
-      const another = await personApi("user");
-      await admin.api.dependencies.grantApprover({
-        type: "person",
-        userId: another.userId,
-      });
+      // Another App's approval retired: the generation moves on.
+      const other = await approvedApp(admin, ["browser"]);
+      await end(admin, "retire", other.request);
     });
     const approvedAgain = await racedBy(async ({ approved }) => {
       // The same graph approved for another target meanwhile: one more
@@ -979,8 +971,8 @@ describe("who ends an approval, and on what", () => {
       });
     });
 
-    expect({ grantLost, policyChanged, approvedAgain }).toStrictEqual({
-      grantLost: { result: "dependency.forbidden", status: "approved" },
+    expect({ removed, policyChanged, approvedAgain }).toStrictEqual({
+      removed: { result: "dependency.forbidden", status: "approved" },
       policyChanged: { result: "dependency.stale", status: "approved" },
       approvedAgain: { result: "dependency.stale", status: "approved" },
     });
@@ -1027,7 +1019,7 @@ describe("who ends an approval, and on what", () => {
     });
   });
 
-  it("lists an App's approvals in force to its builders and to whoever may end them, and to nobody else", async () => {
+  it("lists an App's approvals in force to its builders, who may end them, and to nobody else", async () => {
     const admin = await approvingAdmin();
     const retired = await approvedApp(admin, ["browser"]);
     await end(admin, "retire", retired.request);
@@ -1042,17 +1034,10 @@ describe("who ends an approval, and on what", () => {
     const revoked = await approvedApp(admin, ["browser"]);
     await end(admin, "revoke", revoked.request);
     const stranger = await personApi("user");
-    // Someone who may end approvals, but builds no App.
-    const approver = await personApi("user");
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: approver.userId,
-    });
+    // A builder, of other Apps.
+    const otherBuilder = await personApi("builder");
 
     const builderReads = await retired.builder.api.dependencies.approvals({
-      app: retired.app,
-    });
-    const approverReads = await approver.api.dependencies.approvals({
       app: retired.app,
     });
     const adminReads = await admin.api.dependencies.approvals({
@@ -1063,29 +1048,27 @@ describe("who ends an approval, and on what", () => {
         builderReads.decides,
         builderReads.approvals.map(({ id, status }) => [id, status]),
       ],
-      approver: [
-        approverReads.decides,
-        approverReads.approvals.length,
-        approverReads.subject.id,
-      ],
       // A revoked graph is in force no more: it isn't listed.
       revoked: adminReads.approvals,
       stranger: await outcome(
         stranger.api.dependencies.approvals({ app: retired.app })
       ),
+      otherBuilder: await outcome(
+        otherBuilder.api.dependencies.approvals({ app: retired.app })
+      ),
     };
 
     expect(read).toStrictEqual({
       builder: [
-        false,
+        true,
         [
           [next.id, "approved"],
           [retired.request.id, "retired"],
         ],
       ],
-      approver: [true, 2, retired.app],
       revoked: [],
-      stranger: "app.not_found",
+      stranger: "dependency.not_found",
+      otherBuilder: "dependency.not_found",
     });
   });
 
@@ -1161,24 +1144,42 @@ describe("who ends an approval, and on what", () => {
     expect(result).toBe("dependency.stale");
   });
 
-  it("leaves what an approver approved in force when their permission is revoked", async () => {
-    const admin = await personApi("admin");
-    const approver = await personApi("user");
-    const { id: grant } = await admin.api.dependencies.grantApprover({
+  it("leaves what a builder approved in force once they no longer build the App", async () => {
+    const approved = await approvedApp(await approvingAdmin(), ["browser"]);
+    const coBuilder = await personApi("builder");
+    await approved.builder.api.apps.members.add(approved.app, {
       type: "person",
-      userId: approver.userId,
+      id: coBuilder.userId,
+      role: "builder",
     });
-    const approved = await approvedApp(approver, ["browser"]);
+    const { request } = await approved.builder.api.dependencies.resolve(
+      intentFor(
+        approved.app,
+        { [await smallPackage()]: "1.0.0" },
+        {
+          targets: ["browser"],
+        }
+      )
+    );
+    const { policyGeneration } = await coBuilder.api.dependencies.waiting();
+    await coBuilder.api.dependencies.decide(request.id, {
+      approved: true,
+      reviewed: { graphHash: request.graphHash, policyGeneration },
+    });
 
-    await admin.api.dependencies.revokeApprover(grant);
-    const build = await buildOf(approved, "browser");
+    await approved.builder.api.apps.members.remove(approved.app, {
+      type: "person",
+      id: coBuilder.userId,
+    });
     const status = await approved.builder.api.dependencies.status({
       app: approved.app,
     });
 
-    expect([build.approval, status.approved?.status]).toStrictEqual([
-      approved.request.id,
-      "approved",
-    ]);
+    // Each approval is a decision of its own, standing until a builder ends it.
+    expect(status.approved).toMatchObject({
+      id: request.id,
+      status: "approved",
+      decided: { by: { userId: coBuilder.userId } },
+    });
   });
 });

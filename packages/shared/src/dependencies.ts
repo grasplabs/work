@@ -21,9 +21,10 @@ import { platformLimits } from "./platform-limits.ts";
 // agent or a builder asks core to resolve what the App's package.json
 // names, and core's resolver proposes one exact graph: every package it
 // brings, direct and transitive, each by exact version and integrity hash,
-// as the registry has them. It is a request, and allows nothing. A person
-// who holds `dependencies.approve` approves or denies the graph as a
-// whole. Nothing here fetches, installs or runs a package; a package's own
+// as the registry has them. It is a request, and allows nothing. A builder
+// of the App or workflow approves or denies the graph as a whole, in their
+// own session (the card in the chat that asked). Nothing here fetches,
+// installs or runs a package; a package's own
 // words in a graph (a licence, a finding's summary) are shown as text,
 // never followed.
 
@@ -525,7 +526,7 @@ export interface DependencyReview extends DependencyRequest {
   } | null;
 }
 
-/** What waits on a person who approves dependencies. */
+/** The requests that wait on a builder: those they, or their chat's agent, asked for. */
 export interface DependenciesWaiting {
   /** The policy generation now: a decision names the one it was made under. */
   policyGeneration: number;
@@ -548,13 +549,13 @@ export interface DependencyStatus {
 /** Most approvals `DependenciesApi.approvals` lists for an App: the newest. */
 export const dependencyApprovalsListed = 50;
 
-/** An App's approvals in force, for its builders and whoever may end them. */
+/** An App's or a workflow's approvals in force, for its builders. */
 export interface DependencyApprovals {
   /** The policy generation now. */
   policyGeneration: number;
-  /** Whether the reader holds `dependencies.approve` now, so may retire or revoke them. */
+  /** Whether the reader may retire or revoke them: a builder on their own session, never Grasp staff. */
   decides: boolean;
-  /** The App or workflow, by its name: all a reader who doesn't build it is told of it. */
+  /** The App or workflow, by its name. */
   subject: NamedDependencySubject;
   /** Approved or retired, the newest decision first; at most {@link dependencyApprovalsListed}. */
   approvals: DependencyRequest[];
@@ -583,27 +584,6 @@ export const dependencyApprovalsDigest = async (
 
 /** Most approvals `DependencyImpact.approvals` lists: the newest. */
 export const dependencyImpactListed = 50;
-
-/** How many subjects a page of the approvers' list of approvals in force shows. */
-export const dependencySubjectsListed = 100;
-
-/**
- * The Apps and workflows that hold approvals in force (approved or
- * retired), for someone who holds `dependencies.approve` now: each by its
- * name, with how many approvals it holds, a page at a time by subject.
- */
-export interface DependencySubjectsInForce {
-  /** Whether the reader holds `dependencies.approve` now; none listed otherwise. */
-  decides: boolean;
-  /** At most {@link dependencySubjectsListed}: one page. */
-  subjects: {
-    subject: NamedDependencySubject;
-    approvals: number;
-    decidedAt: string;
-  }[];
-  /** Where the next page starts (`inForce(next)`); null on the last. */
-  next: string | null;
-}
 
 /**
  * What a person decides when they retire or revoke an approved graph, and
@@ -664,55 +644,25 @@ export interface DependencyImpact {
   artifacts: DependencyImpactArtifact[];
 }
 
-/** Who may hold `dependencies.approve`: a member, or everyone in a team. */
-export const dependencyApproverSubjectSchema = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal("person"),
-    userId: z.string().min(1).max(128),
-  }),
-  z.strictObject({
-    type: z.literal("team"),
-    teamId: z.string().min(1).max(128),
-  }),
-]);
-export type DependencyApproverSubject = z.infer<
-  typeof dependencyApproverSubjectSchema
->;
-
 /** Why a dependency call was refused. */
 export const dependencyErrors = defineErrorFamily({
   "dependency.invalid": "That isn't a valid dependency request.",
   "dependency.not_found": "There's no such dependency request.",
   "dependency.forbidden":
-    "Only someone an admin gave the permission to approve dependencies decides this.",
+    "Only a builder of this App or workflow decides its packages, in their own session.",
   "dependency.stale":
     "This request changed, was decided or was replaced since you opened it. Open it again before deciding.",
   "dependency.approval_required":
-    "These packages aren't approved for this App or workflow. Someone with the permission to approve dependencies decides.",
+    "These packages aren't approved for this App or workflow. A builder of it approves them in the chat that asked.",
   "dependency.policy_changed":
-    "Who approves dependencies, or what is approved, changed. Read the status again.",
+    "What is approved changed. Read the status again.",
   "dependency.retired":
-    "These packages were retired for this App or workflow: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
+    "These packages were retired for this App or workflow: what was built with them keeps working, but nothing new is built. A builder of it can approve them again.",
   "dependency.malware":
     "A package is known malware, so Grasp refuses it: no approval can admit it. Remove it, and whatever brings it in.",
   "dependency.revoked":
-    "These packages were revoked for this App or workflow and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
+    "These packages were revoked for this App or workflow and can't be used. A builder of it can approve them again after a new review.",
 });
-
-/** Someone who holds `dependencies.approve`, as the API returns it. */
-export interface DependencyApprover {
-  /** The grant's ID. */
-  id: string;
-  subject: DependencyApproverSubject;
-  /** The member's or team's name, as it is now; null once it is gone. */
-  name: string | null;
-  status: "active" | "revoked";
-  /** User IDs, and when (ISO 8601). */
-  grantedBy: string;
-  grantedAt: string;
-  revokedBy: string | null;
-  revokedAt: string | null;
-}
 
 /**
  * A signed-in person's dependency requests and approvals, over `/rpc`:
@@ -741,42 +691,34 @@ export interface DependenciesApi {
   /** How an App's or a workflow's dependencies stand, for its builders. */
   status: (subject: DependencySubjectRef) => Promise<DependencyStatus>;
   /**
-   * The requests waiting on the person: every pending one, if they hold
-   * `dependencies.approve` now; none otherwise.
+   * The requests waiting on the person: those they, or their chat's agent,
+   * asked for, of Apps and workflows they still build, oldest first.
    */
   waiting: () => Promise<DependenciesWaiting>;
-  /** One request in full, for whoever may decide it or builds its App. */
+  /** One request in full, for the builders of its App or workflow. */
   get: (request: string) => Promise<DependencyReview>;
   /**
-   * Approves or denies a pending request, once. Only a member who holds
-   * `dependencies.approve` as the decision lands, never Grasp staff; no
-   * role gives it. Refused with `dependency.stale` when the request is no
-   * longer the one reviewed.
+   * Approves or denies a pending request, once. Only a builder of its App
+   * or workflow, on their own session: never an agent acting for them, nor
+   * Grasp staff. Known malware is refused whoever approves. Refused with
+   * `dependency.stale` when the request is no longer the one reviewed.
    */
   decide: (
     request: string,
     decision: DependencyDecision
   ) => Promise<DependencyRequest>;
-  /**
-   * An App's or a workflow's approvals in force (approved or retired), for one of its
-   * builders or someone who holds `dependencies.approve` now.
-   */
+  /** An App's or a workflow's approvals in force (approved or retired), for its builders. */
   approvals: (subject: DependencySubjectRef) => Promise<DependencyApprovals>;
   /**
-   * Every App and workflow holding approvals in force, for someone who
-   * holds `dependencies.approve` now; none for anyone else.
-   */
-  inForce: (cursor?: string) => Promise<DependencySubjectsInForce>;
-  /**
    * What retiring or revoking the graph of approval `request` would touch,
-   * for someone who holds `dependencies.approve` now.
+   * for a builder of its App or workflow.
    */
   impact: (request: string) => Promise<DependencyImpact>;
   /**
    * Retires the graph of approval `request` for its App: nothing new is
-   * built with it, and what was built keeps working. Only a member who
-   * holds `dependencies.approve` as it lands, on the graph and policy
-   * generation they reviewed; audited. Returns the approvals it ended.
+   * built with it, and what was built keeps working. Only a builder of
+   * it, on their own session, on the graph and policy generation they
+   * reviewed; audited. Returns the approvals it ended.
    */
   retire: (
     request: string,
@@ -791,16 +733,4 @@ export interface DependenciesApi {
     request: string,
     ending: DependencyEnding
   ) => Promise<DependencyRequest[]>;
-  /** Who holds `dependencies.approve`, revoked ones included. Admins only. */
-  approvers: () => Promise<DependencyApprover[]>;
-  /**
-   * Gives a member or a team `dependencies.approve`. Admins only, never
-   * Grasp staff; audited. An admin needs it too, and may give it to
-   * themselves.
-   */
-  grantApprover: (
-    subject: DependencyApproverSubject
-  ) => Promise<DependencyApprover>;
-  /** Revokes it: their next decision is refused. Admins only; audited. */
-  revokeApprover: (id: string) => Promise<DependencyApprover>;
 }

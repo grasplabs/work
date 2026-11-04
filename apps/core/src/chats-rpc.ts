@@ -18,6 +18,7 @@ import type {
   PreviewBundle,
 } from "@grasp-os/shared/chat";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
+import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import {
   authErrors,
   internalErrors,
@@ -59,6 +60,7 @@ import { teamsOf } from "./auth/identity.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
+import { waitingDependencies } from "./dependencies/requests.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
@@ -1130,6 +1132,18 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       this.#check,
       async (person) =>
         await chatRequests(
+          this.#env,
+          person,
+          await this.#ownChat(person.userId, chatId)
+        )
+    );
+  }
+
+  async packageRequests(chatId: string): Promise<DependenciesWaiting> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await waitingDependencies(
           this.#env,
           person,
           await this.#ownChat(person.userId, chatId)

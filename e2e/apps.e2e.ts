@@ -375,14 +375,11 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
         "Billing",
-        // What approved packages are in use, for anyone but Grasp staff:
-        // core lists it only to those who may approve packages.
-        "Packages",
         ...account,
       ],
     },
-    builder: { nav, menu, settings: ["Packages", ...account] },
-    user: { nav, menu, settings: ["Packages", ...account] },
+    builder: { nav, menu, settings: account },
+    user: { nav, menu, settings: account },
   });
   // Outside Workflows, Requests isn't under it.
   const page = await pageOf(admin);

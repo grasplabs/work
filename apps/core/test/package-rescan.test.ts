@@ -5,10 +5,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   malwareRecheckMs,
-  recheckMalware,
+  rescanPackages,
 } from "../src/dependencies/requests.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  advise,
   failure,
   intentFor,
   named,
@@ -19,29 +20,26 @@ import {
 } from "./npm.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
-// Malware reported after a graph was approved (GRA-924, threat T5), from
-// its threat model: a build that makes a new artifact of a version
-// reported since; an artifact built before it served or run on; OSV.dev
-// out of reach taken as no report; and the re-check revoking on a wrong
-// answer, or never coming back to a graph it couldn't read; and nobody
-// told, or the wrong people told, when core revokes one: its builders and
-// whoever approved it are, nobody else. OSV.dev and
-// the npm registry are connect's fakes, behind the real connect Worker.
+// Malware or an advisory reported after a graph was approved (GRA-924,
+// threat T5), from its threat model: a build that makes a new artifact of
+// a version reported since; an artifact built before it served or run on;
+// OSV.dev out of reach taken as no report; and the re-scan revoking on a
+// wrong answer, or never coming back to a graph it couldn't read; nobody
+// told, or the wrong people told, when core revokes one or finds a new
+// advisory: its builders and whoever approved it are, nobody else; and a
+// new advisory told again on every run. OSV.dev and the npm registry are
+// connect's fakes, behind the real connect Worker.
 
 const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
 /**
- * An App whose graph (`pkg`, which depends on `dep`) an admin approved,
- * neither reported as malware when it was.
+ * An App whose graph (`pkg`, which depends on `dep`) an admin approved, as
+ * a builder of every App, neither reported as malware when it was.
  */
 const approvedApp = async () => {
   const admin = await personApi("admin");
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: admin.userId,
-  });
   const builder = await personApi("builder");
   const { id: app } = await builder.api.apps.create({
     name: `App ${unique()}`,
@@ -110,9 +108,31 @@ const toldOf = async (person: Person) => {
   );
 };
 
-/** A run of the re-check well past any graph's last check. */
+/** A run of the re-scan well past any graph's last one. */
 const recheckLater = async (): Promise<void> => {
-  await recheckMalware(env, new Date(Date.now() + 2 * malwareRecheckMs));
+  await rescanPackages(env, new Date(Date.now() + 2 * malwareRecheckMs));
+};
+
+/**
+ * The new advisories `person` is told of, as their notifications list
+ * them: what each is about, the package and the advisory.
+ */
+const advisedOf = async (person: Person) => {
+  const { notifications } = await person.api.notifications.list();
+  return notifications.flatMap((notification) =>
+    notification.type === "package_advisory"
+      ? [
+          {
+            about:
+              notification.subject.type === "app"
+                ? notification.subject.app
+                : notification.subject.workflow,
+            package: notification.package,
+            advisory: notification.advisory,
+          },
+        ]
+      : []
+  );
 };
 
 describe("malware reported after an approval", () => {
@@ -252,16 +272,11 @@ describe("malware reported after an approval", () => {
     });
   });
 
-  it("tells a workflow's builder and its approver, who sees it only while they still approve packages", async () => {
-    const admin = await personApi("admin");
-    const [builder, approver] = await Promise.all([
+  it("tells a workflow's builders, and nobody else", async () => {
+    const [builder, outsider] = await Promise.all([
       personApi("builder"),
-      personApi("user"),
+      personApi("builder"),
     ]);
-    const { id: grant } = await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: approver.userId,
-    });
     const { id: workflow } = await builder.api.workflowResources.create(
       `stats-${unique()}`
     );
@@ -274,31 +289,28 @@ describe("malware reported after an approval", () => {
       targets: ["computation"],
       dependencies: [{ name: dep, range: "1.0.0" }],
     });
-    const { policyGeneration } = await approver.api.dependencies.waiting();
-    await approver.api.dependencies.decide(request.id, {
+    const { policyGeneration } = await builder.api.dependencies.waiting();
+    await builder.api.dependencies.decide(request.id, {
       approved: true,
       reviewed: { graphHash: request.graphHash, policyGeneration },
     });
     await reportToOsv(dep, "1.0.0", "MAL-2026-30005");
     await recheckLater();
 
-    const [builderTold, approverTold] = await Promise.all([
+    const [builderTold, outsiderTold] = await Promise.all([
       toldOf(builder),
-      toldOf(approver),
+      toldOf(outsider),
     ]);
-    await admin.api.dependencies.revokeApprover(grant);
-
-    const afterRevoked = await toldOf(approver);
-    const told = {
-      about: workflow,
-      package: { name: dep, version: "1.0.0" },
-      advisory: "MAL-2026-30005",
-      read: false,
-    };
-    expect({ builderTold, approverTold, afterRevoked }).toStrictEqual({
-      builderTold: [told],
-      approverTold: [told],
-      afterRevoked: [],
+    expect({ builderTold, outsiderTold }).toStrictEqual({
+      builderTold: [
+        {
+          about: workflow,
+          package: { name: dep, version: "1.0.0" },
+          advisory: "MAL-2026-30005",
+          read: false,
+        },
+      ],
+      outsiderTold: [],
     });
   });
 
@@ -329,6 +341,95 @@ describe("malware reported after an approval", () => {
       logged: true,
       toldWhileUnread: [],
       nextRun: "dependency.revoked",
+    });
+  });
+});
+
+describe("an advisory published after an approval", () => {
+  it("is recorded and told to the App's builders once, on core's clock, and leaves the approval standing", async () => {
+    const app = await approvedApp();
+    const [outsider, user] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    await app.builder.api.apps.members.add(app.app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    // Known before the approval was asked for, its review would have
+    // shown it; this one is new.
+    await advise(app.dep, {
+      id: 2_000_001,
+      url: "https://github.com/advisories/GHSA-pppp-qqqq-rrrr",
+      title: "Prototype pollution",
+      severity: "high",
+      vulnerable_versions: "<1.0.1",
+    });
+    const events = await auditedDuring(recheckLater);
+    // The next run tells nothing again.
+    const again = await auditedDuring(async () => {
+      await rescanPackages(env, new Date(Date.now() + 5 * malwareRecheckMs));
+    });
+    const [builderTold, adminTold, outsiderTold, userTold, waiting] =
+      await Promise.all([
+        advisedOf(app.builder),
+        advisedOf(app.admin),
+        advisedOf(outsider),
+        advisedOf(user),
+        app.builder.api.waiting.list(),
+      ]);
+    const built = await outcomeOf(app.build());
+    const found = (logged: typeof events) =>
+      logged
+        .filter(
+          ({ action, detail }) =>
+            action === "dependency.advisory_found" &&
+            detail.graphHash === app.request.graphHash
+        )
+        .map(({ actor, target, detail }) => ({
+          actor,
+          target,
+          package: detail.package,
+          version: detail.version,
+          advisory: detail.advisory,
+          severity: detail.severity,
+        }));
+    const told = {
+      about: app.app,
+      package: { name: app.dep, version: "1.0.0" },
+      advisory: "GHSA-pppp-qqqq-rrrr",
+    };
+
+    expect({
+      found: found(events),
+      foundAgain: found(again),
+      builderTold,
+      adminTold,
+      outsiderTold,
+      userTold,
+      waiting: waiting.items.filter(({ kind }) => kind === "packageAdvisory")
+        .length,
+      built,
+    }).toStrictEqual({
+      found: [
+        {
+          actor: { type: "system" },
+          target: { type: "app", id: app.app },
+          package: app.dep,
+          version: "1.0.0",
+          advisory: "GHSA-pppp-qqqq-rrrr",
+          severity: "high",
+        },
+      ],
+      foundAgain: [],
+      builderTold: [told],
+      adminTold: [told],
+      outsiderTold: [],
+      userTold: [],
+      waiting: 1,
+      // An advisory warns; the builders decide. Only malware revokes.
+      built: "built",
     });
   });
 });

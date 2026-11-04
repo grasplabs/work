@@ -944,7 +944,7 @@ const Webhooks = ({
 const readPackages = async (session: Session, app: string) =>
   await session.dependencies.approvals({ app });
 
-/** The npm packages approved for the App, for whoever core lets read them. */
+/** The npm packages approved for the App, for its builders. */
 export const AppPackages = ({ app }: { app: string }) => {
   const read = useAppRead(app, readPackages);
   return (
@@ -1007,35 +1007,22 @@ const Options = ({
 
 // --- The settings --------------------------------------------------------
 
-/**
- * Whether `identity` sees Packages by their role: its builders, the
- * organization's builders and its admins. Anyone else who may approve
- * packages sees it once core lists the App's packages to them.
- */
-const approvesByRole = (app: ViewedApp, identity: Identity): boolean =>
-  app.role === "builder" ||
-  canBuild(identity.role) ||
-  decidesRequests(identity);
-
-/** Nothing to read: Packages shows by role. */
-const readNoPackages = async (): Promise<null> => await Promise.resolve(null);
-
 /** The sections `identity` sees of `app`, with Options once core says it declares them. */
 const shownSections = (
   app: ViewedApp,
   identity: Identity,
-  { options, packages }: { options: boolean; packages: boolean }
+  { options }: { options: boolean }
 ): AppSettingsSection[] => {
   const builder = app.role === "builder";
   const shown: Record<AppSettingsSection, boolean> = {
     general: true,
     sharing: true,
-    // Core lists versions and webhooks to its builders alone.
+    // Core lists versions, webhooks and packages to its builders alone.
     versions: builder,
     workflows: true,
     connections: canBuild(identity.role),
     webhooks: builder,
-    packages: approvesByRole(app, identity) || packages,
+    packages: builder,
     options,
   };
   return appSettingsSections.filter((section) => shown[section]);
@@ -1191,19 +1178,11 @@ export const AppSettings = ({
   const { t, i18n } = useLingui();
   const builds = buildsApp(app, identity);
   const surfaces = useAppRead(app.id, readSurfaces);
-  // Packages for an approver of packages who doesn't build: once core
-  // lists the packages to them.
-  const packages = useAppRead(
-    app.id,
-    approvesByRole(app, identity) ? readNoPackages : readPackages
-  );
   const sections = shownSections(app, identity, {
     options: optionsOf(surfaces) !== undefined,
-    packages: packages?.state === "ready" && packages.data !== null,
   });
-  // A section asked for by an address: there for whoever opens it, as an
-  // approver of packages who isn't one of its builders. Options waits on
-  // whether the App declares them; anything else opens General.
+  // A section asked for by an address: there for whoever opens it. Options
+  // waits on whether the App declares them; anything else opens General.
   const section = asked ?? "general";
   const title = i18n._(sectionLabels[section]);
   const description =

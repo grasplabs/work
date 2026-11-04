@@ -65,16 +65,12 @@ export const start = (to) => {
   return name;
 };
 
-/** An App whose package.json resolved to `dependencies`, approved. */
+/** An App whose package.json resolved to `dependencies`, approved by an admin, who builds every App. */
 const approvedApp = async (
   dependencies: Record<string, string>,
   more: Partial<DependencyIntent> = {}
 ) => {
   const admin = await personApi("admin");
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: admin.userId,
-  });
   const builder = await personApi("builder");
   const { id: app } = await builder.api.apps.create({
     name: `App ${named("served")}`,
@@ -391,10 +387,6 @@ describe("serving an App's built packages", () => {
     const served = await servedBuild();
     const file = `${served.address}${served.name}.js`;
     const admin = await personApi("admin");
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: admin.userId,
-    });
     /** Resolves `served`'s App to a graph of its own and approves it. */
     const approveAnother = async (): Promise<void> => {
       const name = named("next");

@@ -71,6 +71,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Malware",
     context: "inbox item kind: packages revoked as malware",
   }),
+  packageAdvisory: msg({
+    message: "Advisory",
+    context: "inbox item kind: a new advisory of approved packages",
+  }),
   stoppedEvents: msg({
     message: "Not hearing",
     context: "inbox item kind: a mailbox or drive connect stopped hearing",
@@ -106,6 +110,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,
+  packageAdvisory: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,
   appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,

@@ -94,26 +94,49 @@ export interface EventsStoppedNotification {
   read: boolean;
 }
 
+/** The App or workflow a package notification is about, by its name now. */
+export type PackageNotificationSubject =
+  | { type: "app"; app: string; appName: string }
+  | { type: "workflow"; workflow: string; workflowName: string };
+
 /**
  * Packages of an App or workflow the person builds, or whose packages
  * they approved, were revoked because one was reported as malware
  * (core's dependencies/requests.ts): nothing of them is built, served or
- * started until a builder removes it and an approver approves a new set.
- * Listed while the person can still open the App or workflow, or approve
- * packages.
+ * started until a builder removes it and approves a new set. Listed while
+ * the person can still open the App or workflow.
  */
 export interface PackageRevokedNotification {
   id: string;
   type: "package_revoked";
-  /** The App or workflow whose packages were revoked, by its name now. */
-  subject:
-    | { type: "app"; app: string; appName: string }
-    | { type: "workflow"; workflow: string; workflowName: string };
+  /** The App or workflow whose packages were revoked. */
+  subject: PackageNotificationSubject;
   /** The package version reported as malware: the first, if several were. */
   package: { name: string; version: string };
   /** The advisory that reported it, such as an OSV or GHSA ID. */
   advisory: string;
   /** When they were revoked (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
+/**
+ * The regular re-scan of approved packages found an advisory that wasn't
+ * known when they were approved (core's dependencies/requests.ts), one
+ * that doesn't mark malware: the packages stay approved, and a builder
+ * decides whether to update or remove the package. Listed while the
+ * person can still open the App or workflow.
+ */
+export interface PackageAdvisoryNotification {
+  id: string;
+  type: "package_advisory";
+  /** The App or workflow whose approved packages it affects. */
+  subject: PackageNotificationSubject;
+  /** The package version it affects: the first, if several were found. */
+  package: { name: string; version: string };
+  /** The advisory, such as a GHSA ID. */
+  advisory: string;
+  /** When it was found (ISO 8601). */
   at: string;
   read: boolean;
 }
@@ -143,6 +166,7 @@ export type Notification =
   | GapAskedNotification
   | TriggerStoppedNotification
   | PackageRevokedNotification
+  | PackageAdvisoryNotification
   | EventsStoppedNotification;
 
 /** Most notifications `list` returns: the latest. */

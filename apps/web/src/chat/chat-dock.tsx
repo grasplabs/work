@@ -38,6 +38,7 @@ import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
+import { PackageRequests } from "./package-requests.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // The conversation, with its Markdown and code highlighting, loads once a
@@ -289,6 +290,7 @@ const DockThread = ({
           </div>
         )}
         <HeldWrites chatId={chatId} version={view.held} />
+        <PackageRequests chatId={chatId} version={view.held} />
       </ChatThread>
     </Suspense>
   );

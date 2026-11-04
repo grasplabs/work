@@ -110,7 +110,7 @@ import { verifiedTarball } from "./tarballs.ts";
 //   (GRA-924): a build that makes a new artifact asks both sources again
 //   first, and is refused (`dependency.malware`), or fails closed when
 //   either can't be read. What was built before is the periodic
-//   re-check's to revoke (`recheckMalware`, dependencies/requests.ts).
+//   re-check's to revoke (`rescanPackages`, dependencies/requests.ts).
 // - Building with a graph that was retired or revoked (spec 19.3.1):
 //   ending an approval moves the policy generation on, so a build that
 //   read it before is refused, and its pin (whose write checks the

@@ -13,7 +13,6 @@ import {
   dependencyImpactListed,
   dependencyMaxBytes,
   dependencyProposalSchema,
-  dependencySubjectsListed,
   subjectOfRef,
   dependencySummaryDirect,
   dependencySummaryFindings,
@@ -35,14 +34,13 @@ import type {
   DependencyStatus,
   DependencyPackageRef,
   DependencySubject,
-  DependencySubjectsInForce,
   DependencyTarget,
-  NamedDependencySubject,
 } from "@grasp-os/shared/dependencies";
 import {
   appIdSchema,
   identifierSchema,
   workflowResourceIdSchema,
+  workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -53,7 +51,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   and,
-  count,
   desc,
   eq,
   getTableColumns,
@@ -71,11 +68,14 @@ import { z } from "zod";
 
 import {
   auditedBatch,
+  keepAuditEvent,
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
   storedEvent,
 } from "../audit-outbox.ts";
+import { activeMember } from "../auth/auth.ts";
+import { memberOf, teamsOf } from "../auth/identity.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
   auditOutbox,
@@ -87,15 +87,21 @@ import {
   workflowResources,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
-import { revocationNoticed } from "../notifications.ts";
+import { workspace } from "../durable-objects.ts";
+import { packageNoticed } from "../notifications.ts";
 import {
   failUnless,
   lockGuardFailed,
   lockStatements,
   unusedLockStatements,
 } from "../packages/locks.ts";
-import { knownMalwareIn } from "../packages/malware.ts";
-import { holdsApprove, holdsApproveSql } from "./approvers.ts";
+import {
+  advisoriesAffecting,
+  knownMalwareIn,
+  malwareAdvised,
+  osvMalwareIn,
+} from "../packages/malware.ts";
+import type { AffectingAdvisory } from "../packages/malware.ts";
 import { concernedWith } from "./concerned.ts";
 import { peerIssues } from "./peers.ts";
 import { dropPending } from "./pending.ts";
@@ -115,84 +121,99 @@ import {
 } from "./subjects.ts";
 
 // npm packages proposed for an App or a workflow (its subject,
-// subjects.ts), a person's decision on them, and the one check that says
+// subjects.ts), a builder's decision on them, and the one check that says
 // whether a graph may be used. Everything below holds per subject: what
 // it says of an App holds of a workflow too, whose packages are only
 // ever for its compute modules (`computation`), and an approval is its
-// subject's alone. Nothing here fetches,
-// unpacks or runs a package: a graph is data handed in, and an approval is
-// a row. What could go wrong, and what stops it:
+// subject's alone. Nothing here fetches, unpacks or runs a package: a
+// graph is data handed in, and an approval is a row.
 //
-// - Packages used before anyone approved them. A request allows nothing.
-//   `admitDependencies` is the only way a graph counts as approved, and it
-//   answers yes for exactly what a person approved: this App, this graph
-//   (by its hash, which core computes itself from the packages, never
-//   takes from the request) and these targets. Anything else is refused,
-//   and the refusal is audited once per App, graph, targets, policy
-//   generation and reason, for a graph some request names; any other hash
-//   a caller makes up is refused and logged, so asking again and again
-//   can't flood the audit trail.
-// - An agent, a workflow or App code approving. They resolve
-//   (agent-builds.ts, packages/resolve.ts), which proposes, and nothing
-//   more: deciding is only on a person's own `/rpc` session, and takes the
-//   session's identity, never one handed in.
+// Who decides (Nick, 2026-11-04): the builder of the App or workflow, in
+// the chat whose agent asked (chat/package-requests on the page), with
+// one click, on their own session. No admin grants anyone the right to;
+// security comes from what is enforced and recorded around the decision.
+// What could go wrong, and what stops it:
+//
+// - The agent approving for itself. It resolves (agent-builds.ts,
+//   packages/resolve.ts), which proposes, and nothing more: its env has
+//   no way to decide, and deciding takes the identity of a person's own
+//   `/rpc` session (`requireOwnSession`), never one acting for them
+//   (`actor`, `via`). A request allows nothing until a person decides it.
+// - Someone who doesn't build the subject approving: a member it isn't
+//   shared with, someone it is shared with as a user, a builder of
+//   another App, Grasp staff. Deciding asks the subject's own role check
+//   (`builtSubject`), as every builder's change does, and refuses anyone
+//   else; each refusal is audited (`dependency.decision_refused`). The
+//   write that takes the decision lands only while the person is still an
+//   active member. A builder of App A deciding a request of App B is
+//   refused for B, whatever they hold in A: the subject is the request's,
+//   never one the caller names.
+// - An approval replayed: for another graph, App or request. A decision
+//   names one request by ID and the graph hash and policy generation the
+//   person reviewed; the one update that takes it lands only while that
+//   request is still pending, for that graph, under that generation. A
+//   request never changes: a proposal for other packages or targets takes
+//   the pending one's place, so a decision on the old one finds nothing.
+//   What is approved is the graph, for its subject and targets alone
+//   (`admitDependencies`), by a hash core computes itself from the
+//   packages, never takes from the request.
+// - Known malware approved anyway. A resolve refuses it before proposing
+//   (`refuseMalware`), an approval asks both sources again and refuses it
+//   (`refuseKnownMalware`), failing closed when either can't be read, a
+//   build asks again (`refuseMalwareBefore`), and the regular re-scan
+//   revokes an approval a later report covers (`rescanPackages`).
+//   Whoever approves, no decision admits it.
+// - Packages used before anyone approved them. `admitDependencies` is the
+//   only way a graph counts as approved, and it answers yes for exactly
+//   what a person approved: this subject, this graph and these targets.
+//   A refusal is audited once per subject, graph, targets, policy
+//   generation and reason, for a graph some request names; any other
+//   hash a caller makes up is refused and logged, so asking again and
+//   again can't flood the audit trail.
 // - A graph whose packages are whatever its proposer says. Nobody hands
 //   in a graph: the resolver is the only proposer (packages/resolve.ts),
 //   and every version, integrity hash, licence and edge in a request is
 //   what it read from the registry through connect, with every tarball's
 //   bytes checked against its integrity and unpacked in quarantine.
-// - A role standing in for the permission, or someone deciding after they
-//   lost it, left, or were taken off the team. Whether the person holds
-//   `dependencies.approve` is part of the one update that takes the
-//   decision (`holdsApproveSql`), so it is read as the decision lands.
-// - A decision on something other than what the person reviewed. The same
-//   update lands only while the request is still pending, its graph is the
-//   one they named, and the policy generation is the one they saw. A
-//   request never changes: a proposal for other packages or targets takes
-//   the pending one's place, so the source asking for something else
-//   refuses the old request. What is approved is the graph, whichever
-//   revision of the source it was resolved from: the same packages at a
-//   later revision need no new approval, and any other package, version,
-//   byte, edge or target is another graph, with another hash.
 // - Two decisions. The first lands; the second finds nothing pending.
 // - One huge request, or many. The size is measured on what core stores,
 //   never taken from a count in the request, and the lists are capped. One
-//   request waits per App, and one that is replaced is deleted, so asking
-//   again and again stores nothing more. No list reads a request's whole
-//   graph: lists select the columns they show.
+//   request waits per subject, and one that is replaced is deleted, so
+//   asking again and again stores nothing more. No list reads a request's
+//   whole graph: lists select the columns they show.
 // - Package text steering anyone. A licence or a finding's summary is
 //   bounded text shown as text; nothing reads it as instructions.
-// - A request showing more than the decision needs. It holds package
-//   metadata only: no source, records or credentials can be put in one.
 // - An approval taken for more than it is. It says these exact packages
-//   may be used by this App on these targets. It grants no connector,
-//   collection, file or model access, approves no browser artifact for
-//   sensitive data, and every use still runs under the App's own
-//   permissions.
+//   may be used by this subject on these targets. It grants no connector,
+//   collection, file or model access, and every use still runs under the
+//   subject's own permissions.
+// - Nobody knowing what was approved, built or found. Every request,
+//   decision, refusal, build (`dependency.built`, packages/build.ts),
+//   ending and re-scan finding is in the audit log.
 //
-// - An approval that should end, and doesn't. A person who holds
-//   `dependencies.approve` retires or revokes an App's graph (spec
-//   19.3.1), every approval of it at once, so no approval of the same
-//   graph for other targets keeps it in use. Retired is a lifecycle
-//   decision: nothing new is admitted (`admitDependencies` with `new`, the
-//   default), and only what was built before is (`retained`: the
-//   artifacts the lock pinned, which no pin adds to once the graph is
-//   retired, packages/build.ts). Revoked is a security decision: nothing
-//   at all is admitted. Neither row is ever approved again: approving the
-//   graph again is a new request, and both stay as history.
+// - An approval that should end, and doesn't. A builder retires or
+//   revokes a graph (spec 19.3.1), every approval of it at once, so no
+//   approval of the same graph for other targets keeps it in use. Retired
+//   is a lifecycle decision: nothing new is admitted (`admitDependencies`
+//   with `new`, the default), and only what was built before is
+//   (`retained`: the artifacts the lock pinned, which no pin adds to once
+//   the graph is retired, packages/build.ts). Revoked is a security
+//   decision: nothing at all is admitted. Neither row is ever approved
+//   again: approving the graph again is a new request, and both stay as
+//   history.
 // - Ending an approval on what the person didn't see. The one batch that
 //   ends it lands only while the approvals still in force are exactly the
-//   ones they read, the policy generation is the one they read, and they
-//   hold the permission; it moves the generation on with its audit event,
-//   so a build that read the generation before is refused, and its pin
-//   (whose write checks both) either landed before, and is what a retired
-//   graph keeps, or never lands.
+//   ones they read and the policy generation is the one they read; it
+//   moves the generation on with its audit event, so a build that read
+//   the generation before is refused, and its pin (whose write checks
+//   both) either landed before, and is what a retired graph keeps, or
+//   never lands.
 //
 // Not stopped here: a licence is what the package states of itself, and
 // findings (lookalike names, the registry's advisories, GRA-699) warn the
-// approver, never refuse, but for known malware, which the resolver
-// refuses before proposing (`refuseMalware`): a graph without findings
-// isn't shown to be safe.
+// approver, never refuse, but for known malware: a graph without findings
+// isn't shown to be safe. An advisory published after the approval is
+// found by the re-scan and told to the builders, who decide.
 // What a person approves is the graph by its hash, so what is later
 // fetched must match it byte for byte to be admitted.
 
@@ -505,6 +526,7 @@ const newRequest = (
   endedGeneration: null,
   endedReason: null,
   malwareCheckedAt: null,
+  advisoriesNoticed: null,
 });
 
 /**
@@ -879,29 +901,107 @@ export const dependencyStatus = async (
 };
 
 /**
- * The requests waiting on `by`: every pending one, oldest first, if they
- * hold `dependencies.approve` now; none otherwise, whatever their role.
- * The permission is the deployment's, so a holder sees the request of
- * every App and workflow, shared with them or not, in one queue: its
- * package metadata, never its source.
+ * Refuses anyone but a person on their own session: never an agent acting
+ * for one (`actor`, `via`), nor Grasp staff, who neither ask for nor
+ * decide what a client's Apps and workflows may use.
+ */
+const requireOwnSession = (by: Acting): void => {
+  const { actor, via } = by;
+  if (by.staff || actor !== undefined || via !== undefined) {
+    throw dependencyErrors.create("dependency.forbidden");
+  }
+};
+
+/**
+ * Refuses `by` unless they build `subject` now, as its own role check
+ * says (`builtSubject`), with the teams they are in now rather than those
+ * their session last read, so leaving a team it is shared with stops
+ * them at once: someone with no role in it with `dependency.not_found`,
+ * as for a request that isn't there, and anyone else who doesn't build it
+ * with `dependency.forbidden`. With `change`, an archived App refuses too
+ * (`app.archived`).
+ */
+const requireBuilderOf = async (
+  env: Env,
+  by: Acting,
+  subject: DependencySubject,
+  change = false
+): Promise<void> => {
+  const now: Acting = { ...by, teams: await teamsOf(env.DB, by.userId) };
+  try {
+    await builtSubject(env, now, subject, change);
+  } catch (error) {
+    if (
+      appErrors.codeOf(error) === "app.not_found" ||
+      workflowResourceErrors.codeOf(error) === "workflow.resource_unavailable"
+    ) {
+      throw notFound();
+    }
+    if (roleErrors.codeOf(error) === "role.forbidden") {
+      throw dependencyErrors.create("dependency.forbidden");
+    }
+    throw error;
+  }
+};
+
+/** Whether `by` builds `subject` now (`requireBuilderOf`). */
+const builds = async (
+  env: Env,
+  by: Acting,
+  subject: DependencySubject
+): Promise<boolean> => {
+  try {
+    await requireBuilderOf(env, by, subject);
+    return true;
+  } catch (error) {
+    const code = dependencyErrors.codeOf(error);
+    if (code === "dependency.not_found" || code === "dependency.forbidden") {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * The requests waiting on `by`, oldest first: those they asked for, or
+ * their chat's agent did for them (in chat `chatId` alone, when given),
+ * of Apps and workflows they still build. Nobody else's: a builder
+ * decides what was asked of them, in the chat that asked.
  */
 export const waitingDependencies = async (
   env: Env,
-  by: Identity
+  by: Identity,
+  chatId?: string
 ): Promise<DependenciesWaiting> => {
   const db = drizzle(env.DB);
-  const generation = await policyGeneration(db);
-  if (!(await holdsApprove(env, by))) {
-    return { policyGeneration: generation, requests: [] };
-  }
-  const rows = await db
-    .select(listed)
-    .from(dependencyRequests)
-    .where(eq(dependencyRequests.status, "pending"))
-    .orderBy(dependencyRequests.requestedAt, dependencyRequests.id);
+  const [generation, rows] = await Promise.all([
+    policyGeneration(db),
+    by.staff
+      ? []
+      : db
+          .select(listed)
+          .from(dependencyRequests)
+          .where(
+            and(
+              eq(dependencyRequests.requestedBy, by.userId),
+              eq(dependencyRequests.status, "pending"),
+              chatId === undefined
+                ? undefined
+                : sql`json_extract(${dependencyRequests.requestedVia}, '$.chatId') = ${chatId}`
+            )
+          )
+          .orderBy(dependencyRequests.requestedAt, dependencyRequests.id),
+  ]);
+  // One waits per subject, so a handful: each asked of its own role check.
+  const theirs = await Promise.all(
+    rows.map(async (row) => await builds(env, by, subjectOfRow(row)))
+  );
   return {
     policyGeneration: generation,
-    requests: await toRequests(env, rows),
+    requests: await toRequests(
+      env,
+      rows.filter((_, index) => theirs[index] === true)
+    ),
   };
 };
 
@@ -957,8 +1057,7 @@ const changesFrom = (
 };
 
 /**
- * One request in full, for whoever may decide it (they hold
- * `dependencies.approve` now) or builds its App or workflow;
+ * One request in full, for the builders of its App or workflow;
  * `dependency.not_found` for anyone else, as for one that isn't there.
  */
 export const dependencyReview = async (
@@ -967,21 +1066,14 @@ export const dependencyReview = async (
   input: unknown
 ): Promise<DependencyReview> => {
   const row = await findRow(env, input);
-  if (!(await holdsApprove(env, by))) {
-    try {
-      await builtSubject(env, by, subjectOfRow(row));
-    } catch (error) {
-      // Not theirs to read: as if it weren't there. Anything else failed.
-      if (
-        appErrors.codeOf(error) === "app.not_found" ||
-        workflowResourceErrors.codeOf(error) ===
-          "workflow.resource_unavailable" ||
-        roleErrors.codeOf(error) === "role.forbidden"
-      ) {
-        throw notFound();
-      }
-      throw error;
+  try {
+    await requireBuilderOf(env, by, subjectOfRow(row));
+  } catch (error) {
+    // Not theirs to read: as if it weren't there. Anything else failed.
+    if (dependencyErrors.codeOf(error) === "dependency.forbidden") {
+      throw notFound();
     }
+    throw error;
   }
   const { graph, findings, refused } = snapshotSchema.parse(
     JSON.parse(row.snapshot)
@@ -1003,7 +1095,7 @@ export const dependencyReview = async (
  * reports, asked again as at a resolve (`findingsOf`, packages/resolve.ts):
  * one reported after the graph was proposed is refused all the same,
  * audited as at a resolve (`refuseMalware`), saying the request and that
- * it was its approval; the request stays pending, for an admin to deny.
+ * it was its approval; the request stays pending, for a builder to deny.
  * Fails closed when either source can't be read, or the check fails any
  * other way, audited as an approval refused (`dependency.approval_refused`,
  * with connect's error code, or `internal.unexpected`). Asked only
@@ -1054,46 +1146,51 @@ const refuseKnownMalware = async (
 };
 
 /**
- * Approves or denies a pending request for `by`, once. One conditional
- * update is the decision: it lands only while the request is pending, its
- * graph is the one reviewed, the policy generation is the one reviewed,
- * and `by` holds `dependencies.approve`, all read as it runs, in the
- * batch that records it. No role decides, nor Grasp staff, nor an agent
- * acting for the person. The person who asked may decide, if they hold
- * the permission themselves: the audit event then says so
- * (`selfDecided`), so a review of the log finds every such decision.
+ * Tells the chat whose agent asked for `request` how it was decided
+ * (`Workspace.packagesDecided`), as a chat's connection is (permissions.ts
+ * `tellChat`): the agent learns it on its next turn, and the chat's page
+ * reads what waits again. Nothing for a request a person made themselves.
+ * The decision stands however this goes.
  */
-export const decideDependency = async (
+const tellChat = async (
+  env: Env,
+  request: Listed,
+  decision: "approved" | "denied"
+): Promise<void> => {
+  const via = request.requestedVia;
+  if (via === null) {
+    return;
+  }
+  try {
+    await workspace(
+      env,
+      workspaceIdSchema.parse(via.workspaceId)
+    ).packagesDecided(via.chatId, request.requestedBy, {
+      request: request.id,
+      decision,
+    });
+  } catch (error) {
+    log.warn("chat.packages_decided_failed", {
+      chatId: via.chatId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/** Approves or denies a pending request for `by`: see `decideDependency`. */
+const decide = async (
   env: Env,
   by: Identity,
-  input: unknown,
+  found: Listed,
   decision: unknown
 ): Promise<DependencyRequest> => {
-  // Only a person, from their own session: never an agent acting for one.
-  const { actor, via }: Acting = by;
-  if (by.staff || actor !== undefined || via !== undefined) {
-    throw dependencyErrors.create("dependency.forbidden");
-  }
-  if (!(await holdsApprove(env, by))) {
-    throw dependencyErrors.create("dependency.forbidden");
-  }
   const { approved, reviewed, reason } = dependencyErrors.parse(
     "dependency.invalid",
     dependencyDecisionSchema,
     decision
   );
-  const id = identifierSchema.safeParse(input);
-  const db = drizzle(env.DB);
-  const found = id.success
-    ? await db
-        .select(listed)
-        .from(dependencyRequests)
-        .where(eq(dependencyRequests.id, id.data))
-        .get()
-    : undefined;
-  if (!found) {
-    throw notFound();
-  }
+  // An archived App is read-only: nothing is decided for it.
+  await requireBuilderOf(env, by, subjectOfRow(found), true);
   if (approved) {
     // A request already decided, or reviewed at another graph, is refused
     // as stale before anything is asked of the registry or OSV.dev.
@@ -1103,6 +1200,7 @@ export const decideDependency = async (
     await refuseKnownMalware(env, by, found);
   }
   const status = approved ? "approved" : "denied";
+  const db = drizzle(env.DB);
   const [[decided]] = await auditedBatch(env, db, [
     db
       .update(dependencyRequests)
@@ -1119,7 +1217,7 @@ export const decideDependency = async (
           eq(dependencyRequests.status, "pending"),
           eq(dependencyRequests.graphHash, reviewed.graphHash),
           sql`${policyGenerationSql} = ${reviewed.policyGeneration}`,
-          holdsApproveSql(by.userId)
+          activeMember(by.userId)
         )
       )
       .returning(listed),
@@ -1136,14 +1234,65 @@ export const decideDependency = async (
     ...unusedLockStatements(db, subjectOfRow(found)),
   ]);
   if (!decided) {
-    // Who holds the permission can have changed since it was checked above.
+    // Removed from the organization since (their session ends with them),
+    // or what they reviewed changed.
     throw dependencyErrors.create(
-      (await holdsApprove(env, by))
-        ? "dependency.stale"
-        : "dependency.forbidden"
+      (await memberOf(env.DB, by.userId)) === undefined
+        ? "dependency.forbidden"
+        : "dependency.stale"
     );
   }
+  await tellChat(env, decided, status);
   return await toRequest(env, decided);
+};
+
+/**
+ * Approves or denies a pending request for `by`, once: only a builder of
+ * its App or workflow (`requireBuilderOf`, the request's subject, never
+ * one the caller names), on their own session (`requireOwnSession`): never
+ * an agent acting for them, nor Grasp staff. Known malware is refused
+ * whoever approves (`refuseKnownMalware`). One conditional update is the
+ * decision: it lands only while the request is pending, its graph is the
+ * one reviewed, the policy generation is the one reviewed and `by` is
+ * still an active member, in the batch that records it. The chat that
+ * asked is told (`tellChat`). A refusal of who decides is audited
+ * (`dependency.decision_refused`), with why.
+ */
+export const decideDependency = async (
+  env: Env,
+  by: Identity,
+  input: unknown,
+  decision: unknown
+): Promise<DependencyRequest> => {
+  const id = identifierSchema.safeParse(input);
+  const acting: Acting = by;
+  try {
+    requireOwnSession(acting);
+    const found = id.success
+      ? await drizzle(env.DB)
+          .select(listed)
+          .from(dependencyRequests)
+          .where(eq(dependencyRequests.id, id.data))
+          .get()
+      : undefined;
+    if (!found) {
+      throw notFound();
+    }
+    return await decide(env, by, found, decision);
+  } catch (error) {
+    const code = dependencyErrors.codeOf(error);
+    if (code === "dependency.forbidden" || code === "dependency.not_found") {
+      await keepAuditEvent(env, drizzle(env.DB), {
+        actor: acting.actor ?? actorOf(by),
+        action: "dependency.decision_refused",
+        ...(id.success
+          ? { target: { type: "dependency_request", id: id.data } }
+          : {}),
+        detail: { reason: code },
+      });
+    }
+    throw error;
+  }
 };
 
 const admissionSchema = z
@@ -1432,10 +1581,10 @@ const endableIds = async (
 /**
  * The approvals in force (approved or retired) of the App or workflow
  * `input` names, the newest decision first, at most
- * {@link dependencyApprovalsListed}: for one of its builders, or someone
- * who holds `dependencies.approve` now, who may end them. `app.not_found`
- * or `workflow.resource_unavailable` for anyone else, as for one that
- * isn't there. Never their graphs: a list selects what it shows.
+ * {@link dependencyApprovalsListed}, for its builders, who may end them
+ * on their own session (`decides`). `dependency.not_found` for anyone
+ * else, as for one that isn't there. Never their graphs: a list selects
+ * what it shows.
  */
 export const dependencyApprovals = async (
   env: Env,
@@ -1443,134 +1592,29 @@ export const dependencyApprovals = async (
   input: unknown
 ): Promise<DependencyApprovals> => {
   const db = drizzle(env.DB);
-  const decides = await holdsApprove(env, by);
   const asked = subjectOfInput(input);
-  // Who may approve packages reads any App's or workflow's, with its name,
-  // and nothing else of it: not its versions, screens, data or members.
-  const names = decides ? await subjectNames(db, [asked]) : undefined;
-  const knownName = names?.get(subjectKey(asked));
-  const subject: NamedDependencySubject =
-    knownName === undefined
-      ? await builtSubject(env, by, asked)
-      : { ...asked, name: knownName };
-  const [generation, rows] = await Promise.all([
+  await requireBuilderOf(env, by, asked);
+  const [generation, rows, names] = await Promise.all([
     policyGeneration(db),
     db
       .select(listed)
       .from(dependencyRequests)
       .where(
         and(
-          ofSubject(dependencyRequests, subject),
+          ofSubject(dependencyRequests, asked),
           inArray(dependencyRequests.status, ["approved", "retired"])
         )
       )
       .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
       .limit(dependencyApprovalsListed),
+    subjectNames(db, [asked]),
   ]);
   return {
     policyGeneration: generation,
-    decides,
-    subject,
+    decides: !by.staff,
+    subject: { ...asked, name: names.get(subjectKey(asked)) ?? "" },
     approvals: await toRequests(env, rows),
   };
-};
-
-/** Where a page of the approvers' list goes on from: the last subject it showed. */
-const inForceCursorSchema = z
-  .string()
-  .max(400)
-  .transform((text, context) => {
-    const match = /^(?<type>app|workflow):(?<id>.{1,200})$/u.exec(text);
-    if (match?.groups === undefined) {
-      context.addIssue({ code: "custom", message: "Not a page of this list" });
-      return z.NEVER;
-    }
-    const { type, id = "" } = match.groups;
-    return {
-      subjectType: type === "workflow" ? "workflow" : "app",
-      subjectId: id,
-    } as const;
-  });
-
-/**
- * Every App and workflow holding approvals in force (approved or
- * retired), each by its name now, how many it holds and when the newest
- * was decided: {@link dependencySubjectsListed} a page, by subject, the
- * next page after `cursor` (the `next` a page answers with), however many
- * there are. For someone who holds `dependencies.approve` now, who may end
- * them; nothing for anyone else. Where an approver finds a workflow's
- * approvals, which have no page of their workflow's to be on.
- *
- * A page reads only its own subjects' rows: in the subject index's order
- * (`dependency_requests_subject_idx`), from the cursor on, stopping once
- * the page is full, so a later page costs what the first does however
- * long the history grows.
- */
-export const dependencySubjectsInForce = async (
-  env: Env,
-  by: Identity,
-  cursor?: unknown
-): Promise<DependencySubjectsInForce> => {
-  if (!(await holdsApprove(env, by))) {
-    return { decides: false, subjects: [], next: null };
-  }
-  const after =
-    cursor === undefined || cursor === null
-      ? undefined
-      : dependencyErrors.parse(
-          "dependency.invalid",
-          inForceCursorSchema,
-          cursor
-        );
-  const db = drizzle(env.DB);
-  const rows = await db
-    .select({
-      subjectType: dependencyRequests.subjectType,
-      subjectId: dependencyRequests.subjectId,
-      approvals: count(),
-      decidedAt: sql<number>`MAX(${dependencyRequests.decidedAt})`,
-    })
-    .from(dependencyRequests)
-    .where(
-      and(
-        inArray(dependencyRequests.status, ["approved", "retired"]),
-        after === undefined
-          ? undefined
-          : sql`(${dependencyRequests.subjectType}, ${dependencyRequests.subjectId}) > (${after.subjectType}, ${after.subjectId})`
-      )
-    )
-    .groupBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
-    .orderBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
-    .limit(dependencySubjectsListed + 1);
-  const page = rows.slice(0, dependencySubjectsListed);
-  const last = page.at(-1);
-  const names = await subjectNames(db, page.map(subjectOfRow));
-  return {
-    decides: true,
-    subjects: page.map((row) => {
-      const subject = subjectOfRow(row);
-      return {
-        subject: { ...subject, name: names.get(subjectKey(subject)) ?? "" },
-        approvals: row.approvals,
-        decidedAt: new Date(row.decidedAt).toISOString(),
-      };
-    }),
-    next:
-      rows.length > dependencySubjectsListed && last !== undefined
-        ? `${last.subjectType}:${last.subjectId}`
-        : null,
-  };
-};
-
-/** Only a person on their own session who holds `dependencies.approve` now. */
-const requireDecider = async (env: Env, by: Identity): Promise<void> => {
-  const { actor, via }: Acting = by;
-  if (by.staff || actor !== undefined || via !== undefined) {
-    throw dependencyErrors.create("dependency.forbidden");
-  }
-  if (!(await holdsApprove(env, by))) {
-    throw dependencyErrors.create("dependency.forbidden");
-  }
 };
 
 /** The approval `input` names, while it is in force (approved or retired). */
@@ -1631,21 +1675,19 @@ const pinnedArtifacts = async (
 
 /**
  * What retiring or revoking the graph of approval `input` would touch,
- * for someone who holds `dependencies.approve` now: its approvals in
- * force, and the artifacts its lock pins. `dependency.not_found` for
- * anyone else, as for an approval that isn't there or no longer in force.
+ * for a builder of its App or workflow: its approvals in force, and the
+ * artifacts its lock pins. `dependency.not_found` for anyone with no role
+ * in it, as for an approval that isn't there or no longer in force.
  */
 export const dependencyImpact = async (
   env: Env,
   by: Identity,
   input: unknown
 ): Promise<DependencyImpact> => {
-  if (!(await holdsApprove(env, by))) {
-    throw notFound();
-  }
   const db = drizzle(env.DB);
   const row = await approvalRow(db, input);
   const subject = subjectOfRow(row);
+  await requireBuilderOf(env, by, subject);
   const [generation, inForce, listedRows, artifacts] = await Promise.all([
     policyGeneration(db),
     endableIds(db, subject, row.graphHash, "revoked"),
@@ -1684,7 +1726,7 @@ export const dependencyImpact = async (
 /**
  * Who denies the request a revocation denies with it: the person who
  * revoked, or core itself for a revocation of reported malware
- * (`recheckMalware`), which no person decided.
+ * (`rescanPackages`), which no person decided.
  */
 interface Denier {
   actor: AuditActor;
@@ -1763,8 +1805,8 @@ const denyWaiting = (
  * the approvals of the graph the person reviewed, in one batch that
  * lands only while those are exactly the ones `ending` would end now
  * (`endings`), the
- * policy generation is the one reviewed, and `by` holds
- * `dependencies.approve`, all read as it runs. The batch records it once
+ * policy generation is the one reviewed, and `by` is still an active
+ * member, all read as it runs. The batch records it once
  * (`dependency.retired` or `dependency.revoked`, naming every approval it
  * ended) and moves the policy generation on, so every admission read
  * before is refused from then on. Revoking also denies the request
@@ -1772,8 +1814,8 @@ const denyWaiting = (
  * files queued for cleanup (packages/locks.ts). A retired graph keeps its lock,
  * and the artifacts it pins keep working.
  *
- * As for a decision: only a person, from their own session, never an
- * agent acting for one nor Grasp staff. Refused with `dependency.stale`
+ * As for a decision: only a builder of it, from their own session, never
+ * an agent acting for one nor Grasp staff. Refused with `dependency.stale`
  * when the approvals in force or the policy changed since they were read.
  */
 export const endDependency = async (
@@ -1783,7 +1825,7 @@ export const endDependency = async (
   ending: Ending,
   decision: unknown
 ): Promise<DependencyRequest[]> => {
-  await requireDecider(env, by);
+  requireOwnSession(by);
   const { reviewed, reason } = dependencyErrors.parse(
     "dependency.invalid",
     dependencyEndingSchema,
@@ -1791,6 +1833,8 @@ export const endDependency = async (
   );
   const db = drizzle(env.DB);
   const named = await approvalRow(db, input);
+  const subject = subjectOfRow(named);
+  await requireBuilderOf(env, by, subject);
   if (named.graphHash !== reviewed.graphHash) {
     throw dependencyErrors.create("dependency.stale");
   }
@@ -1798,7 +1842,6 @@ export const endDependency = async (
   // approvals in force now must be the very set the impact showed them
   // (by digest, however many), and the batch then lands only while they
   // still are.
-  const subject = subjectOfRow(named);
   const inForceNow = await endableIds(db, subject, named.graphHash, ending);
   const ids = inForceNow.map(({ id }) => id);
   if (
@@ -1831,7 +1874,7 @@ export const endDependency = async (
   const inForce = endable(subject, named.graphHash, ending);
   // The IDs as one JSON parameter, however many there are.
   const reviewedIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
-  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
+  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${activeMember(by.userId)}`;
   const status: Row["status"] = ending;
   const [, ended] = await auditedBatch(env, db, [
     outboxedEventWhere(db, event, lands),
@@ -1869,11 +1912,11 @@ export const endDependency = async (
     ...unusedLockStatements(db, subject),
   ]);
   if (ended.length !== ids.length) {
-    // Who holds the permission can have changed since it was checked.
+    // Removed from the organization since, or what they reviewed changed.
     throw dependencyErrors.create(
-      (await holdsApprove(env, by))
-        ? "dependency.stale"
-        : "dependency.forbidden"
+      (await memberOf(env.DB, by.userId)) === undefined
+        ? "dependency.forbidden"
+        : "dependency.stale"
     );
   }
   // Landed: the answer is what the batch returned, and reading names
@@ -1899,7 +1942,7 @@ export const endDependency = async (
 // - An artifact built before the report, served or run on: every graph in
 //   force (approved or retired) is checked again on core's clock, each at
 //   most every `malwareRecheckMs`, a bounded number a run
-//   (`recheckMalware`). One a report covers is revoked for its subject, as
+//   (`rescanPackages`). One a report covers is revoked for its subject, as
 //   a person's revocation does (`endDependency`): the same batch, so its
 //   lock goes, the request waiting for it is denied, and the policy
 //   generation moves on, after which nothing of it is admitted, built,
@@ -1912,12 +1955,21 @@ export const endDependency = async (
 //   race (a person ended or decided it meanwhile) marks nothing either.
 // - A source that answers wrongly revokes what it names: only versions of
 //   the graph count (`osvMalwareIn`), and the revocation names its
-//   advisory, so an admin can see why and approve a new graph.
+//   advisory, so its builders can see why and approve a new graph.
+//
+// An advisory published after the approval, one that doesn't mark
+// malware (a vulnerability): the same re-scan reads the registry's
+// advisories of the graph's exact versions, and one not known when the
+// graph was approved (its review's findings) nor told before is recorded
+// (`dependency.advisory_found`) and told to the subject's builders and
+// approvers, once (`advisoriesNoticed`). The approval stands: a builder
+// decides whether to update or remove the package. Core decides nothing
+// a person should.
 
-/** How long an approval in force goes between two checks for malware. */
+/** How long an approval in force goes between two re-scans. */
 export const malwareRecheckMs = 6 * 60 * 60 * 1000;
 
-/** Most graphs one run of the re-check asks about, one after another. */
+/** Most graphs one run of the re-scan asks about, one after another. */
 export const malwareRecheckGraphs = 20;
 
 /** Core itself, as the actor of a revocation no person decided. */
@@ -2027,7 +2079,8 @@ const revokeReportedMalware = async (
     ),
     ...unusedLockStatements(db, subject),
     // Its builders and approvers are told, as no person decided it.
-    ...revocationNoticed(db, {
+    ...packageNoticed(db, {
+      type: "package_revoked",
       subject,
       package: first.package,
       advisory: first.advisory,
@@ -2045,12 +2098,101 @@ interface DueGraph {
   graphHash: string;
 }
 
+/** Most new advisories one re-scan of a graph records, each as its own event. */
+const advisoriesAuditedMax = 25;
+
 /**
- * Checks one graph in force for malware reported since, by both sources
- * (`knownMalwareIn`): clean, its approvals are marked checked at `at`;
- * reported, they are revoked (`revokeReportedMalware`). `false` when the
- * sources couldn't be read: nothing is marked or revoked, and it is
- * logged.
+ * Records the advisories `found` of `subject`'s graph that weren't known
+ * as it was approved (`known`), and tells its builders and approvers,
+ * once: in the batch that marks its approvals scanned at `at` and keeps
+ * what was told (`advisories_noticed`), so the next run tells nothing
+ * again. The approvals stand.
+ */
+const noticeAdvisories = async (
+  env: Env,
+  {
+    subject,
+    graphHash,
+    inForce,
+    known,
+  }: {
+    subject: DependencySubject;
+    graphHash: string;
+    inForce: SQL | undefined;
+    known: ReadonlySet<string>;
+  },
+  found: readonly AffectingAdvisory[],
+  at: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const fresh = found.filter(({ advisory }) => !known.has(advisory.id));
+  const [first] = fresh;
+  if (first === undefined) {
+    await db
+      .update(dependencyRequests)
+      .set({ malwareCheckedAt: at })
+      .where(inForce);
+    return;
+  }
+  const noticed = [
+    ...new Set([...known, ...fresh.map(({ advisory }) => advisory.id)]),
+  ];
+  const approvals = await db
+    .select({ id: dependencyRequests.id })
+    .from(dependencyRequests)
+    .where(inForce);
+  const concerned = await concernedWith(
+    env,
+    subject,
+    approvals.map(({ id }) => id)
+  );
+  const events = fresh
+    .slice(0, advisoriesAuditedMax)
+    .map(({ advisory, package: ref }) =>
+      createAuditEvent(
+        {
+          actor: coreActor,
+          action: "dependency.advisory_found",
+          target: auditTargetOf(subject),
+          detail: {
+            [subject.type]: subject.id,
+            graphHash,
+            package: ref.name,
+            version: ref.version,
+            advisory: advisory.id,
+            severity: advisory.severity,
+            found: fresh.length,
+          },
+        },
+        "core"
+      )
+    );
+  const [recorded] = events;
+  await auditedBatch(env, db, [
+    db
+      .update(dependencyRequests)
+      .set({ malwareCheckedAt: at, advisoriesNoticed: noticed })
+      .where(inForce),
+    ...events.map((event) => outboxedEventWhere(db, event, sql`1`)),
+    ...packageNoticed(db, {
+      type: "package_advisory",
+      subject,
+      package: first.package,
+      advisory: first.advisory.id,
+      personIds: concerned,
+      recorded: storedEvent(recorded?.id ?? ""),
+    }),
+  ]);
+};
+
+/**
+ * Re-scans one graph in force against both sources: the registry's
+ * advisories of its exact versions and OSV.dev's malware reports. Malware
+ * reported since revokes its approvals (`revokeReportedMalware`); clean of
+ * it, any advisory new since it was approved is recorded and told
+ * (`noticeAdvisories`), and its approvals are marked scanned at `at`.
+ * `false` when the sources couldn't be read: nothing is marked, revoked
+ * or told, and it is logged.
  */
 const recheckGraph = async (
   env: Env,
@@ -2065,7 +2207,10 @@ const recheckGraph = async (
     inArray(dependencyRequests.status, ["approved", "retired"])
   );
   const row = await db
-    .select({ snapshot: dependencyRequests.snapshot })
+    .select({
+      snapshot: dependencyRequests.snapshot,
+      advisoriesNoticed: dependencyRequests.advisoriesNoticed,
+    })
     .from(dependencyRequests)
     .where(inForce)
     .limit(1)
@@ -2074,13 +2219,21 @@ const recheckGraph = async (
     // Ended since it was listed: nothing to check.
     return true;
   }
-  const { graph } = snapshotSchema.parse(JSON.parse(row.snapshot));
+  const { graph, findings } = snapshotSchema.parse(JSON.parse(row.snapshot));
+  const packages = graph.packages.map(({ name, version }) => ({
+    name,
+    version,
+  }));
   let found: MalwareFound[];
+  let affecting: AffectingAdvisory[];
   try {
-    found = await knownMalwareIn(
-      env,
-      graph.packages.map(({ name, version }) => ({ name, version }))
-    );
+    // Both sources at once, as `knownMalwareIn` asks them.
+    const [advised, reported] = await Promise.all([
+      advisoriesAffecting(env, packages),
+      osvMalwareIn(env, packages),
+    ]);
+    affecting = advised;
+    found = [...malwareAdvised(advised), ...reported];
   } catch (error) {
     log.warn("dependencies.malware_unchecked", {
       [subject.type]: subject.id,
@@ -2092,10 +2245,17 @@ const recheckGraph = async (
   }
   const [first, ...rest] = found;
   if (first === undefined) {
-    await db
-      .update(dependencyRequests)
-      .set({ malwareCheckedAt: at })
-      .where(inForce);
+    // What its approver saw, and what the re-scan told since.
+    const known = new Set([
+      ...findings.flatMap(({ id }) => (id === null ? [] : [id])),
+      ...(row.advisoriesNoticed ?? []),
+    ]);
+    await noticeAdvisories(
+      env,
+      { subject, graphHash: due.graphHash, inForce, known },
+      affecting,
+      at
+    );
     return true;
   }
   const revoked = await revokeReportedMalware(env, subject, due.graphHash, [
@@ -2112,14 +2272,15 @@ const recheckGraph = async (
 };
 
 /**
- * Checks the approvals in force (approved or retired) for malware reported
- * since they were last found clean, on core's clock (clock.ts): each graph
- * at most every {@link malwareRecheckMs}, the longest unchecked first, at
- * most {@link malwareRecheckGraphs} a run, one at a time. A graph a report
- * covers is revoked; one whose sources can't be read ends the run, to be
- * asked again by the next.
+ * Re-scans the approvals in force (approved or retired) against the
+ * registry's advisories and OSV.dev, on core's clock (clock.ts): each
+ * graph at most every {@link malwareRecheckMs}, the longest unscanned
+ * first, at most {@link malwareRecheckGraphs} a run, one at a time. A
+ * graph malware covers is revoked; a new advisory is recorded and told;
+ * one whose sources can't be read ends the run, to be asked again by the
+ * next.
  */
-export const recheckMalware = async (
+export const rescanPackages = async (
   env: Env,
   at: Date = new Date()
 ): Promise<void> => {

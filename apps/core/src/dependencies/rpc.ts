@@ -2,8 +2,6 @@ import type {
   DependenciesApi,
   DependenciesWaiting,
   DependencyApprovals,
-  DependencyApprover,
-  DependencyApproverSubject,
   DependencyDecision,
   DependencyEnding,
   DependencyImpact,
@@ -11,7 +9,6 @@ import type {
   DependencyReview,
   DependencyStatus,
   DependencySubjectRef,
-  DependencySubjectsInForce,
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyIntent,
@@ -25,14 +22,12 @@ import type { Resolved } from "../packages/resolve.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
-import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
 import {
   decideDependency,
   dependencyApprovals,
   dependencyImpact,
   dependencyReview,
   dependencyStatus,
-  dependencySubjectsInForce,
   endDependency,
   waitingDependencies,
 } from "./requests.ts";
@@ -105,13 +100,6 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     );
   }
 
-  async inForce(cursor?: string): Promise<DependencySubjectsInForce> {
-    return await withPerson(
-      this.#check,
-      async (by) => await dependencySubjectsInForce(this.#env, by, cursor)
-    );
-  }
-
   async impact(request: string): Promise<DependencyImpact> {
     return await withPerson(
       this.#check,
@@ -138,29 +126,6 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
       this.#check,
       async (by) =>
         await endDependency(this.#env, by, request, "revoked", ending)
-    );
-  }
-
-  async approvers(): Promise<DependencyApprover[]> {
-    return await withPerson(
-      this.#check,
-      async (by) => await listApprovers(this.#env, by)
-    );
-  }
-
-  async grantApprover(
-    subject: DependencyApproverSubject
-  ): Promise<DependencyApprover> {
-    return await withPerson(
-      this.#check,
-      async (by) => await grantApprover(this.#env, by, subject)
-    );
-  }
-
-  async revokeApprover(id: string): Promise<DependencyApprover> {
-    return await withPerson(
-      this.#check,
-      async (by) => await revokeApprover(this.#env, by, id)
     );
   }
 }

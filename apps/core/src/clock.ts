@@ -22,7 +22,7 @@ import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
-import { recheckMalware } from "./dependencies/requests.ts";
+import { rescanPackages } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
@@ -307,12 +307,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepPackageFiles,
   },
-  // Approved packages checked again for malware reported since, a bounded
-  // number of graphs a run (src/dependencies/requests.ts).
+  // Approved packages re-scanned against the registry's advisories and
+  // OSV.dev, each graph every six hours, a bounded number a run: malware
+  // revokes, a new advisory is told (src/dependencies/requests.ts).
   {
-    name: "dependencies.malware",
+    name: "dependencies.rescan",
     period: "quarterHour",
-    run: recheckMalware,
+    run: rescanPackages,
   },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
   {

@@ -10,11 +10,11 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
-// One workflow's approved npm packages, for its builders (to read) and
-// whoever may approve packages (to read, retire and revoke): what an App's
-// Packages tab is for an App, since a workflow has no page of its own.
-// Core says who may read it (`dependencies.approvals`) and who may end
-// what it lists; anyone else is told the workflow isn't there.
+// One workflow's approved npm packages, for its builders, who read,
+// retire and revoke them: what an App's Packages tab is for an App,
+// reached from the workflow's page. Core says who may read it
+// (`dependencies.approvals`) and who may end what it lists; anyone else is
+// told the workflow isn't there.
 
 const WorkflowPackages = () => {
   const { t } = useLingui();

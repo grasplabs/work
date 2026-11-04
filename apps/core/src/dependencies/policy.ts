@@ -5,12 +5,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { dependencyPolicy } from "../db/core/schema.ts";
 
 // The dependency policy generation (`dependency_policy`): one number that
-// goes up, in the batch that makes the change, each time who holds
-// `dependencies.approve` changes. Whoever acts on the policy names the
-// generation they read, and the write that acts checks it is still the
-// current one: a decision made on what a person saw before a grant
-// changed, or a build admitted on what it read before, is refused instead
-// of landing after the change.
+// goes up, in the batch that makes the change, each time an approval is
+// retired or revoked (requests.ts), by a builder or by the re-scan.
+// Whoever acts on the policy names the generation they read, and the
+// write that acts checks it is still the current one: a decision made on
+// what a person saw before an approval ended, or a build admitted on what
+// it read before, is refused instead of landing after the change.
 
 /** The one row's ID. */
 const policyRow = "policy";

@@ -1118,9 +1118,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * dependencies, the targets they run on, the entries the App imports)
    * into an exact graph from the npm registry, checks every package's
    * bytes without running them, and proposes the graph as a request
-   * that waits for a person who holds `dependencies.approve`
-   * (packages/resolve.ts). The agent gets the request and the lock; no
-   * registry credentials, package manager or shell are involved.
+   * that waits for the person the chat is for, who builds the App, to
+   * approve on the chat's page (packages/resolve.ts): the page is told it
+   * waits. The agent gets the request and the lock; no registry
+   * credentials, package manager or shell are involved, and nothing it
+   * reaches decides the request.
    */
   async resolveDependencies(app: unknown, intent: unknown): Promise<Resolved> {
     return await this.#build(
@@ -1128,7 +1130,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       async (by) => {
         const id = await this.#buildable(by, app);
         await admitEffect(this.env, this.ctx.props);
-        return await resolveDependencies(
+        const resolved = await resolveDependencies(
           this.env,
           by,
           typeof intent === "object" && intent !== null
@@ -1136,6 +1138,19 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             : intent,
           this.#admit
         );
+        if (resolved.request.status === "pending") {
+          const { workspaceId, chatId } = this.ctx.props;
+          try {
+            await workspace(this.env, workspaceId).heldChanged(chatId);
+          } catch (error) {
+            // The page reads what waits again on its next change anyway.
+            log.warn("chat.held_push_failed", {
+              chatId,
+              ...errorFields(error),
+            });
+          }
+        }
+        return resolved;
       },
       (resolved) => ({
         app: typeof app === "string" ? app : null,
@@ -1644,12 +1659,13 @@ build: {
   /**
    * Resolves the App's npm packages: what its package.json asks for, into
    * one exact graph from the npm registry, with every package's bytes
-   * checked without running them, proposed as one request. A person who was
-   * given the permission to approve dependencies approves or denies it as a
-   * whole; until then nothing may use the packages, and you can't approve it
-   * or give anyone that permission. Another request for the App replaces one
-   * still waiting. A package that needs install scripts, native code or
-   * another React is refused, with every reason.
+   * checked without running them, proposed as one request. The person you
+   * act for approves or denies it as a whole, on a card in this chat; you
+   * are told how they decided. Until then nothing may use the packages, and
+   * you can't approve it. Known malware is refused whoever approves.
+   * Another request for the App replaces one still waiting. A package that
+   * needs install scripts, native code or another React is refused, with
+   * every reason.
    */
   resolveDependencies(app: string, intent: {
     /** The revision of the source package.json was read from. */

@@ -19,7 +19,6 @@ import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { grantApprover } from "../src/dependencies/approvers.ts";
 import { policyGeneration } from "../src/dependencies/policy.ts";
 import {
   decideDependency,
@@ -96,12 +95,8 @@ const person = async (role: Role): Promise<Identity> => {
  */
 const testPackageChars = 64 * 1024;
 
-/** An admin who may approve packages. */
-const approver = async (): Promise<Identity> => {
-  const admin = await person("admin");
-  await grantApprover(env, admin, { type: "person", userId: admin.userId });
-  return admin;
-};
+/** An admin, who builds every workflow, so approves its packages. */
+const approver = async (): Promise<Identity> => await person("admin");
 
 const objectSchema = (properties: Record<string, unknown>) => ({
   format: "json",

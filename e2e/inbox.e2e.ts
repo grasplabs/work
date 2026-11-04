@@ -6,10 +6,9 @@ import { apiOf, peopleIn } from "./people.ts";
 
 // The inbox, at its address: what waits on the person as a list, the item
 // chosen beside it with its actions, and what was done. Someone with
-// nothing waiting sees that said; someone given the permission approves
-// packages proposed for an engine from it, and the item leaves the list;
-// an admin also reads the latest of what Grasp and people did. It grants a
-// package approver, so it runs with the other package approval tests.
+// nothing waiting sees that said; the builder who asked for packages for
+// their engine approves them from it, and the item leaves the list; an
+// admin also reads the latest of what Grasp and people did.
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
@@ -43,18 +42,13 @@ test("someone with nothing waiting sees that nothing waits, and no activity", as
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("someone given the permission approves packages from the inbox, and the item leaves the list", async ({
+test("the builder who asked approves packages from the inbox, and the item leaves the list", async ({
   pageOf,
 }) => {
-  const { admin, builder, approver } = peopleIn("inbox");
-  const asAdmin = apiOf(admin);
+  const { builder } = peopleIn("inbox");
   const asBuilder = apiOf(builder);
   const engine = `Charts ${crypto.randomUUID().slice(0, 8)}`;
   const { id: app } = await asBuilder.api.apps.create({ name: engine });
-  await asAdmin.api.dependencies.grantApprover({
-    type: "person",
-    userId: approver.userId,
-  });
   const origin = "https://registry.npmjs.org";
   const request = await seedDependencyRequest({
     app,
@@ -79,7 +73,7 @@ test("someone given the permission approves packages from the inbox, and the ite
     },
   });
 
-  const page = await pageOf(approver);
+  const page = await pageOf(builder);
   await page.goto("/inbox");
   const list = page.getByRole("region", { name: "What waits on you" });
   const row = list.getByRole("button", { name: new RegExp(engine, "u") });
@@ -138,7 +132,6 @@ test("someone given the permission approves packages from the inbox, and the ite
     })
     .toBe(request.id);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  asAdmin.core[Symbol.dispose]();
   asBuilder.core[Symbol.dispose]();
 });
 

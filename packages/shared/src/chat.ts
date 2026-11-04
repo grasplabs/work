@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { DependenciesWaiting } from "./dependencies.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
   QuerySnapshotPush,
@@ -722,8 +723,9 @@ export interface ChatUpdate {
   stopped: string | null;
   /**
    * Changes whenever something of the chat waits for the person, or no
-   * longer does: a write its agent had held for them to confirm, or a
-   * connection it asked for (`connectionRequests`). Read both again then.
+   * longer does: a write its agent had held for them to confirm, a
+   * connection it asked for (`connectionRequests`), or packages it asked
+   * for (`packageRequests`). Read them again then.
    * Only a count, from when the object last started; never what waits.
    */
   held: number;
@@ -1009,6 +1011,13 @@ export interface ChatsApi {
   cancel: (chatId: string) => Promise<boolean>;
   /** The connections the chat's agent asked for that wait, oldest first. */
   connectionRequests: (chatId: string) => Promise<ChatConnectionRequest[]>;
+  /**
+   * The npm packages the chat's agent asked for in this chat that wait for
+   * the person, oldest first: those of Apps and workflows they still
+   * build. They decide each with `dependencies.decide`, as the request
+   * shows it.
+   */
+  packageRequests: (chatId: string) => Promise<DependenciesWaiting>;
   /**
    * Grants the chat's request `id` as it was asked for, in this chat
    * alone: only for the person's own personal connection, while it is

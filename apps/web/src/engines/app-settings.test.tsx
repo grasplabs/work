@@ -127,11 +127,11 @@ const fakeCore = (
         return [];
       },
     },
-    // Core lists the App's packages only to who may approve them.
+    // Core lists the App's packages only to its builders.
     dependencies: {
       approvals: async () => {
         await Promise.resolve();
-        throw new Error("Only package approvers read these.");
+        throw new Error("Only its builders read these.");
       },
     },
     // The App may use one HTTP connection, which no catalog entry lists.

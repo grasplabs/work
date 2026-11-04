@@ -95,6 +95,7 @@ export const readWaiting = async (
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
       item.kind === "revokedPackage" ||
+      item.kind === "packageAdvisory" ||
       item.kind === "stoppedEvents" ||
       item.kind === "appMessage"
         ? [item.notification]

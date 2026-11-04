@@ -235,6 +235,15 @@ const notificationItems = async (
             notification,
           };
         }
+        case "package_advisory": {
+          return {
+            ...base,
+            kind: "packageAdvisory",
+            id: `packageAdvisory:${notification.id}`,
+            verdicts: [],
+            notification,
+          };
+        }
         case "app_message": {
           return {
             ...base,
@@ -340,8 +349,8 @@ const parts: Parts = {
     };
   },
   requests: requestItems,
-  // None for anyone without `dependencies.approve`: the namespace says so.
-  packages: async ({ dependencies }) => {
+  // The packages the person, or their chat's agent, asked for: theirs.
+  packages: async ({ dependencies }, { forMe }) => {
     const { requests, policyGeneration } = await dependencies.waiting();
     return {
       items: requests.map((request) => ({
@@ -349,7 +358,7 @@ const parts: Parts = {
         id: `packages:${request.id}`,
         at: request.requestedAt,
         urgent: false,
-        waitsOn: { type: "permission", permission: "dependencies.approve" },
+        waitsOn: forMe,
         verdicts: ["approve", "reject"],
         request,
         policyGeneration,

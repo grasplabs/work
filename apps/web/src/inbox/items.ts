@@ -58,6 +58,7 @@ export type InboxKind =
   | "failedRun"
   | "stoppedSchedule"
   | "revokedPackage"
+  | "packageAdvisory"
   | "stoppedEvents"
   | "appMessage"
   | "bindingApproval"
@@ -69,8 +70,7 @@ export type Target =
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   /**
    * An App: its own page, or the section of its settings where what the
-   * item is about is decided. Its settings also show the packages alone to
-   * an approver with no role in the App.
+   * item is about is decided.
    */
   | {
       kind: "engine";
@@ -102,6 +102,7 @@ export type InboxSource =
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "revoked"; notification: PackageRevokedNotification }
+  | { type: "advisory"; notification: PackageAdvisoryNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "appMessage"; notification: AppMessageNotification }
   | { type: "decision"; decision: DecisionView };
@@ -152,6 +153,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   failedRun: "workflows",
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
+  packageAdvisory: "apps",
   stoppedEvents: "workflows",
   appMessage: "apps",
   bindingApproval: "workflows",
@@ -544,7 +546,13 @@ type PackageRevokedNotification = Extract<
   { type: "package_revoked" }
 >;
 
-/** What a revocation is about: its name and the page it is replaced on. */
+/** A new advisory of an App's or workflow's approved packages: what the notification says of it. */
+type PackageAdvisoryNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "package_advisory" }
+>;
+
+/** What a package notification is about: its name and the page its packages are on. */
 const revokedSubject = (
   subject: PackageRevokedNotification["subject"]
 ): { name: string; about: Target } =>
@@ -586,6 +594,38 @@ const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         date: at,
         urgent: true,
         source: { type: "revoked", notification },
+      },
+    ];
+  });
+
+/** Packages approved for an App or workflow the person builds, with an advisory found since. */
+const advisoryItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "package_advisory") {
+      return [];
+    }
+    const { at, advisory } = notification;
+    const { name, about } = revokedSubject(notification.subject);
+    const affected = `${notification.package.name}@${notification.package.version}`;
+    return [
+      {
+        id: `advisory:${notification.id}`,
+        kind: "packageAdvisory",
+        title: t`A package of ${name} has a new advisory`,
+        context: name,
+        body: [
+          t`Grasp checks approved packages again regularly, and found an advisory for ${affected} that wasn't known when it was approved. The packages stay approved: update or remove it, or retire the packages if ${name} shouldn't use them any more.`,
+        ],
+        facts: [
+          { label: t`Package`, value: affected },
+          { label: t`Advisory`, value: advisory },
+          { label: t`Found`, value: formatDateTime(at) },
+        ],
+        about,
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "advisory", notification },
       },
     ];
   });
@@ -824,6 +864,7 @@ export const inboxItems = (
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
     ...(failed === undefined ? [] : revokedItems(failed, me)),
+    ...(failed === undefined ? [] : advisoryItems(failed, me)),
     ...(failed === undefined ? [] : stoppedEventsItems(failed, me)),
     ...(failed === undefined ? [] : appMessageItems(failed, me)),
     ...reconnect,

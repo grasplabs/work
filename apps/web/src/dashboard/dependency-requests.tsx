@@ -27,12 +27,12 @@ import { useCoreAction } from "../use-core-action.ts";
 import { PileCard } from "./pile-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 
-// npm packages proposed for an engine, waiting on someone who was given
-// the permission to approve them, on the dashboard's pile: each request
-// with who asks, why, where the packages would run and what core's
-// resolver found of them, the whole graph on asking, and the decision.
-// Core lists them only to those who hold the permission, and checks it
-// again as the decision lands. What a package says of itself (a licence,
+// npm packages proposed for an engine, waiting on the builder who asked
+// for them (or whose chat's agent did), on the dashboard's pile: each
+// request with who asks, why, where the packages would run and what
+// core's resolver found of them, the whole graph on asking, and the
+// decision. Core lists them only to who asked, and checks again as the
+// decision lands that they build the App or workflow. What a package says of itself (a licence,
 // a finding) is shown as text.
 
 /** Where a package runs, as a person reads it. */
@@ -241,8 +241,9 @@ const Packages = ({ review }: { review: DependencyReview }) => {
 /**
  * What has to be read of a request before deciding it: who asks for how
  * many packages, where they would run, what was reported of them, and the
- * whole graph on asking, which approving waits for. On the dashboard's
- * pile and in the inbox.
+ * whole graph on asking, which approving waits for on the dashboard's
+ * pile and in the inbox (`hintId`); on the chat's card it is there to
+ * read, and approving is one click.
  */
 export const PackagesDetails = ({
   request,
@@ -255,8 +256,8 @@ export const PackagesDetails = ({
   /** The whole graph, once it was asked for. */
   review: DependencyReview | undefined;
   busy: boolean;
-  /** The id of the line that says approving waits for the graph. */
-  hintId: string;
+  /** The id of the line that says approving waits for the graph, where it does. */
+  hintId?: string;
   onShow: () => void;
 }) => {
   const { t } = useLingui();
@@ -364,9 +365,11 @@ export const PackagesDetails = ({
           >
             <Trans>Show every package</Trans>
           </Button>
-          <p className="text-muted-foreground" id={hintId}>
-            <Trans>Show every package before you approve them.</Trans>
-          </p>
+          {hintId === undefined ? null : (
+            <p className="text-muted-foreground" id={hintId}>
+              <Trans>Show every package before you approve them.</Trans>
+            </p>
+          )}
         </div>
       ) : (
         <Packages review={review} />

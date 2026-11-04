@@ -20,6 +20,7 @@ import type {
   EventsStoppedNotification,
   GapAskedNotification,
   RunFailedNotification,
+  PackageAdvisoryNotification,
   PackageRevokedNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
@@ -45,11 +46,8 @@ export const waitingErrors = defineErrorFamily({
     "That isn't a verdict one of the kinds of what waits takes.",
 });
 
-/** Who an item waits on: the person themself, an admin, or whoever holds a permission. */
-export type WaitsOn =
-  | { type: "person"; userId: string }
-  | { type: "admin" }
-  | { type: "permission"; permission: "dependencies.approve" };
+/** Who an item waits on: the person themself, or an admin. */
+export type WaitsOn = { type: "person"; userId: string } | { type: "admin" };
 
 interface ItemBase {
   /** Stable from one read to the next: its kind and what it is about, e.g. `heldWrite:<id>`. */
@@ -95,7 +93,7 @@ export interface PermissionRequestItem extends ItemBase {
   reviewedVersion: number | null;
 }
 
-/** Packages proposed for an App or workflow, which someone given the permission approves. */
+/** Packages the person, or their chat's agent, asked for an App or workflow they build: theirs to approve. */
 export interface PackagesItem extends ItemBase {
   kind: "packages";
   verdicts: ("approve" | "reject")[];
@@ -156,6 +154,13 @@ export interface RevokedPackageItem extends ItemBase {
   kind: "revokedPackage";
   verdicts: never[];
   notification: PackageRevokedNotification;
+}
+
+/** A new advisory found for packages approved for an App or workflow the person builds: read where they build it. */
+export interface PackageAdvisoryItem extends ItemBase {
+  kind: "packageAdvisory";
+  verdicts: never[];
+  notification: PackageAdvisoryNotification;
 }
 
 /**
@@ -220,6 +225,7 @@ export type WaitingItem =
   | OpenQuestionItem
   | StoppedScheduleItem
   | RevokedPackageItem
+  | PackageAdvisoryItem
   | StoppedEventsItem
   | AppMessageItem
   | BindingApprovalItem
@@ -341,8 +347,8 @@ export interface WaitingApi {
   /**
    * Everything that waits on the person now, each kind as its own API
    * lists it for them: permission requests and apps to approve only for
-   * the organization's own admins, packages only for whoever holds
-   * `dependencies.approve`. Reading it marks nothing read.
+   * the organization's own admins, packages for the builder who asked for
+   * them. Reading it marks nothing read.
    */
   list: () => Promise<WaitingFeed>;
   /**

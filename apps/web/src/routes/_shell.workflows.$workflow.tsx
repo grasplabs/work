@@ -291,8 +291,8 @@ const WorkflowSettings = ({
               workflow={resource.id}
             />
             <ShareWorkflow resource={resource} />
-            {/* Its approved packages: read there, and retired or revoked
-                by whoever may approve packages. */}
+            {/* Its approved packages: read, retired or revoked there by
+                its builders. */}
             <Button
               nativeButton={false}
               render={

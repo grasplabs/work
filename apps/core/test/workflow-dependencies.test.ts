@@ -1,8 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import {
-  dependencySubjectsListed,
-  npmRegistryOrigin,
-} from "@grasp-os/shared/dependencies";
+import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
 import type {
   DependencyProposal,
   DependencyRequest,
@@ -18,10 +15,8 @@ import {
   proposeForTests,
 } from "../src/dependencies/requests.ts";
 import { buildDependencies } from "../src/packages/build.ts";
-import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { mockIdp } from "./idp.ts";
 import { named, plain, publish } from "./npm.ts";
-import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
 import {
   auditedDuring,
@@ -35,8 +30,8 @@ import {
 
 // Packages for an independent workflow's compute modules (GRA-665), from
 // the threat model on the issue: a workflow's packages need a person's
-// approval exactly as an App's do, in the same queue, for `computation`
-// only, asked for by the workflow's own builders, and an approval is its
+// builder's approval exactly as an App's do, for `computation` only,
+// asked for and approved by the workflow's own builders, and an approval is its
 // subject's alone, so an App's never covers a workflow, nor a
 // workflow's an App. Who approved their own request is on the record.
 
@@ -98,16 +93,6 @@ const builderWithWorkflow = async () => {
   return { builder, workflow: id, name };
 };
 
-/** A member an admin gave `dependencies.approve`. */
-const approverBy = async (admin: Person, person?: Person): Promise<Person> => {
-  const approver = person ?? (await personApi("user"));
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: approver.userId,
-  });
-  return approver;
-};
-
 const decide = async (
   api: Person["api"],
   request: Pick<DependencyRequest, "id" | "graphHash">,
@@ -144,15 +129,13 @@ const dependencyEvents = (events: AuditEvent[]) =>
     .map(({ action, target, detail }) => ({ action, target, detail }));
 
 describe("packages for a workflow's compute modules", () => {
-  it("waits in the approvers' queue as the workflow's, and admits nothing until a person approves", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
+  it("waits on the builder who asked as the workflow's, and admits nothing until they approve", async () => {
     const { builder, workflow, name } = await builderWithWorkflow();
     const request = await proposeAs(builder, proposalFor({ workflow }));
 
-    const { requests } = await approver.api.dependencies.waiting();
+    const { requests } = await builder.api.dependencies.waiting();
     const before = await admission(builder, { workflow }, request.graphHash);
-    await decide(approver.api, request);
+    await decide(builder.api, request);
     const after = await admission(builder, { workflow }, request.graphHash);
     const { approved } = await builder.api.dependencies.status({ workflow });
 
@@ -241,19 +224,17 @@ describe("packages for a workflow's compute modules", () => {
       stranger: "workflow.resource_unavailable",
       both: "dependency.invalid",
       followerReads: "role.forbidden",
-      strangerReads: "workflow.resource_unavailable",
+      strangerReads: "dependency.not_found",
     });
   });
 
   it("keeps an App's approval and a workflow's apart, even of the same packages", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const { id: app } = await builder.api.apps.create({
       name: `App ${unique()}`,
     });
     const forApp = await proposeAs(builder, proposalFor({ app }));
-    await decide(approver.api, forApp);
+    await decide(builder.api, forApp);
     const forWorkflow = await proposeAs(builder, proposalFor({ workflow }));
 
     // The same graph, approved for the App: the workflow still waits.
@@ -262,11 +243,12 @@ describe("packages for a workflow's compute modules", () => {
       { workflow },
       forApp.graphHash
     );
-    await decide(approver.api, forWorkflow);
+    await decide(builder.api, forWorkflow);
     // Revoking the workflow's ends nothing of the App's.
-    const { policyGeneration, endings } =
-      await approver.api.dependencies.impact(forWorkflow.id);
-    await approver.api.dependencies.revoke(forWorkflow.id, {
+    const { policyGeneration, endings } = await builder.api.dependencies.impact(
+      forWorkflow.id
+    );
+    await builder.api.dependencies.revoke(forWorkflow.id, {
       reviewed: {
         graphHash: forWorkflow.graphHash,
         policyGeneration,
@@ -276,7 +258,7 @@ describe("packages for a workflow's compute modules", () => {
     });
 
     const appApprovals = await builder.api.dependencies.approvals({ app });
-    const workflowApprovals = await approver.api.dependencies.approvals({
+    const workflowApprovals = await builder.api.dependencies.approvals({
       workflow,
     });
 
@@ -304,14 +286,12 @@ describe("packages for a workflow's compute modules", () => {
   });
 
   it("records the workflow as what was refused, approved or revoked", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const request = await proposeAs(builder, proposalFor({ workflow }));
 
     const events = await auditedDuring(async () => {
       await admission(builder, { workflow }, request.graphHash);
-      await decide(approver.api, request);
+      await decide(builder.api, request);
     });
 
     expect(dependencyEvents(events)).toMatchObject([
@@ -323,15 +303,13 @@ describe("packages for a workflow's compute modules", () => {
       {
         action: "dependency.approved",
         target: { type: "dependency_request", id: request.id },
-        detail: { workflow, targets: "computation", selfDecided: false },
+        detail: { workflow, targets: "computation", selfDecided: true },
       },
     ]);
   });
 
   it("says when someone approved their own request, for an App or a workflow", async () => {
-    const admin = await personApi("admin");
     const { builder, workflow } = await builderWithWorkflow();
-    await approverBy(admin, builder);
     const { id: app } = await builder.api.apps.create({
       name: `App ${unique()}`,
     });
@@ -367,8 +345,6 @@ describe("packages for a workflow's compute modules", () => {
   });
 
   it("locks a resolved graph as the workflow's, and a denial drops only the workflow's lock", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const { id: app } = await builder.api.apps.create({
       name: `App ${unique()}`,
@@ -400,7 +376,7 @@ describe("packages for a workflow's compute modules", () => {
     };
     const before = await locksOf();
 
-    await decide(approver.api, forWorkflow.request, false);
+    await decide(builder.api, forWorkflow.request, false);
 
     expect({ before, after: await locksOf() }).toStrictEqual({
       before: [
@@ -476,8 +452,6 @@ describe("packages for a workflow's compute modules", () => {
   });
 
   it("withdraws a deleted workflow's waiting request and drops the lock only it named", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
@@ -501,8 +475,8 @@ describe("packages for a workflow's compute modules", () => {
     const events = await auditedDuring(async () => {
       await builder.api.workflowResources.delete(workflow);
     });
-    const waiting = await approver.api.dependencies.waiting();
-    const decided = await outcome(decide(approver.api, request));
+    const waiting = await builder.api.dependencies.waiting();
+    const decided = await outcome(decide(builder.api, request));
 
     expect({
       lockedBefore,
@@ -562,9 +536,7 @@ describe("packages for a workflow's compute modules", () => {
   });
 
   it("says when revoking a graph denies the revoker's own waiting request", async () => {
-    const admin = await personApi("admin");
     const { builder, workflow } = await builderWithWorkflow();
-    await approverBy(admin, builder);
     const approved = await proposeAs(builder, proposalFor({ workflow }));
     await decide(builder.api, approved);
     const retiring = await builder.api.dependencies.impact(approved.id);
@@ -666,8 +638,6 @@ const pinsOf = async (
 
 describe("building a workflow's approved packages", () => {
   it("builds the computation target for the workflow's builders, pinned in its own lock and served nowhere", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
@@ -675,7 +645,7 @@ describe("building a workflow's approved packages", () => {
     const before = await outcome(
       buildFor(builder, { workflow }, request.graphHash)
     );
-    await decide(approver.api, request);
+    await decide(builder.api, request);
 
     let built: Awaited<ReturnType<typeof buildFor>> | undefined;
     const events = await auditedDuring(async () => {
@@ -713,8 +683,6 @@ describe("building a workflow's approved packages", () => {
   });
 
   it("builds for neither another target, nor anyone but its builders, nor on an App's approval", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const { id: app } = await builder.api.apps.create({
       name: `App ${unique()}`,
@@ -728,7 +696,7 @@ describe("building a workflow's approved packages", () => {
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
     const forApp = await resolvedFor(builder, { app }, stats);
-    await decide(approver.api, forApp);
+    await decide(builder.api, forApp);
     const forWorkflow = await resolvedFor(builder, { workflow }, stats);
     const { policyGeneration } = await builder.api.dependencies.status({
       workflow,
@@ -760,7 +728,7 @@ describe("building a workflow's approved packages", () => {
         })
       ),
     };
-    await decide(approver.api, forWorkflow);
+    await decide(builder.api, forWorkflow);
     const appBuild = await buildFor(builder, { app }, forApp.graphHash);
     const workflowBuild = await buildFor(
       builder,
@@ -792,16 +760,15 @@ describe("building a workflow's approved packages", () => {
   });
 
   it("builds nothing once the workflow's graph is revoked", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
     const request = await resolvedFor(builder, { workflow }, stats);
-    await decide(approver.api, request);
-    const { policyGeneration, endings } =
-      await approver.api.dependencies.impact(request.id);
-    await approver.api.dependencies.revoke(request.id, {
+    await decide(builder.api, request);
+    const { policyGeneration, endings } = await builder.api.dependencies.impact(
+      request.id
+    );
+    await builder.api.dependencies.revoke(request.id, {
       reviewed: {
         graphHash: request.graphHash,
         policyGeneration,
@@ -816,132 +783,13 @@ describe("building a workflow's approved packages", () => {
   });
 });
 
-describe("the approvers' list of what holds approvals", () => {
-  it("lists each App and workflow with approvals in force for approvers, by name, and nothing for anyone else", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
-    const { builder, workflow, name } = await builderWithWorkflow();
-    const appName = `App ${unique()}`;
-    const { id: app } = await builder.api.apps.create({ name: appName });
-    const forWorkflow = await proposeAs(builder, proposalFor({ workflow }));
-    await decide(approver.api, forWorkflow);
-    const forApp = await proposeAs(
-      builder,
-      proposalFor({ app }, { targets: ["browser"] })
-    );
-    await decide(approver.api, forApp);
-    // Denied: nothing in force, so not listed.
-    const { builder: other, workflow: denied } = await builderWithWorkflow();
-    await decide(
-      approver.api,
-      await proposeAs(other, proposalFor({ workflow: denied })),
-      false
-    );
-
-    const queries = await recordedQueries(async () => {
-      await approver.api.dependencies.inForce();
-    });
-    const listed = await approver.api.dependencies.inForce();
-    const plans = await Promise.all(
-      queries
-        .filter(({ query }) => /from "dependency_requests"/iu.test(query))
-        .map(async (recorded) => await planOf(recorded))
-    );
-    const ours = listed.subjects
-      .filter(({ subject }) => [app, workflow, denied].includes(subject.id))
-      .map(({ subject, approvals }) => ({ subject, approvals }));
-
-    expect({
-      decides: listed.decides,
-      ours,
-      // By the subject index, in its order: a page stops once it is full,
-      // reading neither the table whole nor sorting what it read.
-      readsWhole: plans.some((plan) =>
-        plan.some((step) => fullScan.test(step) || step.includes("TEMP B-TREE"))
-      ),
-      builder: await builder.api.dependencies.inForce(),
-    }).toStrictEqual({
-      decides: true,
-      ours: [
-        { subject: { type: "app", id: app, name: appName }, approvals: 1 },
-        { subject: { type: "workflow", id: workflow, name }, approvals: 1 },
-      ],
-      readsWhole: false,
-      builder: { decides: false, subjects: [], next: null },
-    });
-  });
-});
-
-describe("the approvers' list, page by page", () => {
-  it("shows every App and workflow holding approvals however many there are, each once", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
-    const { builder, workflow } = await builderWithWorkflow();
-    const approved = await proposeAs(builder, proposalFor({ workflow }));
-    await decide(approver.api, approved);
-    // More workflows with an approval than a page shows: each a copy of
-    // that approval, for a workflow of its own.
-    const acting = await builder.api.whoami();
-    const { results: columns } = await env.DB.prepare(
-      "SELECT name FROM pragma_table_info('dependency_requests') WHERE name NOT IN ('id', 'subject_id')"
-    ).all<{ name: string }>();
-    const rest = columns.map(({ name }) => name).join(", ");
-    const ours = [workflow];
-    for (let index = 0; index < dependencySubjectsListed; index += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another, as a person would
-      const { id } = await createWorkflowResource(
-        env,
-        acting,
-        `stats-${unique()}`
-      );
-      ours.push(id);
-    }
-    await env.DB.batch(
-      ours
-        .slice(1)
-        .map((id) =>
-          env.DB.prepare(
-            `INSERT INTO dependency_requests (id, subject_id, ${rest}) SELECT ?, ?, ${rest} FROM dependency_requests WHERE id = ?`
-          ).bind(crypto.randomUUID(), id, approved.id)
-        )
-    );
-
-    const pages = [await approver.api.dependencies.inForce()];
-    for (let next = pages[0]?.next; typeof next === "string";) {
-      // oxlint-disable-next-line no-await-in-loop -- each page after the one before
-      const page = await approver.api.dependencies.inForce(next);
-      pages.push(page);
-      ({ next } = page);
-    }
-    const listed = pages.flatMap(({ subjects }) =>
-      subjects.map(({ subject }) => subject.id)
-    );
-
-    expect({
-      firstPage: pages[0]?.subjects.length,
-      pages: pages.length > 1,
-      once: listed.length === new Set(listed).size,
-      ours: listed.filter((id) => ours.includes(id)).toSorted(),
-      madeUp: await outcome(approver.api.dependencies.inForce("made-up")),
-    }).toStrictEqual({
-      firstPage: dependencySubjectsListed,
-      pages: true,
-      once: true,
-      ours: ours.toSorted(),
-      madeUp: "dependency.invalid",
-    });
-  });
-});
-
 describe("deleting a workflow that holds approved packages", () => {
-  it("revokes its approvals with it, drops their lock and lists it no more", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
+  it("revokes its approvals with it and drops their lock", async () => {
     const { builder, workflow } = await builderWithWorkflow();
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
     const request = await resolvedFor(builder, { workflow }, stats);
-    await decide(approver.api, request);
+    await decide(builder.api, request);
     const built = await buildFor(builder, { workflow }, request.graphHash);
     const subject = { type: "workflow", id: workflow };
     const pinnedBefore = await pinsOf(subject, request.graphHash);
@@ -954,13 +802,11 @@ describe("deleting a workflow that holds approved packages", () => {
     )
       .bind(request.id)
       .all();
-    const listed = await approver.api.dependencies.inForce();
 
     expect({
       pinnedBefore,
       row: results,
       pinnedAfter: await pinsOf(subject, request.graphHash),
-      listed: listed.subjects.some(({ subject: s }) => s.id === workflow),
       revoked: dependencyEvents(events).map(({ action, target, detail }) => ({
         action,
         target,
@@ -971,7 +817,6 @@ describe("deleting a workflow that holds approved packages", () => {
       pinnedBefore: [built.hash],
       row: [{ status: "revoked", reason: "workflow.deleted" }],
       pinnedAfter: [],
-      listed: false,
       revoked: [
         {
           action: "dependency.revoked",
@@ -984,13 +829,11 @@ describe("deleting a workflow that holds approved packages", () => {
   });
 
   it("pins nothing for a build the deletion lands in the middle of", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
     const { builder, workflow } = await builderWithWorkflow();
     const stats = named("stats");
     await publish(plain(stats, "1.0.0"));
     const request = await resolvedFor(builder, { workflow }, stats);
-    await decide(approver.api, request);
+    await decide(builder.api, request);
     const { policyGeneration } = await builder.api.dependencies.status({
       workflow,
     });

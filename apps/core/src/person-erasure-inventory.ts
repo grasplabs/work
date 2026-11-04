@@ -101,7 +101,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_decision_recipients": { company: "who a decision asked" },
   "core.workflow_decision_confirmations": { erased: "runs" },
   "core.dependency_requests": { company: "package requests and decisions" },
-  "core.dependency_approvers": { company: "package approvers" },
   "core.dependency_locks": { none: "subject is an App or workflow" },
   "core.dependency_build_leases": { none: "subject is an App or workflow" },
   "core.dependency_admission_refusals": {
@@ -512,12 +511,6 @@ export const reviewedPersonColumns: Readonly<
   "core.chat_audiences": ["members"],
   "core.chat_workflow_offers": ["user_id"],
   "core.dependency_admission_refusals": ["subject_id", "subject_type"],
-  "core.dependency_approvers": [
-    "granted_by",
-    "revoked_by",
-    "subject_id",
-    "subject_type",
-  ],
   "core.dependency_build_leases": ["subject_id", "subject_type"],
   "core.dependency_locks": ["subject_id", "subject_type"],
   "core.dependency_requests": [

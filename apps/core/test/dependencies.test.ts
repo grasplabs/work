@@ -17,10 +17,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
-  grantApprover,
-  revokeApprover,
-} from "../src/dependencies/approvers.ts";
-import {
   admitDependencies,
   decideDependency,
   proposeForTests,
@@ -29,8 +25,10 @@ import {
   chatOf,
   codeResults,
   codeStep,
+  personalChatsOf,
   says,
   setObjectEnv,
+  transcript,
 } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -51,13 +49,14 @@ import {
   unique,
 } from "./sign-in.ts";
 
-// npm packages for an App need a person's approval, from its threat model
-// (src/dependencies/requests.ts, approvers.ts). Each case below is a way
-// it could go wrong, most of them on purpose: packages used before anyone
-// approved them, a role or an agent standing in for the permission,
-// someone deciding after they lost it, a decision on something other than
-// what was reviewed, the source moving on, and a request too large or not
-// exact.
+// npm packages for an App need its builder's approval, from its threat
+// model (src/dependencies/requests.ts). Each case below is a way it could
+// go wrong, most of them on purpose: packages used before anyone approved
+// them, the agent approving for itself, someone who doesn't build the App
+// approving (a builder of another App among them), someone deciding after
+// they stopped building it, an approval replayed for another graph or
+// App, the source moving on, and a request too large or not exact. Known
+// malware approved anyway is packages.test.ts's.
 
 const idp = mockIdp();
 
@@ -151,16 +150,6 @@ const builderWithApp = async () => {
   return { builder, app: id };
 };
 
-/** A member an admin gave `dependencies.approve`. */
-const approverBy = async (admin: Person, role: Role = "user") => {
-  const person = await personApi(role);
-  const grant = await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: person.userId,
-  });
-  return { ...person, grant };
-};
-
 const approve = async (
   api: Person["api"],
   request: Pick<DependencyRequest, "id" | "graphHash">,
@@ -178,6 +167,15 @@ const waitingFor = async (api: Person["api"]): Promise<string[]> => {
   const { requests } = await api.dependencies.waiting();
   return requests.map(({ id }) => id);
 };
+
+/** Approving `asked` as it was proposed: its graph, under its generation. */
+const reviewing = (asked: DependencyRequest) => ({
+  approved: true,
+  reviewed: {
+    graphHash: asked.graphHash,
+    policyGeneration: asked.policyGeneration,
+  },
+});
 
 const builderActor = (person: Person) =>
   ({ type: "person", userId: person.userId }) as const;
@@ -219,9 +217,7 @@ const eventsOf = (events: AuditEvent[], request: DependencyRequest) =>
 
 describe("dependency approval", () => {
   it("shows one request with everything a person reviews, and admits nothing until they approve", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const graph = charts();
     const proposal = proposalFor(app, {
       targets: ["server", "browser"],
@@ -258,8 +254,8 @@ describe("dependency approval", () => {
     if (request === undefined) {
       throw new Error("No request");
     }
-    const review = await approver.api.dependencies.get(request.id);
-    const waiting = await approver.api.dependencies.waiting();
+    const review = await builder.api.dependencies.get(request.id);
+    const waiting = await builder.api.dependencies.waiting();
     const before = await admission(builder, request);
     const refusal = await admitDependencies(env, builderActor(builder), {
       app: request.subject.id,
@@ -267,7 +263,7 @@ describe("dependency approval", () => {
       targets: ["browser"],
       policyGeneration: waiting.policyGeneration,
     }).catch((error: unknown) => error);
-    const decided = await approve(approver.api, request);
+    const decided = await approve(builder.api, request);
     const after = await admitDependencies(env, builderActor(builder), {
       app: request.subject.id,
       graphHash: request.graphHash,
@@ -325,7 +321,7 @@ describe("dependency approval", () => {
     expect({ decided, after }).toMatchObject({
       decided: {
         status: "approved",
-        decided: { by: { userId: approver.userId } },
+        decided: { by: { userId: builder.userId } },
       },
       after: { approval: request.id },
     });
@@ -351,9 +347,7 @@ describe("dependency approval", () => {
   });
 
   it("records each refused admission once, and every decision", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const request = await proposeAs(builder, proposalFor(app));
 
     const events = await auditedDuring(async () => {
@@ -364,7 +358,7 @@ describe("dependency approval", () => {
       await admission(builder, request, { targets: ["browser", "browser"] });
       await admission(builder, request, { policyGeneration: 1000 });
       await admission(builder, request, { policyGeneration: 1001 });
-      await approver.api.dependencies.decide(request.id, {
+      await builder.api.dependencies.decide(request.id, {
         approved: true,
         reviewed: {
           graphHash: request.graphHash,
@@ -405,7 +399,7 @@ describe("dependency approval", () => {
       },
       {
         action: "dependency.approved",
-        actor: { type: "person", userId: approver.userId },
+        actor: { type: "person", userId: builder.userId },
         target: { type: "dependency_request", id: request.id },
         detail: {
           ...about,
@@ -413,7 +407,7 @@ describe("dependency approval", () => {
           direct: 1,
           packages: 2,
           requestedBy: builder.userId,
-          selfDecided: false,
+          selfDecided: true,
           policyGeneration: request.policyGeneration,
           reason: "Reviewed with the team",
         },
@@ -461,9 +455,7 @@ describe("dependency approval", () => {
   });
 
   it("takes the same graph in any order as the same request, and another as its replacement", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const graph = charts();
     const first = await proposeAs(builder, proposalFor(app));
     const again = await proposeAs(
@@ -486,8 +478,8 @@ describe("dependency approval", () => {
     const status = await builder.api.dependencies.status({ app });
     // The replaced request is gone: nobody approves it, and nothing of it
     // is kept but its audit events.
-    const replaced = await outcome(approve(approver.api, first));
-    await approve(approver.api, other);
+    const replaced = await outcome(approve(builder.api, first));
+    await approve(builder.api, other);
     const approvedAgain = await proposeAs(
       builder,
       proposalFor(app, { sourceRevision: "rev-9", graph: charts("3.2.0") })
@@ -681,11 +673,9 @@ describe("dependency approval", () => {
   });
 
   it("drops what waited once the App is back on a graph it has approved", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const approvedGraph = await proposeAs(builder, proposalFor(app));
-    await approve(approver.api, approvedGraph);
+    await approve(builder.api, approvedGraph);
     const other = await proposeAs(
       builder,
       proposalFor(app, { graph: charts("3.2.0") })
@@ -699,13 +689,13 @@ describe("dependency approval", () => {
       );
     });
     const status = await builder.api.dependencies.status({ app });
-    const stillWaiting = await waitingFor(approver.api);
+    const stillWaiting = await waitingFor(builder.api);
 
     expect({
       back: back?.id,
       pending: status.pending,
       waiting: stillWaiting.includes(other.id),
-      decides: await outcome(approve(approver.api, other)),
+      decides: await outcome(approve(builder.api, other)),
       recorded: events
         .filter(({ target }) => target?.id === other.id)
         .map(({ action, detail }) => [action, detail.by, detail.graphHash]),
@@ -719,11 +709,9 @@ describe("dependency approval", () => {
   });
 
   it("drops whatever waits as it lands, when another proposal took the place of the one it read", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const approvedGraph = await proposeAs(builder, proposalFor(app));
-    await approve(approver.api, approvedGraph);
+    await approve(builder.api, approvedGraph);
     const read = await proposeAs(
       builder,
       proposalFor(app, { graph: charts("3.2.0") })
@@ -752,7 +740,7 @@ describe("dependency approval", () => {
       );
     });
     const status = await builder.api.dependencies.status({ app });
-    const stillWaiting = await waitingFor(approver.api);
+    const stillWaiting = await waitingFor(builder.api);
 
     expect({
       back: back?.id,
@@ -793,11 +781,9 @@ describe("dependency approval", () => {
   });
 
   it("reads an App's requests by index, however many it has had", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const request = await proposeAs(builder, proposalFor(app));
-    await approve(approver.api, request);
+    await approve(builder.api, request);
 
     const queries = await recordedQueries(async () => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
@@ -869,46 +855,60 @@ describe("dependency approval", () => {
     expect(accepted.counts.packages).toBe(dependencyMaxPackages);
   });
 
-  it("lets no role decide: only someone an admin gave the permission, the requester included", async () => {
+  it("lets only a builder of the App decide its packages, and records every refusal", async () => {
     const admin = await personApi("admin");
-    const otherAdmin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const stranger = await personApi("user");
+    // B's builder, who builds nothing of A.
+    const { builder: otherBuilder, app: otherApp } = await builderWithApp();
+    const stranger = await personApi("builder");
+    const user = await personApi("user");
+    const coBuilder = await personApi("builder");
+    const team = await newTeam(admin, [coBuilder]);
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    await builder.api.apps.members.add(app, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core: staffCore } = await openRpc(staffSession);
     const staff = staffCore.authenticate();
     const request = await proposeAs(builder, proposalFor(app));
-    const decision = {
-      approved: true,
-      reviewed: {
-        graphHash: request.graphHash,
-        policyGeneration: request.policyGeneration,
-      },
-    };
+    const otherRequest = await proposeAs(
+      otherBuilder,
+      proposalFor(otherApp, { graph: charts("3.2.0") })
+    );
+    const decision = reviewing(request);
 
-    const refused = {
-      // Admins manage the permission; without it they decide nothing.
-      admin: await outcome(admin.api.dependencies.decide(request.id, decision)),
-      otherAdmin: await outcome(
-        otherAdmin.api.dependencies.decide(request.id, decision)
-      ),
-      // Building the App, or having asked, isn't the permission.
-      builder: await outcome(
-        builder.api.dependencies.decide(request.id, decision)
-      ),
-      builderDenies: await outcome(
-        builder.api.dependencies.decide(request.id, {
-          ...decision,
-          approved: false,
-        })
-      ),
-      stranger: await outcome(
-        stranger.api.dependencies.decide(request.id, decision)
-      ),
-      staff: await outcome(staff.dependencies.decide(request.id, decision)),
-      // Nor does anyone without it see what waits, or read a request of
-      // an App they don't build.
-      adminWaiting: await waitingFor(admin.api),
+    let refused: Record<string, unknown> = {};
+    const events = await auditedDuring(async () => {
+      refused = {
+        // A member it isn't shared with, though their role builds.
+        stranger: await outcome(
+          stranger.api.dependencies.decide(request.id, decision)
+        ),
+        // Someone who only uses it.
+        user: await outcome(user.api.dependencies.decide(request.id, decision)),
+        // B's builder on A's request, and A's builder on B's.
+        otherBuilder: await outcome(
+          otherBuilder.api.dependencies.decide(request.id, decision)
+        ),
+        builderForOtherApp: await outcome(
+          builder.api.dependencies.decide(
+            otherRequest.id,
+            reviewing(otherRequest)
+          )
+        ),
+        staff: await outcome(staff.dependencies.decide(request.id, decision)),
+      };
+    });
+    const unseen = {
+      // Nor does anyone who doesn't build it see what waits, or read it.
+      strangerWaiting: await waitingFor(stranger.api),
       strangerReads: await outcome(stranger.api.dependencies.get(request.id)),
       // Nor resolve for an App: staff never, and only its builders.
       staffResolves: await outcome(
@@ -924,154 +924,117 @@ describe("dependency approval", () => {
       ),
     };
     const stillPending = await builder.api.dependencies.status({ app });
-    // The builder who asked, once an admin gives them the permission.
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: builder.userId,
-    });
-    const own = await approve(builder.api, request);
+    // Who builds it through a team decides, as its owner would.
+    const byCoBuilder = await approve(coBuilder.api, request);
 
     expect(refused).toStrictEqual({
-      admin: "dependency.forbidden",
-      otherAdmin: "dependency.forbidden",
-      builder: "dependency.forbidden",
-      builderDenies: "dependency.forbidden",
-      stranger: "dependency.forbidden",
+      stranger: "dependency.not_found",
+      user: "dependency.not_found",
+      otherBuilder: "dependency.not_found",
+      builderForOtherApp: "dependency.not_found",
       staff: "role.forbidden",
-      adminWaiting: [],
+    });
+    expect(unseen).toStrictEqual({
+      strangerWaiting: [],
       strangerReads: "dependency.not_found",
       staffResolves: "role.forbidden",
       strangerResolves: "app.not_found",
       // Refused as any method the API doesn't have.
       builderProposes: "internal.unexpected",
     });
+    expect(
+      events
+        .filter(({ action }) => action === "dependency.decision_refused")
+        .map(({ actor, target, detail }) => [
+          actor.type === "person" ? actor.userId : actor.type,
+          target?.id,
+          detail.reason,
+        ])
+    ).toStrictEqual([
+      [stranger.userId, request.id, "dependency.not_found"],
+      [user.userId, request.id, "dependency.not_found"],
+      [otherBuilder.userId, request.id, "dependency.not_found"],
+      [builder.userId, otherRequest.id, "dependency.not_found"],
+    ]);
     expect(stillPending.pending?.id).toBe(request.id);
+    expect(byCoBuilder).toMatchObject({
+      status: "approved",
+      decided: { by: { userId: coBuilder.userId } },
+    });
+  });
+
+  it("lists to a builder the requests they asked for, and lets them approve their own", async () => {
+    const { builder, app } = await builderWithApp();
+    const coBuilder = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const request = await proposeAs(builder, proposalFor(app));
+
+    const listed = {
+      asker: await waitingFor(builder.api),
+      // A co-builder decides it, but it waits on whoever asked.
+      coBuilder: await waitingFor(coBuilder.api),
+    };
+    let own: DependencyRequest | undefined;
+    const events = await auditedDuring(async () => {
+      own = await approve(builder.api, request);
+    });
+
+    expect(listed).toStrictEqual({ asker: [request.id], coBuilder: [] });
     expect(own).toMatchObject({
       status: "approved",
       decided: { by: { userId: builder.userId } },
     });
-  });
-
-  it("gives the permission only through the organization's own admins, and records it", async () => {
-    const admin = await personApi("admin");
-    const builder = await personApi("builder");
-    const member = await personApi("user");
-    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core: staffCore } = await openRpc(staffSession);
-    const staff = staffCore.authenticate();
-    const subject = { type: "person", userId: member.userId } as const;
-
-    const refused = {
-      builder: await outcome(builder.api.dependencies.grantApprover(subject)),
-      self: await outcome(member.api.dependencies.grantApprover(subject)),
-      staff: await outcome(staff.dependencies.grantApprover(subject)),
-      nobody: await outcome(
-        admin.api.dependencies.grantApprover({
-          type: "person",
-          userId: "nobody",
-        })
-      ),
-      noTeam: await outcome(
-        admin.api.dependencies.grantApprover({ type: "team", teamId: "none" })
-      ),
-      builderLists: await outcome(builder.api.dependencies.approvers()),
-    };
-    let granted: Awaited<ReturnType<typeof grantApprover>> | undefined;
-    const events = await auditedDuring(async () => {
-      granted = await admin.api.dependencies.grantApprover(subject);
-      // Giving it again changes and records nothing.
-      await admin.api.dependencies.grantApprover(subject);
-    });
-    if (granted === undefined) {
-      throw new Error("No grant");
-    }
-    const { id } = granted;
-    const appPermissions = await admin.api.permissions.list();
-    const others = {
-      builderRevokes: await outcome(
-        builder.api.dependencies.revokeApprover(id)
-      ),
-      staffRevokes: await outcome(staff.dependencies.revokeApprover(id)),
-      // The permissions of Apps and agents know nothing of it.
-      listed: appPermissions.some((permission) => permission.id === id),
-      grantedAsAppPermission: await outcome(
-        admin.api.permissions.grant(id, { version: null })
-      ),
-      revokedAsAppPermission: await outcome(admin.api.permissions.revoke(id)),
-    };
-    const revokedEvents = await auditedDuring(async () => {
-      await admin.api.dependencies.revokeApprover(id);
-      await admin.api.dependencies.revokeApprover(id);
-    });
-    const listed = await admin.api.dependencies.approvers();
-
-    expect(refused).toStrictEqual({
-      builder: "role.forbidden",
-      self: "role.forbidden",
-      staff: "role.forbidden",
-      nobody: "dependency.invalid",
-      noTeam: "dependency.invalid",
-      builderLists: "role.forbidden",
-    });
-    expect(others).toStrictEqual({
-      builderRevokes: "role.forbidden",
-      staffRevokes: "role.forbidden",
-      listed: false,
-      grantedAsAppPermission: "permission.not_found",
-      revokedAsAppPermission: "permission.not_found",
-    });
-    const detail = {
-      subjectType: "person",
-      subjectId: member.userId,
-      objectType: "dependencies",
-      actions: "approve",
-    };
-    const changes = (logged: AuditEvent[]) =>
-      logged
-        .filter(({ target }) => target?.id === id)
-        .map(({ action, actor, detail: recorded }) => ({
-          action,
-          actor,
-          detail: recorded,
-        }));
-    expect(changes(events)).toStrictEqual([
+    expect(
+      eventsOf(events, request).map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        selfDecided: detail.selfDecided,
+      }))
+    ).toStrictEqual([
       {
-        action: "permission.granted",
-        actor: { type: "person", userId: admin.userId },
-        detail,
+        action: "dependency.approved",
+        actor: { type: "person", userId: builder.userId },
+        selfDecided: true,
       },
     ]);
-    expect(changes(revokedEvents)).toStrictEqual([
-      {
-        action: "permission.revoked",
-        actor: { type: "person", userId: admin.userId },
-        detail,
-      },
-    ]);
-    expect(listed.find((approver) => approver.id === id)).toMatchObject({
-      subject,
-      status: "revoked",
-      grantedBy: admin.userId,
-      revokedBy: admin.userId,
-    });
+    await expect(waitingFor(builder.api)).resolves.toStrictEqual([]);
   });
 
-  it("refuses someone who lost the permission, left their team or left the organization", async () => {
+  it("refuses a builder once the App is no longer theirs to build: unshared, off the team or out of the organization", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const revoked = await approverBy(admin);
-    const removed = await approverBy(admin);
-    const inTeam = await personApi("user");
-    const leftTeam = await personApi("user");
+    const unshared = await personApi("builder");
+    const removed = await personApi("builder");
+    const inTeam = await personApi("builder");
+    const leftTeam = await personApi("builder");
     const team = await newTeam(admin, [inTeam, leftTeam]);
-    await admin.api.dependencies.grantApprover({ type: "team", teamId: team });
+    for (const member of [unshared, removed]) {
+      // oxlint-disable-next-line no-await-in-loop -- one share at a time
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: member.userId,
+        role: "builder",
+      });
+    }
+    await builder.api.apps.members.add(app, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
     const request = await proposeAs(builder, proposalFor(app));
-    const seen = {
-      revoked: await waitingFor(revoked.api),
-      leftTeam: await waitingFor(leftTeam.api),
+    const read = {
+      unshared: await outcome(unshared.api.dependencies.get(request.id)),
+      leftTeam: await outcome(leftTeam.api.dependencies.get(request.id)),
     };
 
-    await admin.api.dependencies.revokeApprover(revoked.grant.id);
+    await builder.api.apps.members.remove(app, {
+      type: "person",
+      id: unshared.userId,
+    });
     const left = await callAuth(
       "/organization/remove-team-member",
       admin.session,
@@ -1079,21 +1042,18 @@ describe("dependency approval", () => {
     );
     await admin.api.members.remove(removed.userId);
     const refused = {
-      revoked: await outcome(approve(revoked.api, request)),
+      unshared: await outcome(approve(unshared.api, request)),
       leftTeam: await outcome(approve(leftTeam.api, request)),
       removed: await outcome(approve(removed.api, request)),
-      revokedWaiting: await waitingFor(revoked.api),
     };
     const byTeam = await approve(inTeam.api, request);
 
     expect(left.ok).toBeTruthy();
-    expect(seen.revoked).toContain(request.id);
-    expect(seen.leftTeam).toContain(request.id);
+    expect(read).toStrictEqual({ unshared: "ok", leftTeam: "ok" });
     expect(refused).toStrictEqual({
-      revoked: "dependency.forbidden",
-      leftTeam: "dependency.forbidden",
+      unshared: "dependency.not_found",
+      leftTeam: "dependency.not_found",
       removed: "auth.unauthenticated",
-      revokedWaiting: [],
     });
     expect(byTeam).toMatchObject({
       status: "approved",
@@ -1101,18 +1061,23 @@ describe("dependency approval", () => {
     });
   });
 
-  it("decides in one write: a grant lost, a replacement or a policy change just before it lands refuses it", async () => {
+  it("decides in one write: leaving the organization, a replacement or a policy change just before it lands refuses it", async () => {
     const admin = await personApi("admin");
-    const adminIdentity = await admin.api.whoami();
     const racedBy = async (
       first: (raced: {
-        approver: Awaited<ReturnType<typeof approverBy>>;
+        approver: Person;
         builder: Person;
         app: string;
       }) => Promise<unknown>
     ) => {
       const { builder, app } = await builderWithApp();
-      const approver = await approverBy(admin);
+      // A co-builder decides, so the owner can still act on the App.
+      const approver = await personApi("builder");
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: approver.userId,
+        role: "builder",
+      });
       const request = await proposeAs(builder, proposalFor(app));
       const identity = await approver.api.whoami();
       const { policyGeneration } = await approver.api.dependencies.waiting();
@@ -1146,10 +1111,12 @@ describe("dependency approval", () => {
           .filter((action) => action === "dependency.approved"),
       };
     };
+    // Another App's approval, retired as the decision runs: the policy
+    // generation moves on.
+    const { builder: elsewhere, app: elsewhereApp } = await builderWithApp();
+    const ended = await proposeAs(elsewhere, proposalFor(elsewhereApp));
+    await approve(elsewhere.api, ended);
 
-    const grantLost = await racedBy(async ({ approver }) => {
-      await revokeApprover(env, adminIdentity, approver.grant.id);
-    });
     const removedFromOrganization = await racedBy(async ({ approver }) => {
       await admin.api.members.remove(approver.userId);
     });
@@ -1157,19 +1124,18 @@ describe("dependency approval", () => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
     });
     const policyChanged = await racedBy(async () => {
-      const another = await personApi("user");
-      await grantApprover(env, adminIdentity, {
-        type: "person",
-        userId: another.userId,
+      const impact = await elsewhere.api.dependencies.impact(ended.id);
+      await elsewhere.api.dependencies.retire(ended.id, {
+        reviewed: {
+          graphHash: impact.graphHash,
+          policyGeneration: impact.policyGeneration,
+          approvalsDigest: impact.endings.retire.digest,
+        },
+        reason: "Replaced.",
       });
     });
 
     const nothing = { admitted: "dependency.approval_required", decisions: [] };
-    expect(grantLost).toStrictEqual({
-      result: "dependency.forbidden",
-      status: "pending",
-      ...nothing,
-    });
     expect(removedFromOrganization).toStrictEqual({
       result: "dependency.forbidden",
       status: "pending",
@@ -1188,29 +1154,54 @@ describe("dependency approval", () => {
   });
 
   it("takes one decision, on the graph and policy the person reviewed", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
-    const second = await approverBy(admin);
+    const second = await personApi("builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: second.userId,
+      role: "builder",
+    });
+    // Another of the builder's Apps, asking for other packages.
+    const { id: otherApp } = await builder.api.apps.create({
+      name: `App ${unique()}`,
+    });
     const request = await proposeAs(builder, proposalFor(app));
-    const { policyGeneration } = await approver.api.dependencies.waiting();
+    const otherRequest = await proposeAs(
+      builder,
+      proposalFor(otherApp, { graph: charts("3.2.0") })
+    );
+    const { policyGeneration } = await builder.api.dependencies.waiting();
     const reviewed = { graphHash: request.graphHash, policyGeneration };
 
     const refused = {
       otherGraph: await outcome(
-        approver.api.dependencies.decide(request.id, {
+        builder.api.dependencies.decide(request.id, {
           approved: true,
           reviewed: { ...reviewed, graphHash: "0".repeat(64) },
         })
       ),
+      // A review of another App's graph, replayed on this request, and
+      // this one's on the other's.
+      otherAppsGraph: await outcome(
+        builder.api.dependencies.decide(request.id, {
+          approved: true,
+          reviewed: { ...reviewed, graphHash: otherRequest.graphHash },
+        })
+      ),
+      replayedOnOtherApp: await outcome(
+        builder.api.dependencies.decide(otherRequest.id, {
+          approved: true,
+          reviewed,
+        })
+      ),
       olderPolicy: await outcome(
-        approver.api.dependencies.decide(request.id, {
+        builder.api.dependencies.decide(request.id, {
           approved: true,
           reviewed: { ...reviewed, policyGeneration: policyGeneration - 1 },
         })
       ),
       noReview: await outcome(
-        approver.api.dependencies.decide(
+        builder.api.dependencies.decide(
           request.id,
           z.custom<{ approved: boolean; reviewed: typeof reviewed }>().parse({
             approved: true,
@@ -1218,7 +1209,7 @@ describe("dependency approval", () => {
         )
       ),
       unknown: await outcome(
-        approver.api.dependencies.decide("no-such-request", {
+        builder.api.dependencies.decide("no-such-request", {
           approved: true,
           reviewed,
         })
@@ -1226,7 +1217,7 @@ describe("dependency approval", () => {
     };
     let denied: DependencyRequest | undefined;
     const events = await auditedDuring(async () => {
-      denied = await approver.api.dependencies.decide(request.id, {
+      denied = await builder.api.dependencies.decide(request.id, {
         approved: false,
         reviewed,
         reason: "Too many packages for a chart",
@@ -1249,6 +1240,8 @@ describe("dependency approval", () => {
 
     expect(refused).toStrictEqual({
       otherGraph: "dependency.stale",
+      otherAppsGraph: "dependency.stale",
+      replayedOnOtherApp: "dependency.stale",
       olderPolicy: "dependency.stale",
       noReview: "dependency.invalid",
       unknown: "dependency.not_found",
@@ -1256,7 +1249,7 @@ describe("dependency approval", () => {
     expect(denied).toMatchObject({
       status: "denied",
       decided: {
-        by: { userId: approver.userId },
+        by: { userId: builder.userId },
         reason: "Too many packages for a chart",
       },
     });
@@ -1264,7 +1257,7 @@ describe("dependency approval", () => {
       recorded: [
         {
           action: "dependency.denied",
-          actor: { type: "person", userId: approver.userId },
+          actor: { type: "person", userId: builder.userId },
           reason: "Too many packages for a chart",
           graphHash: request.graphHash,
         },
@@ -1277,14 +1270,12 @@ describe("dependency approval", () => {
   });
 
   it("admits exactly what was approved: this App, graph and targets, at any revision of the source", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const { id: otherApp } = await builder.api.apps.create({
       name: `App ${unique()}`,
     });
-    const approver = await approverBy(admin);
     const request = await proposeAs(builder, proposalFor(app));
-    await approve(approver.api, request);
+    await approve(builder.api, request);
     // The source moves on. The same packages at a later revision are the
     // approved graph still, and ask nobody again; other packages are a
     // request of their own.
@@ -1296,7 +1287,7 @@ describe("dependency approval", () => {
       builder,
       proposalFor(app, { sourceRevision: "rev-3", graph: charts("3.2.0") })
     );
-    const review = await approver.api.dependencies.get(edited.id);
+    const review = await builder.api.dependencies.get(edited.id);
 
     const outcomes = {
       approved: await admission(builder, request),
@@ -1313,7 +1304,7 @@ describe("dependency approval", () => {
       }),
       editedBeforeApproval: await admission(builder, edited),
     };
-    await approve(approver.api, edited);
+    await approve(builder.api, edited);
     const afterApproval = {
       edited: await admission(builder, edited),
       // The earlier approval stands for what it was given for.
@@ -1336,7 +1327,7 @@ describe("dependency approval", () => {
         },
       })
     );
-    const swappedReview = await approver.api.dependencies.get(swapped.id);
+    const swappedReview = await builder.api.dependencies.get(swapped.id);
 
     expect({
       status: swapped.status,
@@ -1374,25 +1365,34 @@ describe("dependency approval", () => {
   });
 
   it("refuses a build that read the policy before it changed, and keeps what was approved", async () => {
-    const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
+    const { builder: elsewhere, app: elsewhereApp } = await builderWithApp();
     const request = await proposeAs(builder, proposalFor(app));
-    await approve(approver.api, request);
+    await approve(builder.api, request);
+    const ended = await proposeAs(elsewhere, proposalFor(elsewhereApp));
+    await approve(elsewhere.api, ended);
     const { policyGeneration: read } = await builder.api.dependencies.status({
       app,
     });
 
     let stale = "";
     const events = await auditedDuring(async () => {
-      await admin.api.dependencies.revokeApprover(approver.grant.id);
+      // Another App's approval retired: the generation moves on.
+      const impact = await elsewhere.api.dependencies.impact(ended.id);
+      await elsewhere.api.dependencies.retire(ended.id, {
+        reviewed: {
+          graphHash: impact.graphHash,
+          policyGeneration: impact.policyGeneration,
+          approvalsDigest: impact.endings.retire.digest,
+        },
+        reason: "Replaced.",
+      });
       stale = await admission(builder, request, { policyGeneration: read });
     });
     const { policyGeneration: now } = await builder.api.dependencies.status({
       app,
     });
-    // Revoking the approver stops their next decision, not what they
-    // approved: that is a decision of its own.
+    // What this App had approved stands: that is a decision of its own.
     const current = await admission(builder, request);
 
     expect(now).toBeGreaterThan(read);
@@ -1409,7 +1409,6 @@ describe("dependency approval", () => {
   it("grants nothing but the use of the packages", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const authority = actingFor({ type: "app", appId: app }, builder.userId);
     const before = Object.keys(await envOf(authority)).toSorted();
 
@@ -1419,7 +1418,7 @@ describe("dependency approval", () => {
         targets: ["browser", "server", "workflow", "computation"],
       })
     );
-    await approve(approver.api, request);
+    await approve(builder.api, request);
 
     // No connection, collection, workflow, export or platform binding.
     await expect(
@@ -1505,7 +1504,7 @@ describe("dependency approval", () => {
     });
   });
 
-  it("lets a chat's agent resolve, and never propose a graph of its own, approve, grant or ask for the permission", async () => {
+  it("lets a chat's agent ask, never approve: its builder approves on the chat's card, and the agent is told", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
@@ -1513,60 +1512,73 @@ describe("dependency approval", () => {
     const { id: app } = await builder.api.apps.create({
       name: `App ${unique()}`,
     });
-    // The person the agent acts for holds the permission themselves.
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: builder.userId,
-    });
     const proposal = proposalFor(app);
     const dates = named("dates");
     await publish(plain(dates, "1.0.0"));
     const intent = intentFor(app, { [dates]: "^1.0.0" });
-    const chat = await chatOf(
+    const chats = await personalChatsOf(
       builder.userId,
       codeStep(`export default async (self, env) => {
         const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
         const { request } = await env.build.resolveDependencies(${JSON.stringify(app)}, ${JSON.stringify(intent)});
-        const decision = { approved: true, reviewed: { graphHash: request.graphHash, policyGeneration: request.policyGeneration } };
-        const subject = { type: "person", userId: ${JSON.stringify(builder.userId)} };
+        const decision = { approved: true, reviewed: { graphHash: request.graphHash, policyGeneration: 0 } };
         return {
           request: { id: request.id, status: request.status },
           proposes: await tried(() => env.build.proposeDependencies(${JSON.stringify(app)}, ${JSON.stringify(proposal)})),
           buildDecides: await tried(() => env.build.decideDependency(request.id, decision)),
           buildApproves: await tried(() => env.build.approveDependencies(request.id, decision)),
           decides: (await tried(() => env.dependencies.decide(request.id, decision))).split(". ")[0],
-          grants: await tried(() => env.build.grantApprover(subject)),
+          chatDecides: (await tried(() => env.chats.packageRequests(request.id))).split(". ")[0],
           grantsElsewhere: (await tried(() => env.permissions.grant(request.id, { version: null }))).split(". ")[0],
           asksForIt: await tried(() => env.build.requestPermission(${JSON.stringify(app)}, {
             object: { type: "dependencies" }, actions: ["approve"], binding: "APPROVE",
           })),
-          asksForPerson: await tried(() => env.build.requestPermission(${JSON.stringify(app)}, {
-            subject, object: { type: "platform" }, actions: ["approve"], binding: "APPROVE",
-          })),
         };
       };`),
-      says("Proposed: someone who approves dependencies decides.")
+      says("Proposed: you approve the packages on the card.")
     );
     await requestGranted(idp, admin, {
-      subject: chat.agent,
+      subject: chats.agent,
       object: { type: "collection", collectionId: "apps" },
       actions: ["read"],
       binding: "APP_LIBRARY",
     });
+    const { chat, ask } = await chats.newChat();
+    const elsewhere = await chats.newChat();
 
-    await chat.ask("Add a chart library");
+    await ask("Add a date library");
 
-    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const [result] = await codeResults(chats.stub, chat.id);
     const returned = z
       .object({ request: z.object({ id: z.string(), status: z.string() }) })
       .loose()
       .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"));
     const status = await builder.api.dependencies.status({ app });
-    const events = await allEvents();
-    const requested = events.find(
-      ({ action, target }) =>
-        action === "dependency.requested" && target?.id === returned.request.id
+    // The card: what waits in this chat, and nothing in another.
+    const card = await builder.api.chats.packageRequests(chat.id);
+    const otherChat = await builder.api.chats.packageRequests(
+      elsewhere.chat.id
     );
+    const [shown] = card.requests;
+    if (shown === undefined) {
+      throw new Error("No card");
+    }
+    const events = await auditedDuring(async () => {
+      await builder.api.dependencies.decide(shown.id, {
+        approved: true,
+        reviewed: {
+          graphHash: shown.graphHash,
+          policyGeneration: card.policyGeneration,
+        },
+      });
+    });
+    const messages: unknown[] = await transcript(chats.stub, chat.id);
+    const notes = messages.flatMap((message) => {
+      const note = z
+        .object({ role: z.literal("system"), content: z.string() })
+        .safeParse(message);
+      return note.success ? [note.data.content] : [];
+    });
 
     expect(returned).toStrictEqual({
       request: { id: status.pending?.id, status: "pending" },
@@ -1575,56 +1587,87 @@ describe("dependency approval", () => {
       buildApproves:
         'The RPC receiver does not implement "approveDependencies".',
       decides: "This chat has no API named env.dependencies",
-      grants: 'The RPC receiver does not implement "grantApprover".',
+      chatDecides: "This chat has no API named env.chats",
       grantsElsewhere: "This chat has no API named env.permissions",
       asksForIt: "That isn't a valid permission request.",
-      asksForPerson: "That isn't a valid permission request.",
     });
-    // Asked by the agent, for its person, and still waiting for a person.
+    // Asked by the agent, for its person, and waiting for them on the card.
     expect(status.pending).toMatchObject({
       status: "pending",
       requestedBy: { userId: builder.userId },
       requestedVia: {
         type: "agent",
-        agentId: chat.agent.agentId,
+        agentId: chats.agent.agentId,
         onBehalfOf: builder.userId,
+        chatId: chat.id,
       },
     });
-    expect(status.approved).toBeNull();
-    expect(requested?.actor).toStrictEqual({
-      type: "agent",
-      agentId: chat.agent.agentId,
-      onBehalfOf: builder.userId,
+    expect({
+      card: card.requests.map(({ id }) => id),
+      otherChat: otherChat.requests,
+      approved: events
+        .filter(({ action }) => action === "dependency.approved")
+        .map(({ actor, target }) => [actor, target?.id]),
+    }).toStrictEqual({
+      card: [returned.request.id],
+      otherChat: [],
+      approved: [
+        [{ type: "person", userId: builder.userId }, returned.request.id],
+      ],
     });
+    const afterwards = await builder.api.chats.packageRequests(chat.id);
+    expect({
+      told: notes.includes(
+        `The npm packages you asked for (request ${returned.request.id}) were approved: the App may use them now.`
+      ),
+      waiting: afterwards.requests,
+    }).toStrictEqual({ told: true, waiting: [] });
   });
 
-  it("takes no decision from an agent acting for someone who holds the permission", async () => {
-    const admin = await personApi("admin");
+  it("takes no decision from an agent acting for the App's builder, and records the refusal", async () => {
     const { builder, app } = await builderWithApp();
-    const approver = await approverBy(admin);
     const request = await proposeAs(builder, proposalFor(app));
-    const identity = await approver.api.whoami();
-    const { policyGeneration } = await approver.api.dependencies.waiting();
+    const identity = await builder.api.whoami();
+    const { policyGeneration } = await builder.api.dependencies.waiting();
     const decision = {
       approved: true,
       reviewed: { graphHash: request.graphHash, policyGeneration },
     };
-
-    // As core names an agent acting for a person (agent-builds.ts).
-    const acting = {
-      ...identity,
-      actor: {
-        type: "agent" as const,
-        agentId: "agent-1",
-        onBehalfOf: identity.userId,
-      },
+    const agent = {
+      type: "agent" as const,
+      agentId: "agent-1",
+      onBehalfOf: identity.userId,
     };
-    const asAgent = await outcome(
-      decideDependency(env, acting, request.id, decision)
-    );
+
+    // As core names an agent acting for a person (agent-builds.ts): as
+    // the actor, and as what it writes records it.
+    const asActor = { ...identity, actor: agent };
+    const asVia = {
+      ...identity,
+      via: { ...agent, workspaceId: "workspace-1", chatId: "chat-1" },
+    };
+
+    let refused: string[] = [];
+    const events = await auditedDuring(async () => {
+      refused = [
+        await outcome(decideDependency(env, asActor, request.id, decision)),
+        await outcome(decideDependency(env, asVia, request.id, decision)),
+      ];
+    });
     const status = await builder.api.dependencies.status({ app });
 
-    expect(asAgent).toBe("dependency.forbidden");
+    expect(refused).toStrictEqual([
+      "dependency.forbidden",
+      "dependency.forbidden",
+    ]);
     expect(status.pending?.id).toBe(request.id);
+    expect(
+      events
+        .filter(({ action }) => action === "dependency.decision_refused")
+        .map(({ actor, detail }) => [actor.type, detail.reason])
+    ).toStrictEqual([
+      ["agent", "dependency.forbidden"],
+      ["person", "dependency.forbidden"],
+    ]);
   });
 });

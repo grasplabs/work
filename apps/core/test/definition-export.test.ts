@@ -14,7 +14,6 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
-import { grantApprover } from "../src/dependencies/approvers.ts";
 import { policyGeneration } from "../src/dependencies/policy.ts";
 import { decideDependency } from "../src/dependencies/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
@@ -170,10 +169,9 @@ export const total = compute({
 });
 `;
 
-/** `by`'s request for workflow `id`'s packages `dependencies`, approved by `admin`. */
+/** `by`'s request for workflow `id`'s packages `dependencies`, which they approve as its builder. */
 const approvedFor = async (
-  by: Acting,
-  admin: Identity,
+  by: Identity,
   id: string,
   intent: { dependencies: Record<string, string>; entries?: string[] }
 ) => {
@@ -189,7 +187,7 @@ const approvedFor = async (
       range,
     })),
   });
-  await decideDependency(env, admin, request.id, {
+  await decideDependency(env, by, request.id, {
     approved: true,
     reviewed: {
       graphHash: request.graphHash,
@@ -206,8 +204,6 @@ const approvedFor = async (
 const appSealingPackage = async (license: string) => {
   const fixture = await appWith(files(), "Requests");
   const { owner, app } = fixture;
-  const admin = await person("admin");
-  await grantApprover(env, admin, { type: "person", userId: admin.userId });
   const pkg = `double-${unique()}`;
   await publish({
     name: pkg,
@@ -216,7 +212,7 @@ const appSealingPackage = async (license: string) => {
     files: { "index.js": "export const double = (value) => value * 2;" },
   });
   const workflow = await createWorkflowResource(env, owner, `p-${unique()}`);
-  const graphHash = await approvedFor(owner, admin, workflow.id, {
+  const graphHash = await approvedFor(owner, workflow.id, {
     dependencies: { [pkg]: "^1.0.0" },
   });
   await publishWorkflowVersion(
@@ -238,7 +234,7 @@ const appSealingPackage = async (license: string) => {
   });
   await seal(fixture);
   await setCurrentVersion(env, owner, app, 1);
-  return { owner, app, admin, pkg, workflow, graphHash };
+  return { owner, app, pkg, workflow, graphHash };
 };
 
 /** A workflow definition's parameters, as far as these tests read them. */
@@ -569,7 +565,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
   });
 
   it("carries a version's approved packages, which publish again only once the graph is approved for the workflow publishing them", async () => {
-    const { owner, app, admin, pkg, workflow, graphHash } =
+    const { owner, app, pkg, workflow, graphHash } =
       await appSealingPackage("MIT");
 
     const exported = await exportAppDefinition(env, owner, app);
@@ -610,7 +606,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     // The exported graph is never taken as approved for another workflow.
     const unapproved = await outcome(publishCopy(packages.graphHash));
     // Asked for at the lock's exact versions, and approved anew.
-    const asked = await approvedFor(builder, admin, copy.id, {
+    const asked = await approvedFor(builder, copy.id, {
       dependencies: packages.lock?.direct ?? {},
       entries: [...packages.entries],
     });

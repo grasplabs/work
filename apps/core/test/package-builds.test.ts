@@ -59,19 +59,15 @@ const resolvedApp = async (
   return { builder, app, request, lock };
 };
 
-/** An App whose package.json resolved, and an admin approved its graph. */
+/** An App whose package.json resolved, and its builder approved its graph. */
 const approvedApp = async (
   dependencies: Record<string, string>,
   more: Partial<DependencyIntent> = {}
 ) => {
-  const admin = await personApi("admin");
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: admin.userId,
-  });
   const resolved = await resolvedApp(dependencies, more);
-  const { policyGeneration } = await admin.api.dependencies.waiting();
-  await admin.api.dependencies.decide(resolved.request.id, {
+  const { builder } = resolved;
+  const { policyGeneration } = await builder.api.dependencies.waiting();
+  await builder.api.dependencies.decide(resolved.request.id, {
     approved: true,
     reviewed: { graphHash: resolved.request.graphHash, policyGeneration },
   });
@@ -215,6 +211,29 @@ export const badge = () => readFileSync("/etc/hostname", "utf8");`,
     )
   );
   return { fmt, ui };
+};
+
+/**
+ * Another App's approval, made now, and how to retire it: retiring moves
+ * the policy generation on, for a build that should see it change.
+ */
+const policyChange = async (): Promise<() => Promise<void>> => {
+  const { ui } = await badgeLibrary();
+  const other = await approvedApp({ [ui]: "^1.0.0" });
+  return async () => {
+    const { builder, request } = other;
+    const { policyGeneration, endings } = await builder.api.dependencies.impact(
+      request.id
+    );
+    await builder.api.dependencies.retire(request.id, {
+      reviewed: {
+        graphHash: request.graphHash,
+        policyGeneration,
+        approvalsDigest: endings.retire.digest,
+      },
+      reason: "Replaced.",
+    });
+  };
 };
 
 describe("building an App's approved packages", () => {
@@ -919,12 +938,12 @@ describe("a build's durability", () => {
   it("keeps nothing when the approval stops holding while it builds", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
-    const admin = await personApi("admin");
+    const movePolicyOn = await policyChange();
     const identity = await app.builder.api.whoami();
     const { policyGeneration } = await app.builder.api.dependencies.status({
       app: app.app,
     });
-    // As the builder starts, who approves dependencies changes: the
+    // As the builder starts, another approval is retired: the
     // policy the build was admitted under is no longer the one in force.
     let changed = false;
     const assets = new Proxy(env.ASSETS, {
@@ -933,10 +952,7 @@ describe("a build's durability", () => {
           ? async (input: RequestInfo, init?: RequestInit) => {
               if (!changed) {
                 changed = true;
-                await admin.api.dependencies.grantApprover({
-                  type: "person",
-                  userId: identity.userId,
-                });
+                await movePolicyOn();
               }
               return await target.fetch(input, init);
             }
@@ -1847,7 +1863,7 @@ describe("waiting for another build", () => {
   it("refuses the artifact another build pinned while it waited when the policy moved on meanwhile", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
-    const admin = await personApi("admin");
+    const movePolicyOn = await policyChange();
     const identity = await app.builder.api.whoami();
     const { policyGeneration } = await app.builder.api.dependencies.status({
       app: app.app,
@@ -1876,10 +1892,7 @@ describe("waiting for another build", () => {
               ) {
                 meanwhile = (async () => {
                   await storeLock(app, pinned);
-                  await admin.api.dependencies.grantApprover({
-                    type: "person",
-                    userId: identity.userId,
-                  });
+                  await movePolicyOn();
                 })();
               }
               return target.prepare(query);
@@ -2014,7 +2027,7 @@ describe("what a build leaves behind", () => {
   it("deletes, from the clock, the files of a build that never pinned them", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
-    const admin = await personApi("admin");
+    const movePolicyOn = await policyChange();
     const identity = await app.builder.api.whoami();
     const { policyGeneration } = await app.builder.api.dependencies.status({
       app: app.app,
@@ -2033,10 +2046,7 @@ describe("what a build leaves behind", () => {
               const put = await target.put(key, value, options);
               if (written === undefined && key.endsWith(".json")) {
                 written = key;
-                await admin.api.dependencies.grantApprover({
-                  type: "person",
-                  userId: identity.userId,
-                });
+                await movePolicyOn();
               }
               return put;
             }

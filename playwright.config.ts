@@ -43,7 +43,7 @@ export const interviewTests = /interview\.e2e\.ts$/u;
  */
 export const journeyTests = /journey\.e2e\.ts$/u;
 /**
- * What grants, retires or revokes package approvals: each bumps the
+ * What retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker
  * uses, so a decision another worker's browser already shows is refused as
  * stale. They run in a project of their own, one test at a time.

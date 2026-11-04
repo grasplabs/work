@@ -197,7 +197,7 @@
   "@grasp-os/core test/lineage-quotas.test.ts": 82.7,
   "@grasp-os/core test/lookalikes.test.ts": 0,
   "@grasp-os/core test/mail-outbox.test.ts": 0.4,
-  "@grasp-os/core test/malware-recheck.test.ts": 3.7,
+  "@grasp-os/core test/package-rescan.test.ts": 3.7,
   "@grasp-os/core test/memory.test.ts": 5.7,
   "@grasp-os/core test/model-ledger.test.ts": 5.9,
   "@grasp-os/core test/model-prices.test.ts": 0,

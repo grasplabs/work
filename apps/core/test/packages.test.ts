@@ -256,10 +256,6 @@ describe("what a resolve takes from the registry", () => {
   it("keeps the versions of the App's approved lock, and resolves only what is new", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: admin.userId,
-    });
     const dates = named("dates");
     const charts = named("charts");
     await publish({ ...plain(dates, "1.0.0"), publishedAt: daysAgo(20) });
@@ -685,13 +681,9 @@ describe("the platform's own packages", () => {
     });
   });
 
-  it("refuses to approve a graph reported as malware after it was proposed, by OSV.dev or the registry, fails closed when OSV can't be read, and still lets an admin deny it", async () => {
+  it("refuses to approve a graph reported as malware after it was proposed, by OSV.dev or the registry, fails closed when OSV can't be read, and still lets a builder deny it", async () => {
     const { builder, app } = await builderWithApp();
     const admin = await personApi("admin");
-    await admin.api.dependencies.grantApprover({
-      type: "person",
-      userId: admin.userId,
-    });
     const decide = async (
       request: { id: string; graphHash: string },
       approved: boolean
@@ -714,7 +706,7 @@ describe("the platform's own packages", () => {
       }
     };
     // Proposed while OSV.dev knew nothing of it; reported before the
-    // admin looked.
+    // builder looked.
     const turned = named("turned");
     const dates = named("dates");
     await publish(
@@ -1648,13 +1640,9 @@ const tarballKeyOf = (integrity: string): string =>
     )
   )}.tgz`;
 
-/** An admin who approves dependencies, and a way to approve or deny a request. */
+/** An admin, who builds every App, and a way to approve or deny a request with them. */
 const approverOf = async () => {
   const admin = await personApi("admin");
-  await admin.api.dependencies.grantApprover({
-    type: "person",
-    userId: admin.userId,
-  });
   return async (
     request: { id: string; graphHash: string },
     approved = true

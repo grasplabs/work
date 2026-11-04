@@ -185,10 +185,6 @@ msgstr "{app} : exécution de {workflowId}"
 msgid "{appName}, version {version}"
 msgstr "{appName}, version {version}"
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "{approvals, plural, one {# approval} other {# approvals}}"
-msgstr "{approvals, plural, one {# approbation} other {# approbations}}"
-
 #: src/engines/package-approvals.tsx
 msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
 msgstr "{approvals, plural, one {Cela met fin à # approbation de ces paquets.} other {Cela met fin à # approbations de ces paquets.}}"
@@ -1666,6 +1662,10 @@ msgstr "Une nouvelle version de cette application est prête. Elle s'ouvrira une
 msgid "A newer link was sent since. Open the latest one from the chat app."
 msgstr "Un lien plus récent a été envoyé depuis. Ouvrez le dernier depuis l’application de chat."
 
+#: src/inbox/items.ts
+msgid "A package of {name} has a new advisory"
+msgstr "Un paquet de {name} a un nouvel avis de sécurité"
+
 #: src/activity/audit-words.ts
 msgid "A page was refused the App's data"
 msgstr "Une page s’est vu refuser les données de l’application"
@@ -1919,7 +1919,6 @@ msgstr "Action"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/settings/package-approvers.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -2031,10 +2030,6 @@ msgstr "Ajouter une connexion HTTP"
 msgid "Add an integration"
 msgstr "Ajouter une intégration"
 
-#: src/settings/package-approvers.tsx
-msgid "Add approver"
-msgstr "Ajouter un approbateur"
-
 #: src/projects/project-people.tsx
 msgid "Add as"
 msgstr "Ajouter en tant que"
@@ -2085,7 +2080,6 @@ msgstr "Ajouter qui répond"
 
 #: src/chat/builds.tsx
 #: src/engines/app-code.tsx
-#: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Ajouté"
 
@@ -2182,6 +2176,11 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 #: src/inbox/items.ts
 msgid "Advisory"
 msgstr "Avis de sécurité"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a new advisory of approved packages"
+msgid "Advisory"
+msgstr "Avis"
 
 #: src/settings/audit-archive.tsx
 msgid "After a run ends. After this, its inputs, outputs and messages are removed."
@@ -2561,7 +2560,6 @@ msgstr "Autre chose ?"
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "App"
@@ -2630,10 +2628,7 @@ msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 msgid "Approval"
 msgstr "Approbation"
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Approvals"
-msgstr "Approbations"
-
+#: src/chat/package-requests.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
@@ -2674,6 +2669,7 @@ msgstr "Approuvez-la sur la page du workflow"
 msgid "Approve the change"
 msgstr "Approuver la modification"
 
+#: src/chat/package-requests.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/inbox/item-detail.tsx
 msgid "Approve the packages for {app}"
@@ -4766,6 +4762,14 @@ msgstr "Supprimé. Rien de ce que vous avez dit n’est conservé."
 msgid "Denied packages"
 msgstr "A refusé des paquets"
 
+#: src/chat/package-requests.tsx
+msgid "Deny"
+msgstr "Refuser"
+
+#: src/chat/package-requests.tsx
+msgid "Deny the packages for {app}"
+msgstr "Refuser les paquets de {app}"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Depends on"
 msgstr "Dépend de"
@@ -5826,6 +5830,10 @@ msgstr "Suivant"
 msgid "Forwarded to our team"
 msgstr "Transmise à notre équipe"
 
+#: src/inbox/items.ts
+msgid "Found"
+msgstr "Trouvé"
+
 #: src/brain/brain.ts
 msgid "Found in {source}"
 msgstr "Trouvé dans {source}"
@@ -6022,6 +6030,10 @@ msgstr "Grasp ne peut pas dire ce que coûterait ce modèle. Choisissez-en un au
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
 msgstr "Grasp a modifié un widget de votre tableau de bord."
+
+#: src/inbox/items.ts
+msgid "Grasp checks approved packages again regularly, and found an advisory for {affected} that wasn't known when it was approved. The packages stay approved: update or remove it, or retire the packages if {name} shouldn't use them any more."
+msgstr "Grasp revérifie régulièrement les paquets approuvés et a trouvé un avis de sécurité pour {affected} qui n'était pas connu lors de l'approbation. Les paquets restent approuvés : mettez-le à jour ou retirez-le, ou mettez les paquets hors service si {name} ne doit plus les utiliser."
 
 #: src/connections/request-app-dialog.tsx
 msgctxt "“Requested” is the name of a section on the Integrations page."
@@ -7305,8 +7317,6 @@ msgid "Key: <0>{mask}</0>"
 msgstr "Clé : <0>{mask}</0>"
 
 #: src/engines/resource-bindings.tsx
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Type"
 
@@ -7356,10 +7366,6 @@ msgstr "Dernière fois"
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "7 derniers jours"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Last decided"
-msgstr "Dernière décision"
 
 #: src/brain/brain-article/kern.tsx
 msgid "Last heard {day}"
@@ -8085,10 +8091,8 @@ msgstr "Micro coupé"
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/new-item-dialog.tsx
 #: src/projects/project-dialog.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
-#: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
@@ -8353,10 +8357,6 @@ msgstr "Aucune application n'a de modèle lié."
 #: src/engines/apps-overview.tsx
 msgid "No App is called “{asked}”"
 msgstr "Aucune application ne s’appelle « {asked} »"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "No App or workflow has approved packages."
-msgstr "Aucune application ni aucun workflow n’a de paquets approuvés."
 
 #: src/chat/side-panel.tsx
 #: src/engines/apps-overview.tsx
@@ -8673,10 +8673,6 @@ msgstr "Non : son hachage ou son lien avec l’événement précédent ne corres
 #: src/routes/decisions.$decision.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Personne n’a répondu à temps : cette décision est donc close."
-
-#: src/settings/package-approvers.tsx
-msgid "Nobody approves packages yet, so every package request waits."
-msgstr "Personne n'approuve encore de paquets : chaque demande de paquets attend."
 
 #: src/settings/stephen-card.tsx
 msgid "Nobody asked him anything yet."
@@ -9376,6 +9372,10 @@ msgstr "Seuls les administrateurs peuvent modifier les équipes."
 msgid "Only an admin makes a collection for everyone or for teams."
 msgstr "Seul un administrateur crée une collection pour tout le monde ou pour des équipes."
 
+#: src/chat/package-requests.tsx
+msgid "Only for {engine}, until a builder retires or revokes them. Grasp refuses known malware however you decide, and tells you if one is reported later."
+msgstr "Uniquement pour {engine}, jusqu'à ce qu'un de ses créateurs les mette hors service ou les révoque. Grasp refuse les logiciels malveillants connus quelle que soit votre décision, et vous prévient si l'un d'eux est signalé plus tard."
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Seulement les prises de parole surlignées"
@@ -9399,10 +9399,6 @@ msgstr "Seulement cartographié"
 #: src/knowledge/new-collection.tsx
 msgid "Only me"
 msgstr "Moi seul"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Only people who may approve packages see what is approved across the workspace."
-msgstr "Seules les personnes autorisées à approuver des paquets voient ce qui est approuvé dans tout l’espace de travail."
 
 #: src/engines/app-own-link.tsx
 msgid "Only someone signed in to the workspace opens it."
@@ -9826,11 +9822,12 @@ msgstr "Paquet"
 msgid "package approvers"
 msgstr "approbateurs de paquets"
 
+#: src/chat/package-requests.tsx
+msgid "Package requests"
+msgstr "Demandes de paquets"
+
 #: src/engines/package-approvals.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.apps.$app_.settings.tsx
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/routes/_shell.settings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Paquets"
@@ -10087,7 +10084,6 @@ msgid "Permissions asked for"
 msgstr "Autorisations demandées"
 
 #: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/package-approvers.tsx
 msgid "Person"
 msgstr "Personne"
 
@@ -10784,7 +10780,6 @@ msgstr "Retenir quelque chose"
 #: src/engines/app-webhooks.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
-#: src/settings/package-approvers.tsx
 msgid "Remove"
 msgstr "Retirer"
 
@@ -10820,10 +10815,6 @@ msgstr "Retirer {name} des modèles de secours"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "Retirer {name} ?"
-
-#: src/settings/package-approvers.tsx
-msgid "Remove {named} as an approver"
-msgstr "Retirer {named} des approbateurs"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Remove {title} from the brain"
@@ -10870,7 +10861,6 @@ msgstr "Retirer ceci du cerveau"
 
 #: src/chat/builds.tsx
 #: src/settings/erasures.tsx
-#: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Supprimé"
 
@@ -11152,6 +11142,10 @@ msgstr "À relire avant le"
 #: src/dashboard/signals.tsx
 msgid "Review overdue"
 msgstr "Révision en retard"
+
+#: src/inbox/item-detail.tsx
+msgid "Review the packages"
+msgstr "Examiner les paquets"
 
 #. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
@@ -12157,7 +12151,6 @@ msgstr "Afficher moins"
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Afficher plus"
 
@@ -12995,7 +12988,6 @@ msgstr "ID de la cible"
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
-#: src/settings/package-approvers.tsx
 #: src/workflows/team-picker.tsx
 msgid "Team"
 msgstr "Équipe"
@@ -13275,6 +13267,10 @@ msgstr "L’adresse peut de nouveau se connecter."
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "L’adresse est peut-être erronée, ou la page a été déplacée ou supprimée."
 
+#: src/chat/package-requests.tsx
+msgid "The agent asks to install packages for {engine}"
+msgstr "L'agent demande à installer des paquets pour {engine}"
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "L’agent a consulté quelque chose"
@@ -13356,10 +13352,6 @@ msgstr "Les statistiques propres à l’application"
 #: src/engines/resource-bindings.tsx
 msgid "The App's own statistics, and the platform's under permission {permission}"
 msgstr "Les statistiques propres à l’application, et celles de la plateforme sous l'autorisation {permission}"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
-msgstr "Les applications et workflows qui peuvent utiliser des paquets npm approuvés. Ouvrez-en un pour mettre hors service ou révoquer ce qui lui a été approuvé."
 
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
@@ -13673,10 +13665,6 @@ msgstr "L’organisation n’a pas encore d’équipes."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "L'origine est https:// et un nom d'hôte public, sans rien après : https://api.example.com."
 
-#: src/routes/_shell.apps.$app_.settings.tsx
-msgid "The packages approved for this App. You see them because you may approve packages; the rest of the App is for its members."
-msgstr "Les paquets approuvés pour cette application. Vous les voyez parce que vous pouvez approuver des paquets ; le reste de l’application est réservé à ses membres."
-
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
 msgstr "Les paquets approuvés pour les calculs de ce workflow. Mettez-les hors service ou révoquez-les ici."
@@ -13692,10 +13680,6 @@ msgstr "La page n’a pas pu être chargée."
 #: src/workflows/triggers.tsx
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "La partie de l'adresse avant le @, sur le domaine de messagerie configuré pour Grasp."
-
-#: src/settings/package-approvers.tsx
-msgid "The people and teams who approve or deny the npm packages Apps and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
-msgstr "Les personnes et les équipes qui approuvent ou refusent les paquets npm demandés par les applications et les workflows. Aucun rôle ne l'inclut, pas même administrateur : ajoutez-vous pour approuver des paquets."
 
 #: src/chat/builds.tsx
 msgid "the person in {field}"
@@ -15909,11 +15893,6 @@ msgstr "Qui répond de l’application : à qui l’on pose les questions et qui
 msgid "Who approves a new tool"
 msgstr "Qui valide un nouvel outil"
 
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/settings/package-approvers.tsx
-msgid "Who approves packages"
-msgstr "Qui approuve les paquets"
-
 #: src/brain/brain.ts
 msgid "Who can answer"
 msgstr "Qui peut répondre"
@@ -16067,7 +16046,6 @@ msgstr "A déterminé ce qui pourrait être amélioré"
 #: src/engines/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/projects/new-item-dialog.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
