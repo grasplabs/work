@@ -45,7 +45,6 @@ import type {
 import { proposeChatDraft } from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { reapProvisionalApp } from "./app-removal.ts";
 import {
   appFor,
   createApp,
@@ -121,13 +120,6 @@ const chatIdOf = (chatId: unknown): ChatId => {
   }
   return parsed.data;
 };
-
-/** Logs a new App whose chat failed and that couldn't be reaped: the reaper takes it in time. */
-const unreapedApp =
-  (appId: string) =>
-  (error: unknown): void => {
-    log.warn("chat.new_app_unreaped", { appId, ...errorFields(error) });
-  };
 
 /**
  * Why a question wasn't taken, as its person reads it: an unplanned error
@@ -395,36 +387,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     description: string;
   }): Promise<ChatSummary & { appId: string }> {
     return await withPerson(this.#check, async (person) => {
-      // Its chat's ID picked first, so the App is made provisional in it,
-      // as a chat's agent makes one (`createApp`), and reaped as one is
-      // (app-removal.ts, `reapAbandonedApps`).
-      const origin = {
-        workspaceId: personalWorkspaceId(person.userId),
-        chatId: chatIdSchema.parse(crypto.randomUUID()),
-      };
-      const made = await createApp(this.#env, person, input, undefined, origin);
-      try {
-        const chat = await this.#appChat(
-          person,
-          made.id,
-          made.name,
-          origin.chatId
-        );
-        return { ...chat, appId: made.id };
-      } catch (error) {
-        // Refused (too many chats, say): its chat never came to be, so the
-        // App goes now, rather than one more each time the person asks
-        // again. Why the chat was refused is what they read. Anything else
-        // may have made the chat after all: the App is left to the reaper.
-        if (isExpectedError(error)) {
-          await reapProvisionalApp(this.#env, {
-            id: made.id,
-            name: made.name,
-            ...origin,
-          }).catch(unreapedApp(made.id));
-        }
-        throw error;
-      }
+      // No room for its chat: refused before an App is made, so asking
+      // again doesn't leave one behind each time.
+      await this.#chatsOf(person.userId).requireRoomForChat(person.userId);
+      const made = await createApp(this.#env, person, input);
+      const chat = await this.#appChat(person, made.id, made.name);
+      return { ...chat, appId: made.id };
     });
   }
 
@@ -432,8 +400,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async #appChat(
     person: Identity,
     id: AppId,
-    name: string,
-    chatId?: ChatId
+    name: string
   ): Promise<ChatSummary> {
     // An App's name always fits a chat's title.
     const title = chatTitleSchema.parse(name);
@@ -445,8 +412,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       undefined,
       "web",
       undefined,
-      id,
-      chatId
+      id
     );
     return {
       id: chat.id,

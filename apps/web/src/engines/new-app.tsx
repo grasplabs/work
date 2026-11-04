@@ -46,10 +46,8 @@ export const NewApp = ({
   const textRef = useRef("");
   const { composer } = useAsk(undefined, models, efforts, "here", undefined, {
     chatFor: async (session: Session) => {
-      // Made with its chat, provisional there as an App a chat's agent
-      // makes is: one left with nothing built goes in time. Kept as soon
-      // as it is made: a retry after its question failed asks in this
-      // App, never making another.
+      // Made with its chat. Kept as soon as it is made: a retry after its
+      // question failed asks in this App, never making another.
       if (made.current === null) {
         const chat = await session.chats.newApp({
           name: nameOf(textRef.current),

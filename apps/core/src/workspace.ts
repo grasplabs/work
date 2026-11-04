@@ -1209,6 +1209,18 @@ export class Workspace extends DurableObject<Env> {
     return id;
   }
 
+  /** Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}. */
+  requireRoomForChat(personId: string): void {
+    const [kept] = this.#db
+      .select({ count: count() })
+      .from(chats)
+      .where(eq(chats.personId, personId))
+      .all();
+    if ((kept?.count ?? 0) >= maxChatsPerPerson) {
+      throw agentErrors.create("agent.too_many_chats");
+    }
+  }
+
   /**
    * A new chat, which belongs to `personId`: agent `agentId` answers in it,
    * acting for them. Refused past {@link maxChatsPerPerson}. Made `by`
@@ -1234,12 +1246,7 @@ export class Workspace extends DurableObject<Env> {
     via: ChatChannel = "web",
     thread?: string,
     /** The App the chat is for (`appChat`), if any. */
-    appId?: AppId,
-    /**
-     * Its ID, picked before it is made: for an App made provisional in it
-     * first (`ChatsApi.newApp`). A new one otherwise.
-     */
-    chatId?: ChatId
+    appId?: AppId
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -1247,15 +1254,8 @@ export class Workspace extends DurableObject<Env> {
       throw permissionErrors.create("permission.context_invalid");
     }
     const channel = chatChannelSchema.parse(via);
-    const [kept] = this.#db
-      .select({ count: count() })
-      .from(chats)
-      .where(eq(chats.personId, personId))
-      .all();
-    if ((kept?.count ?? 0) >= maxChatsPerPerson) {
-      throw agentErrors.create("agent.too_many_chats");
-    }
-    const id = chatId ?? chatIdSchema.parse(crypto.randomUUID());
+    this.requireRoomForChat(personId);
+    const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
         this.#outboxed(
@@ -3963,20 +3963,6 @@ export class Workspace extends DurableObject<Env> {
   // A chat's drafts of Apps (agent-builds.ts). Only core calls these, for
   // the chat's agent, having checked the person's role in the App and the
   // agent's permission first.
-
-  /**
-   * When the chat's draft of App `appId` was last written, in ms; null
-   * when it has none: whether its authoring goes on, as the reaping of
-   * Apps a chat created and nobody accepted asks (app-removal.ts).
-   */
-  draftWrittenAt(chatId: ChatId, appId: string): number | null {
-    const row = this.#db
-      .select({ at: chatDrafts.updatedAt })
-      .from(chatDrafts)
-      .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
-      .get();
-    return row?.at.getTime() ?? null;
-  }
 
   /** The chat's draft of App `appId`; revision 0 while it has none. */
   draft(chatId: ChatId, appId: string): Draft {

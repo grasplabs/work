@@ -37,7 +37,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
-import type { ProvisionalOrigin, AppRow, VersionRow } from "./apps.ts";
+import type { AppRow, VersionRow } from "./apps.ts";
 import {
   appFor,
   blueprintFiles,
@@ -49,7 +49,6 @@ import {
   editableApp,
   findVersion,
   latestVersion,
-  provisionalColumns,
   readTree,
   storeBlueprintTree,
   storeTree,
@@ -524,8 +523,8 @@ export const createFromBlueprint = async (
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
   admit?: () => Promise<void>,
-  /** Where a chat's agent creates it: provisional there (`createApp`). */
-  provisional?: ProvisionalOrigin
+  /** Whether a chat's agent creates it, which writes no workflow into one. */
+  byAgent = false
 ): Promise<CreatedFromBlueprint> => {
   requireBuilder(by);
   requireNotStaff(by);
@@ -574,7 +573,7 @@ export const createFromBlueprint = async (
   refuseV1Server(files.keys());
   // A chat's agent writes no workflow into an App, so it creates none from
   // a blueprint whose code carries one (app-no-workflows.ts).
-  if (provisional !== undefined) {
+  if (byAgent) {
     refuseAppWorkflows(files.keys());
   }
   const tree = await versionTree(files);
@@ -616,7 +615,6 @@ export const createFromBlueprint = async (
     link: null,
     removedAt: null,
     removedBy: null,
-    ...provisionalColumns(provisional),
   };
   const versionRow: VersionRow = {
     appId: app,
@@ -686,12 +684,6 @@ export const createFromBlueprint = async (
       link: sql<string | null>`NULL`.as("link"),
       removedAt: sql<Date | null>`NULL`.as("removed_at"),
       removedBy: sql<string | null>`NULL`.as("removed_by"),
-      provisionalWorkspaceId: sql<
-        string | null
-      >`${appRow.provisionalWorkspaceId}`.as("provisional_workspace_id"),
-      provisionalChatId: sql<string | null>`${appRow.provisionalChatId}`.as(
-        "provisional_chat_id"
-      ),
     })
     .from(blueprints)
     .where(
