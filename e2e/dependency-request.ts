@@ -3,8 +3,8 @@
  * the e2e stack. Resolving reaches the npm registry through connect, which
  * a local stack can't point at a fake (package-artifact.ts says the same),
  * and nothing else may hand core a graph: so the request is written to
- * core's database as the resolver would have proposed it, waiting, or
- * approved as a person's decision leaves it.
+ * core's database as the resolver would have proposed it, with who asked
+ * for it, waiting, or approved as a person's decision leaves it.
  */
 import {
   canonicalGraph,
@@ -71,6 +71,11 @@ export const seedDependencyRequest = async ({
             })
           )
     }, ${now}, ${generationNow}, ${decided}, NULL)`,
+    "core"
+  );
+  // Who asked, as core records each asker: where it waits on them.
+  await execute(
+    `INSERT INTO dependency_request_askers (request_id, person_id, chat_id, workspace_id, asked_at) VALUES (${quoted(id)}, ${quoted(requestedBy)}, ${quoted(requestedVia?.chatId ?? "")}, ${requestedVia === undefined ? "NULL" : quoted(requestedVia.workspaceId)}, ${now})`,
     "core"
   );
   return { id, graphHash };

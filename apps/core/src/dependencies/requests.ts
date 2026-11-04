@@ -1013,19 +1013,10 @@ export const waitingDependencies = async (
           .where(
             and(
               eq(dependencyRequests.status, "pending"),
-              or(
-                // A request asked for before askers were kept: its asker.
-                and(
-                  eq(dependencyRequests.requestedBy, by.userId),
-                  chatId === undefined
-                    ? undefined
-                    : sql`json_extract(${dependencyRequests.requestedVia}, '$.chatId') = ${chatId}`
-                ),
-                sql`EXISTS (SELECT 1 FROM ${dependencyRequestAskers}
-                  WHERE ${dependencyRequestAskers.requestId} = ${dependencyRequests.id}
-                    AND ${dependencyRequestAskers.personId} = ${by.userId}
-                    ${chatId === undefined ? sql`` : sql`AND ${dependencyRequestAskers.chatId} = ${chatId}`})`
-              )
+              sql`EXISTS (SELECT 1 FROM ${dependencyRequestAskers}
+                WHERE ${dependencyRequestAskers.requestId} = ${dependencyRequests.id}
+                  AND ${dependencyRequestAskers.personId} = ${by.userId}
+                  ${chatId === undefined ? sql`` : sql`AND ${dependencyRequestAskers.chatId} = ${chatId}`})`
             )
           )
           .orderBy(dependencyRequests.requestedAt, dependencyRequests.id),
@@ -1259,21 +1250,9 @@ const tellChats = async (
     })
     .from(dependencyRequestAskers)
     .where(eq(dependencyRequestAskers.requestId, request.id));
-  const via = request.requestedVia;
-  // A request asked for before askers were kept names its chat itself.
+  // Each chat once, however many times it asked.
   const chats = new Map(
-    [
-      ...askers,
-      ...(via === null
-        ? []
-        : [
-            {
-              personId: request.requestedBy,
-              chatId: via.chatId,
-              workspaceId: via.workspaceId,
-            },
-          ]),
-    ].flatMap((asker) =>
+    askers.flatMap((asker) =>
       asker.chatId === "" || asker.workspaceId === null
         ? []
         : [[`${asker.workspaceId}/${asker.chatId}`, asker] as const]
