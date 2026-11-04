@@ -32,8 +32,9 @@ import type { BuiltDecision, DecisionAnswer } from "./resource-decisions.ts";
 // fixture-runs.ts): its `grasp.decision` calls, asked of the test's own
 // fixture principals, which answer them through `t.as(name).respond`. The
 // run waits for one as any run waits for its decision (resource-host.ts,
-// `#awaitDecision`); only who is asked, and where the decision is kept, are
-// the test's. Threat model, and how each is closed:
+// `#awaitDecision`; host.ts, `waitForDecision`, through
+// `RunKind.decisionsKept`); only who is asked, and where the decision is
+// kept, are the test's. Threat model, and how each is closed:
 //
 // - A test's decision reaching a person of the organization: it is kept in
 //   `app_test_decisions` alone, never in `workflow_decisions`, so no inbox,

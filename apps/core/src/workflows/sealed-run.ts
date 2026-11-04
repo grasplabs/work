@@ -268,8 +268,12 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     either; its authority decided again; its prompt the recorded one,
 //     its deadline the sealed timeout's (else what is left of the run's
 //     age), whatever its code asks. A step run again opens the decision
-//     it opened (one per run and step). A test's run (a draft's, or one
-//     an App's test started) opens none, and reaches nobody.
+//     it opened (one per run and step). A test's run reaches nobody: a
+//     draft's opens none, its outcome the answer its start gave the
+//     binding (`candidateDecision`); one an App's test started opens its
+//     decision with its test, asking its fixture's principals alone,
+//     never among the organization's (fixture-decisions.ts,
+//     `openFixtureDecision`). Neither is asked by any notice.
 //   - Its task step must record exactly the decision the host opened in
 //     it. Its asking step asks only that one, by the host's own notice
 //     (`askDeciders`: the isolate learns nobody's address), its authority
@@ -278,9 +282,13 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     ask again (one cut off unheard, its activation lost, may ask once
 //     more: a second notice, never a second decision).
 //   - Its wait is for that decision only, until its deadline
-//     (`decisionWait`). The outcome is read from the decision's row,
-//     never from the event that wakes the run nor from the isolate, and
-//     taken only as the binding still allows it (`takeDecision`:
+//     (`decisionWait`). The outcome is read from the decision's row (a
+//     test run's from where it keeps them, `decisionsKeptOf`: looked at
+//     again every `fixtureDecisionLookMs`, as a test's answer owes no
+//     wake), never from the event that wakes the run nor from the
+//     isolate, and taken only as the binding still allows it (a test
+//     run's as its fixture does: `candidateDecision`,
+//     `takeFixtureDecision`; any other's `takeDecision`:
 //     authority decided again, whoever answered still covered and never
 //     the run's person, what they answered held to the contract's
 //     response schema), in the step that records it, so a replay takes it
@@ -1201,6 +1209,7 @@ const decisionsKeptOf = (
         return { answered: true, approved, by, payload: value };
       },
       deadline: async () => await Promise.resolve(candidateDeadlineOf(run)),
+      // Never waited on: its first look finds it answered.
       lookMs: fixtureDecisionLookMs,
     };
   }
@@ -2256,7 +2265,7 @@ class SealedRun implements SealedRunKind {
       };
       // A test run of a draft's checkpoint reaches no person: its decision
       // is the answer its start gave the binding (`candidateDecision`,
-      // checked here), opened nowhere (`candidateKept`).
+      // checked here), opened nowhere (`decisionsKeptOf`).
       if (calling.candidate !== undefined) {
         await candidateDecision(this.#env, calling.candidate, call.binding);
         const opened = {

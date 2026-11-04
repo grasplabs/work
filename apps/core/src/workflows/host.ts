@@ -777,7 +777,9 @@ export const waitStep = (key: string, kind: WaitKind, round: number): string =>
  * - a decision's wait again, and its look, after a wake that answered
  *   nothing (`again:<round>`, `woken:<round>`, `waitForDecision`): an
  *   event of its type sent by someone else causes them, not the run's
- *   code, bounded by the engine's inbox (`maxInboxEvents`).
+ *   code, bounded by the engine's inbox (`maxInboxEvents`); for a test
+ *   run (`RunKind.decisionsKept`), its own looks every so often too,
+ *   bounded by its decision's deadline and its test's lifetime.
  */
 const uncountedWaitStep =
   /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|key:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
