@@ -48,10 +48,22 @@ export interface ValueRecord {
 
 /**
  * An expression (expressions.ts): JavaScript a run evaluates where it
- * stands, reading `input`, `params`, `steps` and, in a catch, `error`.
- * As JSON, it is an object of one value, so it is a `ValueRecord` too.
+ * stands, reading `input`, `params`, `steps`, `inbox` and, in a catch,
+ * `error`. As JSON, it is an object of one value, so it is a
+ * `ValueRecord` too.
  */
 export type Expression = ValueRecord & { readonly $expr: string };
+
+/**
+ * The root an expression reads a run's reply addresses by:
+ * `inbox.<alias>`, the address (`reply-<token>@<host>`) of event binding
+ * `<alias>`, whose contract takes email replies, as the run's
+ * `WorkflowContext.inbox` has it. Typically a mail call's `replyTo`, and a
+ * later `wait` on the same binding takes the reply. A string, or
+ * `undefined` where the run has none: a deployment with no sign-in
+ * origin, or one whose auth secret rotated since the run started.
+ */
+export const inboxRoot = "inbox";
 
 /**
  * A value a step passes: JSON, any part of which may be an expression. A
@@ -397,7 +409,7 @@ export const forEachDescription = `Runs \`do\` for each of \`items\`, one item a
 
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
-  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<from>` (the run's reply address for that binding, or `undefined` when it has none) as its reply-to address, then wait on the same binding. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,

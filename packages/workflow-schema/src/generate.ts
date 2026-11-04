@@ -6,6 +6,7 @@ import type { CheckedWorkflow } from "./check.ts";
 import { pointerJoin } from "./data-schema.ts";
 import {
   durationMs,
+  inboxRoot,
   isPlain,
   isValueList,
   localContractPattern,
@@ -1090,7 +1091,7 @@ class Generator {
       `export default workflow(${literal(id)}, {`,
       `  params: { ${params.map(([name, param]) => `[${literal(name)}]: ${paramCall(param)}`).join(", ")} },`,
       "  input: z.json(),",
-      "}, async (step, { input, params, env, runId }) => {",
+      `}, async (step, { input, params, env, runId, ${inboxRoot} }) => {`,
     ];
     const offset = prelude.length;
     return {

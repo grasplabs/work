@@ -11,12 +11,16 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { releaseContracts } from "../src/release-contracts.ts";
 import { buildGeneratedWorkflow } from "../src/screens.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import {
+  ensureReleaseContract,
+  publishCatalogContract,
+} from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -1847,6 +1851,204 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       afterRevoking: failedWith("workflow.event_denied"),
       ranRevoked: [engineStep("guarded", "catch")],
       asked: [engineStep("reply", "task")],
+    });
+  });
+});
+
+/**
+ * The release's contract for replies to a run's mail, and its type: the
+ * one whose type comes from outside, by email.
+ */
+const emailReplies = () => {
+  for (const contract of releaseContracts) {
+    for (const [type, event] of Object.entries(contract.events ?? {})) {
+      if ("ingress" in event && event.ingress === "email") {
+        return { contract, type };
+      }
+    }
+  }
+  throw new Error("The release has no contract for replies to a run's mail");
+};
+
+/**
+ * The workflow's own mail: an action that answers whom it mailed and where
+ * their replies go, reaching nothing, as a mail connector's call would
+ * carry its Reply-To.
+ */
+const askModule = `import { action, v } from "@grasp-os/sdk/action";
+
+export const ask = action({
+  args: { to: v.string(), replyTo: v.string() },
+  returns: v.object({ to: v.string(), replyTo: v.string() }),
+  uses: [],
+  handler: async (_ctx, { to, replyTo }) => ({ to, replyTo }),
+});
+`;
+
+/**
+ * A workflow of `by`'s on input `{ who }`, published with its own mail
+ * action `ask`, and its event binding `replies`, of the release's
+ * contract for replies to the run's mail, approved by `admin`: so each of
+ * its runs has a reply address for `replies`.
+ */
+const replyingWorkflow = async () => {
+  const admin = await person("admin");
+  const by = await person("builder");
+  const reply = emailReplies();
+  await ensureReleaseContract(env, reply.contract, { builtin: "release" });
+  const workflow = await createWorkflowResource(env, by, `asks-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      bindings: {
+        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
+        replies: { kind: "event", contract: reply.contract.key },
+      },
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        {
+          id: "ask",
+          type: "do",
+          binding: "ask",
+          arguments: { to: { $expr: "input.who" }, replyTo: "x" },
+        },
+        {
+          id: "reply",
+          type: "wait",
+          event: { from: "replies", type: reply.type },
+          timeout: "7 days",
+        },
+      ],
+    }),
+    basedOn: null,
+    modules: { "code/ask.ts": askModule },
+  });
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "replies",
+    target: { kind: "event" },
+    reviewed: { version: 1 },
+  });
+  return { by, workflow, replyType: reply.type };
+};
+
+/** A run's reply address, as `WorkflowContext.inbox` has it. */
+const replyAddress = /^reply-[0-9a-f]{32}@/u;
+
+/** A reply from `address`, as the run's inbox takes one by email. */
+const replyFrom = (address: string) => ({
+  id: `<${unique()}@acme.test>`,
+  stored: null,
+  from: { name: "Ada", address },
+  to: [],
+  cc: [],
+  subject: "Re: Can you approve?",
+  date: null,
+  text: "Approved.",
+  truncated: false,
+  attachments: [],
+  authentication: {
+    spf: { result: "pass", domain: "acme.test" },
+    dkim: { result: "pass", domain: "acme.test" },
+    dmarc: { result: "pass", domain: "acme.test" },
+  },
+});
+
+// `inbox.<alias>` on the run host: the run's reply address for event
+// binding `replies`, which its mail gives as its Reply-To, sealed as any
+// argument the isolate fills in, and the wait on `replies` after it,
+// which takes the reply.
+describe("a grasp-workflow/1 run's inbox on the run host", () => {
+  afterAll(endLiveResourceRuns);
+
+  it("mails its reply address as the Reply-To, and its wait on that binding takes the reply", async () => {
+    const replying = await replyingWorkflow();
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "ask",
+          type: "do",
+          binding: "ask",
+          if: { $expr: 'typeof inbox.replies === "string"' },
+          arguments: {
+            to: { $expr: "input.who" },
+            replyTo: { $expr: "inbox.replies" },
+          },
+        },
+        {
+          id: "reply",
+          type: "wait",
+          event: { from: "replies", type: replying.replyType },
+          timeout: "7 days",
+        },
+      ],
+      {
+        schema: objectOf({
+          mailed: { type: "string" },
+          replyTo: { type: "string" },
+          from: { type: "string" },
+          dmarc: { type: "string" },
+        }),
+        value: {
+          mailed: { $expr: 'steps.ask.output?.replyTo ?? ""' },
+          replyTo: { $expr: 'inbox.replies ?? ""' },
+          from: { $expr: 'steps.reply.output.event?.data.from.address ?? ""' },
+          dmarc: {
+            $expr:
+              'steps.reply.output.event?.data.authentication.dmarc?.result ?? ""',
+          },
+        },
+      },
+      {
+        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
+        replies: { kind: "event", contract: "grasp/email-reply" },
+      }
+    );
+    const runId = await waitingRun(replying);
+    const asked: Asked = [];
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: listeningEngine(
+        runId,
+        async () =>
+          await admitRunEvent(env, {
+            workflowId: replying.workflow.id,
+            runId,
+            binding: "replies",
+            type: replying.replyType,
+            data: replyFrom("ada@acme.test"),
+            key: unique(),
+            source: "mailto:ada@acme.test",
+            sender: "mailto:ada@acme.test",
+          }),
+        asked
+      ),
+    });
+    const address = z.object({ replyTo: z.string() }).safeParse(ran.ended)
+      .data?.replyTo;
+    expect({
+      // The run's own address, as `inbox.replies` read it.
+      address: replyAddress.test(address ?? ""),
+      ran,
+      asked: asked.map(({ step, types }) => ({ step, types })),
+    }).toStrictEqual({
+      address: true,
+      ran: {
+        ended: {
+          // The mail went out with that address as its Reply-To.
+          mailed: address,
+          replyTo: address,
+          from: "ada@acme.test",
+          dmarc: "pass",
+        },
+        tampered: [],
+      },
+      asked: [
+        {
+          step: engineStep("reply", "task"),
+          types: [await eventTypeKey("replies", replying.replyType)],
+        },
+      ],
     });
   });
 });
