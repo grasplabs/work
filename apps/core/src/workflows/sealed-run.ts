@@ -272,7 +272,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   matches), from the run's own inbox, which takes only events admitted
 //   to this run through a binding its start froze (run-events.ts). Before
 //   every wait, a replay's too, the binding must be one the start froze
-//   and its authority must hold (`workflow.event_denied`). Its deadline is
+//   and its authority must hold (`workflow.event_denied`); no catch takes
+//   a wait's failure, so a replay refused after a revocation fails the
+//   run rather than taking a path the run never took. Its deadline is
 //   its sealed timeout from when it was first reached, as recorded, so a
 //   replay waits alike; the engine takes each event once.
 // - A test run sitting waiting. Its sleeps, its deadlines (from its start,
@@ -1739,8 +1741,15 @@ class SealedRun implements SealedRunKind {
     if (!outcome.ok) {
       this.#pendingBy = takenBy;
       this.#pendingError = outcome.error;
+      // An event wait's failure is the host's refusal of the wait (its
+      // binding's authority, its person, a test run's limit), asked again
+      // on every replay and never journaled before it: a catch taking it
+      // would let a replay after a revocation take a path the run never
+      // took, so none does.
       this.#pending =
-        task === undefined || sealed?.kind === "catch"
+        task === undefined ||
+        sealed?.kind === "catch" ||
+        (sealed?.kind === "task" && isEventWait(task))
           ? notCaught()
           : failureOf(outcome.error, task, false);
       return;

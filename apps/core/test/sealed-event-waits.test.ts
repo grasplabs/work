@@ -193,6 +193,17 @@ const eventWorkflow = async () => {
             with: { type: completed, subject: "${ $workflow.input.jobId }" },
           },
         }),
+        {
+          guarded: {
+            try: [
+              listen("await-guarded", {
+                any: [{ with: { type: completed } }],
+              }),
+            ],
+            // Takes any error a catch may take.
+            catch: {},
+          },
+        },
         listen(
           "await-other",
           { any: [{ with: { type: completed } }] },
@@ -505,6 +516,7 @@ describe(
     it("takes the first event of one of its sealed types through its own binding from its run's own inbox, as the host minted it", async () => {
       const { workflow } = sealed;
       const runId = await waitingRun(sealed);
+      // A run of the same workflow: an event sent to it is its own.
       const otherRun = await waitingRun(sealed);
       for (const event of [
         delivery(workflow.id, otherRun, { note: "another run's" }),
@@ -562,9 +574,18 @@ describe(
           },
         ],
       });
-      // The failure, not taken by the wait for completions, is still there.
+      // The other run's event went to its inbox, never this run's.
       const journal = await runObject(runId).journal();
-      expect(journal?.events.length).toBe(3);
+      expect(
+        journal?.events.map(
+          (each) =>
+            z.object({ data: z.json() }).parse(decode(each.payload)).data
+        )
+      ).toStrictEqual([
+        { note: "another binding's" },
+        { note: "ours" },
+        { note: "later" },
+      ]);
     });
 
     it("waits until its sealed timeout from when it was first reached, the same deadline on every replay, and then answers that it timed out", async () => {
@@ -687,43 +708,51 @@ describe(
       });
     });
 
-    it("refuses a wait through a binding its start didn't freeze, or once its approval is revoked, which a catch may take", async () => {
+    it("refuses a wait through a binding its start didn't freeze, a test run's checkpoint doesn't have, or whose approval was revoked, even on a replay of a wait that took its event, and no catch takes it", async () => {
       // Its own workflow: the binding it revokes is the workflow's.
       const revoking = await eventWorkflow();
       const { workflow, admin, approvals } = revoking;
       const runId = await waitingRun(revoking);
       await admitRunEvent(env, delivery(workflow.id, runId, { note: "sent" }));
-      const unfrozen = await ranAs(
-        runId,
-        moduleOf(`return ${wait("await-job")};`),
-        {
-          calling: (frozen) => ({
-            ...frozen,
-            bindings: new Map(
-              [...frozen.bindings].filter(([alias]) => alias !== "jobEvents")
-            ),
-          }),
-        }
-      );
-      // Through the other binding, still approved, before this one is revoked.
-      const other = await ranAs(
-        runId,
-        moduleOf(`return ${wait("await-other")};`)
-      );
-      await revokeWorkflowBinding(
-        env,
-        admin,
-        workflow.id,
-        approvals.otherEvents
-      );
-      const revoked = await ranAs(
-        runId,
-        moduleOf(`return ${wait("await-other")};`)
-      );
-      expect({ unfrozen, other, revoked }).toStrictEqual({
+      const waiting = moduleOf(`return ${wait("await-job")};`);
+      const unfrozen = await ranAs(runId, waiting, {
+        calling: (frozen) => ({
+          ...frozen,
+          bindings: new Map(
+            [...frozen.bindings].filter(([alias]) => alias !== "jobEvents")
+          ),
+        }),
+      });
+      const unfixtured = await ranAs(runId, waiting, {
+        calling: (frozen) => ({ ...frozen, candidate: new Map() }),
+      });
+      // A wait inside a try whose catch takes any error, as generated code
+      // runs it: the catch is asked only if it may take it.
+      const guarded = moduleOf(`
+try {
+  return (${wait("await-guarded")}).event?.data.note;
+} catch (thrown) {
+  const error = await step.caught("guarded", { key: "catch", description: "Its catch" }, async () => true);
+  if (error === undefined) throw thrown;
+  return { caught: error.type };
+}`);
+      const kept = keptOfTest();
+      const took = await ranAs(runId, guarded, {
+        engine: inboxEngine(runId, kept),
+      });
+      await revokeWorkflowBinding(env, admin, workflow.id, approvals.jobEvents);
+      const replayed = await ranAs(runId, guarded, {
+        engine: inboxEngine(runId, kept),
+      });
+      const fresh = await ranAs(runId, guarded);
+      expect({ unfrozen, unfixtured, took, replayed, fresh }).toStrictEqual({
         unfrozen: { ended: "workflow.event_denied", tampered: [] },
-        other: { ended: { timedOut: true }, tampered: [] },
-        revoked: { ended: "workflow.event_denied", tampered: [] },
+        unfixtured: { ended: "workflow.event_denied", tampered: [] },
+        took: { ended: "sent", tampered: [] },
+        // The replay after the revocation fails the run: it never goes on
+        // past its wait, nor down a catch the run never took.
+        replayed: { ended: "workflow.event_denied", tampered: [] },
+        fresh: { ended: "workflow.event_denied", tampered: [] },
       });
     });
 

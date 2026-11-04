@@ -333,7 +333,9 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
   strategy: z.enum(["one", "any", "all"]),
-  read: z.enum(["data", "envelope"]),
+  // How resource-host.ts answers its events, until GRA-1366 removes it;
+  // the run host never reads it (sealed-run.ts, `isEventWait`).
+  read: z.enum(["data", "envelope"]).optional(),
   filters: z
     .array(
       z.strictObject({
