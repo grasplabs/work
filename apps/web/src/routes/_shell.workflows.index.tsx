@@ -86,7 +86,7 @@ import type { AppProcesses } from "../workflows/workflows-table.tsx";
 // person now, with the independent workflows waiting for the reader to
 // let them go live; and, on the Runs tab, today's runs in time, the
 // figures core counted over the last days and their runs, waiting ones
-// first, filtered by App, workflow and status. The lists filter by the
+// first, filtered by App and status. The lists filter by the
 // business process their workflows serve, once they serve more than one.
 // The tab and the filters are in the address, so a link can open the runs
 // it means. A new workflow is the page's action, in the bar above it.
@@ -96,7 +96,6 @@ interface WorkflowsSearch {
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
   app?: string;
-  workflow?: string;
   status?: RunFilterStatus;
 }
 
@@ -118,43 +117,11 @@ const filterLabels: Readonly<Record<RunFilterStatus, MessageDescriptor>> = {
 const all = "all";
 
 /**
- * What the Runs tab's filters offer: the Apps, and the chosen App's
- * workflows, or null when they couldn't be read.
+ * The Apps the person can open, as the Runs tab's App filter offers them.
  */
-interface FilterOptions {
-  apps: Option[];
-  workflows: string[] | null;
-}
-
-/**
- * The Apps the person can open, and the workflows of `app`'s current
- * version once one is chosen: one App's contents, never every App's. An
- * App whose contents can't be read has its workflows unavailable (null),
- * and its runs are still listed.
- */
-const filterOptions = async (
-  session: Session,
-  app: string | undefined
-): Promise<FilterOptions> => {
-  const workflowsOf = async (): Promise<string[] | null> => {
-    if (app === undefined) {
-      return [];
-    }
-    try {
-      const { workflows } = await session.apps.contents(app);
-      return workflows;
-    } catch {
-      return null;
-    }
-  };
-  const [apps, workflows] = await Promise.all([
-    openableApps(session),
-    workflowsOf(),
-  ]);
-  return {
-    apps: apps.map(({ id, name }) => ({ value: id, label: name })),
-    workflows,
-  };
+const appOptions = async (session: Session): Promise<Option[]> => {
+  const apps = await openableApps(session);
+  return apps.map(({ id, name }) => ({ value: id, label: name }));
 };
 
 interface Option {
@@ -209,66 +176,23 @@ const Filter = ({
   );
 };
 
-/**
- * The Runs tab's filters: an App, then one of its workflows (none to pick
- * before an App is), and a status.
- */
-const RunFilters = ({
-  options,
-  settled,
-}: {
-  options: FilterOptions;
-  /**
-   * Whether `options` are the chosen App's: while another App's
-   * workflows are on their way, the Workflow filter offers none.
-   */
-  settled: boolean;
-}) => {
+/** The Runs tab's filters: an App, and a status. */
+const RunFilters = ({ apps }: { apps: Option[] }) => {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/workflows/" });
   const filterBy = (change: Partial<WorkflowsSearch>): void => {
     void navigate({ search: (previous) => ({ ...previous, ...change }) });
   };
   const { t } = useLingui();
-  const listed = settled ? (options.workflows ?? []) : [];
-  const chosen = search.workflow;
-  // A workflow the address filters by that the App's current version
-  // doesn't list (renamed or removed since): core still filters its kept
-  // runs by that name, so it stays, offered under the name it has, said
-  // to be no longer the App's once the App's workflows are known.
-  const kept =
-    chosen === undefined || listed.includes(chosen)
-      ? []
-      : [
-          {
-            value: chosen,
-            label: settled ? t`${chosen} (no longer in this App)` : chosen,
-          },
-        ];
   return (
     <div className="flex flex-wrap gap-2">
       <Filter
         label={t`App`}
         onChange={(app) => {
-          // A workflow of another App finds nothing in this one.
-          filterBy({ app, workflow: undefined });
+          filterBy({ app });
         }}
-        options={options.apps}
+        options={apps}
         value={search.app}
-      />
-      <Filter
-        // Nothing to pick from while the App's workflows can't be read,
-        // or while the chosen one's are still on their way.
-        disabled={!settled || options.workflows === null}
-        label={t`Workflow`}
-        onChange={(workflow) => {
-          filterBy({ workflow });
-        }}
-        options={[
-          ...listed.map((name) => ({ value: name, label: name })),
-          ...kept,
-        ]}
-        value={search.workflow}
       />
       <Filter
         label={t`Status`}
@@ -281,11 +205,6 @@ const RunFilters = ({
         }))}
         value={search.status}
       />
-      {settled && options.workflows === null ? (
-        <p className="text-destructive self-center text-sm">
-          <Trans>Couldn&apos;t load this App&apos;s workflows.</Trans>
-        </p>
-      ) : null}
     </div>
   );
 };
@@ -620,7 +539,7 @@ const countNeeds = (
 /** What the Runs tab's log shows: its runs, its filters' options, and the model a fix asks with. */
 interface RunsRead {
   runs: Loaded<RunsPage>;
-  filters: Loaded<FilterOptions>;
+  apps: Loaded<Option[]>;
   model: string | undefined;
 }
 
@@ -630,23 +549,19 @@ const readRuns = async (
   filter: RunFilter,
   left?: AbortSignal
 ): Promise<RunsRead> => {
-  const [runs, filters, models] = await Promise.all([
+  const [runs, apps, models] = await Promise.all([
     loadFromCore(
       core,
       async (session) => await listRuns(session, filter),
       left
     ),
-    loadFromCore(
-      core,
-      async (session) => await filterOptions(session, filter.app),
-      left
-    ),
+    loadFromCore(core, appOptions, left),
     // The model a fix in chat asks with; without one, none is offered.
     loadFromCore(core, async (session) => await session.chats.models(), left),
   ]);
   return {
     runs,
-    filters,
+    apps,
     model: models.state === "ready" ? models.data[0] : undefined,
   };
 };
@@ -654,30 +569,26 @@ const readRuns = async (
 /** The run filters `search` sets: what the log reads. */
 const filterOf = ({
   app,
-  workflow,
   status,
-}: Pick<WorkflowsSearch, "app" | "workflow" | "status">): RunFilter => ({
+}: Pick<WorkflowsSearch, "app" | "status">): RunFilter => ({
   ...(app === undefined ? {} : { app }),
-  ...(workflow === undefined ? {} : { workflow }),
   ...(status === undefined ? {} : { status }),
 });
 
 /**
- * What of the address's run filters isn't on offer once the filters'
- * options are read, to drop, or null: an App the App filter doesn't
- * offer (one the reader can't open, or that is gone), with its workflow,
- * as it would filter the log by an App the filter can't show. A
- * workflow the App's current version doesn't list stays: core still
- * filters kept runs by that name, and the Workflow filter shows it.
+ * What of the address's run filters isn't on offer once the App filter's
+ * options are read, to drop, or null: an App it doesn't offer (one the
+ * reader can't open, or that is gone), as it would filter the log by an
+ * App the filter can't show.
  */
 const strayOf = (
   app: string | undefined,
   read: { data: RunsRead } | undefined
-): { app: undefined; workflow: undefined } | null =>
+): { app: undefined } | null =>
   app !== undefined &&
-  read?.data.filters.state === "ready" &&
-  !read.data.filters.data.apps.some(({ value }) => value === app)
-    ? { app: undefined, workflow: undefined }
+  read?.data.apps.state === "ready" &&
+  !read.data.apps.data.some(({ value }) => value === app)
+    ? { app: undefined }
     : null;
 
 /** One read of the log: the filters it was read for, and what it answers. */
@@ -698,22 +609,17 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   const core = useCore();
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const { app, workflow, status } = Route.useSearch();
-  const key = JSON.stringify(filterOf({ app, workflow, status }));
+  const { app, status } = Route.useSearch();
+  const key = JSON.stringify(filterOf({ app, status }));
   // The loader's read is taken once, on the first read after that loader
   // run: a later change of filters, back to these too, reads again, as
   // the runs may have moved on since.
   const taken = useRef<LogRead | null>(null);
   const navigate = useNavigate({ from: "/workflows/" });
-  const [read, setRead] = useState<{
-    key: string;
-    /** The App whose workflows its filter options are. */
-    app: string | undefined;
-    data: RunsRead;
-  }>();
+  const [read, setRead] = useState<{ key: string; data: RunsRead }>();
   useEffect(() => {
     const left = new AbortController();
-    const filter = filterOf({ app, workflow, status });
+    const filter = filterOf({ app, status });
     const fresh = taken.current !== log;
     taken.current = log;
     const load = async (): Promise<void> => {
@@ -723,14 +629,14 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
           ? await log.read
           : await readRuns(core, filter, left.signal);
       if (!left.signal.aborted) {
-        setRead({ key: shown, app: filter.app, data });
+        setRead({ key: shown, data });
       }
     };
     void load();
     return () => {
       left.abort();
     };
-  }, [core, log, app, workflow, status]);
+  }, [core, log, app, status]);
   const stray = strayOf(app, read);
   useEffect(() => {
     if (stray !== null) {
@@ -746,17 +652,11 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   // Read for other filters than those now chosen: the filters stay, and
   // the log is loading rather than showing runs the filters don't say.
   const current = read.key === key;
-  const filtered =
-    app !== undefined || workflow !== undefined || status !== undefined;
+  const filtered = app !== undefined || status !== undefined;
   return (
     <div className="flex flex-col gap-4">
       <RunFilters
-        options={
-          read.data.filters.state === "ready"
-            ? read.data.filters.data
-            : { apps: [], workflows: [] }
-        }
-        settled={read.app === app}
+        apps={read.data.apps.state === "ready" ? read.data.apps.data : []}
       />
       {current ? null : <LoadingLines lines={4} />}
       {current && read.data.runs.state === "ready" ? (
@@ -961,7 +861,6 @@ const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
     ? { process: search.process }
     : {}),
   ...(typeof search.app === "string" ? { app: search.app } : {}),
-  ...(typeof search.workflow === "string" ? { workflow: search.workflow } : {}),
   ...(isStatus(search.status) ? { status: search.status } : {}),
 });
 

@@ -1,19 +1,11 @@
-import type { App, FileDiff, VersionReview } from "@grasp-os/shared/apps";
+import type { App, FileDiff } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { screenPath } from "@grasp-os/shared/screens";
-import type { TriggerDeclaration } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 
 // What the side panel's "Being built" section (builds.tsx) and the studio
 // beside the chat (studio.tsx) decide: pure logic, so tested on its own.
-
-/** A workflow's trigger added or removed, as a version's review says. */
-type TriggerChange = NonNullable<
-  VersionReview["workflows"][number]["triggers"]
->[number];
-
-/** An export added, removed or changed, as a version's review says. */
 
 /** One changed file of a version's server code: before, and after. */
 export interface ServerFile {
@@ -104,65 +96,6 @@ export const pendingToShow = (
       ? []
       : [{ ...app, pendingVersion: app.pendingVersion }]
   );
-
-/** What makes a workflow run on its own, in a reviewer's words. */
-export const triggerText = (trigger: TriggerDeclaration): string => {
-  if (trigger.type === "manual") {
-    return i18n._(msg`when someone starts it`);
-  }
-  if (trigger.type === "schedule") {
-    const { param, timeZone } = trigger;
-    return timeZone === undefined
-      ? i18n._(msg`on a schedule (its parameter ${param})`)
-      : i18n._(msg`on a schedule (its parameter ${param}, ${timeZone})`);
-  }
-  if (trigger.type === "event") {
-    const { event } = trigger;
-    // No filter, or an empty one: every such event.
-    const filtered =
-      trigger.filter !== undefined && Object.keys(trigger.filter).length > 0;
-    return filtered
-      ? i18n._(msg`on the event ${event}, filtered`)
-      : i18n._(msg`on every ${event} event`);
-  }
-  const { address } = trigger;
-  return i18n._(msg`on mail to ${address}@`);
-};
-
-/** How many times, as the panel says it: nothing for once. */
-const timesText = (count: number): string =>
-  i18n._(msg`${plural(count, { one: "once", other: "# times" })}`);
-
-/**
- * A workflow's trigger change, as the panel says it, from how many of
- * that trigger it had before and has after: only "no longer" once none
- * are left, and only "now" where there were none.
- */
-export const triggerChangeText = ({
-  trigger,
-  count,
-  countBefore,
-  countAfter,
-}: TriggerChange): string => {
-  const how = triggerText(trigger);
-  if (countBefore === 0) {
-    const times = timesText(countAfter);
-    return countAfter === 1
-      ? i18n._(msg`Now runs ${how}`)
-      : i18n._(msg`Now runs ${how}, ${times}`);
-  }
-  if (countAfter === 0) {
-    return i18n._(msg`No longer runs ${how}`);
-  }
-  const now = timesText(countAfter);
-  return countAfter > countBefore
-    ? i18n._(
-        msg`Runs ${how} ${plural(count, { one: "# more time", other: "# more times" })} (${now} now)`
-      )
-    : i18n._(
-        msg`Runs ${how} ${plural(count, { one: "# fewer time", other: "# fewer times" })} (${now} now)`
-      );
-};
 
 /**
  * What a migration's fixtures found, in a reviewer's words: how many it

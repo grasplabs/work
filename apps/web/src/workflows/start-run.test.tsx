@@ -17,7 +17,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { StartAppRun, StartIndependentRun } from "./start-run.tsx";
+import { StartIndependentRun } from "./start-run.tsx";
 
 // Starting a workflow by hand from its page, against core's RPC as the
 // page reaches it, faked: an independent workflow starts at the version
@@ -87,20 +87,12 @@ const shown = async (
       return { runId: "run-1" };
     },
   };
-  const workflows = {
-    start: async (app: string, workflow: string, input?: unknown) => {
-      await Promise.resolve();
-      asked.push({ app, workflow, input });
-      return { id: "run-9" };
-    },
-  };
   const core = {
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
-        workflows: typeof workflows;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources, workflows }),
+    ): Promise<T> => await action({ workflowResources }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const route = createRoute({
@@ -358,26 +350,6 @@ describe("starting a workflow by hand", () => {
       refused: true,
       shownFiles: ["files"],
       dialog: undefined,
-    });
-  });
-
-  it("starts an App's workflow with no input when none is typed, then with the JSON typed, and links to its run", async () => {
-    const asked = await shown(
-      () => <StartAppRun app="app-1" workflow="invoices" />,
-      form
-    );
-    await press("Start");
-    await press("Start the run");
-    const link = document.querySelector("output a")?.getAttribute("href");
-    await type("Input, as JSON, if it takes any", '{"invoice": 7}');
-    await press("Start the run");
-
-    expect({ asked, link }).toStrictEqual({
-      asked: [
-        { app: "app-1", workflow: "invoices", input: undefined },
-        { app: "app-1", workflow: "invoices", input: { invoice: 7 } },
-      ],
-      link: "/workflows/app-1/invoices/runs/run-9",
     });
   });
 });

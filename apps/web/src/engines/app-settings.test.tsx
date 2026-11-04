@@ -312,11 +312,6 @@ describe(AppSettings, () => {
           open: false,
         },
         {
-          name: "Workflows",
-          to: "/apps/invoice-desk/edit?view=settings&section=workflows",
-          open: false,
-        },
-        {
           name: "Webhooks",
           to: "/apps/invoice-desk/edit?view=settings&section=webhooks",
           open: false,
@@ -336,11 +331,6 @@ describe(AppSettings, () => {
         {
           name: "Sharing",
           to: "/apps/invoice-desk/settings?section=sharing",
-          open: false,
-        },
-        {
-          name: "Workflows",
-          to: "/apps/invoice-desk/settings?section=workflows",
           open: false,
         },
       ],
@@ -429,14 +419,7 @@ describe(AppSettings, () => {
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",
-      sections: [
-        "General",
-        "Sharing",
-        "Versions",
-        "Workflows",
-        "Webhooks",
-        "Packages",
-      ],
+      sections: ["General", "Sharing", "Versions", "Webhooks", "Packages"],
     });
   });
 

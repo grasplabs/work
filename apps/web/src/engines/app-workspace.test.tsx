@@ -70,13 +70,11 @@ const reviewOf = (version: number): VersionReview => ({
   server: null,
   serverFiles: [],
   migrations: [],
-  workflows: [],
   permissions: [],
   grants: [],
   handsFilesToWorkflows: false,
   readsPeople: false,
   rowRules: [],
-  tests: { status: "none", failures: [] },
 });
 
 /** Core's `apps` for one App, as someone with `role` in it reads it. */
@@ -753,7 +751,7 @@ describe(AppWorkspace, () => {
   });
 
   it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {
-    // An App of workflows alone: core has no page of it to build.
+    // An App with no screens: core has no page of it to build.
     const core = new PreviewingCore("screen.not_found");
     socketsTo(core);
     await opened(

@@ -29,8 +29,8 @@ import { workflowsOf } from "./integrations.ts";
 // workflows" on its row in Integrations, opening the list of them
 // (`components/integration-row.tsx`), and its page's Workflows tab
 // (`routes/integrations/$integrationId.tsx`). Each opens the workflow's
-// page: an App's under its App, an independent one by its ID. They come
-// from a read of their own, which the rest of either page never waits on.
+// page. They come from a read of their own, which the rest of either page
+// never waits on.
 
 /** Which workflows use each connection, as the page reads it. */
 export type ConnectionUses = Promise<Loaded<ConnectionWorkflows[]>>;
@@ -51,28 +51,15 @@ const WorkflowLink = ({
   workflow: ConnectionWorkflow;
   className: string;
   children: ReactNode;
-}) =>
-  workflow.kind === "app" ? (
-    <Link
-      className={className}
-      params={{ app: workflow.app, workflow: workflow.workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {children}
-    </Link>
-  ) : (
-    <Link
-      className={className}
-      params={{ workflow: workflow.id }}
-      to="/workflows/$workflow"
-    >
-      {children}
-    </Link>
-  );
-
-/** What a workflow is called: an App's by its name in the App's code. */
-const nameOf = (workflow: ConnectionWorkflow): string =>
-  workflow.kind === "app" ? workflow.workflow : workflow.name;
+}) => (
+  <Link
+    className={className}
+    params={{ workflow: workflow.id }}
+    to="/workflows/$workflow"
+  >
+    {children}
+  </Link>
+);
 
 /** "Used by 2 workflows", as the row's count and its list say it. */
 const useUsedByLabel = (count: number): string => {
@@ -121,17 +108,12 @@ const UsedByCount = ({
             <p className="text-muted-foreground px-2 py-1">{label}</p>
             <ul className="flex flex-col">
               {workflows.map((workflow) => (
-                <li key={JSON.stringify(workflow)}>
+                <li key={workflow.id}>
                   <WorkflowLink
                     className="hover:bg-accent focus-visible:bg-accent flex flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none"
                     workflow={workflow}
                   >
-                    <span className="truncate">{nameOf(workflow)}</span>
-                    {workflow.kind === "app" ? (
-                      <span className="text-muted-foreground truncate text-xs">
-                        {workflow.appName}
-                      </span>
-                    ) : null}
+                    <span className="truncate">{workflow.name}</span>
                   </WorkflowLink>
                 </li>
               ))}
@@ -177,8 +159,7 @@ export const WorkflowsCount = ({
 
 /**
  * The workflows that use the app, on its page's Workflows tab: each opens
- * its workflow, with its App beside it where it has one; or that none does
- * yet, or why that can't be read.
+ * its workflow; or that none does yet, or why that can't be read.
  */
 const WorkflowList = ({
   uses,
@@ -205,19 +186,14 @@ const WorkflowList = ({
       {workflows.map((workflow) => (
         <li
           className="hover:bg-accent relative flex items-center gap-4 border-b px-4 py-3 last:border-b-0"
-          key={JSON.stringify(workflow)}
+          key={workflow.id}
         >
           <WorkflowLink
             className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 focus-visible:underline"
             workflow={workflow}
           >
-            {nameOf(workflow)}
+            {workflow.name}
           </WorkflowLink>
-          {workflow.kind === "app" ? (
-            <span className="text-muted-foreground truncate">
-              {workflow.appName}
-            </span>
-          ) : null}
           <ChevronRightIcon
             aria-hidden="true"
             className="text-muted-foreground size-4 flex-none"

@@ -15,7 +15,6 @@ import {
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { formatEuro, formatPercent } from "../format.ts";
@@ -190,22 +189,14 @@ export const Nothing = ({ children }: { children: ReactNode }) => (
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-/** A workflow's name, opening it. */
-const WorkflowLink = ({
+/** A workflow's name. */
+const WorkflowName = ({
   workflow,
   className,
 }: {
   workflow: ReturnWorkflow;
   className: string;
-}) => (
-  <Link
-    className={className}
-    params={{ app: workflow.app, workflow: workflow.name }}
-    to="/workflows/$app/$workflow"
-  >
-    {workflow.name}
-  </Link>
-);
+}) => <span className={className}>{workflow.name}</span>;
 
 /** A workflow's mark by its return: green where it is measured, light green where it is expected, grey before. */
 const toneOfReturn = (row: WorkflowReturn): Tone => {
@@ -379,7 +370,7 @@ export const ReturnChartView = ({
                 <TableCell>
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Mark tone={toneOfReturn(row)} />
-                    <WorkflowLink
+                    <WorkflowName
                       className="min-w-0 truncate hover:underline"
                       workflow={row.workflow}
                     />
@@ -529,7 +520,7 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                       >
                         <Mark tone={toneOfStage(row.stage)} />
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <WorkflowLink
+                          <WorkflowName
                             className="text-pretty hover:underline"
                             workflow={row.workflow}
                           />
@@ -699,11 +690,10 @@ const TeamWorkflowDot = ({ row }: { row: WorkflowReturn }) => {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Link
+          <button
             aria-label={row.workflow.name}
             className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
-            params={{ app: row.workflow.app, workflow: row.workflow.name }}
-            to="/workflows/$app/$workflow"
+            type="button"
           />
         }
       >

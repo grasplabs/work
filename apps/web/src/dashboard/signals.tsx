@@ -131,13 +131,7 @@ const About = ({
       {engine}
     </Link>
   ) : (
-    <Link
-      className="underline"
-      params={{ app, workflow }}
-      to="/workflows/$app/$workflow"
-    >
-      {workflow}
-    </Link>
+    <span>{workflow}</span>
   );
 };
 

@@ -176,11 +176,10 @@ const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Link
+          <button
             aria-label={t`${name} in ${appName}`}
             className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
-            params={{ app: workflow.app, workflow: name }}
-            to="/workflows/$app/$workflow"
+            type="button"
           />
         }
       >
@@ -298,13 +297,9 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                   className="flex items-baseline gap-4"
                   key={`${workflow.app}/${workflow.workflow}`}
                 >
-                  <Link
-                    className="min-w-0 flex-1 truncate hover:underline"
-                    params={{ app: workflow.app, workflow: workflow.workflow }}
-                    to="/workflows/$app/$workflow"
-                  >
+                  <span className="min-w-0 flex-1 truncate">
                     {workflow.workflow}
-                  </Link>
+                  </span>
                   <span className="text-muted-foreground hidden max-w-48 flex-none truncate @md:block">
                     {workflow.appName}
                   </span>
@@ -388,16 +383,9 @@ const EngineSections = ({ engines, others }: Engines) => {
                   key={workflow.workflow}
                 >
                   <StateMark state={state} />
-                  <Link
-                    className="min-w-0 flex-1 truncate hover:underline"
-                    params={{
-                      app: workflow.app,
-                      workflow: workflow.workflow,
-                    }}
-                    to="/workflows/$app/$workflow"
-                  >
+                  <span className="min-w-0 flex-1 truncate">
                     {workflow.workflow}
-                  </Link>
+                  </span>
                   <span className="text-muted-foreground flex-none">
                     {i18n._(stateNames[state])}
                   </span>

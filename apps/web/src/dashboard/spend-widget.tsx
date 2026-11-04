@@ -32,17 +32,7 @@ const WorkflowName = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
       </Link>
     );
   }
-  return workflow.appName === null ? (
-    <span className="truncate">{name}</span>
-  ) : (
-    <Link
-      className="truncate hover:underline"
-      params={{ app: workflow.appId, workflow: workflow.workflowId }}
-      to="/workflows/$app/$workflow"
-    >
-      {name}
-    </Link>
-  );
+  return <span className="truncate">{name}</span>;
 };
 
 /** A workflow that spent this month: its name, its engine for an App's, and what a run cost. */
