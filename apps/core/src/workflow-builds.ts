@@ -202,6 +202,17 @@ const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
   ])
 );
 
+/** Whether `template` names a sensitive parameter anywhere in it. */
+const namesParam = (template: SealedTemplate): boolean => {
+  if ("param" in template) {
+    return true;
+  }
+  if ("object" in template) {
+    return template.object.some(([, item]) => namesParam(item));
+  }
+  return "array" in template && template.array.some(namesParam);
+};
+
 /** The most keys one task keeps in its workflow's state. */
 const maxStateKeys = 64;
 
@@ -233,13 +244,17 @@ const taskBase = {
   /**
    * What it keeps in its workflow's state once it succeeded, by key: each
    * value's template, as a call's (`templateSchema`: its expressions'
-   * slots, its literals exact), which never names a
-   * sensitive parameter. Its state step (its leave step, else its task
+   * slots, its literals exact), which never names a sensitive parameter:
+   * state is read by the workflow's every later run. Its state step (its leave step, else its task
    * step) records `{ output, state }` (sealed-run.ts, `stateStepOf`).
    */
   state: z
     .record(workflowStateKeySchema, templateSchema)
-    .refine((state) => Object.keys(state).length <= maxStateKeys)
+    .refine(
+      (state) =>
+        Object.keys(state).length <= maxStateKeys &&
+        !Object.values(state).some(namesParam)
+    )
     .optional(),
 };
 

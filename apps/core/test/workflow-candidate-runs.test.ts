@@ -10,6 +10,7 @@ import {
   workflowNamespace,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowCandidateRun } from "@grasp-os/shared/workflow-resources";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -23,6 +24,7 @@ import {
   publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {
   candidateRunFor,
   startCandidateRun,
@@ -1456,6 +1458,51 @@ describe("test runs of a workflow's draft", () => {
       afterWeek: "workflow.candidate_unavailable",
       engine: undefined,
       reservedAfter: 0,
+    });
+  });
+});
+
+describe("a draft's test run and what its workflow keeps between runs", () => {
+  it("reads the state its start froze, whatever is written since, and writes none back", async () => {
+    const ada = await person("builder");
+    const { workflow, revision } = await drafted(ada, {
+      tasks: [{ finish: { set: { status: "done" } } }],
+    });
+    // A run of the workflow's, as core keeps it, that keeps state.
+    const live = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'manifest', ?, 0, 'input', ?)"
+      ).bind(live, ada.userId, unique(), workflow.id, ada.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'manifest', 'build', ?, 'running', ?)"
+      ).bind(live, workflow.id, ada.userId, Date.now()),
+    ]);
+    await writeWorkflowState(env, live, stepIdempotencyKey(live, "a:task"), {
+      count: 1,
+    });
+    const { runId } = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      input: { who: "Ada" },
+      fixtures: {},
+    });
+    await writeWorkflowState(env, live, stepIdempotencyKey(live, "b:task"), {
+      count: 2,
+    });
+    const end = endOf(await ended(ada, workflow.id, runId));
+    const frozen = await env.DB.prepare(
+      "SELECT state FROM workflow_candidate_runs WHERE id = ?"
+    )
+      .bind(runId)
+      .first<{ state: string }>();
+    expect({
+      end,
+      frozen: frozen?.state,
+      now: await workflowStateOf(env, workflow.id),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "done" } },
+      frozen: '{"count":1}',
+      now: { count: 2 },
     });
   });
 });

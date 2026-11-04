@@ -12,7 +12,10 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowResourceErrors,
+  workflowStateMaxBytes,
+} from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
   paramsStep,
@@ -294,11 +297,16 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   step's record and no marker of core's (`#stateChecked`); anything else
 //   is tampering. It is written only as the host records the step
 //   (host.ts, `RunKind.stepRecording`): after the host's last check of
-//   the attempt, its lease held, so never by a failed, refused, caught or
-//   held attempt, nor a failed retry round. It writes under the step's
-//   idempotency key, the same on every attempt, round and replay, so a
-//   crash between the write and the journal writes nothing twice, and a
-//   replay of a journaled step writes nothing at all. A refused write
+//   the attempt, its lease held, so never by an attempt that failed, was
+//   refused, caught or held, nor by a failed retry round. It writes
+//   under the step's idempotency key, the same on every attempt, round
+//   and replay, so it lands once: a crash between the write and the
+//   journal writes nothing twice, and a replay of a journaled step writes
+//   nothing at all. What lands stands, as the first write: should the
+//   engine lose that attempt's result after it (its timeout, or storing
+//   it failing), a later attempt's values aren't written, and if every
+//   later attempt fails, the step fails with its state kept. More than a
+//   workflow's state takes in all fails the step, a test run's too. A refused write
 //   (too large, a run that ended) fails the step, after its call's
 //   effect as `workflow.failed_after_effect`. A test run, a draft's or one
 //   an App's test started, writes nothing, and nor does a restricted run,
@@ -1086,6 +1094,8 @@ const keepsOf = (
     ? undefined
     : { task, kept: task.state };
 
+const utf8 = new TextEncoder();
+
 /** What a state step records: its output, and what it keeps by key. */
 const stateRecordSchema = z.strictObject({
   output: z.json(),
@@ -1724,7 +1734,8 @@ class SealedRun implements SealedRunKind {
    * `{ output, state }`, `state` with exactly the sealed keys, each value
    * held to its template as a call's arguments are (`matched`, no
    * sensitive parameter anywhere), and the whole within a step's record,
-   * no marker of core's in it. Anything else is tampering. What it keeps
+   * no marker of core's in it. Anything else is tampering. More than a
+   * workflow's state takes in all fails the step. What it keeps
    * is written once its step is recorded (`stepRecording`).
    */
   async #stateChecked(
@@ -1765,6 +1776,26 @@ class SealedRun implements SealedRunKind {
         error instanceof Error ? error.message : "The state isn't sealed.",
         "state"
       );
+    }
+    // Past what its workflow's state takes in all, it fails, a test run's
+    // too, which writes nothing: so a draft's test fails where its runs
+    // would (workflow-state.ts counts it with what other runs kept).
+    const bytes = given.reduce(
+      (total, [key, each]) =>
+        total +
+        utf8.encode(key).byteLength +
+        utf8.encode(canonicalJson(each)).byteLength,
+      0
+    );
+    if (bytes > workflowStateMaxBytes) {
+      return {
+        ok: false,
+        error: this.#effected.has(attempt)
+          ? failedAfterEffect
+          : forIsolate(
+              workflowResourceErrors.create("workflow.state_too_large")
+            ),
+      };
     }
     this.#keeps.set(attempt, Object.fromEntries(given));
     return { ok: true, value };

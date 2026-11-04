@@ -3516,27 +3516,42 @@ return null;`),
     });
   });
 
-  it("fails the step whose state is too large, keeping none of it", async () => {
+  it("fails the step whose state is too large, a test run's too, after its call's effect for good, keeping none of it", async () => {
+    const tooLarge = keepFinish(
+      '{ count: 1, seen: "x".repeat(70000), kind: "visit" }'
+    );
     const runId = await waitingRun(sealed);
-    const big = await ranAs(
-      runId,
+    const big = await ranAs(runId, moduleOf(tooLarge), { keeps: finishKeeps });
+    const draft = await ranAs(await waitingRun(sealed), moduleOf(tooLarge), {
+      keeps: finishKeeps,
+      calling: (frozen) => ({ ...frozen, candidate: new Map() }),
+    });
+    // Its mail sent first: no catch may take it as a call that didn't.
+    const sent = await ranAs(
+      await waitingRun(sealed),
       moduleOf(
-        keepFinish('{ count: 1, seen: "x".repeat(70000), kind: "visit" }')
+        send(
+          'await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }); return { output: null, state: { big: "x".repeat(70000) } };'
+        )
       ),
-      { keeps: finishKeeps }
+      { keeps: { send: { big: { slot: 0 } } } }
     );
     expect({
       big: { ended: big.ended, tampered: big.tampered },
+      draft: { ended: draft.ended, tampered: draft.tampered },
+      sent: { ended: sent.ended, tampered: sent.tampered },
       state: await workflowStateOf(env, sealed.workflow.id),
       events: await stateEvents(runId),
     }).toStrictEqual({
       big: { ended: "workflow.state_too_large", tampered: [] },
+      draft: { ended: "workflow.state_too_large", tampered: [] },
+      sent: { ended: "workflow.failed_after_effect", tampered: [] },
       state: {},
       events: { written: 0, withheld: 0 },
     });
   });
 
-  it("writes nothing for a test run or a restricted one, which still checks its state; a restricted run's skip is audited", async () => {
+  it("writes nothing for a draft's test run or a restricted run, which still checks its state; a restricted run's skip is audited", async () => {
     const as = async (calling: (frozen: CallingRun) => CallingRun) => {
       const runId = await waitingRun(sealed);
       const valid = await ranAs(
@@ -3557,16 +3572,10 @@ return null;`),
     };
     expect({
       draft: await as((frozen) => ({ ...frozen, candidate: new Map() })),
-      appTest: await as((frozen) => ({ ...frozen, fixture: true })),
       restricted: await as((frozen) => ({ ...frozen, restricted: true })),
       state: await workflowStateOf(env, sealed.workflow.id),
     }).toStrictEqual({
       draft: {
-        ended: [],
-        tampered: ["workflow.invalid"],
-        events: { written: 0, withheld: 0 },
-      },
-      appTest: {
         ended: [],
         tampered: ["workflow.invalid"],
         events: { written: 0, withheld: 0 },
