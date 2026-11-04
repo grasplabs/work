@@ -3,16 +3,9 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { retryDisconnects } from "../src/members.ts";
-import {
-  codeResults,
-  codeStep,
-  personalChatsOf,
-  says,
-  transcript,
-} from "./agent-chat.ts";
+import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { grantReviewed, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -105,16 +98,18 @@ const resultAt = async (
   return all[index];
 };
 
-const noteSchema = z.object({ role: z.literal("system"), content: z.string() });
-
-/** The notes the chat keeps for its agent (system messages). */
-const notes = async (stub: Stub, chatId: string): Promise<string[]> => {
-  const messages: unknown[] = await transcript(stub, chatId);
-  return messages.flatMap((message) => {
-    const note = noteSchema.safeParse(message);
-    return note.success ? [note.data.content] : [];
-  });
-};
+/**
+ * What the chat's agent was told: the requests `provider` was sent that
+ * carry `asked`, the chat's question, each whole. A note isn't shown in
+ * the chat; the agent reads it with its next request.
+ */
+const notes = (
+  provider: Awaited<ReturnType<typeof personalChatsOf>>["provider"],
+  asked: string
+): string[] =>
+  provider.requests
+    .map(({ body }) => JSON.stringify(body).replaceAll('\\"', '"'))
+    .filter((body) => body.includes(asked));
 
 const returned = (value: unknown) => `Returned:\n${JSON.stringify(value)}`;
 
@@ -252,15 +247,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       person.api.chats.connectionRequests(other.chat.id)
     ).resolves.toStrictEqual([]);
 
-    const listed = async () => {
-      const list = await person.api.chats.list();
-      return list.map((chat) => chat.id);
-    };
-    const before = await listed();
-    // A later millisecond than the other chat was made in.
-    await scheduler.wait(5);
     await person.api.chats.grantConnection(first.chat.id, id);
-    const after = await listed();
     await first.ask("Now look.");
     await other.ask("Look here too.");
     await first.ask("Send it to Ben.");
@@ -271,8 +258,6 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       first: await results(chats.stub, first.chat.id),
       other: await results(chats.stub, other.chat.id),
       waiting: await person.api.chats.connectionRequests(first.chat.id),
-      // The note core adds of the grant moves the chat up its person's list.
-      listed: { before, after },
     }).toStrictEqual({
       first: [
         returned({ id, binding: "MAIL", decidedBy: "person" }),
@@ -282,21 +267,15 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       ],
       other: [refusedWith(notFound.message)],
       waiting: [],
-      listed: {
-        before: [other.chat.id, first.chat.id],
-        after: [first.chat.id, other.chat.id],
-      },
     });
     // The agent was told, in its chat only.
-    const [firstNotes, otherNotes] = await Promise.all([
-      notes(chats.stub, first.chat.id),
-      notes(chats.stub, other.chat.id),
-    ]);
+    const firstNotes = notes(chats.provider, "Now look.");
+    const otherNotes = notes(chats.provider, "Look here too.");
     expect({
       first: firstNotes.some((note) =>
         note.includes('"MAIL" was granted, in this chat only')
       ),
-      other: otherNotes.some((note) => note.includes('"MAIL"')),
+      other: otherNotes.some((note) => note.includes('"MAIL" was granted')),
     }).toStrictEqual({ first: true, other: false });
     const events = await permissionEvents(id, 2);
     expect(
@@ -617,7 +596,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     await person.api.chats.denyConnection(chat.id, id);
     await ask("Look anyway.");
 
-    const told = await notes(chats.stub, chat.id);
+    const told = notes(chats.provider, "Look anyway.");
     expect({
       search: await resultAt(chats.stub, chat.id, 1),
       grant: await outcome(person.api.chats.grantConnection(chat.id, id)),
@@ -819,7 +798,8 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const chats = await personalChatsOf(
       person.userId,
       asks(shared.id, "SHARED"),
-      says("An admin decides.")
+      says("An admin decides."),
+      says("It was denied.")
     );
     const { chat, ask } = await chats.newChat();
     await ask("Find the invoice.");
@@ -827,8 +807,9 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const id = request?.id ?? "";
 
     await admin.api.permissions.revoke(id);
+    await ask("Is it decided?");
 
-    const told = await notes(chats.stub, chat.id);
+    const told = notes(chats.provider, "Is it decided?");
     expect({
       waiting: await person.api.chats.connectionRequests(chat.id),
       told: told.some((note) => note.includes('"SHARED" was denied')),
