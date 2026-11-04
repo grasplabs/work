@@ -90,6 +90,7 @@ export type ProblemCode =
   | "workflow.invalid_default"
   | "workflow.expression_too_long"
   | "workflow.pointer_too_long"
+  | "workflow.arguments_too_deep"
   | "workflow.too_many_expressions"
   | "workflow.duration_too_long";
 
@@ -592,6 +593,47 @@ const checkValue = (
   }
 };
 
+/**
+ * How many objects and arrays `value` nests, an expression a leaf (its
+ * value is the run's): measured without recursion.
+ */
+const nestingOf = (value: Value): number => {
+  let deepest = 0;
+  const pending: [Value, number][] = [[value, 0]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [held, level] = next;
+    if (held !== null && typeof held === "object" && !isExpression(held)) {
+      deepest = Math.max(deepest, level + 1);
+      for (const item of Object.values(held)) {
+        pending.push([item, level + 1]);
+      }
+    }
+  }
+  return deepest;
+};
+
+/**
+ * Refuses a call's part `value` at `pointer`, inside `around` objects
+ * of the call, nested deeper than the host takes a call's arguments.
+ */
+const checkCallDepth = (
+  walk: Walk,
+  value: Value | undefined,
+  pointer: string,
+  around: number
+): void => {
+  const most = sealedBuildLimits.callDepth - around;
+  if (value !== undefined && nestingOf(value) > most) {
+    problem(
+      walk,
+      pointer,
+      "workflow.arguments_too_deep",
+      `Nests deeper than the ${most} objects and lists a call takes here.`,
+      "Flatten it, or build the deep part in an expression from the run's data."
+    );
+  }
+};
+
 /** Refuses `duration` at `pointer` past what the engine sleeps. */
 const checkDuration = (
   walk: Walk,
@@ -703,6 +745,7 @@ const checkDo = (
     );
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
+  checkCallDepth(walk, step.arguments, join(pointer, "arguments"), 0);
   checkValue(
     walk,
     step.arguments,
@@ -720,6 +763,9 @@ const checkAgent = (
 ): void => {
   bindingFor(walk, step.binding, ["model"], pointer);
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
+  // A model call sends `{ instructions, input }`: one object around each.
+  checkCallDepth(walk, step.instructions, join(pointer, "instructions"), 1);
+  checkCallDepth(walk, step.input, join(pointer, "input"), 1);
   checkValue(
     walk,
     step.instructions,

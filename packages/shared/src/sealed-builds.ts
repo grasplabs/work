@@ -3,6 +3,8 @@
 // the host reads a sealed table back with, so each generator bounds what
 // it seals by the same numbers and nothing it publishes fails to load.
 
+import { valueDepth } from "./value-depth.ts";
+
 const day = 86_400_000;
 
 export const sealedBuildLimits = {
@@ -27,6 +29,12 @@ export const sealedBuildLimits = {
   pointerLength: 2048,
   /** Characters of one expression's code, as generated. */
   expressionLength: 8192,
+  /**
+   * Objects and arrays one call's arguments nest, as the host writes them
+   * (core's `boundedJson`): a value as deep as the SDK takes one, and the
+   * two around it a call adds.
+   */
+  callDepth: valueDepth + 2,
   /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
   deadlineMs: 365 * day,
 } as const;

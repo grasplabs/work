@@ -53,6 +53,25 @@ type Link =
   | { kind: "member"; key: string | number; optional: boolean }
   | { kind: "call"; method: string; args: Node[]; optional: boolean };
 
+/** Whether `node` is a chain of reads and calls. */
+const isChain = (node: Node): boolean =>
+  node.type === "MemberExpression" ||
+  node.type === "OptionalMemberExpression" ||
+  node.type === "CallExpression" ||
+  node.type === "OptionalCallExpression";
+
+/** The keys `links` read before their first call. */
+const pathOf = (links: readonly Link[]): (string | number)[] => {
+  const path: (string | number)[] = [];
+  for (const link of links) {
+    if (link.kind !== "member") {
+      break;
+    }
+    path.push(link.key);
+  }
+  return path;
+};
+
 const keyOf = (node: Node): string | number => {
   if (node.type === "NumericLiteral") {
     return node.value;
@@ -62,6 +81,55 @@ const keyOf = (node: Node): string | number => {
     throw new Error("A checked expression has only literal keys.");
   }
   return name;
+};
+
+/**
+ * The base of the chain `node` and its links, from the base out. With
+ * `parentheses`, a chain in parentheses is a base of its own: `(a?.b).c`
+ * reads `.c` of what `a?.b` gives, `undefined` included, and throws
+ * there.
+ */
+const linksOf = (
+  node: Node,
+  parentheses: boolean
+): { base: Node; links: Link[] } => {
+  const links: Link[] = [];
+  let base = node;
+  for (;;) {
+    if (parentheses && base !== node && base.extra?.parenthesized === true) {
+      break;
+    }
+    if (
+      base.type === "MemberExpression" ||
+      base.type === "OptionalMemberExpression"
+    ) {
+      links.unshift({
+        kind: "member",
+        key: keyOf(base.property),
+        optional: base.type === "OptionalMemberExpression" && base.optional,
+      });
+      base = base.object;
+    } else if (
+      (base.type === "CallExpression" ||
+        base.type === "OptionalCallExpression") &&
+      (base.callee.type === "MemberExpression" ||
+        base.callee.type === "OptionalMemberExpression") &&
+      base.callee.property.type === "Identifier"
+    ) {
+      links.unshift({
+        kind: "call",
+        method: base.callee.property.name,
+        args: base.arguments,
+        optional:
+          base.callee.type === "OptionalMemberExpression" &&
+          base.callee.optional,
+      });
+      base = base.callee.object;
+    } else {
+      return { base, links };
+    }
+  }
+  return { base, links };
 };
 
 /**
@@ -202,57 +270,23 @@ class Lowering {
   }
 
   /** A chain of reads and calls, from its base out, `?.` links and all. */
-  private chain(node: Node): t.Expression {
-    const links: Link[] = [];
-    let base = node;
-    for (;;) {
-      // A chain in parentheses is one of its own: `(a?.b).c` reads `.c`
-      // of what `a?.b` gives, `undefined` included, and throws there.
-      if (base !== node && base.extra?.parenthesized === true) {
-        break;
-      }
-      if (
-        base.type === "MemberExpression" ||
-        base.type === "OptionalMemberExpression"
-      ) {
-        links.unshift({
-          kind: "member",
-          key: keyOf(base.property),
-          optional: base.type === "OptionalMemberExpression" && base.optional,
-        });
-        base = base.object;
-      } else if (
-        (base.type === "CallExpression" ||
-          base.type === "OptionalCallExpression") &&
-        (base.callee.type === "MemberExpression" ||
-          base.callee.type === "OptionalMemberExpression") &&
-        base.callee.property.type === "Identifier"
-      ) {
-        links.unshift({
-          kind: "call",
-          method: base.callee.property.name,
-          args: base.arguments,
-          optional:
-            base.callee.type === "OptionalMemberExpression" &&
-            base.callee.optional,
-        });
-        base = base.callee.object;
-      } else {
-        break;
-      }
+  private chain(node: Node, read = true): t.Expression {
+    // What it reads is the whole chain's, parentheses or not:
+    // `(steps.fetch).output` reads `steps.fetch.output`. A chain in
+    // parentheses is evaluated as one of its own all the same, below.
+    const whole = linksOf(node, false);
+    if (read && whole.base.type === "Identifier") {
+      this.read(whole.base.name, pathOf(whole.links));
     }
-    if (base.type !== "Identifier") {
-      return this.links(this.expression(base), links, 0);
+    const { base, links } = linksOf(node, true);
+    if (base.type === "Identifier") {
+      return this.links(t.identifier(base.name), links, 0);
     }
-    const path: (string | number)[] = [];
-    for (const link of links) {
-      if (link.kind !== "member") {
-        break;
-      }
-      path.push(link.key);
-    }
-    this.read(base.name, path);
-    return this.links(t.identifier(base.name), links, 0);
+    // Its reads are the outer chain's, recorded above.
+    const inner = isChain(base)
+      ? this.chain(base, false)
+      : this.expression(base);
+    return this.links(inner, links, 0);
   }
 
   /**

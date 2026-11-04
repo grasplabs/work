@@ -1179,7 +1179,7 @@ const maxPassedBytes = 2 * platformLimits.stepPayloadBytes + 64;
 
 /**
  * `value` as plain JSON, with its size in UTF-16 code units, if it is
- * plain JSON within `maxPassedBytes` and the evaluator's depth: written
+ * plain JSON within `maxPassedBytes` and a call's depth: written
  * once by the bounded writer, so nothing larger is walked, then read back
  * from that text. `undefined` otherwise.
  */
@@ -1188,7 +1188,7 @@ export const boundedJson = (
 ): { value: Json; size: number } | undefined => {
   const written = writeJson(value, {
     maxBytes: maxPassedBytes,
-    maxDepth: evaluatorLimits.maxJsonDepth + 2,
+    maxDepth: sealedBuildLimits.callDepth,
     maxNodes: maxPassedBytes,
     sortKeys: false,
     safeIntegers: false,

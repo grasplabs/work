@@ -550,7 +550,11 @@ class Generator {
     });
   }
 
-  #wait(step: Placed<Extract<Step, { type: "wait" }>>, depth: number): void {
+  #wait(
+    step: Placed<Extract<Step, { type: "wait" }>>,
+    tries: readonly PlacedTry[],
+    depth: number
+  ): void {
     const done = `steps[${literal(step.id)}] = { output: null };`;
     if ("for" in step) {
       const milliseconds = durationMs(step.for);
@@ -584,9 +588,12 @@ class Generator {
     });
     const until = `until${this.#next()}`;
     this.#guarded(step, depth, (inner) => {
+      // Its deadline may fail to evaluate in its enter step, as a call may
+      // fail: a retry around it decides it as any call's.
+      const retry = this.#retryOf(tries, inner);
       this.#line(
         inner,
-        `const ${until} = await step.do(${literal(step.id)}, ${optionsOf(step, "enter")}, async () => ({ output: null, until: ${code} }));`
+        `const ${until} = await step.do(${literal(step.id)}, ${optionsOf(step, "enter", retry === undefined ? [] : [`retry: ${retry}`])}, async () => ({ output: null, until: ${code} }));`
       );
       this.#line(
         inner,
@@ -733,7 +740,7 @@ class Generator {
         break;
       }
       case "wait": {
-        this.#wait({ ...step, pointer }, depth);
+        this.#wait({ ...step, pointer }, tries, depth);
         break;
       }
       case "if": {

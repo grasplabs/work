@@ -310,6 +310,45 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       tampered: [],
     });
   });
+
+  it("decides a deadline that fails to evaluate inside a retrying try by its policy", async () => {
+    const tries = new Map<string, number>();
+    const { source, sealed: withTable } = generated([
+      {
+        id: "guarded",
+        type: "try",
+        try: [
+          // Reads past a field that isn't there: it throws.
+          { id: "pause", type: "wait", until: { $expr: "input.missing.at" } },
+        ],
+        catch: {
+          retry: {
+            attempts: 2,
+            delay: "1 second",
+            backoff: "constant",
+            when: { $expr: "error.status >= 400" },
+          },
+        },
+      },
+    ]);
+    const ran = await ranAs(await waitingRun(sealed), source, {
+      engine: retryingEngine(tries),
+      sealed: withTable,
+    });
+    const keys = [...tries.keys()];
+    expect({
+      ran,
+      decided: keys.filter((key) => key.endsWith(":decide")).length,
+      retried: keys.filter((key) => key.endsWith(":run")).length,
+      caught: tries.has("key:guarded:catch"),
+    }).toStrictEqual({
+      // Its second attempt, decided by the code, then the catch's.
+      ran: { ended: null, tampered: [] },
+      decided: 1,
+      retried: 1,
+      caught: true,
+    });
+  });
 });
 
 /** A module of calculations: `total` sums, `broken` always fails. */

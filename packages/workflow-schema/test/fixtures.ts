@@ -160,6 +160,52 @@ export const everyBinding = () => ({
   ],
 });
 
+/**
+ * A workflow whose expressions use every kind of operator on what they
+ * read: arithmetic, comparisons, logic, conditionals and callbacks.
+ */
+export const everyOperator = () => ({
+  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+  bindings: { mail: { kind: "connector", contract: "composio.mail@1" } },
+  steps: [
+    {
+      id: "later",
+      type: "wait",
+      until: { $expr: "input.at + 60 * 1000" },
+    },
+    {
+      id: "sized",
+      type: "if",
+      condition: { $expr: "input.count > 2 && input.count * 2 <= 10" },
+      // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+      then: [
+        {
+          id: "send",
+          type: "do",
+          binding: "mail",
+          operation: "mail.send",
+          arguments: {
+            to: { $expr: "input.who" },
+            subject: { $expr: '"Order " + (input.count + 1)' },
+            share: { $expr: "input.total / input.count - 1" },
+            negative: { $expr: "-input.count" },
+            rest: { $expr: "input.count % 3" },
+            large: { $expr: "input.total >= 100 ? 'large' : 'small'" },
+            long: {
+              $expr: "input.lines.filter((line) => line.total > 10).length",
+            },
+            sum: {
+              $expr: "input.lines.map((line) => line.total * 2)",
+            },
+            missing: { $expr: "input.note ?? 'none'" },
+            known: { $expr: "!input.unknown || input.count < 0" },
+          },
+        },
+      ],
+    },
+  ],
+});
+
 /** `document` checked, failing the test when it isn't valid. */
 export const checked = (document: unknown): CheckedWorkflow => {
   const result = checkWorkflow(document);

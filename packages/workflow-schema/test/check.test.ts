@@ -192,12 +192,24 @@ describe("checking a workflow", () => {
           },
         ])
       ),
+      // Parentheses change nothing of what it reads.
+      parenthesised: problemsAt(
+        withSteps((steps) => [
+          ...steps,
+          {
+            id: "late",
+            type: "wait",
+            until: { $expr: "(steps.send).output.sent" },
+          },
+        ])
+      ),
     }).toStrictEqual({
       later: ["/steps/0/until/$expr"],
       itself: ["/steps/0/until/$expr"],
       notOutput: ["/steps/5/until/$expr"],
       insideIf: ["/steps/5/until/$expr"],
       earlier: "ok",
+      parenthesised: "ok",
     });
   });
 
@@ -410,7 +422,7 @@ describe("checking a workflow", () => {
     ]);
   });
 
-  it("refuses a document nested past its depth as a problem, not a crash", () => {
+  it("refuses a document nested past its depth, and a call past the host's, as a problem, not a crash", () => {
     let steps: unknown = [{ id: "leaf", type: "wait", for: "1 hour" }];
     for (let level = 0; level < 3000; level += 1) {
       steps = [
@@ -430,12 +442,29 @@ describe("checking a workflow", () => {
         $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
         steps,
       }),
-      // Just within the bound, the validator runs and takes it.
-      withinDepth: codesAt(withKey([send(nestedList(55))])),
+      // As deep as the host takes a call's arguments (`callDepth`, 34):
+      // the arguments object and 33 lists.
+      atCallDepth: codesAt(withKey([send(nestedList(33))])),
+      pastCallDepth: codesAt(withKey([send(nestedList(34))])),
+      // A model call's input sits in one object more.
+      pastModelDepth: codesAt(
+        withKey([
+          {
+            id: "ask",
+            type: "agent",
+            binding: "summary",
+            instructions: "Go.",
+            input: nestedList(34),
+            output: { type: "string" },
+          },
+        ])
+      ),
     }).toStrictEqual({
       deepValue: { "": "workflow.too_deep" },
       deepSteps: { "": "workflow.too_deep" },
-      withinDepth: "ok",
+      atCallDepth: "ok",
+      pastCallDepth: { "/steps/0/arguments": "workflow.arguments_too_deep" },
+      pastModelDepth: { "/steps/0/input": "workflow.arguments_too_deep" },
     });
   });
 

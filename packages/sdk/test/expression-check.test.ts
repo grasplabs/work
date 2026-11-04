@@ -418,11 +418,29 @@ describe("the code generated from an expression", () => {
   });
 });
 
+/** What `source` reads, or why it is refused. */
+const readsOf = (source: string) => {
+  const checked = checkExpression(source);
+  return checked.ok ? checked.reads : checked.errors;
+};
+
 describe("a chain in parentheses", () => {
   it("is a chain of its own: `(a?.b).c` reads `.c` of whatever `a?.b` gives", () => {
     expect(generated("(input.a?.b).c")).toBe(
       '($read($opt($read(input, "a"), $0 => $read($0, "b")), "c"))'
     );
+  });
+
+  it("reads the whole chain through its parentheses, once", () => {
+    expect({
+      member: readsOf("(steps.fetch).output"),
+      nested: readsOf("((input.a).b).c"),
+      called: readsOf("(input.lines.map((line) => line.total)).length"),
+    }).toStrictEqual({
+      member: [{ root: "steps", path: ["fetch", "output"] }],
+      nested: [{ root: "input", path: ["a", "b", "c"] }],
+      called: [{ root: "input", path: ["lines"] }],
+    });
   });
 
   it("is never a method's callee: `(a?.map)(f)` would call `undefined`", () => {

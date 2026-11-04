@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   checked,
   everyBinding,
+  everyOperator,
   everyStep,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildWorkflows } from "../src/screens.ts";
@@ -18,7 +19,7 @@ import { tasksFileSchema } from "../src/workflow-builds.ts";
 // host reads back (`tasksFileSchema`).
 
 /** Every fixture the generator is tested on, by name. */
-const fixtures = { everyStep, everyBinding };
+const fixtures = { everyStep, everyBinding, everyOperator };
 
 describe("grasp-workflow/1's generated code", () => {
   it("type-checks against the SDK, for every fixture", async () => {
