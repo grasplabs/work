@@ -579,6 +579,13 @@ const decisionWaitSchema = z.object({
 /** What a decision's wait step asks: which decision, how long, whether last. */
 export type DecisionWait = z.infer<typeof decisionWaitSchema>;
 
+/** Where a test run's decisions are kept (`RunKind.decisionsKept`). */
+export interface DecisionsKept {
+  outcome: (decision: string, close: boolean) => Promise<DecisionOutcome>;
+  deadline: (decision: string) => Promise<number>;
+  lookMs: number;
+}
+
 /**
  * An error code the audit log may name: shaped like the platform's
  * (`permission.denied`), and short. Workflow code can put anything in an
@@ -1339,6 +1346,14 @@ export interface RunKind {
   };
   /** The run as its decisions name it (decisions.ts). */
   readonly decisionRun: DecisionRun;
+  /**
+   * Where the run's decisions are kept, for a test run's, which are never
+   * the organization's (sealed-run.ts): how one stands, closing it with
+   * `close`; its deadline; and how often the run looks at it besides its
+   * wake, which a test's answer doesn't owe. Unset, decisions.ts keeps
+   * them, under `decisionRun`.
+   */
+  readonly decisionsKept?: DecisionsKept | undefined;
   /** The run as its waits for its AI provider name it (ai-waits.ts). */
   readonly aiWaitRun: AiWaitRun;
   /**
@@ -3070,6 +3085,22 @@ export class RunHost extends RpcTarget {
     }
   }
 
+  /** How the run's decision `decision` stands (`RunKind.decisionsKept`). */
+  async #decisionOutcome(
+    decision: string,
+    close: boolean
+  ): Promise<DecisionOutcome> {
+    const kept = this.#kind.decisionsKept;
+    return kept === undefined
+      ? await decisionOutcome(
+          this.#env,
+          this.#kind.decisionRun,
+          decision,
+          close
+        )
+      : await kept.outcome(decision, close);
+  }
+
   /**
    * Waits up to `timeout` for an answer to one of this run's decisions,
    * and answers how it stands then, read from the decision itself: the
@@ -3107,12 +3138,7 @@ export class RunHost extends RpcTarget {
         reachedSchema.parse(
           await this.#step.do(lookStep, {}, async () => {
             const at = Date.now();
-            const { answered } = await decisionOutcome(
-              this.#env,
-              this.#kind.decisionRun,
-              decision,
-              false
-            );
+            const { answered } = await this.#decisionOutcome(decision, false);
             return { at, answered };
           })
         );
@@ -3122,25 +3148,33 @@ export class RunHost extends RpcTarget {
       // deadline, as its row has it, from when the wait was first reached.
       // Once that has passed, the decision is closed as timed out at once,
       // so a reminder that follows asks nobody.
-      const deadline = await decisionDeadline(
-        this.#env,
-        this.#kind.decisionRun,
-        decision
-      );
+      const kept = this.#kind.decisionsKept;
+      const deadline =
+        kept === undefined
+          ? await decisionDeadline(this.#env, this.#kind.decisionRun, decision)
+          : await kept.deadline(decision);
       const end = Math.min(reached.at + timeout, deadline);
       let seen = reached;
       for (let round = 0; !seen.answered && seen.at < end; round += 1) {
+        // A test run's decision is looked at again every so often as well:
+        // its answer owes no wake, so one is read at the next look.
+        const left = end - seen.at;
         try {
           // oxlint-disable-next-line no-await-in-loop -- one wait at a time
           await this.#step.waitForEvent(
             round === 0 ? step : `${prefix}:again:${round}`,
-            { type: decisionEventType(decision), timeout: end - seen.at }
+            {
+              type: decisionEventType(decision),
+              timeout: kept === undefined ? left : Math.min(left, kept.lookMs),
+            }
           );
         } catch (error) {
           if (!isTimeout(error)) {
             throw error;
           }
-          break;
+          if (kept === undefined) {
+            break;
+          }
         }
         // oxlint-disable-next-line no-await-in-loop -- one look per wake
         seen = await look(`${prefix}:woken:${round}`);
@@ -3149,9 +3183,7 @@ export class RunHost extends RpcTarget {
       // replay of the run hears it ended with.
       return outcomeSchema.parse(
         await this.#step.do(`${prefix}:outcome`, {}, async () => {
-          const outcome = await decisionOutcome(
-            this.#env,
-            this.#kind.decisionRun,
+          const outcome = await this.#decisionOutcome(
             decision,
             last || Date.now() >= deadline
           );

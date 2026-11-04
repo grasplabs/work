@@ -27,6 +27,7 @@ import {
 } from "../src/workflows/candidate-runs.ts";
 import { runModules } from "../src/workflows/code.ts";
 import type { StepError } from "../src/workflows/code.ts";
+import { fixtureDecisionLookMs } from "../src/workflows/fixture-decisions.ts";
 import { fixtureActivation } from "../src/workflows/fixture-runs.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
 import {
@@ -132,6 +133,19 @@ const send = {
   },
 };
 
+/** Asks the fixture's `approver` to approve, through binding `approval`. */
+const review = {
+  review: {
+    call: "grasp.decision",
+    with: {
+      binding: "approval",
+      recipients: ["person:approver"],
+      prompt: "Approve?",
+      input: { who: "${ $workflow.input.who }" },
+    },
+  },
+};
+
 /** The workflow SDK, by the flat name the sealed build has it. */
 const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 
@@ -162,6 +176,39 @@ export default workflow("sealed", { params: {}, input: z.object({ who: z.string(
   return { status: "sent" };
 });
 `;
+
+/**
+ * The module the generator for the run host writes for `linger` then
+ * `review`: its output the answer, and how many people its code was told
+ * of, each time it asked.
+ */
+const reviewModule = `
+import { workflow, z } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { input }) => {
+  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
+  const entered = await step.do("review", { key: "enter", description: "Its ask" }, async () => ({ recipients: ["person:approver"], prompt: "Approve?", input: { who: input.who } }));
+  const told = [];
+  const decided = await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
+  return { status: \`\${decided.approved ? "approved" : "rejected"} by \${decided.by}, told \${told.join(",")}\` };
+});
+`;
+
+/** The organization's own decisions of run `runId`, and asks audited of it. */
+const organizationsOf = async (runId: string) => {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM workflow_decisions WHERE resource_run_id = ? OR run_id = ?"
+  )
+    .bind(runId, runId)
+    .first<{ n: number }>();
+  const events = await allEvents();
+  return {
+    decisions: row?.n,
+    asked: events.filter(
+      ({ action, detail }) =>
+        action === "workflow.decision.asked" && detail?.run === runId
+    ).length,
+  };
+};
 
 /** Memory of a run's tried-once calls and model calls, this test's own. */
 const memoryOfTest = (): Required<
@@ -311,19 +358,29 @@ const contracts = async (admin: Identity) => {
       },
     },
   });
-  return { model, operation, mail };
+  const approval = `approval-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: approval,
+    kind: "decision",
+    input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+    response: JSON.stringify(
+      v.union(v.null(), v.object({ comment: v.string() })).descriptor
+    ),
+  });
+  return { model, operation, mail, approval };
 };
 
 /** A workflow of `by`'s whose draft holds `tasks`, checked: its revision. */
 const drafted = async (by: Identity, tasks: unknown[]) => {
   const admin = await person("admin");
-  const { model } = await contracts(admin);
+  const { model, approval } = await contracts(admin);
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     expectedRevision: base,
     source: definitionOf(workflow.name, tasks, {
       summary: { kind: "model", contract: model },
+      approval: { kind: "decision", contract: approval },
     }),
     modules: {},
   });
@@ -410,7 +467,10 @@ export default app({
 });
 `,
   "tests/fixtures/desk.json": JSON.stringify({
-    principals: { "desk-user": { role: "user" } },
+    principals: {
+      "desk-user": { role: "user" },
+      approver: { role: "user" },
+    },
     workflows: { followUp: fixture },
   }),
 });
@@ -436,6 +496,7 @@ const requestsApp = async (tasks: unknown[], fixture: unknown) => {
       summary: { kind: "model", contract: keys.model },
       save: { kind: "operation", contract: keys.operation },
       mail: { kind: "connector", contract: keys.mail },
+      approval: { kind: "decision", contract: keys.approval },
     }),
     basedOn: null,
   });
@@ -649,6 +710,120 @@ describe(
       expect({ ended, checked }).toStrictEqual({
         ended: { failed: "resource.unavailable" },
         checked: [],
+      });
+    });
+
+    it("takes a draft's test run's decision on the run host from its start's fixture, opening none and asking nobody", async () => {
+      const ada = await person("builder");
+      const { workflow, revision } = await drafted(ada, [linger, review]);
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision,
+        input: { who: "Ada" },
+        fixtures: {
+          approval: {
+            output: {
+              answered: true,
+              approved: true,
+              by: "person:pat",
+              value: null,
+            },
+          },
+        },
+      });
+      await candidateOnce(
+        ada,
+        workflow.id,
+        runId,
+        (status) => status === "running"
+      );
+      const activation = await candidateActivation(
+        env,
+        await candidatePinOf(workflow.id, runId),
+        runId
+      );
+      // Its engine waits for no event: the answer is there at its first look.
+      expect({
+        ended: await ranOnRunHost(activation, reviewModule),
+        organization: await organizationsOf(runId),
+      }).toStrictEqual({
+        ended: { status: "approved by person:pat, told 0" },
+        organization: { decisions: 0, asked: 0 },
+      });
+    });
+
+    it("waits on the run host for an App test's decision its fixture's principal answers, kept with the test and asking nobody", async () => {
+      const app = await requestsApp([linger, review], {
+        deciders: { approval: ["approver"] },
+      });
+      const host = fixtureHostFor(env, app.release, app.files);
+      const session = await host.open("desk", `test-${unique()}`);
+      const started = z
+        .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
+        .parse(
+          JSON.parse(
+            await session.start(
+              "desk-user",
+              await startOf(app.release, { who: "Ada" })
+            )
+          )
+        );
+      const { runId, pin } = await fixtureRunOf(app.app);
+      // Its answer owes the run no wake: the run looks again after its
+      // wait times out, and finds it.
+      const answers: unknown[] = [];
+      const timeouts: unknown[] = [];
+      const { step, leaseOf } = newerEngine();
+      const engine: Engine = {
+        leaseOf,
+        step: {
+          ...step,
+          waitForEvent: async (_name, options) => {
+            timeouts.push(options.timeout);
+            answers.push(
+              JSON.parse(
+                await session.respond(
+                  "approver",
+                  started.value.run,
+                  JSON.stringify({ task: "review", approved: false })
+                )
+              )
+            );
+            const timedOut = new Error("Execution timed out");
+            timedOut.name = "WorkflowTimeoutError";
+            return await Promise.reject(timedOut);
+          },
+        },
+      };
+      const ended = await ranOnRunHost(
+        await fixtureActivation(env, pin, runId),
+        reviewModule,
+        { engine }
+      );
+      const kept = await env.DB.prepare(
+        "SELECT recipients, status, decided_by AS decidedBy FROM app_test_decisions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .all();
+      await session.close();
+      expect({
+        ended,
+        answers,
+        // Each wait ends within a look's time, however far its deadline.
+        timeouts,
+        kept: kept.results,
+        organization: await organizationsOf(runId),
+      }).toStrictEqual({
+        ended: { status: "rejected by fixture-approver, told 0" },
+        answers: [{ ok: true, value: null }],
+        timeouts: [fixtureDecisionLookMs],
+        kept: [
+          {
+            recipients: '["approver"]',
+            status: "rejected",
+            decidedBy: "approver",
+          },
+        ],
+        organization: { decisions: 0, asked: 0 },
       });
     });
 

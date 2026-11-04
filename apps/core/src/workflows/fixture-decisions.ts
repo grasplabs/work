@@ -244,6 +244,28 @@ export const fixtureDecisionOutcome = async (
 };
 
 /**
+ * Until when `run`'s decision `decision` takes answers, as it opened:
+ * `operation.cancelled` once its run's record is gone.
+ */
+export const fixtureDecisionDeadline = async (
+  env: Env,
+  runId: string,
+  decision: string
+): Promise<number> => {
+  const row = await drizzle(env.DB)
+    .select({ expiresAt: appTestDecisions.expiresAt })
+    .from(appTestDecisions)
+    .where(
+      and(eq(appTestDecisions.id, decision), eq(appTestDecisions.runId, runId))
+    )
+    .get();
+  if (row === undefined) {
+    throw operationErrors.create("operation.cancelled");
+  }
+  return row.expiresAt.getTime();
+};
+
+/**
  * What `run`'s decision call through binding `alias` answers, once its
  * decision has `outcome`: whoever answered still one the fixture lets
  * answer through it, and what they answered held to the contract's
