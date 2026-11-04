@@ -118,9 +118,19 @@ export const ShareWorkflow = ({
   const everyone = (project: string): string => t`Everyone in ${project}`;
   const workflow = resource.id;
   const { name } = resource;
-  // Everyone in the organization, so the list and whom it is shared with
-  // tell people of the same name apart alike.
+  // Whom to share with: told apart among everyone in the organization,
+  // so from a namesake it is shared with already too. Whom it is shared
+  // with: among themselves, as an App's list is.
   const apart = usePeopleApart(read?.candidates.people ?? []);
+  const sharedApart = usePeopleApart(
+    read === undefined
+      ? []
+      : read.members.flatMap((member) =>
+          member.type === "person"
+            ? [{ id: member.id, name: nameOf(member, read.candidates) }]
+            : []
+        )
+  );
 
   if (resource.role !== "builder") {
     return null;
@@ -291,7 +301,10 @@ export const ShareWorkflow = ({
                   const projectName = member.projectName ?? null;
                   let shown = memberName;
                   if (member.type === "person") {
-                    shown = apart.named({ id: member.id, name: memberName });
+                    shown = sharedApart.named({
+                      id: member.id,
+                      name: memberName,
+                    });
                   } else if (member.type === "team") {
                     shown = t`${memberName} (team)`;
                   } else if (member.type === "project") {

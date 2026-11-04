@@ -21,8 +21,12 @@ export interface Named {
 /** How many of the end of an ID tell a namesake apart. */
 const idEndLength = 6;
 
-/** A name as namesakes are compared: apart from case and outer spaces. */
-const nameKey = (name: string): string => name.trim().toLocaleLowerCase();
+/**
+ * A name as namesakes are compared: apart from how its letters are
+ * encoded, case and outer spaces.
+ */
+const nameKey = (name: string): string =>
+  name.normalize("NFC").trim().toLocaleLowerCase();
 
 /** What tells people of the same name apart (`usePeopleApart`). */
 export interface PeopleApart {

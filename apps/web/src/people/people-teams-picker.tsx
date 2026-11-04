@@ -23,6 +23,7 @@ import type { Session } from "../core.ts";
 import { roleLabel } from "../labels.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
 import { usePeopleApart } from "./people-apart.ts";
+import type { PeopleApart } from "./people-apart.ts";
 import { matchTyped, PersonOption } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
@@ -44,6 +45,7 @@ export interface PeopleAndTeams {
 export interface PickedSubject {
   type: "person" | "team" | "role";
   id: string;
+  /** As the list named them: a person told apart from a namesake. */
   name: string;
 }
 
@@ -71,12 +73,14 @@ export const readPeopleAndTeams = async (
 };
 
 /**
- * Whom `key` (`subjectKey`) names, by name: a person or team among
- * `candidates`, a role by its label; undefined for one not known.
+ * Whom `key` (`subjectKey`) names, by name: a person among `candidates`,
+ * told apart from a namesake by `apart`, a team among them, a role by its
+ * label; undefined for one not known.
  */
 export const subjectNamed = (
   key: string,
-  candidates: PeopleAndTeams | null
+  candidates: PeopleAndTeams | null,
+  apart: PeopleApart
 ): string | undefined => {
   const colon = key.indexOf(":");
   const type = key.slice(0, colon);
@@ -84,8 +88,11 @@ export const subjectNamed = (
   if (type === "role") {
     return roleLabel(id);
   }
-  const among = type === "person" ? candidates?.people : candidates?.teams;
-  return among?.find((each) => each.id === id)?.name;
+  if (type === "person") {
+    const person = candidates?.people.find((each) => each.id === id);
+    return person === undefined ? undefined : apart.named(person);
+  }
+  return candidates?.teams.find((each) => each.id === id)?.name;
 };
 
 /**
@@ -185,7 +192,7 @@ export const PeopleTeamsPicker = ({
                           pick({
                             type: "person",
                             id: person.id,
-                            name: person.name,
+                            name: apart.named(person),
                           });
                         }}
                         person={person}

@@ -25,6 +25,7 @@ import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { usePeopleApart } from "../people/people-apart.ts";
 import {
   PeopleTeamsPicker,
   subjectKey,
@@ -124,12 +125,14 @@ const FieldInput = ({
   onChange: (value: string | boolean) => void;
 }) => {
   const { t } = useLingui();
+  const apart = usePeopleApart(people?.people ?? []);
   const text = typeof value === "string" ? value : "";
   switch (field.kind) {
     case "person": {
       // The one picked, by name, and for an optional field a way to pick
       // nobody again: core checks the start's input again.
-      const picked = text === "" ? undefined : subjectNamed(text, people);
+      const picked =
+        text === "" ? undefined : subjectNamed(text, people, apart);
       return (
         <div className="flex items-center gap-1">
           <PeopleTeamsPicker

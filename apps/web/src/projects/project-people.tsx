@@ -47,7 +47,11 @@ const useMemberName = (apart: PeopleApart) => {
   };
 };
 
-/** The project's people the page has read, its owner first, by name. */
+/**
+ * The project's people the page has read, its owner first, by name. A
+ * namesake on a page of members not read yet isn't among them: reading
+ * the next page tells them apart then.
+ */
 const knownPeople = (
   project: Project,
   members: readonly ProjectMember[]

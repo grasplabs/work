@@ -303,6 +303,32 @@ describe("starting a workflow by hand", () => {
     });
   });
 
+  it("names the person picked apart from someone of the same name", async () => {
+    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+      version: 3,
+      input: {
+        type: "object",
+        properties: {
+          approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        },
+        required: ["approver"],
+        additionalProperties: false,
+      },
+      people: {
+        people: [
+          { id: "user-ada-111111", name: "Ada Lovelace" },
+          { id: "user-ada-222222", name: "Ada Lovelace" },
+        ],
+        teams: [],
+      },
+    });
+    await press("Start");
+    await click(button("Choose…"));
+    await choose("ID …222222");
+
+    expect(button("Ada Lovelace (ID …222222)")).toBeDefined();
+  });
+
   it("offers no Start for a workflow core gives no version to start", async () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: null,

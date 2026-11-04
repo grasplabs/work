@@ -61,10 +61,16 @@ export const PackageApprovers = ({
   const [candidates, setCandidates] = useState<PeopleAndTeams | null>(null);
   const active = approvers.filter(({ status }) => status === "active");
   const holding = new Set(active.map(({ subject }) => keyOf(subject)));
+  /** An approver as the table names them, with their email once read. */
+  const approverOf = (userId: string, name: string) => ({
+    id: userId,
+    name,
+    email: candidates?.people.find(({ id }) => id === userId)?.email,
+  });
   const apart = usePeopleApart(
     active.flatMap(({ subject, name }) =>
       subject.type === "person" && name !== null
-        ? [{ id: subject.userId, name }]
+        ? [approverOf(subject.userId, name)]
         : []
     )
   );
@@ -166,7 +172,7 @@ export const PackageApprovers = ({
               {active.map(({ id, subject, name, grantedAt }) => {
                 let named = name ?? t`Removed`;
                 if (subject.type === "person" && name !== null) {
-                  named = apart.named({ id: subject.userId, name });
+                  named = apart.named(approverOf(subject.userId, name));
                 }
                 return (
                   <TableRow key={id}>

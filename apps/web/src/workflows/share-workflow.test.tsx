@@ -226,7 +226,7 @@ describe("sharing an independent workflow from its page", () => {
     });
   });
 
-  it("tells apart people of the same name by the end of their ID, offered and shared with alike", async () => {
+  it("tells apart someone offered from a namesake it is shared with by the end of their ID", async () => {
     await shown("builder", undefined, {
       ...candidates,
       people: [...candidates.people, { id: "user-bo-222333", name: "Bo" }],
@@ -238,8 +238,8 @@ describe("sharing an independent workflow from its page", () => {
 
     expect({
       labels,
-      // Bo, whom it is shared with, is named apart from the other Bo.
-      sharedBo: select("Role of Bo (ID …bo)") === null,
+      // The Bo it is shared with is the only one it lists, so plainly.
+      sharedBo: select("Role of Bo") === null,
     }).toStrictEqual({
       labels: ["Ada", "Bo (ID …222333)"],
       sharedBo: false,

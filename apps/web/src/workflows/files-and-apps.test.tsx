@@ -152,7 +152,12 @@ const decisionApproval = (
  * connections catalog answers only once `answerFirstCatalog` lets it, as a
  * cold catalog can take seconds.
  */
-const fakeCore = (initial: ListedWorkflowBindingApproval[] = []) => {
+const fakeCore = (
+  initial: ListedWorkflowBindingApproval[] = [],
+  people = [
+    { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
+  ]
+) => {
   const approved: { id: string; input: { alias: string } }[] = [];
   const revoked: { id: string; approval: string }[] = [];
   const active = [...initial];
@@ -223,10 +228,7 @@ const fakeCore = (initial: ListedWorkflowBindingApproval[] = []) => {
         await Promise.resolve([{ id: "team-finance", name: "Finance" }]),
     },
     members: {
-      list: async () =>
-        await Promise.resolve([
-          { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
-        ]),
+      list: async () => await Promise.resolve(people),
     },
   };
   return {
@@ -405,6 +407,46 @@ describe("a workflow's Files and apps tab", () => {
       waits: false,
       said: ["Approved: crm."],
       saidAfterRevoking: ["Revoked: crm."],
+    });
+  });
+
+  it("tells apart deciders of the same name by their email, picked and to remove", async () => {
+    const { session, approved, answerFirstCatalog } = fakeCore(
+      [],
+      [
+        { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
+        {
+          userId: "user-ada-2",
+          name: "Ada Lovelace",
+          email: "a.lovelace@acme.test",
+        },
+      ]
+    );
+    answerFirstCatalog();
+    await shown(session, true);
+
+    await pick("a.lovelace@acme.test");
+    // The other Ada is still told apart from the one picked.
+    await pick("ada@acme.test");
+    const removable = [
+      button("Remove Ada Lovelace (a.lovelace@acme.test)") !== undefined,
+      button("Remove Ada Lovelace (ada@acme.test)") !== undefined,
+    ];
+    await press(button("Approve approval"));
+
+    expect({
+      removable,
+      deciders: approved.map(({ input }) =>
+        "target" in input ? input.target : undefined
+      ),
+    }).toStrictEqual({
+      removable: [true, true],
+      deciders: [
+        {
+          kind: "decision",
+          deciders: ["person:user-ada-2", "person:user-ada"],
+        },
+      ],
     });
   });
 
