@@ -74,6 +74,14 @@ describe("an App's owner in its settings", () => {
     });
   });
 
+  it("names its owner apart from someone of the same name who may answer for it", () => {
+    shown([{ id: "user-ada-222222", name: "Ada" }]);
+
+    expect(document.querySelector("button")?.getAttribute("aria-label")).toBe(
+      "Owner: Ada (ID …ada). Change owner"
+    );
+  });
+
   it("can't be changed while that couldn't be read, and says so, with a way to try again", () => {
     const onRetry = shown(null);
     const retry = [...document.querySelectorAll("button")].find(

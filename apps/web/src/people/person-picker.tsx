@@ -19,6 +19,7 @@ import { useState } from "react";
 
 import { initials } from "../frame/person-menu.tsx";
 import { usePeopleApart } from "./people-apart.ts";
+import type { PeopleApart } from "./people-apart.ts";
 
 // Who owns a thing, and the people it can be handed to, as the prototype
 // draws it (`components/owner-picker.tsx`): the owner's portrait, and
@@ -93,11 +94,27 @@ export const PersonOption = ({
 );
 
 /**
+ * The owner as their button names them: told apart from a namesake once
+ * the list is read and holds them.
+ */
+const ownerNamed = (
+  name: string | null,
+  id: string | null,
+  people: readonly Pickable[] | null,
+  apart: PeopleApart
+): string | null => {
+  const listed = people?.find((each) => each.id === id);
+  return name === null || listed === undefined
+    ? name
+    : apart.named({ ...listed, name });
+};
+
+/**
  * The owner's button and its list. `people` is null while they're being
  * read: the list says so, and the page reads them only when it opens.
  */
 export const PersonPicker = ({
-  owner,
+  owner: ownerName,
   ownerId,
   people,
   onOpen,
@@ -124,6 +141,7 @@ export const PersonPicker = ({
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const apart = usePeopleApart(people ?? []);
+  const owner = ownerNamed(ownerName, ownerId, people, apart);
   const label =
     owner === null
       ? t`Owner: nobody yet. Change owner`
@@ -149,12 +167,12 @@ export const PersonPicker = ({
           />
         }
       >
-        {owner === null ? (
+        {ownerName === null ? (
           <Avatar size="sm">
             <AvatarFallback>?</AvatarFallback>
           </Avatar>
         ) : (
-          <PersonAvatar name={owner} />
+          <PersonAvatar name={ownerName} />
         )}
         {compact ? null : (owner ?? t`No owner yet`)}
         {compact || disabled ? null : (

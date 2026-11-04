@@ -256,7 +256,10 @@ const settled = async (): Promise<void> => {
 /** The tab on `session`, for an admin who approves when `approves`. */
 const shown = async (
   session: ReturnType<typeof fakeCore>["session"],
-  approves: boolean
+  approves: boolean,
+  people: ReadonlyMap<string, string> = new Map([
+    ["user-grace", "Grace Hopper"],
+  ])
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -269,10 +272,7 @@ const shown = async (
         approves={approves}
         currentVersion={2}
         lifecycle={{ state: "ready", data: lifecycle }}
-        names={{
-          people: new Map([["user-grace", "Grace Hopper"]]),
-          me: "user-ada",
-        }}
+        names={{ people, me: "user-ada" }}
         versions={{ state: "ready", data: [versionTwo] }}
         workflow={workflow}
       />
@@ -410,20 +410,27 @@ describe("a workflow's Files and apps tab", () => {
     });
   });
 
-  it("tells apart deciders of the same name by their email, picked and to remove", async () => {
+  it("tells apart deciders of the same name, picked and to remove", async () => {
     const { session, approved, answerFirstCatalog } = fakeCore(
       [],
       [
-        { userId: "user-ada", name: "Ada Lovelace", email: "ada@acme.test" },
+        { userId: "user-111111", name: "Ada Lovelace", email: "ada@acme.test" },
         {
-          userId: "user-ada-2",
+          userId: "user-222222",
           name: "Ada Lovelace",
           email: "a.lovelace@acme.test",
         },
       ]
     );
     answerFirstCatalog();
-    await shown(session, true);
+    await shown(
+      session,
+      true,
+      new Map([
+        ["user-111111", "Ada Lovelace"],
+        ["user-222222", "Ada Lovelace"],
+      ])
+    );
 
     await pick("a.lovelace@acme.test");
     // The other Ada is still told apart from the one picked.
@@ -444,10 +451,29 @@ describe("a workflow's Files and apps tab", () => {
       deciders: [
         {
           kind: "decision",
-          deciders: ["person:user-ada-2", "person:user-ada"],
+          deciders: ["person:user-222222", "person:user-111111"],
         },
       ],
     });
+  });
+
+  it("lists an approved decision's deciders of the same name apart", async () => {
+    const { session, answerFirstCatalog } = fakeCore([
+      decisionApproval(2, ["person:user-222222", "person:user-111111"]),
+    ]);
+    answerFirstCatalog();
+    await shown(
+      session,
+      true,
+      new Map([
+        ["user-111111", "Ada Lovelace"],
+        ["user-222222", "Ada Lovelace"],
+      ])
+    );
+
+    expect(listed("approval")).toContain(
+      "Answered by Ada Lovelace (ID …222222) and Ada Lovelace (ID …111111)"
+    );
   });
 
   it("keeps a connector approved once the tab's first, slower read of its apps lands after the approval", async () => {

@@ -20,6 +20,8 @@ import type { ReactNode } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { roleLabel } from "../labels.ts";
+import { peopleApart } from "../people/people-apart.ts";
+import type { PeopleApart } from "../people/people-apart.ts";
 import {
   PeopleTeamsPicker,
   readPeopleAndTeams,
@@ -55,11 +57,19 @@ export interface KnownNames {
 
 const noNames: KnownNames = { people: new Map(), teams: new Map() };
 
-/** A decision's decider (`person:`, `team:` or `role:` and an ID), in words. */
-const deciderWords = (decider: string, known: KnownNames): string => {
+/**
+ * A decision's decider (`person:`, `team:` or `role:` and an ID), in
+ * words: a person told apart from another decider of the same name.
+ */
+const deciderWords = (
+  decider: string,
+  known: KnownNames,
+  apart: PeopleApart
+): string => {
   const [type, id = ""] = decider.split(":");
   if (type === "person") {
-    return known.people.get(id) ?? id;
+    const name = known.people.get(id);
+    return name === undefined ? id : apart.named({ id, name });
   }
   if (type === "team") {
     return known.teams.get(id) ?? id;
@@ -95,8 +105,15 @@ export const targetWords = (
       return i18n._(msg`Template ${templateId}, version ${version}`);
     }
     case "decision": {
+      const apart = peopleApart(
+        target.deciders.flatMap((decider) => {
+          const [type, id = ""] = decider.split(":");
+          const name = type === "person" ? known.people.get(id) : undefined;
+          return name === undefined ? [] : [{ id, name }];
+        })
+      );
       const deciders = formatList(
-        target.deciders.map((decider) => deciderWords(decider, known))
+        target.deciders.map((decider) => deciderWords(decider, known, apart))
       );
       return i18n._(msg`Answered by ${deciders}`);
     }

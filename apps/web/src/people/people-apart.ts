@@ -1,4 +1,7 @@
-import { useLingui } from "@lingui/react/macro";
+import { i18n } from "@lingui/core";
+import type { I18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react";
 
 // Telling apart people of the same name, wherever people are listed by
 // name. Someone whose name another person on the page shares is told
@@ -40,9 +43,12 @@ export interface PeopleApart {
  * Telling apart, among `among`, those of the same name. `among` is
  * everyone the page shows or offers, not only who is left to pick, so
  * someone is told apart from a namesake who already has a role too.
+ * Outside a component, in `language`; a component uses `usePeopleApart`.
  */
-export const usePeopleApart = (among: readonly Named[]): PeopleApart => {
-  const { t } = useLingui();
+export const peopleApart = (
+  among: readonly Named[],
+  language: I18n = i18n
+): PeopleApart => {
   const seen = new Set<string>();
   const shared = new Set<string>();
   for (const { name } of among) {
@@ -57,14 +63,20 @@ export const usePeopleApart = (among: readonly Named[]): PeopleApart => {
       return undefined;
     }
     const end = person.id.slice(-idEndLength);
-    return person.email ?? t`ID …${end}`;
+    return person.email ?? language._(msg`ID …${end}`);
   };
   return {
     hint,
     named: (person) => {
       const { name } = person;
       const apart = hint(person);
-      return apart === undefined ? name : t`${name} (${apart})`;
+      return apart === undefined ? name : language._(msg`${name} (${apart})`);
     },
   };
+};
+
+/** `peopleApart` in a component, said again when its language changes. */
+export const usePeopleApart = (among: readonly Named[]): PeopleApart => {
+  const { i18n: language } = useLingui();
+  return peopleApart(among, language);
 };

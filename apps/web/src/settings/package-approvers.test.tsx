@@ -245,8 +245,9 @@ describe("Settings › Packages › Who approves packages", () => {
 
     const names = await offered();
     await add("a.lovelace@acme.test");
+    await add("ada@acme.test");
 
-    expect({ names, asked }).toStrictEqual({
+    expect({ names, asked, listed: listed() }).toStrictEqual({
       // Grace's name is hers alone, so it says nothing more.
       names: [
         expect.stringMatching(/Ada Lovelaceada@acme\.test$/u),
@@ -254,7 +255,15 @@ describe("Settings › Packages › Who approves packages", () => {
         expect.stringMatching(/Grace Hopper$/u),
         "Platform",
       ],
-      asked: [["grant", { type: "person", userId: twin.userId }]],
+      asked: [
+        ["grant", { type: "person", userId: twin.userId }],
+        ["grant", { type: "person", userId: ada.userId }],
+      ],
+      // Both approve, each named by the email the list read.
+      listed: [
+        ["Ada Lovelace (a.lovelace@acme.test)", "Person"],
+        ["Ada Lovelace (ada@acme.test)", "Person"],
+      ],
     });
   });
 
