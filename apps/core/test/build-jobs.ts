@@ -1,9 +1,11 @@
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { chatSession } from "../src/durable-objects.ts";
 import { chatOf, openTestRun, transcript } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { published, release, requestGranted } from "./apps.ts";
@@ -216,6 +218,33 @@ export const endedJob = async (
     },
     { timeout: 90_000, interval: 100 }
   );
+
+/**
+ * Waits until the chat's own object (chat-session.ts) holds the notice of
+ * how build job `id` ended, as pi admitted it (`notice:<id>`): queued for
+ * the turn, or placed in it.
+ */
+export const noticed = async (
+  chat: { id: WorkspaceId; chat: { id: string } },
+  id: string
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const held = await runInDurableObject(
+        chatSession(env, chat.id, chatIdSchema.parse(chat.chat.id)),
+        (_instance, state) =>
+          state.storage.sql
+            .exec(
+              "SELECT id FROM pi_submissions WHERE json_extract(record, '$.requestId') = ?",
+              `notice:${id}`
+            )
+            .toArray().length
+      );
+      expect(held).toBe(1);
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+};
 
 /** How the chat's code runs ended, as their records say, and when. */
 export const runRecords = async (stub: WorkspaceStub, chatId: string) =>

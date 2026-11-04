@@ -1108,104 +1108,7 @@ const restart = async (id: WorkspaceId): Promise<WorkspaceStub> => {
   return workspace(env, id);
 };
 
-/** What the chat's agent said in the chat, oldest first. */
-const saidIn = async (stub: WorkspaceStub, chatId: string) => {
-  const messages = await transcript(stub, chatId);
-  return messages.flatMap((message) =>
-    message.role === "assistant"
-      ? [
-          message.content
-            .flatMap((part) => (part.type === "text" ? [part.text] : []))
-            .join(""),
-        ]
-      : []
-  );
-};
-
-/** Whether the agent's message is the one a cut-short turn leaves. */
-const saysInterrupted = (text: string): boolean =>
-  text.startsWith("I was interrupted before I finished");
-
 describe("chat agent after a restart", () => {
-  it("says nothing of a turn that ended before the restart: answered, stopped by the person, or failed", async () => {
-    const answered = await newChat(says("Done."));
-    await answered.ask("Do it.");
-
-    const stopped = await newChat({ hang: true });
-    const cancelled = stopped.ask("Take your time.");
-    await vi.waitFor(
-      () => {
-        expect(stopped.provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    await stopped.stub.cancel(stopped.chat.id, stopped.personId);
-    await cancelled;
-
-    // The person leaves while the model answers: the turn throws.
-    const { reply, release } = pausedReply(
-      { ...codeStep("export default async () => 'done';"), text: "Running." },
-      1
-    );
-    const failed = await newChat(reply);
-    const failing = codeOf(failed.ask("Wait."));
-    await vi.waitFor(
-      () => {
-        expect(failed.provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
-      .bind(failed.personId)
-      .run();
-    release();
-    await expect(failing).resolves.toBe("permission.person_inactive");
-
-    const said: boolean[] = [];
-    for (const { id, chat } of [answered, stopped, failed]) {
-      // oxlint-disable-next-line no-await-in-loop -- one chat after the other
-      const woken = await restart(id);
-      // oxlint-disable-next-line no-await-in-loop -- one chat after the other
-      const texts = await saidIn(woken, chat.id);
-      said.push(texts.some(saysInterrupted));
-    }
-    expect(said).toStrictEqual([false, false, false]);
-  });
-
-  it("says nothing when the restart came before the turn's question was kept, or after its answer was", async () => {
-    const { id, stub, chat, ask } = await newChat(says("Done."));
-    await ask("Do it.");
-    // The mark of a turn taken when the chat's last message had ID
-    // `before`, left as the object leaves it when it dies before the turn
-    // clears it.
-    const markedAt = async (before: number) => {
-      await runInDurableObject(workspace(env, id), (_instance, state) => {
-        state.storage.kv.put(`turn:${chat.id}`, before);
-      });
-    };
-    const lastId = await runInDurableObject(
-      stub,
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ last: number }>("SELECT max(id) AS last FROM chat_messages")
-          .one().last
-    );
-
-    // A second turn died before its question reached the chat: nothing of
-    // it was stored.
-    await markedAt(lastId);
-    const beforeQuestion = await saidIn(await restart(id), chat.id);
-    // The first turn died after its answer was stored, before it cleared
-    // its mark.
-    await markedAt(0);
-    const afterAnswer = await saidIn(await restart(id), chat.id);
-
-    expect({ beforeQuestion, afterAnswer }).toStrictEqual({
-      beforeQuestion: ["Done."],
-      afterAnswer: ["Done."],
-    });
-  });
-
   it("continues the conversation with everything before it", async () => {
     const { stub, chat, ask } = await newChat(
       codeStep(
@@ -1292,6 +1195,50 @@ describe("chat agent after a restart", () => {
           running: false,
         }
       );
+    });
+  });
+
+  it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession", async () => {
+    const answer = pausedReply(says("42."), 1);
+    const { id, stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
+      ),
+      answer.reply
+    );
+    // The question's call breaks with the restarts: the turn goes on.
+    void ask("What is 6 * 7?").catch(() => "settled");
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // The Workspace first, so nothing asks for the turn again, then the
+    // chat's object, mid-step.
+    const woken = await restart(id);
+    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // A connection decided meanwhile: its note wakes the chat's object.
+    await woken.connectionDecided(chat.id, personId, {
+      binding: "MAIL",
+      decision: "denied",
+    });
+    answer.release();
+    const messages = await vi.waitFor(
+      async () => {
+        const kept = await transcript(woken, chat.id);
+        expect(kept).toHaveLength(4);
+        return kept;
+      },
+      { timeout: 15_000 }
+    );
+    expect(messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "42." }],
     });
   });
 });

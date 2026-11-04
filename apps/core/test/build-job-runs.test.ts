@@ -33,6 +33,7 @@ import {
   screenBuilds,
   submittedJob,
   endedJob,
+  noticed,
   runRecords,
   createdApp,
   jobEvents,
@@ -101,7 +102,8 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }).toMatchObject({ status: "completed", version: 1, afterItsRun: true });
 
     // The turn is still answering: once its answer is in, it reads how
-    // the job ended, and answers that too.
+    // the job ended, and answers that too, in the same turn.
+    await noticed(chat, job.id);
     waiting.release();
     const answer = await answering;
     const followed = await vi.waitFor(
@@ -145,7 +147,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }).toMatchObject({
       answer: {
         outcome: "answered",
-        answer: "I'll say once the build is done.",
+        answer: "The invoice desk is proposed for review.",
       },
       sent: true,
       byItsRun: true,
@@ -228,6 +230,65 @@ describe("build jobs", { timeout: 180_000 }, () => {
     expect({ ended, versions }).toMatchObject({
       ended: { status: "cancelled", version: null, result: null },
       versions: [],
+    });
+  });
+
+  it("stops a turn the person stops while its code runs to answer how its job ended, and shows it stopped, through a restart too", async () => {
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      waiting.reply,
+      codeStep("export default async () => { await scheduler.wait(30_000); };"),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    const answering = chat.ask("Build an invoice desk for invoices@");
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+    } finally {
+      checking.restore();
+    }
+    await endedJob(chat.stub, chat.chat.id, job.id);
+    await noticed(chat, job.id);
+    waiting.release();
+    // Its answer to the notice runs code, stopped in the middle.
+    await vi.waitFor(
+      async () => {
+        const records = await runRecords(chat.stub, chat.chat.id);
+        expect(records.map(({ status }) => status)).toStrictEqual([
+          "completed",
+          "running",
+        ]);
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    await expect(
+      chat.stub.cancel(chat.chat.id, chat.personId)
+    ).resolves.toBeTruthy();
+    const { outcome } = await answering;
+    const { running } = await chat.stub.chatSummary(
+      chat.chat.id,
+      chat.personId
+    );
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    const woken = await workspace(env, chat.id).chatSummary(
+      chat.chat.id,
+      chat.personId
+    );
+    expect({
+      outcome,
+      running,
+      afterRestart: woken.running,
+    }).toStrictEqual({
+      outcome: "cancelled",
+      running: false,
+      afterRestart: false,
     });
   });
 

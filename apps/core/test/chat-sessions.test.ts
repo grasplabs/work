@@ -1,5 +1,5 @@
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -124,8 +124,33 @@ describe("a chat's ChatSession", () => {
         )
         .toArray()
     );
-    // To the grain of pi's live updates of the stream, about a second.
-    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(400);
+    // The pause, to the grain of pi's commits of the stream (100 ms).
+    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("keeps no alarm for an idle chat once a note reaches it, nor once an alarm finds nothing to do", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const { id, stub, chat, ask } = await chatOf(userId, says("Hi."));
+    await ask("Hello?");
+    await stub.connectionDecided(chat.id, userId, {
+      binding: "MAIL",
+      decision: "granted",
+    });
+    const session = chatSession(env, id, chatIdSchema.parse(chat.id));
+    const alarmOf = async () =>
+      await runInDurableObject(
+        session,
+        async (_instance, state) => await state.storage.getAlarm()
+      );
+    const afterNote = await alarmOf();
+    await runInDurableObject(session, async (_instance, state) => {
+      await state.storage.setAlarm(Date.now());
+    });
+    await runDurableObjectAlarm(session);
+    expect({ afterNote, afterAlarm: await alarmOf() }).toStrictEqual({
+      afterNote: null,
+      afterAlarm: null,
+    });
   });
 
   it("is erased with its chat", async () => {

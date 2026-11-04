@@ -1770,7 +1770,9 @@ export class Workspace extends DurableObject<Env> {
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    if (this.#turns.has(chat.id)) {
+    // Its ChatSession's run too, before anything is touched: one this
+    // object's restart left there, or one that answers a notice.
+    if (this.#isRunning(chat.id)) {
       throw agentErrors.create("agent.busy");
     }
     // Taken before the first await, so a second question waits its turn
@@ -1837,6 +1839,9 @@ export class Workspace extends DurableObject<Env> {
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
       });
+      // Its ChatSession's run ended before it returned, even if the
+      // telling of that was lost (`turnRunning`).
+      this.ctx.storage.kv.delete(`${runningKeyPrefix}${chat.id}`);
       if (end.stopped !== undefined) {
         throw turnStopError(end.stopped);
       }
@@ -2713,11 +2718,15 @@ export class Workspace extends DurableObject<Env> {
    * Ends the chat's running build job `id` as `end` says, once: `false`
    * when it had ended already. Its turn's agent is told how it ended, if
    * that turn still runs, in a notice it answers, even once it has
-   * answered (`ChatSession.notify`), never shown as the person's; no other turn
-   * ever is, and nothing of its result goes with it: the agent reads that
-   * with `env.build.job`.
+   * answered (`ChatSession.notify`), never shown as the person's; no other
+   * turn ever is, and nothing of its result goes with it: the agent reads
+   * that with `env.build.job`.
    */
-  endBuildJob(chatId: unknown, id: string, end: BuildJobEnd): boolean {
+  async endBuildJob(
+    chatId: unknown,
+    id: string,
+    end: BuildJobEnd
+  ): Promise<boolean> {
     const chat = chatIdSchema.safeParse(chatId);
     const job = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
     if (job?.status !== "running") {
@@ -2726,16 +2735,49 @@ export class Workspace extends DurableObject<Env> {
     const turn = this.#turns.get(job.chatId);
     this.#jobs.end(job.chatId, id, end);
     if (turn?.id === job.turnId) {
-      const content = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
-      this.ctx.waitUntil(
-        chatSession(
-          this.env,
-          this.#scopeOf(this.#chat(job.chatId)).workspaceId,
-          job.chatId
-        ).notify(content)
+      await this.#notify(
+        job.chatId,
+        turn.id,
+        id,
+        `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`
       );
     }
     return true;
+  }
+
+  /**
+   * Tells turn `turnId` of the chat how build job `jobId` ended
+   * (`ChatSession.notify`): again if a call breaks, as the job's ID makes
+   * it one notice however often it is sent.
+   */
+  async #notify(
+    chatId: ChatId,
+    turnId: string,
+    jobId: string,
+    text: string
+  ): Promise<void> {
+    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- again only once it broke
+        await chatSession(this.env, workspaceId, chatId).notify(
+          turnId,
+          jobId,
+          text
+        );
+        return;
+      } catch (error) {
+        if (attempt >= turnAttempts) {
+          log.warn("build_job.notice_lost", {
+            chatId,
+            turnId,
+            jobId,
+            ...errorFields(error),
+          });
+          return;
+        }
+      }
+    }
   }
 
   /**
@@ -3912,10 +3954,20 @@ export class Workspace extends DurableObject<Env> {
     );
   }
 
-  /** Tells the chat's agent `text` (`ChatSession.note`). */
+  /**
+   * Tells the chat's agent `text` (`ChatSession.note`), and moves the chat
+   * up its person's list: often decided elsewhere, it is where the agent
+   * can now go on.
+   */
   async #note(chatId: ChatId, text: string): Promise<void> {
     const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
     await chatSession(this.env, workspaceId, chatId).note(text);
+    this.#db
+      .update(chats)
+      .set({ lastAt: new Date() })
+      .where(eq(chats.id, chatId))
+      .run();
+    this.#changed(chatId);
   }
 
   /**
