@@ -249,6 +249,12 @@ export const withEventWaits = (...steps: unknown[]) => {
   };
 };
 
+/**
+ * An event type of `count` emoji: each one code point but two UTF-16
+ * units, so a length counted in units is twice the count.
+ */
+export const emojiType = (count: number): string => "\u{1F600}".repeat(count);
+
 /** An event wait for a reply through `replies`, for at most 3 days. */
 export const eventWait = (change: Record<string, unknown> = {}) => ({
   id: "reply",

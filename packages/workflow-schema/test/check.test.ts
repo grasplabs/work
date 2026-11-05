@@ -1,8 +1,10 @@
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkWorkflow } from "../src/check.ts";
 import {
   decision,
+  emojiType,
   eventWait,
   everyStep,
   withDecisions,
@@ -435,6 +437,19 @@ describe("checking a workflow", () => {
       paddedInList: at({
         event: { from: "replies", type: ["grasp.reply.received", "x "] },
       }),
+      // Its length is in code points, as the sealed table's is.
+      longestEmoji: at({
+        event: {
+          from: "replies",
+          type: emojiType(sealedBuildLimits.eventTypeLength),
+        },
+      }),
+      tooLongEmoji: at({
+        event: {
+          from: "replies",
+          type: emojiType(sealedBuildLimits.eventTypeLength + 1),
+        },
+      }),
       // No event a run takes holds a control character, even inside.
       tabType: at({ event: { from: "replies", type: "reply\t received" } }),
       nulInList: at({
@@ -483,6 +498,8 @@ describe("checking a workflow", () => {
       blankType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       spaceType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       paddedInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },
+      longestEmoji: "ok",
+      tooLongEmoji: { "/steps/5/event/type": "workflow.out_of_bounds" },
       tabType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       nulInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },
       inItems: {
