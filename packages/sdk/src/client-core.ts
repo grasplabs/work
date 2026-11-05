@@ -379,26 +379,24 @@ const inputOf = (args: unknown): Json => {
   // core reads it as data and checks it with the function's validator.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const json = input as Json;
-  let text: string;
   try {
-    text = canonicalJson(json);
+    // A snapshot, never the caller's object: a list's cache key and its
+    // Load Mores, and a call sent again, hold what was asked, whatever the
+    // caller changes in it after.
+    // SAFETY: canonical JSON text parses to the JSON it was made of.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return JSON.parse(canonicalJson(json)) as Json;
   } catch {
     throw clientError("contract.invalid_args", {
       issues: [
         {
           message:
-            "The arguments must be JSON: no NaN, infinity, BigInt or cycle.",
+            "The arguments must be JSON: no NaN, infinity, BigInt, undefined array entry, function or cycle.",
           path: [],
         },
       ],
     });
   }
-  // A snapshot, never the caller's object: a list's cache key and its Load
-  // Mores, and a call sent again, hold what was asked, whatever the
-  // caller changes in it after.
-  // SAFETY: canonical JSON text parses to the JSON it was made of.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return JSON.parse(text) as Json;
 };
 
 const queryOptionKeys: ReadonlySet<string> = new Set(["signal"]);

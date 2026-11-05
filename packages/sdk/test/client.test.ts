@@ -283,6 +283,13 @@ describe("the session client and arguments JSON can't hold", () => {
         async () =>
           await client.mutation(api.notes.create, loose({ title: Number.NaN }))
       ),
+      holes: await codeOf(
+        async () =>
+          await client.query(
+            api.notes.get,
+            loose({ id: [undefined, undefined] })
+          )
+      ),
       sent: calls(),
     }).toStrictEqual({
       nan: "contract.invalid_args",
@@ -290,6 +297,7 @@ describe("the session client and arguments JSON can't hold", () => {
       bigint: "contract.invalid_args",
       cycle: "contract.invalid_args",
       saved: "contract.invalid_args",
+      holes: "contract.invalid_args",
       sent: 0,
     });
   });
