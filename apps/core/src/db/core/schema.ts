@@ -1796,9 +1796,8 @@ export const workflowRuns = sqliteTable(
       table.id
     ),
     uniqueIndex("workflow_runs_trigger_key_idx").on(table.triggerKey),
-    // A lineage's runs by its root, for the model ledger to learn whether
-    // every run of it has ended (src/run-lineage-ends.ts). Only runs
-    // another run started have one.
+    // A lineage's runs by its root. Only runs another run started have
+    // one.
     index("workflow_runs_root_idx")
       .on(table.rootRunId)
       .where(sql`root_run_id IS NOT NULL`),
@@ -1974,34 +1973,22 @@ export const workflowAiWaits = sqliteTable(
 );
 
 /**
- * The steps of workflow runs whose model call waits in the model ledger's
- * queue for a share of the model requests in flight (model-admission.ts),
- * so the run's summary shows it queued (src/workflows/model-waits.ts): one
- * row per step while its call waits, refreshed each time it asks again,
- * gone once it stops. One whose call stopped asking (its isolate died)
- * lapses as a workflow step's place does, and is pruned.
+ * Written and read no more: model calls no longer wait in a queue. Dropped
+ * in a later release, once no running version reads it (expand, then
+ * contract).
  */
 export const workflowModelWaits = sqliteTable(
   "workflow_model_waits",
   {
     runId: text("run_id").notNull(),
     stepHash: text("step_hash").notNull(),
-    /** The call of the step that wrote it: only it clears it (model-waits.ts). */
     owner: text().notNull(),
-    /**
-     * Which limit its call waits for: `client` or `person`; null
-     * once the call that owns the row stopped waiting (a tombstone, so an
-     * older call's late note can't bring the wait back: model-waits.ts).
-     */
     waitingFor: text("waiting_for", { enum: ["client", "person"] }),
-    /** When its call asks again at the latest. */
     retryAt: timestamp("retry_at").notNull(),
-    /** When its call last asked: it lapses a while after. */
     seenAt: timestamp("seen_at").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.runId, table.stepHash] }),
-    // The waits still asking, and those to prune.
     index("workflow_model_waits_seen_idx").on(table.seenAt),
   ]
 );
@@ -5288,4 +5275,94 @@ export const projectItems = sqliteTable(
     primaryKey({ columns: [table.projectId, table.itemType, table.itemId] }),
     index("project_items_item_idx").on(table.itemType, table.itemId),
   ]
+);
+
+/**
+ * What each model request used and cost, one row per response, written
+ * after it (src/model-usage.ts) in the same batch as its `model.call`
+ * audit event: the spend overview is a query over these rows
+ * (src/model-spend.ts). Never on the request's path, so it can't fail a
+ * call; a row whose batch failed is logged and lost, as an overview may
+ * be. Identifiers and counts only, never the prompt or the answer.
+ */
+export const modelUsage = sqliteTable(
+  "model_usage",
+  {
+    /** The provider request's ID, so a batch tried again writes it once. */
+    id: text().primaryKey(),
+    /** The UTC month it counts in, such as `2026-11`. */
+    period: text().notNull(),
+    /** The person it was made by or for; null for none. */
+    personId: text("person_id"),
+    /** What asked: its trigger's type (`person`, `agent`, `workflow`, `system`). */
+    triggerType: text("trigger_type").notNull(),
+    /** The workflow it was made for: an App's, in its App, or an independent one (no App). */
+    workflowAppId: text("workflow_app_id"),
+    workflowId: text("workflow_id"),
+    /** The run lineage it counts in: its root run, or its account's. */
+    runId: text("run_id"),
+    /** The App's model binding it was made through, by its App and alias. */
+    bindingAppId: text("binding_app_id"),
+    bindingAlias: text("binding_alias"),
+    /** `<provider>/<model>`. */
+    model: text().notNull(),
+    /** Whose key: `organization`, or `platform` for Grasp's own features. */
+    credential: text().notNull(),
+    /** Which of Grasp's own features, on Grasp's key. */
+    feature: text(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    cacheReadTokens: integer("cache_read_tokens").notNull(),
+    cacheWriteTokens: integer("cache_write_tokens").notNull(),
+    /** US dollars at the provider's list prices (pi's `calculateCost`). */
+    cost: real().notNull(),
+    /** Whether any of it is an estimate, not the provider's count. */
+    estimated: integer({ mode: "boolean" }).notNull(),
+    /** The usage as the provider reported it, through pi; null for a voice model's. */
+    reported: text({ mode: "json" }).$type<Json>(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("model_usage_period_idx").on(table.period, table.credential),
+    index("model_usage_workflow_idx").on(
+      table.period,
+      table.workflowAppId,
+      table.workflowId
+    ),
+    index("model_usage_binding_idx").on(
+      table.period,
+      table.bindingAppId,
+      table.bindingAlias
+    ),
+  ]
+);
+
+/**
+ * How each provider's requests fared last, by whose key, noted after each
+ * response in the batch that records it (src/model-usage.ts): when one
+ * last worked, and when one last failed and how, never what it carried.
+ * What an admin reads as a provider's status (src/ai-providers.ts).
+ */
+export const providerHealth = sqliteTable(
+  "provider_health",
+  {
+    provider: text().notNull(),
+    /** `organization` or `platform`. */
+    credential: text().notNull(),
+    lastOkAt: integer("last_ok_at"),
+    lastFailedAt: integer("last_failed_at"),
+    /** How it last failed (`TransportFailure`'s kind). */
+    lastFailure: text("last_failure"),
+    /** The HTTP status it last failed with, if it answered. */
+    lastStatus: integer("last_status"),
+    /**
+     * What its failing requests show, by the HTTP class seen: `refused`,
+     * `not_answering` or `limiting` (`ProviderTrouble`); null while the
+     * last one worked, and once the organization replaced the key.
+     */
+    failingClass: text("failing_class"),
+    /** Since when: the first failure of that kind after the last that worked. */
+    failingSince: integer("failing_since"),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );

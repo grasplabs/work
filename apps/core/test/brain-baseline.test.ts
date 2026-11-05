@@ -6,7 +6,7 @@ import {
   runBrainBaseline,
   setUpBrainCompany,
 } from "./brain-harness.ts";
-import type { BrainReport, LedgerRequest } from "./brain-harness.ts";
+import type { BrainReport, RecordedRequest } from "./brain-harness.ts";
 import { brainLanguages } from "./fixtures/brain-corpus.ts";
 import {
   brainFamilies,
@@ -19,7 +19,7 @@ import { mockIdp } from "./idp.ts";
 
 // The Brain baseline (GRA-295, experiment E01) as CI runs it: the dev split
 // of the frozen suite, its three arms paired over two repeats, through the
-// real Workspace object, Knowledge, permissions, model gateway and ledger,
+// real Workspace object, Knowledge, permissions, model gateway and usage,
 // with only the model provider stubbed (brain-stub-model.ts). It proves the
 // harness measures what it reports and that its security gate holds and
 // would fail, access revoked mid-run included, and how a run breaks and is
@@ -70,13 +70,10 @@ const changingControls: ReadonlySet<string> = new Set([
 /** The task the durability cases break, in every arm. */
 const durabilityTasks = ["dev-fleet-size"];
 
-/** Whether every one of `requests` settled with a charge, and there are some. */
-const settledAndCharged = (requests: readonly LedgerRequest[]) =>
+/** Whether every one of `requests` was recorded with a cost, and there are some. */
+const recordedWithCost = (requests: readonly RecordedRequest[]) =>
   requests.length > 0 &&
-  requests.every(
-    ({ state, chargedMicros }) =>
-      state === "settled" && chargedMicros !== null && chargedMicros > 0
-  );
+  requests.every(({ chargedMicros }) => chargedMicros > 0);
 
 let baseline: Promise<BrainReport> | undefined;
 
@@ -272,7 +269,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
           shown,
           chatAfterRestart,
           retrySent,
-          ledger,
+          recorded,
         }) => ({
           arm,
           // The ask the restart cut off fails: its asker is gone.
@@ -298,24 +295,19 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
             count(retrySent, streamed) === count(retrySent, afterRestart),
           ],
           retried: [retry.failed, retry.completed],
-          // The cut answer's request is held for reconciliation, which
-          // charges it once; nothing of the first attempt settled at zero,
-          // or was charged again by the retry.
-          ledger: {
-            held: ledger.first.some(({ state }) => state !== "settled"),
-            settledAtZero: ledger.first.some(
-              ({ state, chargedMicros }) =>
-                state === "settled" && (chargedMicros ?? 0) <= 0
-            ),
+          // What the first attempt cost is what was recorded of its requests
+          // (the cut answer's record is best effort); nothing of the first
+          // attempt is recorded again by the retry.
+          recorded: {
             chargedOnce:
               first.costMicros ===
-              ledger.first.reduce(
-                (total, { chargedMicros }) => total + (chargedMicros ?? 0),
+              recorded.first.reduce(
+                (total, { chargedMicros }) => total + chargedMicros,
                 0
               ),
             unchangedByRetry:
-              JSON.stringify(ledger.firstAfterRetry) ===
-              JSON.stringify(ledger.first),
+              JSON.stringify(recorded.firstAfterRetry) ===
+              JSON.stringify(recorded.first),
           },
         })
       ),
@@ -331,9 +323,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         resumed: true,
         kept: [true, true],
         retried: [false, true],
-        ledger: {
-          held: true,
-          settledAtZero: false,
+        recorded: {
           chargedOnce: true,
           unchangedByRetry: true,
         },
@@ -341,11 +331,11 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     });
   });
 
-  it("replays a trial in the same chat after a restart to the same outcome and stored state, the ledger charging the retry as a request of its own", async () => {
+  it("replays a trial in the same chat after a restart to the same outcome and stored state, the retry recorded as requests of its own", async () => {
     const { durability } = await run();
     expect(
       durability.map(
-        ({ kind, arm, first, retry, answers, fingerprints, ledger }) => ({
+        ({ kind, arm, first, retry, answers, fingerprints, recorded }) => ({
           case: `${kind} ${arm}`,
           // A crash's first attempt failed; a replay's answered alike twice.
           outcome:
@@ -354,15 +344,15 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
               : [retry.completed],
           fingerprint: fingerprints[0] === fingerprints[1],
           ownRequests:
-            settledAndCharged(ledger.retry) &&
-            ledger.retry.every(
-              ({ id }) => !ledger.first.some((earlier) => earlier.id === id)
+            recordedWithCost(recorded.retry) &&
+            recorded.retry.every(
+              ({ id }) => !recorded.first.some((earlier) => earlier.id === id)
             ),
-          // What the ledger charged during the retry is its own requests'.
+          // What was spent during the retry is its own requests'.
           charged:
             retry.costMicros ===
-            ledger.retry.reduce(
-              (total, { chargedMicros }) => total + (chargedMicros ?? 0),
+            recorded.retry.reduce(
+              (total, { chargedMicros }) => total + chargedMicros,
               0
             ),
         })
@@ -470,14 +460,14 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     });
   });
 
-  it("measures cold and warm latency, and what the ledger charged each trial", async () => {
+  it("measures cold and warm latency, and what each trial cost", async () => {
     const { arms, costs, scores } = await run();
     expect({
       latency: arms.map(
         ({ latencyMs }) =>
           latencyMs.coldP95 !== null && latencyMs.warmP95 !== null
       ),
-      // The ledger charged every trial, through the gateway.
+      // Every trial cost something, through the gateway.
       charged: scores.every(({ costMicros }) => costMicros > 0),
       perCompleted: arms.map(
         ({ cost }) => cost.totalMicros > 0 && cost.perCompletedMicros !== null

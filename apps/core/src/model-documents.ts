@@ -6,16 +6,15 @@ import { toBase64 } from "@grasp-os/shared/encoding";
 // `models(env).platformCall`). pi's adapters send text and images only, so
 // the gateway adds the document to the request's last user message as the
 // provider's API takes one (`withDocument`), in the body pi made, before
-// the ledger admits it and it is sent:
+// it is sent:
 //
 // - OpenAI's Responses API: an `input_file` part with the file's data.
 // - Anthropic's Messages API: a `document` block, base64.
 // - Chat completions (OpenRouter): a `file` part with the file's data.
 //
-// What a document costs isn't bounded by its bytes (each page is read as
-// text and as an image), so the ledger bounds such a request by the
-// model's whole context window instead (models.ts): the provider refuses
-// a request beyond it, unbilled.
+// What a document cost is what the provider reports it used (each page is
+// read as text and as an image), recorded after the response like any
+// request's (model-usage.ts).
 
 /** A document for a model to read, as a platform feature sends it. */
 export interface ModelDocument {
@@ -26,7 +25,7 @@ export interface ModelDocument {
 }
 
 /** The content parts a document is sent as, by the API it goes to. */
-export const documentPartTypes = {
+const documentPartTypes = {
   "openai-responses": "input_file",
   "anthropic-messages": "document",
   "openai-completions": "file",

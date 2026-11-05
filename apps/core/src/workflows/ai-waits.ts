@@ -45,9 +45,8 @@ import type { Wake } from "./wakes.ts";
 //   is found by the run's timed tries, a minute first, doubling up to 15
 //   minutes. A wake only makes the step try again: the provider's answer
 //   decides.
-// - Billing holds per request: one the provider didn't answer is charged
-//   in full as unknown (model-ledger.ts), and never sent again within its
-//   attempt; the run's next try, after a wait, is a request of its own. An
+// - Billing holds per request: one the provider didn't answer may have
+//   been billed, and is never sent again within its attempt; the run's next try, after a wait, is a request of its own. An
 //   independent run's call is tried once, so it waits only when the
 //   gateway saw that its call provably billed nothing (models.ts,
 //   `provablyUnbilled`); any other failure fails it (resource-host.ts).

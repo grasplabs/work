@@ -12,7 +12,7 @@
  * (stephen-google-fake.ts). Then it asks each case of
  * fixtures/stephen-cases.ts in a new chat, as the Teams door does: through
  * the real Workspace object, Knowledge, the agent's code, connect, the
- * permissions, the model gateway and the ledger, with only the model
+ * permissions, the model gateway and its usage, with only the model
  * provider swapped (stephen-stub.ts in CI).
  *
  * Each case is observed at the boundaries it crosses: the connector calls
@@ -902,7 +902,7 @@ export const judgePrompt = (
     "Reply with one line: PASS or FAIL, a colon, and why in one sentence. Don't run code.",
   ].join("\n\n");
 
-/** The judge's verdict on a turn, through the run's own model gateway and ledger. */
+/** The judge's verdict on a turn, through the run's own model gateway. */
 const judgeCase = async (
   company: StephenCompany,
   provider: Provider,

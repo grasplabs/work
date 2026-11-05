@@ -60,10 +60,8 @@ type HearCode = Parameters<typeof hearErrors.create>[0];
 
 /** The gateway's refusals, as the page is told them; any other is a failure. */
 const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
-  "model.queued": [503, "hear.busy"],
   "model.unconfigured": [503, "hear.unavailable"],
   "model.not_allowed": [503, "hear.unavailable"],
-  "model.unpriced": [503, "hear.unavailable"],
 };
 
 /**

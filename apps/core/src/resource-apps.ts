@@ -207,12 +207,7 @@ const runOriginOf = (caller: BindingCaller): RunOrigin | undefined => {
   if (caller.context.type !== "run") {
     return undefined;
   }
-  return {
-    actor: caller.actor,
-    ...(caller.shareSubject === undefined
-      ? {}
-      : { shareSubject: caller.shareSubject }),
-  };
+  return { actor: caller.actor };
 };
 
 /** The `runOrigin` option for a call from `caller`, when its chain has one. */

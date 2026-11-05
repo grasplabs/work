@@ -1,10 +1,9 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import type { RunAiProviderWait, RunQueue } from "@grasp-os/shared/workflows";
-import { and, gt, isNotNull, sql } from "drizzle-orm";
+import type { RunAiProviderWait } from "@grasp-os/shared/workflows";
+import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { workflowModelWaits } from "../db/core/schema.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import type { QuotaLimits } from "./quotas.ts";
 
@@ -68,14 +67,6 @@ export const askAgainMs = ({
 }: AskingAgain): number =>
   Math.max(0, Math.min(askAgainSeconds(waited) * 1000, maxWaitMs - waitedMs));
 
-/**
- * How long a model call's wait row lasts after its call last asked
- * (model-waits.ts): longer than a waiting step waits between asks (a
- * minute at most, `askAgainSeconds`), with room for an engine slow to
- * wake it.
- */
-export const queueLiveMs = 90_000;
-
 /** A whole number of core's own, as a literal. */
 const literal = (value: number): SQL => sql.raw(String(Math.trunc(value)));
 
@@ -94,58 +85,24 @@ const running = (now: number, where: SQL): SQL =>
 export const slotFree = (app: string, now: number, limits: QuotaLimits): SQL =>
   sql`(${running(now, sql`1`)} < ${literal(limits.workflowClientAttempts)} AND ${running(now, sql`h.resource = ${app}`)} < ${literal(Math.min(limits.workflowAppAttempts, limits.workflowClientAttempts))})`;
 
-/**
- * What a run that goes on by itself waits for, as its status shows it: a
- * share of the model requests in flight (`queued`), or its AI provider
- * (`aiProvider`, ai-waits.ts).
- */
-export type RunWait = { queued: RunQueue } | { aiProvider: RunAiProviderWait };
+/** What a run that goes on by itself waits for, as its status shows it: its AI provider (ai-waits.ts). */
+export interface RunWait {
+  aiProvider: RunAiProviderWait;
+}
 
 /**
- * Of the runs `runs`, each one a step of which waits at `now`: for a
- * share of the model requests in flight (model-waits.ts), and when it
- * asks again; or held for a working AI provider key, since when
- * (ai-waits.ts). A wait that stopped asking doesn't count.
+ * Of the runs `runs`, each one a step of which is held for a working AI
+ * provider key (ai-waits.ts), and since when.
  */
 export const queuedRuns = async (
   db: DrizzleD1Database,
-  runs: readonly string[],
-  now: number
+  runs: readonly string[]
 ): Promise<Map<string, RunWait>> => {
   if (runs.length === 0) {
     return new Map();
   }
-  // One bound list: D1 binds at most 100 parameters.
-  const listed = JSON.stringify(runs);
-  const modelWaits = await db
-    .select({
-      runId: workflowModelWaits.runId,
-      waitingFor: workflowModelWaits.waitingFor,
-      retryAt: workflowModelWaits.retryAt,
-    })
-    .from(workflowModelWaits)
-    .where(
-      and(
-        sql`${workflowModelWaits.runId} IN (SELECT value FROM json_each(${listed}))`,
-        gt(workflowModelWaits.seenAt, new Date(now - queueLiveMs)),
-        isNotNull(workflowModelWaits.waitingFor)
-      )
-    );
-  // A step held for its AI provider (ai-waits.ts): shown first, as it
-  // waits for someone.
   const aiWaits = await aiWaitsOf(db, runs);
-  const rows = modelWaits.toSorted(
-    (one, other) => one.retryAt.getTime() - other.retryAt.getTime()
-  );
-  const byRun = new Map<string, RunWait>(
+  return new Map(
     [...aiWaits].map(([runId, aiProvider]) => [runId, { aiProvider }])
   );
-  for (const { runId, waitingFor, retryAt } of rows) {
-    if (waitingFor !== null && !byRun.has(runId)) {
-      byRun.set(runId, {
-        queued: { waitingFor, retryAt: retryAt.toISOString() },
-      });
-    }
-  }
-  return byRun;
 };

@@ -5731,25 +5731,13 @@ msgstr "Grasp fragt, {number} von {total}"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
 
-#: src/chat/failure.ts
-msgid "Grasp can't count model spend right now. Try again later."
-msgstr "Grasp kann die Modellkosten gerade nicht erfassen. Versuchen Sie es später erneut."
-
 #: src/onboarding/review-parts.tsx
 msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 msgstr "Grasp kann Ihren Leuten ihre Interview-Links vorerst nicht per E-Mail schicken. Senden Sie jedem seinen Link selbst, über Interviews."
 
-#: src/chat/failure.ts
-msgid "Grasp can't read your organization's model limits right now. Try again later."
-msgstr "Grasp kann die Modelllimits Ihrer Organisation gerade nicht lesen. Versuchen Sie es später erneut."
-
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp kann gerade nicht sagen, wie weit es ist. Es läuft trotzdem weiter."
-
-#: src/chat/failure.ts
-msgid "Grasp can't tell what this model would cost. Pick another one."
-msgstr "Grasp kann nicht sagen, was dieses Modell kosten würde. Wählen Sie ein anderes."
 
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
@@ -5803,10 +5791,6 @@ msgstr "Grasp in Ihrer Sprache. Zahlen, Daten und Beträge folgen ihr auch."
 #: src/engines/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp baut"
-
-#: src/chat/failure.ts
-msgid "Grasp is busy with other questions. Try again in a minute."
-msgstr "Grasp ist mit anderen Fragen beschäftigt. Versuchen Sie es in einer Minute erneut."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -13604,10 +13588,6 @@ msgstr "Diese Seite möchte eine andere Website in einem neuen Tab öffnen. Öff
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentlichten Code überein, daher wurde sie nicht geöffnet. Informieren Sie einen Admin."
 
-#: src/chat/failure.ts
-msgid "This run has made all the model calls it may make."
-msgstr "Dieser Lauf hat alle Modellaufrufe gemacht, die er machen darf."
-
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Diesen Speicher gibt es nicht mehr, daher gibt es nichts zu verwerfen."
@@ -14435,14 +14415,6 @@ msgstr "Warten auf eine Entscheidung: {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Wartet auf eine Person"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of the organization's runs; tries again by {time}"
-msgstr "Wartet auf einen Anteil an den Ausführungen der Organisation; versucht es bis {time} erneut"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of this person's runs; tries again by {time}"
-msgstr "Wartet auf einen Anteil an den Ausführungen dieser Person; versucht es bis {time} erneut"
 
 #: src/engines/app-webhooks.tsx
 #: src/workflows/workflow-triggers-tab.tsx

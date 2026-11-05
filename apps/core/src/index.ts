@@ -19,7 +19,6 @@ export { WorkflowBuildApi } from "./agent-workflow-build.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
 export { Onboarding } from "./onboarding/store.ts";
-export { ModelLedger } from "./model-ledger.ts";
 export { DataStore } from "./data-store.ts";
 export { AppTail } from "./server-logs.ts";
 export { ConnectionBinding } from "./bindings.ts";

@@ -66,8 +66,7 @@ const viaOf = async (env: Env): Promise<LabVia> => {
 /** A gateway refusal, as the lab reads it: busy is worth a retry, the rest isn't. */
 const refusalResponse = (error: unknown, requestId: string): Response => {
   const code = modelErrors.codeOf(error) ?? "model.failed";
-  const status =
-    code === "model.queued" || code === "model.rate_limited" ? 429 : 502;
+  const status = code === "model.rate_limited" ? 429 : 502;
   return errorResponse(status, modelErrors.create(code), requestId);
 };
 

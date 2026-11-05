@@ -65,7 +65,6 @@ type RefusedLine = "busy" | "removed" | "failed";
 const lineFor = (error: unknown): RefusedLine => {
   const model = modelErrors.codeOf(error);
   if (
-    model === "model.queued" ||
     model === "model.rate_limited" ||
     agentErrors.codeOf(error) === "agent.busy"
   ) {

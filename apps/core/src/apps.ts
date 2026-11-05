@@ -67,7 +67,7 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
-import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
+import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
@@ -1275,32 +1275,6 @@ const requireRunnableRelease = async (
     .get();
   if (goneStore !== undefined) {
     throw dataErrors.create("data.store_unavailable");
-  }
-};
-
-/** Most tries of the batch that makes a version current. */
-const currentBatchTries = 3;
-
-/**
- * `batch`, tried again when D1 fails for a moment (`isTransientD1Error`),
- * up to `currentBatchTries`; any other failure is thrown at once. Making a
- * version current compares and sets, so a try that committed though its
- * answer was lost only makes the next change nothing: the caller tells
- * that from losing to someone else by its own event (`setCurrentVersion`).
- */
-const retriedBatch = async <Result>(
-  batch: () => Promise<Result>
-): Promise<Result> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      // One try after the other.
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      return await batch();
-    } catch (error) {
-      if (attempt >= currentBatchTries || !isTransientD1Error(error)) {
-        throw error;
-      }
-    }
   }
 };
 

@@ -27,9 +27,9 @@ import type { TransportRoute } from "./model-transport.ts";
 // platform features. Core runs pi's adapter for the provider's API as for
 // any route, with a fetch that hands each request, as the adapter made it,
 // to connect over the `CONNECT` service binding (`modelFetch`), with a
-// grant core signs for exactly that request once the ledger admitted it
+// grant core signs for exactly that request as it is sent
 // (@grasp-os/shared/capability, `signModelGrant`): the credential, the
-// provider, the host, the ledger's ID for it and its body's hash. Core never sees a key:
+// provider, the host, the request's ID and its body's hash. Core never sees a key:
 // where the key goes, the adapter puts `aiCredentialPlaceholder`, which
 // connect replaces. It runs on plain workerd as on Cloudflare: one service
 // binding.
@@ -51,11 +51,11 @@ export interface ConnectTarget {
 }
 
 /**
- * The header `tagged` puts the ledger's ID for a request in, which the
- * route's fetch takes out again into the request's grant: it never reaches
+ * The header `tagged` puts a provider request's ID in, which the route's
+ * fetch takes out again into the request's grant: it never reaches
  * connect or the provider as a header.
  */
-const ledgerRequestHeader = "x-grasp-ledger-request";
+const providerRequestHeader = "x-grasp-provider-request";
 
 /** The header `tagged` puts the call's deadline in, likewise taken out. */
 const endsAtHeader = "x-grasp-ends-at";
@@ -251,13 +251,13 @@ const sendThroughConnect = async (
   target: ConnectTarget,
   host: string,
   request: Request,
-  { ledgerRequest, endsAt, signal }: SentBy
+  { providerRequest, endsAt, signal }: SentBy
 ): Promise<Response> => {
   const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
     credential: target.credential,
     provider: target.provider,
     host,
-    request: ledgerRequest,
+    request: providerRequest,
     notAfter: endsAt,
     body: await sha256HexOfBytes(await request.clone().arrayBuffer()),
   });
@@ -288,9 +288,9 @@ const sendThroughConnect = async (
   return cutOffBy(answered, signal);
 };
 
-/** What one request through connect is admitted as: the ledger's ID, the deadline. */
+/** What one request through connect is sent as: its ID, the deadline. */
 export interface SentBy {
-  ledgerRequest: string;
+  providerRequest: string;
   endsAt: number;
   signal?: AbortSignal;
 }
@@ -308,8 +308,8 @@ const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
 
 /**
  * Sends one request of a platform feature (speech, a recording written
- * down) to `path` at `target`'s provider through connect, as the ledger
- * admitted it: the placeholder where the key goes, which connect replaces
+ * down) to `path` at `target`'s provider through connect, as `sentBy`
+ * names it: the placeholder where the key goes, which connect replaces
  * with Grasp's key, and only the headers given.
  */
 export const connectRequest = async (
@@ -331,7 +331,7 @@ export const connectRequest = async (
       headers.set(name, value);
     }
   }
-  headers.set("x-request-id", sentBy.ledgerRequest);
+  headers.set("x-request-id", sentBy.providerRequest);
   // Read whole first, a form's boundary in its content type, as a body
   // that streams can't cross the service binding with the request.
   const asked = new Request(url, { method: "POST", headers, body: init.body });
@@ -360,7 +360,7 @@ export const connectSocket = async (
   env: ConnectEnv,
   target: ConnectTarget,
   pathAndQuery: string,
-  { ledgerRequest, endsAt, signal }: SentBy
+  { providerRequest, endsAt, signal }: SentBy
 ): Promise<WebSocket> => {
   const url = platformUrl(target, pathAndQuery);
   if (url === undefined) {
@@ -370,7 +370,7 @@ export const connectSocket = async (
     credential: target.credential,
     provider: target.provider,
     host: url.hostname.toLowerCase(),
-    request: ledgerRequest,
+    request: providerRequest,
     notAfter: endsAt,
     // An upgrade has no body: what it sends goes over the socket.
     body: await sha256HexOfBytes(new ArrayBuffer(0)),
@@ -407,15 +407,15 @@ const connectFetch =
   async (input, init) => {
     const asked = new Request(input, init);
     const headers = new Headers(asked.headers);
-    const ledgerRequest = headers.get(ledgerRequestHeader);
+    const providerRequest = headers.get(providerRequestHeader);
     const endsAt = Number(headers.get(endsAtHeader) ?? Number.NaN);
-    if (ledgerRequest === null || !Number.isSafeInteger(endsAt)) {
+    if (providerRequest === null || !Number.isSafeInteger(endsAt)) {
       // Never expected: the gateway tags every request it admitted.
       throw new Error("A model request reached connect unadmitted");
     }
-    headers.delete(ledgerRequestHeader);
+    headers.delete(providerRequestHeader);
     headers.delete(endsAtHeader);
-    headers.set("x-request-id", ledgerRequest);
+    headers.set("x-request-id", providerRequest);
     // Without the caller's signal, which can't cross the service binding:
     // `stopLine` carries it.
     const body = asked.method === "GET" ? null : await asked.arrayBuffer();
@@ -425,7 +425,7 @@ const connectFetch =
       body,
     });
     return await sendThroughConnect(env, target, host, request, {
-      ledgerRequest,
+      providerRequest,
       endsAt,
       signal: asked.signal,
     });
@@ -470,7 +470,7 @@ export const connectRoute = (
     fetch: connectFetch(env, target, host.toLowerCase()),
     tagged: (init, id, endsAt) => {
       const headers = new Headers(init?.headers);
-      headers.set(ledgerRequestHeader, id);
+      headers.set(providerRequestHeader, id);
       headers.set(endsAtHeader, String(endsAt));
       return { ...init, headers };
     },

@@ -42,9 +42,7 @@ import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 // Each list bound as one parameter: a review may name more permissions or
 // collections than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
-import { modelLedger } from "./model-ledger.ts";
-import { microsPerDollar } from "./model-prices.ts";
-import { bindingKey } from "./model-spend.ts";
+import { bindingKey, bindingSpendOf } from "./model-spend.ts";
 import { modelSettings, usableAnswerTokens } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
@@ -1194,13 +1192,13 @@ export const requireHeldBinding = async (
  * The Apps' active model bindings, by App name and alias (at most
  * `bindingSpendListed`, and whether more are bound), each with what its
  * requests spent in `month`: for admins to read (models-rpc.ts), who core
- * checks. Spend is read under the very scope a request through the
- * binding counts against (`bindingKey`), keyed by App and alias. One whose
+ * checks. Spend is read by App and alias (`bindingKey`), never the
+ * binding's row, so approving the alias again keeps it. One whose
  * target can't be read is listed with a null `model`, as it serves
  * nothing.
  */
 export const modelBindingSpend = async (
-  env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
+  env: Pick<Env, "DB">,
   month: string
 ): Promise<ModelSettings["bindings"]> => {
   // One more than are listed, to tell whether any are left out.
@@ -1225,13 +1223,10 @@ export const modelBindingSpend = async (
     appName,
     key: bindingKey({ app: row.appId, alias: row.alias }),
   }));
-  const spent = await modelLedger(env).spendOfKeys(
+  const spentByKey = await bindingSpendOf(
+    env,
     month,
-    "binding",
-    listed.map(({ key }) => key)
-  );
-  const spentByKey = new Map(
-    spent.map(({ key, spentMicros }) => [key, spentMicros])
+    listed.map(({ row }) => ({ app: row.appId, alias: row.alias }))
   );
   return {
     listed: listed.map(({ row, appName, key }) => {
@@ -1246,7 +1241,7 @@ export const modelBindingSpend = async (
           target.success && target.data.kind === "model"
             ? target.data.model
             : null,
-        thisMonth: (spentByKey.get(key) ?? 0) / microsPerDollar,
+        thisMonth: spentByKey.get(key) ?? 0,
       };
     }),
     more: rows.length > bindingSpendListed,

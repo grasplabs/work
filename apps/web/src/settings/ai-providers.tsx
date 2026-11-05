@@ -64,7 +64,7 @@ const fallbacksMax = 5;
 /** The prefix of an OpenAI-compatible endpoint's models, which the organization names. */
 const compatiblePrefix = "openai-compatible/";
 
-/** How a provider's last call failed, in plain words, by the ledger's kind. */
+/** How a provider's last call failed, in plain words, by the gateway's kind. */
 const failureKinds: Readonly<Record<string, MessageDescriptor>> = {
   auth: msg`the provider refused the key`,
   rate_limited: msg`the provider was too busy and asked to wait`,

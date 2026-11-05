@@ -13,7 +13,7 @@ import { recordOutcome } from "@grasp-os/brain/outcomes";
  *   full-text search for the task's keywords.
  *
  * Every arm runs in the real Workspace object, through the real model
- * gateway and ledger, with the same model, tools, memory, permissions and
+ * gateway and usage, with the same model, tools, memory, permissions and
  * answer protocol; the harness reads Knowledge for the last two arms as the
  * person, through their own API, never past what they may read. Only the
  * model provider behind connect is swapped: brain-stub-model.ts in CI.
@@ -46,7 +46,6 @@ import { z } from "zod";
 import { turnSource } from "../src/brain-capture.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { modelLedger } from "../src/model-ledger.ts";
 import { model, setObjectEnv, transcript } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
@@ -101,6 +100,7 @@ import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
+import { spentMicros, usageRows } from "./model-usage.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
@@ -334,7 +334,8 @@ const rowText = (row: unknown): string =>
 
 /**
  * What changes on its own whatever a trial does: the audit outboxes as
- * calls and reads are recorded and drained, sign-in sessions as they are
+ * calls and reads are recorded and drained, the model usage and provider
+ * health recorded after each answer, sign-in sessions as they are
  * checked and refreshed, signing keys as they are made when first needed,
  * SQLite's sequence counters, usage signals as they are computed, and how
  * far the Brain's background consolidation read each scope's episodes,
@@ -348,6 +349,8 @@ const bookkeeping = new Set([
   "core.audit_outbox_rejected",
   "knowledge.audit_outbox",
   "knowledge.audit_outbox_rejected",
+  "core.model_usage",
+  "core.provider_health",
   "core.sessions",
   "core.jwks",
   "core.sqlite_sequence",
@@ -523,18 +526,26 @@ const pointAt = async (stub: Workspace["stub"]) => {
   await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
 };
 
-/** What the ledger has charged for the run's model calls, in micros. */
+/** How long the usage recorded must hold still before it is read. */
+const usageSettleMs = 15;
+
+/**
+ * What the run's model calls cost, in micros, once the gateway's records
+ * of them, written in the background after each answer
+ * (src/model-usage.ts), have settled: two reads alike in a row.
+ */
 export const charged = async (): Promise<number> => {
-  const { deployment = [] } = await modelLedger(env).spendOf(
-    brainBudgetMonth,
-    ["deployment"],
-    1
-  );
-  let total = 0;
-  for (const { spentMicros } of deployment) {
-    total += spentMicros;
+  let last = await spentMicros(brainBudgetMonth);
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- until it holds still
+    await scheduler.wait(usageSettleMs);
+    // oxlint-disable-next-line no-await-in-loop -- until it holds still
+    const now = await spentMicros(brainBudgetMonth);
+    if (now === last) {
+      return now;
+    }
+    last = now;
   }
-  return total;
 };
 
 /** Loads the corpus as it stands at `t0`, as its people would write it. */
@@ -1805,32 +1816,23 @@ const runTrial = async (
   }
 };
 
-/** A request the ledger admitted: its state, and what it was charged. */
-export interface LedgerRequest {
+/** A provider request the gateway recorded, and what it cost. */
+export interface RecordedRequest {
   id: string;
-  state: string;
-  chargedMicros: number | null;
+  chargedMicros: number;
 }
 
-const ledgerRequestSchema = z.object({
-  id: z.string(),
-  state: z.string(),
-  chargedMicros: z.number().nullable(),
-});
-
-/** Every request the ledger holds, by ID. */
-const ledgerRequests = async (): Promise<Map<string, LedgerRequest>> =>
-  await runInDurableObject(modelLedger(env), (_instance, state) => {
-    const rows = state.storage.sql
-      .exec("SELECT id, state, charged_micros AS chargedMicros FROM requests")
-      .toArray();
-    return new Map(
-      rows.map((row) => {
-        const request = ledgerRequestSchema.parse(row);
-        return [request.id, request];
-      })
-    );
-  });
+/** Every provider request recorded in the run's month, by ID, once settled. */
+const recordedRequests = async (): Promise<Map<string, RecordedRequest>> => {
+  await charged();
+  const rows = await usageRows(brainBudgetMonth);
+  return new Map(
+    rows.map(({ id, cost }) => [
+      id,
+      { id, chargedMicros: Math.round(cost * 1_000_000) },
+    ])
+  );
+};
 
 export const durabilityKinds = ["crash", "replay"] as const;
 export type DurabilityKind = (typeof durabilityKinds)[number];
@@ -1879,13 +1881,13 @@ export interface DurabilityCase {
    */
   fingerprints: [first: string, retry: string];
   /**
-   * The ledger's requests each attempt made, as they stand after it, and
-   * the first attempt's again after the retry.
+   * The provider requests recorded for each attempt, as they stand after
+   * it, and the first attempt's again after the retry.
    */
-  ledger: {
-    first: LedgerRequest[];
-    retry: LedgerRequest[];
-    firstAfterRetry: LedgerRequest[];
+  recorded: {
+    first: RecordedRequest[];
+    retry: RecordedRequest[];
+    firstAfterRetry: RecordedRequest[];
   };
 }
 
@@ -1994,7 +1996,7 @@ const runDurabilityCase = async (
   const chatRows = await chatKeeper(place, chat.id);
   const attempt = async (repeat: number, crash: boolean) => {
     const stateBefore = await trialStateOf(place, chat.id, knowledge);
-    const requestsBefore = await ledgerRequests();
+    const requestsBefore = await recordedRequests();
     await provider.mark();
     const firstRequest = sent.requests.length;
     const spentBefore = await charged();
@@ -2080,7 +2082,7 @@ const runDurabilityCase = async (
       ...changedBetween(stateBefore, stateAfter),
       ...(chatRows.intact() ? [] : ["workspace.chat (this chat's rows)"]),
     ];
-    const requestsAfter = await ledgerRequests();
+    const requestsAfter = await recordedRequests();
     const observation: TrialObservation = {
       taskId: task.id,
       arm,
@@ -2118,7 +2120,7 @@ const runDurabilityCase = async (
     await transcript(place.stub, chat.id)
   );
   const retry = await attempt(2, false);
-  const ledgerAfter = await ledgerRequests();
+  const recordedAfter = await recordedRequests();
   const notes = notesOf(company);
   const scoreOf = (observed: TrialObservation) =>
     scoreTrial(task.expect, { ...observed, notes }, task.language);
@@ -2135,10 +2137,10 @@ const runDurabilityCase = async (
     chatAfterRestart,
     retrySent: retry.sent,
     fingerprints: [first.fingerprint, retry.fingerprint],
-    ledger: {
+    recorded: {
       first: first.requests,
       retry: retry.requests,
-      firstAfterRetry: first.requests.map(({ id }) => held(ledgerAfter, id)),
+      firstAfterRetry: first.requests.map(({ id }) => held(recordedAfter, id)),
     },
   };
 };
@@ -2561,8 +2563,7 @@ export const runBrainBaseline = async (
       );
     }
   }
-  // Broken on purpose, last: a crash leaves its request to the ledger's
-  // reconciliation, which nothing measured should run beside.
+  // Broken on purpose, last: nothing measured should run beside a crash.
   const durability = await runDurability(company, places, provider, {
     tasks: tasks.filter(({ id }) => durabilityTasks.includes(id)),
     arms,

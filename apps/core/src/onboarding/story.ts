@@ -121,8 +121,6 @@ export const interviewStoryResponse = async (
     if (code === undefined && !request.signal.aborted) {
       log.error("interview.story_failed", { requestId });
     }
-    return asTheyStand(
-      code === "model.queued" || code === "model.rate_limited" ? 429 : 502
-    );
+    return asTheyStand(code === "model.rate_limited" ? 429 : 502);
   }
 };

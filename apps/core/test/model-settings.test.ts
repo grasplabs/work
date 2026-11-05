@@ -1,10 +1,10 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { modelSpendListed } from "@grasp-os/shared/models";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { modelLedger } from "../src/model-ledger.ts";
-import type { LedgerScope } from "../src/model-ledger.ts";
+import { modelUsage } from "../src/db/core/schema.ts";
 import { modelForRole, models, modelSettings } from "../src/models.ts";
 import type { ModelCall, ModelsNow } from "../src/models.ts";
 import { mockIdp } from "./idp.ts";
@@ -16,6 +16,7 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { connectModels, fakeProviderFor } from "./model-provider.ts";
+import { recordedUsage } from "./model-usage.ts";
 import {
   openRpc,
   outcome,
@@ -67,18 +68,6 @@ const envWith = () => {
 const choose = async (...refs: string[]): Promise<void> => {
   await connectModels(`test-model-key-${crypto.randomUUID()}`, refs);
 };
-
-/** A scope the ledger counts spend in. */
-const counted = (scope: "user" | "workflow", key: string): LedgerScope => ({
-  scope,
-  key,
-});
-
-/** Shares of the requests in flight roomy enough that none fills here. */
-const roomyFair = () => ({
-  subject: "spend-settings",
-  shares: { client: 1000, person: 1000 },
-});
 
 /** The settings as an admin reads them from `coreEnv`. */
 const settingsIn = async (
@@ -227,60 +216,58 @@ describe("model settings", { timeout: 60_000 }, () => {
       },
     };
     await expect(outcome(models(coreEnv).call(chatTurn))).resolves.toBe("ok");
+    // The three calls, recorded after their answers.
+    const month = new Date().toISOString().slice(0, "yyyy-mm".length);
+    await recordedUsage(month, 3);
     // Workflows of an App no longer here, as many as are listed, each
     // spending less: the least is left out.
-    const month = new Date().toISOString().slice(0, "yyyy-mm".length);
-    const ledger = modelLedger(coreEnv);
+    const gone = Array.from({ length: modelSpendListed }, (_, index) => ({
+      id: crypto.randomUUID(),
+      period: month,
+      personId: "someone",
+      triggerType: "workflow",
+      workflowAppId: "gone-app",
+      workflowId: `w${index}`,
+      model: anthropic,
+      credential: "organization",
+      inputTokens: 1000 + index,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: (1000 + index) / 1_000_000,
+      estimated: false,
+      createdAt: new Date(),
+    }));
+    // One row a statement: D1 binds at most 100 values.
     await Promise.all(
-      Array.from({ length: modelSpendListed }, async (_, index) => {
-        const id = crypto.randomUUID();
-        await ledger.admit({
-          id,
-          period: month,
-          scopes: [
-            counted("workflow", JSON.stringify(["gone-app", `w${index}`])),
-          ],
-          model: anthropic,
-          price: {
-            version: "test",
-            input: 1_000_000,
-            output: 1_000_000,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-          reservedMicros: 1000 + index,
-          actor: { type: "person", userId: "someone" },
-          deadline: Date.now() + 60_000,
-          reconcileAt: Date.now() + 60_000,
-          fair: roomyFair(),
-        });
-        await ledger.settle(id, {
-          by: "usage",
-          tokens: {
-            input: 1000 + index,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-        });
-      })
+      gone.map(
+        async (row) => await drizzle(env.DB).insert(modelUsage).values(row)
+      )
     );
+    const goneTotal = gone.reduce((sum, { cost }) => sum + cost, 0);
 
     const { session } = await signedInWithRole(idp, "admin");
     const { core } = await openRpc(session, { coreEnv });
     const spend = await core.authenticate().models.spend();
     expect(spend.workflows).toHaveLength(modelSpendListed);
-    // The three calls: the gone App's spend never counted for the deployment.
-    expect({ ...spend, workflows: spend.workflows.slice(0, 2) }).toStrictEqual({
+    // The three calls, and the gone App's workflows'.
+    expect({
+      ...spend,
+      total: Math.round(spend.total * 1_000_000),
+      workflows: spend.workflows.slice(0, 2).map(({ amount, ...listed }) => ({
+        ...listed,
+        amount: Math.round(amount * 1_000_000),
+      })),
+    }).toStrictEqual({
       month,
-      total: 0.0135,
+      total: Math.round((0.0135 + goneTotal) * 1_000_000),
       workflows: [
         {
           appId: null,
           appName: null,
           workflowId: workflow.id,
           name: workflow.name,
-          amount: 0.009,
+          amount: 9000,
           runs: 2,
         },
         {
@@ -288,7 +275,7 @@ describe("model settings", { timeout: 60_000 }, () => {
           appName: null,
           workflowId: `w${modelSpendListed - 1}`,
           name: `w${modelSpendListed - 1}`,
-          amount: (1000 + modelSpendListed - 1) / 1_000_000,
+          amount: 1000 + modelSpendListed - 1,
           runs: 0,
         },
       ],

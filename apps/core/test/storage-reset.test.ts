@@ -11,11 +11,11 @@ import { resetStorage, wakeTimeoutMs } from "./reset-storage.ts";
 
 type Ledger = DurableObjectStub;
 
-/** A model ledger named `name`, like the deployment's. */
-const namedLedger = (name: string): Ledger => env.MODEL_LEDGER.getByName(name);
+/** A plain object named `name`, as most of core's objects are reached. */
+const namedLedger = (name: string): Ledger => env.CHAT_STATE.getByName(name);
 
-/** A model ledger reached by ID, as the workflow engine reaches its runs. */
-const ledgerById = (id: DurableObjectId): Ledger => env.MODEL_LEDGER.get(id);
+/** A plain object reached by ID, as the workflow engine reaches its runs. */
+const ledgerById = (id: DurableObjectId): Ledger => env.CHAT_STATE.get(id);
 
 const leaveNote = async (ledger: Ledger): Promise<void> => {
   await runInDurableObject(ledger, (_object, state) => {
@@ -47,7 +47,7 @@ const busyMs = 500;
 describe("the reset between test files", () => {
   it("empties objects, databases and buckets that went quiet", async () => {
     const name = crypto.randomUUID();
-    const id = env.MODEL_LEDGER.newUniqueId();
+    const id = env.CHAT_STATE.newUniqueId();
     await leaveNote(namedLedger(name));
     await leaveNote(ledgerById(id));
     await env.KNOWLEDGE.exec("CREATE TABLE left_behind (note TEXT)");

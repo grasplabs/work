@@ -59,11 +59,10 @@ import { goesOn, queuedRun, shownStatus, unended } from "./runs.ts";
 // out yet) goes on by itself, and counts as running; so does one whose
 // cancel was admitted, until the engine stops it.
 //
-// A run that goes on without a decision to wait for, while a step of it
-// waits for a share of the model requests in flight (model-waits.ts),
-// shows as queued (admission.ts, `queuedRuns`), with the share and
-// when it asks again: its own place alone, never who else waits. The
-// Running filter lists it: throttling, not a failure.
+// A run that goes on without a decision to wait for, while a step of it is
+// held for a working AI provider key (ai-waits.ts), shows as queued
+// (admission.ts, `queuedRuns`), with the provider and since when. The
+// Running filter lists it: it goes on by itself, not a failure.
 //
 // The queries are written for a D1 without statistics (a fresh one never
 // has them), where SQLite picks indexes by the query's shape alone. Each
@@ -138,20 +137,17 @@ const latestRuns = async (
 
 /**
  * The latest runs `rows` by workflow: `waiting` while one waits for a
- * decision; one that goes on otherwise may wait for a share of the
- * attempts running at once.
+ * decision; one that goes on otherwise may be held for its AI provider.
  */
 const latestByWorkflow = async (
   db: Db,
-  rows: readonly LatestRow[],
-  now: Date
+  rows: readonly LatestRow[]
 ): Promise<Map<string, LatestRun>> => {
   const queues = await queuedRuns(
     db,
     rows.flatMap(({ id, status, waits: waiting }) =>
       goesOn(status) && waiting !== 1 ? [id] : []
-    ),
-    now.getTime()
+    )
   );
   return new Map(
     rows.map((row) => {
@@ -272,7 +268,7 @@ export const workflowOverview = async (
       workflows.map(({ owner }) => owner)
     ),
   ]);
-  const lastRuns = await latestByWorkflow(db, latest, now);
+  const lastRuns = await latestByWorkflow(db, latest);
   return workflows.map((workflow) => ({
     workflowId: workflowResourceIdSchema.parse(workflow.id),
     name: workflow.name,
@@ -512,11 +508,10 @@ export const listAllRuns = async (
     answerableDecisions(env, db, by, unendedIds, now),
     waitingIds(db, unendedIds, now),
     // A run waiting for a decision says so; one that goes on otherwise
-    // may wait for a share of the attempts running at once.
+    // may be held for its AI provider.
     queuedRuns(
       db,
-      found.flatMap((row) => (goesOn(row.status) ? [row.id] : [])),
-      now.getTime()
+      found.flatMap((row) => (goesOn(row.status) ? [row.id] : []))
     ),
   ]);
   return {

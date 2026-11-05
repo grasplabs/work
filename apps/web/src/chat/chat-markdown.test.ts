@@ -93,7 +93,7 @@ describe(chatMarkdown, () => {
           asked(5, "c"),
           answered(6, "", "cancelled"),
           asked(7, "d"),
-          answered(8, "", "failed", "model.run_limit"),
+          answered(8, "", "failed", "model.answer_too_long"),
         ],
         provenance: { sources: [], restricted: true },
         names: new Map(),
@@ -109,7 +109,7 @@ describe(chatMarkdown, () => {
         "**You:**\n\nc",
         "**Grasp:**\n\nStopped.",
         "**You:**\n\nd",
-        "**Grasp:**\n\nThis run has made all the model calls it may make.",
+        "**Grasp:**\n\nThis model can't give an answer that long. Pick another model, or ask for less.",
         "## Sources",
         "**Restricted**",
       ].join("\n\n")

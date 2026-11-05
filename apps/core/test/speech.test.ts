@@ -3,13 +3,13 @@ import { maxSpeechChars } from "@grasp-os/shared/voice";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
 import { speechBytesPerChar } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformElevenLabsKey } from "./connect-providers.ts";
 import { fakeProviderFor } from "./model-provider.ts";
+import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome } from "./sign-in.ts";
 
@@ -20,7 +20,7 @@ import { outcome } from "./sign-in.ts";
 // like any model call, through connect with Grasp's own key.
 // ElevenLabs is the outside system: a fake behind connect's fetch
 // (test/ai-providers-fake.ts), which says each character in 25 ms.
-// Connect, the rules, the ledger and the audit log are real.
+// Connect, the rules, the usage record and the audit log are real.
 
 const speechModel = "elevenlabs/eleven_v4";
 const quickModel = "elevenlabs/eleven_v4_turbo";
@@ -99,20 +99,19 @@ const auditedFor = async (
   return await mine();
 };
 
-/** What `userId` spent and holds in `month`, as the ledger counts it. */
-const spentBy = async (month: string, userId: string) => {
-  const spent = await modelLedger(env).spendOf(month, ["user"], 1000);
-  return spent.user?.find(({ key }) => key === userId) ?? { spentMicros: 0 };
-};
-
 /**
- * What Grasp's own key spent in `month`: a line is charged there, never
- * to the organization's spend.
+ * Waits until Grasp's own key spent `micros` in `month`: a line is
+ * recorded there after it is said, never to the organization's spend.
  */
-const graspSpent = async (month: string) => {
-  const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
-  const [row] = spent.platform ?? [];
-  return row ?? { spentMicros: 0 };
+const graspSpent = async (month: string, micros: number) => {
+  await vi.waitFor(
+    async () => {
+      await expect(
+        spentMicros(month, { credential: "platform" })
+      ).resolves.toBe(micros);
+    },
+    { timeout: 5000, interval: 20 }
+  );
 };
 
 /** A request's body, read as JSON. */
@@ -181,9 +180,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(sentWith(line)).resolves.toMatchObject([
       { body: { model_id: "eleven_v4_turbo" } },
     ]);
-    await expect(graspSpent(month)).resolves.toMatchObject({
-      spentMicros: lineMicrosOf(line.length) / 2,
-    });
+    await graspSpent(month, lineMicrosOf(line.length) / 2);
   });
 
   it("refuses a voice the speech model doesn't have, charging nothing", async () => {
@@ -200,9 +197,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         })
       )
     ).resolves.toBe("model.failed");
-    await expect(graspSpent(month)).resolves.toMatchObject({
-      spentMicros: 0,
-    });
+    await graspSpent(month, 0);
   });
 
   it("sends Grasp's key only from connect, once, to ElevenLabs alone, and never logs or hands it back", async () => {
@@ -261,12 +256,10 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       model: speechModel,
     });
 
-    await expect(graspSpent(month)).resolves.toMatchObject({
-      spentMicros: lineMicros,
-    });
-    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: 0,
-    });
+    await graspSpent(month, lineMicros);
+    await expect(spentMicros(month, { personId: person.userId })).resolves.toBe(
+      0
+    );
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
       action: "model.call",
@@ -279,9 +272,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         transport: "connect",
         credential: "platform",
         region: "eu",
-        ledger: "settled",
-        ledgerRequests: 1,
-        ledgerCharged: lineMicros / 1_000_000,
       },
     });
     // Never the line itself.
@@ -339,14 +329,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
     expect(speech.words).toHaveLength(3);
     await expect(carrying(line)).resolves.toHaveLength(2);
-    await expect(graspSpent(month)).resolves.toMatchObject({
-      spentMicros: lineMicrosOf(line.length),
-    });
+    await graspSpent(month, lineMicrosOf(line.length));
     const [event] = await auditedFor(person.userId, 1);
-    expect(event?.detail).toMatchObject({
-      outcome: "answered",
-      ledgerRequests: 2,
-    });
+    expect(event?.detail).toMatchObject({ outcome: "answered" });
   });
 
   it("gives up after asking once more, and says when to try again", async () => {

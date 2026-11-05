@@ -1,17 +1,13 @@
 import type { SpokenWord } from "@grasp-os/shared/voice";
 
-import type { ListPrices } from "./model-prices.ts";
-
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
 // models. Each speech model is ElevenLabs's, priced per character it is
-// asked to say, which is how ElevenLabs bills speech: what the ledger
-// reserves for a line is what it charges. Each transcription model is
-// OpenAI's, priced per second it hears, at a price never below what the
-// provider bills for it. Grasp pays for these on its own keys: no
-// organization's budget holds them, but the ledger records what each
-// cost, for the spend overview.
+// asked to say, which is how ElevenLabs bills speech. Each transcription
+// model is OpenAI's, priced per second it hears, at a price never below
+// what the provider bills for it. Grasp pays for these on its own keys:
+// what each cost is recorded for Grasp's spend overview (model-usage.ts).
 
 /**
  * ElevenLabs's API prices for text to speech, in US dollars per 1,000
@@ -63,16 +59,9 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
     : undefined;
 };
 
-/**
- * A speech model's prices in the shape the ledger pins: per million
- * characters, as the input a request sends. Its answer, the audio, is
- * what the characters pay for, so a request counts no output: it is
- * priced the same, and never charged.
- */
-export const voicePricesOf = ({ id }: VoiceRef): ListPrices => {
-  const perMillion = dollarsPer1000Chars[id] * 1000;
-  return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
-};
+/** What saying `characters` characters costs on `ref`, in US dollars: per million, so whole micros stay whole. */
+export const speechCostOf = ({ id }: VoiceRef, characters: number): number =>
+  (characters * dollarsPer1000Chars[id] * 1000) / 1_000_000;
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -120,20 +109,14 @@ export const parseHearingRef = (ref: string): HearingRef | undefined => {
     : undefined;
 };
 
-/**
- * A transcription model's prices in the shape the ledger pins: per
- * million seconds of audio, as the input a request sends. What is heard
- * is all it is billed for, so it counts no output.
- */
-export const hearingPricesOf = ({ id }: HearingRef): ListPrices => {
-  const perMillion = (dollarsPerHour[id] / 3600) * 1_000_000;
-  return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
-};
+/** What hearing `seconds` seconds costs on `ref`, in US dollars. */
+export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
+  (seconds * dollarsPerHour[id]) / 3600;
 
 /**
  * Characters a line is charged as: its UTF-16 length, never fewer than
- * the characters (code points) ElevenLabs counts, so the ledger's
- * reservation is never below what the line is billed.
+ * the characters (code points) ElevenLabs counts, so what is recorded is
+ * never below what the line is billed.
  */
 export const charactersOf = (text: string): number => text.length;
 

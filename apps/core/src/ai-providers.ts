@@ -48,8 +48,8 @@ import {
 import { activeMember } from "./auth/auth.ts";
 import { orgSettings } from "./db/core/schema.ts";
 import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
-import { modelLedger } from "./model-ledger.ts";
-import type { ProviderHealth } from "./model-ledger.ts";
+import { keyReplaced, providerHealthOf } from "./model-usage.ts";
+import type { ProviderHealth } from "./model-usage.ts";
 import { models } from "./models.ts";
 import { platformAi } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -85,8 +85,8 @@ import { wakeAiWaits } from "./workflows/ai-waits.ts";
 //   (a database's, which quotes its query's values) is answered as
 //   `ai_provider.failed`, never passed on.
 // - A test that bypasses the gateway: it is one tiny call through the
-//   model gateway like any other, judged by the rules, admitted by the
-//   ledger against the admin's budgets, and audited.
+//   model gateway like any other, judged by the rules, recorded and
+//   audited.
 
 /** The line a provider's test asks: no one's data. */
 const testLine = "Reply with the single word OK.";
@@ -121,7 +121,7 @@ const requireOwnAdminNow = async (env: Env, by: Identity): Promise<void> => {
   }
 };
 
-/** A provider's status from the ledger's health, by the organization's key. */
+/** A provider's status from its recorded health, by the organization's key. */
 const statusOf = (
   health: readonly ProviderHealth[],
   provider: AiProviderId
@@ -220,7 +220,7 @@ const platformUses = (keyed: readonly AiProviderId[]): AiPlatformUse[] => {
 const listing = async (env: Env): Promise<AiProvidersListing> => {
   const [keys, health, choice, routes] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
-    modelLedger(env).providerHealth(),
+    providerHealthOf(env),
     readModelChoice(env),
     env.CONNECT.aiProviderRoutes(),
   ]);
@@ -244,7 +244,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
  * Adds or replaces the provider's key in connect, which audits it in the
  * same write, in the admin's name. A new key ends what the old one's
  * refusals said: the provider no longer reads as failing
- * (`ModelLedger.keyReplaced`), and every workflow run held for a working
+ * (`keyReplaced`), and every workflow run held for a working
  * key tries again at once (`wakeAiWaits`).
  */
 const addProvider = async (
@@ -265,10 +265,9 @@ const addProvider = async (
     throw refusalOf(error);
   }
   drainConnectOutboxSoon(env);
-  const ledger = modelLedger(env);
-  await ledger.keyReplaced(add.provider);
+  await keyReplaced(env, add.provider);
   await wakeAiWaits(env);
-  return listed(saved, await ledger.providerHealth());
+  return listed(saved, await providerHealthOf(env));
 };
 
 /** The model a test of `provider` asks: the one named, or its own. */

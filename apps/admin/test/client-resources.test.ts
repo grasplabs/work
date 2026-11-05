@@ -278,9 +278,13 @@ describe("a client's resources", () => {
         )
       ).toStrictEqual(
         new Set(
-          inventory.map((row) =>
-            row.kind === "d1_database" ? row.providerId : row.physicalName
-          )
+          inventory
+            // A class the release deleted is kept in the inventory, bound
+            // by no Worker.
+            .filter(({ lifecycle }) => lifecycle !== "tombstoned")
+            .map((row) =>
+              row.kind === "d1_database" ? row.providerId : row.physicalName
+            )
         )
       );
       // ...a binding that names none of it is the release's own, as is...

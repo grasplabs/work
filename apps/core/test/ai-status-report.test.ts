@@ -69,8 +69,9 @@ const ask = async (
 /** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
 const lineMicros = (characters: number): number => characters * 80;
 
-/** GPT-4o Transcribe at $0.60 an hour, as the ledger pins it: micros per million seconds. */
-const heardMicrosPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
+/** What GPT-4o Transcribe costs for `seconds`, at $0.60 an hour, in micros. */
+const heardMicros = (seconds: number): number =>
+  Math.round(((seconds * 0.6) / 3600) * 1e6);
 
 /** The UTC month `monthsBack` before this one, such as `2026-09`. */
 const monthBack = (monthsBack: number): string => {
@@ -289,7 +290,7 @@ describe("the organization's AI, for the admin", () => {
           {
             feature: "transcription",
             model: "openai/gpt-4o-transcribe",
-            micros: Math.ceil((30 * heardMicrosPerMillionSeconds) / 1e6),
+            micros: heardMicros(30),
           },
         ],
         conversion: { model: "openai/gpt-5.4-mini", charged: true },

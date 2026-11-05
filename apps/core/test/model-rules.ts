@@ -1,10 +1,8 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach } from "vite-plus/test";
 
-import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
@@ -67,12 +65,8 @@ export const withRules = async (
 const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
-/**
- * The audit events `actor` triggered, the model ledger's alerts included:
- * its alarm delivers what its outbox holds.
- */
+/** The audit events `actor` triggered. */
 export const eventsOf = async (actor: unknown): Promise<AuditEvent[]> => {
-  await runDurableObjectAlarm(modelLedger(env));
   const events = await allEvents();
   return events.filter(
     (event) => JSON.stringify(event.actor) === JSON.stringify(actor)

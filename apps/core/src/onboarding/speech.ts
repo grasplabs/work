@@ -105,10 +105,8 @@ const gatewayRefusals: Partial<
   >
 > = {
   "model.rate_limited": { status: 429, code: "speech.busy" },
-  "model.queued": { status: 429, code: "speech.busy" },
   "model.unconfigured": { status: 503, code: "speech.unavailable" },
   "model.not_allowed": { status: 503, code: "speech.unavailable" },
-  "model.unpriced": { status: 503, code: "speech.unavailable" },
 };
 
 /** Why the gateway didn't say a line, as the page is told it. */

@@ -290,7 +290,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The month model spend counts in, which tests set (core's
   // src/model-spend.ts).
   "MODEL_BUDGET_MONTH",
-  "MODEL_LEDGER",
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",

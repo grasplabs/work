@@ -90,7 +90,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_runs": { company: "runs they started (D3)" },
   "core.run_lineage_attempts": { kept: "accounting of a run's attempts" },
   "core.build_leases": { kept: "admission, by ID" },
-  "core.workflow_model_waits": { kept: "a step's wait, gone once it stops" },
+  "core.workflow_model_waits": { kept: "a step's wait, no longer written" },
+  // Spend is recorded by ID: a person's usage is keyed by their user ID,
+  // never their name or address.
+  "core.model_usage": { kept: "accounting, by ID" },
+  "core.provider_health": noPerson,
   "core.run_mail_stamps": { company: "mail a run sent (D3)" },
   "core.run_inboxes": noPerson,
   "core.run_mail_calls": { company: "mail a run sent (D3)" },
@@ -448,15 +452,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brain.brain_forgotten_people": {
     kept: "keeps their memory from coming back",
   },
-  // The model ledger.
-  "modelLedger.requests": { kept: "accounting, by ID" },
-  // Spend is accounted by ID: a person's scope is keyed and named by their
-  // user ID, never their name or address.
-  "modelLedger.spend": { kept: "accounting, by ID" },
-  "modelLedger.provider_health": noPerson,
-  "modelLedger.audit_outbox": {
-    kept: "audit events on their way to the log (D2)",
-  },
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
@@ -587,6 +582,7 @@ export const reviewedPersonColumns: Readonly<
   "core.workflow_emitted_events": ["subject"],
   "core.workflow_item_tests": ["principal_id"],
   "core.workflow_model_waits": ["owner"],
+  "core.model_usage": ["person_id"],
   "core.workflow_resource_drafts": ["edited_by"],
   "core.workflow_resource_lifecycles": [
     "go_live_requested_by",
@@ -617,7 +613,6 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_records": ["owner_id"],
   "dataStore.sdk_schema_backfills": ["cursor_owner"],
   "dataStore.sdk_store": ["deleted_by"],
-  "modelLedger.requests": ["actor", "settled_by", "subject"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
   "onboarding.brain_sent": ["person"],

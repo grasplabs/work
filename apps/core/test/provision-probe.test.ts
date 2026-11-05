@@ -184,7 +184,6 @@ describe("the console's provisioning probe", () => {
           BUILTINS: true,
           CLOCK: true,
           ONBOARDING: true,
-          MODEL_LEDGER: true,
           DATA_STORES: true,
           WORKFLOW_RUNS: true,
           ACTION_INVOCATIONS: true,

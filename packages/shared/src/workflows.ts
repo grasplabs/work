@@ -488,8 +488,7 @@ export const runOfStepKey = (key: string): string | undefined => {
  * connector said nothing was done); a call with the same idempotency key
  * still running, whose answer a retry gets; a model call that failed, or
  * that the model budget turned away only while other calls under way hold
- * it, that waited for a share of the model requests in flight, or that its
- * provider's rate limit turned away (nothing was sent, or nothing billed); something unplanned in the platform, where
+ * it, or that its provider's rate limit turned away (nothing was sent, or nothing billed); something unplanned in the platform, where
  * connect's idempotency keys keep a retried side effect to once; and a
  * model's answer that didn't fit, which the SDK asks for again. Any other
  * failure stops the run: a refusal, a tool's own error (it may have
@@ -502,9 +501,7 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "model.failed",
   // A provider that didn't answer: what `model.failed` said of it before.
   "model.provider_unavailable",
-  // Nothing was sent; a share of the model requests in flight comes back
-  // as they end, and a provider's rate as its window passes.
-  "model.queued",
+  // Nothing was sent; a provider's rate comes back as its window passes.
   "model.rate_limited",
   // Nothing ran; room comes back as the lineage's attempts under way settle.
   "workflow.lineage_busy",
@@ -571,9 +568,9 @@ export interface RunFailure {
 }
 
 /**
- * Where a run is: running (a step, or a sleep), queued for a share of the
- * attempts that run at once (`RunQueue`), waiting for a decision, paused
- * (its engine instance is), or ended.
+ * Where a run is: running (a step, or a sleep), queued for a working AI
+ * provider (`RunAiProviderWait`), waiting for a decision, paused (its
+ * engine instance is), or ended.
  */
 export type RunStatus =
   | "queued"
@@ -698,18 +695,6 @@ export interface RunControl {
 }
 
 /**
- * What a `queued` run waits for: a share of the attempts that run at once
- * of its App (`app`), of the person it counts for (`person`) or of the
- * whole organization (`client`), and when it asks again at the latest
- * (ISO 8601). Throttling, not a fault of the workflow. It names the share
- * only: never who else holds it, nor their runs.
- */
-export interface RunQueue {
-  waitingFor: "client" | "person";
-  retryAt: string;
-}
-
-/**
  * What a `queued` run waits for when a model call of it failed on the
  * organization's own AI provider key: the provider, what it showed, by
  * the HTTP class seen (it refuses the key, isn't answering, or is limiting
@@ -732,8 +717,6 @@ export interface WorkflowRun {
   /** A person started it (and it acts for them), or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   status: RunStatus;
-  /** While it is `queued`: the share it waits for, and when it asks again. */
-  queued?: RunQueue;
   /** While it is `queued` for its AI provider: which, what it showed, and since when. */
   aiProvider?: RunAiProviderWait;
   createdAt: string;
@@ -810,8 +793,6 @@ export interface ListedRun {
   /** The person it acts for: who started it, or whom its start named. */
   startedBy: { type: "person"; userId: string };
   status: RunStatus;
-  /** While it is `queued`: the share it waits for, and when it asks again. */
-  queued?: RunQueue;
   /** While it is `queued` for an AI provider: which, and what's wrong. */
   aiProvider?: RunAiProviderWait;
   /**
@@ -846,8 +827,6 @@ export const handledRunDays = 7;
 export interface LatestRun {
   id: RunId;
   status: RunStatus;
-  /** While it is `queued`: the share it waits for. */
-  queued?: RunQueue;
   /** While it is `queued` for its AI provider: which, what it showed, and since when. */
   aiProvider?: RunAiProviderWait;
   createdAt: string;

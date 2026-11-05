@@ -55,6 +55,27 @@ const base = git("merge-base", "origin/main", "HEAD").trim();
 const changedHere = (file: string): boolean =>
   git("diff", "--name-only", base, "--", file).trim() !== "";
 
+/**
+ * Whether `line` deletes a migration of a database the branch removes
+ * whole, its journal too (a Durable Object class deleted with its storage):
+ * nothing applies its migrations again.
+ */
+const ofRemovedDatabase = (line: string): boolean => {
+  const [status, file = ""] = line.split("\t");
+  if (status !== "D") {
+    return false;
+  }
+  const journal = `${file.slice(0, file.lastIndexOf("/"))}/meta/_journal.json`;
+  try {
+    execFileSync("git", ["cat-file", "-e", `HEAD:${journal}`], {
+      stdio: "ignore",
+    });
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 // A migration moved unchanged with its app (a rename at 100% similarity)
 // is still the one main shipped: only its path changed.
 const changed = git(
@@ -67,7 +88,10 @@ const changed = git(
   "*/migrations/*.sql"
 )
   .split("\n")
-  .filter((line) => line !== "" && !line.startsWith("R100\t"));
+  .filter(
+    (line) =>
+      line !== "" && !line.startsWith("R100\t") && !ofRemovedDatabase(line)
+  );
 for (const line of changed) {
   errors.push(
     `${line.split("\t").at(-1)} is on main already: add a new migration instead of changing it.`

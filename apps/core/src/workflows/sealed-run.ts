@@ -2907,7 +2907,6 @@ export const sealedRunFrom = (
       ? {}
       : { accountRunId: runIdSchema.parse(calling.accountRunId) }),
     authority: runAuthority(calling),
-    shareSubject: calling.principal,
     workflowId: run.workflowId,
     version: run.version,
     build: run.build,

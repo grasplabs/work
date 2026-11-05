@@ -15,14 +15,13 @@ import type { RouteApi } from "./model-catalog.ts";
 // How the model gateway (models.ts) reaches a model: a route through
 // connect (model-transport-connect.ts). The gateway stays the one choke
 // point: the
-// organization's chosen models and the rules (model-rules.ts), the model
-// ledger's admission of every provider
-// request before it is sent, and the audit log all run before and around
-// it, never inside it. A transport only says where a request goes and how
+// organization's chosen models and the rules (model-rules.ts), the audit
+// log and the record of what each response used (model-usage.ts) all run
+// before and around it, never inside it. A transport only says where a request goes and how
 // it is authenticated: the endpoint, the model's name there, the headers,
 // and the fetch that carries it. Everything a transport sends goes through
 // the fetch the gateway wraps around it (`open` in models.ts), so no
-// request leaves unadmitted, uncounted or unaudited.
+// request leaves unchecked or unaudited.
 //
 // The interface:
 // - Streaming and whole answers: `streamRoute` streams one request with
@@ -79,16 +78,13 @@ export interface TransportRoute {
  *   was taken on.
  * - `provider_down`: the endpoint failed (5xx) or didn't answer. It may
  *   have taken the request on, and billed it: never sent again.
- * - `held`: the model ledger held it back, unsent (models.ts sets this,
- *   never a response).
  */
 export type TransportFailure =
   | { kind: "auth"; status: number }
   | { kind: "quota"; status: number }
   | { kind: "rate_limited"; status: number; retryAfterSeconds: number }
   | { kind: "refused"; status: number }
-  | { kind: "provider_down"; status: number | undefined }
-  | { kind: "held" };
+  | { kind: "provider_down"; status: number | undefined };
 
 /**
  * What a refused response means (`TransportFailure`), from its status, the
@@ -122,7 +118,7 @@ export interface RequestCache {
 
 /** What one streamed request takes beyond its route and conversation. */
 export interface StreamOptions {
-  /** The gateway's fetch around the route's: admission, accounting. */
+  /** The gateway's fetch around the route's: its checks, and what it notes. */
   fetch: FetchFunction;
   maxTokens: number;
   reasoning: SimpleStreamOptions["reasoning"];
@@ -156,7 +152,7 @@ export const streamRoute = async (
     headers: route.headers,
     maxTokens: options.maxTokens,
     // pi's provider SDKs never retry: the gateway retries only what can't
-    // have been billed (models.ts), each retry admitted by the ledger.
+    // have been billed (models.ts).
     maxRetries: 0,
     reasoning: options.reasoning,
     signal: options.signal,

@@ -20,7 +20,7 @@ import { formatSince } from "../format.ts";
 
 // What the organization's own admins see over every page while one of its
 // AI providers fails its calls, worded by what was seen, by HTTP class
-// only, never a guess at why (`ProviderTrouble`, from the model ledger's
+// only, never a guess at why (`ProviderTrouble`, from the gateway's
 // provider health through `aiProviders.list`): it refuses the key, it
 // isn't answering (an outage, most often), or it is limiting requests. No
 // call has worked since. Chats fall back to the organization's backup

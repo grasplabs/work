@@ -2,7 +2,6 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 
-import type { ModelShare } from "./model-admission.ts";
 import { isRestricted } from "./restricted.ts";
 import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 
@@ -10,12 +9,9 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 // sent (models.ts), beyond the allowlist, which always applies: that the
 // call works in a context its authority can work in. A call without one,
 // or with another's, is refused, so no call is made in a context that
-// isn't its own, or none.
-//
-// Each request a call sends is then admitted by the model ledger, which
-// counts what it costs and holds a run lineage to its limit of requests
-// (model-spend.ts, model-ledger.ts). Nothing limits spend: clients pay
-// their providers on their own keys.
+// isn't its own, or none. Nothing limits spend: clients pay their
+// providers on their own keys, and what each response cost is recorded
+// after it (model-usage.ts).
 
 /** What the gateway checks a call by. */
 export interface RulesInput {
@@ -51,23 +47,9 @@ export interface Refusal {
   code:
     | "model.no_provider"
     | "model.not_allowed"
-    | "model.run_limit"
-    | "model.queued"
-    | "model.rate_limited"
-    | "model.unpriced"
     | "model.answer_too_long"
-    | "model.ledger_unavailable"
-    | "model.quota_policy_unavailable"
     | "permission.context_invalid";
   because?: string;
-  /**
-   * When asking again may be admitted, in seconds, as core computes it:
-   * for `model.queued`, until its call asks for a share again; for
-   * `model.rate_limited`, until the provider's rate may let it through.
-   */
-  retryAfterSeconds?: number;
-  /** For `model.queued`: the limit of the requests in flight it waits for. */
-  waitingFor?: ModelShare;
 }
 
 /**

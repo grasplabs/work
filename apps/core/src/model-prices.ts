@@ -1,67 +1,17 @@
-import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+import type { Api, Model, Usage } from "@earendil-works/pi-ai";
+import { calculateCost } from "@earendil-works/pi-ai/models";
 
-// What model requests cost, in whole millionths of a US dollar (micros):
-// the prices a request is pinned to when it is admitted, the most it can
-// cost, which the model ledger charges when its usage is lost
-// (model-ledger.ts), and what its usage cost, which the ledger charges.
-// Integers only, rounded up, so no sum of many small requests rounds away
-// to nothing, and the most a request can cost is never below what it can
-// cost at those prices.
-//
-// Some models are priced in tiers: past a number of prompt tokens, all of
-// the request is charged at the tier's prices (OpenAI's GPT-5.4 and later
-// past 272K). A request is charged at its tier as pi's `calculateCost`
-// picks it, so the ledger agrees with the cost the audit log records, and
-// bounded at the dearest tier, which its prompt may reach.
-//
-// Prices the catalog leaves out are refused before a request is sent
-// (model-requests.ts): Anthropic's one-hour cache writes, a provider's
-// service tiers. Anthropic's long-context premium, which pi's catalog
-// doesn't price either, is added here as a tier (`listPricesOf`).
-
-/** Micros in a US dollar. */
-export const microsPerDollar = 1_000_000;
-
-/** The token counts that prices are given per. */
-const tokensPerPrice = 1_000_000n;
-
-/** Prices per million tokens, of each kind. */
-export interface Rates {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-/** Prices that apply to a request whose prompt has more than `inputTokensAbove` tokens. */
-export interface Tier extends Rates {
-  inputTokensAbove: number;
-}
-
-/**
- * A model's list prices as a request is charged at them: micros per
- * million tokens, rounded up to whole micros, its tiers lowest first, and
- * the content hash of all of them, which names the catalog entry they came
- * from.
- */
-export interface PinnedPrice extends Rates {
-  version: string;
-  tiers: Tier[];
-}
+// What a model request cost, in US dollars at its provider's list prices:
+// pi's own `calculateCost` over the usage the provider reported, which
+// prices a model's tiers (past a number of prompt tokens, all of a request
+// at the tier's prices: OpenAI's GPT-5.4 and later past 272K) and
+// Anthropic's one-hour cache writes. Anthropic's long-context premium,
+// which pi's catalog doesn't price, is added here as a tier
+// (`listPricesOf`). An estimate for an overview, never a bill: the
+// provider's invoice is the bill.
 
 /** A model's prices as pi's catalog gives them: US dollars per million tokens. */
-export interface ListPrices extends Rates {
-  tiers?: readonly Tier[];
-}
-
-/** Tokens a request used, or may use, by how they are priced. */
-export interface TokenCounts {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+export type ListPrices = Model<Api>["cost"];
 
 /** The prompt tokens past which Anthropic's long-context premium applies. */
 const longContextTokens = 200_000;
@@ -113,148 +63,18 @@ export const listPricesOf = (
 };
 
 /**
- * Dollars per million tokens as whole micros, rounded up. The catalog's
- * prices are decimals such as 0.293, which are a hair off in binary: they
- * are rounded to a thousandth of a micro first, so 0.293 is 293000.
+ * What `usage` cost on `model` (pi's catalog entry of `provider`'s model
+ * `id`), in US dollars at its list prices (`listPricesOf`), as pi's
+ * `calculateCost` prices it; 0 for a count that isn't one.
  */
-const microsOf = (dollars: number): number =>
-  Math.ceil(Math.round(dollars * microsPerDollar * 1000) / 1000);
-
-const isPrice = (value: number): boolean =>
-  Number.isFinite(value) && value >= 0 && Number.isSafeInteger(microsOf(value));
-
-/** Whether `rates` are all prices, with some for input and output. */
-const arePrices = ({ input, output, cacheRead, cacheWrite }: Rates): boolean =>
-  [input, output, cacheRead, cacheWrite].every(isPrice) &&
-  input > 0 &&
-  output > 0;
-
-const ratesOf = ({ input, output, cacheRead, cacheWrite }: Rates): Rates => ({
-  input: microsOf(input),
-  output: microsOf(output),
-  cacheRead: microsOf(cacheRead),
-  cacheWrite: microsOf(cacheWrite),
-});
-
-/**
- * The prices a model's requests are pinned to, or `undefined` for a model
- * with no safe price: a price that isn't a number, below nothing, or none
- * at all for its input or its output, which a catalog gives a model it
- * doesn't know the price of, in its base prices or any tier. What such a
- * model costs can't be told: its requests are counted at no cost.
- */
-export const pinnedPrice = async (
-  prices: ListPrices
-): Promise<PinnedPrice | undefined> => {
-  const tiers = prices.tiers ?? [];
-  if (
-    !arePrices(prices) ||
-    !tiers.every(
-      (tier) =>
-        arePrices(tier) &&
-        Number.isSafeInteger(tier.inputTokensAbove) &&
-        tier.inputTokensAbove >= 0
-    )
-  ) {
-    return undefined;
-  }
-  const rates = {
-    ...ratesOf(prices),
-    tiers: tiers
-      .map((tier) => ({
-        inputTokensAbove: tier.inputTokensAbove,
-        ...ratesOf(tier),
-      }))
-      .toSorted((one, other) => one.inputTokensAbove - other.inputTokensAbove),
-  };
-  return {
-    version: `sha256:${await sha256Hex(canonicalJson(rates))}`,
-    ...rates,
-  };
-};
-
-/**
- * The rates `tokens` are charged at, as pi's `calculateCost` picks them:
- * the tier with the highest threshold its whole prompt (cached or not) is
- * past, or the base prices.
- */
-const ratesFor = (price: PinnedPrice, tokens: TokenCounts): Rates => {
-  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite;
-  let rates: Rates = price;
-  let matched = -1;
-  for (const tier of price.tiers) {
-    if (prompt > tier.inputTokensAbove && tier.inputTokensAbove > matched) {
-      rates = tier;
-      matched = tier.inputTokensAbove;
-    }
-  }
-  return rates;
-};
-
-/** `tokens` at `rate` micros a million, rounded up. */
-const priced = (tokens: number, rate: number): bigint => {
-  if (!(Number.isSafeInteger(tokens) && tokens >= 0)) {
-    throw new RangeError("A token count is a whole number, at least 0");
-  }
-  const product = BigInt(tokens) * BigInt(rate);
-  return (product + tokensPerPrice - 1n) / tokensPerPrice;
-};
-
-const safeMicros = (micros: bigint): number => {
-  const value = Number(micros);
-  if (!Number.isSafeInteger(value)) {
-    throw new RangeError("A cost too large to count");
-  }
-  return value;
-};
-
-/** What `tokens` cost at `price`, each kind at its own price, in its tier. */
-export const costMicros = (price: PinnedPrice, tokens: TokenCounts): number => {
-  const rates = ratesFor(price, tokens);
-  return safeMicros(
-    priced(tokens.input, rates.input) +
-      priced(tokens.output, rates.output) +
-      priced(tokens.cacheRead, rates.cacheRead) +
-      priced(tokens.cacheWrite, rates.cacheWrite)
-  );
-};
-
-/**
- * What `tokens` cost at `price`, in US dollars, as exactly as a float
- * holds it, before the ledger rounds each kind up to a micro: for the
- * audit event, which records the same cost.
- */
-export const costDollars = (
-  price: PinnedPrice,
-  tokens: TokenCounts
+export const usageCost = (
+  { provider, id, model }: { provider: string; id: string; model: Model<Api> },
+  usage: Usage
 ): number => {
-  const rates = ratesFor(price, tokens);
-  const micros =
-    BigInt(tokens.input) * BigInt(rates.input) +
-    BigInt(tokens.output) * BigInt(rates.output) +
-    BigInt(tokens.cacheRead) * BigInt(rates.cacheRead) +
-    BigInt(tokens.cacheWrite) * BigInt(rates.cacheWrite);
-  return Number(micros) / (Number(tokensPerPrice) * microsPerDollar);
-};
-
-/**
- * The most a request can cost at `price`: its input bound at the dearest
- * price any input token can take, in any tier (written to the provider's
- * cache costs more than plain input), and its output bound at the dearest
- * output price.
- */
-export const boundMicros = (
-  price: PinnedPrice,
-  bound: { inputTokens: number; outputTokens: number }
-): number => {
-  const all: Rates[] = [price, ...price.tiers];
-  const input = Math.max(
-    ...all.map(({ input: plain, cacheRead, cacheWrite }) =>
-      Math.max(plain, cacheRead, cacheWrite)
-    )
+  const { total } = calculateCost(
+    { ...model, cost: listPricesOf(provider, id, model.cost) },
+    // pi writes the cost into the usage it is given: never the caller's.
+    { ...usage, cost: { ...usage.cost } }
   );
-  const output = Math.max(...all.map((rates) => rates.output));
-  return safeMicros(
-    priced(bound.inputTokens, input) + priced(bound.outputTokens, output)
-  );
+  return Number.isFinite(total) && total > 0 ? total : 0;
 };

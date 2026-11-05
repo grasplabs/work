@@ -188,7 +188,7 @@ describe("sessions end", () => {
       // there on a socket another request opened.
       const before = reads.sessions;
       await runInDurableObject(
-        env.MODEL_LEDGER.getByName(crypto.randomUUID()),
+        env.CHAT_STATE.getByName(crypto.randomUUID()),
         async () => {
           await vi.advanceTimersByTimeAsync(sessionRecheckMs);
         }

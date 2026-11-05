@@ -127,10 +127,8 @@ const purpose = "onboarding.transcription";
 const gatewayRefusals: Partial<
   Record<string, Parameters<typeof transcriptionErrors.create>[0]>
 > = {
-  "model.queued": "transcription.busy",
   "model.unconfigured": "transcription.unavailable",
   "model.not_allowed": "transcription.unavailable",
-  "model.unpriced": "transcription.unavailable",
 };
 
 /** Refusals that leave the session as `limited`: the link's minutes, or a busy gateway. */

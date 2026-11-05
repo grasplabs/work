@@ -1947,14 +1947,9 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       )
     );
   }
-  // A budget busy with requests under way, a full share of the requests in
-  // flight, a provider's rate: worth trying again, after the wait the
-  // gateway computed, the only detail passed on.
-  if (
-    code === "resource.budget_busy" ||
-    code === "resource.queued" ||
-    code === "resource.rate_limited"
-  ) {
+  // A budget busy with requests under way, a provider's rate: worth trying
+  // again, after the wait the gateway computed, the only detail passed on.
+  if (code === "resource.budget_busy" || code === "resource.rate_limited") {
     return hostError(
       operationErrors.create(
         code,

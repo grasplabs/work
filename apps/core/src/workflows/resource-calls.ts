@@ -801,17 +801,14 @@ const callModel = async (
       ),
       purpose: "workflow.step",
       trigger: { type: "system" },
-      // Its account's: the run and every child under it share the model
-      // requests of the account they are charged to at the gateway (their
-      // lineage's root, or their workflow's account in the lineage a
-      // trigger started them in), whatever each one's own `maxModelCalls`
-      // allows (run-children.ts). Its spend counts against its workflow's
-      // budget too.
+      // Its account's: its spend counts in the run lineage of the account
+      // it is charged to (its lineage's root, or its workflow's account in
+      // the lineage a trigger started it in), and in its workflow's.
       lineage: { rootRunId: run.accountRunId, workflowId: run.workflowId },
       work: { authority: runAuthority(run), context: runContext(run) },
-      // Once the ledger admitted each provider request, the run's authority
-      // decided again (it may have gone while the request waited), then its
-      // lease, nothing awaited before the request is sent.
+      // Before each provider request, the run's authority decided again
+      // (it may have gone meanwhile), then its lease, nothing awaited
+      // before the request is sent.
       reauthorize: async () => {
         try {
           await requireCallAuthority(env, run, binding);

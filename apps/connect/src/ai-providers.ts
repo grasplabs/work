@@ -35,9 +35,8 @@ import { aiProviderKeys, auditOutbox } from "./db/schema.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 
 // The AI providers' credentials, and the one place a model request leaves
-// for a provider with one. Core's model gateway decides each call, has the
-// model ledger admit each provider request and audits it (core's
-// models.ts); it runs pi's adapter for the provider's API with a fetch that
+// for a provider with one. Core's model gateway decides each call, audits
+// it and records what it used (core's models.ts); it runs pi's adapter for the provider's API with a fetch that
 // hands each request here (`modelFetch`), with a grant it signed for that
 // request (@grasp-os/shared/capability, `signModelGrant`). Connect adds the
 // key and sends it. Core never holds a key.
