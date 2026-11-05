@@ -213,9 +213,7 @@ const said: Record<string, string[]> = {
     "server/m-kit-path.ts:1:31 TS2307 error",
     "server/m-library.ts:1:30 TS2307 error",
     "server/m-react.ts:1:32 TS2307 error",
-    // TS2322 when it was recorded; `query` has since taken an overload
-    // without `returns`, so none matches, at the same place.
-    "server/m-returns.ts:4:76 TS2769 error",
+    "server/m-returns.ts:4:76 TS2322 error",
     "server/m-screen-module.ts:1:31 TS2307 error",
     "server/m-undefined.ts:1:45 TS18048 error",
   ],

@@ -136,9 +136,24 @@ query({
   handler: () => "1",
 });
 
-// Without `returns`, the handler's answer is the return.
+action({
+  args: {},
+  returns: v.string(),
+  // @ts-expect-error -- a number isn't the declared string
+  handler: () => 1,
+});
+
+// Without `returns`, the handler's answer is the return, of every kind.
 expectTypeOf(query({ args: {}, handler: () => ({ count: 1 }) })).toExtend<
   FunctionReference<"query", "public", Record<never, never>, { count: number }>
+>();
+expectTypeOf(
+  mutation({ args: {}, handler: async () => await Promise.resolve("saved") })
+).toExtend<
+  FunctionReference<"mutation", "public", Record<never, never>, string>
+>();
+expectTypeOf(action({ args: {}, handler: () => 1 })).toExtend<
+  FunctionReference<"action", "public", Record<never, never>, number>
 >();
 // There is no `input`/`output` form.
 // @ts-expect-error -- `input` is superseded by `args`
