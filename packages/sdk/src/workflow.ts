@@ -718,12 +718,13 @@ export type WorkflowBrainBinding = Required<
 
 /**
  * Which of the App's functions `callFunction` calls: its generated
- * reference, its name and kind. The host resolves it in the release the
- * run is pinned to.
+ * reference, or its name and kind. A query's reference holds no kind, so
+ * a reference without one calls a query. The host resolves it in the
+ * release the run is pinned to.
  */
 export interface FunctionReferenceName {
   readonly name: string;
-  readonly kind: ReferenceKind;
+  readonly kind?: ReferenceKind;
 }
 
 /**

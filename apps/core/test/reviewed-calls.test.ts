@@ -324,27 +324,32 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     });
   });
 
-  it("call the App's own function through its generated reference, which carries more than its name and kind", async () => {
+  it("call the App's own functions through their generated references: a query's with no kind, a mutation's with more than its name and kind", async () => {
     const admin = await personApi("admin");
-    // A mutation's reference as `_generated/api` holds it: its name, kind
-    // and arguments' descriptor, which the host's request doesn't take.
+    // References as `_generated/api` holds them: a mutation's name, kind
+    // and arguments' descriptor, which the host's request doesn't take,
+    // and a query's name and declared return, with no kind at all.
     const app = await appWith(
       admin,
       workflowFiles(
         "bumper",
-        `  return await step.do("bump", { description: "Bump" }, async () => {
+        `  type Answer = { ok: true; value: Json } | { ok: false; error: { code: string } };
+  const outcome = (answer: Answer): Json => (answer.ok ? answer.value : answer.error.code);
+  return await step.do("bump", { description: "Bump" }, async () => {
     const bump = { name: "counter.bump", kind: "mutation" as const, args: { descriptorVersion: 1, kind: "object" } };
-    const answer = (await env.APP.callFunction(bump, { name: "generated" })) as { ok: true; value: Json } | { ok: false; error: { code: string } };
-    return answer.ok ? answer.value : answer.error.code;
+    const hits = { name: "counter.hits", returns: { descriptorVersion: 1, kind: "number" } };
+    const bumped = outcome((await env.APP.callFunction(bump, { name: "generated" })) as Answer);
+    const read = outcome((await env.APP.callFunction(hits, { name: "generated" })) as Answer);
+    return [bumped, read];
   });`,
-        { bump: 1 }
+        { bump: [1, 1] }
       )
     );
     const run = await admin.api.workflows.start(app, "bumper");
     await finished(run.id);
     await expect(outcomeOf(admin, run.id)).resolves.toMatchObject({
       status: "completed",
-      output: 1,
+      output: [1, 1],
     });
   });
 
