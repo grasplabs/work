@@ -72,7 +72,7 @@ type Punctuation = (typeof punctuation)[number];
 /** One token of a header: a run of text, a quoted string or punctuation. */
 interface Token {
   readonly kind: "word" | "quoted" | Punctuation;
-  /** Its text; a quoted string's content, its quoted pairs undone. */
+  /** Its text as written: a quoted string's with its quotes and escapes. */
   readonly text: string;
   /** Whether CFWS comes before it. */
   readonly spaced: boolean;
@@ -98,18 +98,13 @@ const isWordChar = (char: string): boolean =>
   !isPunctuation(char);
 
 /**
- * Where the RFC 5322 comment or quoted string opening at `start` ends (past
- * its closing character), and its content, quoted pairs undone. Comments
- * nest; quoted strings don't.
+ * Where the RFC 5322 comment or quoted string opening at `start` ends, past
+ * its closing character. Comments nest; quoted strings don't.
  */
-const delimited = (
-  text: string,
-  start: number
-): { end: number; content: string } => {
+const delimited = (text: string, start: number): number => {
   const nests = text.charAt(start) === "(";
   const close = nests ? ")" : '"';
   let depth = 1;
-  let content = "";
   for (let at = start + 1; at < text.length; at += 1) {
     const quotedPair = text.charAt(at) === "\\";
     if (quotedPair) {
@@ -127,12 +122,11 @@ const delimited = (
     if (!quotedPair && char === close) {
       depth -= 1;
       if (depth === 0) {
-        return { end: at + 1, content };
+        return at + 1;
       }
     } else if (!quotedPair && nests && char === "(") {
       depth += 1;
     }
-    content += char;
   }
   throw unparsable("A comment or quoted string never ends");
 };
@@ -145,13 +139,13 @@ const tokensOf = (text: string): Token[] => {
   while (at < text.length) {
     const char = text.charAt(at);
     if (isWhitespace(char) || char === "(") {
-      at = char === "(" ? delimited(text, at).end : at + 1;
+      at = char === "(" ? delimited(text, at) : at + 1;
       spaced = true;
       continue;
     }
     if (char === '"') {
-      const { end, content } = delimited(text, at);
-      tokens.push({ kind: "quoted", text: content, spaced });
+      const end = delimited(text, at);
+      tokens.push({ kind: "quoted", text: text.slice(at, end), spaced });
       at = end;
     } else if (isPunctuation(char)) {
       tokens.push({ kind: char, text: char, spaced });
@@ -298,24 +292,27 @@ const instanceOf = (digits: string | undefined): number => {
   return instance;
 };
 
-/** An ARC-Authentication-Results header's instance (`i=N;`, RFC 8617 4.1.1). */
-const arcInstance = (reader: Reader): number => {
-  reader.word(/^i$/u);
-  reader.expect("=");
-  const instance = instanceOf(reader.word(digitsPattern));
-  reader.expect(";");
-  return instance;
-};
+/**
+ * An ARC-Authentication-Results header's instance (RFC 8617 4.1.1), read
+ * as Email Routing writes it, `i=N;` with no comments: a sealer reading a
+ * commented one otherwise could number its set differently from us.
+ */
+const resultsInstanceOf = (value: string): number =>
+  instanceOf(
+    /^[ \t]*i[ \t]*=[ \t]*(?<instance>\d{1,2})[ \t]*;/u.exec(value)?.groups
+      ?.instance
+  );
 
 /**
  * An ARC-Authentication-Results header's authserv-id, lower case, and
- * results (RFC 8601 2.2's `authres-payload`): none for `; none`.
+ * results (RFC 8601 2.2's `authres-payload`, past its instance's `;`):
+ * none for `; none`. The authserv-id is compared as written: Email
+ * Routing writes it unquoted.
  */
 const arcResults = (
   value: string
 ): { authservId: string; results: ResultInfo[] } => {
-  const reader = new Reader(value);
-  arcInstance(reader);
+  const reader = new Reader(value.slice(value.indexOf(";") + 1));
   const authservId = reader.value().toLowerCase();
   // A version not known stops the parse (RFC 8601 2.6): only 1 exists.
   if (reader.peek()?.kind === "word") {
@@ -409,9 +406,7 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
   const resultsHeaders = values("arc-authentication-results");
   // Of the others' results only their instance is read: they needn't be
   // the grammar's past it (Microsoft 365 writes `action=none`).
-  const resultsInstances = resultsHeaders.map((value) =>
-    arcInstance(new Reader(value.slice(0, value.indexOf(";") + 1)))
-  );
+  const resultsInstances = resultsHeaders.map(resultsInstanceOf);
   const seals = values("arc-seal").map(arcTagsOf);
   const sealInstances = seals.map(({ instance }) => instance);
   const signatureInstances = values("arc-message-signature").map(

@@ -101,7 +101,8 @@ describe("Authentication-Results grammar (RFC 8601 2.2)", () => {
         dkim: { result: "pass", domain: "acme.test" },
         dmarc: { result: "pass", domain: "acme.test" },
       },
-      quotedAuthserv: { result: "pass", domain: "acme.test" },
+      // Compared as written: Email Routing writes it unquoted.
+      quotedAuthserv: null,
     });
   });
 
@@ -290,6 +291,9 @@ describe("a reply's authentication", () => {
       oneLabel: routing('spf=pass smtp.mailfrom="acme"').spf,
       trailingDot: routing("dkim=pass header.d=acme.test.").dkim,
       identity: routing("dkim=pass header.i=ben@Mail.Acme.Test").dkim,
+      // Checked as written: a domain-name never holds a quote.
+      quotedDomain: routing('spf=pass smtp.mailfrom=x@"bank.test"').spf,
+      quotedLocal: routing('spf=pass smtp.mailfrom="first last"@acme.test').spf,
       // U+212A KELVIN SIGN lower-cases to an ASCII `k`.
       kelvin: routing("dmarc=none header.from=\u212Araken.com").dmarc,
     }).toStrictEqual({
@@ -298,6 +302,8 @@ describe("a reply's authentication", () => {
       oneLabel: { result: "pass", domain: null },
       trailingDot: { result: "pass", domain: null },
       identity: { result: "pass", domain: "mail.acme.test" },
+      quotedDomain: { result: "pass", domain: null },
+      quotedLocal: { result: "pass", domain: "acme.test" },
       kelvin: { result: "none", domain: null },
     });
   });
@@ -403,6 +409,14 @@ describe("a reply's authentication", () => {
       passAtOne: bossReport(...arcSet(1, forged, "pass")),
       noneAbove: bossReport(...arcSet(2, forged, "none"), ...arcSet(1, forged)),
       // A tag twice in two cases, which a sealer may read as one.
+      // An instance a sealer reading it loosely may take as 50.
+      commentedInstance: bossReport(
+        ...arcSet(1, forged).map(({ key, value }) => ({
+          key,
+          value:
+            key === "arc-authentication-results" ? `(i=50) ${value}` : value,
+        }))
+      ),
       casedTagTwice: bossReport(
         ...arcSet(2, forged, "pass; CV=fail"),
         ...arcSet(1, forged)
@@ -447,6 +461,7 @@ describe("a reply's authentication", () => {
       passAtOne: nothing,
       noneAbove: nothing,
       casedTagTwice: nothing,
+      commentedInstance: nothing,
       unreadableSeal: nothing,
       unreadableInstance: nothing,
       lowerUnreadable: { result: "pass", domain: "bank.test" },
