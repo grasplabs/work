@@ -1,197 +1,130 @@
 /**
- * App code held to the repo's own bar, Ultracite: the rules of the oxlint
- * presets the repo extends, which an exported App's `oxlint` runs too, and
- * its Prettier config. oxlint and oxfmt are native and have no WebAssembly
- * build, so the isolate runs each rule's ESLint equivalent on ESLint's
- * `Linter`, under oxlint's name (worked out when the compiler was built:
- * `#ultracite-rules`, ultracite-rules.ts), and Prettier's standalone
- * build. It runs in an isolate of its own (ultracite-worker.ts), started
- * only when a write tidies or a check lints.
+ * App code held to the repo's own bar, Ultracite: its oxlint presets and
+ * its oxfmt config (ultracite-config.ts), run by oxlint and oxfmt
+ * themselves, compiled to WebAssembly (oxc.ts), the same releases an
+ * exported App's own oxlint and oxfmt are. It runs in an isolate of its
+ * own (ultracite-worker.ts), started only when a write tidies or a check
+ * lints. Disable comments are oxlint's own to read.
  *
  * - `tidy`, on every write, before it is saved: every fix oxlint counts as
- *   safe, then Prettier, so the agent never spends a turn on formatting or
- *   on what fixes itself.
+ *   safe (`oxlint --fix`), then oxfmt, so the agent never spends a turn on
+ *   formatting or on what fixes itself.
  * - `lintCode`, in what every write and check reports: every rule, no
  *   fixes, a file at a time (core keeps each file's result:
  *   module-cache.ts).
+ *
+ * A file oxc.wasm can't take (nested too deep, or too large for its
+ * memory) fails alone: the others in its call, and every other App's,
+ * are linted and tidied as ever (oxc.ts).
  */
-import { Linter } from "eslint/universal";
-import * as estree from "prettier/plugins/estree";
-import * as prettierTypescript from "prettier/plugins/typescript";
-import { format } from "prettier/standalone";
+import { appLimits } from "@grasp-os/shared/app-limits";
 
-import ultracite from "#ultracite-rules";
-
+import type { UltraciteConfig } from "../ultracite-config.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { formatConfig } from "./format-config.ts";
 import { isLintedCode } from "./inputs.ts";
-import {
-  asEslint,
-  namesUnknownRule,
-  placeIn,
-  restored,
-  ruleIndex,
-} from "./lint-comments.ts";
-import type { Place } from "./lint-comments.ts";
-import { lintConfig, pluginsWith } from "./ultracite-plugins.ts";
+import { oxcOf } from "./oxc.ts";
+import type { Finding } from "./oxc.ts";
 
-const plugins = pluginsWith(ultracite.stubs);
-
-const fixable = new Set(ultracite.fixable);
-
-/**
- * Every rule here, and every stub, as a disable comment names it: sonarjs's
- * (`reportOnly`) are a JS plugin's in oxlint.
- */
-const jsPluginRules = new Set(Object.keys(ultracite.reportOnly));
-const commentRules = ruleIndex(
-  [
-    ...Object.keys(ultracite.rules),
-    ...ultracite.overrides.flatMap(({ rules }) => Object.keys(rules)),
-    ...ultracite.stubs,
-  ].filter((id) => !jsPluginRules.has(id)),
-  jsPluginRules
-);
-
-/** `rules`, but those a write doesn't fix (`fixable`). */
-const fixing = (
-  rules: Readonly<Record<string, Linter.RuleEntry>>
-): Linter.RulesRecord =>
-  Object.fromEntries(Object.entries(rules).filter(([id]) => fixable.has(id)));
+export interface Ultracite {
+  /**
+   * `files` (by path in the App), their TypeScript tidied, the rest as
+   * they are; null for a file to keep as written, which `tidy` couldn't
+   * take, or whose tidied text is past the App's file limit or the
+   * answer's (`tidiedCharacters`).
+   */
+  tidy: (files: Record<string, string>) => Record<string, string | null>;
+  /**
+   * What the rules say of each of `files`' TypeScript (by path in the
+   * App), at its own level, by file: every file it lints has an entry,
+   * empty when clean. A file that doesn't parse says nothing here: the
+   * build says why.
+   */
+  lintCode: (files: Record<string, string>) => Record<string, Diagnostic[]>;
+}
 
 /**
- * What a write fixes: only the rules whose fix oxlint counts as safe
- * (ultracite-rules.ts), so a fix never changes what the code does.
+ * The most characters one `tidy` answers: what a call hands Workers RPC
+ * is at most two bytes a character, so this keeps an answer at half its
+ * 32 MiB. oxfmt can make a file far larger than it was (an array nested
+ * 500 deep, 1 kB written, is half a megabyte formatted).
  */
-const fixConfig = lintConfig(
-  plugins,
-  fixing(ultracite.rules),
-  ultracite.overrides.map(({ files, rules }) => ({
-    files,
-    rules: fixing(rules),
-  }))
-);
+const tidiedCharacters = 8_000_000;
 
 /**
- * What a lint reports: every rule, and sonarjs's as warnings, which never
- * fix (`reportOnly`).
+ * What a file oxc.wasm couldn't lint says: an error, so a draft never
+ * passes unlinted. Past what its stack and memory hold: an expression
+ * nested hundreds deep, or a component with hundreds of conditional
+ * branches (the React Compiler's analysis recurses on each), which native
+ * oxlint, with a far larger stack, still reads.
  */
-const reportConfig = lintConfig(
-  plugins,
-  { ...ultracite.rules, ...ultracite.reportOnly },
-  ultracite.overrides
-);
-
-const linter = new Linter({ cwd: "/" });
-
-/** Where a file is linted: no rule here reads the file system. */
-const filenameOf = (path: string): string => `/app/${path}`;
-
-/** Whether a write makes `message`'s fix: only a rule of `fixable`'s. */
-const fixes = ({ ruleId }: Linter.LintMessage): boolean =>
-  ruleId !== null && fixable.has(ruleId);
-
-/**
- * `text` (`path` in the App) with `fixes`' fixes made, as many rounds as
- * ESLint makes them. Filtered by rule, not only by `fixConfig`: an inline
- * config comment (`/* eslint rule: "error" *\/`) turns on a rule beyond
- * it, whose fix may not be safe. `verifyAndFix` takes a function as its
- * `fix` (its `ESLint` class passes one for `fixTypes`), which its types
- * don't name, so it is called by `Reflect` and its answer read as found.
- */
-const fixedText = (path: string, text: string): string => {
-  const verifyAndFix: unknown = Reflect.get(linter, "verifyAndFix");
-  if (typeof verifyAndFix !== "function") {
-    return text;
-  }
-  const report: unknown = Reflect.apply(verifyAndFix, linter, [
-    text,
-    fixConfig,
-    { filename: filenameOf(path), fix: fixes },
-  ]);
-  return typeof report === "object" &&
-    report !== null &&
-    "output" in report &&
-    typeof report.output === "string"
-    ? report.output
-    : text;
-};
-
-/**
- * `source` with every fix oxlint counts as safe made, then formatted.
- * Code that doesn't parse is left as it is: the build says why.
- */
-const tidyOne = async (path: string, source: string): Promise<string> => {
-  const { text, written } = asEslint(path, source, commentRules);
-  const fixed = restored(path, fixedText(path, text), written) ?? source;
-  try {
-    return await format(fixed, {
-      ...formatConfig,
-      // By its name: a `.ts` file has no JSX, so `<T>` needs no comma.
-      filepath: path,
-      parser: "typescript",
-      plugins: [estree, prettierTypescript],
-    });
-  } catch {
-    return fixed;
-  }
-};
-
-/** `files` (by path in the App), their TypeScript tidied (`tidyOne`), the rest as they are. */
-export const tidy = async (
-  files: Record<string, string>
-): Promise<Record<string, string>> =>
-  Object.fromEntries(
-    await Promise.all(
-      Object.entries(files).map(
-        async ([path, source]): Promise<[string, string]> => [
-          path,
-          isLintedCode(path) ? await tidyOne(path, source) : source,
-        ]
-      )
-    )
-  );
+const unlintable = (file: string): Diagnostic => ({
+  file,
+  rule: "lint",
+  severity: "error",
+  message:
+    "Ultracite's lint ran out of room on this file: split this screen into components, or the file into smaller ones, and flatten anything nested hundreds deep.",
+});
 
 const diagnosticOf = (
   file: string,
-  place: Place,
-  { ruleId, severity, message, suggestions }: Linter.LintMessage
-): Diagnostic => {
-  const [suggestion] = suggestions ?? [];
+  { rule, severity, message, help, line, column }: Finding
+): Diagnostic => ({
+  file,
+  line,
+  column,
+  rule,
+  severity,
+  message,
+  ...(help === undefined ? {} : { fix: help }),
+});
+
+/** Ultracite's lint and format of App code, on oxc.wasm's `module`. */
+export const ultraciteOf = (
+  module: WebAssembly.Module,
+  config: UltraciteConfig
+): Ultracite => {
+  const oxc = oxcOf(module, config);
+  /** `source` tidied, or null to keep it as written. */
+  const tidied = (path: string, source: string): string | null => {
+    try {
+      const text = oxc.tidy(path, source);
+      return text.length > appLimits.fileLength ? null : text;
+    } catch {
+      return null;
+    }
+  };
+  const linted = (path: string, source: string): Diagnostic[] => {
+    try {
+      return (oxc.lint(path, source) ?? [])
+        .toSorted((a, b) => a.line - b.line || a.column - b.column)
+        .map((finding) => diagnosticOf(path, finding));
+    } catch {
+      return [unlintable(path)];
+    }
+  };
   return {
-    file,
-    ...place,
-    // As oxlint names it, which a disable comment names too.
-    rule: ruleId === null ? "lint" : (ultracite.names[ruleId] ?? ruleId),
-    severity: severity === 2 ? "error" : "warning",
-    message,
-    ...(suggestion === undefined ? {} : { fix: suggestion.desc }),
+    tidy: (files) => {
+      let answered = 0;
+      return Object.fromEntries(
+        Object.entries(files).map(([path, source]) => {
+          if (!isLintedCode(path)) {
+            answered += source.length;
+            return [path, source];
+          }
+          const text = tidied(path, source);
+          if (text === null || answered + text.length > tidiedCharacters) {
+            return [path, null];
+          }
+          answered += text.length;
+          return [path, text];
+        })
+      );
+    },
+    lintCode: (files) =>
+      Object.fromEntries(
+        Object.entries(files)
+          .filter(([path]) => isLintedCode(path))
+          .map(([path, source]) => [path, linted(path, source)])
+      ),
   };
 };
-
-/**
- * What the rules say of `source` (`path` in the App), each where it is in
- * `source`, not in the text ESLint reads (`placeIn`).
- */
-const lintOne = (path: string, source: string): Diagnostic[] => {
-  const { text, changes } = asEslint(path, source, commentRules);
-  const place = placeIn(source, text, changes);
-  return linter
-    .verify(text, reportConfig, filenameOf(path))
-    .filter((message) => message.fatal !== true && !namesUnknownRule(message))
-    .map((message) => diagnosticOf(path, place(message), message));
-};
-
-/**
- * What the rules say of each of `files`' TypeScript (by path in the App),
- * at its own level, by file: every file it lints has an entry, empty when
- * clean. A file that doesn't parse says nothing here: the build says why.
- */
-export const lintCode = (
-  files: Record<string, string>
-): Record<string, Diagnostic[]> =>
-  Object.fromEntries(
-    Object.entries(files)
-      .filter(([path]) => isLintedCode(path))
-      .map(([path, source]) => [path, lintOne(path, source)])
-  );

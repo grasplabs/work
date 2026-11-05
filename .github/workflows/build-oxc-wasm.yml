@@ -1,0 +1,111 @@
+# Builds oxc.wasm, oxlint's linter and oxfmt's formatter for the isolate
+# that lints and formats App code (packages/compiler/oxc-wasm), and
+# publishes it as an asset of the pre-release pin.json names: by oxc's
+# commit and the hash of the glue (glue.ts), so a change to either is a
+# release of another name. Installs, CI and release builds download it by
+# that name and check the SHA-256 pin.json pins (wasm.ts), and never build
+# it.
+#
+# Run by hand on the branch that changes the glue (`gh workflow run
+# build-oxc-wasm.yml --ref <branch>`), as its pull request needs the
+# release to test, and on a push to main. A release, once there, is built
+# again and compared byte for byte (.github/actions/oxc-wasm-build), and a
+# mismatch fails the run.
+#
+# What a run proves is no more than its branch's copy of this file says:
+# anyone with write access can run their own, or make a release by hand.
+# What binds a pin to the glue is CI's `oxc-wasm` job, part of the
+# required check: on a pull request that changes the glue, this workflow
+# or pin.json, it builds the glue read-only, publishes nothing, and fails
+# unless the release's digest, the pin and its build are one.
+#
+# The build runs with a read-only token and no credentials on disk, as it
+# runs the build scripts and proc-macros of oxc's whole dependency tree;
+# only the publish job, which runs nothing of the repo's or oxc's, can
+# write, and it publishes the build's artifact.
+name: Build oxc WASM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/compiler/oxc-wasm/**
+      - .github/actions/oxc-wasm-build/**
+      - .github/workflows/build-oxc-wasm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-oxc-wasm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    # An exact image, so the host's tools stay put; the toolchain is oxc's
+    # (rust-toolchain.toml at the pinned commit).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      release: ${{ steps.build.outputs.release }}
+      published: ${{ steps.build.outputs.published }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+      oxc: ${{ steps.build.outputs.oxc }}
+      glue: ${{ steps.build.outputs.glue }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: build
+        uses: ./.github/actions/oxc-wasm-build
+      - if: steps.build.outputs.published != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oxc-wasm
+          path: ${{ runner.temp }}/oxc.wasm
+          if-no-files-found: error
+          retention-days: 7
+
+  # Runs nothing but GitHub's CLI on the build's artifact: no checkout.
+  publish:
+    name: publish
+    needs: build
+    if: needs.build.outputs.published != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: oxc-wasm
+          path: ${{ runner.temp }}/oxc-wasm
+      # A pre-release, never "latest": it is a build input, not a release
+      # of Grasp. Its notes say what it was built from.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.build.outputs.release }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+          OXC: ${{ needs.build.outputs.oxc }}
+          GLUE: ${{ needs.build.outputs.glue }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          wasm="$RUNNER_TEMP/oxc-wasm/oxc.wasm"
+          if [ "$(sha256sum "$wasm" | cut -d ' ' -f 1)" != "$SHA256" ]; then
+            echo "::error::The artifact isn't what the build job built"
+            exit 1
+          fi
+          gh release create "$RELEASE" "$wasm" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "$RELEASE" \
+            --notes "oxlint and oxfmt as WebAssembly (packages/compiler/oxc-wasm), built by $RUN from $GITHUB_SHA.
+
+          - oxc commit: $OXC (oxc's own Rust toolchain at it, rust-toolchain.toml; target wasm32-wasip1)
+          - Glue (packages/compiler/oxc-wasm/glue.ts): $GLUE
+          - SHA-256: $SHA256"
+          echo "Published $RELEASE: oxc.wasm, SHA-256 \`$SHA256\` (pin it in packages/compiler/oxc-wasm/pin.json)." >> "$GITHUB_STEP_SUMMARY"

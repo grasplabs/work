@@ -32,6 +32,7 @@ import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
 import { withBuildLock } from "./build-lock.ts";
+import { oxcWasm } from "./oxc-wasm/wasm.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
@@ -59,7 +60,7 @@ import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
 import { compilerOptions, serverLibs } from "./src/type-check.ts";
 import type { KitTypes } from "./src/type-check.ts";
-import { ultraciteRules } from "./ultracite-rules.ts";
+import { ultraciteConfig } from "./ultracite-config.ts";
 
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
@@ -1333,33 +1334,25 @@ ${code.replace(required, "typescriptEslintParser")}`;
 };
 
 /**
- * Ultracite's rules (`#ultracite-rules`), worked out here, where its
- * presets, the plugins of their equivalents and oxlint load
- * (ultracite-rules.ts), into a module of Ultracite's bundle: the isolate
- * only reads them.
- * What of the presets has no equivalent is said once, as it is built.
+ * How App code is linted and formatted (`#ultracite-config`), worked out
+ * here, where Ultracite's presets load (ultracite-config.ts), into a module
+ * of Ultracite's bundle: the isolate only reads it.
  */
-const ultraciteRulesModule: Plugin = {
-  name: "ultracite-rules",
+const ultraciteConfigModule: Plugin = {
+  name: "ultracite-config",
   enforce: "pre",
-  resolveId: (id) => (id === "#ultracite-rules" ? "\0ultracite-rules" : null),
-  load: (id) => {
-    if (id !== "\0ultracite-rules") {
-      return null;
-    }
-    const rules = ultraciteRules();
-    console.log(
-      `Ultracite's rules: ${Object.keys(rules.rules).length} linted, ${rules.fixable.length} fixed on a write; without an equivalent: ${rules.unmapped.join(", ")}`
-    );
-    return `export default ${JSON.stringify(rules)};`;
-  },
+  resolveId: (id) => (id === "#ultracite-config" ? "\0ultracite-config" : null),
+  load: (id) =>
+    id === "\0ultracite-config"
+      ? `export default ${JSON.stringify(ultraciteConfig())};`
+      : null,
 };
 
 /**
  * ESLint checks each rule's options against its JSON schema with Ajv,
  * which compiles a schema to code at runtime, which Workers forbid. Every
- * rule's options in the compiler are fixed (the design system's, and
- * Ultracite's), so the bundled ESLint checks none.
+ * rule's options in the compiler are fixed (the design system's), so the
+ * bundled ESLint checks none.
  */
 const lintOptionsUnchecked: Plugin = {
   name: "lint-options-unchecked",
@@ -1378,13 +1371,12 @@ const lintOptionsUnchecked: Plugin = {
 };
 
 /**
- * Packages the build would take a build of that doesn't run in the
- * isolate, taken as Node's `require` resolves them instead:
- * decode-named-character-reference (which unicorn loads), whose browser
- * build decodes with the DOM; and esquery (ESLint's selectors), whose ES
- * module ESLint's `require` would get as a namespace with no `parse`.
+ * A package the build would take a build of that doesn't run in the
+ * isolate, taken as Node's `require` resolves it instead: esquery
+ * (ESLint's selectors), whose ES module ESLint's `require` would get as a
+ * namespace with no `parse`.
  */
-const nodeResolved = new Set(["decode-named-character-reference", "esquery"]);
+const nodeResolved = new Set(["esquery"]);
 
 const resolvedAsNode: Plugin = {
   name: "resolved-as-node",
@@ -1396,61 +1388,12 @@ const resolvedAsNode: Plugin = {
 };
 
 /**
- * eslint-plugin-import-x resolves imports with unrs-resolver, which is
- * native and has no build that runs in a Worker (see `shadcnParser`); the
- * isolate has no project on disk to resolve them in anyway. It gets a
- * resolver that finds nothing: its rules that read what an import resolves
- * to pass over it, as they do any import they can't resolve, and the rest
- * read the file they are given.
- */
-const importsUnresolved: Plugin = {
-  name: "imports-unresolved",
-  enforce: "pre",
-  resolveId: (id, importer) =>
-    id === "unrs-resolver" &&
-    importer?.includes("/eslint-plugin-import-x/") === true
-      ? "\0unrs-resolver"
-      : null,
-  load: (id) =>
-    id === "\0unrs-resolver"
-      ? `export class ResolverFactory {
-  sync() { return { error: "No resolver in the isolate" }; }
-  async async() { return { error: "No resolver in the isolate" }; }
-}`
-      : null,
-};
-
-/**
- * Two of the rules' plugins read their own package.json from disk as they
- * load, for their name and version: eslint-plugin-jsdoc, and
- * eslint-plugin-import-x (its meta). The isolate has no such file, so the
- * build puts the file in place of the read.
- */
-const packageJsonReads: Record<string, string> = {
-  "/eslint-plugin-jsdoc/src/":
-    "JSON.parse(\n  readFileSync(join(import.meta.dirname, '../package.json'), 'utf8'),\n)",
-  "/eslint-plugin-import-x/lib/meta.js": "cjsRequire('../package.json')",
-};
-
-const packageJsonInlined: Plugin = {
-  name: "package-json-inlined",
-  transform: (code, id) => {
-    const read = Object.entries(packageJsonReads).find(([where]) =>
-      id.includes(where)
-    )?.[1];
-    if (read === undefined || !code.includes(read)) {
-      return null;
-    }
-    const text = readText(path.join(path.dirname(id), "../package.json"));
-    return code.replace(read, text);
-  },
-};
-
-/**
- * What the compiler's and Ultracite's bundles both need: the ESLint they
- * each run (the design system's lint, and Ultracite's) checks no rule's
- * options in the isolate, and reads selectors with esquery's CommonJS
- * build (`lintOptionsUnchecked`, `resolvedAsNode`).
+ * What the compiler's and Ultracite's bundles both need: the design
+ * system's ESLint checks no rule's options in the isolate, and reads
+ * selectors with esquery's CommonJS build (`lintOptionsUnchecked`,
+ * `resolvedAsNode`). Both are written in ASCII alone: V8 holds a module's
+ * source as one byte a character only then, two otherwise, and these are
+ * megabytes.
  */
 const isolateBuild = (
   entry: string,
@@ -1467,8 +1410,7 @@ const isolateBuild = (
     ssr: {
       noExternal: true,
       target: "webworker",
-      // Production's, whatever `NODE_ENV` is (`kitResolve`): micromark,
-      // under Ultracite's jsdoc rules, ships a build for each.
+      // Production's, whatever `NODE_ENV` is (`kitResolve`).
       resolve: { conditions: ["workerd", "worker", "browser", "production"] },
     },
     define: { ...production, ...moduleLocation(moduleUrl) },
@@ -1476,11 +1418,18 @@ const isolateBuild = (
     build: {
       ssr: entry,
       write: false,
-      minify: true,
+      // Rolldown's (`output.minify`), to write it in ASCII.
+      minify: false,
       target: "es2022",
       rolldownOptions: {
-        external: ["cloudflare:workers", "#kit", ...nodeBuiltins],
+        // oxc's WebAssembly is a module of the isolate: Ultracite's.
+        external: ["cloudflare:workers", "#kit", "./oxc.wasm", ...nodeBuiltins],
         output: {
+          minify: {
+            compress: true,
+            mangle: true,
+            codegen: { asciiOnly: true },
+          },
           format: "es",
           codeSplitting: false,
           paths: { "#kit": kitModule },
@@ -1517,17 +1466,14 @@ const buildCompiler = async (): Promise<string> =>
 
 /**
  * Ultracite's lint and format (src/ultracite-worker.ts), a module of its
- * own that core runs in an isolate of its own: about as large as the
- * compiler (ESLint with every rule's plugin, and Prettier), it isn't
+ * own that core runs in an isolate of its own, with oxc.wasm: it isn't
  * loaded by an isolate that only builds, nor read by core but to start
  * one that lints.
  */
 const buildUltracite = async (): Promise<string> =>
   await oneModule(
     isolateBuild("src/ultracite-worker.ts", compilerAssets.ultracite, [
-      ultraciteRulesModule,
-      packageJsonInlined,
-      importsUnresolved,
+      ultraciteConfigModule,
     ]),
     "Ultracite's lint"
   );
@@ -1782,6 +1728,8 @@ const buildAppCompiler = async (
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
+  // oxlint's and oxfmt's, which Ultracite's isolate runs, as pinned.
+  const oxc = await oxcWasm();
   // jq's, which every workflow isolate loads beside the SDK's modules.
   const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
@@ -1810,6 +1758,7 @@ const buildAppCompiler = async (
     .update(workflowSdkModules.version)
     .update(serverSdkModules.version)
     .update(ultracite)
+    .update(oxc)
     .update(packageBuilder)
     .update(esbuildWasm)
     .update(jqWasm)
@@ -1821,6 +1770,7 @@ const buildAppCompiler = async (
   writeRelease(assets, version, {
     [compilerAssets.source]: compiler,
     [compilerAssets.ultracite]: ultracite,
+    [compilerAssets.oxcWasm]: oxc,
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
     [compilerAssets.kitPreviewModules]: JSON.stringify(kitPreviewModules),

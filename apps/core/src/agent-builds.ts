@@ -39,6 +39,7 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
@@ -51,7 +52,7 @@ import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
 import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
-import { platformRunner } from "./platform-sandbox.ts";
+import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import {
@@ -618,16 +619,22 @@ export interface SubmittedJob {
   revision: number;
 }
 
-/** What Ultracite's `tidy` answers: the files it was handed, by path. */
-const tidiedSchema = z.record(z.string(), z.string());
+/**
+ * What Ultracite's `tidy` answers: the files it was handed, by path; null
+ * for one to keep as written.
+ */
+const tidiedSchema = z.record(z.string(), z.string().nullable());
 
 /**
  * `changes` (new content by path, or null to delete a file), each file as
  * Ultracite's lint tidies it (`tidy`: what oxlint fixes safely fixed, then
- * formatted): so the agent never spends a turn on formatting, nor on what
- * a rule fixes itself. Before they are applied (`applyChanges`), so the
- * App's limits hold for what is saved. A write is never refused for it:
- * where the lint can't run now, what was written is saved as it is.
+ * formatted by oxfmt): so the agent never spends a turn on formatting, nor
+ * on what a rule fixes itself. Before they are applied (`applyChanges`),
+ * so the App's limits hold for what is saved. A batch at a time
+ * (`ultraciteBatch`), a batch stopped at a bound split (`callSplitting`).
+ * A write is never refused for it: a file the lint can't tidy now, or
+ * whose tidied text would be past the App's file limit, is saved as it
+ * was written, and the App's limits are checked on what is saved.
  */
 const tidied = async (
   env: Env,
@@ -640,14 +647,37 @@ const tidied = async (
       content === null ? [] : [[path, content]]
     )
   );
-  let tidy: Record<string, string>;
-  try {
-    tidy = tidiedSchema.parse(
-      await platformRunner(env, app).run("ultracite", "tidy", [contents])
-    );
-  } catch (error) {
-    log.warn("build.tidy_failed", errorFields(error));
-    return written;
+  const tidy: Record<string, string | null> = {};
+  const runner = platformRunner(env, app);
+  for (const batch of batchesOf(Object.entries(contents), ultraciteBatch)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its bounds
+      const stopped = await callSplitting(batch, async (part) => {
+        Object.assign(
+          tidy,
+          tidiedSchema.parse(
+            await runner.run("ultracite", "tidy", [part], { once: true })
+          )
+        );
+      });
+      for (const file of stopped) {
+        tidy[file] = null;
+      }
+    } catch (error) {
+      // This batch is saved as written.
+      log.warn("build.tidy_failed", errorFields(error));
+      if (error instanceof PlatformBoundError) {
+        // The load's (a deadline, a crash; `callSplitting` splits only
+        // the files' own): the rest too, rather than wait out another.
+        break;
+      }
+    }
+  }
+  const kept = Object.keys(tidy).filter((path) => tidy[path] === null);
+  if (kept.length > 0) {
+    // Too large or too deep for the lint to tidy, or past a limit once
+    // tidied (`Ultracite.tidy`): saved as written.
+    log.warn("build.tidy_kept", { files: kept.length });
   }
   return Object.fromEntries(
     Object.entries(written).map(([path, content]) => [
@@ -1561,7 +1591,7 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
-   * TypeScript is saved fixed and formatted (Prettier, and what Ultracite's
+   * TypeScript is saved fixed and formatted (oxfmt, and what Ultracite's
    * rules fix themselves): read the file again before editing it by text.
    * Answers with what fails in the whole draft now, its screens and server
    * code checked at once (compile, types, lint, React Compiler), and its

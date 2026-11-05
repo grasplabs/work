@@ -32,10 +32,12 @@ const desk = (
 ): string => `import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
-export default function Desk() {
+const Desk = () => {
   const titles = useQuery(api.notes.titles, {});
   return <main>${marker}: {titles?.join(", ")}</main>;
-}
+};
+
+export default Desk;
 `;
 
 /** An App of spec 8's layout whose one screen says `marker` and reads its notes. */

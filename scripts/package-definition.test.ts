@@ -37,10 +37,15 @@ import { hostModules } from "../apps/core/src/host-modules.ts";
 import { designCases, designFindings } from "../apps/core/test/design-cases.ts";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import {
+  oxcWasmModule,
+  oxcWasmPin,
+} from "../packages/compiler/oxc-wasm/wasm.ts";
+import {
   serverEntryPath,
   serverEntrySource,
 } from "../packages/compiler/src/app-code.ts";
-import { lintCode, tidy } from "../packages/compiler/src/ultracite.ts";
+import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
+import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
 import * as notesFunctions from "../packages/sdk/test/notes/server/notes.ts";
@@ -67,13 +72,13 @@ const hash = (digit: string): string => digit.repeat(64);
  */
 const confirmations = `import { workflows } from "@server/_generated/api";
 
-export const confirmed = workflows.archiveNotes.events.confirmed;
+export const { confirmed } = workflows.archiveNotes.events;
 `;
 
 /** A screen, which has the DOM as its frame does. */
-const notesScreen = `export default function Notes() {
-  return <p>{window.location.pathname}</p>;
-}
+const notesScreen = `const Notes = () => <p>{window.location.pathname}</p>;
+
+export default Notes;
 `;
 
 /** The Notes fixture's source, as an App version's tree holds it. */
@@ -374,10 +379,20 @@ const installedVersion = (dir: string, name: string): string =>
 const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
 
 /**
- * The compiler's TypeScript, 6: the project's, for sonarjs, which needs
- * its JavaScript API. Nothing type-checks on it: the check is tsrs's.
+ * Grasp's own lint and format of App code (ultracite.ts), on the oxc.wasm
+ * its isolate runs.
  */
-const compilerTypescript = installedVersion("packages/compiler", "typescript");
+const ultracite = ultraciteOf(await oxcWasmModule(), ultraciteConfig());
+const { lintCode } = ultracite;
+
+/** `files` as a write saves them: tidied, or as written where `tidy` keeps them. */
+const tidy = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(ultracite.tidy(files)).map(([file, tidied]) => [
+      file,
+      tidied ?? files[file] ?? "",
+    ])
+  );
 
 /** The Babel the platform parses App files with, its parser bundled. */
 const platformParser = installedVersion(
@@ -807,9 +822,15 @@ describe(
         install: install.status,
         checker: {
           tsrs: project.devDependencies["@tsrs/wasm"],
+          // No TypeScript of its own: the check is tsrs's.
           typescript: project.devDependencies.typescript,
           // The parser it reads files with, as the platform's Babel does.
           parser: project.devDependencies["@babel/parser"],
+        },
+        // Its lint and format: the releases Grasp's isolate runs.
+        tools: {
+          oxlint: project.devDependencies.oxlint,
+          oxfmt: project.devDependencies.oxfmt,
         },
         held,
         declared,
@@ -831,9 +852,10 @@ describe(
         install: 0,
         checker: {
           tsrs: platformChecker,
-          typescript: compilerTypescript,
+          typescript: undefined,
           parser: platformParser,
         },
+        tools: { oxlint: oxcWasmPin.oxlint, oxfmt: oxcWasmPin.oxfmt },
         held: { lint: 0, format: 0 },
         declared: { status: 1, problems: { "app/declared.d.ts": ["TS2304"] } },
         accepted: { status: 0, problems: {} },
@@ -1041,9 +1063,7 @@ describe(
             locked("@grasp-os/sdk", "9.9.9", "MIT"),
           ]),
           lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")]),
-          lockOf({ typescript: "5.0.0" }, [
-            locked("typescript", "5.0.0", "MIT"),
-          ]),
+          lockOf({ oxlint: "1.0.0" }, [locked("oxlint", "1.0.0", "MIT")]),
           lockOf({ "date-kit": "1.2.0" }, [
             locked("date-kit", "1.2.0", "MIT", { react: "18.0.0" }),
             locked("react", "18.0.0", "MIT"),
@@ -1551,11 +1571,11 @@ describe(
 
     it("holds the App's code to what Grasp holds it to: what Grasp's tidy wrote passes its typecheck, lint, format and build, and its lint finds what Grasp's finds", async () => {
       const { out } = scratch();
-      // A blueprint's App as Grasp saves an agent's writes (`tidy`), and a
-      // component Grasp keeps as it is though oxfmt wouldn't: imports out
-      // of oxfmt's order, and classes Tailwind's sorter would reorder; and
-      // a GraphQL template, whose query Grasp leaves as written.
-      const written = await tidy({
+      // A blueprint's App as Grasp saves an agent's writes (`tidy`): a
+      // component with imports out of order, which oxfmt sorts, and
+      // classes Tailwind's sorter would reorder, which neither sorts; and
+      // a GraphQL template, whose query both leave as written.
+      const written = tidy({
         ...blueprintFiles("workflow-map"),
         "components/count.tsx": `import type { ReactNode } from "react";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -1589,14 +1609,13 @@ export const query = gql\`
         project: rulesOf(run(out, "lint", "--format=json").stdout),
       };
 
-      // What Grasp's lint finds, the project's finds, no more: an error
-      // (a debugger); a sonarjs hint, a warning; and what Grasp leaves out
-      // reports nothing (a forEach, a spread in an accumulator, a
-      // comparison that is always false, a function declaration, and in a
-      // test what a preset's override turns on: vitest's rules). A disable
-      // comment holds whatever plugin it names a rule by
-      // (`@typescript-eslint/…`), and an inline config comment, which
-      // oxlint doesn't read, turns nothing on.
+      // What Grasp's lint finds, the project's finds, no more: a debugger,
+      // a forEach, a spread in an accumulator, a comparison that is always
+      // false, a function declaration, and in a test what a preset's
+      // override turns on (vitest's rules). A disable comment holds
+      // whatever plugin it names a rule by (`@typescript-eslint/…`), and
+      // an inline config comment, which oxlint doesn't read, turns nothing
+      // on.
       const findings = `export const stop = (): void => {
   debugger;
 };
@@ -1647,6 +1666,15 @@ test("counts", () => {
         // Unused names: an import, a local and a parameter after the last
         // one used, but not one before it, nor a name a type reads.
         "components/unused.ts": unusedNames,
+        // What only the App's other files say (a default or a name they
+        // lack, a file importing itself), which Grasp's lint, a file at a
+        // time, can't read: neither finds it (`leftOut`).
+        "components/imports.ts": `import comments from "./comments";
+import * as spanning from "./spanning";
+import * as imports from "./imports";
+
+export const imported = [comments, spanning.missing, imports];
+`,
       };
       const write = (file: string, source: string): void => {
         mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
@@ -1717,14 +1745,21 @@ export const Off = () => (
       const unformatted = run(out, "format:check");
 
       const foundRules = [
+        "app/components/findings.ts error func-style",
         "app/components/findings.ts error no-debugger",
-        "app/components/findings.ts warning sonarjs/no-identical-expressions",
+        "app/components/findings.ts error oxc/const-comparisons",
+        "app/components/findings.ts error oxc/no-accumulating-spread",
+        "app/components/findings.ts error unicorn/no-array-for-each",
         "app/components/spanning.ts error no-debugger",
         "app/components/spanning.ts error no-inline-comments",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
+        "app/tests/count.test.ts error vitest/prefer-strict-equal",
+        "app/tests/count.test.ts error vitest/prefer-to-be",
+        "app/tests/count.test.ts error vitest/prefer-to-have-length",
+        "app/tests/count.test.ts error vitest/require-top-level-describe",
       ];
       expect({
         install: install.status,
@@ -1780,7 +1815,7 @@ export const Off = () => (
       }).toStrictEqual({
         beside: ["project"],
         written: [
-          ".prettierignore",
+          ".oxfmtrc.json",
           "LICENSES",
           "THIRD-PARTY-NOTICES.md",
           "app",
@@ -1791,7 +1826,6 @@ export const Off = () => (
           "package.json",
           "pnpm-lock.yaml",
           "pnpm-workspace.yaml",
-          "prettier.config.mjs",
           "tsconfig.json",
           "vendor",
           "workflows",

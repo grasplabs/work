@@ -9,26 +9,26 @@
 
 /** Screens and components, by path in the App. */
 export const designCases: Record<string, string> = {
-  "screens/kit-classes.tsx": `export default function KitClasses() {
-  return (
-    <p className="flex animate-in fade-in ease-house type-display foo-bar">
-      Kit
-    </p>
-  );
-}
+  "screens/kit-classes.tsx": `const KitClasses = () => (
+  <p className="flex animate-in fade-in ease-house type-display foo-bar">
+    Kit
+  </p>
+);
+
+export default KitClasses;
 `,
   "screens/disabled.tsx": `import { Button } from "@grasp-os/ui/components/button";
 
-export default function Disabled() {
-  return (
-    <main>
-      {/* oxlint-disable-next-line shadcn/no-restyle */}
-      <Button className="rounded-none">Go</Button>
-      {/* oxlint-disable-next-line grasp/no-remote-resources */}
-      <img alt="" src="https://example.com/logo.png" />
-    </main>
-  );
-}
+const Disabled = () => (
+  <main>
+    {/* oxlint-disable-next-line shadcn/no-restyle */}
+    <Button className="rounded-none">Go</Button>
+    {/* oxlint-disable-next-line grasp/no-remote-resources */}
+    <img alt="" src="https://example.com/logo.png" />
+  </main>
+);
+
+export default Disabled;
 `,
   "components/other-rules.tsx": `// eslint-disable-next-line typescript/no-explicit-any
 export const anything = (value: any): unknown => value;

@@ -7,12 +7,14 @@
  * import { useMutation, useQuery } from "@grasp-os/sdk/react";
  * import { api } from "@server/_generated/api";
  *
- * export default function Notes() {
+ * const Notes = () => {
  *   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
  *   const create = useMutation(api.notes.create);
- *   if (notes === undefined) return <p role="status">Loading notes…</p>;
+ *   if (notes === undefined) return <output>Loading notes…</output>;
  *   …
- * }
+ * };
+ *
+ * export default Notes;
  * ```
  *
  * The platform mounts one `GraspProvider` per App session; a screen never

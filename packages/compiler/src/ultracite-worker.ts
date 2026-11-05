@@ -1,26 +1,37 @@
 /**
  * Ultracite's lint and format of App code (ultracite.ts), in an isolate of
  * its own (`startUltracite`): no bindings, no network, as the compiler's.
- * Its code, ESLint with the plugins of every rule and Prettier, is about as
- * large as the compiler's, so it is apart from it: an isolate that only
- * builds never loads it, core reads it only to start this one, and a lint
- * never shares a build's CPU or memory.
+ * Apart from the compiler's, so an isolate that only builds never loads
+ * oxc.wasm, core reads it only to start this one, and a lint never shares
+ * a build's CPU or memory.
  */
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import config from "#ultracite-config";
+
 import { assertNoBindings } from "./authority.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { lintCode, tidy } from "./ultracite.ts";
+import oxcWasm from "./oxc.wasm";
+import { ultraciteOf } from "./ultracite.ts";
+
+/** Made once per isolate, on its first call: oxc keeps nothing of a file. */
+let ultracite: ReturnType<typeof ultraciteOf> | undefined;
+
+const ultraciteHere = () => {
+  ultracite ??= ultraciteOf(oxcWasm, config);
+  return ultracite;
+};
 
 export default class UltraciteLinter extends WorkerEntrypoint {
   /**
    * `files` (by path in the App) as the agent's write saves them: its
    * TypeScript with what oxlint fixes safely fixed, and formatted, as
-   * Ultracite would; every other file as it is.
+   * Ultracite would; every other file as it is; null for one to keep as
+   * written (`Ultracite.tidy`).
    */
-  async tidy(files: Record<string, string>): Promise<Record<string, string>> {
+  tidy(files: Record<string, string>): Record<string, string | null> {
     assertNoBindings(this.env, this.ctx.props, "Ultracite's lint");
-    return await tidy(files);
+    return ultraciteHere().tidy(files);
   }
 
   /**
@@ -30,6 +41,6 @@ export default class UltraciteLinter extends WorkerEntrypoint {
    */
   lint(files: Record<string, string>): Record<string, Diagnostic[]> {
     assertNoBindings(this.env, this.ctx.props, "Ultracite's lint");
-    return lintCode(files);
+    return ultraciteHere().lintCode(files);
   }
 }

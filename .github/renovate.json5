@@ -50,6 +50,10 @@
         "typescript",
         "ultracite",
         "@shadcn/lint",
+        // Vite+'s own, in the default catalog: they move with vite-plus,
+        // to its pin (scripts/check-vite-plus-oxc.ts).
+        "oxlint",
+        "oxfmt",
       ],
     },
     {
@@ -122,6 +126,13 @@
       matchDatasources: ["docker"],
       matchPackageNames: ["mcr.microsoft.com/playwright"],
       minimumReleaseAgeBehaviour: "timestamp-optional",
+    },
+
+    // App code's oxlint and oxfmt move only with oxc.wasm, which is built
+    // from their release (packages/compiler/oxc-wasm/pin.json).
+    {
+      matchDepTypes: ["pnpm.catalog.oxc"],
+      enabled: false,
     },
 
     // The screen compiler's TypeScript: 7 has no JavaScript API.
