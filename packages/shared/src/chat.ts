@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AppFiles } from "./apps.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
@@ -913,6 +914,13 @@ export interface ChatsApi {
    * person while they build the App.
    */
   draftVersions: (chatId: string, app: string) => Promise<ChatDraftVersion[]>;
+  /**
+   * Every file of the chat's draft of `app` as it is now, as its agent
+   * reads them: its changes over the version it is over, or the App's
+   * latest version while it changes nothing. For the App's code view,
+   * read-only: for the person while they build the App.
+   */
+  draftFiles: (chatId: string, app: string) => Promise<AppFiles>;
   /**
    * Makes version `version` of the chat's draft of `app` the draft again,
    * as a new version: for the person while they build the App.

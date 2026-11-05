@@ -1,4 +1,5 @@
 import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
+import type { ChatDraft } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
   ToggleGroup,
@@ -20,13 +21,21 @@ import { useCore } from "../use-core.ts";
 import { changedLines } from "./line-diff.ts";
 import type { DiffPart } from "./line-diff.ts";
 
-// An App's code on its page, for its builders (app-page.tsx's Code tab):
-// the files of its current version as a tree, the one picked shown
-// highlighted, and, when a version is up for review (the draft), the same
-// of it and its changes against the current version, file by file.
-// Read-only: the App changes through its chat, which the note says.
-// Everything is read with core's own reads for builders
-// (`apps.files.read`, `apps.versions.diff`), which refuse anyone else.
+// An App's code in its workspace, for its builders (app-workspace.tsx's
+// Code view): the files of the build the preview beside it shows, as a
+// tree, the one picked shown highlighted. While the workspace's chat has
+// a draft of the App, that is the draft's files as they are now, read
+// again at each write of the chat's agent; otherwise the version up for
+// review, if any, and its changes against the current version, file by
+// file, or else the current version. Read-only: the App changes through
+// its chat, which the note says. Everything is read with core's own reads
+// for builders (`chats.draftFiles`, `apps.files.read`,
+// `apps.versions.diff`), which refuse anyone else.
+//
+// What the host generates for an App (`server/_generated/`, `.grasp/`) is
+// never one of its files: core refuses those paths in an App's files and
+// generates them afresh for each build, so they aren't here to show, as
+// Convex's dashboard leaves out `convex/_generated/`.
 //
 // Highlighting is the chat's (answer-markdown.tsx): rehype-highlight by
 // class, coloured from the theme's tokens in styles.css. A file goes
@@ -177,14 +186,21 @@ const FolderEntries = ({
 
 /**
  * What `read` read for `key`, read again whenever `key` changes; nothing
- * while it is read.
+ * while it is read, unless an earlier read of the same `scope` landed:
+ * that one stays until the new one does, so what is shown doesn't blink
+ * away at each write.
  */
 const useCoreRead = <T,>(
   key: string,
-  read: (session: Session) => Promise<T>
+  read: (session: Session) => Promise<T>,
+  scope?: string
 ): Loaded<T> | undefined => {
   const core = useCore();
-  const [held, setHeld] = useState<{ key: string; loaded: Loaded<T> }>();
+  const [held, setHeld] = useState<{
+    key: string;
+    scope: string | undefined;
+    loaded: Loaded<T>;
+  }>();
   const onRead = useEffectEvent(
     async (signal: AbortSignal): Promise<Loaded<T>> =>
       await loadFromCore(core, read, signal)
@@ -194,15 +210,18 @@ const useCoreRead = <T,>(
     const load = async (): Promise<void> => {
       const loaded = await onRead(left.signal);
       if (!left.signal.aborted) {
-        setHeld({ key, loaded });
+        setHeld({ key, scope, loaded });
       }
     };
     void load();
     return () => {
       left.abort();
     };
-  }, [key]);
-  return held?.key === key ? held.loaded : undefined;
+  }, [key, scope]);
+  if (held?.key === key) {
+    return held.loaded;
+  }
+  return scope !== undefined && held?.scope === scope ? held.loaded : undefined;
 };
 
 /** A read not done: that it is being read, or why it failed. */
@@ -394,6 +413,31 @@ const VersionFiles = ({ app, version }: { app: string; version: number }) => {
   );
 };
 
+/**
+ * The files of the chat's draft, read again at each of its revisions: the
+ * file picked stays picked while the draft still has it.
+ */
+const ChatDraftFiles = ({
+  app,
+  chatId,
+  revision,
+}: {
+  app: string;
+  chatId: string;
+  revision: number;
+}) => {
+  const files = useCoreRead(
+    `${chatId}/${app}/${revision}`,
+    async (session) => await session.chats.draftFiles(chatId, app),
+    `${chatId}/${app}`
+  );
+  return files?.state === "ready" ? (
+    <FilesView files={files.data} />
+  ) : (
+    <ReadState loaded={files} />
+  );
+};
+
 /** The draft's changes against the current version, read. */
 const DraftChanges = ({
   app,
@@ -485,6 +529,14 @@ const SourceToggle = ({
   );
 };
 
+/** The read-only note, above what the view shows. */
+const ReadOnlyNote = () => (
+  <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+    <MessageSquareIcon aria-hidden="true" className="size-3.5" />
+    <Trans>Read-only. Changes to the code go through the chat.</Trans>
+  </p>
+);
+
 /** What the tab shows once it knows the App's versions. */
 const CodeBody = ({
   app,
@@ -495,12 +547,12 @@ const CodeBody = ({
   current: number | null;
   draft: number | null;
 }) => {
-  const [asked, setAsked] = useState<Source>("current");
+  const [asked, setAsked] = useState<Source>();
   const [part, setPart] = useState<Part>("files");
-  // The current version's, unless only a draft has files, or the draft's
-  // were asked for.
+  // The draft's, as the preview shows it, unless the current version's
+  // were asked for, or there is no draft.
   const source: Source =
-    current === null || (asked === "draft" && draft !== null)
+    current === null || (asked !== "current" && draft !== null)
       ? "draft"
       : "current";
   const version = source === "draft" ? draft : current;
@@ -518,10 +570,7 @@ const CodeBody = ({
             source={source}
           />
         ) : null}
-        <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          <MessageSquareIcon aria-hidden="true" className="size-3.5" />
-          <Trans>Read-only. Changes to the code go through the chat.</Trans>
-        </p>
+        <ReadOnlyNote />
       </div>
       {changes !== null && (
         <DraftChanges app={app} current={current} draft={changes} />
@@ -533,14 +582,41 @@ const CodeBody = ({
   );
 };
 
+/** The workspace's chat, and its draft of the App the preview shows. */
+export interface ChatBuilding {
+  chatId: string;
+  draft: ChatDraft;
+}
+
 /**
- * The App's Code tab. Its draft is the version up for review alone, as the
- * App says it: a version merely newer than the current one may be one a
- * builder rolled back from, never a draft.
+ * The App's Code view: the files of the chat's draft (`building`) while
+ * the workspace's chat has one, as the preview shows it. Otherwise, its
+ * draft is the version up for review alone, as the App says it: a version
+ * merely newer than the current one may be one a builder rolled back
+ * from, never a draft.
  */
-export const AppCode = ({ app }: { app: ViewedApp }) => {
+export const AppCode = ({
+  app,
+  building,
+}: {
+  app: ViewedApp;
+  /** None while the workspace's chat has no draft of the App. */
+  building?: ChatBuilding;
+}) => {
   const current = app.currentVersion;
   const draft = app.pendingVersion;
+  if (building !== undefined) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <ReadOnlyNote />
+        <ChatDraftFiles
+          app={app.id}
+          chatId={building.chatId}
+          revision={building.draft.revision}
+        />
+      </div>
+    );
+  }
   if (current === null && draft === null) {
     return (
       <p className="text-muted-foreground">
