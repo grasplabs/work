@@ -6,7 +6,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { actionInvocation, invocationName } from "../src/action-invocation.ts";
@@ -27,7 +27,7 @@ import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { endLiveRuns, leave } from "./runs.ts";
+import { leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -1050,13 +1050,5 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       direct: "invited",
       fromScreen: "error:resource.not_allowed",
     });
-  });
-});
-
-// Kept until JSON runs reach parity: an App's own workflow's run, as
-// before.
-describe("a run calling another App's functions", { timeout: 90_000 }, () => {
-  afterEach(async () => {
-    await endLiveRuns();
   });
 });
