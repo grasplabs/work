@@ -189,6 +189,7 @@ describe("the console's provisioning probe", () => {
           WORKFLOW_RUNS: true,
           ACTION_INVOCATIONS: true,
           CHAT_STATE: true,
+          CHAT_SESSIONS: true,
           // Connect's own, as connect answered for them.
           "connect.DB": true,
           "connect.LOADER": true,
