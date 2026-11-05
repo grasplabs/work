@@ -39,18 +39,19 @@ const workflowsUsing = async (
 };
 
 /**
- * A decision of the run `run` at its step `step`, opened now: open until
- * `expiresAt`.
+ * A decision of the run `run` at its step `step`, opened at `openedAt`
+ * (now, unless given): open until `expiresAt`.
  */
 const seedDecision = async (
   run: string,
   step: string,
-  expiresAt: number
+  expiresAt: number,
+  openedAt = Date.now()
 ): Promise<void> => {
   await env.DB.prepare(
     "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, description, status, opened_at, expires_at) VALUES (?, ?, ?, 'role:admin', 'Approve it', 'open', ?, ?)"
   )
-    .bind(`decision-${unique()}`, run, step, Date.now(), expiresAt)
+    .bind(`decision-${unique()}`, run, step, openedAt, expiresAt)
     .run();
 };
 
@@ -214,13 +215,14 @@ describe("the Workflows page", buildTime, () => {
         seeded("running", now - 2 * minute),
       ]
     );
+    // The waiting list comes latest to wait first: `waiting` asked last.
     await Promise.all([
-      seedDecision(waiting, "review", now + day),
-      seedDecision(waiting, "sign", now + day),
+      seedDecision(waiting, "review", now + day, now - minute),
+      seedDecision(waiting, "sign", now + day, now),
       seedDecision(ended, "review", now + day),
       seedDecision(lapsed, "review", now - minute),
       seedDecision(cancelling, "review", now + day),
-      seedDecision(uncancelled, "review", now + day),
+      seedDecision(uncancelled, "review", now + day, now - 2 * minute),
     ]);
     await Promise.all([
       seedCancel(cancelling, owner.userId, "admitted"),
