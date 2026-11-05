@@ -61,10 +61,12 @@ export const DraftPreview = ({
   const screens = draft === undefined ? [] : changedScreens(draft);
   const screen = previewedScreen(screens, picked, version);
   // The page the open frame was opened for, and the one core said it
-  // shows: a frame opened for none shows the App's first, so a write that
-  // then names that page keeps the frame, and takes the write as an
-  // update, keeping what the page holds. Another page or version opens
-  // the frame afresh, as its key says.
+  // shows: a frame opened for none shows the App's first, and one opened
+  // for a page that didn't build shows another in its place. Naming the
+  // page it shows (a write to it, or the person picking it) keeps the
+  // frame, which is asked for that page from then on (`askedFor`, the one
+  // page its updates ask for): what the page holds stays. Another page or
+  // version opens the frame afresh, as its key says.
   const [framed, setFramed] = useState({ app, screen, version });
   const [showing, setShowing] = useState<string>();
   const keeps =
@@ -108,6 +110,7 @@ export const DraftPreview = ({
         }}
         {...(draft === undefined ? {} : { revision: draft.revision })}
         {...(open.screen === undefined ? {} : { screen: open.screen })}
+        {...(screen === undefined ? {} : { askedFor: screen })}
         {...(version === undefined ? {} : { version })}
         {...(onEnded === undefined ? {} : { onEnded })}
       />

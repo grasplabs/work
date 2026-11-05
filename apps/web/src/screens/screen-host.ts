@@ -1702,6 +1702,12 @@ export interface DraftRevisions {
   latest: number | undefined;
   listener: ((revision: number) => void) | undefined;
   /**
+   * The page the preview is asked for now, when the person picked the one
+   * it shows in place of the one it opened for: what its updates ask core
+   * for. The page it opened for when not set.
+   */
+  askedFor?: string | undefined;
+  /**
    * Told what the frame shows: the App's version, if one
    * (`PreviewRefresh.appVersion`), and its screen, as core opens it and
    * as each update comes in.
@@ -1783,16 +1789,18 @@ export const runPreview = (
           {
             // What the frame shows, with the screen it was opened for,
             // which core shows again once a build has it.
-            fetch: async (revision, appVersion) =>
-              await on(
+            fetch: async (revision, appVersion) => {
+              const asked = revisions.askedFor ?? screen;
+              return await on(
                 link,
                 async ({ chats }) =>
                   await chats.previewUpdate(chatId, bundle.app, revision, {
                     screen: bundle.screen,
-                    ...(screen === undefined ? {} : { asked: screen }),
+                    ...(asked === undefined ? {} : { asked }),
                     ...(appVersion === undefined ? {} : { appVersion }),
                   })
-              ),
+              );
+            },
             health: (next) => {
               health = next;
               if (running) {

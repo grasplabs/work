@@ -845,6 +845,52 @@ describe(AppWorkspace, () => {
     }).toStrictEqual({ sameFrame: true, opens: 1 });
   });
 
+  it("asks for the page the person picks from then on when it is the one the frame shows in place of a broken one, keeping the frame", async () => {
+    const fake = fakeApps("published");
+    // The draft's `board` doesn't build: core shows the App's `desk`.
+    const core = new PreviewingCore(undefined, {
+      ...deskOfVersion1,
+      revision: 1,
+      fallback: true,
+    });
+    socketsTo(core);
+    const drafts = [
+      {
+        ...draftOf("invoice-desk"),
+        changed: ["screens/board.tsx", "screens/desk.tsx"],
+      },
+    ];
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-drafting",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve(drafts)
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    const before = frame?.getAttribute("title");
+
+    await press(button("desk"));
+
+    expect({
+      before,
+      // The page its updates ask for from now on, named on the frame.
+      after: document.querySelector("iframe")?.getAttribute("title"),
+      sameFrame: document.querySelector("iframe") === frame,
+      opens: core.asked.map((args) => args[2]),
+    }).toStrictEqual({
+      before: "Preview of the board page",
+      after: "Preview of the desk page",
+      sameFrame: true,
+      opens: ["board"],
+    });
+  });
+
   it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {
     // An App with no screens: core has no page of it to build.
     const core = new PreviewingCore("screen.not_found");
