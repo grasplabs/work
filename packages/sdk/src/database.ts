@@ -264,16 +264,22 @@ type ResultCount = UpTo<typeof queryMaxResults>;
 
 /**
  * `Count` if it is a valid result count, or any `number` (checked at run
- * time); a literal out of range fails to type-check.
+ * time); a literal out of range fails to type-check against `Refusal`,
+ * which the type error then names: what the count may be.
  */
 type Bounded<
   Count extends number,
   Allowed extends number,
-> = number extends Count ? Count : Count extends Allowed ? Count : never;
+  Refusal extends string,
+> = number extends Count ? Count : Count extends Allowed ? Count : Refusal;
 
 /** What `paginate` takes: as `paginationOptionsValidator` normalizes it. */
 export interface PaginationOptions<PageSize extends number = number> {
-  readonly pageSize?: Bounded<PageSize, Exclude<ResultCount, 0>>;
+  readonly pageSize?: Bounded<
+    PageSize,
+    Exclude<ResultCount, 0>,
+    `pageSize is a whole number from 1 to ${typeof queryMaxResults}`
+  >;
   readonly cursor?: string | null;
 }
 
@@ -400,7 +406,11 @@ export interface Group<
 export interface RecordReads<Document> {
   /** At most `count` records, 0 to 100. */
   readonly take: <const Count extends number>(
-    count: Bounded<Count, ResultCount>
+    count: Bounded<
+      Count,
+      ResultCount,
+      `take() returns 0 to ${typeof queryMaxResults} records: use paginate() for more`
+    >
   ) => Promise<Document[]>;
   /** The first record, or null. */
   readonly first: () => Promise<Document | null>;

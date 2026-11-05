@@ -4200,10 +4200,12 @@ export class Workspace extends DurableObject<Env> {
       return true;
     });
     if (saved) {
-      // The preview of the revision before is over once its server code
-      // changed: its database goes now. A write of screens alone runs on
-      // as it was, store and all (sealed-previews.ts). Its problems are
-      // not the new revision's either way (preview-reports.ts).
+      // The preview of the revision before is over once changed server
+      // code seals, its database with it; until then, and for good while
+      // that code doesn't seal, the preview runs on as it was, as after a
+      // write of screens alone, store and all (sealed-previews.ts). Its
+      // problems are not the new revision's either way
+      // (preview-reports.ts).
       this.#sealedPreviews.revised(chatId, appId, this.draft(chatId, appId));
       this.#draftsChanged(chatId);
     }
@@ -4436,12 +4438,13 @@ export class Workspace extends DurableObject<Env> {
    * The build a frame of the chat's preview of App `appId` names for a
    * call of it now (`PreviewAt`), and the revision the call runs at: a
    * version of the App, on that version's own code at
-   * `appVersionRevision`; or the chat's draft, at its revision or one
-   * since which only its screens changed (`SealedPreviews.serves`).
-   * `app.preview_outdated` for a revision the draft's server code moved
-   * past, and for a draft that changes nothing, which no frame shows by
-   * its revision. `ownRevision`: the draft's own revision, the only one
-   * whose calls count toward the agent's check of the draft. Read with no
+   * `appVersionRevision`; or the draft that a frame of the chat's draft at
+   * that revision runs on (`SealedPreviews.served`): the draft now, or
+   * the last server code of the preview that sealed.
+   * `app.preview_outdated` for a revision the preview moved past, and for
+   * a draft that changes nothing, which no frame shows by its revision.
+   * `ownRevision`: the draft's own revision on its own server code, the
+   * only one whose calls count toward the agent's check of the draft. Read with no
    * wait, so nothing lands between the check and what the caller does
    * with it next.
    */
@@ -4473,13 +4476,19 @@ export class Workspace extends DurableObject<Env> {
     }
     const revision = named.data;
     const draft = this.draft(id, appId);
-    if (
-      Object.keys(draft.changes).length === 0 ||
-      !this.#sealedPreviews.serves(id, appId, draft, revision)
-    ) {
+    const served =
+      Object.keys(draft.changes).length === 0
+        ? undefined
+        : this.#sealedPreviews.served(id, appId, draft, revision);
+    if (served === undefined) {
       throw appErrors.create("app.preview_outdated");
     }
-    return { id, draft, revision, ownRevision: revision === draft.revision };
+    return {
+      id,
+      draft: served,
+      revision,
+      ownRevision: served === draft && revision === draft.revision,
+    };
   }
 
   /**
@@ -4517,8 +4526,8 @@ export class Workspace extends DurableObject<Env> {
    * still reaches it: for what follows it outside this object, a live
    * query or a stream (chats-rpc.ts). A version of the App always does,
    * as it runs that version's own code; the draft at a revision while
-   * `SealedPreviews.serves` it. Neither once the chat is gone, or has no
-   * preview of the App.
+   * `SealedPreviews.served` serves it. Neither once the chat is gone, or
+   * has no preview of the App.
    */
   previewServes(chatId: unknown, appId: string, at: unknown): boolean {
     const chat = chatIdSchema.safeParse(chatId);
@@ -4531,12 +4540,12 @@ export class Workspace extends DurableObject<Env> {
     }
     return (
       typeof named.data === "object" ||
-      this.#sealedPreviews.serves(
+      this.#sealedPreviews.served(
         chat.data,
         appId,
         this.draft(chat.data, appId),
         named.data
-      )
+      ) !== undefined
     );
   }
 
@@ -4859,30 +4868,66 @@ export class Workspace extends DurableObject<Env> {
    * `personId`'s own chat's preview of App `appId` shows at `at` import
    * (`#servedBuild`): generated from its release, sealed now if it isn't
    * yet; null when it generates none. Of the draft, only at its own
-   * revision: `app.preview_outdated` once it moved on. Throws as the seal
-   * does for code that doesn't build or inspect.
+   * revision: `app.preview_outdated` once it moved on. While the draft's
+   * server code doesn't build, those of the server code its frames run on
+   * instead (`serverUnbuilt`); throws as the seal does when there is none.
    */
   async previewReferences(
     chatId: unknown,
     personId: string,
     appId: string,
     at: PreviewAt
-  ): Promise<string | null> {
-    const { id, draft } = this.#servedBuild(chatId, personId, appId, at);
-    if (typeof at === "number" && draft.revision !== at) {
+  ): Promise<{ references: string | null; serverUnbuilt: boolean }> {
+    const served = this.#servedBuild(chatId, personId, appId, at);
+    const { id } = served;
+    const own = this.draft(id, appId);
+    if (typeof at === "number" && own.revision !== at) {
       throw appErrors.create("app.preview_outdated");
     }
     const app = appIdSchema.parse(appId);
-    const { release, version } = await this.#sealedPreviews.release(
-      id,
-      app,
-      draft
-    );
-    const generated = await generateModules(release.app, {
+    let { draft } = served;
+    // Of the draft at its revision, on other server code than its own.
+    let inPlace = typeof at === "number" && !served.ownRevision;
+    let sealed: Awaited<ReturnType<SealedPreviews["release"]>>;
+    try {
+      sealed = await this.#sealedPreviews.release(id, app, draft);
+    } catch (error) {
+      // The draft's server code doesn't build: its screens are built
+      // against what its frames then run on, the last server code of the
+      // preview that sealed, or else the App's latest version.
+      if (
+        typeof at !== "number" ||
+        !this.#sealedPreviews.serverUnbuilt(id, app, own)
+      ) {
+        throw error;
+      }
+      draft =
+        this.#sealedPreviews.served(id, app, own, at) ??
+        (await this.#latestInPlace(app, error));
+      inPlace = true;
+      sealed = await this.#sealedPreviews.release(id, app, draft);
+    }
+    const generated = await generateModules(sealed.release.app, {
       resourceId: app,
-      resourceVersion: version,
+      resourceVersion: sealed.version,
     });
-    return generated[generatedPaths.api] ?? null;
+    return {
+      references: generated[generatedPaths.api] ?? null,
+      serverUnbuilt: inPlace,
+    };
+  }
+
+  /**
+   * The App's latest version as a preview runs it (`#servedBuild`), in
+   * place of a draft whose server code doesn't build: `failure`, the
+   * draft's own, when the App has none.
+   */
+  async #latestInPlace(app: AppId, failure: unknown): Promise<Draft> {
+    const latest = await latestVersion(this.env, app);
+    if (latest === null) {
+      throw failure;
+    }
+    return { base: latest, changes: {}, revision: appVersionRevision };
   }
 
   /**

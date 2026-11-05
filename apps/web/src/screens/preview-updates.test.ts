@@ -1,4 +1,5 @@
 import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/screen-runtime";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import type {
   PreviewAt,
   PreviewRefresh,
@@ -276,6 +277,54 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
       ],
       health: ["fixing", "working"],
     });
+  });
+
+  it("says the problem is being fixed while the draft's server code doesn't build, showing each write of its screens meanwhile, until its server code builds", async () => {
+    const { updates, seen, toFrame } = following([
+      // Its server code doesn't build, and no server code did before.
+      async () =>
+        await Promise.reject(
+          versionErrors.create("version.build_failed", { reason: "x" })
+        ),
+      // A write of its screens, on the last server code that built.
+      answered({ ...refreshAt(3), serverUnbuilt: true }),
+      // Its server code builds again.
+      answered(refreshAt(4)),
+    ]);
+    updates.follow(toFrame);
+    updates.revise(2);
+    await vi.waitFor(() => {
+      expect(seen.health).toStrictEqual(["fixing"]);
+    });
+    updates.revise(3);
+    await vi.waitFor(() => {
+      expect(seen.moved).toStrictEqual([3]);
+    });
+    const whileUnbuilt = [...seen.health];
+    updates.revise(4);
+    await vi.waitFor(() => {
+      expect(seen.moved).toStrictEqual([3, 4]);
+    });
+
+    expect({
+      whileUnbuilt,
+      handed: revisionsOf(seen.handed),
+      health: seen.health,
+    }).toStrictEqual({
+      whileUnbuilt: ["fixing"],
+      handed: [3, 4],
+      health: ["fixing", "working"],
+    });
+  });
+
+  it("opens being fixed on a build of the last server code that built, in place of the draft's: a problem reported then is nothing new", () => {
+    const { seen, updates } = following([], () => "applied", {
+      opened: { ...refreshAt(1), serverUnbuilt: true },
+    });
+    updates.problem();
+    updates.close();
+
+    expect(seen.health).toStrictEqual([]);
   });
 
   it("keeps the App's version shown in place of a draft that didn't build being fixed, its calls on that version's own code, until a write of the draft shows", async () => {

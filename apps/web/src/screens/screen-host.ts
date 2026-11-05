@@ -1782,7 +1782,10 @@ export const runPreview = (
           return { target: previewTarget(link, chatId, bundle) };
         }
         const moves: { to?: (at: PreviewAt) => void } = {};
-        health = bundle.fallback === true ? "fixing" : "working";
+        health =
+          bundle.fallback === true || opened.serverUnbuilt === true
+            ? "fixing"
+            : "working";
         const updates = new PreviewUpdates(
           bundle.app,
           opened,
