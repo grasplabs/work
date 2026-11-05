@@ -1,7 +1,10 @@
 import type { Schema } from "@cfworker/json-schema";
 import { blockedProperties } from "@grasp-os/sdk/expression-check";
 import { decisionLimits } from "@grasp-os/shared/decisions";
-import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import {
+  eventTypePattern,
+  sealedBuildLimits,
+} from "@grasp-os/shared/sealed-builds";
 
 import {
   aliasPattern,
@@ -289,12 +292,11 @@ export const workflowSchema: Schema = {
       Object.entries(stepKinds).map(([type, schema]) => [`${type}Step`, schema])
     ),
     alias: { type: "string", pattern: aliasPattern },
-    // Not blank, on one line, no space before or after it: otherwise a
-    // typo, which a run would only wait out to its timeout. Whether the
-    // binding's contract admits it is publication's to check.
+    // A type a run's inbox takes; whether the binding's contract admits
+    // it is publication's to check.
     eventType: {
       type: "string",
-      pattern: "^\\S(?:.*\\S)?$",
+      pattern: eventTypePattern,
       maxLength: sealedBuildLimits.eventTypeLength,
     },
     duration: { type: "string", pattern: durationPattern },

@@ -42,3 +42,12 @@ export const sealedBuildLimits = {
   /** Characters of an event's type, as a run's inbox keeps one. */
   eventTypeLength: 256,
 } as const;
+
+/**
+ * An event's type, as a pattern JSON Schema and `RegExp` (with the `u`
+ * flag) both read: on one line, with no control character, and neither
+ * blank nor padded. A run's inbox takes no other, so a workflow waiting
+ * for one would only sit out its timeout.
+ */
+export const eventTypePattern =
+  "^(?!\\s)[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?<!\\s)$";

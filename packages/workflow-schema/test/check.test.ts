@@ -435,6 +435,11 @@ describe("checking a workflow", () => {
       paddedInList: at({
         event: { from: "replies", type: ["grasp.reply.received", "x "] },
       }),
+      // No event a run takes holds a control character, even inside.
+      tabType: at({ event: { from: "replies", type: "reply\t received" } }),
+      nulInList: at({
+        event: { from: "replies", type: ["grasp.reply.received", "x\0y"] },
+      }),
       // Where it is, not what it is named: a filter's in a loop's items,
       // and an argument named `from` that is no filter at all.
       inItems: codesAt(
@@ -478,6 +483,8 @@ describe("checking a workflow", () => {
       blankType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       spaceType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       paddedInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },
+      tabType: { "/steps/5/event/type": "workflow.invalid_event_type" },
+      nulInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },
       inItems: {
         "/steps/5/do/0/event/from": "workflow.invalid_alias",
         "/steps/5/do/0/event/type": "workflow.invalid_event_type",
