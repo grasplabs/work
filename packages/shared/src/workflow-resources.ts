@@ -319,11 +319,17 @@ export const catalogKeySchema = z
     message: "Workflow contract keys are this deployment's workflows",
   });
 
+/** The most a catalog contract holds, as JSON. */
+const catalogContractMaxBytes = 512 * 1024;
+
 /**
- * A catalog contract as an admin publishes it: its key, kind, and the SDK
- * value descriptors (as JSON text) of what a call passes and returns, as
- * `@grasp-os/open-workflow`'s catalog reads them.
+ * Where outsiders send an event contract's type from: a reply to mail the
+ * run sent (`email`), to the run's own reply address (core's
+ * run-inboxes.ts), the workflow's `inbox.<alias>`.
  */
+export const eventIngressKinds = ["email"] as const;
+export type EventIngressKind = (typeof eventIngressKinds)[number];
+
 /**
  * A workflow event's CloudEvents type, wherever one is read: as an event
  * contract admits it, a sealed build names it, and a run's inbox takes it.
@@ -335,9 +341,11 @@ export const workflowEventTypeSchema = z
     "1 to 256 characters on one line, with no control character and no space at either end"
   );
 
-/** The most a catalog contract holds, as JSON. */
-const catalogContractMaxBytes = 512 * 1024;
-
+/**
+ * A catalog contract as an admin publishes it: its key, kind, and the SDK
+ * value descriptors (as JSON text) of what a call passes and returns, as
+ * `@grasp-os/open-workflow`'s catalog reads them.
+ */
 export const catalogContractSchema = z
   .strictObject({
     key: catalogKeySchema,
@@ -384,9 +392,12 @@ export const catalogContractSchema = z
       .optional(),
     /**
      * An event contract's admitted CloudEvents types, each with the
-     * descriptor of its data (required: no type is admitted untyped) and
+     * descriptor of its data (required: no type is admitted untyped),
      * whether a person's screen may send it, which is what makes it an
-     * App's event reference.
+     * App's event reference, and whether outsiders may (`ingress`): a
+     * reply to the run's mail (`email`), through a reply address of the
+     * run's own (core's run-inboxes.ts). An email type's data is the
+     * platform's received message, as core checks it is.
      */
     events: z
       .record(
@@ -394,6 +405,7 @@ export const catalogContractSchema = z
         z.strictObject({
           data: z.string().max(256 * 1024),
           browser: z.boolean(),
+          ingress: z.enum(eventIngressKinds).optional(),
         })
       )
       .optional(),
@@ -405,6 +417,24 @@ export const catalogContractSchema = z
       Object.values(contract.events ?? {}).filter(({ browser }) => browser)
         .length <= 1,
     { message: "An event contract admits at most one type a screen sends." }
+  )
+  .refine(
+    // Who sends a type is a screen or outsiders, never both.
+    (contract) =>
+      Object.values(contract.events ?? {}).every(
+        ({ browser, ingress }) => !(browser && ingress !== undefined)
+      ),
+    { message: "An event type a screen sends takes no ingress." }
+  )
+  .refine(
+    // A binding's inbox (`inbox.<alias>`) is one address, and what arrives
+    // there is of one type: an event contract admits at most one type
+    // from outside.
+    (contract) =>
+      Object.values(contract.events ?? {}).filter(
+        ({ ingress }) => ingress !== undefined
+      ).length <= 1,
+    { message: "An event contract admits at most one type from outside." }
   )
   .refine(
     // One row of the catalog: well under what a database row may hold.
@@ -447,8 +477,8 @@ const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
  *   that App's own resource bindings;
  * - `decision`: who answers it;
  * - `event`: that the workflow may listen for and emit the contract's
- *   types. Who may send each is the contract's (`browser`) and the
- *   host's checks on every send, never this approval's.
+ *   types. Who may send each is the contract's (`browser`, `ingress`)
+ *   and the host's checks on every send, never this approval's.
  */
 export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({

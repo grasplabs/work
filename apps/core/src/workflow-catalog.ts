@@ -13,6 +13,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import {
   catalogBindingKinds,
   catalogContractSchema,
+  eventIngressKinds,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type {
@@ -27,6 +28,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
 import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { emailReplyContract, emailReplyData } from "./release-contracts.ts";
 import {
   envelopedSchema,
   envelopedSchemaText,
@@ -85,17 +87,24 @@ const storedSchema = z.strictObject({
   events: z
     .record(
       z.string(),
-      z.strictObject({ data: z.string(), browser: z.boolean() })
+      z.strictObject({
+        data: z.string(),
+        browser: z.boolean(),
+        ingress: z.enum(eventIngressKinds).optional(),
+      })
     )
     .optional(),
 });
 
-/** A catalog contract as `@grasp-os/open-workflow` reads it. */
+/**
+ * A catalog contract as `@grasp-os/open-workflow` reads it, and what core
+ * reads of it besides (an event type's `ingress`).
+ */
 export interface ResolvedCatalogContract {
   key: string;
   kind: CatalogBindingKind;
   fingerprint: string;
-  contract: CatalogContract;
+  contract: CatalogContract & z.infer<typeof storedSchema>;
 }
 
 const entryOf = (row: typeof workflowCatalogContracts.$inferSelect) => ({
@@ -249,6 +258,38 @@ const requireNativeOperations = async (
   }
 };
 
+/** The platform's reply data, canonical, as an `email` type's must be. */
+const emailReplyText = canonicalJson(
+  z.json().parse(JSON.parse(emailReplyData))
+);
+
+/**
+ * Refuses (`workflow.contract_invalid`) an `email` type whose data isn't
+ * exactly the platform's reply (`emailReplyData`), compared canonically:
+ * a reply is admitted as core reads it off the message, never as an admin
+ * might shape it, so a type taking anything else would refuse every one.
+ */
+const requireEmailReplies = (
+  events: Readonly<Record<string, { data: string; ingress?: string }>> = {}
+): void => {
+  for (const [type, { data, ingress }] of Object.entries(events)) {
+    if (ingress !== "email") {
+      continue;
+    }
+    let text: string | undefined;
+    try {
+      text = canonicalJson(z.json().parse(JSON.parse(data)));
+    } catch {
+      text = undefined;
+    }
+    if (text !== emailReplyText) {
+      throw contractInvalid(
+        `events.${type}: An email type's data is the platform's reply (${emailReplyContract}'s).`
+      );
+    }
+  }
+};
+
 /**
  * `input` as the catalog stores it: refused unless the profile's catalog
  * reader accepts it, and a decision contract's response schema takes what
@@ -289,6 +330,7 @@ const checkedContract = async (
       ],
     });
   }
+  requireEmailReplies(contract.events);
   const text = canonicalJson(contract);
   return { key, kind: contract.kind, text, fingerprint: await sha256Hex(text) };
 };

@@ -2338,6 +2338,28 @@ export const runChatSources = sqliteTable(
 );
 
 /**
+ * A run's inboxes (src/workflows/run-inboxes.ts): one for each event
+ * binding its start froze whose pinned contract takes replies to the
+ * run's mail (`ingress`), written as the start is admitted. `token_hash`
+ * is the SHA-256 of its token, which is derived (never stored) from
+ * core's key, the run and `binding`. It takes nothing once the run ended,
+ * and goes with the run's details (src/workflows/retention.ts).
+ */
+export const runInboxes = sqliteTable(
+  "run_inboxes",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    runId: text("run_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    binding: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_inboxes_run_binding_idx").on(table.runId, table.binding),
+  ]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume

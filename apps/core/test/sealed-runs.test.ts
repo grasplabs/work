@@ -156,9 +156,10 @@ describe("a sealed build's run on the run host", () => {
 
   it("hands the isolate only the parameters that aren't sensitive", async () => {
     const run = await sealedRunOf(await waitingRun(sealed));
+    const start = await sealedRunStart(env, run);
     expect({
       frozen: Object.keys(run.params),
-      handed: sealedRunStart(run).params,
+      handed: start.params,
     }).toStrictEqual({ frozen: ["token"], handed: {} });
   });
 

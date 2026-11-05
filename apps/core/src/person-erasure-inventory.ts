@@ -92,6 +92,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.build_leases": { kept: "admission, by ID" },
   "core.workflow_model_waits": { kept: "a step's wait, gone once it stops" },
   "core.run_mail_stamps": { company: "mail a run sent (D3)" },
+  "core.run_inboxes": noPerson,
   "core.run_mail_calls": { company: "mail a run sent (D3)" },
   "core.resource_run_mail_calls": {
     company: "mail an independent workflow's run sent (D3)",

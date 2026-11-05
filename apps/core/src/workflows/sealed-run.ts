@@ -98,6 +98,7 @@ import type { CaughtError, Failure } from "./resource-errors.ts";
 import { boundedJson } from "./resource-host.ts";
 import type { ActionModelCalls, HostedResourceRun } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
+import { inboxOf } from "./run-inboxes.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // What a run of a sealed build of a generated JSON workflow may do on the
@@ -2977,13 +2978,15 @@ const callAliasesOf = (build: LoadedBuild): string[] => [
 
 /**
  * What a sealed run's main module starts with: its input, only the
- * parameters the build lists as not sensitive, and the aliases its calls
+ * parameters the build lists as not sensitive, the aliases its calls
  * go through (`callAliasesOf`), each a binding whose `call` goes to the
  * host, which checks it against the sealed template and the run's
- * authority.
+ * authority, and its inboxes' reply addresses by alias (run-inboxes.ts),
+ * the same on every activation.
  */
-export const sealedRunStart = (run: HostedSealedRun) => ({
+export const sealedRunStart = async (env: Env, run: HostedSealedRun) => ({
   runId: run.runId,
+  inbox: await inboxOf(env, run),
   params: Object.fromEntries(
     run.build.params.flatMap((name) =>
       Object.hasOwn(run.params, name) ? [[name, run.params[name] ?? null]] : []

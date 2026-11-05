@@ -770,6 +770,19 @@ export interface WorkflowContext<P extends Params, Input> {
   input: Input;
   params: ParamValues<P>;
   /**
+   * Where outsiders send this run's events, by the alias of an event
+   * binding whose contract takes them from outside: for replies to the
+   * run's mail, its reply address (`reply-<token>@<host>`), to give that
+   * mail as its Reply-To. Each is the run's own, the same for its whole
+   * life, and takes nothing once it ended. Anyone the mail reaches can
+   * reply through it: a reply is checked against the contract, but who
+   * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
+   * and DMARC found, each of which domain: only `dmarc.result === "pass"`
+   * ties its `from` to who sent it. A test run gets placeholders that
+   * reach nobody; any run not on a sealed build's run host, none.
+   */
+  inbox: Readonly<Record<string, string>>;
+  /**
    * The App's connections and other permissions, and its own functions,
    * by binding name; call them in a step's own function, each written out
    * as `env.NAME.method(…)` or `appFunctions(env).query(…)` (or
@@ -1552,6 +1565,7 @@ export const workflow = <
       runner.steps as StepRunner,
       {
         runId: engine.runId,
+        inbox: Object.freeze({ ...engine.inbox }),
         input,
         // SAFETY: resolveParams parses every declared parameter with the
         // schema of its kind, which is what ParamValues<P> describes.

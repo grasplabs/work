@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { apps, triggerResources, workflowTriggers } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
+import { replyLocalPattern } from "./run-inboxes.ts";
 
 // The addresses workflows receive mail at, on the deployment's mail
 // domain (inbound-email.ts): one namespace, whoever receives there. An
@@ -59,14 +60,20 @@ export const addressTaken = (
 ): SQL => sql`EXISTS (${holders(addresses, except)})`;
 
 /**
- * Refuses `addresses` when someone other than App `except` holds one
- * (`workflow.email_taken`).
+ * Refuses `addresses` when someone other than App `except` holds one, or
+ * one has the shape of a run's reply address (`replyLocalPattern`,
+ * run-inboxes.ts), which no workflow takes: a builder who saw one in a
+ * run's trace would otherwise read its replies (`workflow.email_taken`).
  */
 export const requireFreeAddresses = async (
   env: Env,
   addresses: readonly string[],
   except?: AppId
 ): Promise<void> => {
+  const reserved = addresses.find((address) => replyLocalPattern.test(address));
+  if (reserved !== undefined) {
+    throw workflowErrors.create("workflow.email_taken", { address: reserved });
+  }
   if (addresses.length === 0) {
     return;
   }
