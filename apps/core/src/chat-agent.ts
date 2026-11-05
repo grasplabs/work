@@ -409,9 +409,14 @@ export const rebase = async (
     const base = await tx.doc(BaseDoc, conversation.id);
     return { base: base.base, dropped: [...base.dropped] };
   }, context);
+  // What the context leaves out: what is withheld now, and what an earlier
+  // rebase left out. A rebase a restart cut short already recorded its runs
+  // as left out, yet reads its history from before it again; those stay
+  // out even when access came back meanwhile.
+  const dropped = new Set([...start.dropped, ...withheld]);
   const history = withheldFrom(
     await historySince(conversation, start.base, context),
-    withheld
+    dropped
   );
   const reset = await conversation.commit(async (tx) => {
     const entry = await tx.appendEntry(conversation.id, {
@@ -419,7 +424,7 @@ export const rebase = async (
       head: "self",
     });
     const base = await tx.doc(BaseDoc, conversation.id);
-    base.dropped = [...new Set([...start.dropped, ...withheld])];
+    base.dropped = [...dropped];
     base.rebasing = true;
     return entry.id;
   }, context);

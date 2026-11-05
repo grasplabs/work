@@ -143,9 +143,18 @@ const openChat = async (
   const requests: Message[][] = [];
   const summaries: Message[][] = [];
   const queue: FauxResponseStep[] = [];
+  // A compaction's summary held until released, so a restart can cut
+  // short what waits on it.
+  let held:
+    | { asked: (value: boolean) => void; released: Promise<boolean> }
+    | undefined;
   const answer: FauxResponseStep = async (request, ...rest) => {
     if (isSummaryRequest(request.messages)) {
       summaries.push(structuredClone(request.messages));
+      if (held !== undefined) {
+        held.asked(true);
+        await held.released;
+      }
       return says(
         JSON.stringify(request.messages).includes(secretWord)
           ? `summary saw ${secretWord}`
@@ -274,6 +283,21 @@ const openChat = async (
   const rebased = async (room = 150_000): Promise<void> => {
     await rebase(opened.root, revoked, room, context);
   };
+  /** A rebase a restart cuts short while pi summarizes what it appended. */
+  const rebaseCutShort = async (room: number): Promise<void> => {
+    const asked = Promise.withResolvers<boolean>();
+    const released = Promise.withResolvers<boolean>();
+    held = { asked: asked.resolve, released: released.promise };
+    const rebasing = rebase(opened.root, revoked, room, context).catch(
+      () => "cut short"
+    );
+    await asked.promise;
+    held = undefined;
+    const restarted = restart([]);
+    released.resolve(true);
+    await restarted;
+    await rebasing;
+  };
   /** Whether the chat's context must be rebased before its next turn. */
   const mustRebase = async (): Promise<boolean> =>
     await needsRebase(opened.root, revoked, context);
@@ -281,6 +305,7 @@ const openChat = async (
     ask,
     steer,
     rebased,
+    rebaseCutShort,
     mustRebase,
     submit,
     next,
@@ -783,7 +808,7 @@ describe("compaction", () => {
     expect(JSON.stringify(chat.requests.slice(2))).not.toContain(secretWord);
   });
 
-  it("sends no summary made before a revocation once rebased, and summarizes again from what may be read", async () => {
+  it("sends no summary made before a revocation once rebased, and summarizes again from what may be read, even once a restart cut the rebase short and access came back before it was done again", async () => {
     const chat = await openChat(
       {},
       { contextWindow: 4000, settings: compacting }
@@ -796,20 +821,39 @@ describe("compaction", () => {
     expect(JSON.stringify(chat.requests.at(-1))).toContain(
       `summary saw ${secretWord}`
     );
-    chat.revoked.add("run-1");
-    const before = {
+    const mark = () => ({
       requests: chat.requests.length,
       summaries: chat.summaries.length,
-    };
+    });
+    /** What went to the model, its summarizer included, since `from`. */
+    const sentSince = (from: ReturnType<typeof mark>): string =>
+      JSON.stringify([
+        ...chat.requests.slice(from.requests),
+        ...chat.summaries.slice(from.summaries),
+      ]);
+    chat.revoked.add("run-1");
+    const revoked = mark();
+    await chat.rebaseCutShort(2000);
+    const whileRevoked = sentSince(revoked);
+    // Access comes back before the rebase is done again, and goes again
+    // after: what the cut-short rebase left out stays out.
+    chat.revoked.delete("run-1");
     await chat.rebased(2000);
+    chat.revoked.add("run-1");
+    const revokedAgain = mark();
     await chat.ask("Again?", [chat.reply(says("Withheld"))]);
-    const since = JSON.stringify([
-      ...chat.requests.slice(before.requests),
-      ...chat.summaries.slice(before.summaries),
-    ]);
-    expect(chat.summaries.length).toBeGreaterThan(before.summaries);
-    expect(since).not.toContain(secretWord);
-    expect(since).toContain("summary saw nothing");
+    const afterwards = sentSince(revokedAgain);
+    expect({
+      whileRevoked: whileRevoked.includes(secretWord),
+      afterwards: afterwards.includes(secretWord),
+      summarizedAgain: chat.summaries.length > revoked.summaries,
+      summary: afterwards.includes("summary saw nothing"),
+    }).toStrictEqual({
+      whileRevoked: false,
+      afterwards: false,
+      summarizedAgain: true,
+      summary: true,
+    });
   });
 });
 
