@@ -300,6 +300,10 @@ const sizeOf = (messages: readonly Message[]): number =>
     .filter(({ role }) => role !== "system")
     .reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 
+/** What a whole request holds, as pi estimates it, its system prompt included. */
+const wholeSizeOf = (messages: readonly Message[]): number =>
+  messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+
 /** The text of every tool result `messages` hold, in order. */
 const resultsIn = (messages: readonly Message[]): string[] =>
   messages.flatMap((message) =>
@@ -591,6 +595,43 @@ describe("what a chat can no longer read", () => {
     expect({ summaries, fits: asked <= 4000 }).toStrictEqual({
       summaries: summaries.map((size) => Math.min(size, 2000)),
       fits: true,
+    });
+  });
+
+  it("rebases a prefix just under its room followed by one large tool result, every request, the summarizer's included, within the window", async () => {
+    const chat = await openChat(
+      {},
+      { contextWindow: 6000, settings: compacting }
+    );
+    // A prefix just under the room of 2,000 tokens.
+    await chat.ask("Small", [chat.reply(says("a".repeat(7200)))]);
+    // Then one result of about 1,500 tokens: within the room on its own,
+    // past it with the prefix.
+    await chat.ask("Read", [
+      chat.reply(
+        call("executeCode", {
+          // Built in the run, so only its result holds it.
+          code: 'export default async () => "z".repeat(6_000);',
+        })
+      ),
+      chat.reply(says("Read it")),
+    ]);
+    const before = chat.requests.length;
+    const summarized = chat.summaries.length;
+    await chat.rebased(2000);
+    await chat.ask("Again?", [chat.reply(says("ok"))]);
+    const summaries = chat.summaries.slice(summarized).map(wholeSizeOf);
+    const requests = chat.requests.slice(before).map(wholeSizeOf);
+    // The rebase compacted the prefix before it appended the result: its
+    // summary took at most the room, and no request passed the window.
+    expect({
+      compacted: summaries.length > 0,
+      summaries,
+      requests,
+    }).toStrictEqual({
+      compacted: true,
+      summaries: summaries.map((size) => Math.min(size, 2000)),
+      requests: requests.map((size) => Math.min(size, 6000)),
     });
   });
 
