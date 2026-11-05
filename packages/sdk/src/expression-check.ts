@@ -130,6 +130,11 @@ export type CheckedExpression =
       code: string;
       /** The reads of its roots, for the caller to hold to where it stands. */
       reads: ExpressionRead[];
+      /**
+       * The most array and object literals it nests, one in another: how
+       * deep what it writes is at least, whatever it reads.
+       */
+      literalDepth: number;
       forTypes: TypeForm;
     }
   | { ok: false; errors: ExpressionError[] };

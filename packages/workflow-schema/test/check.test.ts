@@ -446,6 +446,17 @@ describe("checking a workflow", () => {
       // the arguments object and 33 lists.
       atCallDepth: codesAt(withKey([send(nestedList(33))])),
       pastCallDepth: codesAt(withKey([send(nestedList(34))])),
+      // An expression nests at least as deep as its own literals, around
+      // a value or around what it reads.
+      expressionLiteral: codesAt(
+        withKey([send({ $expr: `${"[".repeat(34)}1${"]".repeat(34)}` })])
+      ),
+      expressionAround: codesAt(
+        withKey([send({ $expr: `${"[".repeat(34)}input${"]".repeat(34)}` })])
+      ),
+      expressionAtDepth: codesAt(
+        withKey([send({ $expr: `${"[".repeat(33)}1${"]".repeat(33)}` })])
+      ),
       // A model call's input sits in one object more.
       pastModelDepth: codesAt(
         withKey([
@@ -464,6 +475,13 @@ describe("checking a workflow", () => {
       deepSteps: { "": "workflow.too_deep" },
       atCallDepth: "ok",
       pastCallDepth: { "/steps/0/arguments": "workflow.arguments_too_deep" },
+      expressionLiteral: {
+        "/steps/0/arguments": "workflow.arguments_too_deep",
+      },
+      expressionAround: {
+        "/steps/0/arguments": "workflow.arguments_too_deep",
+      },
+      expressionAtDepth: "ok",
       pastModelDepth: { "/steps/0/input": "workflow.arguments_too_deep" },
     });
   });

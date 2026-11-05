@@ -435,6 +435,8 @@ interface Walk {
   readonly code: Map<string, string>;
   readonly placeholders: Map<string, string>;
   readonly answers: Map<string, ValueDescriptor>;
+  /** How many array and object literals each expression nests, by pointer. */
+  readonly literals: Map<string, number>;
   count: number;
 }
 
@@ -522,6 +524,7 @@ const checkExpressionAt = (
     }
     return;
   }
+  walk.literals.set(pointer, checked.literalDepth);
   const refusals = new Map(
     checked.reads.flatMap((read) => {
       const refusal = refusalOf(walk, read, place);
@@ -594,18 +597,21 @@ const checkValue = (
 };
 
 /**
- * How many objects and arrays `value` nests, an expression a leaf (its
- * value is the run's): measured without recursion.
+ * How many objects and arrays `value`, at `pointer`, nests at least: an
+ * expression as many as its own literals nest (what it reads may nest
+ * more, which only the run knows). Measured without recursion.
  */
-const nestingOf = (value: Value): number => {
+const nestingOf = (walk: Walk, value: Value, pointer: string): number => {
   let deepest = 0;
-  const pending: [Value, number][] = [[value, 0]];
+  const pending: [Value, number, string][] = [[value, 0, pointer]];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    const [held, level] = next;
-    if (held !== null && typeof held === "object" && !isExpression(held)) {
+    const [held, level, at] = next;
+    if (isExpression(held)) {
+      deepest = Math.max(deepest, level + (walk.literals.get(at) ?? 0));
+    } else if (held !== null && typeof held === "object") {
       deepest = Math.max(deepest, level + 1);
-      for (const item of Object.values(held)) {
-        pending.push([item, level + 1]);
+      for (const [key, item] of Object.entries(held)) {
+        pending.push([item, level + 1, join(at, key)]);
       }
     }
   }
@@ -615,6 +621,7 @@ const nestingOf = (value: Value): number => {
 /**
  * Refuses a call's part `value` at `pointer`, inside `around` objects
  * of the call, nested deeper than the host takes a call's arguments.
+ * After its expressions are checked, whose literals it counts.
  */
 const checkCallDepth = (
   walk: Walk,
@@ -623,13 +630,13 @@ const checkCallDepth = (
   around: number
 ): void => {
   const most = sealedBuildLimits.callDepth - around;
-  if (value !== undefined && nestingOf(value) > most) {
+  if (value !== undefined && nestingOf(walk, value, pointer) > most) {
     problem(
       walk,
       pointer,
       "workflow.arguments_too_deep",
       `Nests deeper than the ${most} objects and lists a call takes here.`,
-      "Flatten it, or build the deep part in an expression from the run's data."
+      "Flatten it: its lists and objects, and those its expressions write."
     );
   }
 };
@@ -745,7 +752,6 @@ const checkDo = (
     );
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
-  checkCallDepth(walk, step.arguments, join(pointer, "arguments"), 0);
   checkValue(
     walk,
     step.arguments,
@@ -753,6 +759,7 @@ const checkDo = (
     place,
     binding?.kind === "connector"
   );
+  checkCallDepth(walk, step.arguments, join(pointer, "arguments"), 0);
 };
 
 const checkAgent = (
@@ -763,9 +770,6 @@ const checkAgent = (
 ): void => {
   bindingFor(walk, step.binding, ["model"], pointer);
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
-  // A model call sends `{ instructions, input }`: one object around each.
-  checkCallDepth(walk, step.instructions, join(pointer, "instructions"), 1);
-  checkCallDepth(walk, step.input, join(pointer, "input"), 1);
   checkValue(
     walk,
     step.instructions,
@@ -774,6 +778,9 @@ const checkAgent = (
     false
   );
   checkValue(walk, step.input, join(pointer, "input"), place, false);
+  // A model call sends `{ instructions, input }`: one object around each.
+  checkCallDepth(walk, step.instructions, join(pointer, "instructions"), 1);
+  checkCallDepth(walk, step.input, join(pointer, "input"), 1);
   const answer = checkSchema(walk, step.output, join(pointer, "output"));
   if (answer !== undefined) {
     walk.answers.set(pointer, answer);
@@ -978,6 +985,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     code: new Map(),
     placeholders: new Map(),
     answers: new Map(),
+    literals: new Map(),
     count: 0,
   };
   checkParams(walk, params);

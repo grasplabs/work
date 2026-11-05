@@ -157,6 +157,12 @@ class Lowering {
 
   readonly reads: ExpressionRead[] = [];
 
+  /** The array and object literals around what is lowered now. */
+  private literals = 0;
+
+  /** The most array and object literals it nests, one in another. */
+  deepest = 0;
+
   private readonly roots: ReadonlySet<string>;
 
   /** The callback parameters in scope, which a root's name may shadow. */
@@ -171,6 +177,37 @@ class Lowering {
     if (this.roots.has(name) && !this.bound.includes(name)) {
       this.reads.push({ root: name, path });
     }
+  }
+
+  /** An array or object literal, its values lowered. */
+  private literal(node: Node): t.Expression {
+    if (node.type === "ArrayExpression") {
+      return t.arrayExpression(
+        node.elements.map((element) =>
+          element?.type === "SpreadElement"
+            ? t.spreadElement(this.expression(element.argument))
+            : this.expression(nonNull(element))
+        )
+      );
+    }
+    if (node.type !== "ObjectExpression") {
+      throw new Error(`A literal is no ${node.type}.`);
+    }
+    return t.objectExpression(
+      node.properties.map((property) => {
+        if (property.type === "SpreadElement") {
+          return t.spreadElement(this.expression(property.argument));
+        }
+        if (property.type !== "ObjectProperty") {
+          throw new Error("A checked object literal has only fields.");
+        }
+        return t.objectProperty(
+          t.stringLiteral(String(keyOf(property.key))),
+          this.expression(property.value),
+          true
+        );
+      })
+    );
   }
 
   expression(node: Node): t.Expression {
@@ -203,31 +240,13 @@ class Lowering {
           node.expressions.map((expression) => this.expression(expression))
         );
       }
-      case "ArrayExpression": {
-        return t.arrayExpression(
-          node.elements.map((element) =>
-            element?.type === "SpreadElement"
-              ? t.spreadElement(this.expression(element.argument))
-              : this.expression(nonNull(element))
-          )
-        );
-      }
+      case "ArrayExpression":
       case "ObjectExpression": {
-        return t.objectExpression(
-          node.properties.map((property) => {
-            if (property.type === "SpreadElement") {
-              return t.spreadElement(this.expression(property.argument));
-            }
-            if (property.type !== "ObjectProperty") {
-              throw new Error("A checked object literal has only fields.");
-            }
-            return t.objectProperty(
-              t.stringLiteral(String(keyOf(property.key))),
-              this.expression(property.value),
-              true
-            );
-          })
-        );
+        this.literals += 1;
+        this.deepest = Math.max(this.deepest, this.literals);
+        const literal = this.literal(node);
+        this.literals -= 1;
+        return literal;
       }
       case "UnaryExpression": {
         return t.unaryExpression(node.operator, this.expression(node.argument));
@@ -354,18 +373,20 @@ class Lowering {
 
 /**
  * The code a checked expression runs as (`Lowering`): one parenthesized
- * expression, with no comment, printed from its syntax tree; and the
- * reads of `roots` it makes.
+ * expression, with no comment, printed from its syntax tree; the reads
+ * of `roots` it makes; and the most array and object literals it nests,
+ * one in another, as deep as what it writes is at least.
  */
 export const lowerExpression = (
   checked: Node,
   roots: ReadonlySet<string>
-): { code: string; reads: ExpressionRead[] } => {
+): { code: string; reads: ExpressionRead[]; literalDepth: number } => {
   const lowering = new Lowering(roots);
   const lowered = lowering.expression(checked);
   return {
     code: `(${generate(lowered, { comments: false }).code})`,
     reads: lowering.reads,
+    literalDepth: lowering.deepest,
   };
 };
 

@@ -85,8 +85,23 @@ describe("what a workflow expression may be", () => {
       source: " input.a ",
       code: '($read(input, "a"))',
       reads: [{ root: "input", path: ["a"] }],
+      literalDepth: 0,
       forTypes: { code: " input.a ", added: [] },
     });
+  });
+
+  it("says how deep its literals nest, one in another", () => {
+    expect(
+      [
+        "input.a",
+        "[input]",
+        "[{ a: [1] }, []]",
+        "input.lines.map((line) => ({ at: [line] }))",
+      ].map((source) => {
+        const checked = checkExpression(source);
+        return checked.ok ? checked.literalDepth : checked.errors;
+      })
+    ).toStrictEqual([0, 1, 3, 2]);
   });
 });
 
