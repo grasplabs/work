@@ -99,7 +99,7 @@ const screenMistakes: Record<string, string> = {
   "components/m-dom.tsx":
     'export const wrong: HTMLInputElement = document.createElement("div");\n',
   "components/m-api.tsx":
-    'import { useQuery } from "@grasp-os/sdk/react";\n\nimport { api } from "#grasp";\n\nexport const Wrong = () => useQuery(api, 42 as unknown as { nope: true });\n',
+    'import { useQuery } from "@grasp-os/sdk/react";\n\nimport { api } from "@server/_generated/api";\n\nexport const Wrong = () => useQuery(api, 42 as unknown as { nope: true });\n',
   "components/m-callback.tsx":
     'import { useCallback } from "react";\n\nexport const useWrong = () => useCallback((event) => event, []);\n',
   "components/m-null.tsx":
@@ -117,32 +117,31 @@ const screenMistakes: Record<string, string> = {
     'import type { useQuery } from "../node_modules/@grasp-os/sdk/src/react";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
-/** Mistakes in an App's server code, each an operation file of its own. */
+/** Mistakes in an App's server code, each a server module of its own. */
 const serverMistakes: Record<string, string> = {
-  "operations/m-assign.ts": 'export const wrong: number = "x";\n',
-  "operations/m-returns.ts":
-    'import { v } from "@grasp-os/sdk";\nimport { query } from "#grasp/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
-  "operations/m-dom.ts": "export const wrong = (): string => document.title;\n",
-  "operations/m-implicit.ts": "export const wrong = (x) => x;\n",
-  "operations/m-undefined.ts":
-    "export const wrong = (a?: { b: number }) => a.b;\n",
+  "server/m-assign.ts": 'export const wrong: number = "x";\n',
+  "server/m-returns.ts":
+    'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
+  "server/m-dom.ts": "export const wrong = (): string => document.title;\n",
+  "server/m-implicit.ts": "export const wrong = (x) => x;\n",
+  "server/m-undefined.ts": "export const wrong = (a?: { b: number }) => a.b;\n",
   // Modules the kit holds but doesn't give server code: a screen's, a
   // library's, and the kit's files by path, relative, absolute and bare.
-  "operations/m-screen-module.ts":
+  "server/m-screen-module.ts":
     'import type { useQuery } from "@grasp-os/sdk/react";\n\nexport type Wrong = typeof useQuery;\n',
-  "operations/m-react.ts":
+  "server/m-react.ts":
     'import type { ReactNode } from "react";\n\nexport type Wrong = ReactNode;\n',
-  "operations/m-library.ts":
+  "server/m-library.ts":
     'import type { ZodType } from "zod";\n\nexport type Wrong = ZodType;\n',
-  "operations/m-kit-path.ts":
+  "server/m-kit-path.ts":
     'import type { useQuery } from "../node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
-  "operations/m-kit-absolute.ts":
+  "server/m-kit-absolute.ts":
     'import type { useQuery } from "/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
-  "operations/m-hidden-relative.ts":
+  "server/m-hidden-relative.ts":
     'import type { useQuery } from "../.kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
-  "operations/m-hidden-absolute.ts":
+  "server/m-hidden-absolute.ts":
     'import type { useQuery } from "/.kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
-  "operations/m-hidden-bare.ts":
+  "server/m-hidden-bare.ts":
     'import type { useQuery } from ".kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
@@ -204,19 +203,19 @@ const said: Record<string, string[]> = {
     "components/m-utf16.tsx:1:35 TS2322 error",
   ],
   server: [
-    "operations/m-assign.ts:1:14 TS2322 error",
-    "operations/m-dom.ts:1:36 TS2584 error",
-    "operations/m-hidden-absolute.ts:1:31 TS2307 error",
-    "operations/m-hidden-bare.ts:1:31 TS2307 error",
-    "operations/m-hidden-relative.ts:1:31 TS2307 error",
-    "operations/m-implicit.ts:1:23 TS7006 error",
-    "operations/m-kit-absolute.ts:1:31 TS2307 error",
-    "operations/m-kit-path.ts:1:31 TS2307 error",
-    "operations/m-library.ts:1:30 TS2307 error",
-    "operations/m-react.ts:1:32 TS2307 error",
-    "operations/m-returns.ts:4:76 TS2322 error",
-    "operations/m-screen-module.ts:1:31 TS2307 error",
-    "operations/m-undefined.ts:1:45 TS18048 error",
+    "server/m-assign.ts:1:14 TS2322 error",
+    "server/m-dom.ts:1:36 TS2584 error",
+    "server/m-hidden-absolute.ts:1:31 TS2307 error",
+    "server/m-hidden-bare.ts:1:31 TS2307 error",
+    "server/m-hidden-relative.ts:1:31 TS2307 error",
+    "server/m-implicit.ts:1:23 TS7006 error",
+    "server/m-kit-absolute.ts:1:31 TS2307 error",
+    "server/m-kit-path.ts:1:31 TS2307 error",
+    "server/m-library.ts:1:30 TS2307 error",
+    "server/m-react.ts:1:32 TS2307 error",
+    "server/m-returns.ts:4:76 TS2322 error",
+    "server/m-screen-module.ts:1:31 TS2307 error",
+    "server/m-undefined.ts:1:45 TS18048 error",
   ],
   workflows: [
     "workflows/m-assign.ts:1:14 TS2322 error",
@@ -239,10 +238,10 @@ const said: Record<string, string[]> = {
  */
 const refusedFirst: Record<string, string[]> = {
   server: [
-    "operations/m-hidden-absolute.ts:1",
-    "operations/m-hidden-relative.ts:1",
-    "operations/m-kit-absolute.ts:1",
-    "operations/m-kit-path.ts:1",
+    "server/m-hidden-absolute.ts:1",
+    "server/m-hidden-relative.ts:1",
+    "server/m-kit-absolute.ts:1",
+    "server/m-kit-path.ts:1",
   ],
 };
 
