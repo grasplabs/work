@@ -27,16 +27,8 @@
   // (@grasp-os/shared/log), never headers or bodies (threat model R17).
   // Query strings stay out of logs and traces: the OAuth callback's carries
   // the code and state (threat model R17, CN3).
-  // Accepted exception: traces keep the whole path, and two paths carry a
-  // token in one of their segments, a screen module's
-  // (/screen-modules/<scope>/<token>/…) and a package artifact's. Workers
-  // can't exclude or redact a path from traces, only the query string.
-  // Nor can the token move elsewhere: a sandboxed frame's module requests
-  // carry no cookie or header of the page's, so the address is the only
-  // credential, and a relative import keeps the path and drops the query.
-  // Core's own request log leaves both tokens out. A token reads one
-  // scope's modules for at most about 12 hours, and whoever reads this
-  // Worker's traces holds the bucket those modules are kept in.
+  // A screen module's token rides in its address's query for this reason,
+  // never in its path, which traces keep whole (screen-frame.ts).
   "observability": {
     "enabled": true,
     "redact_query_string": true,

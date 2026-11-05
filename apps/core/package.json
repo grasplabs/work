@@ -44,6 +44,7 @@
     "chat": "catalog:",
     "csv-parse": "catalog:",
     "drizzle-orm": "catalog:",
+    "es-module-lexer": "catalog:",
     "fflate": "catalog:",
     "jose": "catalog:",
     "postal-mime": "catalog:",

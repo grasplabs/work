@@ -345,7 +345,7 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "components/one.ts": [] }],
-        files: ["compiler.js", "esbuild.wasm", "kit.json", "ultracite.js"],
+        files: ["compiler.js", "kit.json", "ultracite.js"],
         overlap: false,
       });
     });

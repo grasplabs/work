@@ -175,8 +175,8 @@ describe("a preview's frame taking its draft's updates", () => {
   });
 
   it("tells a module that didn't load, in each engine's words, from the screen's own code throwing", () => {
-    const directory = `https://acme.grasp.test/screen-modules/${"d".repeat(64)}/1.x/`;
-    const imported = `${directory}${"e".repeat(64)}.js`;
+    const directory = `https://acme.grasp.test/screen-modules/${"d".repeat(64)}/`;
+    const imported = `${directory}${"e".repeat(64)}.js?token=1.x`;
     expect({
       chromium: notLoaded(
         new TypeError(

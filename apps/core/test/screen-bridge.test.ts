@@ -24,6 +24,7 @@ import {
   kitModulesOf,
   loadFrame,
   modulePartsOf,
+  modulePath,
   pathOf,
   policyOf,
   routed,
@@ -205,7 +206,7 @@ const without = (address: string): string => {
 /** A module's address with `token` in place of its own. */
 const withToken = (address: string, token: string): string => {
   const { scope, hash } = modulePartsOf(address);
-  return `/screen-modules/${scope}/${token}/${hash}.js`;
+  return modulePath({ scope, hash, token });
 };
 
 /** Runs the clock's sweep at `ahead` until it has read everything once. */

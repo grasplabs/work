@@ -74,7 +74,12 @@ const servedFrom = async (
   address: string
 ): Promise<{ status: number; code: string }> => {
   const response = await routed(
-    pathOf(new URL(`${address}.js`, frame?.screen.entry).href)
+    pathOf(
+      new URL(
+        `${address}.js${new URL(frame?.screen.entry ?? "").search}`,
+        frame?.screen.entry
+      ).href
+    )
   );
   return { status: response.status, code: await response.text() };
 };

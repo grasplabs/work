@@ -114,19 +114,29 @@ const stagedAppModules = async (
 };
 
 const modulePathPattern =
-  /^\/screen-modules\/(?<scope>[^/]+)\/(?<token>[^/]+)\/(?<hash>[^/]+)\.js$/u;
+  /^\/screen-modules\/(?<scope>[^/]+)\/(?:\d+\/)?(?<hash>[^/]+)\.js$/u;
 
-/** A module's address, `/screen-modules/<scope>/<token>/<hash>.js`, in parts. */
-export const modulePartsOf = (
-  address: string
-): { scope: string; token: string; hash: string } => {
-  const {
-    scope = "",
-    token = "",
-    hash = "",
-  } = modulePathPattern.exec(new URL(address).pathname)?.groups ?? {};
-  return { scope, token, hash };
+/** One module's address in parts: what a frame asks core for. */
+export interface ModuleParts {
+  scope: string;
+  token: string;
+  hash: string;
+}
+
+/**
+ * A module's address, `/screen-modules/<scope>/<hash>.js?token=<token>`,
+ * in parts.
+ */
+export const modulePartsOf = (address: string): ModuleParts => {
+  const url = new URL(address);
+  const { scope = "", hash = "" } =
+    modulePathPattern.exec(url.pathname)?.groups ?? {};
+  return { scope, token: url.searchParams.get("token") ?? "", hash };
 };
+
+/** The path and query core serves a module at, from its parts. */
+export const modulePath = ({ scope, token, hash }: ModuleParts): string =>
+  `/screen-modules/${scope}/${hash}.js?${new URLSearchParams({ token }).toString()}`;
 
 /** Where a module is staged in R2, from its address. */
 export const moduleKeyOf = (address: string): string => {
@@ -168,7 +178,12 @@ export const loadFrame = async (
     ...imports,
     ...Object.fromEntries(
       Object.entries(await stagedAppModules(framed.artifact)).map(
-        ([name, address]) => [name, new URL(`${address}.js`, screen.entry).href]
+        ([name, address]) => [
+          name,
+          // As the screen's module imports it: beside it, under its token.
+          new URL(`${address}.js${new URL(screen.entry).search}`, screen.entry)
+            .href,
+        ]
       )
     ),
   };

@@ -68,10 +68,13 @@ const nextTask = async (): Promise<void> => {
 /**
  * Where `load`'s module is, beside `screen`, the address the frame first
  * loaded the screen's module at: in the same directory, the preview's
- * own (core's screen-frame.ts), under its visit from 1 on.
+ * own (core's screen-frame.ts), under its visit from 1 on, with the same
+ * query, which carries the directory's token.
  */
-const addressOf = (screen: string, { entry, visit }: PreviewLoad): string =>
-  new URL(visit === 0 ? `${entry}.js` : `${visit}/${entry}.js`, screen).href;
+const addressOf = (screen: string, { entry, visit }: PreviewLoad): string => {
+  const file = visit === 0 ? `${entry}.js` : `${visit}/${entry}.js`;
+  return new URL(`${file}${new URL(screen).search}`, screen).href;
+};
 
 /**
  * The style element the frame's document put the screen's CSS in, which

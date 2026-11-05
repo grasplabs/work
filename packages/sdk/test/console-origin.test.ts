@@ -11,11 +11,13 @@ import { calledByApp } from "../src/console-origin.ts";
 // or a stack the runtime can't read taken for the kit's.
 
 const origin = "https://acme.grasp.test/screen-modules";
-const kit = `${origin}/kit/1.x`;
-const appDirectory = `${origin}/${"d".repeat(64)}/1.z/`;
-const runtime = `${kit}/${"a".repeat(64)}.js`;
-const app = `${appDirectory}${"b".repeat(64)}.js`;
-const reactDom = `${kit}/${"c".repeat(64)}.js`;
+const kit = `${origin}/kit`;
+const appDirectory = `${origin}/${"d".repeat(64)}/`;
+// Each address with its directory's token in the query (core's
+// screen-frame.ts), which stacks keep.
+const runtime = `${kit}/${"a".repeat(64)}.js?token=1.x`;
+const app = `${appDirectory}${"b".repeat(64)}.js?token=1.z`;
+const reactDom = `${kit}/${"c".repeat(64)}.js?token=1.x`;
 
 const chrome = (caller: string): string => `Error
     at console.error (${runtime}:1:2048)
@@ -27,8 +29,8 @@ render@${caller}:1:99`;
 
 describe("a console.error call in a screen's frame", () => {
   it("is the App's when its caller is a module of the App's directory, the kit's otherwise", () => {
-    const later = `${appDirectory}${"e".repeat(64)}.js`;
-    const visited = `${appDirectory}3/${"b".repeat(64)}.js`;
+    const later = `${appDirectory}${"e".repeat(64)}.js?token=1.z`;
+    const visited = `${appDirectory}3/${"b".repeat(64)}.js?token=1.z`;
     const from = (stack: string) => calledByApp(stack, runtime, appDirectory);
 
     expect({

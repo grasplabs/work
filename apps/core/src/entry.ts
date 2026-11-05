@@ -81,11 +81,7 @@ import {
 } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
-import {
-  screenFrameResponse,
-  screenModuleResponse,
-  withoutModuleToken,
-} from "./screen-frame.ts";
+import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
 import {
   isRefusedToProductPage,
   setSecurityHeaders,
@@ -572,14 +568,11 @@ export const handleRequest = async (
     requestId
   );
   // One line per request. Only the path: query strings can carry tokens,
-  // and so can a screen module's path, an artifact's and a webhook
-  // trigger's, without them.
+  // and so can an artifact's path and a webhook trigger's, without them.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: withoutWebhookToken(
-      withoutArtifactToken(withoutModuleToken(url.pathname))
-    ),
+    path: withoutWebhookToken(withoutArtifactToken(url.pathname)),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,

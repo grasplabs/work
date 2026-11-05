@@ -20,6 +20,7 @@ import {
   screenNestedInterfaces,
   screenPeerInterfaces,
 } from "@grasp-os/shared/screens";
+import { parse } from "es-module-lexer/js";
 import { z } from "zod";
 
 import { signInConfig } from "./auth/config.ts";
@@ -37,8 +38,9 @@ import { screenFramePolicy } from "./security-headers.ts";
 // That policy names, by hash or by exact address, every script the build
 // may run, and nothing else: this document's own two inline scripts (the
 // import map and the bootstrap below) and each module of the build at
-// `/screen-modules/<scope>/<token>/<hash>.js`, where core serves exactly
-// those bytes. No
+// `/screen-modules/<scope>/<hash>.js`, where core serves exactly those
+// bytes (with its imports of the App's other modules carrying the
+// address's query, below). No
 // `'unsafe-inline'`, no `data:` or `blob:`, no eval. So code that comes
 // from anywhere but the build doesn't run, even when the build's own code
 // lets it in: HTML an App's server sends that the screen renders (an
@@ -76,37 +78,83 @@ export interface FrameCode {
   css: string;
 }
 
-// Who may load a build's frame and modules. A sandboxed frame sends no
-// cookies, so its document and modules can't ask for a session; instead
-// each address carries a token core made for exactly that build or scope
-// of modules, which expires: the page gets the frame's with the build
+// Who may load a build's frame and modules. No secret goes in a URL's
+// path (OWASP): routers, proxies and traces log paths, and Workers can
+// redact only the query string (`redact_query_string`, in core's and the
+// router's wrangler.jsonc). The router's traces sit in Grasp's own
+// account, so a token in a path there would let Grasp staff read a
+// client's App code without an audit entry.
+//
+// A session can't carry it either. The frame is sandboxed without
+// `allow-same-origin`, so its origin is opaque: every module request it
+// makes is cross-site, and browsers send no cookie of the deployment's
+// with it, SameSite=Lax or Strict. A `SameSite=None` cookie would need
+// `Access-Control-Allow-Origin: null` with credentials, which lets any
+// sandboxed document on the web read with the person's session, and
+// browsers that block third-party cookies drop it anyway. A module
+// request carries no header we set. So the credential stays in the URL,
+// in its query alone, as signed URLs carry theirs: a token core made for
+// exactly one scope of modules (`moduleAccess`), short-lived and bound to
+// that scope and to modules (no other token of core's passes for it).
+// The page gets the frame's token with the build
 // (`ScreenBundle.frameToken`), the frame's document the modules'. A hash
-// alone, from an audit entry say, reads nothing.
+// alone, from an audit entry say, reads nothing. Only a person's call
+// mints one, and Grasp staff's calls are refused and audited
+// (staff-audit.ts). Every answer on these paths sends no referrer, so no
+// token leaves as a Referer; the content hash stays in the path, an
+// immutable cache key and no secret.
+//
+// That holds because every screen today is for signed-in people alone: a
+// member, or a visitor signed in with a code mailed to them
+// (app-visitors.ts). A screen for anyone, signed in or not, would have
+// browser code as public as any website's, so its scope would be served
+// with no token and `public, immutable`, for a CDN to keep, while its data
+// stays behind its server functions' own checks. The token check and the
+// cache header below are the one place that decision would go.
 //
 // Modules are kept and served by scope: the kit's (`kitScope`), shared by
-// every frame; a build's own, for a published screen (its artifact); and
-// a chat's preview's of an App (`previewScope`), shared by every frame of
-// it and every write of its draft. An App's modules import each other by
-// address relative to their own (@grasp-os/compiler's
-// module-addresses.ts), so the token is a segment of the path, which a
-// relative import keeps, and not a query, which it drops. A scope's token
-// reads only that scope's modules: a module is kept under its scope with
-// core's MAC over the scope, its address and its bytes, checked on serve
+// every frame; a build's own, for a published screen (its artifact, the
+// hash of exactly its code, so of one version of one App's screen); and a
+// chat's preview's of an App (`previewFrame`), shared by every frame of it
+// and every write of its draft. A scope's token reads only that scope's
+// modules: a module is kept under its scope with core's MAC over the
+// scope, its address and its bytes, checked on serve
 // (`screenModuleResponse`), so another scope's address, or bytes moved
 // from one, reads nothing.
+//
+// An App's modules import each other by address relative to their own
+// (@grasp-os/compiler's module-addresses.ts), and a relative import keeps
+// the path but drops the query. So core serves each App module with its
+// imports of the App's others carrying the query it was asked with
+// (`withQuery`), as Vite's dev server adds its `?v=` to the imports of
+// what it serves, with the same lexer. The kit's modules import each
+// other by name, which the import map resolves, query and all.
 
 /** What the tokens' key is for: no other MAC of core's passes for one. */
 const accessPurpose = "grasp-os screen frame access";
 
+const minute = 60 * 1000;
+const hour = 60 * minute;
+
 /** How long a frame's token holds: the page frames it at once. */
-const frameAccessMs = 10 * 60 * 1000;
+const frameAccessMs = 10 * minute;
 
 /**
- * Module tokens hold until the end of the next six-hour window, so every
- * frame in one window names a module at the same address, which the
- * browser caches, and a screen open for hours can still load one late.
+ * A windowed token (`windowedAccess`) holds until the end of the next
+ * window, so every frame in one window names a file at the same address,
+ * which the browser caches, and one open for a while can still load one
+ * late: between one window and two. A package artifact's windows are six
+ * hours.
  */
-const moduleAccessWindowMs = 6 * 60 * 60 * 1000;
+const accessWindowMs = 6 * hour;
+
+/**
+ * A module token's windows: at most an hour for a chat's preview, whose
+ * frame the page opens again with a fresh token when one expires
+ * (@grasp-os/sdk's preview-runtime.ts), and at most six for a published
+ * build's, which a person keeps open through a working day's stretch.
+ */
+const moduleAccessWindowMs = { preview: 30 * minute, published: 3 * hour };
 
 const encoder = new TextEncoder();
 
@@ -157,22 +205,26 @@ export const updatingFrameAccess = async (
 
 /**
  * When a token `windowedAccess` makes at `now` expires: the end of the
- * next window of `moduleAccessWindowMs`.
+ * next window of `windowMs`.
  */
-export const windowedAccessEnd = (now: number): number =>
-  (Math.floor(now / moduleAccessWindowMs) + 2) * moduleAccessWindowMs;
+export const windowedAccessEnd = (
+  now: number,
+  windowMs = accessWindowMs
+): number => (Math.floor(now / windowMs) + 2) * windowMs;
 
 /**
  * A token for `subject` that holds until the end of the next window of
- * `moduleAccessWindowMs` (`windowedAccessEnd`): the same for everything
- * asked in one window. The subject says what it is for (`modules:…`,
+ * `windowMs` (`windowedAccessEnd`): the same for everything asked in one
+ * window. The subject says what it is for (`modules:…`,
  * `package-artifact:…`), so one never passes for another.
  */
 export const windowedAccess = async (
   env: Env,
   subject: string,
-  now: number
-): Promise<string> => await accessToken(env, subject, windowedAccessEnd(now));
+  now: number,
+  windowMs = accessWindowMs
+): Promise<string> =>
+  await accessToken(env, subject, windowedAccessEnd(now, windowMs));
 
 /** The scope of the kit's modules, which every frame shares. */
 const kitScope = "kit";
@@ -197,14 +249,31 @@ export const previewFrame = async (
   };
 };
 
-/** A token for the modules of `scope`, a segment of their address. */
+/**
+ * A token for the modules of `scope`, in their address's query: for a
+ * frame of a chat's preview (`preview`) or of a published build, which
+ * hold for different lengths (`moduleAccessWindowMs`).
+ */
 const moduleAccess = async (
   env: Env,
   scope: string,
-  now: number
-): Promise<string> => await windowedAccess(env, `modules:${scope}`, now);
+  { now, preview }: { now: number; preview: boolean }
+): Promise<string> =>
+  await windowedAccess(
+    env,
+    `modules:${scope}`,
+    now,
+    preview ? moduleAccessWindowMs.preview : moduleAccessWindowMs.published
+  );
 
-/** What a token looks like: also the one path segment it may be. */
+/** The query parameter a module's address carries its token in. */
+const moduleTokenParameter = "token";
+
+/** The query of a module's address with `token`. */
+const moduleQuery = (token: string): string =>
+  `?${new URLSearchParams({ [moduleTokenParameter]: token }).toString()}`;
+
+/** What a token looks like. */
 export const accessTokenPattern =
   /^(?<expires>\d{1,16})\.(?<mac>[\w-]{1,64})$/u;
 
@@ -411,18 +480,59 @@ const moduleKey = (scope: string, hash: string): string =>
   `${modulesPrefix}${scope}/${hash}.js`;
 
 /**
- * `/screen-modules/<scope>/<token>/<hash>.js`: one module, as a frame
- * imports it. A preview's frame may put a number of its own before the
- * hash (`/<visit>/<hash>.js`): the same module, at an address the frame
- * hasn't evaluated yet, so it evaluates it afresh (@grasp-os/sdk's
+ * `/screen-modules/<scope>/<hash>.js?token=<token>`: one module, as a
+ * frame imports it. A preview's frame may put a number of its own before
+ * the hash (`/<visit>/<hash>.js`): the same module, at an address the
+ * frame hasn't evaluated yet, so it evaluates it afresh (@grasp-os/sdk's
  * preview-updates.ts); the modules it imports, relative to it, are then
  * evaluated afresh too. One asked without a token is a module all the
  * same, refused as one.
  */
 const modulePath = new RegExp(
-  `^${screenModulePath}/(?<scope>${kitScope}|[0-9a-f]{64})/(?:(?<token>[^/]{1,96})/)?(?:\\d{1,9}/)?(?<hash>[0-9a-f]{64})\\.js$`,
+  `^${screenModulePath}/(?<scope>${kitScope}|[0-9a-f]{64})/(?:\\d{1,9}/)?(?<hash>[0-9a-f]{64})\\.js$`,
   "u"
 );
+
+/** An import of another of the App's modules, as the compiler writes it. */
+const appModuleSpecifier = /^\.\/[0-9a-f]{64}\.js$/u;
+
+/** Reads a module's bytes as they are, a byte order mark included. */
+const moduleDecoder = new TextDecoder("utf-8", {
+  fatal: false,
+  ignoreBOM: true,
+});
+
+/**
+ * `bytes`, an App module, with each import of the App's other modules
+ * (`./<address>.js`, static, re-exported or `import()`) carrying `query`:
+ * resolved relative to the module, an import keeps its path but drops
+ * the query, and the token in it is what lets the import in. Found with
+ * the lexer that wrote them (@grasp-os/compiler's module-addresses.ts),
+ * so a string that merely spells an address is left as it is. A module
+ * that imports none of them is its bytes exactly.
+ */
+const withQuery = (bytes: Uint8Array, query: string): Uint8Array => {
+  const code = moduleDecoder.decode(bytes);
+  const [imports] = parse(code);
+  const sites = imports.flatMap(({ specifier, start, end, type }) =>
+    typeof specifier === "string" && appModuleSpecifier.test(specifier)
+      ? [{ specifier, start, end, type }]
+      : []
+  );
+  if (sites.length === 0) {
+    return bytes;
+  }
+  let text = "";
+  let at = 0;
+  for (const { specifier, start, end, type } of sites) {
+    const addressed = `${specifier}${query}`;
+    text += code.slice(at, start);
+    // An `import()`'s span is its argument, quotes and all.
+    text += type === "dynamic" ? JSON.stringify(addressed) : addressed;
+    at = end;
+  }
+  return encoder.encode(text + code.slice(at));
+};
 
 /** One module to stage: where it is kept, and its bytes. */
 interface StagedModule {
@@ -488,19 +598,58 @@ export const appModules = (
     bytes: encoder.encode(code),
   }));
 
-/** Whether every module of `manifest` is stored. */
+/** Whether every kit module of `manifest` is stored (`servedIntegrity` reads the App's). */
 const allStaged = async (
   env: Env,
-  { scope, kit, app }: FrameManifest
+  { kit }: Pick<FrameManifest, "kit">
 ): Promise<boolean> => {
-  const keys = [
-    ...Object.values(kit).map((hash) => moduleKey(kitScope, hash)),
-    ...Object.values(app).map((hash) => moduleKey(scope, hash)),
-  ];
   const found = await Promise.all(
-    keys.map(async (key) => await env.FILES.head(key))
+    Object.values(kit).map(
+      async (hash) => await env.FILES.head(moduleKey(kitScope, hash))
+    )
   );
   return found.every((head) => head !== null);
+};
+
+/**
+ * The Subresource Integrity of each App module of `manifest`, by its
+ * address, as core serves it under `query` (`withQuery`), or null when
+ * one isn't kept as core staged it: the bytes in R2 are checked against
+ * the sha384 the manifest names (under core's MAC), so the import map
+ * never vouches for bytes core didn't stage. One that differs goes,
+ * so the next open stages it again.
+ */
+const servedIntegrity = async (
+  env: Env,
+  { scope, app, integrity }: FrameManifest,
+  query: string
+): Promise<Record<string, string> | null> => {
+  const found = await Promise.all(
+    [...new Set(Object.values(app))].map(async (hash) => {
+      const key = moduleKey(scope, hash);
+      const module = await env.FILES.get(key);
+      if (module === null) {
+        return null;
+      }
+      if (module.size > frameObjectMaxBytes) {
+        await module.body.cancel();
+      } else {
+        const bytes = new Uint8Array(await module.arrayBuffer());
+        if ((await moduleIntegrity(bytes)) === integrity[hash]) {
+          return [
+            hash,
+            await moduleIntegrity(withQuery(bytes, query)),
+          ] as const;
+        }
+      }
+      log.error("screen_frame.module_corrupt", { hash });
+      await env.FILES.delete(key);
+      return null;
+    })
+  );
+  return found.includes(null)
+    ? null
+    : Object.fromEntries(found.filter((entry) => entry !== null));
 };
 
 /**
@@ -650,23 +799,10 @@ const refused = (
     headers: {
       "content-security-policy": screenFramePolicy(scripts),
       "cache-control": cache,
+      // Its address may carry a token.
+      "referrer-policy": "no-referrer",
     },
   });
-
-/**
- * `pathname` as core's request log keeps it: a module's token left out. A
- * path under the modules' that isn't shaped as an address is logged
- * without anything after it, as a token could be in any of its segments.
- */
-export const withoutModuleToken = (pathname: string): string => {
-  if (!pathname.startsWith(`${screenModulePath}/`)) {
-    return pathname;
-  }
-  const { scope, hash } = modulePath.exec(pathname)?.groups ?? {};
-  return scope === undefined || hash === undefined
-    ? `${screenModulePath}/-`
-    : `${screenModulePath}/${scope}/-/${hash}.js`;
-};
 
 /**
  * A module, as a frame imports it, or null when the path isn't one: only
@@ -677,11 +813,16 @@ export const screenModuleResponse = async (
   env: Env,
   url: URL
 ): Promise<Response | null> => {
-  const { scope, token, hash } = modulePath.exec(url.pathname)?.groups ?? {};
+  const { scope, hash } = modulePath.exec(url.pathname)?.groups ?? {};
   if (scope === undefined || hash === undefined) {
-    return null;
+    // Under the modules' path but no module's address (one with a token
+    // in its path, say): nothing, rather than the frontend's page.
+    return url.pathname.startsWith(`${screenModulePath}/`)
+      ? refused(404)
+      : null;
   }
-  if (!(await hasFrameAccess(env, `modules:${scope}`, token ?? null))) {
+  const token = url.searchParams.get(moduleTokenParameter);
+  if (!(await hasFrameAccess(env, `modules:${scope}`, token))) {
     return refused(403);
   }
   const key = moduleKey(scope, hash);
@@ -712,15 +853,22 @@ export const screenModuleResponse = async (
     await env.FILES.delete(key);
     return refused(404, [], "no-store");
   }
-  return new Response(bytes, {
+  const served =
+    scope === kitScope ? bytes : withQuery(bytes, moduleQuery(token ?? ""));
+  return new Response(served, {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
       // The frame's origin is opaque, so its module requests are
       // cross-origin, without cookies: the token in the address is what
       // lets it in.
       "access-control-allow-origin": "*",
-      // Its address is its content, for as long as its token holds.
+      // Its address is its content, for as long as its token holds: in
+      // the browser's cache alone, never a shared one.
       "cache-control": "private, max-age=3600, immutable",
+      // A module's imports send its address, token and all, as their
+      // Referer unless it says otherwise: a module's fetches take the
+      // referrer policy of the module that imports (HTML).
+      "referrer-policy": "no-referrer",
     },
   });
 };
@@ -1204,42 +1352,46 @@ export const screenFrameResponse = async (
     return refused(404, [], "no-store");
   }
   const manifest = parsed.data;
-  if (!(await allStaged(env, manifest))) {
-    // A module the sweep took from under it: the manifest goes too, so
-    // the page's next open stages the whole build again.
+  const origin = signInConfig(env)?.origin ?? url.origin;
+  const access = { now: Date.now(), preview: manifest.preview };
+  const kitQuery = moduleQuery(await moduleAccess(env, kitScope, access));
+  const appQuery = moduleQuery(await moduleAccess(env, manifest.scope, access));
+  const appIntegrity = await servedIntegrity(env, manifest, appQuery);
+  if (appIntegrity === null || !(await allStaged(env, manifest))) {
+    // A module the sweep took from under it, or one not as core staged
+    // it: the manifest goes too, so the page's next open stages the whole
+    // build again.
     await env.FILES.delete(frameKey(artifact.data));
     return refused(404, [], "no-store");
   }
-  const origin = signInConfig(env)?.origin ?? url.origin;
-  const now = Date.now();
-  const directoryOf = async (scope: string): Promise<string> =>
-    `${origin}${screenModulePath}/${scope}/${await moduleAccess(env, scope, now)}/`;
-  const kitDirectory = await directoryOf(kitScope);
-  const appDirectory = await directoryOf(manifest.scope);
+  const kitDirectory = `${origin}${screenModulePath}/${kitScope}/`;
+  const appDirectory = `${origin}${screenModulePath}/${manifest.scope}/`;
+  // Each address with its token in the query, as the browser asks for it;
+  // the policy names it by its path, which is all a policy matches.
   const kit = Object.entries(manifest.kit).map(([name, hash]) => ({
     name,
-    hash,
-    address: `${kitDirectory}${hash}.js`,
+    path: `${kitDirectory}${hash}.js`,
+    address: `${kitDirectory}${hash}.js${kitQuery}`,
+    integrity: manifest.integrity[hash] ?? "",
   }));
   const app = Object.values(manifest.app).map((hash) => ({
-    hash,
-    address: `${appDirectory}${hash}.js`,
+    path: `${appDirectory}${hash}.js`,
+    address: `${appDirectory}${hash}.js${appQuery}`,
+    integrity: appIntegrity[hash] ?? "",
   }));
   const imports: Record<string, string> = Object.fromEntries(
     kit.map(({ name, address }) => [name, address])
   );
   // Keyed by the address a module resolves to, as the browser matches it:
-  // the App's modules import each other relative to their own.
+  // the App's modules import each other relative to their own, under the
+  // query core serves them with.
   const integrity: Record<string, string> = Object.fromEntries(
-    [...kit, ...app].map(({ hash, address }) => [
-      address,
-      manifest.integrity[hash] ?? "",
-    ])
+    [...kit, ...app].map(({ address, integrity: hash }) => [address, hash])
   );
   const importMap = scriptJson({ imports, integrity });
   const screen = scriptJson({
     artifact: artifact.data,
-    entry: `${appDirectory}${manifest.app[manifest.entry] ?? ""}.js`,
+    entry: `${appDirectory}${manifest.app[manifest.entry] ?? ""}.js${appQuery}`,
     runtime: manifest.runtime,
     css: manifest.css,
   });
@@ -1249,7 +1401,7 @@ export const screenFrameResponse = async (
   const scripts = [
     await hashSource(bootstrap),
     await hashSource(importMap),
-    ...new Set([...kit, ...app].map(({ address }) => address)),
+    ...new Set([...kit, ...app].map(({ path }) => path)),
     ...previewScripts,
   ];
   // The page's language, one it speaks or English: never text of the
@@ -1273,6 +1425,9 @@ export const screenFrameResponse = async (
     headers: {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": screenFramePolicy(scripts),
+      // Its address carries its token, and so does every module's it
+      // loads: neither leaves as a Referer.
+      "referrer-policy": "no-referrer",
       // No name a screen writes is looked up ahead of time: a lookup is a
       // packet to whoever answers for that name.
       "x-dns-prefetch-control": "off",
