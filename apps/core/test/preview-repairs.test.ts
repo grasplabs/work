@@ -65,7 +65,7 @@ import { query } from "@server/_generated/server";
 export const total = query({
   args: {},
   returns: v.number(),
-  handler: async () => ${
+  handler: () => ${
     fixed
       ? "7"
       : `{
@@ -100,7 +100,7 @@ const talkingDesk = (): Record<string, string> => {
 export const chatty = query({
   args: { note: v.string() },
   returns: v.string(),
-  handler: async (_ctx, args) => {
+  handler: (_ctx, args) => {
     console.warn("about to log", { note: args.note });
     for (let line = 1; line <= 25; line += 1) {
       console.log("line", line);
@@ -112,7 +112,7 @@ export const chatty = query({
 export const shouting = query({
   args: {},
   returns: v.string(),
-  handler: async () => {
+  handler: () => {
     for (let line = 1; line <= 5; line += 1) {
       console.log(String(line).repeat(1500));
     }

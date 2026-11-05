@@ -1,0 +1,15 @@
+# oxc.wasm, oxlint and oxfmt as the compiler builds them in, from this
+# repo's pre-release that packages/compiler/oxc-wasm/pin.json names,
+# checked against its SHA-256 (packages/compiler/oxc-wasm/wasm.ts). From
+# the asset's public address, with no token: the hash is what it is
+# trusted for. Kept in the compiler's node_modules, so nothing after it
+# downloads. Once installed (Set up runs it): restored node_modules may
+# lack a newer pin's file.
+name: oxc.wasm
+description: Download the pinned oxc.wasm into the compiler's node_modules
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: node packages/compiler/oxc-wasm/wasm.ts

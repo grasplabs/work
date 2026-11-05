@@ -106,7 +106,7 @@ const columns = [
   { id: "done", title: "Done" },
 ] as const;
 
-export default function Board() {
+const Board = () => {
   const cards = useQuery(api.cards.list, {});
   const create = useMutation(api.cards.create);
   const move = useMutation(api.cards.move);
@@ -114,7 +114,7 @@ export default function Board() {
     await create({ title: "New card" });
   };
   if (cards === undefined) {
-    return <p role="status">Loading the board…</p>;
+    return <output>Loading the board…</output>;
   }
   return (
     <main className="flex flex-col gap-4 p-6">
@@ -156,7 +156,9 @@ export default function Board() {
       </div>
     </main>
   );
-}
+};
+
+export default Board;
 `;
 
 /**

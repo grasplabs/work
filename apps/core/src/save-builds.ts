@@ -17,6 +17,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
+import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
@@ -381,12 +382,29 @@ const diagnosticSchema = z.object({
 const lintedSchema = z.record(z.string(), z.array(diagnosticSchema));
 
 /**
+ * What a file whose lint stopped at the isolate's bounds by itself, in a
+ * fresh isolate too (`run`'s `once`), says: an error, so a draft never
+ * passes unlinted. Never kept: a later lint tries it again.
+ */
+const unlinted = (file: string): Diagnostic => ({
+  file,
+  rule: "lint",
+  severity: "error",
+  message:
+    "Ultracite's lint stopped at its isolate's limits on this file alone: split it into smaller files.",
+});
+
+/**
  * What Ultracite's rules say of a draft's TypeScript (Ultracite's
  * `lint`): a build of its own, in an isolate of its own, so it runs beside
  * the others rather than after them. Each file's result is kept under the
  * key of its content (module-cache.ts), so a write lints only the files
- * that changed. Failed while any of its errors is left; its warnings stay
- * warnings. Never throws, unless `signal` gave up on it, as `buildOnSave`.
+ * that changed. The files it lacks go a batch at a time (`ultraciteBatch`),
+ * each batch's results kept as it answers, so a lint stopped part way
+ * resumes where it stopped; a batch stopped at a bound is split
+ * (`callSplitting`). Failed while any of its errors is left; its warnings
+ * stay warnings. Never throws, unless `signal` gave up on it, as
+ * `buildOnSave`.
  */
 export const draftLintBuild = async (
   env: Env,
@@ -403,18 +421,27 @@ export const draftLintBuild = async (
       const missing = Object.fromEntries(
         Object.entries(files).filter(([path]) => !Object.hasOwn(kept, path))
       );
-      let linted: Record<string, Diagnostic[]> = {};
-      if (Object.keys(missing).length > 0) {
-        const runner = platformRunner(env, source.app);
-        linted = lintedSchema.parse(
-          await runner.run("ultracite", "lint", [missing])
-        );
-        await keepLints(
-          env,
-          missing,
-          linted,
-          runner.callMs("ultracite") + leaseSlackMs
-        );
+      const linted: Record<string, Diagnostic[]> = {};
+      const runner = platformRunner(env, source.app);
+      for (const batch of batchesOf(Object.entries(missing), ultraciteBatch)) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its bounds
+        const stopped = await callSplitting(batch, async (part) => {
+          const found = lintedSchema.parse(
+            await runner.run("ultracite", "lint", [part], { once: true })
+          );
+          await keepLints(
+            env,
+            part,
+            found,
+            runner.callMs("ultracite") + leaseSlackMs
+          );
+          Object.assign(linted, found);
+        });
+        // A stop of the load's (a deadline, a crash) is thrown, not split:
+        // this lint couldn't run, and a later one tries it again.
+        for (const file of stopped) {
+          linted[file] = [unlinted(file)];
+        }
       }
       const diagnostics = Object.keys(files)
         .toSorted()

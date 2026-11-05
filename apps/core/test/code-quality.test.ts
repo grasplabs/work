@@ -1,14 +1,21 @@
 import { startUltracite } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { draftLintBuild } from "../src/save-builds.ts";
+import { stoppingUltracite } from "./ultracite-stops.ts";
 
-// App code held to Ultracite, in the isolate of its own: what a write
-// saves (`tidy`: fixed and formatted) and what it reports (`lint`).
+// App code held to Ultracite, in the isolate of its own, by oxlint and
+// oxfmt compiled to WebAssembly: what a write saves (`tidy`: fixed and
+// formatted) and what it reports (`lint`).
 
 const ultracite = () => startUltracite(env.LOADER, env.ASSETS);
+
+/** An array nested `depth` deep. */
+const deep = (depth: number): string =>
+  `export const deep = ${"[".repeat(depth)}${"]".repeat(depth)};\n`;
 
 /** Each of `linted`'s findings: its file, line, column and rule. */
 const findings = (
@@ -19,7 +26,7 @@ const findings = (
   );
 
 describe("tidying App code", { timeout: 60_000 }, () => {
-  it("formats TypeScript as Ultracite's Prettier config does, and fixes what fixes itself", async () => {
+  it("formats TypeScript as Ultracite's oxfmt config does, and fixes what fixes itself", async () => {
     const tidied = await ultracite().tidy({
       "components/total.ts":
         "var rate = 2\nexport const total = (n: number) => { return n*rate }\n",
@@ -63,9 +70,10 @@ describe("tidying App code", { timeout: 60_000 }, () => {
   });
 
   it("makes no fix of a rule an inline config comment turns on, as the agent might write it", async () => {
-    // Each comment turns on a rule whose ESLint fix oxlint doesn't count
-    // as safe: `catch` before `then` would handle what the first handler
-    // throws too; `Number.isNaN` answers otherwise for a string.
+    // oxlint doesn't read ESLint's inline config comments; were it to,
+    // each turns on a rule whose fix it doesn't count as safe: `catch`
+    // before `then` would handle what the first handler throws too;
+    // `Number.isNaN` answers otherwise for a string.
     const source = [
       '/* eslint "promise/prefer-catch": "error", "unicorn/prefer-number-properties": "error" */',
       "export const settled = async (promise: Promise<number>) =>",
@@ -140,8 +148,7 @@ describe("linting App code", { timeout: 60_000 }, () => {
       expect.arrayContaining([
         // ESLint's own, by its own name.
         { file: "components/sum.ts", rule: "eqeqeq", severity: "error" },
-        // typescript-eslint's, standing in for oxlint's own: as oxlint
-        // names it.
+        // A rule oxlint has under ESLint's name, as oxlint names it.
         {
           file: "components/sum.ts",
           rule: "no-empty-function",
@@ -153,27 +160,26 @@ describe("linting App code", { timeout: 60_000 }, () => {
 
   it("reads oxlint's disable comments as oxlint does: every rule it knows, by any of its names", async () => {
     const source = [
-      // A rule oxc has and nothing here runs, as an export's oxlint needs it.
+      // A rule App code isn't held to, as an export's oxlint needs it.
       "// oxlint-disable-next-line oxc/no-barrel-file",
       "export const a = 1;",
       // oxlint's `eslint/` name of ESLint's own rule.
       "// oxlint-disable-next-line eslint/eqeqeq",
       "export const same = (x: number, y: number) => x == y;",
-      // oxlint's bare name of a rule typescript-eslint stands in for.
+      // oxlint's bare name of a rule.
       "// oxlint-disable-next-line no-empty-function",
       "export const noop = () => {};",
-      // A rule the ESLint plugins no longer have.
+      // A rule oxlint has under a plugin's name.
       "// oxlint-disable-next-line typescript/ban-types",
       "export type Loose = object;",
-      // A range, in a line comment, which oxlint reads and ESLint doesn't.
+      // A range, in a line comment.
       "// oxlint-disable eqeqeq",
       "export const loosely = (x: number, y: number) => x == y;",
       "// oxlint-enable eqeqeq",
       // A disable comment's text in a string is a string.
       'export const text = "// oxlint-disable-next-line eqeqeq";',
       "export const loose = (x: number, y: number) => x == y;",
-      // Read by a longer name, before code on its line: what follows it
-      // is found where it is in the file.
+      // Before code on its line: what follows it is found where it is.
       "/* oxlint-disable-line no-empty-function */ export const looser = (x: number, y: number) => x == y;",
       "",
     ].join("\n");
@@ -201,34 +207,22 @@ describe("linting App code", { timeout: 60_000 }, () => {
     expect(linted).toStrictEqual({ "components/plain.ts": [] });
   });
 
-  it("reports sonarjs's rules as warnings, which a write never fixes and a draft passes with", async () => {
-    const app = appIdSchema.parse(crypto.randomUUID());
-    const source = `export const positive = (n: number): boolean => {\n  if (n > 0) {\n    return true;\n  }\n  return false;\n};\n// ${crypto.randomUUID()}\n`;
-
-    const tidied = await ultracite().tidy({ "components/positive.ts": source });
-    const linted = await draftLintBuild(env, {
-      app,
-      version: 0,
-      files: { "components/positive.ts": source },
+  it("runs the rules only oxlint has: oxc's own, and vitest's on a test", async () => {
+    const linted = await ultracite().lint({
+      "components/merge.ts":
+        "export const merge = (items: Record<string, number>[]) =>\n  items.reduce((all, item) => ({ ...all, ...item }), {});\n",
+      "tests/count.test.ts":
+        'import { describe, expect, it } from "vitest";\n\ndescribe("count", () => {\n  it("counts", () => {\n    expect([1].length).toBe(1);\n  });\n});\n',
     });
 
-    expect({
-      tidied: tidied["components/positive.ts"] === source,
-      status: linted.status,
-      found: linted.diagnostics.map(({ rule, severity }) => ({
-        rule,
-        severity,
-      })),
-    }).toStrictEqual({
-      tidied: true,
-      status: "ok",
-      found: [
-        {
-          rule: "sonarjs/prefer-single-boolean-return",
-          severity: "warning",
-        },
-      ],
-    });
+    expect(
+      findings(linted).map(({ file, rule }) => `${file} ${rule}`)
+    ).toStrictEqual(
+      expect.arrayContaining([
+        "components/merge.ts oxc/no-accumulating-spread",
+        "tests/count.test.ts vitest/prefer-to-have-length",
+      ])
+    );
   });
 
   it("reports unused names as oxlint does, and a write keeps them, its fix not being safe", async () => {
@@ -296,9 +290,193 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
       })
     ).resolves.toStrictEqual({ "screens/broken.tsx": [] });
   });
+
+  it("fails only a file nested too deep for oxc, and lints and tidies the files after it, any App's", async () => {
+    // Nested deeper than oxc's recursion has stack for: oxc.wasm traps on
+    // it, in the isolate every App's lint shares.
+    const tidied = await ultracite().tidy({
+      "components/deep.ts": deep(5000),
+      "components/after.ts": "export const after = 1\n",
+    });
+    const linted = await ultracite().lint({
+      "components/deep.ts": deep(1000),
+      "components/after.ts": "export const after = (a: number) => a == 1;\n",
+    });
+
+    // Another App's write and check, in the same isolate.
+    expect({
+      tidied,
+      linted: findings(linted).map(({ file, rule }) => `${file} ${rule}`),
+      other: await ultracite().lint({ "b/clean.ts": "export const a = 1;\n" }),
+      tidiedOther: await ultracite().tidy({
+        "b/clean.ts": "export const a = 1\n",
+      }),
+    }).toStrictEqual({
+      // Saved as written.
+      tidied: {
+        "components/deep.ts": null,
+        "components/after.ts": "export const after = 1;\n",
+      },
+      linted: ["components/deep.ts lint", "components/after.ts eqeqeq"],
+      other: { "b/clean.ts": [] },
+      tidiedOther: { "b/clean.ts": "export const a = 1;\n" },
+    });
+  });
+
+  it("lints and tidies a flat screen of a thousand rows, as native oxlint and oxfmt do", async () => {
+    const table = `export const Table = () => (\n  <table>\n    <tbody>\n${"      <tr>\n        <td>Name</td>\n        <td>Value</td>\n      </tr>\n".repeat(1000)}    </tbody>\n  </table>\n);\n`;
+
+    const linted = await ultracite().lint({ "screens/table.tsx": table });
+    const tidied = await ultracite().tidy({ "screens/table.tsx": table });
+
+    expect({
+      linted: linted["screens/table.tsx"]?.map(({ rule }) => rule),
+      tidied: typeof tidied["screens/table.tsx"],
+    }).toStrictEqual({ linted: [], tidied: "string" });
+  });
+
+  it("keeps as written a file oxfmt would make larger than an App's file may be", async () => {
+    // Formatted, each array nested 300 deep is a line a level, indented:
+    // 180,000 characters, from 600 written.
+    const grows = Array.from(
+      { length: 3 },
+      (_, at) =>
+        `export const grows${at} = ${"[".repeat(300)}${"]".repeat(300)};`
+    ).join("\n");
+
+    await expect(
+      ultracite().tidy({ "components/grows.ts": grows })
+    ).resolves.toStrictEqual({ "components/grows.ts": null });
+  });
 });
 
-describe("a draft's lint", { timeout: 60_000 }, () => {
+/** `count` files of an App, each with one finding (`eqeqeq`) and its own text. */
+const manyFiles = (count: number): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, at) => [
+      `components/file-${at}.ts`,
+      `export const same${at} = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
+    ])
+  );
+
+/** Each of `diagnostics`' file and rule, sorted. */
+const fileRules = (
+  diagnostics: readonly { file?: string | null; rule?: string }[]
+): string[] =>
+  diagnostics.map(({ file, rule }) => `${file ?? ""} ${rule ?? ""}`).toSorted();
+
+/** How many files of `diagnostics` have a finding. */
+const filesFound = (diagnostics: readonly { file?: string | null }[]): number =>
+  new Set(diagnostics.map(({ file }) => file)).size;
+
+describe("a draft's lint", { timeout: 120_000 }, () => {
+  it("lints a large App in batches, keeping each batch's results as it answers", async () => {
+    const app = appIdSchema.parse(crypto.randomUUID());
+    // As many files as an App may have (`authoringFiles`), more than one
+    // call takes (`ultraciteBatch`: 100).
+    const files = manyFiles(platformLimits.authoringFiles);
+    const first = await draftLintBuild(env, { app, version: 0, files });
+
+    // Every batch's results were kept: with the lint unable to start, a
+    // second lint finds them all.
+    const { LOADER: loader } = env;
+    env.LOADER = {
+      get: (name, code) => {
+        if (name?.startsWith("ultracite:") === true) {
+          throw new Error("The lint can't start");
+        }
+        return loader.get(name, code);
+      },
+      load: (code) => loader.load(code),
+    };
+    try {
+      const kept = await draftLintBuild(env, { app, version: 0, files });
+      expect({
+        first: [first.status, filesFound(first.diagnostics)],
+        kept: [kept.status, filesFound(kept.diagnostics)],
+      }).toStrictEqual({
+        first: ["failed", platformLimits.authoringFiles],
+        kept: ["failed", platformLimits.authoringFiles],
+      });
+    } finally {
+      env.LOADER = loader;
+    }
+  });
+
+  it("splits a call stopped at its CPU time until the file that stops alone, and fails that file alone until a lint of it gets through", async () => {
+    const app = appIdSchema.parse(crypto.randomUUID());
+    const files = manyFiles(6);
+    const [marker = ""] = Object.keys(files);
+    const { LOADER: loader } = env;
+    env.LOADER = stoppingUltracite(loader, {
+      marker,
+      limit: "CPU time",
+      fresh: true,
+    });
+    let stopped: Awaited<ReturnType<typeof draftLintBuild>>;
+    try {
+      stopped = await draftLintBuild(env, { app, version: 0, files });
+    } finally {
+      env.LOADER = loader;
+    }
+    // Never kept: the next lint lints it.
+    const later = await draftLintBuild(env, { app, version: 0, files });
+
+    const others = Object.keys(files)
+      .filter((file) => file !== marker)
+      .map((file) => `${file} eqeqeq`);
+    expect({
+      stopped: fileRules(stopped.diagnostics),
+      unlinted: stopped.diagnostics.some(
+        ({ file, message }) =>
+          file === marker && message.includes("on this file alone")
+      ),
+      later: fileRules(later.diagnostics),
+    }).toStrictEqual({
+      stopped: [`${marker} lint`, ...others].toSorted(),
+      unlinted: true,
+      later: [`${marker} eqeqeq`, ...others].toSorted(),
+    });
+  });
+
+  it("tries a memory stop in the isolate every App shares again in a fresh one, and blames a file only for its own", async () => {
+    const { LOADER: loader } = env;
+    /** The rule each of four files (the first stopping) is found breaking. */
+    const lintedWith = async (fresh: boolean) => {
+      // Text of their own, so no lint before has kept their results.
+      const files = manyFiles(4);
+      const [marker = ""] = Object.keys(files);
+      env.LOADER = stoppingUltracite(loader, {
+        marker,
+        limit: "memory",
+        fresh,
+      });
+      try {
+        const { diagnostics } = await draftLintBuild(env, {
+          app: appIdSchema.parse(crypto.randomUUID()),
+          version: 0,
+          files,
+        });
+        return Object.keys(files).map(
+          (file) => diagnostics.find((found) => found.file === file)?.rule
+        );
+      } finally {
+        env.LOADER = loader;
+      }
+    };
+
+    expect({
+      // Another call's memory, as far as this one knows: the fresh
+      // isolate lints every file.
+      shared: await lintedWith(false),
+      // Its own: the fresh isolate stops on it too.
+      own: await lintedWith(true),
+    }).toStrictEqual({
+      shared: ["eqeqeq", "eqeqeq", "eqeqeq", "eqeqeq"],
+      own: ["lint", "eqeqeq", "eqeqeq", "eqeqeq"],
+    });
+  });
+
   it("lints only the files that changed, keeping each file's result by its content", async () => {
     const app = appIdSchema.parse(crypto.randomUUID());
     const files = {

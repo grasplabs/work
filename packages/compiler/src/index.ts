@@ -205,7 +205,8 @@ const reader = <T>(keep: boolean, turns?: Turns) => {
  * only when it isn't, so a warm build reads none of it.
  *
  * A cold check starts the compiler's isolate and Ultracite's together:
- * their reads at once would be about 80 MB of the 128. So the reads of
+ * their reads at once would be about 60 MB of the 128 (Ultracite's is
+ * mostly oxc's 11 MB of WebAssembly). So the reads of
  * platform code run one at a time (`platformCodeTurns`): each holds its
  * copy only until the Loader has it, and then the next reads.
  */
@@ -620,17 +621,21 @@ export const packageBuilderCode = async (
 const ultraciteWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
-  await workerCodeRead(assets, `ultracite:${version}`, async () => ({
-    ...isolateSettings,
-    mainModule: compilerAssets.ultracite,
-    modules: {
-      [compilerAssets.ultracite]: await readCompilerFile(
-        assets,
-        compilerAssets.ultracite,
-        "javascript"
-      ),
-    },
-  }));
+  await workerCodeRead(assets, `ultracite:${version}`, async () => {
+    const [source, wasm] = await Promise.all([
+      readCompilerFile(assets, compilerAssets.ultracite, "javascript"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
+    ]);
+    return {
+      ...isolateSettings,
+      mainModule: compilerAssets.ultracite,
+      modules: {
+        [compilerAssets.ultracite]: source,
+        // Compiled as the isolate loads; the isolate itself can't.
+        [compilerAssets.oxcWasm]: { wasm },
+      },
+    };
+  });
 
 /**
  * Ultracite's lint, in one isolate per release that every App's writes
@@ -655,20 +660,21 @@ export const loadUltracite = async (
 
 /** Ultracite's lint's code, for the on-prem sandbox host, as `appCompilerCode` gives the compiler's. */
 export const ultraciteCode = async (assets: Fetcher): Promise<PlatformCode> =>
-  await platformCodeRead(assets, `ultracite:${version}`, async () => ({
-    mainModule: compilerAssets.ultracite,
-    modules: {
-      [compilerAssets.ultracite]: {
-        type: "js",
-        bytes: new Uint8Array(
-          await readCompilerBytes(
-            assets,
-            compilerAssets.ultracite,
-            "javascript"
-          )
-        ),
+  await platformCodeRead(assets, `ultracite:${version}`, async () => {
+    const [source, wasm] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.ultracite, "javascript"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
+    ]);
+    return {
+      mainModule: compilerAssets.ultracite,
+      modules: {
+        [compilerAssets.ultracite]: {
+          type: "js",
+          bytes: new Uint8Array(source),
+        },
+        [compilerAssets.oxcWasm]: { type: "wasm", bytes: new Uint8Array(wasm) },
       },
-    },
-    nodejsCompat: true,
-    cpuMs: isolateSettings.limits.cpuMs,
-  }));
+      nodejsCompat: true,
+      cpuMs: isolateSettings.limits.cpuMs,
+    };
+  });

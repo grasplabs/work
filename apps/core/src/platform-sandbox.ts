@@ -309,8 +309,11 @@ export interface PlatformRunner {
   /**
    * What `method` of `program` answers for `args`: values, and functions
    * the program may call back. Throws as {@link runPlatformCode} does,
-   * wherever it runs. With `once`, a stop is thrown as it is, never tried
-   * again in a fresh isolate: for a caller whose own retry it is.
+   * wherever it runs. With `once`, a stop at the call's own CPU time is
+   * thrown as it is, never tried again in a fresh isolate: for a caller
+   * whose own retry it is (`callSplitting`). Any other stop in a warm
+   * isolate is still tried once in a fresh one, as another call can cause
+   * it.
    */
   readonly run: (
     program: PlatformProgram,
@@ -400,7 +403,14 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
         args
       );
     } catch (error) {
-      if (once || !(error instanceof PlatformBoundError)) {
+      // With `once`, only a CPU stop is the call's own in a warm isolate:
+      // the runtime counts each request's CPU time, but the isolate's
+      // memory is every call's that shares it, so a memory stop there is
+      // tried in a fresh isolate too before its caller splits on it.
+      if (
+        !(error instanceof PlatformBoundError) ||
+        (once && error.verdict === "cpu")
+      ) {
         throw error;
       }
       return await loaderCall(

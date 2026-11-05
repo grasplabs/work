@@ -11,9 +11,8 @@
     "#types": {
       "types": "./src/types-module.d.ts"
     },
-    "#ultracite-rules": {
-      "types": "./src/ultracite-rules.d.ts",
-      "node": "./ultracite-rules-node.ts"
+    "#ultracite-config": {
+      "types": "./src/ultracite-config.d.ts"
     },
     "#version": {
       "types": "./src/version.d.ts",
@@ -34,22 +33,13 @@
     "@grasp-os/ui": "workspace:*",
     "@shadcn/lint": "catalog:",
     "@tsrs/wasm": "catalog:",
-    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@tybys/wasm-util": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
     "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "eslint": "catalog:",
-    "eslint-plugin-import-x": "catalog:",
-    "eslint-plugin-jsdoc": "catalog:",
-    "eslint-plugin-jsx-a11y": "catalog:",
-    "eslint-plugin-promise": "catalog:",
-    "eslint-plugin-react": "catalog:",
-    "eslint-plugin-react-hooks": "catalog:",
-    "eslint-plugin-sonarjs": "catalog:",
-    "eslint-plugin-unicorn": "catalog:",
     "lucide-react": "catalog:",
-    "prettier": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-refresh": "catalog:",
@@ -63,6 +53,8 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "oxfmt": "catalog:oxc",
+    "oxlint": "catalog:oxc",
     "rolldown": "catalog:",
     "rolldown-plugin-dts": "catalog:",
     "ultracite": "catalog:",

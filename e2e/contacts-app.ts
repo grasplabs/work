@@ -45,7 +45,7 @@ import { Input } from "@grasp-os/ui/components/input";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 
-export default function Contacts() {
+const Contacts = () => {
   const names = useQuery(api.contacts.list, {});
   const add = useMutation(api.contacts.add);
   const [name, setName] = useState("");
@@ -77,6 +77,8 @@ export default function Contacts() {
       </ul>
     </main>
   );
-}
+};
+
+export default Contacts;
 `,
 };

@@ -7,9 +7,9 @@
  * definitions), and the checkout's own SDK, UI kit, Brain, shared and
  * workflow-expressions packages under `vendor/`, with their licence and
  * the notices of every direct dependency. Its `lint` and `format` hold
- * the App's code to what Grasp holds it to (`planTooling`): oxlint with
- * the rules Grasp lints it with, and Prettier with the config Grasp
- * formats it with.
+ * the App's code to what Grasp holds it to (`planTooling`): oxlint and
+ * oxfmt, the releases Grasp runs as WebAssembly, with the config Grasp
+ * lints and formats it with.
  *
  * Threat model (GRA-713), and how each is closed:
  *
@@ -70,7 +70,6 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 
 import {
@@ -86,13 +85,12 @@ import {
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
-import { selectJsPlugins } from "ultracite/oxlint/js-plugins";
 import shadcnPreset from "ultracite/oxlint/shadcn";
 import { parse } from "yaml";
 import { z } from "zod";
 
+import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import { designRuleLevels } from "../packages/compiler/src/design-rules.ts";
-import { formatConfig } from "../packages/compiler/src/format-config.ts";
 import {
   codeExtensions,
   componentsFolder,
@@ -111,9 +109,10 @@ import {
 } from "../packages/compiler/src/type-check.ts";
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 import {
+  leftOut,
+  ultraciteFormat,
   ultracitePresets,
-  ultraciteRules,
-} from "../packages/compiler/ultracite-rules.ts";
+} from "../packages/compiler/ultracite-config.ts";
 import {
   LockfileError,
   projectLockfile,
@@ -135,33 +134,25 @@ const projectDependencies = ["react", "react-dom"] as const;
  * Its own development tools, each pinned as the catalog pins it: what its
  * check (`grasp/check.ts`) runs as the platform does, the checker App code
  * is type-checked with (`@tsrs/wasm`, the compiler's) and the parser that
- * reads its comments and ambient declarations (`@babel/parser`); and
- * TypeScript, the compiler's 6, for sonarjs (`compilerTypescript`).
+ * reads its comments and ambient declarations (`@babel/parser`).
  */
 const projectDevDependencies = [
   "@babel/parser",
   "@tsrs/wasm",
-  "typescript",
   "@types/react",
   "@types/react-dom",
   // Its lint and format, as Grasp holds App code to them (`planTooling`):
-  // Ultracite's presets and Prettier config, and sonarjs and @shadcn/lint
-  // as oxlint's JS plugins, sonarjs with ESLint as its peer.
+  // oxlint and oxfmt, the releases Grasp's isolate runs (`oxcReleases`),
+  // with Ultracite's presets and config, and @shadcn/lint as oxlint's JS
+  // plugin.
+  "oxlint",
+  "oxfmt",
   "ultracite",
-  "eslint",
-  "eslint-plugin-sonarjs",
   "@shadcn/lint",
-  "prettier",
   // What the kit's theme imports, which @shadcn/lint builds to read the
   // classes and tokens it has, as Grasp's lint reads them (`lintProject`).
   "tailwindcss",
 ] as const;
-
-/**
- * The linter every project runs: Vite+'s own oxlint, at the version the
- * repo lints itself with (`vitePlusOxlint`).
- */
-const oxlint = "oxlint";
 
 /** The identity the generated references carry: no deployment's own. */
 const localIdentity = "local";
@@ -311,6 +302,20 @@ export const readCatalog = (
 const exactVersionPattern =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 
+/**
+ * Refuses an `oxc` catalog whose oxlint and oxfmt aren't the releases
+ * Grasp's isolate runs (oxc-wasm/pin.json): the project would lint and format by
+ * other rules than Grasp.
+ */
+const oxcReleases = (catalog: ReadonlyMap<string, string>): void => {
+  const { oxlint, oxfmt } = oxcWasmPin;
+  if (catalog.get("oxlint") !== oxlint || catalog.get("oxfmt") !== oxfmt) {
+    refuse(
+      `The oxc catalog's oxlint and oxfmt must be ${oxlint} and ${oxfmt}, the releases Grasp lints and formats App code with (packages/compiler/oxc-wasm/pin.json).`
+    );
+  }
+};
+
 /** `name`'s exact catalog version, or a refusal. */
 const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
   const version = catalog.get(name);
@@ -318,28 +323,6 @@ const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
     return refuse(`${name}: the catalog pins no exact version of it.`);
   }
   return version;
-};
-
-/**
- * The compiler's TypeScript, 6, exactly, as its package names it from the
- * catalog (`catalog:typescript6`).
- */
-const compilerTypescript = (repo: string, catalogText: string): string => {
-  const spec = z
-    .object({ dependencies: z.object({ typescript: z.string() }) })
-    .parse(
-      JSON.parse(
-        readFileSync(path.join(repo, "packages/compiler/package.json"), "utf-8")
-      )
-    ).dependencies.typescript;
-  const named = /^catalog:(?<name>.*)$/u.exec(spec)?.groups?.name;
-  if (named === undefined) {
-    return refuse("The compiler names TypeScript by no catalog.");
-  }
-  return pinned(
-    readCatalog(catalogText, named === "" ? undefined : named),
-    "typescript"
-  );
 };
 
 const packageJsonSchema = z.looseObject({
@@ -536,7 +519,7 @@ const graphPeersOf = (entry: LockedPackage): Record<string, string> =>
 /** Whether the project pins `name` itself, so no App lock may name it. */
 const ownedByProject = (name: string): boolean =>
   name.startsWith("@grasp-os/") ||
-  [...projectDependencies, ...projectDevDependencies, oxlint].some(
+  [...projectDependencies, ...projectDevDependencies].some(
     (each) => each === name
   );
 
@@ -883,10 +866,10 @@ const ignoredGlobs = [
 
 /**
  * What the project's format formats: the App's TypeScript, as Grasp's
- * `tidy` formats it, less `ignoredGlobs` (`.prettierignore`). A project
- * whose App has none of it formats nothing, and passes.
+ * `tidy` formats it, less `ignoredGlobs` (the config's `ignorePatterns`).
+ * A project whose App has none of it formats nothing, and passes.
  */
-const formatted = `--no-editorconfig --no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
+const formatted = `--no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
 
 /**
  * What the design-system lint holds, as Grasp's screen build lints it
@@ -906,42 +889,18 @@ const configData = (value: unknown): string =>
 
 /**
  * The project's oxlint config, App code held to exactly what Grasp holds
- * it to, every list read from where Grasp reads it, as data:
- * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less
- *   every rule Grasp leaves out (`unmapped`, ultracite-rules.ts: those
- *   with no equivalent the isolate runs, and those it calibrated out);
- * - sonarjs's rules at Grasp's levels, as warnings (`reportOnly`);
+ * it to, every list read from where Grasp reads it (ultracite-config.ts),
+ * as data:
+ * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less the
+ *   rules Grasp leaves out (`leftOut`);
  * - on screens and components, the design system's lint, as the
  *   compiler's (lint.ts): @shadcn/lint's rules and its own.
  */
 const oxlintConfigText = (): string => {
-  const ultracite = ultraciteRules();
   const presets = Object.entries(ultracitePresets);
-  // Off in an override for every file, which names the plugins the
-  // presets' overrides add (`vitest`, on tests): oxlint reads a rule of a
-  // plugin only where the plugin is on, and the presets set no categories,
-  // so naming one turns none of its rules on.
-  const leftOut = {
-    files: ["**/*"],
-    plugins: [
-      ...new Set(
-        presets.flatMap(([, preset]) =>
-          (preset.overrides ?? []).flatMap((override) => override.plugins ?? [])
-        )
-      ),
-    ],
-    rules: Object.fromEntries(ultracite.unmapped.map((name) => [name, "off"])),
-  };
-  const hints = Object.fromEntries(
-    Object.entries(ultracite.reportOnly).map(([id, level]) => [
-      ultracite.names[id] ?? id,
-      level,
-    ])
-  );
   return `// Written by Grasp when it exported this App: App code held to what
 // Grasp holds it to. Ultracite's presets, less the rules Grasp leaves
-// out; sonarjs's rules as warnings; and the design system's lint on
-// screens and components.
+// out, and the design system's lint on screens and components.
 import { defineConfig } from "oxlint";
 ${presets
   .map(([name]) => `import ${name} from "ultracite/oxlint/${name}";`)
@@ -951,13 +910,11 @@ export default defineConfig({
   extends: [${presets.map(([name]) => name).join(", ")}],
   ignorePatterns: ${configData(ignoredGlobs)},
   jsPlugins: ${configData([
-    ...(selectJsPlugins(["sonarjs"]).jsPlugins ?? []),
     ...(shadcnPreset.jsPlugins ?? []),
     { name: "grasp", specifier: `./${designPlugin}` },
   ])},
-  rules: ${configData(hints)},
+  rules: ${configData(Object.fromEntries(leftOut.map((rule) => [rule, "off"])))},
   overrides: ${configData([
-    leftOut,
     {
       files: designLinted,
       rules: { ...shadcnPreset.rules, ...designRuleLevels },
@@ -974,9 +931,8 @@ const componentsJsonSchema = z.looseObject({
 
 /**
  * The project's lint and format: oxlint (`oxlintConfigText`) with the
- * compiler's design rules as its JS plugin, and Prettier with Ultracite's
- * config, the formatter and config Grasp formats App code with
- * (ultracite.ts `tidy`). @shadcn/lint reads the kit as Grasp's lint
+ * compiler's design rules as its JS plugin, and oxfmt with the config
+ * Grasp formats App code with (ultracite.ts `tidy`). @shadcn/lint reads the kit as Grasp's lint
  * reads it (compiler build.ts `collectLintProject`): by the kit's
  * `components.json`, its theme where the vendored kit has it.
  */
@@ -1007,32 +963,9 @@ export default designRules;
 `
   );
   project.add(
-    "prettier.config.mjs",
-    `// Written by Grasp when it exported this App: the Prettier config Grasp
-// formats App code with.
-export default ${JSON.stringify(formatConfig, null, 2)};
-`
+    ".oxfmtrc.json",
+    jsonText({ ...ultraciteFormat(), ignorePatterns: ignoredGlobs })
   );
-  project.add(".prettierignore", `${ignoredGlobs.join("\n")}\n`);
-};
-
-/** Vite+'s oxlint, as the checkout installed it: its version and licence. */
-const vitePlusOxlint = (
-  repo: string
-): { version: string; licence: string | null } => {
-  const fromVitePlus = createRequire(
-    createRequire(path.join(repo, "package.json")).resolve(
-      "vite-plus/package.json"
-    )
-  );
-  const manifest = z
-    .object({ version: z.string(), license: z.string().optional() })
-    .parse(
-      JSON.parse(
-        readFileSync(fromVitePlus.resolve(`${oxlint}/package.json`), "utf-8")
-      )
-    );
-  return { version: manifest.version, licence: manifest.license ?? null };
 };
 
 /** A licence as an SPDX expression may be written: anything else is unknown. */
@@ -1154,13 +1087,11 @@ export const planProject = async (
       vendoring
     );
   }
-  // TypeScript 6, the compiler's, as Grasp keeps it: sonarjs (through
-  // ts-api-utils) needs TypeScript's JavaScript API, which TypeScript 7
-  // doesn't have. Nothing type-checks on it: the check is tsrs's
-  // (TypeScript 7), `grasp/check.ts`.
-  const typescript = compilerTypescript(input.repo, catalogText);
+  // oxlint and oxfmt from the catalog of their own, App code's.
+  const oxc = readCatalog(catalogText, "oxc");
+  oxcReleases(oxc);
   const versionOf = (name: string): string =>
-    name === "typescript" ? typescript : pinned(catalog, name);
+    pinned(oxc.has(name) ? oxc : catalog, name);
   for (const name of [...projectDependencies, ...projectDevDependencies]) {
     notices.push({
       name,
@@ -1170,8 +1101,6 @@ export const planProject = async (
       from: "the project",
     });
   }
-  const linter = vitePlusOxlint(input.repo);
-  notices.push({ name: oxlint, ...linter, from: "the project" });
   const pinnedAll = (names: readonly string[]) =>
     Object.fromEntries(names.map((name) => [name, versionOf(name)]));
   const root: Importer = {
@@ -1185,10 +1114,7 @@ export const planProject = async (
       ...pins.direct,
       ...pinnedAll(projectDependencies),
     },
-    devDependencies: {
-      ...pinnedAll(projectDevDependencies),
-      [oxlint]: linter.version,
-    },
+    devDependencies: pinnedAll(projectDevDependencies),
     peerDependencies: {},
   };
   importers["."] = root;
@@ -1220,8 +1146,8 @@ export const planProject = async (
         typecheck: "node grasp/check.ts",
         build: "node grasp/check.ts",
         lint: "oxlint app",
-        format: `prettier --write ${formatted}`,
-        "format:check": `prettier --check ${formatted}`,
+        format: `oxfmt ${formatted}`,
+        "format:check": `oxfmt --check ${formatted}`,
       },
       dependencies: root.dependencies,
       devDependencies: root.devDependencies,
