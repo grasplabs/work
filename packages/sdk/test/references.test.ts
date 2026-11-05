@@ -175,24 +175,40 @@ describe("generated modules", () => {
     }
   });
 
-  test("hold a function's name, kind and visibility only, frozen all the way down", () => {
-    // A mutation's: its name, kind and arguments, built with the code.
-    expect(api.notes.create).toStrictEqual({
-      name: "notes.create",
-      kind: "mutation",
-      args: notesManifest().operations["notes.create"]?.args,
+  test("hold what a page calls and checks a function by, nothing of the release, frozen all the way down", () => {
+    const { operations } = notesManifest();
+    const references = [api.notes.create, api.notes.exportAll, api.notes.list];
+    expect({
+      // A mutation's and an action's (a streaming one's too: core knows
+      // it streams): the kind `useForm` sends by, and the arguments it
+      // checks a form with.
+      create: api.notes.create,
+      exportAll: {
+        kind: api.notes.exportAll.kind,
+        args: api.notes.exportAll.args,
+      },
+      // A query's: what it answers, which a grid reads its columns from,
+      // and no kind, which its hook says.
+      list: {
+        returns: api.notes.list.returns,
+        kind: Reflect.has(api.notes.list, "kind"),
+      },
+      // Nothing that changes from one release to the next.
+      ofRelease: references.flatMap((reference) =>
+        ["resourceId", "resourceVersion", "contractId", "fingerprint"].filter(
+          (key) => Reflect.has(reference, key)
+        )
+      ),
+    }).toStrictEqual({
+      create: {
+        name: "notes.create",
+        kind: "mutation",
+        args: operations["notes.create"]?.args,
+      },
+      exportAll: { kind: "action", args: operations["notes.exportAll"]?.args },
+      list: { returns: operations["notes.list"]?.returns, kind: false },
+      ofRelease: [],
     });
-    // A query's: its name and what it answers.
-    expect(Object.keys(api.notes.list).toSorted()).toStrictEqual([
-      "name",
-      "returns",
-    ]);
-    // A streaming action's is an action's: core knows it streams.
-    expect(Object.keys(api.notes.exportAll).toSorted()).toStrictEqual([
-      "args",
-      "kind",
-      "name",
-    ]);
     // The phantom types exist in types only.
     expect(Object.getOwnPropertySymbols(api.notes.create)).toStrictEqual([]);
     expect([

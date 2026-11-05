@@ -654,7 +654,11 @@ export class ActionInvocation extends DurableObject<Env> {
     // call (app-functions.ts, `publicOperationOf`); read before anything
     // is held, so a refusal holds nothing. The run gets this version, never
     // a later read of the current one: the record names what ran, so
-    // revoking it stops the result.
+    // revoking it stops the result. A publish between this read and the
+    // run's own (`invokeAppAction`) refuses it with `version.mismatch`
+    // before any of the App's code runs: no receipt is kept
+    // (`keepsReceipt`), so the same key may be sent again and runs in the
+    // new version.
     let version: number;
     try {
       version = await currentVersionOf(this.env, spec.app);
