@@ -324,6 +324,30 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     });
   });
 
+  it("call the App's own function through its generated reference, which carries more than its name and kind", async () => {
+    const admin = await personApi("admin");
+    // A mutation's reference as `_generated/api` holds it: its name, kind
+    // and arguments' descriptor, which the host's request doesn't take.
+    const app = await appWith(
+      admin,
+      workflowFiles(
+        "bumper",
+        `  return await step.do("bump", { description: "Bump" }, async () => {
+    const bump = { name: "counter.bump", kind: "mutation" as const, args: { descriptorVersion: 1, kind: "object" } };
+    const answer = (await env.APP.callFunction(bump, { name: "generated" })) as { ok: true; value: Json } | { ok: false; error: { code: string } };
+    return answer.ok ? answer.value : answer.error.code;
+  });`,
+        { bump: 1 }
+      )
+    );
+    const run = await admin.api.workflows.start(app, "bumper");
+    await finished(run.id);
+    await expect(outcomeOf(admin, run.id)).resolves.toMatchObject({
+      status: "completed",
+      output: 1,
+    });
+  });
+
   it("show a review of what the version's row keeps, and fail a run of a workflow it keeps nothing for before it calls anything", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
