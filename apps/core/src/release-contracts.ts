@@ -91,8 +91,8 @@ const mailbox = v.object({ name: v.string(), address: v.string() });
  * of the signature (`header.d`), DMARC's of the From header
  * (`header.from`, as Email Routing read it). A pass vouches only for that
  * domain: SPF and DKIM may pass for any domain the sender owns, so only
- * DMARC's pass ties `from` to its sender, and only when its domain is
- * `from`'s. Null when Email Routing's own ARC set
+ * DMARC's pass ties `from`'s domain to its sender, and only when its
+ * domain is `from`'s. Null when Email Routing's own ARC set
  * (authentication-results.ts) records none, or none core can trust.
  */
 const methodResult = v
@@ -115,8 +115,8 @@ const methodResult = v
  * A reply as a run's inbox takes it: the message as an email trigger's run
  * gets it (`InboundEmail` in @grasp-os/shared/workflows, fitted to an
  * event's data), and what SPF, DKIM and DMARC said of it, each of which
- * domain. `from` is what its header says, tied to its sender only by
- * DMARC's `pass` for `from`'s domain: the workflow checks who replied,
+ * domain. `from` is what its header says, its domain tied to its sender
+ * only by DMARC's `pass` for that domain: the workflow checks who replied,
  * never core, which takes every reply. An
  * event contract's `email` type takes exactly this
  * (workflow-catalog.ts), so every reply fits whichever contract a binding

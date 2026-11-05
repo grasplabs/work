@@ -648,10 +648,11 @@ export interface WorkflowContext<P extends Params, Input> {
    * reply through it: a reply is checked against the contract, but who
    * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
    * and DMARC found as the deployment's mail service received it, each of
-   * which domain (`null` where it recorded nothing). A pass vouches only
-   * for its domain: `from` is tied to who sent it only when
+   * which domain (`null` where it recorded nothing). Only DMARC ties
+   * `from` to its sender, and only to its domain: when
    * `dmarc.result === "pass"` and `dmarc.domain` (lower case) is the
-   * domain after `from`'s last `@`, lower-cased. A reply
+   * domain after `from`'s last `@`, lower-cased. Who may send as which
+   * address at that domain is the domain's own policy. A reply
    * delivered again is the same event; a reply after the run ended, or
    * one sent automatically (an out-of-office), is dropped and audited. A test run gets placeholders that
    * reach nobody; any run not on a sealed build's run host, none.
