@@ -73,6 +73,7 @@ export type ProblemCode =
   | "workflow.reserved_id"
   | "workflow.invalid_name"
   | "workflow.invalid_alias"
+  | "workflow.invalid_event_type"
   | "workflow.invalid_duration"
   | "workflow.invalid_contract"
   | "workflow.invalid_currency"
@@ -143,6 +144,18 @@ const lastOf = (pointer: string): string =>
 /** The pointer of what holds `pointer`. */
 const parentOf = (pointer: string): string =>
   pointer.slice(0, pointer.lastIndexOf("/"));
+
+/**
+ * An event wait's filter's `from` or `type` (or one of its types), as a
+ * step in any list of steps has it: never a property of that name
+ * elsewhere, such as a call's arguments.
+ */
+const eventFilterAt =
+  /^\/steps\/\d+(?:\/(?:then|else|try|do|catch\/do)\/\d+)*\/event\/(?<part>from|type)(?:\/\d+)?$/u;
+
+/** Which part of an event wait's filter `pointer` is, if it is one. */
+const eventFilterPart = (pointer: string): string | undefined =>
+  eventFilterAt.exec(pointer)?.groups?.part;
 
 const isExpression = (value: unknown): value is { $expr: string } =>
   typeof value === "object" &&
@@ -265,11 +278,20 @@ const patternProblem = ({
         "Start with a lower-case letter, then letters and digits only, e.g. `apiKey`.",
     };
   }
-  if (parent === "/bindings" || last === "binding" || last === "from") {
+  const filterPart = eventFilterPart(pointer);
+  if (parent === "/bindings" || last === "binding" || filterPart === "from") {
     return {
       code: "workflow.invalid_alias",
       message: "Not a binding's alias.",
       remedy: "Start with a letter, then letters, digits and `_` only.",
+    };
+  }
+  if (filterPart === "type") {
+    return {
+      code: "workflow.invalid_event_type",
+      message: "Not an event type.",
+      remedy:
+        "Name a type the binding's contract admits, on one line, with no space before or after it, e.g. `invoice.approved`.",
     };
   }
   if (durationProperties.has(last)) {
@@ -350,7 +372,7 @@ const schemaProblem = (error: SchemaError): Problem => {
       remedy: "Give it one of `for`, `until` and `event`.",
     });
   }
-  if (keyword === "uniqueItems") {
+  if (keyword === "uniqueItems" && eventFilterPart(pointer) === "type") {
     return as({
       code: "workflow.duplicate",
       message: "It names the same type twice.",

@@ -839,9 +839,9 @@ class Generator {
    * the first event of its sealed binding and types sent to the run, its
    * timeout sealed beside them. The host decides what it takes and until
    * when from the table alone (`step.listen` passes neither), and answers
-   * `{ timedOut: true }` past its timeout. Any failure of the wait
-   * fails the run, whatever `try` is around it (`EventWaitOutput`). Its `if`, if any, is decided
-   * in an enter step before it, as a sleep's.
+   * `{ timedOut: true }` past its timeout. Any failure of the wait fails
+   * the run, whatever `try` is around it (`EventWaitStep`). Its `if`, if
+   * any, is decided in an enter step before it, as a sleep's.
    */
   #listen(step: Placed<EventWaitStep>, depth: number): void {
     const { from, type } = step.event;

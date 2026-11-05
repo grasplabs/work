@@ -1484,6 +1484,38 @@ const listeningEngine = (
   };
 };
 
+/** What an engine's waits for an event took, by their step. */
+type Taken = Map<string, Awaited<ReturnType<Engine["step"]["waitForMatch"]>>>;
+
+/**
+ * `listening`'s waits, its other steps journaled as `journalingEngine`
+ * journals them (those that ran in `ran`): each wait's event kept in
+ * `taken`, which a replay takes it from, asking the engine nothing.
+ */
+const journaledListening = (
+  listening: Engine,
+  journal: Map<string, Journaled>,
+  taken: Taken,
+  ran: string[] = []
+): Engine => {
+  const journaled = journalingEngine(journal, ran);
+  return {
+    leaseOf: journaled.leaseOf,
+    step: {
+      ...journaled.step,
+      waitForMatch: async (name, options) => {
+        const kept = taken.get(name);
+        if (kept !== undefined) {
+          return kept;
+        }
+        const event = await listening.step.waitForMatch(name, options);
+        taken.set(name, event);
+        return event;
+      },
+    },
+  };
+};
+
 /** The engine types the host keeps `replies`' events of `types` under. */
 const keysOf = async (...types: string[]): Promise<string[]> =>
   await Promise.all(
@@ -1745,6 +1777,70 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       caught: failedWith("workflow.event_denied"),
       bare: failedWith("workflow.event_denied"),
       asked: [],
+    });
+  });
+
+  it("replays a wait that took its event as it ran, and fails the replay with `workflow.event_denied` once its binding is revoked, its `try` notwithstanding", async () => {
+    const revoked = await eventWorkflow();
+    const { source, sealed: withTable } = await generated(
+      [{ id: "guarded", type: "try", try: [replyWait()], catch: {} }],
+      undefined,
+      replies
+    );
+    const runId = await waitingRun(revoked);
+    const journal = new Map<string, Journaled>();
+    const taken: Taken = new Map();
+    const asked: Asked = [];
+    const first = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: journaledListening(
+        listeningEngine(
+          runId,
+          async () => await sendTo(revoked, runId, received, "ada@acme.test"),
+          asked
+        ),
+        journal,
+        taken
+      ),
+    });
+    // Each replay finds the wait's event in the journal: nothing is sent.
+    const replay = async (ran: string[]) =>
+      await ranAs(runId, source, {
+        sealed: withTable,
+        engine: journaledListening(
+          listeningEngine(runId, nothingSent, asked),
+          journal,
+          taken,
+          ran
+        ),
+      });
+    const ranAgain: string[] = [];
+    const replayed = await replay(ranAgain);
+    await revokeWorkflowBinding(
+      env,
+      revoked.admin,
+      revoked.workflow.id,
+      revoked.approval.id
+    );
+    const ranRevoked: string[] = [];
+    const afterRevoking = await replay(ranRevoked);
+    expect({
+      first,
+      replayed,
+      ranAgain,
+      afterRevoking,
+      ranRevoked,
+      // The engine was asked once, by the first run.
+      asked: asked.map(({ step }) => step),
+    }).toStrictEqual({
+      first: { ended: null, tampered: [] },
+      replayed: { ended: null, tampered: [] },
+      ranAgain: [],
+      // The path the run took is gone: its catch is asked, and takes
+      // nothing, so it never takes a path the run never took.
+      afterRevoking: failedWith("workflow.event_denied"),
+      ranRevoked: [engineStep("guarded", "catch")],
+      asked: [engineStep("reply", "task")],
     });
   });
 });

@@ -430,6 +430,30 @@ describe("checking a workflow", () => {
       match: at({
         event: { from: "replies", type: "x", match: { subject: "a" } },
       }),
+      blankType: at({ event: { from: "replies", type: "" } }),
+      spaceType: at({ event: { from: "replies", type: " " } }),
+      paddedInList: at({
+        event: { from: "replies", type: ["grasp.reply.received", "x "] },
+      }),
+      // Where it is, not what it is named: a filter's in a loop's items,
+      // and an argument named `from` that is no filter at all.
+      inItems: codesAt(
+        withEventWaits({
+          id: "each",
+          type: "forEach",
+          items: { $expr: "[1]" },
+          do: [eventWait({ event: { from: "no-dashes", type: "\n" } })],
+        })
+      ),
+      fromArgument: codesAt(
+        withEventWaits({
+          id: "answer",
+          type: "do",
+          binding: "mail",
+          operation: "mail.send",
+          arguments: { from: "no-dashes", type: [" ", " "] },
+        })
+      ),
       alsoFor: at({ for: "1 hour" }),
       timeoutOnSleep: codesAt(
         withEventWaits({
@@ -451,6 +475,14 @@ describe("checking a workflow", () => {
       twice: { "/steps/5/event/type": "workflow.duplicate" },
       tooMany: { "/steps/5/event/type": "workflow.out_of_bounds" },
       match: { "/steps/5/event/match": "workflow.unknown_property" },
+      blankType: { "/steps/5/event/type": "workflow.invalid_event_type" },
+      spaceType: { "/steps/5/event/type": "workflow.invalid_event_type" },
+      paddedInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },
+      inItems: {
+        "/steps/5/do/0/event/from": "workflow.invalid_alias",
+        "/steps/5/do/0/event/type": "workflow.invalid_event_type",
+      },
+      fromArgument: "ok",
       alsoFor: { "/steps/5": "workflow.wait_kind" },
       timeoutOnSleep: { "/steps/5/timeout": "workflow.unknown_property" },
     });

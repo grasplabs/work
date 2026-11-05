@@ -1,4 +1,3 @@
-import type { EventWait } from "@grasp-os/sdk/workflow";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
@@ -228,12 +227,22 @@ export interface EventFilter {
 }
 
 /**
- * An event wait's output, as the SDK's `step.listen` answers it: the
- * first event of its filter sent to the run (once the run started, or
- * while it waited), as the host minted it, or `{ timedOut: true }` when
- * none came within its timeout. A timeout is an outcome a later step reads
- * (`steps.<id>.output.timedOut`), never a failure; the event's data is
- * `steps.<id>.output.event.data`.
+ * Waits: for a time span, until a deadline (ms since the epoch), or for an
+ * event (`EventWaitStep`), at most `timeout`, which an event wait always
+ * names: a run never waits for an event with no end.
+ */
+export type WaitStep =
+  | (StepBase & { readonly type: "wait"; readonly for: Duration })
+  | (StepBase & { readonly type: "wait"; readonly until: Expression })
+  | EventWaitStep;
+
+/**
+ * A wait for an event. Its output is the SDK's `step.listen`'s
+ * (`EventWait`): the first event of its filter sent to the run (once the
+ * run started, or while it waited), as the host minted it, or
+ * `{ timedOut: true }` when none came within its timeout. A timeout is an
+ * outcome a later step reads (`steps.<id>.output.timedOut`), never a
+ * failure; the event's data is `steps.<id>.output.event.data`.
  *
  * Any failure of an event wait fails the run, and no `try` catches it:
  * its binding revoked (`workflow.event_denied`), the run's person no
@@ -242,19 +251,6 @@ export interface EventFilter {
  * again on every replay, so a catch would let a replay after a revocation
  * take a path the run never took.
  */
-export type EventWaitOutput = EventWait;
-
-/**
- * Waits: for a time span, until a deadline (ms since the epoch), or for an
- * event (`EventWaitOutput`), at most `timeout`, which an event wait always
- * names: a run never waits for an event with no end.
- */
-export type WaitStep =
-  | (StepBase & { readonly type: "wait"; readonly for: Duration })
-  | (StepBase & { readonly type: "wait"; readonly until: Expression })
-  | EventWaitStep;
-
-/** A wait for an event (`WaitStep`). */
 export interface EventWaitStep extends StepBase {
   readonly type: "wait";
   readonly event: EventFilter;
@@ -355,10 +351,6 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
-  /** The types one event wait takes, as the host seals its filters. */
-  eventTypes: 16,
-  /** An event's type, as the host keeps it. */
-  eventTypeLength: 256,
   params: 64,
   bindings: 64,
 } as const;

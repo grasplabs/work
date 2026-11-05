@@ -1,6 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { decode } from "@grasp-os/workerflow/codec";
 import { z } from "zod";
@@ -81,7 +82,7 @@ const deliverySchema = z.strictObject({
   workflowId: workflowResourceIdSchema,
   runId: runIdSchema,
   binding: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-  type: z.string().min(1).max(256).regex(oneLine),
+  type: z.string().min(1).max(sealedBuildLimits.eventTypeLength).regex(oneLine),
   data: z.json(),
   subject: z.string().max(1024).regex(oneLine).optional(),
   key: z.string().min(1).max(200).regex(oneLine),

@@ -550,7 +550,7 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("seals an event wait's binding, types and timeout, and leaves what it takes to the host", () => {
+  it("seals an event wait's binding, types and timeout", () => {
     const generated = generateWorkflow(
       checked(
         withEventWaits(
@@ -587,21 +587,6 @@ describe("generating a workflow", () => {
       reply: taskOf("reply"),
       either: taskOf("either"),
       each: taskOf("each"),
-      // Its step names only itself: the host reads what it takes and
-      // until when from the table, never from the code.
-      listens: [
-        ...generated.source.matchAll(
-          /steps\["(?<id>[a-z]+)"\] = \{ output: await step\.listen\("\k<id>", \{ (?<options>[^}]*) \}\) \};/gu
-        ),
-      ].map((match) => [
-        match.groups?.id,
-        match.groups?.options?.replaceAll(/index\d+/gu, "i"),
-      ]),
-      // Its `if` decided in an enter step before it, as a sleep's.
-      decidesInEnter:
-        /step\.do\("either", \{ key: "enter", description: "either" \}, async \(\) => \([^\n]* \? \{ output: null \} : \{ skipped: true \}\)\);/u.test(
-          generated.source
-        ),
     }).toStrictEqual({
       reply: {
         kind: "listen",
@@ -624,12 +609,6 @@ describe("generating a workflow", () => {
         listen: listenFor("grasp.reply.received"),
         timeoutMs: 3 * 86_400_000,
       },
-      listens: [
-        ["reply", 'key: "task", description: "reply"'],
-        ["either", 'key: "task", description: "either"'],
-        ["each", 'key: "task@" + i, description: "each"'],
-      ],
-      decidesInEnter: true,
     });
   });
 

@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { z } from "zod";
 
 // The events of a run's inbox as the host keeps them and a listen task
@@ -27,7 +28,7 @@ export const eventTypeKey = async (
 export const storedEventSchema = z.strictObject({
   id: z.string().min(1).max(128),
   source: z.string().min(1).max(1024),
-  type: z.string().min(1).max(256),
+  type: z.string().min(1).max(sealedBuildLimits.eventTypeLength),
   subject: z.string().max(1024).optional(),
   datacontenttype: z.literal(contentType),
   data: z.json(),

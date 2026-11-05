@@ -137,7 +137,7 @@ const stepKinds = {
                 {
                   type: "array",
                   minItems: 1,
-                  maxItems: formatLimits.eventTypes,
+                  maxItems: sealedBuildLimits.eventTypes,
                   uniqueItems: true,
                   items: ref("eventType"),
                 },
@@ -289,10 +289,13 @@ export const workflowSchema: Schema = {
       Object.entries(stepKinds).map(([type, schema]) => [`${type}Step`, schema])
     ),
     alias: { type: "string", pattern: aliasPattern },
+    // Not blank, on one line, no space before or after it: otherwise a
+    // typo, which a run would only wait out to its timeout. Whether the
+    // binding's contract admits it is publication's to check.
     eventType: {
       type: "string",
-      minLength: 1,
-      maxLength: formatLimits.eventTypeLength,
+      pattern: "^\\S(?:.*\\S)?$",
+      maxLength: sealedBuildLimits.eventTypeLength,
     },
     duration: { type: "string", pattern: durationPattern },
     expression: {

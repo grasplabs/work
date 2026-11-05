@@ -37,4 +37,8 @@ export const sealedBuildLimits = {
   callDepth: valueDepth + 2,
   /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
   deadlineMs: 365 * day,
+  /** The types one event wait takes: a filter each. */
+  eventTypes: 16,
+  /** Characters of an event's type, as a run's inbox keeps one. */
+  eventTypeLength: 256,
 } as const;
