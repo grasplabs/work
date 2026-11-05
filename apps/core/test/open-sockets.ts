@@ -18,6 +18,11 @@ const open = new Map<WebSocket, number>();
 /** The requests and D1 statements still unanswered, and when each was sent. */
 const unanswered = new Map<symbol, { what: string; sent: number }>();
 
+/** Forgets every request and statement still unanswered: none of them will be. */
+export const forgetUnanswered = (): void => {
+  unanswered.clear();
+};
+
 /** Has `socket` closed once the running test ends. */
 export const closeWhenTestEnds = (socket: WebSocket): void => {
   open.set(socket, Date.now());
@@ -116,5 +121,5 @@ export const endTest = (): void => {
     }
   }
   open.clear();
-  unanswered.clear();
+  forgetUnanswered();
 };

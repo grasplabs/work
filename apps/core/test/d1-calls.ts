@@ -1,12 +1,7 @@
 /**
  * Every D1 statement run in this isolate counts as unanswered until it
  * settles (open-sockets.ts), so a test that timed out names a statement
- * it was still waiting on. A fresh runtime's first sign-in sometimes never
- * got an answer, nor did any sign-in after it in that runtime (CI run
- * 42041457441), with every thread idle: a promise that never settled. A
- * sign-in's start waits on D1 for one statement, its verification row,
- * and otherwise only on mocked fetches and crypto, so this tells a D1
- * that stopped answering from a promise of Better Auth's own.
+ * it was still waiting on.
  *
  * The prototypes of workerd's D1 classes are wrapped, as reset-storage.ts
  * wraps the namespaces', once per runtime: each file's setup imports this
