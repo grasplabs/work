@@ -145,18 +145,23 @@ export type ReturnOf<Reference> =
 /**
  * The progress `Reference` streams; never for a single answer. Read in
  * two steps: inferring from a progress of `never` finds nothing, which
- * would answer `unknown`.
+ * would answer `unknown`. A progress of `any` (a draft's stand-in
+ * references, save-builds.ts) stays `any`, though it also passes for
+ * `never`: a stand-in is any kind of call, a stream's too.
  */
-export type ProgressOf<Reference> = Reference extends Callable
-  ? never
-  : Reference extends Callable<
-        ReferenceKind,
-        ReferenceVisibility,
-        unknown,
-        unknown,
-        infer Progress
-      >
-    ? Progress
+export type ProgressOf<Reference> =
+  Reference extends Callable<
+    ReferenceKind,
+    ReferenceVisibility,
+    unknown,
+    unknown,
+    infer Progress
+  >
+    ? 0 extends 1 & Progress
+      ? Progress
+      : Reference extends Callable
+        ? never
+        : Progress
     : never;
 
 /** The operations a files resource declares. */
