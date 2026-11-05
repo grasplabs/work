@@ -38,12 +38,8 @@ jobs:
         with:
           persist-credentials: false
           ref: main
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+      # Node.js, node_modules and oxc.wasm, with this job's read-only token.
+      - uses: ./.github/actions/setup
       # The model's provider key and the eval's settings, from the staging
       # 1Password Environment; a setting left out takes its default, and
       # with no issue named nothing is posted.

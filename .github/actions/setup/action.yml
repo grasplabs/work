@@ -13,8 +13,11 @@
 # and `release` on a push to main, whose caches every pull request can
 # read. Every job saving would have them all pack the same 2 GB at once,
 # for one to win.
+#
+# Then oxc.wasm, which the compiler builds in (.github/actions/oxc-wasm),
+# with the job's own token: every workflow that sets up can build.
 name: Set up
-description: Install Vite+ and Node.js, and restore or install node_modules
+description: Install Vite+ and Node.js, restore or install node_modules, and download oxc.wasm
 
 inputs:
   save:
@@ -59,3 +62,4 @@ runs:
           packages/*/node_modules
           packages/connectors/*/node_modules
         key: ${{ steps.modules.outputs.cache-primary-key }}
+    - uses: ./.github/actions/oxc-wasm

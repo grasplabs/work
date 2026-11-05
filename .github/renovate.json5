@@ -50,7 +50,8 @@
         "typescript",
         "ultracite",
         "@shadcn/lint",
-        // Vite+'s own, in the default catalog: they move with vite-plus.
+        // Vite+'s own, in the default catalog: they move with vite-plus,
+        // to its pin (scripts/check-vite-plus-oxc.ts).
         "oxlint",
         "oxfmt",
       ],
