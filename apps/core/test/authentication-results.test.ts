@@ -408,7 +408,6 @@ describe("a reply's authentication", () => {
       casedCv: bossReport(...arcSet(1, forged, "NONE")),
       passAtOne: bossReport(...arcSet(1, forged, "pass")),
       noneAbove: bossReport(...arcSet(2, forged, "none"), ...arcSet(1, forged)),
-      // A tag twice in two cases, which a sealer may read as one.
       // An instance a sealer reading it loosely may take as 50.
       commentedInstance: bossReport(
         ...arcSet(1, forged).map(({ key, value }) => ({
@@ -417,6 +416,7 @@ describe("a reply's authentication", () => {
             key === "arc-authentication-results" ? `(i=50) ${value}` : value,
         }))
       ),
+      // A tag twice in two cases, which a sealer may read as one.
       casedTagTwice: bossReport(
         ...arcSet(2, forged, "pass; CV=fail"),
         ...arcSet(1, forged)
