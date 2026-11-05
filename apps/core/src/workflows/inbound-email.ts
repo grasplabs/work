@@ -35,7 +35,6 @@ import { z } from "zod";
 import {
   auditedBatch,
   keepAuditEvent,
-  outboxed,
   outboxedEventWhere,
   outboxedWhere,
   storedEvent,
@@ -65,9 +64,8 @@ import {
 } from "./mail-stamps.ts";
 import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
-import { callingRunOf } from "./resource-authority.ts";
+import { heldRunOf } from "./resource-authority.ts";
 import { admitRunEvent, notStartedYet } from "./run-events.ts";
-import type { AdmittedEvent } from "./run-events.ts";
 import { isRunFileText } from "./run-files.ts";
 import {
   inboxAt,
@@ -252,8 +250,9 @@ import type { StartFiles } from "./start-files.ts";
 //   yet fails for now, for Email Routing to try again.
 // - The same reply delivered twice: its key is the message's
 //   (`messageKeyOf`), so it is one event, however its bytes differ.
-//   Each accepted reply is audited with its run and binding
-//   (`workflow.email.reply.received`), bounded by the run's inbox limits.
+//   Each reply a run takes is audited with its run and binding
+//   (`workflow.email.reply.received`) once, by its event, a delivery
+//   tried again included, bounded by the run's inbox limits.
 // - An oversized reply: it bounces past `maxMessageBytes`, as any mail;
 //   its data is fitted to an event's (`fitted`), its attachments listed,
 //   never kept.
@@ -938,6 +937,39 @@ const replyDropped = async (
 };
 
 /**
+ * Records that `inbox`'s run took the reply that is its event `eventId`:
+ * once, however often it is delivered (the event's ID is derived from
+ * the run's event's, and it holds nothing else that differs), so a
+ * delivery tried again after the run took it, its audit lost, records it
+ * then. Its time is the day it was recorded.
+ */
+const replyReceived = async (
+  env: Env,
+  inbox: RunInbox,
+  eventId: string
+): Promise<void> => {
+  const day = new Date().toISOString().slice(0, 10);
+  const action = "workflow.email.reply.received";
+  const event = auditEventSchema.parse({
+    id: uuidFromHash(await sha256Hex(`${action}:${inbox.runId}:${eventId}`)),
+    at: `${day}T00:00:00.000Z`,
+    source: "core",
+    actor: { type: "system" },
+    action,
+    target: { type: "workflow_run", id: inbox.runId },
+    detail: {
+      workflow: inbox.workflowId,
+      binding: inbox.binding,
+      event: eventId,
+    },
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, not(storedEvent(event.id))),
+  ]);
+};
+
+/**
  * Takes a reply to a run's mail, sent to its inbox's address
  * (`reply-<token>`, run-inboxes.ts): admits it to the run as its
  * binding's contract's email type, its data the message as an email
@@ -966,11 +998,16 @@ const receiveReply = async (
   }
   const { parsed, id } = read;
   const loop = loopOf(message.to, message.from, parsed);
-  const run = inbox.ended
-    ? undefined
-    : await callingRunOf(env, inbox.workflowId, inbox.runId);
-  if (run === undefined || loop !== undefined) {
-    await replyDropped(env, inbox, loop ?? "run_ended", id);
+  if (loop !== undefined) {
+    await replyDropped(env, inbox, loop, id);
+    return;
+  }
+  // The run's frozen bindings, ended or not: a reply its run took before
+  // it ended, delivered again, is still the event it took
+  // (`admitRunEvent`), never dropped as if it were lost.
+  const run = await heldRunOf(env, inbox.runId);
+  if (run === undefined) {
+    await replyDropped(env, inbox, "run_ended", id);
     return;
   }
   const binding = run.bindings.get(inbox.binding);
@@ -980,7 +1017,7 @@ const receiveReply = async (
     await replyDropped(env, inbox, "event_invalid", id);
     return;
   }
-  let admitted: AdmittedEvent;
+  let admitted: { id: string };
   try {
     admitted = await admitRunEvent(env, {
       workflowId: inbox.workflowId,
@@ -1023,22 +1060,7 @@ const receiveReply = async (
     await replyDropped(env, inbox, drop, id);
     return;
   }
-  if (admitted.accepted) {
-    const db = drizzle(env.DB);
-    await auditedBatch(env, db, [
-      outboxed(db, {
-        actor: { type: "system" },
-        action: "workflow.email.reply.received",
-        target: { type: "workflow_run", id: inbox.runId },
-        detail: {
-          workflow: inbox.workflowId,
-          binding: inbox.binding,
-          event: admitted.id,
-          message: id,
-        },
-      }),
-    ]);
-  }
+  await replyReceived(env, inbox, admitted.id);
 };
 
 /**

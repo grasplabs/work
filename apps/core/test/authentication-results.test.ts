@@ -112,19 +112,25 @@ describe("Authentication-Results", () => {
     });
   });
 
-  it("reads an IPv6 address as is, as Email Routing writes it", () => {
-    expect(
-      resultsOf(
-        `${trustedAuthservId}; arc=none smtp.remote-ip=2a00:1440:4824:20::32e`
-      )
-    ).toStrictEqual([
-      {
-        method: "arc",
-        result: "none",
-        reason: undefined,
-        properties: { "smtp.remote-ip": "2a00:1440:4824:20::32e" },
-      },
-    ]);
+  it("reads a property's value as receiving servers write it, outside the grammar's tokens too", () => {
+    const valuesOf = (value: string) =>
+      resultsOf(`${trustedAuthservId}; ${value}`)?.map(
+        ({ properties }) => properties
+      );
+
+    expect({
+      ipv6: valuesOf("arc=none smtp.remote-ip=2a00:1440:4824:20::32e"),
+      signature: valuesOf("dkim=pass header.d=acme.test header.b=Gj4cVp/R"),
+      padded: valuesOf("dkim=pass header.b=ab+cd=ef(comment) header.s=s1"),
+      nullSender: valuesOf("spf=none smtp.mailfrom=<>"),
+      literal: valuesOf("spf=pass smtp.helo=[192.0.2.1]"),
+    }).toStrictEqual({
+      ipv6: [{ "smtp.remote-ip": "2a00:1440:4824:20::32e" }],
+      signature: [{ "header.d": "acme.test", "header.b": "Gj4cVp/R" }],
+      padded: [{ "header.b": "ab+cd=ef", "header.s": "s1" }],
+      nullSender: [{ "smtp.mailfrom": "<>" }],
+      literal: [{ "smtp.helo": "[192.0.2.1]" }],
+    });
   });
 
   it("refuses anything that isn't the grammar's", () => {
@@ -136,9 +142,10 @@ describe("Authentication-Results", () => {
       "example.com; spf=",
       "example.com; spf=pass smtp.mailfrom",
       "example.com; spf=pass smtp=example.net",
-      "example.com; spf=pass smtp.mailfrom=a@@example.net",
-      "example.com; spf=pass smtp.mailfrom=a@-example.net",
-      "example.com; spf=pass smtp.mailfrom=a/b",
+      "example.com; spf=pass smtp.mailfrom=",
+      "example.com; spf=pass smtp.mailfrom=a\\b",
+      "example.com; spf=pass smtp.mailfrom=a.test extra",
+      "example.com; sp_f=pass",
       "example.com; spf=pass (never closed",
       'example.com; dkim=pass reason="never closed',
       "example.com 2; spf=pass",
@@ -186,6 +193,22 @@ describe("a reply's authentication", () => {
       spf: { result: "pass", domain: "acme.test" },
       dkim: { result: "pass", domain: "acme.test" },
       dmarc: { result: "pass", domain: "acme.test" },
+    });
+  });
+
+  it("reports a domain only when it is one", () => {
+    expect(
+      authenticationOf(
+        headers([
+          "authentication-results",
+          `${trustedAuthservId}; spf=pass smtp.mailfrom=a@-acme.test; dkim=pass header.d=acme.test header.b=Gj4cVp/R; dmarc=none header.from=<>`,
+        ]),
+        "ben@acme.test"
+      )
+    ).toStrictEqual({
+      spf: { result: "pass", domain: null },
+      dkim: { result: "pass", domain: "acme.test" },
+      dmarc: { result: "none", domain: null },
     });
   });
 

@@ -29,7 +29,7 @@ import { inboxOf } from "../src/workflows/run-inboxes.ts";
 import { allEvents } from "./audit-events.ts";
 import { deliver } from "./email-triggers.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
-import { liveStatus, runObject, woken } from "./runs.ts";
+import { aroundEngine, liveStatus, runObject, woken } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
 
@@ -244,6 +244,9 @@ const dropReasons = async (runId: string) => {
   return dropped.map((detail) => detail?.reason);
 };
 
+/** Today, as the audit log's days are: in UTC. */
+const today = (): string => new Date().toISOString().slice(0, 10);
+
 /** Email Routing's results of a message from Ben, all passing. */
 const routingPass = `ARC-Authentication-Results: i=1; ${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=IRdayjbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`;
 
@@ -396,6 +399,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
   it("drops an automatic reply, audited, never bounced", async () => {
     const { runId, address } = await holdingRun(shared);
 
+    const before = today();
     const delivery = await deliver(
       address,
       replyMail({
@@ -403,27 +407,31 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         headers: ["Auto-Submitted: auto-replied", routingPass],
       })
     );
+    const days = [before, today()];
+    const [dropped] = await audited("workflow.email.reply.dropped", runId);
 
     expect({
       delivery,
       events: await inboxEvents(runId),
-      dropped: await audited("workflow.email.reply.dropped", runId),
+      dropped,
+      onItsDay: days.includes(String(dropped?.day)),
     }).toStrictEqual({
       delivery: { rejected: undefined },
       events: [],
-      dropped: [
-        {
-          workflow: shared.workflow.id,
-          binding: "replies",
-          reason: "auto_submitted",
-          day: new Date().toISOString().slice(0, 10),
-        },
-      ],
+      dropped: {
+        workflow: shared.workflow.id,
+        binding: "replies",
+        reason: "auto_submitted",
+        day: dropped?.day,
+      },
+      onItsDay: true,
     });
   });
 
-  it("drops replies to a run that ended, audited once however many come, never bounced", async () => {
+  it("drops replies to a run that ended, audited once a day however many come, never bounced, but not one it took", async () => {
     const { runId, address } = await holdingRun(shared);
+    const taken = replyMail();
+    await deliver(address, taken);
     await runObject(runId).terminate({ rollback: false });
     await vi.waitFor(
       async () => {
@@ -432,17 +440,93 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       { timeout: 30_000, interval: 100 }
     );
 
+    const before = today();
     const deliveries = [
+      // Its answer lost, the reply the run took comes again.
+      await deliver(address, taken),
       await deliver(address, replyMail()),
       await deliver(address, replyMail()),
     ];
+    const days = new Set([before, today()]);
+    const dropped = await dropReasons(runId);
+    const received = await audited("workflow.email.reply.received", runId);
 
     expect({
       rejected: deliveries.map(({ rejected }) => rejected),
+      reasons: [...new Set(dropped)],
+      oncePerDay: dropped.length <= days.size,
+      received: received.length,
+    }).toStrictEqual({
+      rejected: [undefined, undefined, undefined],
+      reasons: ["run_ended"],
+      oncePerDay: true,
+      received: 1,
+    });
+  });
+
+  it("fails a reply for now while the run's start isn't confirmed, and takes it when delivered again", async () => {
+    const { runId, address } = await holdingRun(shared);
+    const reply = replyMail();
+
+    const refused = await aroundEngine(
+      async (method, call) =>
+        method === "sendEvent"
+          ? await Promise.resolve("missing")
+          : await call(),
+      async () => {
+        try {
+          await deliver(address, reply);
+          return "delivered";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      }
+    );
+    const again = await deliver(address, reply);
+
+    expect({
+      refused: refused.includes("hasn't started yet"),
+      again,
+      events: await inboxEvents(runId),
       dropped: await dropReasons(runId),
     }).toStrictEqual({
-      rejected: [undefined, undefined],
-      dropped: ["run_ended"],
+      refused: true,
+      again: { rejected: undefined },
+      events: [{ taken: false }],
+      dropped: [],
+    });
+  });
+
+  it("drops replies past the inbox's share for replies, audited, leaving the rest of the inbox to the run's other senders", async () => {
+    const { runId, address } = await holdingRun(shared);
+    // Each reply as large as an event's data takes: an eighth of the
+    // inbox's bytes holds a few dozen.
+    const text = "x".repeat(140 * 1024);
+    let sent = 0;
+    const rejected: (string | undefined)[] = [];
+    while (sent < 64) {
+      sent += 1;
+      // oxlint-disable-next-line no-await-in-loop -- in order, until the share is full
+      const delivery = await deliver(address, replyMail({ text }));
+      rejected.push(delivery.rejected);
+      // oxlint-disable-next-line no-await-in-loop -- read after each
+      const dropped = await dropReasons(runId);
+      if (dropped.length > 0) {
+        break;
+      }
+    }
+    const events = await inboxEvents(runId);
+
+    expect({
+      rejected: [...new Set(rejected)],
+      dropped: await dropReasons(runId),
+      kept: events.length === sent - 1,
+      share: events.length < 64,
+    }).toStrictEqual({
+      rejected: [undefined],
+      dropped: ["event_refused"],
+      kept: true,
+      share: true,
     });
   });
 

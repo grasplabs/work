@@ -16,11 +16,19 @@
 // `null`), as does one whose header doesn't parse: a verdict is never
 // guessed from a header read loosely.
 //
-// The parser follows the RFC's grammar strictly (RFC 8601 2.2, RFC 8617
-// 4.1.1, with RFC 5322's CFWS and quoted strings and RFC 2045's tokens),
-// with one narrow addition: a property's value may be an IPv6 address as
-// is (`smtp.remote-ip=2a00:1440::32e`), which Email Routing writes
-// unquoted though `:` can't be in a token.
+// The parser follows the RFC's grammar strictly where it decides what is
+// reported (RFC 8601 2.2, RFC 8617 4.1.1, with RFC 5322's CFWS and quoted
+// strings and RFC 2045's tokens): the authserv-id, each method, result
+// and property name, the `;` between results. A property's value is
+// taken as the grammar's quoted string, or else as any visible text up to
+// the next whitespace, comment or `;`: receiving servers write values the
+// grammar doesn't allow unquoted (a signature's start with `/` or `=`,
+// `smtp.remote-ip=2a00:1440::32e`, `smtp.mailfrom=<>`), and a value only
+// ever becomes a domain reported once it is one (`domainOf`).
+//
+// The trust above holds only for mail Email Routing received: an ingress
+// without it in front (mail-ingress.ts) must remove every results header
+// under its authserv-id first, as RFC 8601 5 asks of a border server.
 
 /** The authserv-id Email Routing writes its results under. */
 export const trustedAuthservId = "mx.cloudflare.net";
@@ -95,8 +103,8 @@ const maxCommentDepth = 16;
 /** A character of an RFC 2045 token: visible US-ASCII but its `tspecials`. */
 const tokenCharPattern = /^[!#$%&'*+\-.0-9A-Z^_`a-z{|}~]$/u;
 
-/** RFC 5322 `atext` beyond letters and digits, which a local part may hold. */
-const atextSpecialPattern = /^[!#$%&'*+\-/=?^_`{|}~]$/u;
+/** A character of a property's value as written unquoted (see above). */
+const valueCharPattern = /^[!#-'*-:<-[\]-~]$/u;
 
 const isWhitespace = (char: string): boolean =>
   char === " " || char === "\t" || char === "\r" || char === "\n";
@@ -111,17 +119,6 @@ const keywordPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
 /** RFC 6376 3.5's `domain-name`: sub-domains, each a Keyword, by dots. */
 const domainNamePattern =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/u;
-
-/** RFC 5322 `dot-atom-text`. */
-const dotAtomPattern =
-  /^[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+(?:\.[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+)*$/u;
-
-/** An RFC 2045 token. */
-const tokenPattern = /^[!#$%&'*+\-.0-9A-Z^_`a-z{|}~]+$/u;
-
-/** An IPv6 address as written, its last part maybe IPv4 (RFC 4291 2.2). */
-const ipv6Pattern =
-  /^[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(?:\d{1,3}(?:\.\d{1,3}){3})?$/u;
 
 /** What marks an error as a header that isn't the grammar's (`unparsable`). */
 const notTheGrammar = Symbol("not the grammar");
@@ -266,8 +263,9 @@ class Cursor {
   }
 
   /**
-   * RFC 8601's `pvalue`, without its CFWS: a value, or an address or
-   * domain (`[[local-part] "@"] domain-name`), or an IPv6 address as is.
+   * RFC 8601's `pvalue`, without its CFWS: a quoted string (a quoted
+   * local part and its domain), or visible text up to the next
+   * whitespace, comment, quote or `;` (see above).
    */
   pvalue(): string {
     if (this.peek() === '"') {
@@ -277,27 +275,9 @@ class Cursor {
       }
       return `${quoted}@${this.#domainName()}`;
     }
-    const word = this.run(
-      (char) =>
-        isTokenChar(char) ||
-        atextSpecialPattern.test(char) ||
-        char === "@" ||
-        char === ":"
-    );
-    const at = word.indexOf("@");
-    if (at === -1) {
-      if (tokenPattern.test(word) || ipv6Pattern.test(word)) {
-        return word;
-      }
+    const word = this.run((char) => valueCharPattern.test(char));
+    if (word === "") {
       throw unparsable("Expected a property's value");
-    }
-    const local = word.slice(0, at);
-    const domain = word.slice(at + 1);
-    if (
-      (local !== "" && !dotAtomPattern.test(local)) ||
-      !domainNamePattern.test(domain)
-    ) {
-      throw unparsable("Expected an address or a domain");
     }
     return word;
   }
