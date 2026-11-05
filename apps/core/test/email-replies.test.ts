@@ -425,6 +425,69 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
     ]);
   });
 
+  it("reports DMARC only when it judged the one From mailbox the run gets", async () => {
+    const { runId, address } = await holdingRun(shared);
+    // Each with Email Routing's own DMARC pass for acme.test, of the From
+    // it judged: which one, the run can't tell, so only a message with one
+    // From header holding one mailbox, the one the run gets, at that
+    // domain, keeps it. By subject, each case.
+    const cases: Record<
+      string,
+      { from: string; headers?: string[]; envelopeFrom?: string }
+    > = {
+      aligned: { from: "Ben <ben@acme.test>" },
+      cased: { from: "Ben <ben@ACME.Test>" },
+      // DMARC vouches for the domain: which address at it may send is the
+      // domain's own policy.
+      sameDomain: { from: "Boss <boss@acme.test>" },
+      otherDomain: { from: "Boss <boss@bank.test>" },
+      // A From above the one DMARC may have judged (verifiers read From
+      // bottom up), the run getting the topmost.
+      severalFrom: {
+        from: "Ben <ben@acme.test>",
+        headers: [...routingPass, "From: Boss <boss@acme.test>"],
+      },
+      // RFC 5322 4.5's obsolete `From :`, kept apart by postal-mime.
+      spacedFrom: {
+        from: "Ben <ben@acme.test>",
+        headers: [...routingPass, "From : Boss <boss@acme.test>"],
+      },
+      severalMailboxes: { from: "boss@acme.test, ben@acme.test" },
+      group: { from: "Team: boss@acme.test;" },
+      // No From postal-mime can read: the run gets the envelope sender.
+      unreadable: { from: "", envelopeFrom: "boss@acme.test" },
+    };
+    await Promise.all(
+      Object.entries(cases).map(
+        async ([subject, { from, headers, envelopeFrom }]) =>
+          await deliver(address, replyMail({ subject, from, headers }), {
+            envelopeFrom,
+          })
+      )
+    );
+
+    const replies = await repliesIn(runId);
+
+    expect(
+      Object.fromEntries(
+        replies.map(({ subject, from, authentication }) => [
+          subject,
+          [from, z.object({ dmarc: z.unknown() }).parse(authentication).dmarc],
+        ])
+      )
+    ).toStrictEqual({
+      aligned: ["ben@acme.test", { result: "pass", domain: "acme.test" }],
+      cased: ["ben@ACME.Test", { result: "pass", domain: "acme.test" }],
+      sameDomain: ["boss@acme.test", { result: "pass", domain: "acme.test" }],
+      otherDomain: ["boss@bank.test", null],
+      severalFrom: ["boss@acme.test", null],
+      spacedFrom: ["ben@acme.test", null],
+      severalMailboxes: ["boss@acme.test", null],
+      group: ["boss@acme.test", null],
+      unreadable: ["boss@acme.test", null],
+    });
+  });
+
   it("takes a reply delivered again as the one event it is, whatever its bytes", async () => {
     const { runId, address } = await holdingRun(shared);
     const messageId = `${unique()}@acme.test`;

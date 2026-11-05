@@ -24,6 +24,7 @@ import {
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { addressParser } from "postal-mime";
 import type { Address, Attachment, Email } from "postal-mime";
 import { z } from "zod";
 
@@ -39,6 +40,7 @@ import {
   triggerResourceVersions,
 } from "../db/core/schema.ts";
 import { authenticationOf } from "./authentication-results.ts";
+import type { Authentication } from "./authentication-results.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
 import { parsedOf, stagedAttachmentKey } from "./kept-email.ts";
@@ -173,7 +175,10 @@ import type { StartFiles } from "./start-files.ts";
 //   binding's share, never an App screen's. What Email Routing found of
 //   SPF, DKIM and DMARC goes with it (authentication-results.ts: only
 //   its own ARC set, on top, is read), for the workflow to check; core
-//   refuses no reply on it.
+//   refuses no reply on it. Its DMARC verdict only when it is of the
+//   `from` the run gets (`dmarcOfFrom`): a message whose From DMARC may
+//   not have judged (several, several mailboxes, none readable) has none,
+//   so a pass always means `from`'s domain is verified.
 // - A reply the run can't take: one to a run that ended, through a
 //   binding whose approval went, one its contract refuses, past its
 //   inbox's limits, or one that may loop (`loopOf`) is accepted and
@@ -441,6 +446,39 @@ const textOfHtml = (full: string): string => {
     .join("")
     .replaceAll(entities, (_, name: string) => entityText[name] ?? "")
     .trim();
+};
+
+/** `domain`, lower case, when it is ASCII (U+212A lower-cases to `k`). */
+const asciiLowerCase = (domain: string): string | undefined =>
+  /^[\u0021-\u007E]*$/u.test(domain) ? domain.toLowerCase() : undefined;
+
+/**
+ * `authentication`, its DMARC verdict kept only when it is of the `from`
+ * the run gets (`messageOf`): the message has one From header (any
+ * spelling of its name, RFC 5322 3.6 allows only one), holding one
+ * mailbox, the one postal-mime read, at the domain DMARC judged. Which
+ * From Email Routing judged, when there are several or a header holds
+ * several mailboxes or none postal-mime reads (the run then gets the
+ * envelope sender), the run can't tell.
+ */
+const dmarcOfFrom = (
+  parsed: Email,
+  authentication: Authentication
+): Authentication => {
+  const fromHeaders = parsed.headers.filter(({ key }) => key.trim() === "from");
+  const fromMailboxes =
+    fromHeaders.length === 1 ? addressParser(fromHeaders[0]?.value ?? "") : [];
+  const address = fromMailboxes[0]?.address;
+  const domain =
+    address === undefined
+      ? undefined
+      : asciiLowerCase(address.slice(address.lastIndexOf("@") + 1));
+  const ofFrom =
+    fromMailboxes.length === 1 &&
+    address === parsed.from?.address &&
+    domain !== undefined &&
+    domain === authentication.dmarc?.domain;
+  return ofFrom ? authentication : { ...authentication, dmarc: null };
 };
 
 /**
@@ -931,7 +969,10 @@ const receiveReply = async (
     type: ingress.type,
     data: fitted({
       ...messageOf(id, null, message.from, parsed),
-      authentication: authenticationOf(parsed.headers, parsed.from?.address),
+      authentication: dmarcOfFrom(
+        parsed,
+        authenticationOf(parsed.headers, parsed.from?.address)
+      ),
     }),
     key: await messageKeyOf(parsed, id),
     // Minted from the inbox, never from the message: its From is data.
