@@ -273,6 +273,48 @@ describe("build jobs", { timeout: 180_000 }, () => {
     expect(versions).toHaveLength(1);
   });
 
+  it("takes a job from a turn its Workspace's restart left running, and ends it when the person stops that turn", async () => {
+    const building = pausedReply(
+      { ...codeStep(submitProposal), text: "Building." },
+      1
+    );
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([building.reply, waiting.reply]);
+
+    const checking = holdFiles(screenBuilds());
+    void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
+    const woken = workspace(env, chat.id);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await vi.waitFor(
+        () => {
+          expect(chat.provider.requests).toHaveLength(1);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+      // The Workspace restarts before the turn's code runs: the turn goes
+      // on in the chat's own object, its asker gone.
+      await runInDurableObject(chat.stub, (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+      building.release();
+      job = await submittedJob(woken, chat.chat.id);
+      await checking.reached();
+      await expect(
+        woken.cancel(chat.chat.id, chat.personId)
+      ).resolves.toBeTruthy();
+    } finally {
+      checking.restore();
+      waiting.release();
+    }
+    await expect(endedJob(woken, chat.chat.id, job.id)).resolves.toMatchObject({
+      status: "cancelled",
+      version: null,
+    });
+  });
+
   it("ends a job when the person stops the turn that submitted it, and commits nothing", async () => {
     const waiting = pausedReply(says("I'll say once the build is done."), 3);
     const { builder, chat } = await setUp([

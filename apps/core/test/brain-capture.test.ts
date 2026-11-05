@@ -14,7 +14,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
-import { model, says } from "./agent-chat.ts";
+import { model, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -517,11 +517,11 @@ describe("a workflow run's outcome", () => {
 const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const stub = workspace(env, personalWorkspaceId(person.userId));
-  await fakeProvider(...replies);
+  const provider = await fakeProvider(...replies);
   const chat = await person.api.chats.create("Questions");
   const id = chatIdSchema.parse(chat.id);
   const ask = async () => await stub.ask(id, { text: "Hello?", model });
-  return { person, stub, id, ask };
+  return { person, stub, id, ask, provider };
 };
 
 /** The object's capture intents of chat `chatId`. */
@@ -581,6 +581,36 @@ describe("a chat turn's outcome", () => {
     });
     // Identifiers only: nothing of the question or the answer.
     expect(JSON.stringify(event)).not.toMatch(/Floor 3|Hello/u);
+  });
+
+  it("is captured once when the turn settles after its Workspace restarted, nobody waiting on it", async () => {
+    const answer = pausedReply(says("Floor 3."), 1);
+    const { person, stub, id, ask, provider } = await chatter(answer.reply);
+    void ask().catch(() => "cut short");
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    // The turn goes on in the chat's own object; its asker is gone.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    answer.release();
+    const woken = workspace(env, personalWorkspaceId(person.userId));
+    await vi.waitFor(
+      async () => {
+        await expect(executionsOf(id)).resolves.toStrictEqual(["completed"]);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    expect({
+      intents: await turnIntents(woken, id),
+      summary: await woken.chatSummary(id, person.userId),
+    }).toMatchObject({ intents: [], summary: { running: false } });
   });
 
   it("survives the Brain being out of reach as the turn settles, through the object's alarm", async () => {

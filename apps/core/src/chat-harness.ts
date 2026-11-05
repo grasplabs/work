@@ -444,8 +444,8 @@ export class ChatHarness {
   readonly #thinking = thinkingClock();
   /** Each response's thinking time, by its entry, until it is copied. */
   readonly #thought = new Map<EntryId, number>();
-  /** What the Workspace was told last: whether the agent is at work, its partial. */
-  readonly #told: { running?: boolean; partial: AssistantMessage | null } = {
+  /** What the Workspace was told last: the partial, and the turn that ended. */
+  readonly #told: { partial: AssistantMessage | null; ended?: string } = {
     partial: null,
   };
   /** The Workspace brought up to date (`#sync`), once at a time. */
@@ -625,6 +625,8 @@ export class ChatHarness {
       return await end;
     } finally {
       this.#taking = undefined;
+      // Its end told to the Workspace too, should its asker be gone.
+      this.#syncSoon();
     }
   }
 
@@ -1189,15 +1191,17 @@ export class ChatHarness {
   /**
    * Brings the chat's Workspace up to date, in this order: what was
    * committed since the last copy (`#copy`), the answer streaming in, and
-   * whether the agent is at work. Each the latest, never an older one
-   * after it; each told again until it is through.
+   * how the turn ended, once its runs are over (`turnEnded`). Each the
+   * latest, never an older one after it; each told again until it is
+   * through, and the end at every open, as the Workspace settles a turn
+   * once however often it is told.
    */
   async #sync(): Promise<void> {
     const request = await this.#request();
     if (request === undefined) {
       return;
     }
-    const { scope } = request;
+    const { scope, turnId } = request;
     await this.#copy(scope);
     const partial = this.#partial;
     if (partial !== this.#told.partial) {
@@ -1206,13 +1210,37 @@ export class ChatHarness {
       });
       this.#told.partial = partial;
     }
-    const running = this.#running;
-    if (running !== this.#told.running) {
-      await callObject(async () => {
-        await this.#host(scope).turnRunning(scope.chatId, running);
-      });
-      this.#told.running = running;
+    // Once its runs are over, and no `run` is still taking it.
+    if (
+      this.#running ||
+      this.#taking?.turnId === turnId ||
+      this.#told.ended === turnId
+    ) {
+      return;
     }
+    const end = await this.#endOfTurn(turnId);
+    if (end === undefined) {
+      return;
+    }
+    await callObject(async () => {
+      await this.#host(scope).turnEnded(scope.chatId, turnId, end);
+    });
+    this.#told.ended = turnId;
+  }
+
+  /**
+   * How turn `turnId` ended, as pi settled its last input (`#endOf`): failed
+   * when it never submitted its question; none while that is in flight.
+   */
+  async #endOfTurn(turnId: string): Promise<TurnEnd | undefined> {
+    const last = await this.#lastInputOf(turnId);
+    if (last === undefined) {
+      return { outcome: "failed", answer: "" };
+    }
+    const { status } = await last.status(context);
+    return status === "done" || status === "unanswered"
+      ? await this.#endOf(await last.wait(context))
+      : undefined;
   }
 
   /**
