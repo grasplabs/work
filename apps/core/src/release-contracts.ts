@@ -90,7 +90,9 @@ const mailbox = v.object({ name: v.string(), address: v.string() });
  * of the signature (`header.d`), DMARC's of the From header
  * (`header.from`). A pass vouches only for that domain: SPF and DKIM may
  * pass for any domain the sender owns, so only DMARC's pass ties the From
- * header to its sender. Null when the header records no result.
+ * header to its sender. Null when Email Routing's own results (the
+ * topmost header, authentication-results.ts) record none, or none of
+ * these.
  */
 const methodResult = v
   .object({

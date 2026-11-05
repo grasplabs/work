@@ -96,6 +96,12 @@ const deliverySchema = z.strictObject({
   sender: z.string().min(1).max(256),
 });
 
+/**
+ * The reason `workflow.event_refused` gives when the run's start isn't
+ * confirmed yet: the same delivery later may be accepted.
+ */
+export const notStartedYet = "not_started";
+
 /** An event a caller admits to a run: everything but what the host mints. */
 export interface RunEventDelivery {
   readonly workflowId: string;
@@ -204,7 +210,8 @@ export const unlessAccepted = async (
  * `workflow.run_ended` for one that ended, `workflow.event_invalid` for
  * an event its binding doesn't take, `workflow.event_denied` when the
  * authority behind the binding no longer holds, `workflow.event_refused`
- * when the run can't take it now, `workflow.event_conflict` for a key
+ * when the run can't take it now (`reason: "not_started"` when its start
+ * isn't confirmed yet), `workflow.event_conflict` for a key
  * used for another event.
  */
 export const admitRunEvent = async (
@@ -284,12 +291,17 @@ export const admitRunEvent = async (
       throw workflowResourceErrors.create("workflow.run_ended");
     }
     case "too_large":
-    case "full":
-    case "missing": {
+    case "full": {
       // Full: the inbox, or its sender's share of it.
-      // Missing: the engine has no record of the run yet (its start isn't
-      // confirmed); a delivery later may find it.
       throw workflowResourceErrors.create("workflow.event_refused");
+    }
+    case "missing": {
+      // The engine has no record of the run yet (its start isn't
+      // confirmed): a delivery later may find it, which a caller that can
+      // try again later tells by its reason (`notStartedYet`).
+      throw workflowResourceErrors.create("workflow.event_refused", {
+        reason: notStartedYet,
+      });
     }
     default: {
       return outcome satisfies never;

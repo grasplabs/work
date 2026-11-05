@@ -1,5 +1,6 @@
 import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import { fileErrors } from "@grasp-os/shared/app-files";
+import { auditEventSchema } from "@grasp-os/shared/audit";
 import { sha256Hex, sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
 import {
@@ -15,7 +16,10 @@ import {
   runFileTextTypes,
 } from "@grasp-os/shared/run-files";
 import type { RunFileType } from "@grasp-os/shared/run-files";
-import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
+import {
+  coreStartKeyPrefix,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
   inboundEmailMaxBytes as maxMessageBytes,
@@ -23,17 +27,27 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InboundEmail } from "@grasp-os/shared/workflows";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Address, Attachment, Email } from "postal-mime";
+import { z } from "zod";
 
-import { keepAuditEvent, outboxedWhere } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  keepAuditEvent,
+  outboxed,
+  outboxedEventWhere,
+  outboxedWhere,
+  storedEvent,
+  uuidFromHash,
+} from "../audit-outbox.ts";
 import {
   apps,
   triggerResources,
   triggerResourceVersions,
   workflowTriggers,
 } from "../db/core/schema.ts";
+import { authenticationOf } from "./authentication-results.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
 import {
@@ -51,7 +65,17 @@ import {
 } from "./mail-stamps.ts";
 import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
+import { callingRunOf } from "./resource-authority.ts";
+import { admitRunEvent, notStartedYet } from "./run-events.ts";
+import type { AdmittedEvent } from "./run-events.ts";
 import { isRunFileText } from "./run-files.ts";
+import {
+  inboxAt,
+  ingressTypeOf,
+  replyLocalPattern,
+  replyPrefix,
+} from "./run-inboxes.ts";
+import type { RunInbox } from "./run-inboxes.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 import type { StartFiles } from "./start-files.ts";
 
@@ -196,6 +220,43 @@ import type { StartFiles } from "./start-files.ts";
 //   now, to be started at the new version.
 // - The same message delivered twice: its start is keyed by the trigger
 //   and the message (its Message-ID, or bytes), so it is one run.
+//
+// A reply to a run's mail, to the run's reply address
+// (`reply-<token>@<host>`, run-inboxes.ts), starts nothing: it is an
+// event for that run (`receiveReply`), admitted as an App screen's is
+// (run-events.ts, `admitRunEvent`). Its address is looked up before any
+// trigger's or App's, and before the message is read. Threat model, and
+// how each is closed:
+//
+// - A guessed or stale token: an address no inbox has (never minted, gone
+//   with its run's details, or one core's key no longer derives) is
+//   rejected at SMTP time, as an address nobody receives at, so no bounce
+//   goes out later. Nothing logs or audits the token, only its run.
+// - A builder taking a run's replies with an email trigger named after
+//   one: that shape is reserved (email-addresses.ts), and reply addresses
+//   are looked up first.
+// - A forged sender: the From header is data. The event's source and its
+//   sender (its share of the run's inbox, `inbox:<alias>`) are minted
+//   from the inbox, never from the message, so outsiders fill only that
+//   binding's share, never an App screen's. What Email Routing found of
+//   SPF, DKIM and DMARC goes with it (authentication-results.ts: only
+//   its own results, the topmost header, are read), for the workflow to
+//   check; core refuses no reply on it.
+// - A reply the run can't take: one to a run that ended, through a
+//   binding whose approval went, one its contract refuses, past its
+//   inbox's limits, or one that may loop (`loopOf`) is accepted and
+//   dropped, never bounced (a bounce can loop), and audited
+//   (`workflow.email.reply.dropped`) once per run and reason a day, so a
+//   flood of replies can't fill the audit log; every drop is logged with
+//   the message's hash alone. One to a run whose start isn't confirmed
+//   yet fails for now, for Email Routing to try again.
+// - The same reply delivered twice: its key is the message's
+//   (`messageKeyOf`), so it is one event, however its bytes differ.
+//   Each accepted reply is audited with its run and binding
+//   (`workflow.email.reply.received`), bounded by the run's inbox limits.
+// - An oversized reply: it bounces past `maxMessageBytes`, as any mail;
+//   its data is fitted to an event's (`fitted`), its attachments listed,
+//   never kept.
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -334,11 +395,12 @@ const fittingText = (input: InboundEmail): string => {
 };
 
 /**
- * `input` made to fit a run's input: its text cut first, to the longest
+ * `input` made to fit a run's input (or an event's data, which is as
+ * large), whatever else it carries: its text cut first, to the longest
  * start that fits (`fittingText`), then, should the rest still not fit,
  * Cc, To and attachments dropped from the end, in that order.
  */
-const fitted = (input: InboundEmail): InboundEmail => {
+const fitted = <T extends InboundEmail>(input: T): T => {
   if (overBy(input) <= 0) {
     return input;
   }
@@ -351,7 +413,7 @@ const fitted = (input: InboundEmail): InboundEmail => {
   const lists = ["cc", "to", "attachments"] as const;
   const fitting = { ...cutText, cc: [...cutText.cc], to: [...cutText.to] };
   const attachments = [...cutText.attachments];
-  const current = (): InboundEmail => ({ ...fitting, attachments });
+  const current = (): T => ({ ...fitting, attachments });
   for (const list of lists) {
     const items = list === "attachments" ? attachments : fitting[list];
     while (overBy(current()) > 0 && items.length > 0) {
@@ -448,10 +510,11 @@ const textOfHtml = (full: string): string => {
 };
 
 /**
- * A parsed message as its run's input: each attachment of `files` with
- * its reference (`attachmentRef`).
+ * A parsed message as its run's input, before it is made to fit
+ * (`fitted`): each attachment of `files` with its reference
+ * (`attachmentRef`).
  */
-const inputOf = (
+const messageOf = (
   id: string,
   stored: string | null,
   envelopeFrom: string,
@@ -461,7 +524,7 @@ const inputOf = (
   const referenced = new Set(files.map(({ index }) => index));
   const [from] = mailboxes(parsed.from === undefined ? [] : [parsed.from]);
   const date = parsed.date === undefined ? null : new Date(parsed.date);
-  return fitted({
+  return {
     id,
     stored,
     from: from ?? { name: "", address: cut(envelopeFrom) },
@@ -482,8 +545,12 @@ const inputOf = (
           ? { file: { id: attachmentRef(index) } }
           : {}),
       })),
-  });
+  };
 };
+
+/** A parsed message as its run's input (`messageOf`), made to fit. */
+const inputOf = (...message: Parameters<typeof messageOf>): InboundEmail =>
+  fitted(messageOf(...message));
 
 /**
  * The workflows of Apps' current versions with an email trigger at
@@ -804,8 +871,179 @@ const receiveForTrigger = async (
   }
 };
 
+/** Why a reply to a run's inbox is dropped (`receiveReply`). */
+type ReplyDrop =
+  | LoopReason
+  | "run_ended"
+  | "event_denied"
+  | "event_invalid"
+  | "event_refused";
+
+/** The drop a refusal of `admitRunEvent` is, by its code. */
+const replyDrops: Readonly<Record<string, ReplyDrop>> = {
+  "workflow.run_ended": "run_ended",
+  // A run whose row is gone took its inbox with it: never reached here
+  // but in a race with retention, as an ended run's.
+  "workflow.run_unavailable": "run_ended",
+  "workflow.event_denied": "event_denied",
+  "workflow.event_invalid": "event_invalid",
+  "workflow.event_refused": "event_refused",
+};
+
+const refusalReasonSchema = z.object({
+  details: z.object({ reason: z.string() }),
+});
+
 /**
- * Takes a message Email Routing delivers: starts a run of each workflow
+ * Records that a reply to `inbox`'s run (the message hashing to
+ * `message`) was dropped, and why: audited once per run and reason a day
+ * (the event's ID is derived from them, and it holds nothing else, so the
+ * same event however often that day), and logged each time with the
+ * message's hash alone. A reply's sender can drop as many as they like;
+ * the audit log takes at most one of each a day.
+ */
+const replyDropped = async (
+  env: Env,
+  inbox: RunInbox,
+  reason: ReplyDrop,
+  message: string
+): Promise<void> => {
+  log.warn("workflow.email_reply_dropped", {
+    run: inbox.runId,
+    reason,
+    message,
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  const action = "workflow.email.reply.dropped";
+  const event = auditEventSchema.parse({
+    id: uuidFromHash(
+      await sha256Hex(`${action}:${inbox.runId}:${reason}:${day}`)
+    ),
+    at: `${day}T00:00:00.000Z`,
+    source: "core",
+    actor: { type: "system" },
+    action,
+    target: { type: "workflow_run", id: inbox.runId },
+    detail: {
+      workflow: inbox.workflowId,
+      binding: inbox.binding,
+      reason,
+      day,
+    },
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, not(storedEvent(event.id))),
+  ]);
+};
+
+/**
+ * Takes a reply to a run's mail, sent to its inbox's address
+ * (`reply-<token>`, run-inboxes.ts): admits it to the run as its
+ * binding's contract's email type, its data the message as an email
+ * trigger's run gets it with what SPF, DKIM and DMARC found
+ * (`emailReplyData`), keyed by the message (`messageKeyOf`), so a
+ * redelivery is the same event. A token no inbox has is rejected, as mail
+ * to an address nobody receives at, before the message is read. A reply
+ * the run can't take (it ended, its binding's approval went, its inbox is
+ * full, or it may loop) is accepted and dropped, audited
+ * (`replyDropped`), never bounced; one to a run whose start isn't
+ * confirmed yet fails for now, for Email Routing to try again.
+ */
+const receiveReply = async (
+  message: InboundMessage,
+  env: Env,
+  token: string
+): Promise<void> => {
+  const inbox = await inboxAt(env, token);
+  if (inbox === undefined) {
+    message.setReject("No such address.");
+    return;
+  }
+  const read = await readMessage(message, env);
+  if (read === undefined) {
+    return;
+  }
+  const { parsed, id } = read;
+  const loop = loopOf(message.to, message.from, parsed);
+  const run = inbox.ended
+    ? undefined
+    : await callingRunOf(env, inbox.workflowId, inbox.runId);
+  if (run === undefined || loop !== undefined) {
+    await replyDropped(env, inbox, loop ?? "run_ended", id);
+    return;
+  }
+  const binding = run.bindings.get(inbox.binding);
+  const ingress =
+    binding?.kind === "event" ? await ingressTypeOf(env, binding) : undefined;
+  if (ingress?.ingress !== "email") {
+    await replyDropped(env, inbox, "event_invalid", id);
+    return;
+  }
+  let admitted: AdmittedEvent;
+  try {
+    admitted = await admitRunEvent(env, {
+      workflowId: inbox.workflowId,
+      runId: inbox.runId,
+      binding: inbox.binding,
+      type: ingress.type,
+      data: fitted({
+        ...messageOf(id, null, message.from, parsed),
+        authentication: authenticationOf(parsed.headers, parsed.from?.address),
+      }),
+      key: await messageKeyOf(parsed, id),
+      // Minted from the inbox, never from the message: its From is data.
+      source: `urn:grasp:run:${inbox.runId}:inbox:${inbox.binding}:email`,
+      sender: `inbox:${inbox.binding}`,
+    });
+  } catch (error) {
+    const code = workflowResourceErrors.codeOf(error);
+    if (code === "workflow.event_conflict") {
+      // The same message (its Message-ID) delivered again with other
+      // bytes, or what other servers found of it: the run has it already.
+      log.warn("workflow.email_reply_redelivered", {
+        run: inbox.runId,
+        message: id,
+      });
+      return;
+    }
+    if (
+      code === "workflow.event_refused" &&
+      refusalReasonSchema.safeParse(error).data?.details.reason ===
+        notStartedYet
+    ) {
+      throw new Error(`Message ${id} reached a run that hasn't started yet`, {
+        cause: error,
+      });
+    }
+    const drop = code === undefined ? undefined : replyDrops[code];
+    if (drop === undefined) {
+      throw error;
+    }
+    await replyDropped(env, inbox, drop, id);
+    return;
+  }
+  if (admitted.accepted) {
+    const db = drizzle(env.DB);
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor: { type: "system" },
+        action: "workflow.email.reply.received",
+        target: { type: "workflow_run", id: inbox.runId },
+        detail: {
+          workflow: inbox.workflowId,
+          binding: inbox.binding,
+          event: admitted.id,
+          message: id,
+        },
+      }),
+    ]);
+  }
+};
+
+/**
+ * Takes a message Email Routing delivers: a reply to a run's mail to the
+ * run (`receiveReply`); anything else starts a run of each workflow
  * that receives mail at its recipient's address, with the message as
  * input, bounces it, or fails it for now. A message that may loop
  * (`loopOf`) is dropped, and its refusal audited.
@@ -819,6 +1057,12 @@ export const receiveEmail = async (
   // (mail-stamps.ts).
   const at = message.to.lastIndexOf("@");
   const local = message.to.slice(0, Math.max(at, 0)).toLowerCase();
+  // A run's reply address first: no trigger may take its shape
+  // (email-addresses.ts), and it carries no recorded token.
+  if (replyLocalPattern.test(local)) {
+    await receiveReply(message, env, local.slice(replyPrefix.length));
+    return;
+  }
   const { local: address, stamp: recorded } =
     local === ""
       ? { local: "", stamp: undefined }
