@@ -360,7 +360,8 @@ const readReference = (value: unknown, kind: ReferenceKind): ReadReference => {
 };
 
 /**
- * `args` as the request carries them, an omitted input as `{}`;
+ * `args` as the request carries them, as a JSON snapshot, an omitted
+ * input as `{}`;
  * `contract.invalid_args` for anything but an object JSON can hold (a NaN,
  * an infinity or a BigInt in it is refused, as the cache key and the
  * request couldn't be made of it). What they must be beyond that is the
@@ -378,8 +379,9 @@ const inputOf = (args: unknown): Json => {
   // core reads it as data and checks it with the function's validator.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const json = input as Json;
+  let text: string;
   try {
-    canonicalJson(json);
+    text = canonicalJson(json);
   } catch {
     throw clientError("contract.invalid_args", {
       issues: [
@@ -391,7 +393,12 @@ const inputOf = (args: unknown): Json => {
       ],
     });
   }
-  return json;
+  // A snapshot, never the caller's object: a list's cache key and its Load
+  // Mores, and a call sent again, hold what was asked, whatever the
+  // caller changes in it after.
+  // SAFETY: canonical JSON text parses to the JSON it was made of.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return JSON.parse(text) as Json;
 };
 
 const queryOptionKeys: ReadonlySet<string> = new Set(["signal"]);

@@ -209,6 +209,51 @@ const loose = (args: object): never =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   args as never;
 
+describe("the session client's paginated list", () => {
+  it("asks Load More for the arguments it was given, whatever the caller does to them after", async () => {
+    const followed: { input?: unknown }[] = [];
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async (request, onSnapshot) => {
+        const sent: unknown = JSON.parse(request);
+        followed.push(
+          typeof sent === "object" && sent !== null && "input" in sent
+            ? { input: sent.input }
+            : {}
+        );
+        await Promise.resolve();
+        onSnapshot({
+          revision: followed.length,
+          result: {
+            ok: true,
+            value: { items: [], hasMore: true, nextCursor: "next" },
+          },
+        });
+        return { release: () => {} };
+      },
+    });
+    const internals = clientInternals(client);
+    const args = { search: "launch" };
+    const pager = internals.pager(api.notes.list, args, 2);
+    const stop = internals.subscribePager(pager, () => {});
+    for (let tick = 0; tick < 20 && followed.length === 0; tick += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- waits for the first follow
+      await Promise.resolve();
+    }
+    // Shown once its first page is.
+    await pager.loadMore();
+    // The caller's object, changed once the list was asked for.
+    args.search = "changed";
+    await pager.loadMore();
+    expect(followed.map(({ input }) => input)).toStrictEqual([
+      // The first page, then the larger window Load More asks for.
+      { search: "launch" },
+      { search: "launch" },
+    ]);
+    stop();
+  });
+});
+
 describe("the session client and arguments JSON can't hold", () => {
   it("refuses them as invalid arguments, sending nothing", async () => {
     const { client, calls } = network(async () => {
