@@ -26,6 +26,18 @@
 //   it until the step's timeout. A blocked worker may not even have sent
 //   that its test started: hence the file's silence. Past that, nothing
 //   will report it any more;
+// - ends the run too, with the same grace set, once `wedgedAfterTimeouts`
+//   tests in a row timed out, in whichever files: a runtime wedged so that
+//   every test waits for Vitest to time it out, then the next one does.
+//   Each is reported in time, so none is overdue, and the shard ran every
+//   test left to its timeout, retry included, until the step's own (seen
+//   in CI: three files at once, every test of theirs timed out, for 13
+//   minutes, and no stacks). A run with tests that time out for a reason
+//   of their own fails anyway; ending it costs only the files left to run;
+// - writes a line per finished file too, with how long Vitest timed it,
+//   hooks included (`file <ms>ms <project> <file>`): the shard split's
+//   durations (test-durations.ts), which a file's tests alone undercount
+//   by its `beforeAll`;
 // - before it ends a run, prints the thread stacks of every workerd the
 //   run started, when GRASP_STALL_DUMP_STACKS is "gdb" (stack-dump.ts):
 //   what the stalled runtime is stuck in, which nothing else records;
@@ -83,6 +95,8 @@ export interface ReportedModule {
   readonly children: { allTests: () => Iterable<ReportedCase> };
   /** "queued" or "pending" until the file has run. */
   state: () => string;
+  /** How long its tests and hooks took, by Vitest's own timing. */
+  diagnostic?: () => { readonly duration: number };
 }
 
 /** What the reporter reads of a test: Vitest's `TestCase` has it. */
@@ -96,8 +110,30 @@ export interface ReportedCase {
     readonly repeats?: number | undefined;
   };
   /** "pending" until the test has ended. */
-  result: () => { readonly state: string };
+  result: () => {
+    readonly state: string;
+    readonly errors?: readonly { readonly message?: string }[] | undefined;
+  };
 }
+
+/**
+ * How many tests in a row may time out before the run counts as wedged.
+ * Three: two can be one slow test and its retry's neighbour; in the
+ * wedged shard every test timed out, and its third had by minute 4 of 15.
+ */
+export const wedgedAfterTimeouts = 3;
+
+/** Vitest's own words for a test or hook it timed out (@vitest/runner). */
+const timedOutMessage = /\b(?:Test|Hook) timed out in \d+ms/u;
+
+/** Whether Vitest failed `testCase` by timing it out. */
+const timedOut = (testCase: ReportedCase): boolean => {
+  const { state, errors } = testCase.result();
+  return (
+    state === "failed" &&
+    (errors ?? []).some(({ message }) => timedOutMessage.test(message ?? ""))
+  );
+};
 
 /** What the reporter reads of an unhandled error Vitest reports. */
 export interface ReportedError {
@@ -302,6 +338,10 @@ export default class StallReporter implements Reporter {
   #overdueTimer: NodeJS.Timeout | undefined;
   /** When a file or test last reported anything; never before the first. */
   #lastHeard: number | undefined;
+  /** The tests that timed out since the last one that didn't, in order. */
+  #timedOutInARow: string[] = [];
+  /** Once Vitest ends the run, nothing the reporter sees ends it again. */
+  #runEnded = false;
   #ended = false;
 
   // Vitest constructs a reporter given by path with no settings, or an
@@ -421,6 +461,7 @@ export default class StallReporter implements Reporter {
     unhandledErrors: readonly ReportedError[] = [],
     reason = "passed"
   ): Promise<void> {
+    this.#runEnded = true;
     clearTimeout(this.#timer);
     clearInterval(this.#overdueTimer);
     // Files whose end, or whose tests' events, never arrived.
@@ -490,6 +531,31 @@ export default class StallReporter implements Reporter {
     this.#progress?.write(
       `${new Date().toISOString()} ${testCase.result().state}${took} ${caseName(testCase)}\n`
     );
+    this.#countTimeout(testCase);
+  }
+
+  /**
+   * Counts `testCase` towards the timeouts in a row, or starts the count
+   * again for one that ended otherwise (a skipped test says nothing of
+   * the runtime), and ends a run whose count has reached
+   * `wedgedAfterTimeouts`.
+   */
+  #countTimeout(testCase: ReportedCase): void {
+    const graceMs = this.#overdueGraceMs;
+    if (graceMs === undefined || this.#runEnded) {
+      return;
+    }
+    if (timedOut(testCase)) {
+      this.#timedOutInARow.push(caseName(testCase));
+    } else if (testCase.result().state !== "skipped") {
+      this.#timedOutInARow = [];
+    }
+    if (this.#timedOutInARow.length >= wedgedAfterTimeouts) {
+      void this.#endRun(
+        `the last ${this.#timedOutInARow.length} tests to end all timed out, so the runtime they share is likely wedged (each test below waited for its timeout)`,
+        this.#timedOutInARow.map((name) => `- timed out: ${name}`)
+      );
+    }
   }
 
   /**
@@ -499,6 +565,14 @@ export default class StallReporter implements Reporter {
    */
   #moduleDone(testModule: ReportedModule): void {
     this.#lastHeard = Date.now();
+    if (this.#modules.has(testModule.id) && moduleEnded(testModule)) {
+      const duration = testModule.diagnostic?.().duration;
+      if (duration !== undefined) {
+        this.#progress?.write(
+          `${new Date().toISOString()} file ${Math.round(duration)}ms ${moduleName(testModule)}\n`
+        );
+      }
+    }
     this.#modules.delete(testModule.id);
     this.#recover(testModule);
     for (const [id, { testCase }] of this.#cases) {
@@ -580,10 +654,21 @@ export default class StallReporter implements Reporter {
     if (overdue === undefined) {
       return;
     }
+    await this.#endRun(`Vitest no longer times it out: ${overdue}`);
+  }
+
+  /**
+   * Ends the run, once, for `why`: names what still runs, prints the
+   * stacks, and explains it, with `details` under the verdict.
+   */
+  async #endRun(why: string, details: readonly string[] = []): Promise<void> {
+    if (this.#ended) {
+      return;
+    }
     this.#ended = true;
     clearTimeout(this.#timer);
     clearInterval(this.#overdueTimer);
-    const verdict = `Ending the run, as Vitest no longer times it out: ${overdue}`;
+    const verdict = `Ending the run, as ${why}`;
     this.#report(verdict);
     await this.#printStacks();
     await Promise.race([
@@ -592,6 +677,7 @@ export default class StallReporter implements Reporter {
       Promise.all([
         this.#explain([
           verdict,
+          ...details,
           ...this.#running(Date.now()).map((line) => `- ${line.trim()}`),
         ]),
         this.#flush(),

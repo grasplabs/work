@@ -20,16 +20,28 @@ import { byKey } from "./test-shards.ts";
 const progressLine =
   /^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? (?<project>\S+) (?<file>\S+) > /u;
 
+/** A finished file in a progress log: how long Vitest timed it, hooks included. */
+const fileLine = /^\S+ file (?<ms>\d+)ms (?<project>\S+) (?<file>\S+)$/u;
+
 /**
  * Seconds per file, `<project> <file>`, as one progress log has them: from
  * the start of its first test (when it finished, less its time) to when
  * its last finished, which counts the hooks between its tests too (a
- * fresh store, a sign-in), or the sum of its tests' times when that is
- * more (a log without readable times).
+ * fresh store, a sign-in), or the sum of its tests' times, or the file's
+ * own time when it has one, whichever is most. Only the file's own time
+ * counts its `beforeAll` and `afterAll`: the compiler's build tests spend
+ * half their time there, which the rest put at about half what they took.
  */
 export const fileSecondsIn = (log: string): Map<string, number> => {
   const files = new Map<string, { sum: number; from: number; to: number }>();
+  const fileMs = new Map<string, number>();
   for (const line of log.split("\n")) {
+    const own = fileLine.exec(line)?.groups;
+    if (own !== undefined) {
+      const key = `${own.project} ${own.file}`;
+      fileMs.set(key, Math.max(fileMs.get(key) ?? 0, Number(own.ms)));
+      continue;
+    }
     const match = progressLine.exec(line);
     if (match?.groups === undefined) {
       continue;
@@ -50,11 +62,19 @@ export const fileSecondsIn = (log: string): Map<string, number> => {
     }
     files.set(key, seen);
   }
+  const keys = new Set([...files.keys(), ...fileMs.keys()]);
   return new Map(
-    [...files].map(([key, { sum, from, to }]) => [
-      key,
-      Math.max(sum, Number.isFinite(from) ? to - from : 0) / 1000,
-    ])
+    [...keys].map((key) => {
+      const { sum = 0, from = 0, to = 0 } = files.get(key) ?? {};
+      return [
+        key,
+        Math.max(
+          sum,
+          Number.isFinite(from) ? to - from : 0,
+          fileMs.get(key) ?? 0
+        ) / 1000,
+      ];
+    })
   );
 };
 

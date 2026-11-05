@@ -40,6 +40,22 @@ describe("reading test files' durations from progress logs", () => {
     });
   });
 
+  it("takes a file's own time, its hooks before and after its tests included, when that is longer", () => {
+    const seconds = fileSecondsIn(
+      log(
+        "2026-10-16T10:01:00.000Z passed 2000ms @grasp-os/compiler build-heap.test.ts > b > builds",
+        "2026-10-16T10:01:30.000Z file 62500ms @grasp-os/compiler build-heap.test.ts",
+        "2026-10-16T10:01:31.000Z passed 4000ms @grasp-os/core test/quick.test.ts > q > one",
+        "2026-10-16T10:01:32.000Z file 3000ms @grasp-os/core test/quick.test.ts"
+      )
+    );
+
+    expect(Object.fromEntries(seconds)).toStrictEqual({
+      "@grasp-os/compiler build-heap.test.ts": 62.5,
+      "@grasp-os/core test/quick.test.ts": 4,
+    });
+  });
+
   it("skips lines that aren't a finished test", () => {
     expect(fileSecondsIn(log("", "not a test line"))).toStrictEqual(new Map());
   });
