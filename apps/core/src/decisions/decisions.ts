@@ -66,10 +66,7 @@ import {
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
 import { removedText } from "../workflows/retention.ts";
-import {
-  tellDecisionFollowers,
-  tellScreens,
-} from "../workflows/run-changes.ts";
+import { tellDecisionFollowers } from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
 import type { Wake } from "../workflows/wakes.ts";
 import {
@@ -124,13 +121,6 @@ import type { ReviewContext } from "./confirmations.ts";
 
 type DecisionRow = typeof workflowDecisions.$inferSelect;
 
-/** The run a decision belongs to, as `tellScreens` names it. */
-const changed = (run: AppDecisionRun) => ({
-  id: run.runId,
-  appId: run.app,
-  workflowId: run.workflow,
-});
-
 /** An App's run a decision belongs to, as the host serves it. */
 export interface AppDecisionRun {
   kind?: "app";
@@ -172,13 +162,13 @@ const ofRun = (run: DecisionRun): SQL =>
     : eq(workflowDecisions.runId, run.runId);
 
 /**
- * Tells the screens of the run's App it changed; for an independent run an
- * App started, the App's connections following its decision queries.
+ * Tells, for an independent run an App started, the App's connections
+ * following its decision queries that it changed.
  */
 const tellRunScreens = async (env: Env, run: DecisionRun): Promise<void> => {
-  await (isResource(run)
-    ? tellDecisionFollowers(env, run.runId)
-    : tellScreens(env, changed(run)));
+  if (isResource(run)) {
+    await tellDecisionFollowers(env, run.runId);
+  }
 };
 
 /** A person a decision asks, and the link that leads them to it. */
@@ -685,7 +675,11 @@ export const answerableByNow = (db: DrizzleD1Database, userId: string): SQL =>
 /**
  * That the decision of each row of an independent run goes on and still
  * takes answers at `now`, as a condition on `workflow_decisions`: open,
- * before its deadline, its run going on (`resourceRunGoesOn`).
+ * before its deadline, its run going on (`resourceRunGoesOn`). The one
+ * rule for whether a run waits for an answer, wherever it is shown
+ * (workflows/run-view.ts, overview.ts, today.ts, activity.ts): a run
+ * whose cancel was admitted takes no answer, so waits for none, and shows
+ * as running until the engine stops it.
  */
 export const resourceDecisionPending = (now: Date): SQL =>
   and(

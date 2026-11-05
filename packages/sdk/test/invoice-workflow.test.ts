@@ -11,11 +11,8 @@ import {
 import { z } from "../src/workflow.ts";
 import type { DecisionRequest } from "../src/workflow.ts";
 import { createFakeEngine, invoice } from "./fakes.ts";
-import { asDefaultExport, outlineOf } from "./outline.ts";
 import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 import type { InvoiceSystems } from "./workflows/invoice-approval.ts";
-// oxlint-disable-next-line import/default -- Vite's `?raw` import; typed in raw.d.ts
-import invoiceSource from "./workflows/invoice-approval.ts?raw";
 
 const fakeSystems = (
   overrides: Partial<InvoiceSystems> = {}
@@ -51,64 +48,6 @@ describe("the sample invoice workflow", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("lists its steps from the code, with the review nested under its condition", () => {
-    expect(outlineOf(asDefaultExport(invoiceSource))).toStrictEqual([
-      {
-        type: "step",
-        name: "match-po",
-        kind: "exact",
-        description: "Find the purchase order the invoice refers to",
-        sideEffect: false,
-        locked: true,
-        params: [],
-        options: {},
-      },
-      {
-        type: "step",
-        name: "extract",
-        kind: "ai",
-        description: "Read the total and currency from the invoice",
-        sideEffect: false,
-        locked: false,
-        params: [],
-        options: {
-          binding: "extractor",
-          instructions:
-            "Read the invoice's total amount in whole minor units (cents for EUR) and its ISO 4217 currency code.",
-          retries: { limit: 2 },
-        },
-      },
-      {
-        type: "branch",
-        condition: "extracted.total > params.threshold",
-        params: ["threshold"],
-        steps: [
-          {
-            type: "step",
-            name: "review",
-            kind: "decision",
-            description: "Ask the reviewer to approve invoices above the limit",
-            sideEffect: true,
-            locked: false,
-            params: ["reviewer"],
-            options: { timeout: "7 days", remindAfter: "2 days" },
-          },
-        ],
-        otherwise: [],
-      },
-      {
-        type: "step",
-        name: "book",
-        kind: "exact",
-        description: "Book the invoice in the ledger",
-        sideEffect: true,
-        locked: true,
-        params: [],
-        options: {},
-      },
-    ]);
   });
 
   it("asks the model through the App's binding, with the instructions", async () => {

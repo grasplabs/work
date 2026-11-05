@@ -1,14 +1,13 @@
 import { offeredWidgets } from "@grasp-os/shared/dashboard";
 import type { WidgetProgress, WidgetSpec } from "@grasp-os/shared/widgets";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { codeStep, chatOf, says } from "./agent-chat.ts";
-import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { seedResourceRun } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Widgets Grasp makes from what a person asks (dashboard-widgets.ts),
@@ -23,69 +22,58 @@ const idp = mockIdp();
 
 const day = 24 * 60 * 60 * 1000;
 
-/** A run of `workflow` of `app`'s, started `ago` UTC days before today, as core keeps it. */
+/** A run of `workflow` for `principal`, started `ago` UTC days before today, as core keeps it. */
 const seedRun = async (
-  app: string,
   workflow: string,
+  principal: string,
   status: "completed" | "failed",
   ago: number
 ): Promise<void> => {
   const start = (Math.floor(Date.now() / day) - ago) * day;
-  const at =
+  const createdAt =
     start + Math.floor((Math.min(Date.now(), start + day - 1) - start) / 2);
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, ?, 1, NULL, ?, ?, ?)"
-  )
-    .bind(`run-${unique()}`, app, workflow, status, at, at)
-    .run();
+  await seedResourceRun({ workflow, principal, status, createdAt });
 };
 
 /**
- * A builder with an engine of two workflows, `approve` and `remind`, that
- * a user can open too, and their runs: this week `approve` completed
- * twice and failed once, `remind` failed once; `remind` also completed
- * before the week. And another builder's engine neither can open.
+ * A builder's two workflows, `approve` and `remind`, which another builder
+ * (`user`) builds too, and their runs: this week `approve` completed twice
+ * and failed once, `remind` failed once; `remind` also completed before
+ * the week. And a third builder's workflow neither has a role in.
  */
-const engines = async () => {
+const sharedWorkflows = async () => {
   const [owner, other, user] = await Promise.all([
     signedInApi(idp, "builder"),
     signedInApi(idp, "builder"),
-    signedInApi(idp, "user"),
+    signedInApi(idp, "builder"),
   ]);
-  const name = `Invoices ${unique()}`;
-  const { id: app } = await owner.api.apps.create({ name });
-  const { version } = await owner.api.apps.files.commit(
-    app,
-    {
-      "workflows/approve.ts": "export default {};\n",
-      "workflows/remind.ts": "export default {};\n",
-    },
-    "Workflows"
+  const tag = unique();
+  const [approve, remind, hidden] = await Promise.all([
+    owner.api.workflowResources.create(`approve-${tag}`),
+    owner.api.workflowResources.create(`remind-${tag}`),
+    other.api.workflowResources.create(`pay-${tag}`),
+  ]);
+  await Promise.all(
+    [approve, remind].map(async ({ id }) => {
+      await owner.api.workflowResources.share(id, {
+        type: "person",
+        id: user.userId,
+        role: "builder",
+      });
+    })
   );
-  await verifiedCandidate(app, version);
-  await env.DB.prepare(
-    "UPDATE apps SET current_version = ?, status = 'published' WHERE id = ?"
-  )
-    .bind(version, app)
-    .run();
-  await owner.api.apps.members.add(app, {
-    type: "person",
-    id: user.userId,
-    role: "user",
-  });
-  const { id: hidden } = await other.api.apps.create({
-    name: `Payroll ${unique()}`,
-  });
   await Promise.all([
-    seedRun(app, "approve", "completed", 0),
-    seedRun(app, "approve", "completed", 1),
-    seedRun(app, "approve", "failed", 2),
-    seedRun(app, "remind", "failed", 0),
-    seedRun(app, "remind", "completed", 9),
-    seedRun(hidden, "pay", "failed", 0),
+    seedRun(approve.id, owner.userId, "completed", 0),
+    seedRun(approve.id, owner.userId, "completed", 1),
+    seedRun(approve.id, owner.userId, "failed", 2),
+    seedRun(remind.id, owner.userId, "failed", 0),
+    seedRun(remind.id, owner.userId, "completed", 9),
+    seedRun(hidden.id, other.userId, "failed", 0),
   ]);
-  return { owner, user, app, name, hidden };
+  return { owner, user, approve, remind, hidden: hidden.id };
 };
+
+type SharedWorkflows = Awaited<ReturnType<typeof sharedWorkflows>>;
 
 /** What `run` returns while the provider answers with `replies`, and what was sent to it. */
 const answering = async <T>(
@@ -107,8 +95,10 @@ const answer = (widget: unknown, note?: string): ProviderReply => ({
 const sentOf = (requests: { body: unknown }[]): string[] =>
   requests.map(({ body }) => JSON.stringify(body));
 
-/** Failures this week by workflow, of the engine `app`. */
-const failures = (app: string): WidgetSpec => ({
+/** Failures this week by workflow, of the two workflows `app` names. */
+const failures = (
+  app: Pick<SharedWorkflows, "approve" | "remind">
+): WidgetSpec => ({
   title: "Failures this week",
   days: 7,
   parts: [
@@ -116,7 +106,7 @@ const failures = (app: string): WidgetSpec => ({
       type: "number",
       label: "Failed",
       measure: "failed",
-      filter: { engines: [app] },
+      filter: { workflows: [app.approve.id, app.remind.id] },
     },
     { type: "bars", measure: "started", by: "workflow" },
   ],
@@ -124,7 +114,8 @@ const failures = (app: string): WidgetSpec => ({
 
 describe("widgets Grasp makes from what a person asks", () => {
   it("makes one from their own workflows' numbers, puts it last on their board, and records it", async () => {
-    const { owner, app, name, hidden } = await engines();
+    const app = await sharedWorkflows();
+    const { owner, approve, remind, hidden } = app;
     const { requests, result } = await answering(
       [answer(failures(app))],
       async () =>
@@ -150,8 +141,8 @@ describe("widgets Grasp makes from what a person asks", () => {
       asked: widget.asked,
       shown: await owner.api.dashboard.widgets(),
       layout: await owner.api.dashboard.layout(),
-      // The model is told the person's engines, never another's.
-      toldTheirs: sent.includes(name) && sent.includes(`${app}/remind`),
+      // The model is told the person's workflows, never another's.
+      toldTheirs: sent.includes(remind.name) && sent.includes(remind.id),
       toldOthers: sent.includes(hidden),
       made: made?.actor,
       call: { actor: call?.actor, platform: call?.detail.platform },
@@ -168,8 +159,8 @@ describe("widgets Grasp makes from what a person asks", () => {
             measure: "started",
             by: "workflow",
             bars: [
-              { key: `${app}/approve`, name: "approve", value: 3 },
-              { key: `${app}/remind`, name: "remind", value: 1 },
+              { key: approve.id, name: approve.name, value: 3 },
+              { key: remind.id, name: remind.name, value: 1 },
             ],
           },
         ],
@@ -188,16 +179,21 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("works its numbers out as its person sees them now, never as they did when it was made", async () => {
-    const { owner, user, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner, user } = app;
     const { result } = await answering(
       [answer(failures(app))],
       async () => await user.api.dashboard.makeWidget("Failures this week")
     );
-    // The user can no longer open the engine.
-    await owner.api.apps.members.remove(app, {
-      type: "person",
-      id: user.userId,
-    });
+    // The other builder no longer has a role in either workflow.
+    await Promise.all(
+      [app.approve, app.remind].map(async ({ id }) => {
+        await owner.api.workflowResources.unshare(id, {
+          type: "person",
+          id: user.userId,
+        });
+      })
+    );
     const [later] = await user.api.dashboard.widgets();
 
     expect({
@@ -219,7 +215,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("sends back what doesn't read, doesn't fit or names what isn't theirs, and keeps what it then makes", async () => {
-    const { owner, app, hidden } = await engines();
+    const app = await sharedWorkflows();
+    const { owner, hidden } = app;
     const tooBig: WidgetSpec = {
       title: "Everything",
       days: 30,
@@ -237,7 +234,7 @@ describe("widgets Grasp makes from what a person asks", () => {
           days: 7,
           parts: [{ type: "html", html: "<script>alert(1)</script>" }],
         }),
-        // An engine the person can't open, in a widget too big for a block.
+        // A workflow the person has no role in, in a widget too big for a block.
         answer({
           ...tooBig,
           parts: [
@@ -246,7 +243,7 @@ describe("widgets Grasp makes from what a person asks", () => {
               type: "number",
               label: "Pay",
               measure: "failed",
-              filter: { engines: [hidden] },
+              filter: { workflows: [hidden] },
             },
           ],
         }),
@@ -264,14 +261,14 @@ describe("widgets Grasp makes from what a person asks", () => {
       calls: requests.length,
       // Each repair says what was wrong with the answer before.
       unknownPart: second.includes("parts.0.type"),
-      unknownEngine: third.includes(hidden),
+      unknownWorkflow: third.includes(hidden),
       tooBig: third.includes("units of room"),
       note: result.note,
       kept: kept.map(({ id }) => id),
     }).toStrictEqual({
       calls: 3,
       unknownPart: true,
-      unknownEngine: true,
+      unknownWorkflow: true,
       tooBig: true,
       note: "Shown for the week, not the month.",
       kept: [result.widget.id],
@@ -279,7 +276,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("tells the page that asked how it goes, each attempt as it is written, checked, put right and kept, and makes it whatever the page does", async () => {
-    const { owner, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner } = app;
     const told: WidgetProgress[] = [];
     const { result } = await answering(
       [
@@ -346,7 +344,7 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("gives up after the answer is sent back twice, keeping nothing and recording no widget", async () => {
-    const { owner } = await engines();
+    const { owner } = await sharedWorkflows();
     const nonsense: ProviderReply = {
       text: "I'd make a pie chart.",
       inputTokens: 10,
@@ -378,7 +376,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("changes a widget where it stands, and says so when the answer is the widget as it was", async () => {
-    const { owner, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner } = app;
     const { result: made } = await answering(
       [answer(failures(app))],
       async () => await owner.api.dashboard.makeWidget("Failures")
@@ -441,7 +440,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("takes a widget off the board for good, and records it", async () => {
-    const { owner, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner } = app;
     const { result } = await answering(
       [answer(failures(app))],
       async () => await owner.api.dashboard.makeWidget("Failures")
@@ -472,7 +472,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("is each person's own: no one else sees, changes, places or removes it", async () => {
-    const { owner, user, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner, user } = app;
     const { result } = await answering(
       [answer(failures(app))],
       async () => await owner.api.dashboard.makeWidget("Failures")
@@ -502,7 +503,7 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("refuses a request that says nothing or too much before any model is asked", async () => {
-    const { owner } = await engines();
+    const { owner } = await sharedWorkflows();
     const { requests, result } = await answering([], async () => ({
       empty: await outcome(owner.api.dashboard.makeWidget("   ")),
       long: await outcome(owner.api.dashboard.makeWidget("x".repeat(501))),
@@ -524,7 +525,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("lets go of a widget when the model fails, so it can be asked for again", async () => {
-    const { owner, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner } = app;
     const { result } = await answering(
       [
         { status: 400, errorType: "invalid_request_error" },
@@ -546,7 +548,8 @@ describe("widgets Grasp makes from what a person asks", () => {
   });
 
   it("makes one from a chat for its person, telling the agent only its ID and what was asked", async () => {
-    const { owner, app } = await engines();
+    const app = await sharedWorkflows();
+    const { owner } = app;
     // One provider for the chat and the widget: the code step, the widget it
     // asks for, then the chat's answer.
     const { ask, provider } = await chatOf(

@@ -25,10 +25,10 @@ import {
 import type { EvaluatedQuery } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
-import { RunSubscription } from "./run-subscription.ts";
 import { delivering } from "./screen-delivery.ts";
 import type { LeasedBuild } from "./screen-delivery.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { Subscription } from "./subscription.ts";
 
 // Live queries (spec 11): what one page's connection to core (one browser
 // tab) follows of its Apps' public queries, kept fresh by core. A screen
@@ -592,7 +592,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
      * forgets it then (screens-rpc.ts).
      */
     ended?: () => void
-  ): RunSubscription {
+  ): Subscription {
     if (this.#count >= querySubscriptionLimits.perConnection) {
       throw screenErrors.create("screen.too_many_queries");
     }
@@ -643,7 +643,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     ) {
       this.#enqueue(evaluation, false);
     }
-    return new RunSubscription(async () => {
+    return new Subscription(async () => {
       this.#release(evaluation, listener);
       await Promise.resolve();
     });

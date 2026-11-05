@@ -67,22 +67,17 @@ export interface GoalVersion extends Dated {
   howWeNotice: string;
 }
 
-/** One of the company's workflows: its App, and its id there. */
-export interface GoalWorkflow {
-  app: string;
-  workflow: string;
-}
-
 /** A board goal from the vision. Adjusting it adds a version; the newest counts. */
 export interface Goal {
   id: string;
   /** Oldest first; the first is where it was set. Never empty. */
   versions: GoalVersion[];
   /**
-   * The company's workflows that serve it, in the order they were linked:
-   * only those the reader may see, while their App still has them.
+   * The IDs of the company's independent workflows that serve it, in the
+   * order they were linked: only those the reader has a role in, while
+   * they aren't deleted.
    */
-  workflows: GoalWorkflow[];
+  workflows: string[];
 }
 
 /** A role in a team, from the directory: how many people hold it, never who. */

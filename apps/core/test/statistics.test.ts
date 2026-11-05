@@ -18,7 +18,7 @@ import { readPlatformStatistics } from "../src/statistics.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, finished, seedResourceRun } from "./runs.ts";
+import { seedResourceRun } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
@@ -266,13 +266,39 @@ const limited = (limit: "call" | "minute" | "day", at?: number) => ({
   },
 });
 
-/** A run of `app`'s workflow `workflow`, started `ago` milliseconds back. */
-const seedRun = async (app: string, workflow: string, ago = 0) => {
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, ?, 1, NULL, 'completed', ?, ?)"
+/**
+ * A run of the independent workflow `app` binds as `alias`, started `ago`
+ * milliseconds back: bound to a new workflow of the App's owner the first
+ * time.
+ */
+const seedRun = async (app: string, alias: string, ago = 0) => {
+  const bound = await env.DB.prepare(
+    "SELECT workflow_resource_id AS workflow FROM app_workflow_bindings WHERE app_id = ? AND alias = ? AND status = 'active'"
   )
-    .bind(crypto.randomUUID(), app, workflow, Date.now() - ago, Date.now())
-    .run();
+    .bind(app, alias)
+    .first<{ workflow: string }>();
+  const owner = await env.DB.prepare("SELECT owner_id FROM apps WHERE id = ?")
+    .bind(app)
+    .first<string>("owner_id");
+  const principal = owner ?? "";
+  let workflow = bound?.workflow;
+  if (workflow === undefined) {
+    workflow = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(workflow, `${alias}-${unique()}`, principal, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) VALUES (?, ?, ?, ?, 1, 'active', ?, ?)"
+      ).bind(crypto.randomUUID(), app, alias, workflow, principal, Date.now()),
+    ]);
+  }
+  await seedResourceRun({
+    workflow,
+    principal,
+    status: "completed",
+    createdAt: Date.now() - ago,
+  });
 };
 
 /**
@@ -839,7 +865,9 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const plans = await Promise.all(
       recorded
         .filter(({ query: sql }) =>
-          /from "(?:apps|improvement_signals|workflow_runs)"/u.test(sql)
+          /from "(?:apps|improvement_signals|workflow_resource_runs|app_workflow_bindings)"/u.test(
+            sql
+          )
         )
         .map(planOf)
     );
@@ -874,11 +902,10 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const watched = await countedApp(admin);
     holdClock();
     // 101 workflows ran a minute ago: two pages of groups.
-    await env.DB.prepare(
-      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 101) INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) SELECT ?1 || i, ?2, 'w' || i, 1, NULL, 'completed', ?3, ?3 FROM n"
-    )
-      .bind(`bulk-${unique()}-`, watched, Date.now() - 60_000)
-      .run();
+    for (let i = 1; i <= 101; i += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one workflow after another
+      await seedRun(watched, `w${i}`, 60_000);
+    }
     const until = new Date(Date.now() - 1000).toISOString();
     const page = async (offset: number, held = true) =>
       answerSchema.parse(
@@ -954,6 +981,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       ["pay", "cost_per_run", "", 0.5],
       ["remind", "failing_step", "send", 1],
     ]);
+    // A run of the workflow the App binds as `pay`, for the runs read.
+    await seedRun(watched, "pay");
     // A snapshot's time, after it finished.
     const until = new Date(Date.now() - 60_000).toISOString();
     const signalsRead = async (held: boolean) =>
@@ -993,7 +1022,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const heldAfter = await signalsRead(true);
     const current = await signalsRead(false);
     const measured = recorded.filter(({ query }) =>
-      /from "(?:improvement_signals|workflow_runs)"/u.test(query)
+      /from "(?:improvement_signals|workflow_resource_runs)"/u.test(query)
     );
     const plans = await Promise.all(measured.map(planOf));
     expect({
@@ -1204,95 +1233,6 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           refused: "statistics.rate_limited",
         },
       ],
-    });
-  });
-});
-
-/** A function of the Stats App, as a step names it. */
-const statsFunction = (name: string, kind = "action") =>
-  JSON.stringify({ name: `stats.${name}`, kind });
-
-/** The input of `stats.platformRead`, as a step passes it. */
-const statsInput = (value: unknown) =>
-  JSON.stringify({ json: JSON.stringify(value) });
-
-describe("a run's statistics", { timeout: 90_000 }, () => {
-  afterEach(async () => {
-    await endLiveRuns();
-  });
-
-  it("read the platform's measures for a run as the run, for the person it acts for", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    const watched = await countedApp(admin);
-    await seedRun(watched, "pay");
-    const query = {
-      measure: "platform.workflow_runs",
-      days: 7,
-      where: { app: watched },
-    };
-    const reader = await statsApp(builder, {
-      ...statsFiles(),
-      "workflows/reads.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("reads", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("read", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${statsFunction("platformRead")}, ${statsInput(query)})) as Json
-  )
-);
-`,
-      "workflows/reads.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./reads.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { read: null }, expect: {} }]);
-`,
-    });
-    await grantPlatform(builder, reader);
-    /** A run of `reads` started by `starter`: its ID, and what it read. */
-    const runBy = async (starter: Person) => {
-      const run = await starter.api.workflows.start(reader, "reads");
-      await finished(run.id);
-      const ended = await starter.api.workflows.status(run.id);
-      const parsed = z
-        .object({ ok: z.literal(true), value: z.string() })
-        .safeParse(ended.output);
-      const answer: unknown = parsed.success
-        ? JSON.parse(parsed.data.value)
-        : ended.output;
-      return { id: run.id, read: answer };
-    };
-    const started: { id: string; read: unknown }[] = [];
-    const events = await auditedDuring(async () => {
-      started.push(await runBy(admin));
-    });
-    const [byAdmin = { id: "", read: null }] = started;
-    // A builder of the reading App, with no role in the one it counts.
-    const byBuilder = await runBy(builder);
-    expect({
-      byAdmin: answerSchema.parse(byAdmin.read).ok.groups,
-      audited: events
-        .filter(({ action }) => action === "statistics.read")
-        .map(({ actor, detail }) => ({
-          actor,
-          onBehalfOf: detail.onBehalfOf,
-        })),
-      byBuilder: byBuilder.read,
-    }).toStrictEqual({
-      byAdmin: [{ dimensions: {}, count: 1, sum: 1, min: 1, max: 1 }],
-      // As the run, for the person it acts for: whoever started it.
-      audited: [
-        {
-          actor: {
-            type: "workflow",
-            appId: reader,
-            workflowId: "reads",
-            runId: byAdmin.id,
-          },
-          onBehalfOf: admin.userId,
-        },
-      ],
-      byBuilder: { error: "resource.item_not_found" },
     });
   });
 });

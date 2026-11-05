@@ -1,21 +1,17 @@
-import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import type { RunActivity } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { published, verifiedCandidate } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { seedResourceRun } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// The dashboard's runs over time: the runs of the Apps a person can open
-// and of the independent workflows they have a role in, by the UTC day
-// they started and how they stand now, and the decisions they asked people
-// for. What could go wrong: a run of an App the person can't open counted,
-// another person's run of an independent workflow counted for one of its
-// users, a run counted on the wrong day or as the wrong outcome, a day
+// The dashboard's runs over time: the runs of the independent workflows a
+// person has a role in, by the UTC day they started and how they stand
+// now, and the decisions they asked people for. What could go wrong: a run
+// of a workflow the person has no role in counted, another person's run
+// counted for one of its users, a run counted on the wrong day or as the wrong outcome, a day
 // without runs missing, a decision that ended with its run counted as
 // open, a window longer than core reads, and a read that walks every run
 // there is.
@@ -35,7 +31,6 @@ const dateOf = (ago: number): string =>
   new Date(dayStart(ago)).toISOString().slice(0, 10);
 
 interface SeededRun {
-  workflow: string;
   status: "running" | "completed" | "failed" | "cancelled";
   /** How many UTC days before today it started. */
   ago: number;
@@ -43,31 +38,27 @@ interface SeededRun {
 }
 
 /**
- * A run of `app`'s as core keeps it, started halfway through its day (or
- * through today so far), and its decision.
+ * A run of workflow `workflow` for `principal`, as core keeps it, started
+ * halfway through its day (or through today so far), and its decision.
  */
-const seedRun = async (app: string, run: SeededRun): Promise<void> => {
-  const id = `run-${unique()}`;
+const seedRun = async (
+  workflow: string,
+  principal: string,
+  run: SeededRun
+): Promise<void> => {
   const start = dayStart(run.ago);
   const createdAt =
     start + Math.floor((Math.min(Date.now(), start + day - 1) - start) / 2);
-  const ended = run.status !== "running";
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, ?, 1, NULL, ?, ?, ?)"
-  )
-    .bind(
-      id,
-      app,
-      run.workflow,
-      run.status,
-      createdAt,
-      ended ? createdAt : null
-    )
-    .run();
+  const id = await seedResourceRun({
+    workflow,
+    principal,
+    status: run.status,
+    createdAt,
+  });
   if (run.decision !== undefined) {
     const answered = run.decision === "approved" || run.decision === "rejected";
     await env.DB.prepare(
-      "INSERT INTO workflow_decisions (id, run_id, step, deciders, description, status, opened_at, expires_at, decided_at) VALUES (?, ?, 'review', 'role:admin', 'Approve it', ?, ?, ?, ?)"
+      "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, description, status, opened_at, expires_at, decided_at) VALUES (?, ?, 'review', 'role:admin', 'Approve it', ?, ?, ?, ?)"
     )
       .bind(
         `decision-${unique()}`,
@@ -91,169 +82,7 @@ const none = (ago: number) => ({
   withPerson: 0,
 });
 
-/** The days of a window of `days`, oldest first, none of them with runs but as `ran` says. */
-const daysOf = (
-  days: number,
-  ran: Record<number, Partial<RunActivity["days"][number]>>
-) =>
-  Array.from({ length: days }, (_, index) => {
-    const ago = days - 1 - index;
-    return { ...none(ago), ...ran[ago] };
-  });
-
 describe("runs over time", () => {
-  it("counts the runs of the Apps the person can open by day and outcome, and the people they needed", async () => {
-    const [owner, other, user] = await Promise.all([
-      personApi("builder"),
-      personApi("builder"),
-      personApi("user"),
-    ]);
-    const appName = `Invoices ${unique()}`;
-    const { id: app } = await owner.api.apps.create({ name: appName });
-    await published(app);
-    const { id: hidden } = await other.api.apps.create({
-      name: `Payroll ${unique()}`,
-    });
-    // Its current version has `approve`: `remind` ran, but a later
-    // version removed it, so it has no page to open.
-    const { version } = await owner.api.apps.files.commit(
-      app,
-      { "workflows/approve.ts": "export default {};\n" },
-      "Workflows"
-    );
-    await verifiedCandidate(app, version);
-    await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
-      .bind(version, app)
-      .run();
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    await Promise.all([
-      // Today: two completed, one asking a person; one waiting; one failed.
-      seedRun(app, { workflow: "approve", status: "completed", ago: 0 }),
-      seedRun(app, {
-        workflow: "approve",
-        status: "completed",
-        ago: 0,
-        decision: "approved",
-      }),
-      seedRun(app, {
-        workflow: "approve",
-        status: "running",
-        ago: 0,
-        decision: "open",
-      }),
-      seedRun(app, { workflow: "remind", status: "failed", ago: 0 }),
-      // Two days ago: one rejected and failed; one cancelled while its
-      // decision was open, which nobody answers any more.
-      seedRun(app, {
-        workflow: "approve",
-        status: "failed",
-        ago: 2,
-        decision: "rejected",
-      }),
-      seedRun(app, {
-        workflow: "remind",
-        status: "cancelled",
-        ago: 2,
-        decision: "open",
-      }),
-      // Three days ago: still running once its decision timed out.
-      seedRun(app, {
-        workflow: "approve",
-        status: "running",
-        ago: 3,
-        decision: "timed_out",
-      }),
-      // Before the week: only a longer window counts it.
-      seedRun(app, { workflow: "remind", status: "completed", ago: 8 }),
-      // An App the owner can't open.
-      seedRun(hidden, { workflow: "pay", status: "completed", ago: 0 }),
-    ]);
-
-    const week: RunActivity = {
-      from: dateOf(6),
-      to: dateOf(0),
-      days: daysOf(7, {
-        0: { completed: 2, failed: 1, waiting: 1, withPerson: 2 },
-        2: { failed: 1, other: 1, withPerson: 2 },
-        3: { other: 1, withPerson: 1 },
-      }),
-      runs: { total: 7, withPerson: 5, withoutPerson: 2 },
-      decisions: { approved: 1, rejected: 1, timedOut: 1, open: 1 },
-      workflows: [
-        {
-          type: "app",
-          app,
-          appName,
-          workflow: workflowIdSchema.parse("approve"),
-          current: true,
-          started: 5,
-          completed: 2,
-          failed: 1,
-          // One of today's two completed runs asked a person.
-          completedAlone: 1,
-        },
-        {
-          type: "app",
-          app,
-          appName,
-          workflow: workflowIdSchema.parse("remind"),
-          current: false,
-          started: 2,
-          completed: 0,
-          failed: 1,
-          completedAlone: 0,
-        },
-      ],
-    };
-    const [asOwner, asUser, asOther, month] = await Promise.all([
-      owner.api.workflows.activity(),
-      user.api.workflows.activity({ days: 7 }),
-      other.api.workflows.activity(),
-      owner.api.workflows.activity({ days: 30 }),
-    ]);
-    expect(asOwner).toStrictEqual(week);
-    expect(asUser).toStrictEqual(week);
-    expect({
-      runs: asOther.runs,
-      workflows: asOther.workflows.map((row) =>
-        row.type === "app" ? row.app : row.workflowId
-      ),
-    }).toStrictEqual({
-      runs: { total: 1, withPerson: 0, withoutPerson: 1 },
-      workflows: [hidden],
-    });
-    expect({
-      from: month.from,
-      days: month.days.length,
-      eightDaysAgo: month.days.at(-9),
-      runs: month.runs.total,
-      remind: month.workflows.find(
-        (row) => row.type === "app" && row.workflow === "remind"
-      ),
-    }).toStrictEqual({
-      from: dateOf(29),
-      days: 30,
-      eightDaysAgo: { ...none(8), completed: 1 },
-      runs: 8,
-      remind: {
-        type: "app",
-        app,
-        appName,
-        workflow: "remind",
-        current: false,
-        started: 3,
-        completed: 1,
-        failed: 1,
-        // Eight days ago, asking no one.
-        completedAlone: 1,
-      },
-    });
-  });
-
   it("counts an independent workflow's runs as its page lists them: every run for its builders, their own for its users", async () => {
     const [owner, user, stranger] = await Promise.all([
       personApi("builder"),
@@ -296,7 +125,6 @@ describe("runs over time", () => {
       }),
     ]);
     const entry = (started: number, completed: number, failed: number) => ({
-      type: "resource",
       workflowId: workflow.id,
       name: workflow.name,
       started,
@@ -348,16 +176,18 @@ describe("runs over time", () => {
 
   it("reads a window that ended before today as it was: its own days, and none after it", async () => {
     const owner = await personApi("builder");
-    const { id: app } = await owner.api.apps.create({
-      name: `Invoices ${unique()}`,
-    });
-    await published(app);
+    const { id: workflow } = await owner.api.workflowResources.create(
+      `approve-${unique()}`
+    );
+    const seeded = async (run: SeededRun) => {
+      await seedRun(workflow, owner.userId, run);
+    };
     await Promise.all([
-      seedRun(app, { workflow: "approve", status: "completed", ago: 9 }),
-      seedRun(app, { workflow: "approve", status: "completed", ago: 7 }),
-      seedRun(app, { workflow: "approve", status: "failed", ago: 3 }),
-      seedRun(app, { workflow: "approve", status: "completed", ago: 2 }),
-      seedRun(app, { workflow: "approve", status: "completed", ago: 0 }),
+      seeded({ status: "completed", ago: 9 }),
+      seeded({ status: "completed", ago: 7 }),
+      seeded({ status: "failed", ago: 3 }),
+      seeded({ status: "completed", ago: 2 }),
+      seeded({ status: "completed", ago: 0 }),
     ]);
     // Five days, from 7 days ago to 3 days ago.
     const activity = await owner.api.workflows.activity({
@@ -430,53 +260,38 @@ describe("runs over time", () => {
     });
   });
 
-  it("reads the window's runs of the person's Apps by index, with no statistics to go by", async () => {
+  it("reads the window's runs of the person's workflows by index, with no statistics to go by", async () => {
     const owner = await personApi("admin");
-    const { id: app } = await owner.api.apps.create({
-      name: `Invoices ${unique()}`,
-    });
-    await published(app);
     const workflow = await owner.api.workflowResources.create(
       `intake-${unique()}`
     );
     await Promise.all([
-      seedRun(app, {
-        workflow: "approve",
+      seedRun(workflow.id, owner.userId, {
         status: "running",
         ago: 0,
         decision: "open",
       }),
-      seedResourceRun({
-        workflow: workflow.id,
-        principal: owner.userId,
-        status: "completed",
-        createdAt: Date.now(),
-      }),
+      seedRun(workflow.id, owner.userId, { status: "completed", ago: 0 }),
     ]);
     const queries = await recordedQueries(
       async () => await owner.api.workflows.activity({ days: 90 })
     );
     const plans = await Promise.all(
       queries
-        .filter(({ query }) => query.includes('"workflow_runs"'))
+        .filter(({ query }) => query.includes('"workflow_resource_runs"'))
         .map(async (recorded) => ({
           query: recorded.query,
           plan: await planOf(recorded),
         }))
     );
-    // Each reads both kinds of runs, each by the start of its App's or its
-    // workflow's runs.
+    // Each reads the runs by the start of their workflow's runs.
     expect({
       read: plans.length,
       fullScans: plans.filter(({ plan }) =>
         plan.some((step) => fullScan.test(step))
       ),
-      byStart: plans.every(
-        ({ plan }) =>
-          plan.some((step) => step.includes("workflow_runs_app_idx")) &&
-          plan.some((step) =>
-            step.includes("workflow_resource_runs_newest_idx")
-          )
+      byStart: plans.every(({ plan }) =>
+        plan.some((step) => step.includes("workflow_resource_runs_newest_idx"))
       ),
     }).toStrictEqual({ read: 3, fullScans: [], byStart: true });
   });

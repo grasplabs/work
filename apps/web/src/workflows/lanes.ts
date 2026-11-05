@@ -68,15 +68,8 @@ export interface LaneDay {
   unseen: number;
 }
 
-/** A lane's key: its App and workflow, or its independent workflow. */
-export const laneKeyOf = (lane: TodayLane): string =>
-  lane.kind === "app"
-    ? JSON.stringify(["app", lane.app, lane.workflow])
-    : JSON.stringify(["independent", lane.id]);
-
-/** A lane's name, as the page names a workflow. */
-const nameOf = (lane: TodayLane): string =>
-  lane.kind === "app" ? `${lane.appName} · ${lane.workflow}` : lane.name;
+/** A lane's key: its workflow's ID. */
+export const laneKeyOf = (lane: TodayLane): string => lane.id;
 
 /** What a run came to, as its dot says it. */
 export const stateOf = (run: TodayRun): LaneState => {
@@ -135,7 +128,7 @@ export const laneDay = (today: WorkflowsToday): LaneDay => {
       .toSorted((one, other) => one.at - other.at);
     return {
       key,
-      name: nameOf(lane),
+      name: lane.name,
       of: lane,
       runs,
       running: runs.some(({ end }) => end === null),

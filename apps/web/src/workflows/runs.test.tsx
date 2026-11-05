@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
-import type { ResourceListedRun } from "@grasp-os/shared/workflows";
+import type { ListedRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -25,11 +25,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let root: Root | undefined;
 
 /** An independent workflow's run, as core lists it, with `fields`. */
-const runOf = (
-  id: string,
-  fields: Partial<ResourceListedRun>
-): ResourceListedRun => ({
-  type: "resource",
+const runOf = (id: string, fields: Partial<ListedRun>): ListedRun => ({
   id: runIdSchema.parse(id),
   workflowId: workflowResourceIdSchema.parse("workflow-quotes"),
   name: "Quotes",
@@ -55,7 +51,6 @@ describe("the runs log", () => {
       component: () => (
         <RunsLog
           me="user-ada"
-          model={undefined}
           more={false}
           runs={[
             runOf("run-waiting", { decision: "decision-7" }),

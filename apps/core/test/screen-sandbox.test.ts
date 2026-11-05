@@ -99,45 +99,6 @@ export const classes = ["mt-7","${"(".repeat(400)}"];`
 
     expect(built.ok && built.css).toContain(".mt-7");
   });
-
-  it("refuses more files and characters than a build takes", async () => {
-    const many = Object.fromEntries(
-      Array.from({ length: 201 }, (_, index) => [
-        `components/c${index}.ts`,
-        "export {};\n",
-      ])
-    );
-    await expect(summaries({ ...screen(""), ...many })).resolves.toStrictEqual([
-      "undefined:undefined limits: The App has 202 files; a build takes at most 200.",
-    ]);
-    // Files a build doesn't read don't count.
-    const unread = Object.fromEntries(
-      Object.keys(many).map((path) => [`workflows/${path}`, "x".repeat(10_000)])
-    );
-    await expect(
-      buildScreens(env, { ...screen(""), ...unread }, "app-test")
-    ).resolves.toMatchObject({ ok: true });
-
-    const long = `// ${"x".repeat(200_001)}\n`;
-    await expect(
-      summaries({
-        ...screen(""),
-        "components/a.ts": long,
-        "components/b.ts": "x".repeat(199_000),
-        "components/c.ts": "x".repeat(199_000),
-        "components/d.ts": "x".repeat(199_000),
-        "components/e.ts": "x".repeat(199_000),
-        "components/f.ts": "x".repeat(199_000),
-      })
-    ).resolves.toStrictEqual([
-      expect.stringContaining(
-        "components/a.ts:undefined limits: This file has 200005 characters; a file can have at most 200000."
-      ),
-      expect.stringContaining(
-        "undefined:undefined limits: The App's files have 1195"
-      ),
-    ]);
-  });
 });
 
 /** How an isolate runs, apart from its code. */

@@ -11,7 +11,6 @@ import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
 import {
   buildComputeModules,
   buildScreens,
-  buildWorkflows,
   checkAppCode,
 } from "../src/screens.ts";
 
@@ -145,21 +144,6 @@ const serverMistakes: Record<string, string> = {
     'import type { useQuery } from ".kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
-/** Mistakes in an App's workflows. */
-const workflowMistakes: Record<string, string> = {
-  "workflows/m-assign.ts": 'export const wrong: number = "x";\n',
-  "workflows/m-screen-module.ts":
-    'import type { useQuery } from "@grasp-os/sdk/react";\n\nexport type Wrong = typeof useQuery;\n',
-  "workflows/m-step.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("wrong", { params: {}, input: z.object({ count: z.number() }) }, async (step, { input }) => {
-  const doubled: string = await step.do("double", { description: "Double" }, async () => input.count * 2);
-  return doubled;
-});
-`,
-  "workflows/m-implicit.ts": "export const wrong = (x) => x;\n",
-};
-
 /** Mistakes in a JSON workflow's compute modules. */
 const computeMistakes: Record<string, string> = {
   "code/total.ts": `import { compute, v } from "@grasp-os/sdk/compute";
@@ -216,12 +200,6 @@ const said: Record<string, string[]> = {
     "server/m-returns.ts:4:76 TS2322 error",
     "server/m-screen-module.ts:1:31 TS2307 error",
     "server/m-undefined.ts:1:45 TS18048 error",
-  ],
-  workflows: [
-    "workflows/m-assign.ts:1:14 TS2322 error",
-    "workflows/m-implicit.ts:1:23 TS7006 error",
-    "workflows/m-screen-module.ts:1:31 TS2307 error",
-    "workflows/m-step.ts:4:9 TS2322 error",
   ],
   compute: [
     "code/m-dom.ts:1:36 TS2584 error",
@@ -368,15 +346,6 @@ describe(
           { ...(await sealedServer(app, files)), ...serverMistakes },
           app
         )
-      );
-      expect(found).toStrictEqual(was);
-    });
-
-    it("gives a workflow's mistakes", async () => {
-      const { app, files } = await blueprintApp("intake");
-      const { found, said: was } = parity(
-        "workflows",
-        await buildWorkflows(env, { ...files, ...workflowMistakes }, app, {})
       );
       expect(found).toStrictEqual(was);
     });

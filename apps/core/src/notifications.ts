@@ -1,4 +1,3 @@
-import type { AuditEntry } from "@grasp-os/shared/audit";
 import { brainRecordSchema } from "@grasp-os/shared/brain-records";
 import {
   listedNotifications,
@@ -31,7 +30,6 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appsFoundBy } from "./app-access.ts";
-import { outboxedWhere } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import {
   apps,
@@ -49,9 +47,8 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { rowsOf } from "./sharing.ts";
 
-// What core tells a person in the product: that a workflow failed while
-// acting for them, or that an admin asked them one of the brain's open
-// questions (`gap_asked`, written by brain-gaps.ts in the batch that
+// What core tells a person in the product: that an admin asked them one
+// of the brain's open questions (`gap_asked`, written by brain-gaps.ts in the batch that
 // records the ask), or that a schedule trigger they own stopped
 // (`trigger_stopped`, written by workflows/schedule-triggers.ts in the
 // batch that stops it), or that connect stopped hearing a mailbox or
@@ -68,78 +65,12 @@ import { rowsOf } from "./sharing.ts";
 // see every App's and workflow's approvals anyway; an App's message while
 // they can still open the App.
 //
-// A workflow's failure tells who it acted for (who started the run, or,
-// for a run a trigger started, the App's owner when it failed), while
-// they are a member of the organization still. Nobody else is told:
-// admins see every run's failure on the Workflows page, and the report
-// itself stays there, for those who see it (`seesDetails` in
-// workflows/runs.ts). A notification holds IDs and a count, never what
-// the run read or its error's words.
-//
-// A failure notifies in the batch that marks the run failed, audited as
-// `workflow.run.notified` in it too, only if that batch ended the run: a
-// run ends once, so it notifies once. While a notification of a workflow
-// is unread, its next failures count on it, so a workflow failing every
-// minute is one notification, not thousands.
-//
 // A person lists only notifications of Apps they can still open
 // (`appsFoundBy`), so one of an App taken from them tells them nothing
 // more, not even its name now.
 
 /** How long a person's read notifications are kept. */
 const keptReadMs = 30 * 24 * 60 * 60 * 1000;
-
-/** The failed run a notice is for, and whom it tells. */
-export interface FailureNotice {
-  run: { id: string; appId: string; workflowId: string; version: number };
-  personId: string;
-  /** Its audit event: `workflow.run.notified`. */
-  entry: AuditEntry;
-  /**
-   * That the failure is recorded, as SQL on what the batch wrote before:
-   * the run's own failed event stored. Nothing is written otherwise.
-   */
-  recorded: SQL;
-}
-
-/**
- * The statements that notify `personId` of the failed run, and audit it,
- * in the batch that records the failure: a new unread notification of
- * the workflow, or one more failure counted on the unread one there is.
- * Only while they are a member of the organization, as the batch finds
- * them: someone removed since the run started (members.ts, which deletes
- * their notifications) is told nothing, and the log doesn't say they were.
- */
-export const failureNoticed = (
-  db: DrizzleD1Database,
-  { run, personId, entry, recorded }: FailureNotice
-) => {
-  const now = Date.now();
-  const told = sql`${recorded} AND ${activeMember(personId)}`;
-  return [
-    // The WHERE keeps SQLite from reading ON CONFLICT as a join.
-    db
-      .insert(notifications)
-      .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${told}`
-      )
-      .onConflictDoUpdate({
-        target: [
-          notifications.personId,
-          notifications.type,
-          notifications.appId,
-          notifications.workflowId,
-        ],
-        targetWhere: isNull(notifications.readAt),
-        set: {
-          runId: sql`excluded.run_id`,
-          failures: sql`${notifications.failures} + 1`,
-          updatedAt: sql`excluded.updated_at`,
-        },
-      }),
-    outboxedWhere(db, entry, told),
-  ] as const;
-};
 
 /** A schedule trigger that stopped, and whom it tells: its owner. */
 export interface StopNotice {
@@ -162,7 +93,7 @@ export const stopNoticed = (
   return db
     .insert(notifications)
     .select(
-      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
     );
 };
 
@@ -192,7 +123,7 @@ export const eventsStopNoticed = (
   return db
     .insert(notifications)
     .select(
-      sql`SELECT ${notice.id}, ${notice.personId}, 'events_stopped', NULL, NULL, NULL, NULL, NULL, ${at}, ${at}, NULL, NULL, NULL, NULL, NULL, ${notice.connection}, ${notice.type}, ${notice.resource}, ${notice.reason}, NULL, NULL, NULL WHERE ${activeMember(notice.personId)}`
+      sql`SELECT ${notice.id}, ${notice.personId}, 'events_stopped', NULL, NULL, NULL, ${at}, ${at}, NULL, NULL, NULL, NULL, NULL, ${notice.connection}, ${notice.type}, ${notice.resource}, ${notice.reason}, NULL, NULL, NULL WHERE ${activeMember(notice.personId)}`
     )
     .onConflictDoNothing({ target: notifications.id });
 };
@@ -226,7 +157,7 @@ export const revocationNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
       )
   );
 };
@@ -253,7 +184,7 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
     eq(notifications.personId, person.userId),
     or(
       and(
-        inList(notifications.type, ["run_failed", "app_message"]),
+        eq(notifications.type, "app_message"),
         isNotNull(apps.id),
         appsFoundBy(env, person)
       ),
@@ -286,7 +217,7 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
     )
   );
 
-/** Joins `apps` to a notification: a `run_failed` row's App. */
+/** Joins `apps` to a notification: the App of an `app_message` or a revocation. */
 const appOn = eq(apps.id, notifications.appId);
 /** Joins `brain_records` to a notification: a `gap_asked` row's gap. */
 const gapOn = and(
@@ -310,7 +241,6 @@ const workflowOn = and(
 interface ListedRow {
   id: string;
   type:
-    | "run_failed"
     | "gap_asked"
     | "trigger_stopped"
     | "package_revoked"
@@ -319,8 +249,6 @@ interface ListedRow {
   app: string | null;
   appName: string | null;
   workflow: string | null;
-  run: string | null;
-  failures: number | null;
   gap: string | null;
   gapBody: string | null;
   trigger: string | null;
@@ -452,39 +380,17 @@ const notificationOf = (row: ListedRow): Notification[] => {
   if (row.type === "app_message") {
     return appMessageOf(row);
   }
-  if (row.type === "trigger_stopped") {
-    return row.trigger === null ||
-      row.workflow === null ||
-      row.workflowName === null
-      ? []
-      : [
-          {
-            id: row.id,
-            type: "trigger_stopped",
-            trigger: row.trigger,
-            workflow: row.workflow,
-            workflowName: row.workflowName,
-            at,
-            read,
-          },
-        ];
-  }
-  const { app, appName, workflow, run, failures } = row;
-  return app === null ||
-    appName === null ||
-    workflow === null ||
-    run === null ||
-    failures === null
+  return row.trigger === null ||
+    row.workflow === null ||
+    row.workflowName === null
     ? []
     : [
         {
           id: row.id,
-          type: "run_failed",
-          app,
-          appName,
-          workflow,
-          run,
-          failures,
+          type: "trigger_stopped",
+          trigger: row.trigger,
+          workflow: row.workflow,
+          workflowName: row.workflowName,
           at,
           read,
         },
@@ -524,8 +430,6 @@ export const listNotifications = async (
         app: notifications.appId,
         appName: apps.name,
         workflow: notifications.workflowId,
-        run: notifications.runId,
-        failures: notifications.failures,
         gap: notifications.gapId,
         gapBody: brainRecords.body,
         trigger: notifications.triggerId,

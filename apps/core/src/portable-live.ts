@@ -31,13 +31,13 @@ import { isStub } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
-import type { RunSubscription } from "./run-subscription.ts";
 import { deliveryAt, requireDelivery } from "./screen-delivery.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { auditStaffRoute, staffAudited } from "./staff-audit.ts";
+import type { Subscription } from "./subscription.ts";
 
 // A portable host's live connection (spec 10.7.1, 11): the App's UI
 // outside Grasp's shell follows the App's live queries as a screen does,
@@ -370,7 +370,7 @@ export class PortableQueriesRpc
   async watchQuery(
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     const by = await this.#check();
     const env = this.#env;
     // Following is a request like any other; what core then pushes is

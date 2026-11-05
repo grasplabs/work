@@ -3,16 +3,19 @@ import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { Acting } from "../src/auth/identity.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
 import type {
   AttemptAdmission,
   AttemptOwner,
 } from "../src/workflows/quotas.ts";
-import { allEvents } from "./audit-events.ts";
+import { workflowOwnerOf } from "../src/workflows/resource-runs.ts";
+import { published } from "./json-workflows.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { runObject, sleeping } from "./runs.ts";
+import { unique } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // What the workflow-slot*.test.ts files share: the limit on workflow
 // attempts running at once (admission.ts). Each file calls `mockIdp()`
@@ -52,42 +55,58 @@ export const withShares = async <Result>(
   }
 };
 
-/**
- * A workflow whose runs wait a day: runs still going, whose attempts a
- * test admits as their host would.
- */
-export const idle = workflowFiles(
-  "idle",
-  `  await step.sleep("idle", { description: "Wait", duration: "1 day" });
-  return 1;`
-);
+/** `builder` as their session has them, to act as. */
+const actingAs = ({ userId }: Builder): Acting => ({
+  userId,
+  role: "builder",
+  teams: [],
+  staff: false,
+});
 
-/** A run of `app`'s idle workflow, waiting. */
+/** A run's owner, with the workflow it is a run of. */
+export type RunOwner = AttemptOwner & { workflow: string };
+
+/** A run of independent workflow `workflow`, waiting a day in its `idle` task. */
 export const idleRun = async (
   builder: Builder,
-  app: string
+  workflow: string
 ): Promise<string> => {
-  const run = await builder.api.workflows.start(app, "idle");
-  await sleeping(run.id, "idle");
-  return run.id;
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: actingAs(builder) },
+    workflow,
+    { version: 1, input: { who: "Ada" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  await sleeping(runId, "task:idle");
+  return runId;
 };
 
-/** A new App of `builder`'s, and an idle run of it to admit attempts of. */
-export const ownerOf = async (builder: Builder): Promise<AttemptOwner> => {
-  const app = await appWith(builder, {
-    ...workflowFiles("noop", "  return 1;"),
-    ...idle,
-  });
-  const run = await idleRun(builder, app);
-  return { run, root: run, resource: app };
+/**
+ * A new workflow of `builder`'s whose runs wait a day, and a run of it
+ * still going, to admit attempts of as its host would.
+ */
+export const ownerOf = async (builder: Builder): Promise<RunOwner> => {
+  const { workflow } = await published(actingAs(builder), [
+    { idle: { wait: { days: 1 } } },
+  ]);
+  const run = await idleRun(builder, workflow.id);
+  return {
+    run,
+    root: run,
+    resource: workflowOwnerOf(workflow.id),
+    workflow: workflow.id,
+  };
 };
 
-/** Another run of `owner`'s App. */
+/** Another run of `owner`'s workflow. */
 export const anotherRun = async (
   builder: Builder,
-  owner: AttemptOwner
-): Promise<AttemptOwner> => {
-  const run = await idleRun(builder, owner.resource);
+  owner: RunOwner
+): Promise<RunOwner> => {
+  const run = await idleRun(builder, owner.workflow);
   return { ...owner, run, root: run };
 };
 
@@ -184,23 +203,6 @@ export const loadWaitsOf = async (run: string): Promise<number[]> =>
       .toArray()
       .map(({ ms }) => ms)
   );
-
-/** How many of `run`'s attempts hold their slot now: unsettled. */
-export const holdingOf = async (run: string): Promise<number> =>
-  (await env.DB.prepare(
-    "SELECT count(*) AS held FROM run_lineage_attempts WHERE run_id = ? AND settled_at IS NULL"
-  )
-    .bind(run)
-    .first<number>("held")) ?? 0;
-
-/** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
-export const failedWith = async (run: string): Promise<unknown> => {
-  const events = await allEvents();
-  return events.find(
-    ({ action, target }) =>
-      action === "workflow.run.failed" && target?.id === run
-  )?.detail.error;
-};
 
 /** Settles what `admit` admitted, if it did. */
 export const settled = async (answer: Awaited<ReturnType<typeof admit>>) => {

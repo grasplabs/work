@@ -3,10 +3,10 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { RpcTarget } from "cloudflare:workers";
 
-import type { RunHostCalls, Settled } from "./code.ts";
+import type { IsolateHostCalls, Settled } from "./sealed-isolate.ts";
 
 // The time a run's code spends outside its steps, bounded per activation.
-// The run's call into its isolate (code.ts, `loadRunIsolate`) holds the
+// The run's call into its isolate (sealed-isolate.ts, `loadSealedIsolate`) holds the
 // run's alarm handler and an isolate (on-prem, a sandbox session holding a
 // process) from its start until it ends or suspends. Inside a step, that
 // time is the step's: its attempt holds a share and its lineage's active
@@ -46,10 +46,10 @@ import type { RunHostCalls, Settled } from "./code.ts";
 //   that is refused (it never settles, as the engine fences a call), and
 //   no step of it runs. On-prem its session is aborted, ending its process.
 // - Waiting for a sandbox place on-prem: no code of the run runs then, so
-//   that time isn't counted; it is bounded on its own (code.ts,
+//   that time isn't counted; it is bounded on its own (sealed-isolate.ts,
 //   `runLoadWaitMs`).
 // - CPU time spent between steps: bounded apart, by the isolate's CPU limit
-//   (code.ts, `workflowSandbox`).
+//   (sealed-isolate.ts, `sealedSandbox`).
 //
 // It is a bound, never a charge: nothing is written, and no run is charged
 // more than its attempts used.
@@ -189,12 +189,12 @@ export const betweenSteps = (budgetMs: number): BetweenSteps => {
  */
 export class BoundedRunHost<Attempt extends object>
   extends RpcTarget
-  implements RunHostCalls<Attempt>
+  implements IsolateHostCalls<Attempt>
 {
-  readonly #host: RunHostCalls<Attempt>;
+  readonly #host: IsolateHostCalls<Attempt>;
   readonly #clock: BetweenSteps;
 
-  constructor(host: RunHostCalls<Attempt>, clock: BetweenSteps) {
+  constructor(host: IsolateHostCalls<Attempt>, clock: BetweenSteps) {
     super();
     this.#host = host;
     this.#clock = clock;

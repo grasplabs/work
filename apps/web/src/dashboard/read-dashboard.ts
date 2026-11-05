@@ -20,26 +20,24 @@ import type {
   WaitingKind,
   WaitingPart,
 } from "@grasp-os/shared/waiting";
-import { handledRunDays } from "@grasp-os/shared/workflows";
-import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { listAppWorkflows, openableApps } from "../workflows/reads.ts";
+import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
-import { markShownRead } from "./failed-workflows.tsx";
-import { goalProgressOf, noReturns, teamProgressOf } from "./returns.ts";
-import type { GoalProgress, TeamsRead } from "./returns.ts";
+import { markShownRead } from "./notifications-page.ts";
+import { goalProgressOf, noReturns } from "./returns.ts";
+import type { GoalProgress } from "./returns.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./waiting.ts";
 import type { Waiting } from "./waiting.ts";
-import type { Board, EnginesRead } from "./widget-board.tsx";
+import type { Board } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
 // hangs leaves the rest: what waits on the person, the person's layout of
@@ -78,8 +76,8 @@ const partOf = <T>(
 
 /**
  * What waits on the person: core's feed of it, in one read, and the names
- * permission requests are shown with. Reading it marks the failed
- * workflows it lists as read.
+ * permission requests are shown with. Reading it marks the
+ * notifications it lists as read.
  */
 export const readWaiting = async (
   core: CoreConnection,
@@ -89,9 +87,8 @@ export const readWaiting = async (
     core,
     async (session) => await session.waiting.list()
   );
-  const failed = partOf(feed, "notifications", (read) => {
-    const notifications = read.items.flatMap((item) =>
-      item.kind === "failedRun" ||
+  const notifications = partOf(feed, "notifications", (read) => {
+    const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
       item.kind === "revokedPackage" ||
@@ -109,18 +106,17 @@ export const readWaiting = async (
     );
     return {
       page: {
-        notifications,
+        notifications: listed,
         unread: read.unreadNotifications,
         more: read.moreNotifications,
       },
-      model: read.fixModel ?? undefined,
       accounts,
     };
   });
   // Marked read as shown; one that couldn't be stays unread, and shows all the same.
-  if (failed.state === "ready") {
+  if (notifications.state === "ready") {
     await loadFromCore(core, async (session) => {
-      await markShownRead(session, failed.data.page.notifications);
+      await markShownRead(session, notifications.data.page.notifications);
     });
   }
   const asked = partOf(feed, "requests", (read) =>
@@ -144,7 +140,7 @@ export const readWaiting = async (
     outcomes: partOf(feed, "outcomes", (read) =>
       ofKind(read, "unknownOutcome").map(({ outcome }) => outcome)
     ),
-    failed,
+    notifications,
     reconnect: partOf(feed, "connections", (read) =>
       ofKind(read, "signInAgain")
     ),
@@ -235,14 +231,13 @@ const readImprovement = async (
   };
 };
 
-/** The signals this person sees, with the engines' names and the model a fix is asked with. */
+/** The signals this person sees, with the engines' names. */
 const readSignals = async (
   session: Session,
   identity: Identity
 ): Promise<Signals> => {
-  const [apps, models, knowledge] = await Promise.all([
+  const [apps, knowledge] = await Promise.all([
     openableApps(session),
-    listedOrNone(session.chats.models()),
     orNone<KnowledgeSignals>(session.knowledgeSignals.list()),
   ]);
   const improvement = await readImprovement(
@@ -254,7 +249,6 @@ const readSignals = async (
     improvement,
     knowledge,
     engines: new Map(apps.map(({ id, name }) => [id, name])),
-    model: models[0],
   };
 };
 
@@ -303,17 +297,6 @@ const bothOf = async <A, B>(
   return { state: "ready", data: [one.data, other.data] };
 };
 
-/** The engines widget's read: the engines, with the workflows read once for both widgets. */
-const readEngines = async (
-  core: CoreConnection,
-  workflows: Promise<Loaded<WorkflowSummary[]>>
-): Promise<Loaded<EnginesRead>> => {
-  const both = await bothOf(loadFromCore(core, openableApps), workflows);
-  return both.state === "ready"
-    ? { state: "ready", data: { apps: both.data[0], workflows: both.data[1] } }
-    : both;
-};
-
 /**
  * The goals widget's read: the board's goals, with the workflows read once
  * for the board, to say how far each goal's are.
@@ -328,27 +311,6 @@ const readGoals = async (
   );
   return both.state === "ready"
     ? { state: "ready", data: goalProgressOf(both.data[0], both.data[1]) }
-    : both;
-};
-
-/**
- * The teams widget's read: the workflows read once for the board, each
- * with the team that owns it, and what they handled this week.
- */
-const readTeams = async (
-  core: CoreConnection,
-  workflows: Promise<Loaded<WorkflowSummary[]>>
-): Promise<Loaded<TeamsRead>> => {
-  const both = await bothOf(
-    workflows,
-    loadFromCore(
-      core,
-      async (session) =>
-        await session.workflows.activity({ days: handledRunDays })
-    )
-  );
-  return both.state === "ready"
-    ? { state: "ready", data: teamProgressOf(both.data[0], both.data[1]) }
     : both;
 };
 
@@ -397,15 +359,13 @@ export const readDashboard = async (
   identity: Identity
 ): Promise<Dashboard> => {
   // Not awaited: their blocks and cards wait for them.
-  // The board shows engines' workflows.
-  const workflows = loadFromCore(core, listAppWorkflows);
+  const workflows = loadFromCore(core, listWorkflows);
   const signals = loadFromCore(
     core,
     async (session) => await readSignals(session, identity)
   );
-  const engines = readEngines(core, workflows);
+  const engines = loadFromCore(core, openableApps);
   const goals = readGoals(core, workflows);
-  const teams = readTeams(core, workflows);
   // The full view's days, once: the block shows the last week of them.
   const runs = loadFromCore(
     core,
@@ -446,7 +406,6 @@ export const readDashboard = async (
       made,
       returns: noReturns,
       goals,
-      teams,
       workflows,
       engines,
       runs,

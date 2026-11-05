@@ -729,7 +729,6 @@ describe("a chat's connections", setUpTime, () => {
       person.userId,
       chat.id,
       undefined,
-      undefined,
       "teams"
     );
     const asked = "Send ben@acme.test the invoice.";

@@ -879,7 +879,7 @@ describe("asking the people a JSON workflow's decision is for", () => {
     });
   });
 
-  it("lists its waiting run with a link to it to someone who may answer it, and to the run's person without one", async () => {
+  it("lists its run as waiting, with a link to the decision for someone who may answer it, and to the run's person without one", async () => {
     const { owner, reviewer: asked, workflow } = await approvalWorkflow();
     // A builder of the workflow, who sees each of its runs.
     await env.DB.prepare(
@@ -898,17 +898,17 @@ describe("asking the people a JSON workflow's decision is for", () => {
     const listedFor = async (by: Identity) => {
       const { runs } = await listAllRuns(env, by);
       const run = runs.find(({ id }) => id === runId);
-      return run?.type === "resource"
-        ? { status: run.status, decision: run.decision }
-        : run;
+      return run === undefined
+        ? undefined
+        : { status: run.status, decision: run.decision };
     };
 
     expect({
       reviewer: await listedFor(reviewer),
       owner: await listedFor(owner),
     }).toStrictEqual({
-      reviewer: { status: "running", decision },
-      owner: { status: "running", decision: undefined },
+      reviewer: { status: "waiting", decision },
+      owner: { status: "waiting", decision: undefined },
     });
   });
 

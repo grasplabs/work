@@ -13,13 +13,16 @@ import {
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { AttemptHost } from "../../src/workflows/attempt-host.ts";
 import type { AttemptCalls } from "../../src/workflows/attempt-host.ts";
-import { attemptMethods, sessionRunHost } from "../../src/workflows/code.ts";
-import type {
-  RunHostCalls,
-  RunSession,
-  Settled,
-} from "../../src/workflows/code.ts";
 import { isCpuLimitKill } from "../../src/workflows/host.ts";
+import {
+  attemptHostMethods,
+  sessionHostCalls,
+} from "../../src/workflows/sealed-isolate.ts";
+import type {
+  IsolateHostCalls,
+  IsolateSession,
+  Settled,
+} from "../../src/workflows/sealed-isolate.ts";
 
 // Sessions on plain workerd (scripts/workerd-sandbox-session*.test.ts): the
 // same `runInSession` core runs, with `SANDBOX_HOST` bound to the sandbox
@@ -356,7 +359,7 @@ const run = async (
 };
 
 /**
- * A workflow run's host as core passes it on-prem (`sessionRunHost`), over
+ * A workflow run's host as core passes it on-prem (`sessionHostCalls`), over
  * a stand-in of `RunHost` whose every step mints an attempt host of its
  * own, as `RunHost.do` does: each case's isolate gets it, and a probe that
  * gives up on the session at once.
@@ -368,7 +371,7 @@ const runHostCases: Record<
   // Each of the attempt's calls, one it doesn't have, and attempt A's
   // host used again while step B runs.
   attempts: {
-    body: `const names = ${JSON.stringify(attemptMethods)};
+    body: `const names = ${JSON.stringify(attemptHostMethods)};
       let kept;
       const inside = await host.do("a", {}, async (attempt) => {
         kept = attempt;
@@ -377,13 +380,13 @@ const runHostCases: Record<
         out.revokeAll = await attempt.revokeAll().then(() => "reached", () => "refused");
         return out;
       });
-      const late = await host.do("b", {}, async () => await kept.callModel().then(() => "reached", () => "refused"));
+      const late = await host.do("b", {}, async () => await kept.callConnection().then(() => "reached", () => "refused"));
       return { inside, late };`,
   },
   // A call of a running step's attempt, sent just after core gave up on
   // the session.
   givenUp: {
-    body: `return await host.do("a", {}, async (attempt) => { probe.giveUp(); await attempt.callModel().catch(() => {}); return "after"; });`,
+    body: `return await host.do("a", {}, async (attempt) => { probe.giveUp(); await attempt.callConnection().catch(() => {}); return "after"; });`,
   },
   // A step whose code spins: its process ended on its CPU time.
   spins: {
@@ -396,7 +399,7 @@ const runHostCases: Record<
   },
   // A step whose call core answers with more than a session takes.
   bigAnswer: {
-    body: `return await host.do("a", {}, async (attempt) => await attempt.readAttachment());`,
+    body: `return await host.do("a", {}, async (attempt) => await attempt.callConnection());`,
     bigAttachment: true,
   },
 };
@@ -414,28 +417,21 @@ const runHostCase = async (env: StandInEnv, name: string) => {
     return await Promise.resolve({ ok: true, value });
   };
   const calls: AttemptCalls = {
-    callModel: async () => await answer("callModel", 1),
-    callCollection: async () => await answer("callCollection", 1),
-    callConnection: async () => await answer("callConnection", 1),
-    callBrain: async () => await answer("callBrain", 1),
-    callFunction: async () => await answer("callFunction", 1),
+    // More than a session takes, as core's own answer, where the case says.
+    callConnection: async () =>
+      await answer(
+        "callConnection",
+        chosen.bigAttachment === true ? "x".repeat(17 * 1024 * 1024) : "x"
+      ),
     openDecision: async () =>
       await answer("openDecision", { decision: "d", deadline: 1 }),
     decisionRecipients: async () => await answer("decisionRecipients", []),
-    // More than a session takes, as core's own answer, where the case says.
-    readAttachment: async () =>
-      await answer(
-        "readAttachment",
-        new TextEncoder().encode(
-          chosen.bigAttachment === true ? "x".repeat(17 * 1024 * 1024) : "x"
-        )
-      ),
   };
   // The attempt still holds its lease, whenever it's asked: no refusal.
   const refusals = new Map<string, Settled<never>>();
   const holds = async (call: string) =>
     await Promise.resolve(refusals.get(call));
-  const runHost: RunHostCalls = {
+  const runHost: IsolateHostCalls = {
     do: async (_name, _options, fn) => {
       try {
         // Every call admitted: a lineage's host calls aren't this test's.
@@ -458,7 +454,7 @@ const runHostCase = async (env: StandInEnv, name: string) => {
   const giveUp = new AbortController();
   let sessionLive: (() => boolean) | undefined;
   const ended = Promise.withResolvers<unknown>();
-  const session: RunSession = {
+  const session: IsolateSession = {
     live: () => sessionLive?.() === true,
     ended: ended.promise,
   };
@@ -476,11 +472,10 @@ export class E extends WorkerEntrypoint { async go(host, probe) { ${chosen.body}
         method: "go",
         args: [
           {
-            capability: capability(sessionRunHost(runHost, session), [
-              "do",
-              "sleep",
-              "waitForDecision",
-            ]),
+            capability: capability(
+              sessionHostCalls(runHost, session, attemptHostMethods),
+              ["do", "sleep", "waitForDecision"]
+            ),
           },
           {
             capability: capability(
@@ -530,22 +525,22 @@ export class E extends WorkerEntrypoint { async go(host, probe) { ${chosen.body}
 };
 
 /**
- * The attempt host `sessionRunHost` passes each step, called from core's
+ * The attempt host `sessionHostCalls` passes each step, called from core's
  * side of the session as a call that reached it would be: a step's own,
  * attempt A's once step B runs, and one once the session was given up on.
  * Calls in a session that's over seldom reach core at all (the session's
  * socket closes, and a callback's stubs go with its call); this is what
  * refuses one that does.
  */
-/** Calls `callModel` on a passed capability, as the isolate would. */
-const callModelOf = async (passed: unknown): Promise<string> => {
+/** Calls `callConnection` on a passed capability, as the isolate would. */
+const callConnectionOf = async (passed: unknown): Promise<string> => {
   const target: unknown =
     typeof passed === "object" && passed !== null
       ? Reflect.get(passed, "target")
       : undefined;
   const method: unknown =
     typeof target === "object" && target !== null
-      ? Reflect.get(target, "callModel")
+      ? Reflect.get(target, "callConnection")
       : undefined;
   if (typeof method !== "function") {
     return "missing";
@@ -562,14 +557,10 @@ const attemptLiveness = async () => {
   const reached: string[] = [];
   const attempt = new AttemptHost(
     {
-      callModel: async () => {
-        reached.push("callModel");
+      callConnection: async () => {
+        reached.push("callConnection");
         return await Promise.resolve({ ok: true, value: 1 });
       },
-      callCollection: async () => await Promise.resolve({ ok: true, value: 1 }),
-      callConnection: async () => await Promise.resolve({ ok: true, value: 1 }),
-      callBrain: async () => await Promise.resolve({ ok: true, value: 1 }),
-      callFunction: async () => await Promise.resolve({ ok: true, value: 1 }),
       openDecision: async () =>
         await Promise.resolve({
           ok: true,
@@ -577,8 +568,6 @@ const attemptLiveness = async () => {
         }),
       decisionRecipients: async () =>
         await Promise.resolve({ ok: true, value: [] }),
-      readAttachment: async () =>
-        await Promise.resolve({ ok: true, value: new Uint8Array() }),
     },
     async (call: string) =>
       await Promise.resolve(new Map<string, Settled<never>>().get(call)),
@@ -587,30 +576,31 @@ const attemptLiveness = async () => {
       await Promise.resolve();
     }
   );
-  const runHost: RunHostCalls = {
+  const runHost: IsolateHostCalls = {
     do: async (_name, _options, fn) => ({ ok: true, value: await fn(attempt) }),
     sleep: async () => await Promise.resolve({ ok: true, value: null }),
     waitForDecision: async () =>
       await Promise.resolve({ ok: true, value: null }),
   };
   let sessionOpen = true;
-  const host = sessionRunHost(runHost, {
-    live: () => sessionOpen,
-    ended: Promise.resolve(null),
-  });
+  const host = sessionHostCalls(
+    runHost,
+    { live: () => sessionOpen, ended: Promise.resolve(null) },
+    attemptHostMethods
+  );
   let keptA: unknown;
   const own = await host.do("a", {}, async (passed) => {
     keptA = passed;
-    return await callModelOf(passed);
+    return await callConnectionOf(passed);
   });
   const lateFromA = await host.do(
     "b",
     {},
-    async () => await callModelOf(keptA)
+    async () => await callConnectionOf(keptA)
   );
   const afterGivingUp = await host.do("c", {}, async (passed) => {
     sessionOpen = false;
-    return await callModelOf(passed);
+    return await callConnectionOf(passed);
   });
   return { own, lateFromA, givenUp: afterGivingUp, reached };
 };

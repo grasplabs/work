@@ -598,7 +598,7 @@ export const FilesAndApps = ({
     // The teams a decision's deciders may name, for its builders and the
     // organization's admins: anyone else, or a read that fails, sees IDs.
     void read(
-      async (session) => await session.workflows.teams(),
+      async (session) => await session.organization.teams(),
       (loaded) => {
         if (loaded.state === "ready") {
           setTeams(new Map(loaded.data.map(({ id, name }) => [id, name])));

@@ -17,7 +17,6 @@ import type {
   ScreenInputOf,
 } from "../src/index.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
-import type { OwnAppBinding } from "../src/workflow.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
 import {
   api,
@@ -215,11 +214,3 @@ const anyReferences: readonly AnyOperationReference[] = [
   internal.notes.count,
 ];
 void anyReferences;
-
-// A workflow calls its App's functions through the same references
-// (`env.APP.callFunction`): a query's, which holds no kind, as well as a
-// mutation's and an action's.
-declare const ownApp: OwnAppBinding;
-void ownApp.callFunction(api.notes.list, {});
-void ownApp.callFunction(api.notes.create, { title: "A" });
-void ownApp.callFunction(api.notes.exportAll, {});

@@ -104,7 +104,7 @@ describe("a run's status, as the engine's notifications set it", () => {
     });
   });
 
-  it("gives a run the engine ended as errored without a report of its own one saying it stopped, audited and notified once", async () => {
+  it("gives a run the engine ended as errored without a report of its own one saying it stopped, audited once", async () => {
     const run = await runRow();
     const at = Date.now();
 
@@ -123,7 +123,7 @@ describe("a run's status, as the engine's notifications set it", () => {
         code: "workflow.run_failed",
         message: "The workflow run stopped.",
       },
-      audited: ["workflow.run.failed", "workflow.run.notified"],
+      audited: ["workflow.run.failed"],
     });
   });
 

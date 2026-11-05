@@ -75,7 +75,6 @@ import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
-import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
 import {
   and,
@@ -169,7 +168,6 @@ import migrations from "./db/workspace/migrations/migrations.js";
 import {
   auditOutbox,
   brainCaptureIntents,
-  chatAttachments,
   chatCodeRuns,
   chatDraftFiles,
   maxToolCallIdChars,
@@ -274,19 +272,6 @@ export interface Draft {
 /** What a chat's agent spent building Apps this turn: the Apps it created (agent-builds.ts). */
 interface TurnBuilds {
   created: number;
-}
-
-/**
- * A failed run a new chat's agent is asked to fix (`fixRun` in
- * chats-rpc.ts): its report, attached to the chat as data, and what the
- * report may hold data from, which the chat carries from the start.
- */
-export interface RunToFix {
-  report: RunFailure;
-  /** The run, and every source its App may have read (app-provenance.ts). */
-  sources: string[];
-  /** Whether the run's App is restricted: then the chat is, from the start. */
-  restricted: boolean;
 }
 
 /**
@@ -455,14 +440,6 @@ const chatFileOf = ({
   bytes,
   createdAt: createdAt.toISOString(),
 });
-
-/**
- * A failure report attached to a chat (`attachments`), as this object
- * stored it: checked as far as being an object.
- */
-const storedReportSchema = z.custom<RunFailure>(
-  (value) => typeof value === "object" && value !== null
-);
 
 /** The message a watcher saw last: none (`null`), or a stored one's ID. */
 const afterSchema = z.int().nonnegative().nullable();
@@ -1135,7 +1112,6 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     agentId: string,
     by?: AuditActor,
-    fix?: RunToFix,
     via: ChatChannel = "web",
     thread?: string,
     /** The App the chat is for (`appChat`), if any. */
@@ -1168,101 +1144,16 @@ export class Workspace extends DurableObject<Env> {
           lastAt: now,
           personId,
           agentId: agent.data,
-          restricted: fix?.restricted === true,
           via: channel,
           thread: thread ?? null,
           appId: appId ?? null,
         })
         .returning()
         .get();
-      if (fix !== undefined) {
-        this.#attachRun(made, fix, by);
-      }
       return made;
     });
     this.#deliverAudit();
     return chat;
-  }
-
-  /**
-   * A new chat of `personId`'s to fix a failed run (`createChat` with
-   * `fix`), made only if the deployment allows `model`, which its question
-   * will name: a refused model leaves no chat without a question.
-   */
-  async createFixChat(
-    title: string,
-    personId: string,
-    agentId: string,
-    by: AuditActor,
-    fix: RunToFix,
-    model: string
-  ): Promise<Chat> {
-    const { models: allowed } = await modelSettings(this.env);
-    if (!allowed.includes(model)) {
-      throw modelErrors.create("model.not_allowed");
-    }
-    return this.createChat(title, personId, agentId, by, fix);
-  }
-
-  /**
-   * Attaches the report of the run `fix` names to the new chat, with its
-   * sources, and audits it: in `createChat`'s transaction.
-   */
-  #attachRun(chat: Chat, fix: RunToFix, by: AuditActor | undefined): void {
-    const { report, sources, restricted } = fix;
-    const { id, createdAt, personId, agentId, via } = chat;
-    this.#db
-      .insert(chatAttachments)
-      .values({
-        chatId: id,
-        runId: report.run,
-        report: JSON.stringify(report),
-        createdAt,
-      })
-      .run();
-    const carried = [...new Set([report.run, ...sources])];
-    this.#keepSources(id, carried);
-    const workspace = this.ctx.id.name ?? null;
-    if (by !== undefined) {
-      this.#outboxEntry({
-        actor: by,
-        action: "workflow.run.fix_asked",
-        target: { type: "workflow_run", id: report.run },
-        detail: {
-          app: report.app,
-          workflow: report.workflow,
-          version: report.version,
-          chat: id,
-          workspace,
-        },
-      });
-    }
-    if (restricted) {
-      // As restricted.ts records a chat entering restricted mode.
-      this.#outboxEntry({
-        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
-        action: "context.restricted",
-        target: { type: "chat", id },
-        provenance: carried.slice(0, auditProvenanceMaxItems),
-        detail: { workspace },
-      });
-    }
-  }
-
-  /**
-   * The reports of the failed runs the chat was started to fix, oldest
-   * first, as data for its agent (`env.chat.attachments()` in
-   * agent-apis.ts). Core's own read: the agent's code reaches only its
-   * own chat's.
-   */
-  attachments(chatId: ChatId): RunFailure[] {
-    return this.#db
-      .select({ report: chatAttachments.report })
-      .from(chatAttachments)
-      .where(eq(chatAttachments.chatId, chatId))
-      .orderBy(asc(chatAttachments.createdAt), asc(chatAttachments.runId))
-      .all()
-      .map(({ report }) => storedReportSchema.parse(JSON.parse(report)));
   }
 
   /**
@@ -1726,7 +1617,6 @@ export class Workspace extends DurableObject<Env> {
         personId,
         agentId,
         actorOf({ userId: personId, staff: false }, platform),
-        undefined,
         platform,
         where?.thread
       );
@@ -3832,10 +3722,6 @@ export class Workspace extends DurableObject<Env> {
         this.#db
           .delete(chatToolEvents)
           .where(eq(chatToolEvents.chatId, id))
-          .run();
-        this.#db
-          .delete(chatAttachments)
-          .where(eq(chatAttachments.chatId, id))
           .run();
         this.#dropDrafts(
           eq(chatDraftFiles.chatId, id),

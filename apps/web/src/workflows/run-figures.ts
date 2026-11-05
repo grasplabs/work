@@ -31,28 +31,3 @@ export const runFiguresOf = (activity: RunActivity): RunFigures => {
     waiting: activity.days.reduce((sum, day) => sum + day.waiting, 0),
   };
 };
-
-/**
- * One App workflow's runs: those started in the window and the share of
- * them that completed without asking anyone (core counts no more for one
- * workflow), and `waiting`, its runs waiting for a decision now, which
- * its summary counts over every run, not only the window's.
- */
-export const workflowFiguresOf = (
-  activity: RunActivity,
-  { app, workflow }: { app: string; workflow: string },
-  waiting: number
-): RunFigures => {
-  const counted = activity.workflows.find(
-    (row) => row.type === "app" && row.app === app && row.workflow === workflow
-  );
-  const runs = counted?.started ?? 0;
-  return {
-    runs,
-    alone:
-      counted === undefined || runs === 0
-        ? null
-        : counted.completedAlone / runs,
-    waiting,
-  };
-};

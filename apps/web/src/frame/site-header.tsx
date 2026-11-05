@@ -38,11 +38,6 @@ export type Crumb =
     }
   | {
       label: string;
-      to: "/workflows/$app/$workflow";
-      params: { app: string; workflow: string };
-    }
-  | {
-      label: string;
       to: "/workflows/$workflow";
       params: { workflow: string };
     };
@@ -55,9 +50,6 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   }
   if (!("params" in crumb)) {
     return <Link to={crumb.to} />;
-  }
-  if (crumb.to === "/workflows/$app/$workflow") {
-    return <Link params={crumb.params} to="/workflows/$app/$workflow" />;
   }
   if (crumb.to === "/workflows/$workflow") {
     return <Link params={crumb.params} to="/workflows/$workflow" />;

@@ -21,7 +21,6 @@ import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { roleLabel } from "../labels.ts";
-import type { TeamChoice } from "../workflows/team-picker.tsx";
 import { usePeopleApart } from "./people-apart.ts";
 import type { PeopleApart } from "./people-apart.ts";
 import { matchTyped, PersonOption } from "./person-picker.tsx";
@@ -38,7 +37,7 @@ import type { Pickable } from "./person-picker.tsx";
 /** Who can be added: the organization's people and teams. */
 export interface PeopleAndTeams {
   people: Pickable[];
-  teams: TeamChoice[];
+  teams: { id: string; name: string }[];
 }
 
 /** One person, team or role picked, by the key a list holds it under. */
@@ -62,7 +61,7 @@ export const readPeopleAndTeams = async (
 ): Promise<PeopleAndTeams> => {
   const [members, teams] = await Promise.all([
     session.members.list(),
-    session.workflows.teams(),
+    session.organization.teams(),
   ]);
   return {
     people: members

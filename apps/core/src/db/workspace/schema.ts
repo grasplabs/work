@@ -384,27 +384,6 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * What a chat was started with, besides its question: for now, the
- * failure report of the workflow run the person asked its agent to fix
- * (`chats.fixRun` in chats-rpc.ts), as JSON. Its agent reads it through
- * `env.chat.attachments()`, as data: the report's message is the
- * workflow's own text, and never goes into the agent's instructions.
- */
-export const chatAttachments = sqliteTable(
-  "chat_attachments",
-  {
-    chatId: text("chat_id")
-      .$type<ChatId>()
-      .notNull()
-      .references(() => chats.id),
-    runId: text("run_id").notNull(),
-    report: text().notNull(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.chatId, table.runId] })]
-);
-
-/**
  * Files the person attached to the chat's questions (`chats.attachFile`):
  * the text core read from each, never the file itself, which nothing
  * keeps. `messageId` is the question that carried it, null while it waits

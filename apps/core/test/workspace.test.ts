@@ -92,7 +92,6 @@ describe("Workspace schema", () => {
       "person-1",
       "agent-1",
       undefined,
-      undefined,
       "teams"
     );
     const web = await stub.createChat("From Grasp", "person-1", "agent-1");
@@ -126,7 +125,6 @@ describe("Workspace schema", () => {
         "INSERT INTO chat_sources (chat_id, source_id, created_at) VALUES ('owned', 'collection-1', 1), ('nobodys', 'collection-1', 1), ('no-agent', 'collection-2', 1)",
         "INSERT INTO chat_drafts (chat_id, app_id, base, revision, updated_at) VALUES ('owned', 'app-1', NULL, 1, 1), ('no-agent', 'app-1', NULL, 1, 1)",
         "INSERT INTO chat_draft_files (chat_id, app_id, path, content) VALUES ('owned', 'app-1', 'index.ts', 'a'), ('no-agent', 'app-1', 'index.ts', 'b')",
-        "INSERT INTO chat_attachments (chat_id, run_id, report, created_at) VALUES ('owned', 'run-1', '{}', 1), ('nobodys', 'run-2', '{}', 1)",
       ]) {
         state.storage.sql.exec(statement);
       }
@@ -149,7 +147,6 @@ describe("Workspace schema", () => {
         sources: rows("SELECT chat_id AS chatId FROM chat_sources"),
         drafts: rows("SELECT chat_id AS chatId FROM chat_drafts"),
         files: rows("SELECT chat_id AS chatId FROM chat_draft_files"),
-        attachments: rows("SELECT chat_id AS chatId FROM chat_attachments"),
       }).toStrictEqual({
         chats: [
           {
@@ -167,7 +164,6 @@ describe("Workspace schema", () => {
         sources: [{ chatId: "owned" }],
         drafts: [{ chatId: "owned" }],
         files: [{ chatId: "owned" }],
-        attachments: [{ chatId: "owned" }],
       });
       // Its rows still refer to a chat that exists, and must.
       expect(() => {

@@ -1,4 +1,3 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type {
   RunActivity,
   RunActivityDay,
@@ -6,7 +5,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { runFiguresOf, workflowFiguresOf } from "./run-figures.ts";
+import { runFiguresOf } from "./run-figures.ts";
 
 // The figures over the runs (run-figures.ts): how many ran, the share
 // that needed no person, and how many wait for one, for every workflow
@@ -23,25 +22,6 @@ const day = (
   waiting: 0,
   other: 0,
   withPerson: 0,
-  ...change,
-});
-
-/** A workflow of the Invoices App that ran, changed by `change`. */
-const ran = (
-  name: string,
-  change: Partial<
-    Pick<RunActivityWorkflow, "started" | "completed" | "completedAlone">
-  > = {}
-): RunActivityWorkflow => ({
-  type: "app",
-  app: appIdSchema.parse("invoices"),
-  appName: "Invoices",
-  workflow: workflowIdSchema.parse(name),
-  current: true,
-  started: 0,
-  completed: 0,
-  failed: 0,
-  completedAlone: 0,
   ...change,
 });
 
@@ -93,28 +73,5 @@ describe("the figures over the runs", () => {
       alone: null,
       waiting: 0,
     });
-  });
-
-  it("counts one workflow's runs and the share that completed without a person, with its waiting runs as given", () => {
-    const activity = activityOf(
-      [day(1, { completed: 4 })],
-      [
-        ran("approve", { started: 8, completed: 6, completedAlone: 2 }),
-        ran("remind", { started: 4, completed: 4, completedAlone: 4 }),
-      ]
-    );
-    expect(
-      workflowFiguresOf(activity, { app: "invoices", workflow: "approve" }, 3)
-    ).toStrictEqual({ runs: 8, alone: 0.25, waiting: 3 });
-  });
-
-  it("has no runs and no share for a workflow that didn't run in the window", () => {
-    expect(
-      workflowFiguresOf(
-        activityOf([day(1)], [ran("approve", { started: 2 })]),
-        { app: "other", workflow: "approve" },
-        1
-      )
-    ).toStrictEqual({ runs: 0, alone: null, waiting: 1 });
   });
 });

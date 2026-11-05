@@ -224,6 +224,8 @@ const fakeCore = (
     },
     workflows: {
       byConnection: async () => await Promise.resolve([]),
+    },
+    organization: {
       teams: async () =>
         await Promise.resolve([{ id: "team-finance", name: "Finance" }]),
     },

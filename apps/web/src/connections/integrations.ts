@@ -430,22 +430,9 @@ export const nearestApps = (
     .slice(0, most);
 };
 
-/** A workflow's key: an App's by its App and name, an independent one by its ID. */
-const workflowKeyOf = (workflow: ConnectionWorkflow): string =>
-  workflow.kind === "app"
-    ? JSON.stringify([workflow.app, workflow.workflow])
-    : workflow.id;
-
-/** What a workflow is listed by: an App's by its App's name, then its own. */
-const workflowSortKeyOf = (workflow: ConnectionWorkflow): [string, string] =>
-  workflow.kind === "app"
-    ? [workflow.appName, workflow.workflow]
-    : [workflow.name, ""];
-
 /**
- * The workflows that use any of an integration's connections, each once:
- * App workflows first, by App name and workflow, then independent ones by
- * name, as core lists one connection's.
+ * The workflows that use any of an integration's connections, each once,
+ * by name, as core lists one connection's.
  */
 export const workflowsOf = (
   integration: Integration,
@@ -456,20 +443,13 @@ export const workflowsOf = (
   for (const { connectionId, workflows } of uses) {
     if (ids.has(connectionId)) {
       for (const workflow of workflows) {
-        found.set(workflowKeyOf(workflow), workflow);
+        found.set(workflow.id, workflow);
       }
     }
   }
-  return [...found.values()].toSorted((one, other) => {
-    const [oneFirst, oneSecond] = workflowSortKeyOf(one);
-    const [otherFirst, otherSecond] = workflowSortKeyOf(other);
-    return (
-      Number(one.kind === "independent") -
-        Number(other.kind === "independent") ||
-      oneFirst.localeCompare(otherFirst) ||
-      oneSecond.localeCompare(otherSecond)
-    );
-  });
+  return [...found.values()].toSorted((one, other) =>
+    one.name.localeCompare(other.name)
+  );
 };
 
 /**

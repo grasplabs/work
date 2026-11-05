@@ -1506,6 +1506,27 @@
       "when": 1793829843771,
       "tag": "0214_run_inboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "6",
+      "when": 1793886112476,
+      "tag": "0215_drop_app_workflow_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "6",
+      "when": 1793886202932,
+      "tag": "0216_drop_app_workflow_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "6",
+      "when": 1793886223306,
+      "tag": "0217_drop_app_run_views",
+      "breakpoints": true
     }
   ]
 }

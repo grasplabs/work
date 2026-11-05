@@ -2,7 +2,6 @@ import type {
   ListedConnection,
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -315,18 +314,7 @@ describe("beyond and nearestApps", () => {
   });
 });
 
-const appWorkflow = (
-  appName: string,
-  workflow: string
-): ConnectionWorkflow => ({
-  kind: "app",
-  app: appIdSchema.parse(`app-${appName}`),
-  appName,
-  workflow: workflowIdSchema.parse(workflow),
-});
-
 const independent = (name: string): ConnectionWorkflow => ({
-  kind: "independent",
   id: `workflow-${name}`,
   name,
 });
@@ -429,7 +417,7 @@ describe(sectionsOf, () => {
 });
 
 describe(workflowsOf, () => {
-  it("lists each workflow that uses any of an app's connections once, App workflows first, by App and name", () => {
+  it("lists each workflow that uses any of an app's connections once, by name", () => {
     const shared = connection("microsoft", "shared", "active");
     const personal = connection("microsoft", "personal", "active");
     const elsewhere = connection("google", "shared", "active");
@@ -440,23 +428,20 @@ describe(workflowsOf, () => {
     const uses = [
       {
         connectionId: shared.id,
-        workflows: [appWorkflow("Payroll", "remind"), independent("Digest")],
+        workflows: [independent("Remind"), independent("Digest")],
       },
       {
         connectionId: personal.id,
-        workflows: [
-          appWorkflow("Invoices", "send"),
-          appWorkflow("Payroll", "remind"),
-        ],
+        workflows: [independent("Send"), independent("Remind")],
       },
       { connectionId: elsewhere.id, workflows: [independent("Calendar")] },
     ];
     expect(
       microsoft === undefined ? undefined : workflowsOf(microsoft, uses)
     ).toStrictEqual([
-      appWorkflow("Invoices", "send"),
-      appWorkflow("Payroll", "remind"),
       independent("Digest"),
+      independent("Remind"),
+      independent("Send"),
     ]);
   });
 });

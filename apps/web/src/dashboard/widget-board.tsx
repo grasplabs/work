@@ -6,10 +6,7 @@ import type {
 } from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
-import type {
-  AppWorkflowSummary as WorkflowSummary,
-  RunActivity,
-} from "@grasp-os/shared/workflows";
+import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Popover,
@@ -27,7 +24,7 @@ import {
 import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -39,8 +36,8 @@ import { formatDate } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
-import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
+import { byState, stateOf, workflowStates } from "./board.ts";
+import type { WorkflowState } from "./board.ts";
 import {
   addWidget,
   differsFromDefault,
@@ -52,17 +49,12 @@ import {
 } from "./layout.ts";
 import type { GridShape } from "./layout.ts";
 import { MakingDots } from "./making-dots.tsx";
-import type { GoalProgress, TeamsRead, WorkReturns } from "./returns.ts";
+import type { GoalProgress, WorkReturns } from "./returns.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
 import { SpendWidget } from "./spend-widget.tsx";
-import {
-  GoalListView,
-  ReturnChartView,
-  TeamListView,
-  fills,
-} from "./standard-widgets.tsx";
+import { GoalListView, ReturnChartView, fills } from "./standard-widgets.tsx";
 import { ChangeWidget, WidgetAsk } from "./widget-ask.tsx";
 import {
   BlockButton,
@@ -87,8 +79,8 @@ const CustomWidgetBlock = lazy(async () => {
 // their own board: the widgets on it in their order, saved in core whole
 // with each change. It begins with the prototype's four (what the work
 // returns a month, the board's goals, how far each team is with AI,
-// where the workflows stand), then each engine's workflows, the runs this
-// week and what could be better. There is no mode for changing it: a
+// where the workflows stand), then the Apps, the runs this week and what
+// could be better. There is no mode for changing it: a
 // block pointed at shows its grip, to drag it (or by its title, with the
 // mouse) or move it with the arrow keys, and the button that takes it
 // off; the last place is an empty card that adds one; and a quiet line
@@ -103,15 +95,8 @@ const CustomWidgetBlock = lazy(async () => {
 // drawn in dots (making-dots.tsx). What the prototype's board has
 // besides: the blocks gliding out of each other's way. The goals widget
 // reads the board's goals from core, each with the workflows linked to
-// it, and the teams widget the teams that own workflows; the return
-// widget counts hours core doesn't keep yet: it shows what the prototype
-// shows with nothing to count (`returns.ts`).
-
-/** The engines the person can open, with the workflows. */
-export interface EnginesRead {
-  apps: App[];
-  workflows: WorkflowSummary[];
-}
+// it; the return and teams widgets count what core doesn't keep yet: they
+// show what the prototype shows with nothing to count (`returns.ts`).
 
 /** What the board reads, each on its own, and the person's order of it. */
 export interface Board {
@@ -123,12 +108,11 @@ export interface Board {
   made: Loaded<CustomWidget[]>;
   /** What the return widget counts. */
   returns: WorkReturns;
-  /** The teams that own workflows, and what their workflows handled. */
-  teams: Promise<Loaded<TeamsRead>>;
   /** The board's goals, and how far the workflows that serve each are. */
   goals: Promise<Loaded<GoalProgress[]>>;
   workflows: Promise<Loaded<WorkflowSummary[]>>;
-  engines: Promise<Loaded<EnginesRead>>;
+  /** The Apps the person can open. */
+  engines: Promise<Loaded<App[]>>;
   runs: Promise<Loaded<RunActivity>>;
   signals: Promise<Loaded<Signals>>;
   /** What the models cost this month: admins only, the only ones offered its widget. */
@@ -167,20 +151,18 @@ const StateMark = ({ state }: { state: WorkflowState }) => (
   />
 );
 
-/** A workflow's dot that opens it, and names it and its engine when pointed at. */
+/** A workflow's dot that opens it, and names it when pointed at. */
 const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
-  const { t } = useLingui();
-  const name = workflow.workflow;
-  const { appName } = workflow;
+  const { name } = workflow;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Link
-            aria-label={t`${name} in ${appName}`}
+            aria-label={name}
             className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
-            params={{ app: workflow.app, workflow: name }}
-            to="/workflows/$app/$workflow"
+            params={{ workflow: workflow.workflowId }}
+            to="/workflows/$workflow"
           />
         }
       >
@@ -189,10 +171,7 @@ const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
         />
       </TooltipTrigger>
       <TooltipContent side="right" variant="quiet">
-        <span className="flex flex-col text-left">
-          <span className="text-foreground font-medium">{name}</span>
-          <span>{appName}</span>
-        </span>
+        <span className="text-foreground font-medium">{name}</span>
       </TooltipContent>
     </Tooltip>
   );
@@ -226,7 +205,7 @@ const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
  * a dot for each workflow in it, so the picture is how many stand where,
  * and the count under it. In full, every state as a row: its name and how
  * many stand there on the left, its workflows on the right, one line
- * each with its engine and when it last ran. The prototype's columns are
+ * each with when it last ran. The prototype's columns are
  * the five steps on the way to live, which core doesn't keep.
  */
 const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
@@ -249,10 +228,7 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                 className="flex min-h-0 flex-1 flex-col-reverse items-center gap-1.5"
               >
                 {here.map((workflow) => (
-                  <li
-                    className="flex"
-                    key={`${workflow.app}/${workflow.workflow}`}
-                  >
+                  <li className="flex" key={workflow.workflowId}>
                     <WorkflowDot workflow={workflow} />
                   </li>
                 ))}
@@ -296,18 +272,15 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
               {here.map((workflow) => (
                 <li
                   className="flex items-baseline gap-4"
-                  key={`${workflow.app}/${workflow.workflow}`}
+                  key={workflow.workflowId}
                 >
                   <Link
                     className="min-w-0 flex-1 truncate hover:underline"
-                    params={{ app: workflow.app, workflow: workflow.workflow }}
-                    to="/workflows/$app/$workflow"
+                    params={{ workflow: workflow.workflowId }}
+                    to="/workflows/$workflow"
                   >
-                    {workflow.workflow}
+                    {workflow.name}
                   </Link>
-                  <span className="text-muted-foreground hidden max-w-48 flex-none truncate @md:block">
-                    {workflow.appName}
-                  </span>
                   <span className="text-muted-foreground hidden flex-none tabular-nums @md:block">
                     <LastRun workflow={workflow} />
                   </span>
@@ -331,95 +304,8 @@ const WorkflowsWidget = ({ rows }: { rows: WorkflowSummary[] }) => {
   );
 };
 
-/** How many of an engine's workflows ran, in words. */
-const RanOf = ({ engine }: { engine: EngineWorkflows }) => {
-  const { ran } = engine;
-  const workflows = engine.workflows.length;
-  return (
-    <Plural
-      one={`${ran} of # workflow ran`}
-      other={`${ran} of # workflows ran`}
-      value={workflows}
-    />
-  );
-};
-
-/** How many engines there are with no workflow to show, if any. */
-const Others = ({ count }: { count: number }) =>
-  count === 0 ? null : (
-    <p className="text-muted-foreground border-t pt-3 text-xs first:border-t-0 first:pt-0">
-      <Plural
-        one="# more App with no workflows to show"
-        other="# more Apps with no workflows to show"
-        value={count}
-      />
-    </p>
-  );
-
-/** In full: each engine with its workflows, each with where it stands, opening it. */
-const EngineSections = ({ engines, others }: Engines) => {
-  const { i18n } = useLingui();
-  return (
-    <div className="flex flex-col">
-      {engines.map((engine) => (
-        <section
-          aria-label={engine.app.name}
-          className="grid grid-cols-1 gap-x-6 gap-y-2 border-t py-4 first:border-t-0 first:pt-0 @lg:grid-cols-4"
-          key={engine.app.id}
-        >
-          <h3 className="flex min-w-0 flex-col self-start">
-            <Link
-              className="truncate font-medium hover:underline"
-              params={{ app: engine.app.id }}
-              to="/apps/$app"
-            >
-              {engine.app.name}
-            </Link>
-            <span className="text-muted-foreground text-xs">
-              <RanOf engine={engine} />
-            </span>
-          </h3>
-          <ul className="flex min-w-0 flex-col gap-2 @lg:col-span-3">
-            {engine.workflows.map((workflow) => {
-              const state = stateOf(workflow);
-              return (
-                <li
-                  className="flex items-center gap-2.5"
-                  key={workflow.workflow}
-                >
-                  <StateMark state={state} />
-                  <Link
-                    className="min-w-0 flex-1 truncate hover:underline"
-                    params={{
-                      app: workflow.app,
-                      workflow: workflow.workflow,
-                    }}
-                    to="/workflows/$app/$workflow"
-                  >
-                    {workflow.workflow}
-                  </Link>
-                  <span className="text-muted-foreground flex-none">
-                    {i18n._(stateNames[state])}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-      <Others count={others} />
-    </div>
-  );
-};
-
-/** Each engine the person can open, with how many of its workflows ran. */
-const EnginesWidget = ({
-  apps,
-  rows,
-}: {
-  apps: App[];
-  rows: WorkflowSummary[];
-}) => {
+/** Each App the person can open, opening it. */
+const EnginesWidget = ({ apps }: { apps: App[] }) => {
   const { t } = useLingui();
   const title = t`Apps`;
   if (apps.length === 0) {
@@ -431,40 +317,24 @@ const EnginesWidget = ({
       </WidgetBlock>
     );
   }
-  const { engines, others } = enginesOf(apps, rows);
   return (
-    <WidgetBlock
-      full={<EngineSections engines={engines} others={others} />}
-      title={title}
-    >
+    <WidgetBlock title={title}>
       <ul className="flex flex-col">
-        {engines.map((engine) => (
+        {apps.map((app) => (
           <li
             className="flex items-center gap-3 border-t py-2 first:border-t-0 first:pt-0"
-            key={engine.app.id}
+            key={app.id}
           >
             <Link
               className="min-w-0 flex-1 truncate hover:underline"
-              params={{ app: engine.app.id }}
+              params={{ app: app.id }}
               to="/apps/$app"
             >
-              {engine.app.name}
+              {app.name}
             </Link>
-            <span
-              aria-hidden="true"
-              className="flex max-w-24 flex-none gap-1 overflow-hidden"
-            >
-              {engine.workflows.map((workflow) => (
-                <StateMark key={workflow.workflow} state={stateOf(workflow)} />
-              ))}
-            </span>
-            <span className="text-muted-foreground flex-none text-xs tabular-nums">
-              <RanOf engine={engine} />
-            </span>
           </li>
         ))}
       </ul>
-      <Others count={others} />
     </WidgetBlock>
   );
 };
@@ -488,10 +358,6 @@ const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
     context: "dashboard widget: what the work costs now and what returns",
   }),
   goals: msg({ message: "Board goals", context: "dashboard widget" }),
-  teams: msg({
-    message: "Teams with AI",
-    context: "dashboard widget: how far each team is with AI",
-  }),
   workflows: msg`Workflows`,
   engines: msg`Apps`,
   runs: msg`Runs this week`,
@@ -525,24 +391,6 @@ const widgetBlocks: Record<
       }
     </Await>
   ),
-  teams: (board, title) => (
-    <Await fallback={<WidgetLoading title={title} />} promise={board.teams}>
-      {(loaded) =>
-        loaded.state === "ready" ? (
-          <WidgetBlock
-            full={
-              <TeamListView rows={loaded.data.rows} teams={loaded.data.teams} />
-            }
-            title={title}
-          >
-            <TeamListView rows={loaded.data.rows} teams={loaded.data.teams} />
-          </WidgetBlock>
-        ) : (
-          <NotRead loaded={loaded} title={title} />
-        )
-      }
-    </Await>
-  ),
   workflows: (board, title) => (
     <Await fallback={<WidgetLoading title={title} />} promise={board.workflows}>
       {(loaded) =>
@@ -558,7 +406,7 @@ const widgetBlocks: Record<
     <Await fallback={<WidgetLoading title={title} />} promise={board.engines}>
       {(loaded) =>
         loaded.state === "ready" ? (
-          <EnginesWidget apps={loaded.data.apps} rows={loaded.data.workflows} />
+          <EnginesWidget apps={loaded.data} />
         ) : (
           <NotRead loaded={loaded} title={title} />
         )

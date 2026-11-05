@@ -20,7 +20,6 @@ import {
   ShieldAlertIcon,
   SparklesIcon,
   SplitIcon,
-  TriangleAlertIcon,
   WorkflowIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -62,7 +61,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   packages: msg({ message: "Packages", context: "inbox item kind" }),
-  failedRun: msg({ message: "Failed run", context: "inbox item kind" }),
   stoppedSchedule: msg({
     message: "Stopped schedule",
     context: "inbox item kind",
@@ -103,7 +101,6 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   packages: PackageIcon,
-  failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,

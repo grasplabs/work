@@ -42,11 +42,6 @@ export const workflowErrors = defineErrorFamily({
   "workflow.run_not_found": "There's no such workflow run.",
   "workflow.run_details_removed":
     "This run's details were removed when its retention ended, so there is nothing left to work out a fix from.",
-  "workflow.build_failed": "The App's workflows don't build.",
-  "workflow.model_undeclared":
-    "A workflow's AI step goes through an `ai` permission this version doesn't declare, so it can't be made current.",
-  "workflow.tests_failed":
-    "A workflow's tests fail, or it has none, so this version can't be made current.",
   "workflow.outside_step":
     "A workflow calls its connections only inside a step: code between steps runs again on every replay.",
   "workflow.control_conflict":
@@ -71,30 +66,8 @@ export const workflowErrors = defineErrorFamily({
     "This workflow step waited to run for as long as a step may wait, so it was stopped. Steps already running kept the organization or this App busy throughout: try again later.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
-  "workflow.param_not_found":
-    "The workflow has no such parameter in the App's current version.",
-  "workflow.param_invalid": "That isn't a valid value for this parameter.",
-  "workflow.param_conflict":
-    "The App's current version changed while the value was set. Try again.",
-  "workflow.trigger_gone":
-    "The trigger belongs to a version of the App that is no longer current.",
-  "workflow.owner_invalid":
-    "Only a current member of the organization who can open the App can own its workflow.",
-  "workflow.owner_conflict":
-    "Someone changed the workflow's owner meanwhile. Try again.",
-  "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
     "Another workflow already receives mail at this address.",
-  "workflow.attachment_not_found":
-    "This App has no such attachment: the message isn't kept for it, or its 30 days have passed.",
-  "workflow.attachment_unreadable":
-    "The kept message can't be read any more, so none of its attachments can.",
-  "workflow.call_not_reviewed":
-    "A step called a binding its version's review doesn't show it calling: call each binding only in the step's own function.",
-  "workflow.step_not_reviewed":
-    "A step ran that its version's review doesn't show: run steps only as the workflow's function writes them.",
-  "workflow.calls_not_kept":
-    "This version keeps no reading of what the workflow calls, so it doesn't run: commit the workflow again.",
   // What a step or run failed with when its error named no code of its
   // own: the audit log and failure reports carry these instead.
   "workflow.step_failed": "A step of the workflow failed.",
@@ -255,7 +228,7 @@ export const emailLocalPartSchema = z
  * can be read: the UTC day it was stored and its ID, `2026-09-29/<id>`. It
  * names no App: a run reads only what its own App received.
  */
-export const storedEmailSchema = z
+const storedEmailSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}\/[0-9a-f]{64}$/u);
 
@@ -267,12 +240,6 @@ export const inboundEmailMaxBytes = 10 * 1024 * 1024;
  * lists; so the most attachments a run reads by index.
  */
 export const inboundEmailMaxListed = 100;
-
-/** An attachment's index in a message's run input. */
-export const inboundEmailIndexSchema = z
-  .int()
-  .min(0)
-  .max(inboundEmailMaxListed - 1);
 
 /** A name and address, as a message's headers give them. */
 const mailboxSchema = z.object({ name: z.string(), address: z.string() });
@@ -459,8 +426,7 @@ export const coreStepPrefix = "$grasp:";
  * The key of a sensitive parameter's placeholder, `{"$grasp:param": name}`
  * (the SDK's `sensitiveParam`): where a sealed build seals that parameter
  * as a connector call's argument, its run host puts in the value the run's
- * start froze (core's workflows/sealed-run.ts). An App's run may send
- * none (core's workflows/app-run.ts).
+ * start froze (core's workflows/sealed-run.ts).
  */
 export const sensitiveParamKey = "$grasp:param";
 
@@ -480,27 +446,6 @@ export const placeholderOf = (value: unknown): string | undefined => {
     typeof name === "string"
     ? name
     : undefined;
-};
-
-/** Whether `value` holds a placeholder (`placeholderOf`) at any depth. */
-export const holdsPlaceholder = (value: unknown): boolean => {
-  const seen = new Set<unknown>();
-  const pending: unknown[] = [value];
-  while (pending.length > 0) {
-    const node = pending.pop();
-    if (typeof node === "object" && node !== null && !seen.has(node)) {
-      if (placeholderOf(node) !== undefined) {
-        return true;
-      }
-      seen.add(node);
-      const items: unknown[] = Object.values(node);
-      // One at a time: a spread of a large list would overflow the stack.
-      for (const item of items) {
-        pending.push(item);
-      }
-    }
-  }
-  return false;
 };
 
 /**
@@ -640,74 +585,6 @@ export type RunStatus =
   | "cancelled";
 
 /**
- * A run as an App's screens observe it, all of one revision of the run
- * (core's workflows/summary.ts): its status, who it is, its times (Unix
- * milliseconds), the decisions it waits for, a compensation's cause and
- * activity, and what the person asking may do with it now. `revision`
- * orders snapshots: a greater one is newer.
- */
-export interface RunSummary {
-  revision: number;
-  runId: string;
-  workflowId: string;
-  workflowVersion: number;
-  status:
-    | "queued"
-    | "running"
-    | "waiting"
-    | "paused"
-    | "compensating"
-    | "completed"
-    | "failed"
-    | "cancelled";
-  createdAt: number;
-  /** When the engine first ran it; null until it has. */
-  startedAt: number | null;
-  /** Once it has ended; null before. */
-  finishedAt: number | null;
-  /** While it compensates: why, and what its cleanup is doing. */
-  compensation?: {
-    cause: "failure" | "cancellation";
-    activity: "running" | "waiting" | "paused";
-    /**
-     * After a failure, what the run failed with, to those who see why a
-     * run failed (its person and admins): as `error` once it ends.
-     */
-    originalError?: { code: string; message: string };
-  };
-  /** Why it failed, once failed: a code and message, no values. */
-  error?: { code: string; message: string };
-  /** The decisions it waits for now: none once it has ended. */
-  waits: { kind: "decision"; name: string; expiresAt: number }[];
-  /**
-   * While it is `queued` for a share of the attempts that run at once (its
-   * App's, its person's or the organization's): which, and when it asks
-   * again at the latest. Throttling, not a fault of the workflow.
-   */
-  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
-  /**
-   * While it is `queued` because a model call of it failed on the
-   * organization's own AI provider key: the provider, what it showed (it
-   * refuses the key, isn't answering, or is limiting requests), and since
-   * when. It goes on by itself once calls work.
-   */
-  aiProvider?: { since: number; provider: string; trouble: ProviderTrouble };
-  /**
-   * What the person asking may do now, as the host would admit it, and a
-   * control the host admitted that the engine is still applying.
-   */
-  control: {
-    canPause: boolean;
-    canResume: boolean;
-    canCancel: boolean;
-    pendingControl: {
-      kind: "pause" | "resume" | "cancel";
-      stage: "applying";
-    } | null;
-  };
-}
-
-/**
  * A step's or a compensation's failure as a run's history shows it. To
  * those who see the run's details (admins, and the person it acts for):
  * its code and message. To anyone else: the code only when it is one the
@@ -744,7 +621,14 @@ export type RunHistoryEntry = {
 } & (
   | {
       kind: "lifecycle";
-      status: Exclude<RunSummary["status"], "compensating">;
+      status:
+        | "queued"
+        | "running"
+        | "waiting"
+        | "paused"
+        | "completed"
+        | "failed"
+        | "cancelled";
     }
   | {
       kind: "lifecycle";
@@ -800,59 +684,6 @@ export type RunHistoryEntry = {
        */
       kind: "unreadable";
     }
-);
-
-/** Most entries one page of a run's history holds. */
-export const runHistoryMaxPageSize = 100;
-
-/** What `WorkflowsApi.history` reads: a page size, and where to go on from. */
-export const runHistoryPageSchema = z
-  .strictObject({
-    pageSize: z.int().min(1).max(runHistoryMaxPageSize).default(50),
-    /** The `nextCursor` of the page before; null for the first. */
-    cursor: z
-      .string()
-      .regex(/^[1-9]\d{0,15}$/u)
-      .nullable()
-      .default(null),
-  })
-  .default({ pageSize: 50, cursor: null });
-
-/** What `WorkflowsApi.history` reads. */
-export type RunHistoryPageQuery = z.input<typeof runHistoryPageSchema>;
-
-/**
- * One page of a run's history, oldest first; the last page has no cursor.
- * Empty once the run's details are removed.
- */
-export type RunHistoryPage =
-  | { items: RunHistoryEntry[]; nextCursor: null; hasMore: false }
-  | { items: RunHistoryEntry[]; nextCursor: string; hasMore: true };
-
-/**
- * A trigger of a workflow, as its App's current version registered it:
- * read from that registration, which was checked as the version was made
- * current, never from the workflow's code again. `position` is its place
- * among the triggers the workflow's code declares, its own alone: two
- * triggers alike in all else (one event, two filters) still differ in it.
- */
-export type WorkflowTrigger = { position: number } & (
-  | {
-      type: "schedule";
-      /** The schedule parameter it runs on. */
-      param: string;
-      timeZone: string;
-      /** ISO 8601; null while it has no next run. */
-      nextRunAt: string | null;
-      /** Its runs failed to start {@link maxFailedStarts} times in a row. */
-      stopped: boolean;
-    }
-  | {
-      type: "email";
-      /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
-      localPart: string;
-    }
-  | { type: "event"; event: string }
 );
 
 /**
@@ -940,213 +771,8 @@ export interface WorkflowRun {
  */
 export type StepKind = "exact" | "ai" | "decision" | "wait";
 
-/** An option written as a literal, or an object of literals. */
-export type OptionValue =
-  | string
-  | number
-  | boolean
-  | { [key: string]: OptionValue };
-
-/** A step as the UI shows it. */
-export interface StepOutline {
-  type: "step";
-  name: string;
-  kind: StepKind;
-  description: string;
-  /** Source of the per-item key, e.g. `invoice.id`; only on keyed steps. */
-  key?: string;
-  /** Changes something outside Grasp; a decision's `ask` always does. */
-  sideEffect: boolean;
-  /** Deterministic, with no model involvement. */
-  locked: boolean;
-  /** Parameters the call reads (options and callback), in source order. */
-  params: string[];
-  /** Other options written as literals, e.g. `retries` or `instructions`. */
-  options: Record<string, OptionValue>;
-  /**
-   * Options the step reads only at run time, e.g. a decision's `from` or
-   * `timeout` taken from the run's input: neither a parameter nor
-   * literals, so the review shows only how they're written (`code`).
-   * Absent when there are none.
-   */
-  dynamic?: string[];
-  /**
-   * The App's bindings the step's code calls (`env.NAME`): its own
-   * functions (`APP`) or a connection, each of which may change things. Absent when it calls none.
-   */
-  env?: string[];
-  /**
-   * The step's call as written, its function included, which the review
-   * of a version compares whole: any change to its code shows. Only for
-   * the App's builders; empty for anyone else.
-   */
-  code: string;
-  line: number;
-}
-
-/** Steps that run only when a condition holds. */
-export interface BranchOutline {
-  type: "branch";
-  /** The condition as written, e.g. `extracted.total > params.threshold`. */
-  condition: string;
-  /** Parameters the condition reads. */
-  params: string[];
-  /** Steps when the condition holds. */
-  steps: OutlineNode[];
-  /** Steps when it doesn't (the `else`). */
-  otherwise: OutlineNode[];
-  line: number;
-}
-
-/** Steps that run once per item. */
-export interface LoopOutline {
-  type: "loop";
-  /** The loop's head as written, e.g. `for (const invoice of input.invoices)`. */
-  header: string;
-  /** Parameters the head reads. */
-  params: string[];
-  steps: OutlineNode[];
-  line: number;
-}
-
-export type OutlineNode = StepOutline | BranchOutline | LoopOutline;
-
-/**
- * A workflow's steps, as its code runs them: read from the code by the
- * SDK's describer (`@grasp-os/sdk/describe`), never kept apart from it.
- */
-export interface WorkflowOutline {
-  steps: OutlineNode[];
-}
-
-/** An outline's steps, wherever they are in its branches and loops. */
-export const outlineSteps = (nodes: readonly OutlineNode[]): StepOutline[] =>
-  nodes.flatMap((node) => {
-    if (node.type === "step") {
-      return [node];
-    }
-    return node.type === "loop"
-      ? outlineSteps(node.steps)
-      : [...outlineSteps(node.steps), ...outlineSteps(node.otherwise)];
-  });
-
-/**
- * The App's bindings a workflow's code calls, as the review of its version
- * shows them, which its runs are held to. Bindings by name only (`APP` for
- * the App's own server, a collection's, a connection's or another App's
- * exports' binding name), not by method: the reader names no more, so a
- * step shown calling a binding may call any of its methods.
- */
-export interface WorkflowCalls {
-  /**
-   * The bindings each step calls, by step name, every step included, as
-   * its outline names them (`StepOutline.env`); null when the steps can't
-   * be read, and every step is then held to `all`.
-   */
-  steps: Record<string, string[]> | null;
-  /**
-   * Each step's kind, by step name, as its outline names it
-   * (`StepOutline.kind`): what the host lets it run as (`stepRunsAs`).
-   * Empty when the steps can't be read.
-   */
-  kinds: Record<string, StepKind>;
-  /**
-   * The model binding each AI step's call names (`step.llm`'s `binding`),
-   * by step name: what its model calls may name (`modelReviewed`). When
-   * the steps can't be read, the bindings of every AI step its code may
-   * take (`aiStepCalls`), any of which its model calls may name. Empty
-   * when it has no AI step.
-   */
-  models: Record<string, string[]>;
-  /**
-   * The steps written with a `key` (`StepOutline.key`): only these run
-   * under a keyed engine name (`name:key`). Empty when the steps can't be
-   * read, and any name may then run.
-   */
-  keyed: string[];
-  /** Every binding the workflow's code calls, in any step. */
-  all: string[];
-  /**
-   * The options each step reads only at run time (`StepOutline.dynamic`),
-   * by step name: only steps that have any. Absent when none does.
-   */
-  dynamic?: Record<string, string[]>;
-}
-
-/** What ends a step's name in its engine name: a key, or a decision's part. */
-const engineNameSeparator = /[:#]/u;
-
 /** The SDK's own step, which reads the run's parameters and calls nothing. */
 export const paramsStep = "$params";
-
-/**
- * The name a step has in its outline, from its engine name (`name`,
- * `name:key` for a keyed step, `name#ask` for a part of a decision): step
- * names hold neither `:` nor `#`.
- */
-export const outlineNameOf = (engineStep: string): string =>
-  engineStep.split(engineNameSeparator, 1)[0] ?? "";
-
-/** Whether an engine name runs its step under a key (`name:key…`). */
-const isKeyed = (engineStep: string): boolean =>
-  engineStep.slice(outlineNameOf(engineStep).length).startsWith(":");
-
-/**
- * Whether a step of this name may run: one the review shows, or the
- * SDK's `$params`, and under a key only if the review shows it written
- * with one (`WorkflowCalls.keyed`): a step written once is never run
- * again under names of the run's making. Any name may when the steps
- * can't be read.
- */
-export const stepReviewed = (
-  calls: WorkflowCalls,
-  engineStep: string
-): boolean => {
-  if (calls.steps === null || engineStep === paramsStep) {
-    return true;
-  }
-  const name = outlineNameOf(engineStep);
-  return (
-    Object.hasOwn(calls.steps, name) &&
-    (!isKeyed(engineStep) || calls.keyed.includes(name))
-  );
-};
-
-/**
- * Whether an AI step of engine name `engineStep` may ask the model
- * binding `binding`: the one its review shows its call naming
- * (`WorkflowCalls.models`), or, when the steps can't be read, one of
- * those its code's AI steps name.
- */
-export const modelReviewed = (
-  calls: WorkflowCalls,
-  engineStep: string,
-  binding: string
-): boolean => {
-  if (calls.steps === null) {
-    return Object.values(calls.models).some((bindings) =>
-      bindings.includes(binding)
-    );
-  }
-  const name = outlineNameOf(engineStep);
-  return (
-    Object.hasOwn(calls.models, name) &&
-    (calls.models[name]?.includes(binding) ?? false)
-  );
-};
-
-/**
- * Whether a decision step of engine name `engineStep` takes its reviewer
- * (`from`) only at run time, so the run's starter may have chosen it: as
- * its review keeps it, or when the steps can't be read, as nobody can
- * then say it doesn't.
- */
-export const reviewerChosenAtRun = (
-  calls: WorkflowCalls,
-  engineStep: string
-): boolean =>
-  calls.steps === null ||
-  (calls.dynamic?.[outlineNameOf(engineStep)]?.includes("from") ?? false);
 
 /**
  * How the host is asked to run a step, by the SDK only in these ways for
@@ -1164,129 +790,9 @@ export type StepUse =
   | "decision"
   | "recipients";
 
-/** A decision's parts the SDK asks who it asks in (workflow.ts). */
-const decisionAskParts = new Set(["ask", "remind"]);
-
-/** A decision's parts the SDK runs as steps: asking, and when it asked. */
-const decisionDoParts = new Set(["ask", "remind", "asked", "reminded"]);
-
-/** A decision's parts the SDK waits for its answer in. */
-const decisionWaitParts = new Set(["answer", "answer-after-reminder"]);
-
-/**
- * Each use, by the kind kept for a step and the decision part (`name#…`,
- * null for none) its engine name runs.
- */
-const runsAs: Record<
-  StepUse,
-  (kind: StepKind, part: string | null) => boolean
-> = {
-  do: (kind, part) =>
-    part === null
-      ? kind !== "wait"
-      : kind === "decision" && decisionDoParts.has(part),
-  sleep: (kind, part) => kind === "wait" && part === null,
-  waitForDecision: (kind, part) =>
-    kind === "decision" && part !== null && decisionWaitParts.has(part),
-  recipients: (kind, part) =>
-    kind === "decision" && part !== null && decisionAskParts.has(part),
-  decision: (kind, part) => kind === "decision" && part === null,
-  model: (kind, part) => kind === "ai" && part === null,
-};
-
-/**
- * Whether a step of engine name `engineStep` may be run as `use`: as the
- * kind its review keeps (`WorkflowCalls.kinds`) runs it, so a reviewed
- * name is never run as another kind (a wait as code, an exact step asking
- * a model or a person). Any use when the steps can't be read, as any name
- * then; the SDK's `$params` only as a `do`. A reviewed name with no kept
- * kind is refused.
- */
-export const stepRunsAs = (
-  calls: WorkflowCalls,
-  engineStep: string,
-  use: StepUse
-): boolean => {
-  if (calls.steps === null) {
-    // Held to all its calls; a model only if its code has an AI step at
-    // all (`aiStepCalls`, kept as `kinds`).
-    return use !== "model" || Object.values(calls.kinds).includes("ai");
-  }
-  if (engineStep === paramsStep) {
-    return use === "do";
-  }
-  const name = outlineNameOf(engineStep);
-  const kind = Object.hasOwn(calls.kinds, name) ? calls.kinds[name] : undefined;
-  const hash = engineStep.indexOf("#");
-  const part = hash === -1 ? null : engineStep.slice(hash + 1);
-  return kind !== undefined && runsAs[use](kind, part);
-};
-
-/**
- * The task a step of engine name `engineStep` is, as `calls` (its
- * version's review) names it: its outline name, without the key or part
- * an engine name adds. Null when the review doesn't show that name, or
- * shows no steps at all (`steps` null, or no review kept): a name the
- * review didn't read can be made of what the run read, so it isn't shown.
- */
-export const reviewedTaskOf = (
-  calls: WorkflowCalls | undefined,
-  engineStep: string
-): string | null => {
-  const steps = calls?.steps ?? null;
-  const name = outlineNameOf(engineStep);
-  return steps !== null && Object.hasOwn(steps, name) ? name : null;
-};
-
-/**
- * Whether a step's function may call `binding`, by the step's engine name:
- * its review shows the step calling it, or, when the steps can't be read,
- * the workflow's code calls it at all.
- */
-export const callReviewed = (
-  calls: WorkflowCalls,
-  engineStep: string,
-  binding: string
-): boolean => {
-  if (calls.steps === null) {
-    return calls.all.includes(binding);
-  }
-  const name = outlineNameOf(engineStep);
-  return (
-    Object.hasOwn(calls.steps, name) &&
-    (calls.steps[name]?.includes(binding) ?? false)
-  );
-};
-
-/** Which runs `WorkflowsApi.runs` lists; each field narrows it. */
+/** Which runs `WorkflowsApi.runs` lists. */
 export interface RunFilter {
-  app?: string;
-  workflow?: string;
   status?: RunFilterStatus;
-}
-
-/**
- * The workflow a run, a summary or a count is of: an App's, by its App and
- * ID, or an independent one (platform specification 13), by its ID and
- * name. The run lists, the overview and the activity read both alike.
- */
-export type RunWorkflowRef =
-  | { type: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { type: "resource"; workflowId: WorkflowResourceId; name: string };
-
-/**
- * A run of an App's workflow as the Runs list has it, with its App's
- * name. While it waits for a decision its `status` is `waiting`.
- */
-export interface AppListedRun extends WorkflowRun {
-  type: "app";
-  appName: string;
-  /**
-   * An open decision it waits for that the person may answer now (the
-   * latest such), answered on its own page (`/decisions/<id>`); none when
-   * they may answer none of them.
-   */
-  decision?: string;
 }
 
 /**
@@ -1295,8 +801,7 @@ export interface AppListedRun extends WorkflowRun {
  * workflow's builders, their own for its users). What it returned or why
  * it failed stays on the run itself.
  */
-export interface ResourceListedRun {
-  type: "resource";
+export interface ListedRun {
   id: RunId;
   workflowId: WorkflowResourceId;
   name: string;
@@ -1318,9 +823,6 @@ export interface ResourceListedRun {
   createdAt: string;
   endedAt: string | null;
 }
-
-/** A run as the Runs list has it, of an App's workflow or an independent one. */
-export type ListedRun = AppListedRun | ResourceListedRun;
 
 /** Most runs one `runs` call returns. */
 export const runsPageSize = 100;
@@ -1351,15 +853,17 @@ export interface LatestRun {
   createdAt: string;
 }
 
-/** What the Workflows page shows of any workflow, an App's or independent. */
-interface WorkflowRunCounts {
-  /**
-   * Who owns it: the person who answers for it. For an App's workflow, and
-   * told when a run a trigger started fails, its App's owner unless
-   * someone set another; for an independent one, who created it. Not whom
-   * its runs act for: a run of an App no person started acts for the
-   * App's owner.
-   */
+/**
+ * An independent workflow the person has a role in, as the Workflows page
+ * lists it. Its counts are of the runs its page lists them: every run for
+ * its builders, their own for its users.
+ */
+export interface WorkflowSummary {
+  workflowId: WorkflowResourceId;
+  name: string;
+  /** The version published last, which new runs run; null before the first. */
+  version: number | null;
+  /** Who owns it: the person who created it. */
   owner: { userId: string; name: string | null };
   /**
    * Its latest run, of any version, `waiting` while it waits for a
@@ -1375,91 +879,6 @@ interface WorkflowRunCounts {
    * in the last {@link handledRunDays} days.
    */
   handled: number;
-}
-
-/** A workflow of an App's current version, as the Workflows page lists it. */
-export interface AppWorkflowSummary extends WorkflowRunCounts {
-  type: "app";
-  app: AppId;
-  appName: string;
-  workflow: WorkflowId;
-  /** The App's current version, which new runs run. */
-  version: number;
-  /**
-   * Whether the person may change its owner (`setOwner`) and its team
-   * (`setTeam`): an admin, or a builder of the App; never Grasp staff.
-   */
-  changesOwner: boolean;
-  /** The organization's team that owns it (`setTeam`); null for none. */
-  team: { id: string; name: string } | null;
-  /**
-   * A schedule of it stopped: its run failed to start
-   * {@link maxFailedStarts} times in a row. It starts again once its
-   * schedule parameter is set, or a new version is made current.
-   */
-  scheduleStopped: boolean;
-}
-
-/**
- * An independent workflow the person has a role in, as the Workflows page
- * lists it. Its counts are of the runs its page lists them: every run for
- * its builders, their own for its users.
- */
-export interface ResourceWorkflowSummary extends WorkflowRunCounts {
-  type: "resource";
-  workflowId: WorkflowResourceId;
-  name: string;
-  /** The version published last, which new runs run; null before the first. */
-  version: number | null;
-}
-
-/** A workflow as the Workflows page lists it. */
-export type WorkflowSummary = AppWorkflowSummary | ResourceWorkflowSummary;
-
-/**
- * One workflow, as its view shows it: its summary, its steps as its code
- * reads (or why they can't be read), and, for the App's builders, its
- * parameters.
- */
-export interface WorkflowDetail {
-  summary: AppWorkflowSummary;
-  /**
-   * For anyone who doesn't build the App, the outline without its code:
-   * no conditions, loop heads, per-item keys, parameters read or literal
-   * options, only each step's description, name and kind.
-   */
-  steps:
-    | { ok: true; outline: WorkflowOutline }
-    | { ok: false; message: string };
-  /**
-   * What starts it by itself, in the order its code declares them, as the
-   * current version registered them; none for one started only by people.
-   */
-  triggers: WorkflowTrigger[];
-  /**
-   * Its parameters, for those who build the App; null for anyone else,
-   * who neither sees nor sets them.
-   */
-  params: WorkflowParam[] | null;
-  /** Whether the person sets its parameters: a builder, not Grasp staff. */
-  setsParams: boolean;
-}
-
-/**
- * A dry run of each of a workflow's tests, with the parameter values
- * people set now over the test's own: what each run did and would have
- * changed, as the test harness reports it (`dryRun`). It makes no state
- * changes: side effects are recorded, never made.
- */
-export interface WorkflowDryRun {
-  /** The App version whose code ran. */
-  version: number;
-  runs: {
-    /** The test the run is of. */
-    name: string;
-    status: "completed" | "failed";
-    report: string;
-  }[];
 }
 
 /** Most UTC days one `activity` read looks back over, today included. */
@@ -1505,21 +924,9 @@ export interface RunActivityDay {
 }
 
 /** A workflow's runs started in the window, and how many of them ended how. */
-export type RunActivityWorkflow = (
-  | {
-      type: "app";
-      app: AppId;
-      appName: string;
-      workflow: WorkflowId;
-      /**
-       * It is a workflow of its App's current version, so its page opens; a
-       * workflow a later version removed or renamed has runs here but no
-       * page.
-       */
-      current: boolean;
-    }
-  | { type: "resource"; workflowId: WorkflowResourceId; name: string }
-) & {
+export interface RunActivityWorkflow {
+  workflowId: WorkflowResourceId;
+  name: string;
   started: number;
   completed: number;
   failed: number;
@@ -1528,7 +935,7 @@ export type RunActivityWorkflow = (
    * it handled without a person.
    */
   completedAlone: number;
-};
+}
 
 /**
  * The runs a person can list (`WorkflowsApi.runs`), started over the last
@@ -1559,26 +966,20 @@ export interface RunActivity {
     timedOut: number;
     open: number;
   };
-  /** Each workflow that ran, by App name, then workflow. */
+  /** Each workflow that ran, by name. */
   workflows: RunActivityWorkflow[];
 }
 
-/**
- * A workflow that uses a connection, as Integrations names and links it:
- * an App's (its App and its name in the App's code), or an independent
- * workflow (its ID and name).
- */
-export type ConnectionWorkflow =
-  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { kind: "independent"; id: string; name: string };
+/** A workflow that uses a connection, as Integrations names and links it. */
+export interface ConnectionWorkflow {
+  id: string;
+  name: string;
+}
 
 /**
- * The workflows a person can open that use one connection: an App's whose
- * App holds an active permission on it and whose code calls that
- * permission's binding, and an independent workflow whose current version
- * declares a connector binding an active approval serves through the
- * workflow's own active permission on it. App workflows first, by App name
- * and workflow, then independent ones by name.
+ * The workflows a person can open that use one connection: each whose
+ * current version declares a connector binding an active approval serves
+ * through the workflow's own active permission on it, by name.
  */
 export interface ConnectionWorkflows {
   connectionId: string;
@@ -1621,18 +1022,18 @@ export interface TodayRun {
   /** It waits on someone other than the reader. */
   waitsOnOthers: boolean;
   /**
-   * The run it came from, by its lineage: an App run's root, an
-   * independent run's parent; only a run of today the reader sees, null
-   * otherwise.
+   * The run it came from, its parent; only a run of today the reader
+   * sees, null otherwise.
    */
   from: string | null;
 }
 
 /** A workflow that worked today, with its runs of the day, oldest first. */
-export type TodayLane = (
-  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { kind: "independent"; id: string; name: string }
-) & { runs: TodayRun[] };
+export interface TodayLane {
+  id: string;
+  name: string;
+  runs: TodayRun[];
+}
 
 /**
  * The runs of the company's day across the workflows the reader may see,
@@ -1656,39 +1057,14 @@ export interface WorkflowsToday {
 }
 
 /**
- * A signed-in person's workflows. Anyone with a role in the App
- * (`AppsApi`) starts and follows its runs, and its builders cancel them;
- * every call checks the session and the person's role again.
+ * A signed-in person's view of the independent workflows they have a role
+ * in, and their runs; every call checks the session and the person's role
+ * again.
  */
 export interface WorkflowsApi {
   /**
-   * Starts a run of an App's workflow on the App's current version, acting
-   * for the person who starts it.
-   */
-  start: (
-    app: string,
-    workflow: string,
-    input?: unknown
-  ) => Promise<WorkflowRun>;
-  /** A run as it is now. */
-  status: (run: string) => Promise<WorkflowRun>;
-  /**
-   * A page of a run's history, oldest first, for anyone `status` shows the
-   * run to: what its engine journaled, step by step and attempt by attempt.
-   */
-  history: (run: string, page?: RunHistoryPageQuery) => Promise<RunHistoryPage>;
-  /**
-   * An App's runs, newest first; a failed one with its report for those
-   * `status` shows it to.
-   */
-  list: (app: string) => Promise<WorkflowRun[]>;
-  /** Stops a run for good; a run that ended stays as it ended. */
-  cancel: (run: string) => Promise<WorkflowRun>;
-  /**
-   * Every workflow of the current version of every App the person can
-   * open, by App name and workflow, then every independent workflow they
-   * have a role in, by name: each with its latest run and its waiting and
-   * failed runs.
+   * Every independent workflow the person has a role in, by name: each with
+   * its latest run and its waiting and failed runs.
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
@@ -1698,10 +1074,8 @@ export interface WorkflowsApi {
    */
   byConnection: () => Promise<ConnectionWorkflows[]>;
   /**
-   * Runs of the Apps the person can open, and of the independent workflows
-   * they have a role in (every run for a builder, their own for a user),
-   * as `filter` narrows them (an App or its workflow: that App's runs
-   * alone):
+   * Runs of the independent workflows the person has a role in (every run
+   * for a builder, their own for a user), as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended
    * first), then the rest, newest first; at most {@link runsPageSize},
    * with `more` when more matched.
@@ -1715,79 +1089,8 @@ export interface WorkflowsApi {
   activity: (query?: RunActivityQuery) => Promise<RunActivity>;
   /**
    * The runs of the company's day across the workflows the person may
-   * see, App and independent alike, a lane per workflow that worked; runs
-   * they may not see only counted.
+   * see, a lane per workflow that worked; runs they may not see only
+   * counted.
    */
   today: () => Promise<WorkflowsToday>;
-  /** One workflow of an App's current version. */
-  get: (app: string, workflow: string) => Promise<WorkflowDetail>;
-  /**
-   * Makes `owner`, a member of the organization who can open the App,
-   * the owner of an App's workflow; for admins and the App's builders,
-   * audited. Returns the workflow's summary as it is now.
-   */
-  setOwner: (
-    app: string,
-    workflow: string,
-    owner: string
-  ) => Promise<AppWorkflowSummary>;
-  /**
-   * Makes one of the organization's teams (by ID) the team that owns an
-   * App's workflow, or none with `null`; for admins and the App's
-   * builders, audited. Returns the workflow's summary as it is now.
-   */
-  setTeam: (
-    app: string,
-    workflow: string,
-    team: string | null
-  ) => Promise<AppWorkflowSummary>;
-  /**
-   * The organization's teams, by name, that a workflow's team may be set
-   * to (`setTeam`); for admins and builders, never Grasp staff.
-   */
-  teams: () => Promise<{ id: string; name: string }[]>;
-  /**
-   * Dry-runs a workflow's tests at the App's current version, with the
-   * parameter values set now; for the App's builders.
-   */
-  test: (app: string, workflow: string) => Promise<WorkflowDryRun>;
-  /** The values people set for a workflow's parameters. */
-  readonly params: WorkflowParamsApi;
-}
-
-/**
- * A parameter of a workflow in its App's current version, as its code
- * declares it, with the value people set.
- */
-export interface WorkflowParam {
-  name: string;
-  /** `money`, `number`, `text`, `person`, `schedule` or `template`. */
-  kind: string;
-  label: string;
-  /**
-   * Its value needs care where it's shown. It's set like any other, and,
-   * like any other, never goes in an audit event.
-   */
-  sensitive: boolean;
-  default: ParamValue;
-  /** For money: its ISO 4217 currency; amounts are in its minor units. */
-  currency?: string;
-  /** The value people set; null while the code's default applies. */
-  value: ParamValue | null;
-}
-
-/**
- * The values of workflows' parameters. The App's builders set them
- * directly, sensitive or not, audited without the value.
- */
-export interface WorkflowParamsApi {
-  /** A workflow's parameters, in the order its code declares them. */
-  list: (app: string, workflow: string) => Promise<WorkflowParam[]>;
-  /** Sets a parameter's value, audited without the value. */
-  set: (
-    app: string,
-    workflow: string,
-    param: string,
-    value: ParamValue
-  ) => Promise<WorkflowParam>;
 }

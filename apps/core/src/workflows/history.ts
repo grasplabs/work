@@ -1,20 +1,8 @@
-import { appErrors } from "@grasp-os/shared/apps";
 import { isExpectedCode } from "@grasp-os/shared/errors";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
-import {
-  reviewedTaskOf,
-  runHistoryPageSchema,
-  workflowErrors,
-} from "@grasp-os/shared/workflows";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunHistoryEntry,
   RunHistoryError,
-  RunHistoryPage,
-  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 import type { WorkflowError } from "@grasp-os/workerflow/contracts";
 import type {
@@ -24,14 +12,9 @@ import type {
   StepIdentity,
 } from "@grasp-os/workerflow/run";
 
-import { callsFor, appFor } from "../apps.ts";
-import type { Member } from "../auth/identity.ts";
 import { decisionOfEventType } from "../decisions/decisions.ts";
 import { runObjectOf } from "./engine.ts";
 import { waitKeyOf, waitStepPrefix } from "./host.ts";
-import { detailsRemoved } from "./retention.ts";
-import { findRun, seesDetails } from "./runs.ts";
-import type { RunRow } from "./runs.ts";
 
 // A run's history, as Grasp's run pages show it: projected, page by page,
 // from what the run's engine journaled (workerflow's `history`), never
@@ -49,8 +32,8 @@ import type { RunRow } from "./runs.ts";
 // What it holds: metadata only. The engine hands core no params, output,
 // step result or event payload for it, so none can reach a page: no
 // input, output, reviewer or review. A step is named (`taskId`) only by a
-// name its version's review shows (`reviewedTaskOf`), without the key an
-// engine name adds (`name:key`, from the App's data); any other name can
+// name its version's build names (`taskOf`), without the key an
+// engine name adds (`name:key`, from the run's data); any other name can
 // be made of what the run read, so its entries name no task, and the
 // opaque `stepId` alone tells the step. A failure's message is the
 // workflow's own text, which can hold what the run read, so only those
@@ -145,7 +128,7 @@ interface Context {
   sees: boolean;
   /**
    * The task an engine step name is, as its version names it; null for a
-   * name it doesn't (`reviewedTaskOf` for an App's run).
+   * name it doesn't.
    */
   taskOf: (engineStep: string) => string | null;
   /**
@@ -650,31 +633,6 @@ export const historyTeller = async (
   return (record) => entryOf(record, context);
 };
 
-/**
- * What the run's version's review shows of its workflow; none when the
- * version keeps none (or is gone), and then no step is named.
- */
-const reviewedOf = async (
-  env: Env,
-  row: RunRow
-): Promise<WorkflowCalls | undefined> => {
-  try {
-    return await callsFor(env, {
-      app: appIdSchema.parse(row.appId),
-      version: row.version,
-      workflow: workflowIdSchema.parse(row.workflowId),
-    });
-  } catch (error) {
-    if (
-      workflowErrors.codeOf(error) === "workflow.calls_not_kept" ||
-      appErrors.codeOf(error) === "app.version_not_found"
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
-};
-
 /** How a page of a run's history tells its steps: `Context`'s own two. */
 export interface HistoryTelling {
   readonly sees: boolean;
@@ -739,44 +697,4 @@ export const historyEntries = async (
   return more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };
-};
-
-/**
- * A page of run `run`'s history for `by`, from `input`'s cursor (the
- * engine event ID the page before ended at): at most its page size of
- * entries, oldest first.
- */
-export const runHistory = async (
-  env: Env,
-  by: Member,
-  run: unknown,
-  input?: unknown
-): Promise<RunHistoryPage> => {
-  const id = runIdSchema.safeParse(run);
-  const query = runHistoryPageSchema.safeParse(input);
-  if (!(id.success && query.success)) {
-    throw workflowErrors.create("workflow.invalid");
-  }
-  const row = await findRun(env, id.data);
-  if (row === undefined) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  const { owner } = await appFor(env, by, row.appId, "user");
-  if (detailsRemoved(row)) {
-    return { items: [], nextCursor: null, hasMore: false };
-  }
-  const reviewed = await reviewedOf(env, row);
-  const { pageSize, cursor } = query.data;
-  const page = await historyEntries(
-    env,
-    row.id,
-    { after: cursor === null ? 0 : Number(cursor), pageSize },
-    {
-      sees: seesDetails(by, row, owner),
-      taskOf: (engineStep) => reviewedTaskOf(reviewed, engineStep),
-    }
-  );
-  return page.hasMore && page.nextCursor !== null
-    ? { items: [...page.items], nextCursor: page.nextCursor, hasMore: true }
-    : { items: [...page.items], nextCursor: null, hasMore: false };
 };

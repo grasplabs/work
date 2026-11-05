@@ -82,9 +82,6 @@ import { runFilesRemoved } from "./run-files.ts";
 // Kept, each by rules of its own, not this retention's:
 // - The audit log: it has its own retention (audit-log.ts), and its
 //   events of a run's steps name them as the workflow did, keys and all.
-// - A chat started to fix a failed run keeps the failure report it was
-//   started with, message included, as the chat's attachment
-//   (workspace.ts), for as long as the chat is kept.
 // - What a workflow wrote elsewhere: its App's own storage, Knowledge,
 //   mail it sent.
 // - The engine's records of core's own runs (Knowledge's extractions),

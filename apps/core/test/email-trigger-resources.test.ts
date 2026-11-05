@@ -5,10 +5,6 @@ import {
   toBase64,
 } from "@grasp-os/shared/encoding";
 import {
-  triggerIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import {
   mailFromHeader,
   mailIngressPath,
   mailSentAtHeader,
@@ -18,28 +14,18 @@ import {
   mailToHeader,
   signMail,
 } from "@grasp-os/shared/mail-ingress";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { routerSecretHeader } from "@grasp-os/shared/router";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileLimits } from "@grasp-os/shared/run-files";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import { inboundEmailMaxBytes } from "@grasp-os/shared/workflows";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { setCurrentVersion } from "../src/apps.ts";
 import worker from "../src/index.ts";
-import { requireResourceRole } from "../src/permission-resources.ts";
-import {
-  grantPermission,
-  requestPermission,
-  revokePermission,
-} from "../src/permissions.ts";
+import { revokePermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
-import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
@@ -48,24 +34,29 @@ import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   addedSince,
+  admin,
+  attachment,
   deliver,
-  intake,
+  definitionOf,
+  emailTriggerFor,
+  inputOf,
   invoiceMail,
+  mapping,
+  own,
+  runsOf,
   storedObjects,
 } from "./email-triggers.ts";
-import type { Person } from "./email-triggers.ts";
+import type { Person, Starting } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
-import { clientOrigin } from "./sign-in-config.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
-import { appWith } from "./workflow-apps.ts";
 
 // Independent workflows' email triggers (workflows/inbound-email.ts), from
 // their threat model: mail reaches a trigger only through the signed
 // ingress (or Email Routing), at its own address; a forged delivery, mail
 // that may loop (sent automatically, from the deployment's own domain, or
-// a run's own mail past its lineage's limits, or an App run's), an
+// a run's own mail past its lineage's limits, or another kind of run's), an
 // oversized message or one whose attachments would be kept, a sender
 // writing someone else's address, a trigger whose creator lost access and
 // the same message delivered twice each start nothing more than they
@@ -73,196 +64,12 @@ import { appWith } from "./workflow-apps.ts";
 
 const idp = mockIdp();
 
-/** The deployment's mail domain: its hostname, as the router sorts by. */
-const own = new URL(clientOrigin).hostname;
-
-/** An admin, straight in the database, to grant triggers their starts. */
-const admin = async (): Promise<Identity> => {
-  const userId = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
-    ).bind(Date.now()),
-    env.DB.prepare(
-      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Admin', ?, 1, ?, ?)"
-    ).bind(userId, `${userId}@acme.test`, Date.now(), Date.now()),
-    env.DB.prepare(
-      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'admin', ?)"
-    ).bind(crypto.randomUUID(), userId, Date.now()),
-  ]);
-  return {
-    userId,
-    email: `${userId}@acme.test`,
-    name: "Admin",
-    role: "admin",
-    teams: [],
-    staff: false,
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-  };
-};
-
-const stringOrNull = { anyOf: [{ type: "string" }, { type: "null" }] };
-
 /**
- * An attachment, as a message's input lists it: as a file of the run too,
- * when a run file may be it.
+ * A builder's workflow with an email trigger of theirs on it
+ * (`emailTriggerFor`), signed in for this file.
  */
-const attachment = {
-  type: "object",
-  properties: {
-    filename: stringOrNull,
-    mimeType: { type: "string" },
-    size: { type: "integer" },
-    file: { type: "object", "x-grasp-value": { kind: "file" } },
-  },
-  required: ["filename", "mimeType", "size"],
-  additionalProperties: false,
-};
-
-/** A workflow taking a message's `subject`, and what else its trigger maps. */
-const definitionOf = (name: string, version = "1.0.0"): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: {
-            subject: { type: "string" },
-            from: { type: "string" },
-            stored: stringOrNull,
-            attachments: { type: "array", items: attachment },
-          },
-          required: ["subject", "from", "stored", "attachments"],
-          additionalProperties: false,
-        },
-      },
-    },
-    output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { subject: { type: "string" } },
-          required: ["subject"],
-          additionalProperties: false,
-        },
-      },
-    },
-    do: [{ finish: { set: { subject: "${ $workflow.input.subject }" } } }],
-  });
-
-const mapping = {
-  fields: {
-    subject: "/subject",
-    from: "/from/address",
-    stored: "/stored",
-    attachments: "/attachments",
-  },
-  defaults: {},
-};
-
-/** `request`, asked for and granted by `by`. */
-const granted = async (
-  by: Identity,
-  request: Omit<PermissionRequest, "binding">
-): Promise<string> => {
-  const { id } = await requestPermission(
-    env,
-    by,
-    {
-      ...request,
-      binding: `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`,
-    },
-    {
-      app: () => {
-        throw new Error("No App here");
-      },
-      resource: async (ref, needed) => {
-        await requireResourceRole(env, by, ref, needed);
-      },
-    }
-  );
-  await grantPermission(env, by, id, { version: null });
-  return id;
-};
-
-/** What a test's email trigger is on, when not the plain `definitionOf`. */
-interface Starting {
-  /** The workflow's definition, by its name. */
-  definition?: (name: string) => string;
-  /** Its own modules, by path. */
-  modules?: Record<string, string>;
-  /** Its files binding, approved by the admin, for a catalog key of its own. */
-  files?: true;
-  input?: InputMapping;
-  /** The name its address takes, when not a random one of its own. */
-  address?: string;
-}
-
-/**
- * A builder's workflow with an email trigger of theirs on it, made over
- * `/rpc`, granted `start` by an admin: the trigger as its owner sees it,
- * and the address it receives at.
- */
-const emailTrigger = async ({
-  definition = definitionOf,
-  modules,
-  files,
-  input = mapping,
-  address,
-}: Starting = {}) => {
-  const builder = await signedInApi(idp, "builder");
-  const by = await admin();
-  const { id, name } = await builder.api.workflowResources.create(
-    `intake-${unique()}`
-  );
-  await builder.api.workflowResources.publish(id, {
-    definition: definition(name),
-    basedOn: null,
-    ...(modules === undefined ? {} : { modules }),
-  });
-  if (files === true) {
-    await approveWorkflowBinding(env, by, id, {
-      alias: "files",
-      target: { kind: "files" },
-      reviewed: { version: 1 },
-    });
-  }
-  const trigger = await builder.api.workflowResources.triggers.create({
-    kind: "email",
-    workflowId: id,
-    version: 1,
-    config: { input, ...(address === undefined ? {} : { address }) },
-  });
-  const start = await granted(by, {
-    subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
-    object: {
-      type: "workflow",
-      workflowId: workflowResourceIdSchema.parse(id),
-    },
-    actions: ["start"],
-  });
-  return {
-    builder,
-    admin: by,
-    workflow: id,
-    name,
-    trigger,
-    start,
-    address: `${trigger.address ?? ""}@${own}`,
-  };
-};
+const emailTrigger = async (starting: Starting = {}) =>
+  await emailTriggerFor(await signedInApi(idp, "builder"), starting);
 
 /**
  * Core's database, with `first` run once, just before the first statement
@@ -362,31 +169,11 @@ const post = async (
   );
 };
 
-/** The runs trigger `trigger` started, oldest first. */
-const runsOf = async (trigger: string) => {
-  const rows = await env.DB.prepare(
-    "SELECT run.id, run.depth, run.root_run_id AS root, receipt.idempotency_key AS key, receipt.principal_id AS principal, receipt.input FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at, run.depth"
-  )
-    .bind(trigger)
-    .all<{
-      id: string;
-      depth: number;
-      root: string | null;
-      key: string;
-      principal: string;
-      input: string | null;
-    }>();
-  return rows.results;
-};
-
 /** How many runs trigger `id` started. */
 const runCount = async (id: string): Promise<number> => {
   const runs = await runsOf(id);
   return runs.length;
 };
-
-/** A run's input, as its receipt keeps it. */
-const inputOf = (input: string | null): unknown => JSON.parse(input ?? "null");
 
 /** What the log holds of trigger `id`'s messages, refused or dropped, as `action`. */
 const auditedOf = async (id: string, action: string) => {
@@ -1351,19 +1138,15 @@ describe(
       });
     });
 
-    it("refuse a name another workflow receives at, an App's or a trigger's, either way round, or that isn't one; and free it once its trigger is deleted", async () => {
+    it("refuse a name another trigger receives at, or that isn't one; and free it once its trigger is deleted", async () => {
       const name = `intake-${unique()}`;
-      const appName = `app-${unique()}`;
       const first = await emailTrigger({ address: name });
       const random = await emailTrigger();
       const other = await signedInApi(idp, "builder");
       const workflow = await publishedWorkflow(other);
-      await appWith(other, intake(appName));
 
       const outcomes = {
         trigger: await outcome(createEmailTrigger(other, workflow, name)),
-        app: await outcome(appWith(other, intake(name))),
-        appFirst: await outcome(createEmailTrigger(other, workflow, appName)),
         copied: await outcome(
           createEmailTrigger(other, workflow, random.trigger.address ?? "")
         ),
@@ -1377,8 +1160,6 @@ describe(
       expect({ outcomes, after: taken.address }).toStrictEqual({
         outcomes: {
           trigger: "workflow.email_taken",
-          app: "workflow.email_taken",
-          appFirst: "workflow.email_taken",
           copied: "workflow.email_taken",
           notAName: "workflow.resource_invalid",
         },
@@ -1405,11 +1186,9 @@ describe(
       });
     });
 
-    it("refuse a name an App or another trigger took after the trigger checked it was free, before its batch landed", async () => {
+    it("refuse a name another trigger took after the trigger checked it was free, before its batch landed", async () => {
       const builder = await signedInApi(idp, "builder");
       const workflow = await publishedWorkflow(builder);
-      const app = await appWith(builder, intake(`was-${unique()}`));
-      const byApp = `raced-${unique()}`;
       const byTrigger = `raced-${unique()}`;
       // Someone takes the name just before the trigger's batch lands.
       const racedBy = async (name: string, take: () => Promise<unknown>) =>
@@ -1429,77 +1208,20 @@ describe(
           )
         );
 
-      const refused = {
-        app: await racedBy(
-          byApp,
-          async () =>
-            await env.DB.prepare(
-              "UPDATE workflow_triggers SET address = ? WHERE app_id = ?"
-            )
-              .bind(byApp, app)
-              .run()
-        ),
-        trigger: await racedBy(
-          byTrigger,
-          async () =>
-            await env.DB.prepare(
-              "INSERT INTO trigger_resources (id, owner_id, kind, current_version, enabled, created_at, email_address) VALUES (?, ?, 'email', 1, 1, ?, ?)"
-            )
-              .bind(crypto.randomUUID(), builder.userId, Date.now(), byTrigger)
-              .run()
-        ),
-      };
-
-      expect({
-        refused,
-        holders: [await holdersOf(byApp), await holdersOf(byTrigger)],
-      }).toStrictEqual({
-        refused: {
-          app: "workflow.email_taken",
-          trigger: "workflow.email_taken",
-        },
-        // The App's, and the one trigger that got there first.
-        holders: [0, 1],
-      });
-    });
-
-    it("keep an App from taking a name a trigger took after the App checked it was free", async () => {
-      const name = `taken-${unique()}`;
-      const builder = await signedInApi(idp, "builder");
-      const { id: app } = await builder.api.apps.create({ name: "Raced" });
-      const { version } = await builder.api.apps.files.commit(
-        app,
-        intake(name),
-        "Raced"
-      );
-      // A trigger takes the name just before the App's batch lands.
-      const racing = racingDb(
+      const refused = await racedBy(
+        byTrigger,
         async () =>
           await env.DB.prepare(
             "INSERT INTO trigger_resources (id, owner_id, kind, current_version, enabled, created_at, email_address) VALUES (?, ?, 'email', 1, 1, ?, ?)"
           )
-            .bind(crypto.randomUUID(), builder.userId, Date.now(), name)
-            .run(),
-        /update "apps" set "current_version"/iu
+            .bind(crypto.randomUUID(), builder.userId, Date.now(), byTrigger)
+            .run()
       );
 
-      const refused = await outcome(
-        setCurrentVersion(
-          { ...env, DB: racing },
-          await builder.api.whoami(),
-          app,
-          version
-        )
-      );
-      const { results } = await env.DB.prepare(
-        "SELECT app_id FROM workflow_triggers WHERE address = ?"
-      )
-        .bind(name)
-        .all<{ app_id: string }>();
-
-      expect({ refused, receivers: results.length }).toStrictEqual({
-        refused: "app.conflict",
-        receivers: 0,
+      expect({ refused, holders: await holdersOf(byTrigger) }).toStrictEqual({
+        refused: "workflow.email_taken",
+        // The one trigger that got there first.
+        holders: 1,
       });
     });
   }

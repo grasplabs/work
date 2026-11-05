@@ -55,64 +55,12 @@ export interface DecisionRecipient {
 export type BindingMethod = (...args: Json[]) => Promise<unknown>;
 
 /**
- * What a run reaches outside its own code, by binding name: one binding per
- * permission of its App (a connection, say: `env.OUTLOOK.call(action,
- * input, { idempotencyKey })`), and its App's own public functions
- * (`env.APP.callFunction`, below). Each call is checked against the
- * permissions as they are then, and acts for the person the run acts for.
- * They work only inside a step (a replay doesn't call them again), and a
- * connection call takes that step's `idempotencyKey` or none.
- *
- * A public function of the App's own release (spec 8: a query, mutation
- * or action) is `env.APP.callFunction(reference, input)`: `reference` is
- * the function's generated reference, `{ name, kind }`. It
- * runs in the release of the version the run is pinned to, as the run,
- * and answers what the function answered or why it failed, as data:
- * `{ ok: true, value }` or `{ ok: false, error }`, where `error` has the
- * failure's `code`, `message` and `retryable`. To fail the step with it,
- * throw it as it is: `if (!answered.ok) throw answered.error;`. It keeps
- * its code, so a failure trying again may fix (`resource.budget_busy`,
- * `internal.unexpected`) is retried as the step's retries allow, and any
- * other fails the step at once; a thrown code alone (a string) is never
- * retried. Each call's key is the step's and
- * its place among the step's calls of `callFunction`: two calls in one
- * step each do what they do, and the step run again, calling in the same
- * order, makes the same calls: their mutations answer from their receipts
- * and their connector requests from connect's stored answers, never doing
- * it again. A model request has no such key: it is sent again, and charged
- * again, each time the step runs again. Make the calls one after another
- * (calls made at once count in the order they reach core). An action's permissions (`ctx.ai`, `ctx.connections`, …) resolve
- * through the App's approved bindings, as the run: a model request counts
- * against the binding's caps and the run's budgets, and a side effect held
- * for the person holds the step, as the run's own do.
- *
- * Write each call out where it happens, in the function of the step that
- * makes it: `env.NAME.method(…)` or `appFunctions(env).query(…)`, so
- * the workflow's step list names
- * every binding a step calls. `env`, a binding or a stub kept in a
- * variable, passed to a function, spread or read by a computed name
- * can't be read, and neither can a call in a function inside the step's
- * own (loop with `for...of` instead) or between steps
- * (`describeWorkflow` in `@grasp-os/sdk/describe`): the steps then show
- * as unread.
- *
- * Once the run's App has read restricted data, each side effect waits for
- * the person the run acts for to confirm it (where the deployment has held
- * actions on; elsewhere it is refused), and the run waits with it, using
- * none of the step's retries. After their decision the step's
- * function runs again from the top, so work before the call repeats:
- * keep it idempotent. Confirmed, the call answers as it would have; a
- * decline, or a drop (its connection disconnected, the person removed),
- * fails the call with `connect.declined`, which isn't retried: a final
- * answer, which the step's code (or the App's) may catch and handle like
- * any other error, as its own choice; uncaught, it fails the step. A run
- * that ended meanwhile gets nothing (`connect.run_ended`, for the person).
- * On a Composio connection, once the App has read restricted data, a read
- * counts as a side effect too (its input leaves for a third party): it
- * needs the step's `idempotencyKey` like any other, or connect refuses it
- * (`connect.idempotency_key_required`), not holds it. Make such a call in
- * a `sideEffect: true` step, which gets the key: one call per action and
- * input with it, so more calls take keyed steps of their own.
+ * What a run reaches outside its own code, by binding name: the
+ * connections its version binds (`env.NAME.call(action, input, {
+ * idempotencyKey })`). Each call is checked against the permissions as
+ * they are then, and acts for the person the run acts for. They work only
+ * inside a step (a replay doesn't call them again), and a connection call
+ * takes that step's `idempotencyKey` or none.
  */
 export type WorkflowEnv = Readonly<
   Record<string, Readonly<Record<string, BindingMethod>>>
@@ -162,8 +110,7 @@ export interface EngineStepOptions {
  *
  * The SDK reads `params` and calls `callModel`, `openDecision` and
  * `decisionRecipients` only inside `do`, so they need not be durable
- * themselves; workflow code calls `readAttachment`, which the engine
- * checks is inside a step.
+ * themselves.
  *
  * Engines may keep only a failed step's error name and message (Cloudflare
  * Workflows does); the SDK puts what it needs to recover into both.
@@ -261,18 +208,4 @@ export interface WorkflowEngine {
     name: string,
     options: { decision: string; timeout: number; last: boolean }
   ) => Promise<EngineDecision>;
-  /**
-   * The content of attachment `index` of a message an email trigger kept
-   * (`stored`, as its run's input names it), as the run's App received it.
-   * Not recorded, so a replay that runs the step again reads it again.
-   * The SDK passes every call on as the workflow made it, as far as it is
-   * data (anything else as `undefined`): the engine refuses each call it
-   * must (outside a step, `stored: null`, a name or index that isn't one,
-   * a message its App didn't receive) and records every call, refused or
-   * not.
-   */
-  readAttachment: (
-    stored: string | null | undefined,
-    index: number | undefined
-  ) => Promise<Uint8Array>;
 }

@@ -1,4 +1,3 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type {
   TodayLane,
@@ -20,40 +19,39 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import type { Member } from "../auth/identity.ts";
 import {
   teams,
   workflowDecisions,
   workflowResourceRuns,
-  workflowRuns,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { answerableByNow, stillOpen } from "../decisions/decisions.ts";
+import {
+  answerableByNow,
+  resourceDecisionPending,
+} from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { visibleApps } from "./run-view.ts";
 
 // The company's day at work (GRA-1255), for Runs › Today: every run
 // started since midnight in the organization's time zone, across the
 // workflows the reader may see, a lane per workflow that worked. Threat
 // model:
 //
-// - Naming a run, or a workflow, the reader may not see. An App's runs
-//   only of the Apps the Workflows page shows them (`visibleApps`); an
-//   independent workflow's only where they have a role in it, and of
-//   those every run only for its builders and the organization's admins,
-//   a user's own otherwise, as its Runs tab lists them. Every other run
-//   of the day is counted (`unseen`), never named, nor its workflow.
+// - Naming a run, or a workflow, the reader may not see. A workflow's
+//   runs only where they have a role in it, and of those every run only
+//   for its builders and the organization's admins, a user's own
+//   otherwise, as its Runs tab lists them. Every other run of the day is
+//   counted (`unseen`), never named, nor its workflow.
 // - Telling whom someone else waits for, and how long. A run waiting on
 //   the reader says on whom (their role, their team, or them) and since
 //   when, as their inbox does (`answerableByNow`, the one rule of who
 //   answers); one waiting on anyone else only says that it waits.
 // - Pointing at a run the reader may not see. The run a run came from is
 //   named only when it is one of the day's runs the reader sees.
-// - Load. One day of runs, at most `maxRuns` of each kind, their
+// - Load. One day of runs, at most `maxRuns`, their
 //   decisions read by run in one statement. On a busier day the newest
 //   are read, as a run waiting on the reader is a recent one; the older
 //   runs the reader may see are counted apart (`cutOff`) from those they
@@ -61,7 +59,7 @@ import { visibleApps } from "./run-view.ts";
 //   waiting on the reader is read whatever its place in the day: past
 //   the newest `maxRuns` it would lose its dot and its answer.
 
-/** The most runs of each kind one day's read takes. */
+/** The most runs one day's read takes. */
 const maxRuns = 1000;
 
 const ended = (endedAt: Date | null): string | null =>
@@ -85,38 +83,27 @@ const waitsOnOf = (
   return { kind: "you" };
 };
 
-/** A lane, before its runs. */
-type Lane =
-  | Omit<Extract<TodayLane, { kind: "app" }>, "runs">
-  | Omit<Extract<TodayLane, { kind: "independent" }>, "runs">;
-
 interface DayRun {
   id: string;
-  /** Its lane's key, and the lane. */
-  lane: string;
-  of: Lane;
+  /** Its workflow, and the workflow's name: its lane. */
+  workflow: string;
+  name: string;
   createdAt: Date;
   endedAt: Date | null;
   status: TodayRun["status"];
   from: string | null;
 }
 
-/** Whose open decision `by` may answer now, of the run `run` names. */
-const waitsOn = (
-  db: DrizzleD1Database,
-  by: Member,
-  decisionRun: SQLiteColumn,
-  run: SQLiteColumn,
-  now: Date
-) =>
+/** Whether `by` may answer an open decision of the run now. */
+const waitsOn = (db: DrizzleD1Database, by: Member, now: Date) =>
   exists(
     db
       .select({ one: sql`1` })
       .from(workflowDecisions)
       .where(
         and(
-          eq(decisionRun, run),
-          stillOpen(workflowDecisions, now),
+          eq(workflowDecisions.resourceRunId, workflowResourceRuns.id),
+          resourceDecisionPending(now),
           answerableByNow(db, by.userId)
         )
       )
@@ -146,20 +133,15 @@ const runsOf = async (
       : await db
           .select({
             id: workflowDecisions.id,
-            runId: sql<string>`coalesce(${workflowDecisions.runId}, ${workflowDecisions.resourceRunId})`,
+            runId: workflowDecisions.resourceRunId,
             deciders: workflowDecisions.deciders,
             description: workflowDecisions.description,
             openedAt: workflowDecisions.openedAt,
-            open: sql<number>`${stillOpen(workflowDecisions, now)}`,
+            open: sql<number>`${resourceDecisionPending(now)}`,
             mine: sql<number>`${answerableByNow(db, by.userId)}`,
           })
           .from(workflowDecisions)
-          .where(
-            or(
-              inList(workflowDecisions.runId, ids),
-              inList(workflowDecisions.resourceRunId, ids)
-            )
-          )
+          .where(inList(workflowDecisions.resourceRunId, ids))
           .orderBy(asc(workflowDecisions.openedAt));
   const teamIds = decisions.flatMap(({ deciders }) =>
     deciders.startsWith("team:") ? [deciders.slice("team:".length)] : []
@@ -213,24 +195,16 @@ export const workflowsToday = async (
   const { start, timeZone } = await startOfCompanyDay(env, now.getTime());
   const since = new Date(start);
   const db = drizzle(env.DB);
-  const [apps, resources] = await Promise.all([
-    visibleApps(env, by),
-    listWorkflowResources(env, by),
-  ]);
-  const appIds = apps.map(({ id }) => id);
-  const ofApps = and(
-    inList(workflowRuns.appId, appIds),
-    gte(workflowRuns.createdAt, since)
-  );
-  // An independent workflow's runs, as its Runs tab lists them: every
-  // run for its builders and admins, a user's own otherwise.
+  const resources = await listWorkflowResources(env, by);
+  // A workflow's runs, as its Runs tab lists them: every run for its
+  // builders and admins, a user's own otherwise.
   const everyRun = resources
     .filter(({ role }) => role === "builder" || isAdmin(by.role))
     .map(({ id }) => id);
   const ownRuns = resources
     .filter(({ role }) => role !== "builder" && !isAdmin(by.role))
     .map(({ id }) => id);
-  const ofResources = and(
+  const seenToday = and(
     or(
       inList(workflowResourceRuns.workflowResourceId, everyRun),
       and(
@@ -240,16 +214,7 @@ export const workflowsToday = async (
     ),
     gte(workflowResourceRuns.createdAt, since)
   );
-  const appColumns = {
-    id: workflowRuns.id,
-    appId: workflowRuns.appId,
-    workflowId: workflowRuns.workflowId,
-    status: workflowRuns.status,
-    createdAt: workflowRuns.createdAt,
-    endedAt: workflowRuns.endedAt,
-    rootRunId: workflowRuns.rootRunId,
-  };
-  const resourceColumns = {
+  const columns = {
     id: workflowResourceRuns.id,
     workflowId: workflowResourceRuns.workflowResourceId,
     status: workflowResourceRuns.status,
@@ -258,60 +223,23 @@ export const workflowsToday = async (
     invokerType: workflowStartReceipts.invokerType,
     invokerId: workflowStartReceipts.invokerId,
   };
-  const [
-    newestAppRuns,
-    appWaits,
-    appSeen,
-    appTotal,
-    newestResourceRuns,
-    resourceWaits,
-    resourceSeen,
-    resourceTotal,
-  ] = await Promise.all([
-    appIds.length === 0
-      ? []
-      : db
-          .select(appColumns)
-          .from(workflowRuns)
-          .where(ofApps)
-          .orderBy(desc(workflowRuns.createdAt))
-          .limit(maxRuns),
-    appIds.length === 0
-      ? []
-      : db
-          .select(appColumns)
-          .from(workflowRuns)
-          .where(
-            and(
-              ofApps,
-              isNull(workflowRuns.endedAt),
-              waitsOn(db, by, workflowDecisions.runId, workflowRuns.id, now)
-            )
-          )
-          .limit(maxRuns),
-    appIds.length === 0
-      ? []
-      : db.select({ count: count() }).from(workflowRuns).where(ofApps),
-    db
-      .select({ count: count() })
-      .from(workflowRuns)
-      .where(gte(workflowRuns.createdAt, since)),
+  const [newestRuns, waiting, seenCount, totalCount] = await Promise.all([
     resources.length === 0
       ? []
       : db
-          .select(resourceColumns)
+          .select(columns)
           .from(workflowResourceRuns)
           .innerJoin(
             workflowStartReceipts,
             eq(workflowStartReceipts.id, workflowResourceRuns.id)
           )
-          .where(ofResources)
+          .where(seenToday)
           .orderBy(desc(workflowResourceRuns.createdAt))
           .limit(maxRuns),
     resources.length === 0
       ? []
       : db
-          .select(resourceColumns)
+          .select(columns)
           .from(workflowResourceRuns)
           .innerJoin(
             workflowStartReceipts,
@@ -319,15 +247,9 @@ export const workflowsToday = async (
           )
           .where(
             and(
-              ofResources,
+              seenToday,
               isNull(workflowResourceRuns.endedAt),
-              waitsOn(
-                db,
-                by,
-                workflowDecisions.resourceRunId,
-                workflowResourceRuns.id,
-                now
-              )
+              waitsOn(db, by, now)
             )
           )
           .limit(maxRuns),
@@ -340,61 +262,42 @@ export const workflowsToday = async (
             workflowStartReceipts,
             eq(workflowStartReceipts.id, workflowResourceRuns.id)
           )
-          .where(ofResources),
+          .where(seenToday),
     db
       .select({ count: count() })
       .from(workflowResourceRuns)
       .where(gte(workflowResourceRuns.createdAt, since)),
   ]);
-  const appRuns = withWaits(newestAppRuns, appWaits);
-  const resourceRuns = withWaits(newestResourceRuns, resourceWaits);
-  const appNames = new Map<string, string>(
-    apps.map(({ id, name }) => [id, name])
-  );
-  const resourceNames = new Map(resources.map(({ id, name }) => [id, name]));
-  const day: DayRun[] = [
-    ...appRuns.map((run) => ({
+  const names = new Map(resources.map(({ id, name }) => [id, name]));
+  const day: DayRun[] = withWaits(newestRuns, waiting)
+    .map((run) => ({
       id: run.id,
-      lane: JSON.stringify(["app", run.appId, run.workflowId]),
-      of: {
-        kind: "app" as const,
-        app: appIdSchema.parse(run.appId),
-        appName: appNames.get(run.appId) ?? "",
-        workflow: workflowIdSchema.parse(run.workflowId),
-      },
-      createdAt: run.createdAt,
-      endedAt: run.endedAt,
-      status: run.status,
-      from: run.rootRunId,
-    })),
-    ...resourceRuns.map((run) => ({
-      id: run.id,
-      lane: JSON.stringify(["independent", run.workflowId]),
-      of: {
-        kind: "independent" as const,
-        id: run.workflowId,
-        name: resourceNames.get(run.workflowId) ?? "",
-      },
+      workflow: run.workflowId,
+      name: names.get(run.workflowId) ?? "",
       createdAt: run.createdAt,
       endedAt: run.endedAt,
       status: run.status,
       from: run.invokerType === "workflow" ? run.invokerId : null,
-    })),
-  ].toSorted(
-    (one, other) => one.createdAt.getTime() - other.createdAt.getTime()
-  );
+    }))
+    .toSorted(
+      (one, other) => one.createdAt.getTime() - other.createdAt.getTime()
+    );
   const told = await runsOf(env, by, day, now);
   const lanes = new Map<string, TodayLane>();
   for (const run of day) {
     const shown = told.get(run.id);
     if (shown !== undefined) {
-      const lane = lanes.get(run.lane) ?? { ...run.of, runs: [] };
+      const lane = lanes.get(run.workflow) ?? {
+        id: run.workflow,
+        name: run.name,
+        runs: [],
+      };
       lane.runs.push(shown);
-      lanes.set(run.lane, lane);
+      lanes.set(run.workflow, lane);
     }
   }
-  const total = (appTotal[0]?.count ?? 0) + (resourceTotal[0]?.count ?? 0);
-  const seen = (appSeen[0]?.count ?? 0) + (resourceSeen[0]?.count ?? 0);
+  const total = totalCount[0]?.count ?? 0;
+  const seen = seenCount[0]?.count ?? 0;
   return {
     from: since.toISOString(),
     now: now.toISOString(),

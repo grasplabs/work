@@ -1,15 +1,16 @@
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
-import { apiOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person; the widget
 // board under it, with the prototype's return, goals, teams and
-// workflows, then where their engines stand, the runs this week and what
-// could be better, each block opening in full; and,
+// workflows, then the Apps, the runs this week and what could be better,
+// each block opening in full; and,
 // for admins, the latest of the audit trail. Each person lays out their
 // own board: widgets taken off, added back and moved stay so over a
 // reload, until they put it back as it began. Without a plan for the
@@ -17,33 +18,121 @@ import { pileOf, toCard } from "./pile.ts";
 // a plan, are in e2e/onboarding.e2e.ts, which runs after this file, as a
 // plan can't be taken back. What waits is a pile of
 // cards gone through one at a time, and what is settled on its own page
-// under it; what fills them is the failed-run, held-write and approval
-// journeys' (notifications, chat, activity, screen approval).
-
-/** Counts in one step, and is done. */
-const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("tally", { input: z.unknown(), params: {} }, async (step) =>
-  await step.do("count", { description: "Count the invoices" }, async () => 3)
-);
-`;
-
-const tallyTests = `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import tally from "./tally.ts";
-
-export default workflowTests(tally, [
-  { name: "counts", mocks: { count: 3 }, expect: {} },
-]);
-`;
-
-/** Never started here. */
-const later = tally.replaceAll('"tally"', '"later"');
-
-const laterTests = tallyTests.replaceAll("tally", "later");
+// under it; what fills them is the held-write and approval journeys'
+// (chat, activity, screen approval).
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
+
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** An independent workflow `name` that counts in one step, and is done. */
+const countingDefinition = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [{ count: { set: { status: "counted" } } }],
+  });
+
+test("a builder sees their workflows on the board, and opens them in full", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("dashboardBoard");
+  const tag = crypto.randomUUID().slice(0, 8);
+  const { core, api } = apiOf(builder);
+  let made: { id: string; name: string }[] = [];
+  try {
+    made = await Promise.all(
+      [`tally-${tag}`, `later-${tag}`].map(async (name) => {
+        const workflow = await api.workflowResources.create(name);
+        await api.workflowResources.publish(workflow.id, {
+          definition: countingDefinition(workflow.name),
+          basedOn: null,
+        });
+        return { id: workflow.id, name: workflow.name };
+      })
+    );
+    const [counted] = made;
+    if (counted === undefined) {
+      throw new Error("No workflow was made");
+    }
+    const { runId } = await api.workflowResources.start(counted.id, {
+      version: 1,
+      input: { who: "Ada" },
+      key: `count-${tag}`,
+    });
+    await expect(async () => {
+      // Awaited first: `expect` would probe the RPC promise's stub itself.
+      const run = await api.workflowResources.run(counted.id, runId ?? "");
+      expect(run.status).toBe("completed");
+    }).toPass({ timeout: 30_000 });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const [tally, later] = made;
+  if (tally === undefined || later === undefined) {
+    throw new Error("Expected two workflows");
+  }
+
+  const page = await pageOf(builder);
+  await page.goto("/dashboard");
+
+  // Where the workflows stand: a dot for each, in its state's column.
+  const workflows = page.getByRole("region", { name: "Workflows" });
+  await expect(
+    workflows
+      .getByRole("list", { name: "Ran" })
+      .getByRole("link", { name: tally.name })
+  ).toBeVisible(pageRead);
+  await expect(
+    workflows
+      .getByRole("list", { name: "Not run yet" })
+      .getByRole("link", { name: later.name })
+  ).toBeVisible();
+
+  // The run, completed today, which needed nobody.
+  const runs = page.getByRole("region", { name: "Runs this week" });
+  await expect(runs).toContainText("100% without a person", pageRead);
+
+  // In full, the month, with each workflow's runs.
+  await runs.getByRole("button", { name: "Open in full" }).click();
+  let dialog = page.getByRole("dialog", { name: "Runs this week" });
+  await expect(
+    dialog
+      .getByRole("region", { name: "By workflow" })
+      .getByRole("row")
+      .filter({ hasText: tally.name })
+  ).toContainText("1");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // In full, each state with its workflows, each opening its own page.
+  await workflows.getByRole("button", { name: "Open in full" }).click();
+  dialog = page.getByRole("dialog", { name: "Workflows" });
+  await dialog
+    .getByRole("list", { name: "Ran" })
+    .getByRole("link", { name: tally.name })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${tally.id}$`, "u"));
+});
 
 test("someone with nothing waiting sees no pile or activity, and a board with nothing on it yet", async ({
   pageOf,
@@ -75,16 +164,13 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
   // The board is there, with nothing of theirs on it yet: core counts no
-  // hours or teams' work, and there are no workflows in their columns. The
+  // hours, and there are no workflows in their columns. The
   // board's goals are the company's: another journey's may be on it
   // (e2e/board-goals.e2e.ts).
   await expect(
     page.getByRole("region", { name: "Return a month" })
   ).toContainText("No workflow with counted hours here yet.");
   await expect(page.getByRole("region", { name: "Board goals" })).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Teams with AI" })
-  ).toContainText("No teams yet.");
   const workflows = page.getByRole("region", { name: "Workflows" });
   await expect(workflows.getByRole("list", { name: "Ran" })).toBeAttached(
     pageRead
@@ -108,105 +194,11 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("a builder sees their workflows and App on the board, and opens them in full", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("dashboardBoard");
-  const name = `Invoices ${crypto.randomUUID()}`;
-  const { core, api } = apiOf(builder);
-  let app: string;
-  try {
-    ({ id: app } = await api.apps.create({ name }));
-    await release(
-      api,
-      app,
-      {
-        "workflows/tally.ts": tally,
-        "workflows/tally.workflow-tests.ts": tallyTests,
-        "workflows/later.ts": later,
-        "workflows/later.workflow-tests.ts": laterTests,
-      },
-      "Invoice counts"
-    );
-    const run = await api.workflows.start(app, "tally");
-    await expect(async () => {
-      const { status } = await api.workflows.status(run.id);
-      expect(status).toBe("completed");
-    }).toPass({ timeout: 30_000 });
-  } finally {
-    core[Symbol.dispose]();
-  }
-
-  const page = await pageOf(builder);
-  await page.goto("/dashboard");
-
-  // Where the workflows stand: a dot for each, in its state's column.
-  const workflows = page.getByRole("region", { name: "Workflows" });
-  await expect(
-    workflows
-      .getByRole("list", { name: "Ran" })
-      .getByRole("link", { name: `tally in ${name}` })
-  ).toBeVisible(pageRead);
-  await expect(
-    workflows
-      .getByRole("list", { name: "Not run yet" })
-      .getByRole("link", { name: `later in ${name}` })
-  ).toBeVisible();
-
-  // The engine, with how many of its workflows ran.
-  const engines = page.getByRole("region", { name: "Apps" });
-  await expect(
-    engines.getByRole("listitem").filter({ hasText: name })
-  ).toContainText("1 of 2 workflows ran");
-
-  // In full, each engine with its workflows.
-  await engines.getByRole("button", { name: "Open in full" }).click();
-  let dialog = page.getByRole("dialog", { name: "Apps" });
-  await expect(
-    dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
-  ).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect(dialog).toHaveCount(0);
-
-  // The run, completed today, which needed nobody.
-  const runs = page.getByRole("region", { name: "Runs this week" });
-  await expect(runs).toContainText("100% without a person", pageRead);
-  const today = runs
-    .getByRole("table", { name: "Runs by the day they started" })
-    .getByRole("row")
-    .last();
-  // Its day, then completed, failed, waiting, and the rest.
-  await expect(today.getByRole("cell").nth(1)).toHaveText(/^[1-9]\d*$/u);
-
-  // In full, the month, with each workflow's runs.
-  await runs.getByRole("button", { name: "Open in full" }).click();
-  dialog = page.getByRole("dialog", { name: "Runs this week" });
-  await expect(
-    dialog
-      .getByRole("region", { name: "By workflow" })
-      .getByRole("row")
-      .filter({ hasText: name })
-  ).toContainText("tally");
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect(dialog).toHaveCount(0);
-
-  // In full, each state with its workflows, each opening its own page.
-  await workflows.getByRole("button", { name: "Open in full" }).click();
-  dialog = page.getByRole("dialog", { name: "Workflows" });
-  const ran = dialog
-    .getByRole("list", { name: "Ran" })
-    .getByRole("listitem")
-    .filter({ hasText: name });
-  await expect(ran).toContainText("tally");
-  await ran.getByRole("link", { name: "tally" }).click();
-  await expect(page).toHaveURL(new RegExp(`/workflows/${app}/tally$`, "u"));
-});
-
 /** The board's widgets, by their titles, in the order they stand. */
 const boardTitles = (page: Page) =>
   page.getByRole("heading", {
     level: 2,
-    name: /^(?:Return a month|Board goals|Teams with AI|Workflows|Apps|Runs this week|Could be better)$/u,
+    name: /^(?:Return a month|Board goals|Workflows|Apps|Runs this week|Could be better)$/u,
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
@@ -227,7 +219,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   const begun = [
     "Return a month",
     "Board goals",
-    "Teams with AI",
     "Workflows",
     "Apps",
     "Runs this week",
@@ -255,14 +246,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(titles).toHaveText(without);
   await expect
     .poll(saved)
-    .toStrictEqual([
-      "return",
-      "goals",
-      "teams",
-      "workflows",
-      "runs",
-      "signals",
-    ]);
+    .toStrictEqual(["return", "goals", "workflows", "runs", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(without);
 
@@ -278,7 +262,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "runs",
       "signals",
@@ -301,7 +284,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   const moved = [
     "Return a month",
     "Board goals",
-    "Teams with AI",
     "Workflows",
     "Runs this week",
     "Apps",
@@ -314,7 +296,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "runs",
       "engines",
@@ -332,7 +313,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "engines",
       "runs",

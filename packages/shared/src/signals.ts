@@ -187,17 +187,9 @@ export interface ImprovementSignals {
   signals: ImprovementSignal[];
 }
 
-/** Which signals to list. */
+/** Which signals to list: every one, or one App's. */
 export const signalFilterSchema = z
-  .strictObject({
-    app: appIdSchema.optional(),
-    /** Only with `app`, and one its running version has. */
-    workflow: workflowIdSchema.optional(),
-  })
-  .refine(({ app, workflow }) => workflow === undefined || app !== undefined, {
-    path: ["workflow"],
-    message: "Only with app",
-  })
+  .strictObject({ app: appIdSchema.optional() })
   .default({});
 export type SignalFilter = z.input<typeof signalFilterSchema>;
 

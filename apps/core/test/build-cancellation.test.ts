@@ -4,7 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildOnSave } from "../src/save-builds.ts";
-import { isolateCall, workflowTestOutcome } from "../src/workflows/code.ts";
 
 // A build job's check given up on once its lease is lost (build-
 // admission.ts, `holding`): what it builds and tests starts nothing more,
@@ -71,7 +70,6 @@ describe("a build given up on", { timeout: 60_000 }, () => {
             app: appIdSchema.parse(crypto.randomUUID()),
             version: 0,
             files: freshScreen(),
-            bindings: {},
           },
           { profile: "production", signal: lost() }
         )
@@ -81,152 +79,6 @@ describe("a build given up on", { timeout: 60_000 }, () => {
       // Nothing written: no compile ran. (The cache read is its receipt in
       // core's database: with none, no object is read.)
       touched: [],
-    });
-  });
-
-  it("builds nothing for workflow tests once given up on", async () => {
-    const watched = await watchingFiles(
-      async () =>
-        await workflowTestOutcome(
-          env,
-          appIdSchema.parse(crypto.randomUUID()),
-          0,
-          {
-            "workflows/intake.ts": "export default {};\n",
-            "workflows/intake.test.ts": "export default [];\n",
-          },
-          { signal: lost() }
-        )
-    );
-    expect(watched).toStrictEqual({
-      outcome: lostLease.message,
-      touched: [],
-    });
-  });
-
-  it("gives up a test isolate's call still running once its signal aborts", async () => {
-    const giveUp = new AbortController();
-    const started = Date.now();
-    const call = isolateCall(env, {
-      key: null,
-      owner: `app-${crypto.randomUUID()}`,
-      mainModule: "hang.js",
-      modules: async () =>
-        await Promise.resolve({
-          "hang.js":
-            'import { WorkerEntrypoint } from "cloudflare:workers"; export class Tests extends WorkerEntrypoint { async run() { await scheduler.wait(60000); } }',
-        }),
-      entrypoint: "Tests",
-      method: "run",
-      args: [],
-      signal: giveUp.signal,
-    });
-    await scheduler.wait(200);
-    giveUp.abort(lostLease);
-    let outcome: string;
-    try {
-      await call;
-      outcome = "answered";
-    } catch (error) {
-      outcome = error instanceof Error ? error.message : String(error);
-    }
-    expect({
-      outcome,
-      promptly: Date.now() - started < 5000,
-    }).toStrictEqual({ outcome: lostLease.message, promptly: true });
-  });
-
-  it("never starts a test isolate given up on before its call", async () => {
-    let loaded = false;
-    let outcome: string;
-    try {
-      await isolateCall(env, {
-        key: null,
-        owner: `app-${crypto.randomUUID()}`,
-        mainModule: "tests.js",
-        modules: async () => {
-          loaded = true;
-          return await Promise.resolve({
-            "tests.js":
-              'import { WorkerEntrypoint } from "cloudflare:workers"; export class Tests extends WorkerEntrypoint { async run() { return "ran"; } }',
-          });
-        },
-        entrypoint: "Tests",
-        method: "run",
-        args: [],
-        signal: lost(),
-      });
-      outcome = "answered";
-    } catch (error) {
-      outcome = error instanceof Error ? error.message : String(error);
-    }
-    // Room for a load started anyway to land.
-    await scheduler.wait(1000);
-    expect({ outcome, loaded }).toStrictEqual({
-      outcome: lostLease.message,
-      loaded: false,
-    });
-  });
-
-  it("starts no workflow compile when it is given up on during the build's cache read", async () => {
-    const giveUp = new AbortController();
-    const touched: string[] = [];
-    const { FILES: files, DB: db } = env;
-    env.FILES = new Proxy(files, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (typeof property === "string" && typeof value === "function") {
-          return async (...args: unknown[]): Promise<unknown> => {
-            touched.push(property);
-            return await Reflect.apply(value, target, args);
-          };
-        }
-        return value;
-      },
-    });
-    // Its lease lost while the build's cache was read: its receipt, in
-    // core's database (build-cache.ts).
-    env.DB = new Proxy(db, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "prepare" && typeof value === "function") {
-          return (query: string): unknown => {
-            if (
-              query.includes("build_receipts") &&
-              query.startsWith("select")
-            ) {
-              giveUp.abort(lostLease);
-            }
-            return Reflect.apply(value, target, [query]);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-    let outcome: string;
-    try {
-      await workflowTestOutcome(
-        env,
-        appIdSchema.parse(crypto.randomUUID()),
-        0,
-        {
-          "workflows/intake.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
-          "workflows/intake.test.ts": "export default [];\n",
-        },
-        { signal: giveUp.signal }
-      );
-      outcome = "ran to its end";
-    } catch (error) {
-      outcome = error instanceof Error ? error.message : String(error);
-    } finally {
-      env.FILES = files;
-      env.DB = db;
-    }
-    expect({ outcome, compiled: touched.includes("put") }).toStrictEqual({
-      outcome: lostLease.message,
-      compiled: false,
     });
   });
 

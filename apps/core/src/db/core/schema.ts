@@ -11,12 +11,7 @@ import type {
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
 import { signalKinds } from "@grasp-os/shared/signals";
-import type {
-  EventFilter,
-  ParamValue,
-  RunFailure,
-  WorkflowCalls,
-} from "@grasp-os/shared/workflows";
+import type { RunFailure } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
  *
@@ -1018,16 +1013,6 @@ export const appVersions = sqliteTable(
      */
     approved: integer(),
     /**
-     * The IDs of the version's workflows (JSON), written when it is
-     * committed, as a version never changes: so listing an App's
-     * workflows reads no files (workflows/overview.ts). A row the
-     * previous release writes gets none (the default).
-     */
-    workflows: text({ mode: "json" })
-      .$type<string[]>()
-      .notNull()
-      .default(sql`'[]'`),
-    /**
      * The names of the version's screens (JSON, `screensIn`), written when
      * it is committed: so listing every App someone can open, with its
      * pages, is one query and reads no files (`listAppOverviews`). A row
@@ -1038,34 +1023,11 @@ export const appVersions = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     /**
-     * The App's bindings each of the version's workflows calls, by
-     * workflow ID (JSON, `WorkflowCalls`), written when it is committed
-     * from the same reading its review shows: a run's calls are held to
-     * it (workflows/host.ts). A workflow it keeps no entry for doesn't run
-     * (`workflow.calls_not_kept`), and its review shows no calls.
-     */
-    workflowCalls: text("workflow_calls", { mode: "json" })
-      .$type<Record<string, WorkflowCalls>>()
-      .notNull()
-      .default(sql`'{}'`),
-    /**
      * The chat's agent that wrote and proposed it, for `author_id` (JSON,
      * `AgentProposer`); null for a version a person committed. A row the
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
-    /**
-     * The binding names the App's permissions held when the version was
-     * committed, whatever their status, each with the kind of binding it
-     * is (JSON, `WorkflowBindingKinds`, permissions.ts): what its
-     * workflows' `env` is typed by at every build, so a version is typed
-     * the same however its App's permissions change after. A row the
-     * previous release writes gets none (the default).
-     */
-    workflowBindings: text("workflow_bindings", { mode: "json" })
-      .$type<Record<string, "connection" | "collection" | "brain">>()
-      .notNull()
-      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -1748,11 +1710,10 @@ export const workflowRuns = sqliteTable(
      */
     engineSequence: integer("engine_sequence").notNull().default(0),
     /**
-     * The start the engine is still to confirm, as it is sent (`{ input }`,
-     * src/workflows/engine.ts): kept until the engine's first notification
-     * of the run, so a start core stopped in the middle of is sent again,
-     * the same, by the repair (src/workflows/runs.ts, `repairStarts`).
-     * Null once confirmed, and for a run whose start failed.
+     * The start the engine was still to confirm, as it was sent
+     * (`{ input }`). Nothing starts an App run any more, nor repairs one:
+     * left until the table goes. Null once confirmed, and for a run whose
+     * start failed.
      */
     pendingStart: text("pending_start", { mode: "json" }).$type<{
       input?: Json;
@@ -1820,8 +1781,9 @@ export const workflowRuns = sqliteTable(
       table.workflowId,
       table.createdAt
     ),
-    // The start repair (src/workflows/runs.ts, `repairStarts`): starts the
-    // engine is still to confirm, by ID, which the repair pages by.
+    // Starts the engine was still to confirm, by ID, as the App runs' start
+    // repair paged them; it went with App workflows, and this with the
+    // table.
     index("workflow_runs_pending_start_idx")
       .on(table.id)
       .where(sql`pending_start IS NOT NULL`),
@@ -2455,52 +2417,6 @@ export const workflowRunWakes = sqliteTable(
 );
 
 /**
- * The triggers of the workflows in each App's current version
- * (src/workflows/trigger-registry.ts), written when a version is made
- * current and removed when another is. `position` is the trigger's place
- * among its workflow's. A schedule keeps its cron expression as its
- * parameter holds it now (`cron`), in its time zone, when it next
- * fires (`next_run_at`), and how many starts of its run have failed in a
- * row (`failed_starts`): at `maxFailedStarts` it stops, with no next time
- * (src/workflows/triggers.ts). An email trigger keeps the address it receives
- * mail at (`address`, the part before the `@`); an event trigger its event
- * type (`event`) and filter (`filter`, JSON).
- */
-export const workflowTriggers = sqliteTable(
-  "workflow_triggers",
-  {
-    id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    version: integer().notNull(),
-    workflowId: text("workflow_id").notNull(),
-    position: integer().notNull(),
-    type: text({ enum: ["schedule", "email", "event"] }).notNull(),
-    param: text(),
-    cron: text(),
-    timeZone: text("time_zone"),
-    nextRunAt: timestamp("next_run_at"),
-    createdAt: timestamp("created_at").notNull(),
-    address: text(),
-    event: text(),
-    filter: text({ mode: "json" }).$type<EventFilter>(),
-    failedStarts: integer("failed_starts").notNull().default(0),
-  },
-  (table) => [
-    uniqueIndex("workflow_triggers_position_idx").on(
-      table.appId,
-      table.version,
-      table.workflowId,
-      table.position
-    ),
-    index("workflow_triggers_next_run_idx").on(table.nextRunAt),
-    index("workflow_triggers_address_idx").on(table.address),
-    index("workflow_triggers_event_idx").on(table.event),
-  ]
-);
-
-/**
  * Every decision a workflow run waits for (`step.decision`, src/decisions/),
  * one per run and step: who answers it (`deciders`: `person:<id>`,
  * `role:<role>` or `team:<id>`), until when (`expires_at`), and how it
@@ -2526,8 +2442,7 @@ export const workflowDecisions = sqliteTable(
     /**
      * Whether the run's starter never answers it, even when it names
      * exactly them (`person:<their id>`): set when the step takes its
-     * reviewer only at run time (`StepOutline.dynamic`), so the starter
-     * may have chosen it, and when its steps can't be read (R8).
+     * reviewer only at run time, so the starter may have chosen it (R8).
      */
     starterExcluded: integer("starter_excluded", { mode: "boolean" })
       .notNull()
@@ -2564,7 +2479,9 @@ export const workflowDecisions = sqliteTable(
     // A run's open decisions (src/workflows/overview.ts): whether it waits.
     index("workflow_decisions_run_status_idx").on(table.runId, table.status),
     // The improvement signals (src/signals.ts): open decisions, oldest
-    // first, and decisions answered in a window, latest first.
+    // first, and decisions answered in a window, latest first. The runs
+    // waiting for a decision (src/workflows/overview.ts), counted and
+    // listed from the open ones.
     index("workflow_decisions_status_opened_idx").on(
       table.status,
       table.openedAt,
@@ -2981,74 +2898,6 @@ export const dependencyAdmissionRefusals = sqliteTable(
 );
 
 /**
- * The values people set for workflows' parameters, one per App, workflow
- * and parameter; a parameter without one has its code's default. `set_by`
- * set it directly.
- */
-export const workflowParamValues = sqliteTable(
-  "workflow_param_values",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    param: text().notNull(),
-    value: text({ mode: "json" }).$type<ParamValue>().notNull(),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.appId, table.workflowId, table.param] }),
-  ]
-);
-
-/**
- * Who owns each workflow (workflows/owners.ts): the person who answers
- * for it, shown on its line and told about its failures; one row per App
- * and workflow, kept across the App's versions. A workflow without one is
- * owned by its App's owner. Who owns it never changes whom its runs act
- * for. `set_by` set it last.
- */
-export const workflowOwners = sqliteTable(
-  "workflow_owners",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    ownerId: text("owner_id").notNull(),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
-);
-
-/**
- * The team that owns a workflow (workflows/teams.ts): one of the
- * organization's teams, set by an admin or a builder of its App, by App
- * and workflow ID, so it holds across versions. A workflow without a row
- * has no team; a team that goes takes its rows with it.
- */
-export const workflowTeams = sqliteTable(
-  "workflow_teams",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    teamId: text("team_id")
-      .notNull()
-      .references(() => teams.id, { onDelete: "cascade" }),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.appId, table.workflowId] }),
-    index("workflow_teams_team").on(table.teamId),
-  ]
-);
-
-/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
@@ -3323,20 +3172,16 @@ export const platformVersions = sqliteTable("platform_versions", {
 });
 
 /**
- * What core tells a person in the product (src/notifications.ts): that a
- * workflow failed while acting for them (`run_failed`), or that an admin
- * asked them one of the brain's open questions (`gap_asked`,
- * src/brain-gaps.ts), that connect stopped hearing a source their
- * triggers listen to (`events_stopped`), or that packages of an App or
+ * What core tells a person in the product (src/notifications.ts): that an
+ * admin asked them one of the brain's open questions (`gap_asked`,
+ * src/brain-gaps.ts), that a schedule trigger of theirs stopped
+ * (`trigger_stopped`), that connect stopped hearing a source their
+ * triggers listen to (`events_stopped`), that packages of an App or
  * workflow they build or approved were revoked as malware
- * (`package_revoked`). A `run_failed` row has its App, workflow, run and
- * failures, and no gap; a `gap_asked` row its gap alone, once per person
- * and gap. One unread `run_failed` row per person, App and workflow:
- * another failure while it is unread counts on it (`failures`) and names
- * the latest run (`run_id`), so a workflow that fails every minute makes
- * one row, not thousands. Once read (`read_at`), the next failure makes a
- * new one. The person's rows read over 30 days ago go when they next
- * read, and all of them when they are removed from the organization.
+ * (`package_revoked`), or what an App told them (`app_message`). A
+ * `gap_asked` row has its gap alone, once per person and gap. The
+ * person's rows read over 30 days ago go when they next read, and all of
+ * them when they are removed from the organization.
  */
 export const notifications = sqliteTable(
   "notifications",
@@ -3345,7 +3190,6 @@ export const notifications = sqliteTable(
     personId: text("person_id").notNull(),
     type: text({
       enum: [
-        "run_failed",
         "gap_asked",
         "trigger_stopped",
         "package_revoked",
@@ -3355,12 +3199,10 @@ export const notifications = sqliteTable(
     }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
-    runId: text("run_id"),
-    failures: integer(),
     /** The gap a `gap_asked` row asks about: its brain record id. */
     gapId: text("gap_id"),
     createdAt: timestamp("created_at").notNull(),
-    /** When it last changed: the latest failure it counts. */
+    /** When it last changed. */
     updatedAt: timestamp("updated_at").notNull(),
     readAt: timestamp("read_at"),
     /**
@@ -3406,7 +3248,7 @@ export const notifications = sqliteTable(
       table.updatedAt,
       table.id
     ),
-    // The one unread row a failure counts on, and the unread count.
+    // One unread row per person, kind, App and workflow, and the unread count.
     uniqueIndex("notifications_unread_idx")
       .on(table.personId, table.type, table.appId, table.workflowId)
       .where(sql`read_at IS NULL`),

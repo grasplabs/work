@@ -12,7 +12,7 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -735,54 +735,6 @@ const PackagesItem = ({
   );
 };
 
-/** A failed workflow: its next step asks the agent to fix it, in a new chat with the run's report. */
-const FailedItem = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "failed" }>;
-}) => {
-  const { t } = useLingui();
-  const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
-  const [refused, setRefused] = useState<string>();
-  const { model, notification } = source;
-  const ask = async (asked: string): Promise<void> => {
-    const started = await run(
-      async (session) => await session.chats.fixRun(notification.run, asked)
-    );
-    if (started === undefined) {
-      return;
-    }
-    if (started.sent) {
-      await navigate({ to: "/", search: { chat: started.chat.id } });
-      return;
-    }
-    const { reason } = started;
-    setRefused(t`The agent wasn't asked: ${reason}`);
-  };
-  return (
-    <ItemFrame
-      acts={
-        model === undefined
-          ? []
-          : [
-              {
-                label: t`Ask the agent to fix`,
-                onPress: async () => {
-                  await ask(model);
-                },
-              },
-            ]
-      }
-      busy={busy}
-      failure={failure ?? refused}
-      frame={frame}
-    />
-  );
-};
-
 /**
  * A version of a workflow asked to go live: approved or sent back here,
  * through the workflow's lifecycle, which checks again that the person
@@ -930,9 +882,6 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "packages") {
     return <PackagesItem frame={frame} source={source} />;
-  }
-  if (source.type === "failed") {
-    return <FailedItem frame={frame} source={source} />;
   }
   if (source.type === "workflowGoLive") {
     return <WorkflowGoLiveDetail frame={frame} source={source} />;

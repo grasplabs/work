@@ -1,7 +1,4 @@
-import type {
-  AppVersionPush,
-  RunSubscriptionApi,
-} from "@grasp-os/shared/screens";
+import type { AppVersionPush, SubscriptionApi } from "@grasp-os/shared/screens";
 import { RpcStub } from "capnweb";
 
 import type { Session } from "../core.ts";
@@ -40,7 +37,7 @@ interface Followed {
   /** The last version core pushed, for a frame that joins later. */
   last: Extract<AppVersionPush, { type: "current" }> | undefined;
   /** Core's hold on it, once it answered. */
-  hold: RunSubscriptionApi | undefined;
+  hold: SubscriptionApi | undefined;
   /** Failed attempts since the last that held, for the pause. */
   attempt: number;
 }
@@ -180,7 +177,7 @@ export class VersionFeed {
         },
       }
     );
-    let hold: RunSubscriptionApi;
+    let hold: SubscriptionApi;
     try {
       hold = await session.screens.watchVersion(app, onVersion);
     } catch (error) {

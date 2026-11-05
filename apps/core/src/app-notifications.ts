@@ -357,7 +357,7 @@ const deliver = async (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${id}, ${userId}, 'app_message', ${send.app}, NULL, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ${title}, ${body ?? null}, ${link ?? null} WHERE ${activeMember(userId)} AND ${limit}`
+        sql`SELECT ${id}, ${userId}, 'app_message', ${send.app}, NULL, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ${title}, ${body ?? null}, ${link ?? null} WHERE ${activeMember(userId)} AND ${limit}`
       )
       .onConflictDoNothing({ target: notifications.id })
   );

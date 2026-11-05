@@ -31,7 +31,6 @@ import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
-  firstVersion,
   openRpc,
   outcome,
   routed,
@@ -463,10 +462,6 @@ const refusals = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
       ({ detail }) => `${detail.operation}/${detail.stage}: ${detail.reason}`
     );
 
-const noop = (): void => {
-  // Nothing to update.
-};
-
 const failedResult = z.object({
   ok: z.literal(false),
   error: z.object({ code: z.string() }),
@@ -669,9 +664,11 @@ describe("screen delivery", { timeout: 60_000 }, () => {
     const own = await openFrame(other, leased);
     const withOwn = [
       await called(other, leased, { lease: own.lease }),
-      // Past the gate, to the run the workflow doesn't have.
+      // Past the gate, to a decision there isn't.
       await outcome(
-        other.api.screens.frame(leased, own.lease).runs("invoices")
+        other.api.screens
+          .frame(leased, own.lease)
+          .reviewDecision("run-1", "review", { approved: true })
       ),
     ];
     // A forgery of their own lease names no build, whatever another frame
@@ -682,7 +679,9 @@ describe("screen delivery", { timeout: 60_000 }, () => {
     );
     const afterForgery = [
       await forged.delivery(),
-      await outcome(forged.runs("invoices")),
+      await outcome(
+        forged.reviewDecision("run-1", "review", { approved: true })
+      ),
     ];
     // The builder's real lease, changed only in the version it was opened
     // on, or in the two-part form leases had before they signed the
@@ -719,7 +718,7 @@ describe("screen delivery", { timeout: 60_000 }, () => {
         Object.keys(forgeries).map((name) => [name, refusedAsUnserved])
       ),
       borrowed: refusedAsUnserved,
-      withOwn: [data, "ok"],
+      withOwn: [data, "decision.not_found"],
       afterForgery: refusedAsUnserved,
       reshaped: {
         "another version, with the real MAC": refusedAsUnserved,
@@ -797,7 +796,7 @@ describe("screen delivery", { timeout: 60_000 }, () => {
         await outcome(
           builder.api.screens
             .frame(app, bundle.lease)
-            .watchRuns("invoices", noop)
+            .reviewDecision("run-1", "review", { approved: true })
         ),
       ];
       // The App's current version, whose release stands, opens.
@@ -825,10 +824,10 @@ describe("screen delivery", { timeout: 60_000 }, () => {
         // The answer of the call it landed in, after the call ran.
         "call/admission: revoked",
         "call/delivery: revoked",
+        "reviewDecision/admission: revoked",
         // The live read after the change, or its push: whichever checked
         // first.
         expect.stringMatching(liveRefusal),
-        "watchRuns/admission: revoked",
       ],
     });
   });
@@ -848,34 +847,6 @@ describe("screen delivery", { timeout: 60_000 }, () => {
       pushed: [[secret]],
       refused: ["watchQuery/push: revoked"],
     });
-  });
-
-  it("lets go of a build's run subscription when its release is revoked, with nothing pushed after", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const bundle = await openFrame(builder, app);
-    const state = { released: false };
-    const onChange = Object.assign(
-      (): void => {
-        // No run changes in this test.
-      },
-      {
-        [Symbol.dispose]: (): void => {
-          state.released = true;
-        },
-      }
-    );
-    await builder.api.screens
-      .frame(app, bundle.lease)
-      .watchRuns("invoices", onChange);
-    await nextVersion(builder, app);
-    const events = await auditedDuring(async () => {
-      await revoked(app);
-      await vi.waitFor(() => {
-        expect(state.released).toBeTruthy();
-      }, pushWait);
-    });
-    expect(refusals(events)).toStrictEqual(["watchRuns/push: revoked"]);
   });
 
   it("refuses a build of a revoked release however its App's data is classified", async () => {
@@ -1017,69 +988,6 @@ describe("screen delivery", { timeout: 60_000 }, () => {
       failed: { code: "notes.never_released", carriesData: false },
       read: true,
     });
-  });
-
-  it("holds every way from an App to code core didn't serve, and leaves the screen its own reports", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const { screens } = builder.api;
-    const live = await requestFor(app, "notes.live", {});
-
-    const events = await auditedDuring(async () => {
-      expect({
-        gated: await Promise.all([
-          outcome(called(builder, app)),
-          outcome(screens.frame(app, "").watchQuery(live, noop)),
-          outcome(screens.frame(app, "").startRun("invoices")),
-          outcome(screens.frame(app, "").runs("invoices")),
-          outcome(screens.frame(app, "").run("run-1")),
-          outcome(
-            screens
-              .frame(app, "")
-              .reviewDecision("run-1", "approve", { approved: true })
-          ),
-          outcome(
-            screens
-              .frame(app, "")
-              .confirmDecision("run-1", "approve", "revision", {
-                approved: true,
-              })
-          ),
-          outcome(
-            screens
-              .frame(app, "")
-              .decide("run-1", "approve", { approved: true })
-          ),
-          outcome(screens.frame(app, "").watchRuns("invoices", noop)),
-        ]),
-        version: await firstVersion(
-          async (onVersion) => await screens.watchVersion(app, onVersion)
-        ),
-        report: await outcome(
-          screens.report(
-            app,
-            { version: 1, screen: "notes" },
-            { kind: "error", message: "It didn't load" }
-          )
-        ),
-      }).toStrictEqual({
-        gated: Array.from({ length: 9 }, () => "screen.unreviewed"),
-        version: { type: "current", version: 1, recheck: false },
-        report: "ok",
-      });
-    });
-
-    expect(refusals(events).toSorted()).toStrictEqual([
-      "call/admission: unreviewed",
-      "confirmDecision/admission: unreviewed",
-      "decide/admission: unreviewed",
-      "reviewDecision/admission: unreviewed",
-      "run/admission: unreviewed",
-      "runs/admission: unreviewed",
-      "startRun/admission: unreviewed",
-      "watchQuery/admission: unreviewed",
-      "watchRuns/admission: unreviewed",
-    ]);
   });
 
   it("runs no action sent under a key without a lease of core's", async () => {

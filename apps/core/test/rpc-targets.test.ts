@@ -10,7 +10,7 @@ import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { browserApi } from "../src/rpc.ts";
 import type { CoreRpc } from "../src/rpc.ts";
 import { openTestRun } from "./agent-chat.ts";
-import { approvalApp } from "./approval-app.ts";
+import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -296,8 +296,6 @@ const calls = {
   },
   "authenticate.screens.frame": async (screens, { app, held }) =>
     holding(held, await screens.frame(app, "")),
-  "authenticate.screens.frame.watchRuns": async (frame, { held }) =>
-    holding(held, await frame.watchRuns("approval", pageStub().stub)),
   "authenticate.screens.frame.watchQuery": async (frame, { held }) => {
     const page = pageStub();
     const subscription = holding(held, await frame.watchQuery("{}", page.stub));
@@ -513,7 +511,8 @@ describe("what a browser reaches over core's connection", () => {
 
   it("is bounded signed in, every target, through every call that hands one out", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await approvalApp(builder);
+    const { id: app } = await builder.api.apps.create({ name: "Walked" });
+    await release(builder, app, { "AGENTS.md": "# Walked\n" });
 
     const walked = await walkConnection(builder.session, app, builder.userId);
 
@@ -528,13 +527,12 @@ describe("what a browser reaches over core's connection", () => {
       expect.arrayContaining([
         "authenticate: SessionRpc",
         "authenticate.apps.files: AppFilesRpc",
-        "authenticate.workflows.params: WorkflowParamsRpc",
-        "authenticate.chats.watch: RunSubscription",
+        "authenticate.chats.watch: Subscription",
         "authenticate.screens.frame: ScreenFrameRpc",
-        "authenticate.screens.frame.watchRuns: RunSubscription",
-        "authenticate.screens.watchVersion: RunSubscription",
-        "authenticate.chats.previewWatchQuery: RunSubscription",
-        "authenticate.chats.previewStream: RunSubscription",
+        "authenticate.screens.frame.watchQuery: Subscription",
+        "authenticate.screens.watchVersion: Subscription",
+        "authenticate.chats.previewWatchQuery: Subscription",
+        "authenticate.chats.previewStream: Subscription",
       ])
     );
   });
@@ -548,7 +546,7 @@ describe("what a browser reaches over core's connection", () => {
 
       expect(walked.unbounded).toStrictEqual([]);
       expect(walked.targets).toContain(
-        "authenticate.chats.watch: RunSubscription"
+        "authenticate.chats.watch: Subscription"
       );
     }
   );

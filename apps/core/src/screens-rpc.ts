@@ -11,7 +11,6 @@ import type {
 } from "@grasp-os/shared/decisions";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -37,10 +36,8 @@ import type {
   AppErrorLog,
   AppVersionPush,
   QuerySnapshotPush,
-  RunChange,
   ScreenBundle,
   ScreenRoute,
-  ScreenRun,
   ScreenFrameApi,
   ScreensApi,
   ScreenTarget,
@@ -49,11 +46,6 @@ import type {
   TargetSurface,
 } from "@grasp-os/shared/screens";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
-import type {
-  RunControl,
-  RunSummary,
-  WorkflowRun,
-} from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
@@ -69,39 +61,31 @@ import {
 } from "./apps.ts";
 import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
-import { callbackFor, isStub } from "./page-callbacks.ts";
+import { isStub } from "./page-callbacks.ts";
 import type { PageCallback, StillOpen } from "./page-callbacks.ts";
-import type { AppAnswer } from "./plain-data.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { RunSubscription } from "./run-subscription.ts";
 import {
   deliveryOf,
   deliveryAt,
-  deliveryOpen,
   delivering,
   leasedBuild,
   leaseFor,
   requireDelivery,
   standingOf,
 } from "./screen-delivery.ts";
-import type { LeasedBuild, Standing } from "./screen-delivery.ts";
+import type { LeasedBuild } from "./screen-delivery.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
 import { versionScreenCodes } from "./screen-references.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { controlScreenRun } from "./workflows/controls.ts";
+import { Subscription } from "./subscription.ts";
 import {
   confirmScreenDecision,
   decideScreenRun,
   reviewScreenDecision,
-  screenRun,
-  screenRuns,
-  screenWorkflow,
-  startScreenRun,
-} from "./workflows/screen-runs.ts";
-import { runSummary } from "./workflows/summary.ts";
+} from "./workflows/screen-decisions.ts";
 
 // What the frontend's screen host reaches for the frames it runs (see
 // @grasp-os/sdk/screen-runtime): an App's screen to load, its server to
@@ -121,7 +105,7 @@ import { runSummary } from "./workflows/summary.ts";
 //
 // Anyone with a role in the App (app-access.ts) uses its screens: opens
 // them, calls its functions, reports problems, and starts, follows and
-// answers its workflow runs (workflows/screen-runs.ts). Only its builders
+// answers its workflow runs (workflows/screen-decisions.ts). Only its builders
 // read its error log.
 //
 // A screen's build needs nobody's approval: it reaches only its App's
@@ -133,25 +117,14 @@ import { runSummary } from "./workflows/summary.ts";
 // builders read and no frame reaches, don't. Which build a frame runs is the one
 // core leased it (`frame`), never what the frame says.
 //
-// A callback the App keeps (a screen's subscription), or its host keeps
-// for the App's run changes (`watchRuns`), outlives the call that passed
-// it, so each push through it checks again that the person
+// A callback the App keeps (a screen's subscription) outlives the call
+// that passed it, so each push through it checks again that the person
 // still has a role in the App (`stillHasRole`), once per reading of the
 // connection's session (at most every `sessionRecheckMs`) per App and
 // connection. Once they don't (signed out, unshared, a team left, a role
 // changed, a source they can't read), the callback is released and
 // forwards nothing more: losing access stops a screen within a few
 // seconds, whatever the App does.
-
-/**
- * Most run subscriptions (`watchRuns`) one connection keeps at once. A
- * connection is one browser tab, shared by every App frame it runs
- * (`ScreensApi.frame`), so this bounds the whole tab, as spec 11.4 sets
- * its limits per tab: each screen follows a workflow or two, and this
- * only bounds what screens that subscribe over and over keep in their
- * Apps' hosts.
- */
-const maxRunSubscriptions = 20;
 
 /**
  * Most Apps one connection follows the current version of at once
@@ -826,209 +799,6 @@ const sidebarSurfaces = async (
   return listed.filter(({ entries }) => entries.length > 0);
 };
 
-/** What a frame's calls on its App are decided on (`ScreenFrameRpc`). */
-interface Frame {
-  /** The build the frame's lease named for the App, if it named one. */
-  buildOf: (app: AppId) => LeasedBuild | undefined;
-  /**
-   * Whether the person may still get a callback's pushes from the App:
-   * they still have a role in it, and `build` still gets its data.
-   */
-  stillOpen: (
-    by: Identity,
-    app: AppId,
-    build: LeasedBuild | undefined,
-    operation: string
-  ) => StillOpen;
-  /** What the frame keeps through its calls, let go of when it closes. */
-  held: Holder;
-  /**
-   * Has `look` called whenever the person's access to `app` may have
-   * dropped (`QuerySubscriptions.follow`), until let go of; `lose` when
-   * the App's revocations can't be followed.
-   */
-  follow: (
-    by: Identity,
-    app: AppId,
-    look: () => Promise<void>,
-    lose: () => void
-  ) => Disposable;
-  /**
-   * `stillOpen`, as a look at a revocation asks it: the build's standing
-   * read once for every look of the same App and build at the same time
-   * (`standingNow`), so a revocation costs one read per build, however
-   * many callbacks the connection keeps.
-   */
-  lookOpen: (
-    by: Identity,
-    app: AppId,
-    build: LeasedBuild | undefined,
-    operation: string
-  ) => StillOpen;
-}
-
-/**
- * What a frame keeps until it closes: `keep` lets go at once of what
- * arrives once the frame has closed, `forget` drops what was let go of.
- */
-interface Holder {
-  keep: (held: Disposable) => void;
-  forget: (held: Disposable) => void;
-}
-
-/** A function the App gets for a callback the screen passed. */
-type Callback = (value: AppAnswer) => Promise<void>;
-
-/**
- * How the App's pushes through a screen's callback are refused. A push is
- * held to the size of an answer: what `live` sends a screen is the same
- * data a call would answer.
- */
-const refusals = {
-  invalid: () => appErrors.create("app.answer_invalid"),
-  closed: () => appErrors.create("app.not_found"),
-  tooLarge: {
-    maxBytes: screenLimits.answerBytes,
-    refuse: () => screenErrors.create("screen.answer_too_large"),
-  },
-};
-
-/**
- * The page's callback `stub`, checked before each push (`callbackFor`,
- * with `frame.stillOpen`), and looked at again whenever the person's
- * access to `app` may have dropped (`Frame.follow`, with
- * `frame.lookOpen`): refused then, it lets itself go, with nothing
- * pushed, which tells the screen that it must follow again; let go of
- * too when the App's revocations can't be followed. `released` is told
- * once it is let go of, however that happens.
- */
-const followedCallback = (
-  stub: PageCallback,
-  {
-    frame,
-    by,
-    app,
-    build,
-    operation,
-    lookNow = false,
-  }: {
-    frame: Frame;
-    by: Identity;
-    app: AppId;
-    build: LeasedBuild | undefined;
-    operation: string;
-    /** Whether to look once now: its delivery was read before it followed. */
-    lookNow?: boolean;
-  },
-  released: () => void
-): Callback & Disposable => {
-  const following: { held?: Disposable } = {};
-  const callback = callbackFor(
-    stub,
-    frame.stillOpen(by, app, build, operation),
-    refusals,
-    () => {
-      following.held?.[Symbol.dispose]();
-      released();
-    }
-  );
-  const lookOpen = frame.lookOpen(by, app, build, operation);
-  // Refused, or not answered (the database away): let go of, so the
-  // screen follows again from a fresh call rather than keep what it had.
-  const look = async (): Promise<void> => {
-    let open = false;
-    try {
-      open = await lookOpen();
-    } catch (error) {
-      log.warn("screen.callback_look_failed", {
-        appId: app,
-        ...errorFields(error),
-      });
-    }
-    if (!open) {
-      callback[Symbol.dispose]();
-    }
-  };
-  following.held = frame.follow(by, app, look, () => {
-    callback[Symbol.dispose]();
-  });
-  if (lookNow) {
-    void look();
-  }
-  return callback;
-};
-
-/**
- * Follows the App's runs of `workflow` for the person (app.ts,
- * `watchRuns`): the screen's callback goes to the App's host as a
- * function it can only call, checked before each push as any callback of
- * a screen is. `subscriptions` holds this connection's, which drop out
- * once released: at most {@link maxRunSubscriptions} at once.
- */
-const watchRuns = async (
-  env: Env,
-  by: Identity,
-  {
-    app,
-    workflow,
-    onChange,
-  }: { app: unknown; workflow: unknown; onChange: unknown },
-  frame: Frame,
-  subscriptions: Set<Disposable>,
-  /** Told once the callback is let go of, however that happens. */
-  ended?: () => void
-): Promise<RunSubscription> => {
-  // Following is a request like any other: a screen that follows and
-  // lets go over and over is held to what a person may ask. What core
-  // then pushes is not counted, and how many it follows at once has its
-  // own bound below.
-  const id = await admitted(env, by, app);
-  const name = screenWorkflow(workflow);
-  if (!isStub(onChange)) {
-    throw screenErrors.create("screen.invalid");
-  }
-  const build = frame.buildOf(id);
-  await requireDelivery(env, by, id, build, {
-    operation: "watchRuns",
-    stage: "admission",
-  });
-  if (subscriptions.size >= maxRunSubscriptions) {
-    throw screenErrors.create("screen.too_many_subscriptions");
-  }
-  // Looked at again on every revocation from now on, and once now: one
-  // that landed since its admission's check is seen by that look.
-  const callback: Callback & Disposable = followedCallback(
-    onChange,
-    { frame, by, app: id, build, operation: "watchRuns", lookNow: true },
-    () => {
-      subscriptions.delete(callback);
-      frame.held.forget(callback);
-      ended?.();
-    }
-  );
-  subscriptions.add(callback);
-  // The frame's from now on: one closed while its host answers lets go
-  // of it, and its slot, at once.
-  frame.held.keep(callback);
-  let watch: string;
-  try {
-    watch = await appHost(env, id).watchRuns(name, callback);
-  } catch (error) {
-    callback[Symbol.dispose]();
-    throw error;
-  }
-  return new RunSubscription(async () => {
-    // The slot is free at once, and the callback forwards nothing more;
-    // the host drops it now, or at its next push if it can't be reached.
-    callback[Symbol.dispose]();
-    try {
-      await appHost(env, id).unwatchRuns(name, watch);
-    } catch (error) {
-      log.warn("screen.unwatch_failed", { appId: id, ...errorFields(error) });
-    }
-  });
-};
-
 /**
  * Follows `app`'s current version for `by`'s page (`ScreensApi.watchVersion`,
  * spec 11.5), through the connection's way to the App's host
@@ -1060,7 +830,7 @@ const followVersion = (
   stub: PageCallback,
   queries: QuerySubscriptions,
   subscriptions: Set<Disposable>
-): RunSubscription => {
+): Subscription => {
   const toPage = stub.dup();
   const state: { live: boolean; following?: Disposable; turn: Promise<void> } =
     { live: true, turn: Promise.resolve() };
@@ -1143,7 +913,7 @@ const followVersion = (
     }
   );
   void push(false);
-  return new RunSubscription(async () => {
+  return new Subscription(async () => {
     release();
     await Promise.resolve();
   });
@@ -1268,19 +1038,6 @@ const errorLog = async (
   return await appHost(env, id).errors();
 };
 
-/**
- * Marks `read` handled the moment a look starts it: its failure is never
- * left unhandled, whether the look goes on to await it (`deliveryAt`,
- * which still hears of it) or no longer needs it (no role).
- */
-const handled = async (read: Promise<unknown>): Promise<void> => {
-  try {
-    await read;
-  } catch {
-    // Nobody reads its answer.
-  }
-};
-
 /** What a frame's capability shares with its connection (`ScreensRpc`). */
 interface FrameConnection {
   readonly env: Env;
@@ -1290,17 +1047,8 @@ interface FrameConnection {
   readonly app: AppId;
   /** The build core leased the frame, if the lease was core's for them. */
   readonly build: LeasedBuild | undefined;
-  /** The connection's check that the person may still use an App. */
-  readonly stillOpen: (app: AppId) => StillOpen;
   /** The connection's live queries, bounded for the whole tab. */
   readonly queries: QuerySubscriptions;
-  /** The connection's run subscriptions, bounded for the whole tab. */
-  readonly runSubscriptions: Set<Disposable>;
-  /** The connection's shared read of a build's standing (`standingNow`). */
-  readonly standingNow: (
-    app: AppId,
-    build: LeasedBuild | undefined
-  ) => Promise<Standing>;
 }
 
 /**
@@ -1328,61 +1076,10 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
   /** What the frame follows, let go of when it closes. */
   readonly #held = new Set<Disposable>();
   #closed = false;
-  /** What the frame's calls are decided on: its own build, always. */
-  readonly #frame: Frame;
 
   constructor(connection: FrameConnection) {
     super();
     this.#connection = connection;
-    const { env, app } = connection;
-    this.#frame = {
-      buildOf: (id) => (id === app ? connection.build : undefined),
-      stillOpen: (by, id, build, operation) => {
-        const hasRole = connection.stillOpen(id);
-        return async () =>
-          !this.#closed &&
-          (await hasRole()) &&
-          (await deliveryOpen(env, by, id, build, {
-            operation,
-            stage: "push",
-          }));
-      },
-      held: {
-        keep: (held) => {
-          this.#keep(held);
-        },
-        forget: (held) => {
-          this.#held.delete(held);
-        },
-      },
-      follow: (by, id, look, lose) =>
-        connection.queries.follow(by, id, look, lose),
-      lookOpen: (by, id, build, operation) => {
-        const hasRole = connection.stillOpen(id);
-        return async () => {
-          // Begun before anything is awaited: shared with the other looks
-          // of this revocation, and only with them (`standingNow`).
-          const read = connection.standingNow(id, build);
-          // Handled at once, so a read that fails while the role is still
-          // being read is never left unhandled; `deliveryAt` still hears of
-          // it. Not awaited: the screen never waits for an unneeded read.
-          void handled(read);
-          if (this.#closed || !(await hasRole())) {
-            return false;
-          }
-          return (
-            (await deliveryAt(
-              env,
-              by,
-              id,
-              build,
-              { operation, stage: "push" },
-              read
-            )) === "open"
-          );
-        };
-      },
-    };
   }
 
   /**
@@ -1439,12 +1136,12 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
    * page gets a hold that releases both.
    */
   async #hold(
-    open: (ended: () => void) => RunSubscription | Promise<RunSubscription>
-  ): Promise<RunSubscription> {
+    open: (ended: () => void) => Subscription | Promise<Subscription>
+  ): Promise<Subscription> {
     // Told when the subscription ends on its own (a refusal, a store
     // that can't be watched, a callback the page no longer takes): the
     // frame forgets it then, so ended ones don't pile up while it's open.
-    const state: { hold?: RunSubscription; ended: boolean } = {
+    const state: { hold?: Subscription; ended: boolean } = {
       ended: false,
     };
     // Ended, it is still released: what holds it besides its callback (a
@@ -1453,7 +1150,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
       state.ended = true;
       void state.hold?.release();
     });
-    const hold = new RunSubscription(async () => {
+    const hold = new Subscription(async () => {
       this.#held.delete(hold);
       await subscription.release();
     });
@@ -1474,38 +1171,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     // of an archived App is delivered anything.
     const { id } = await usableApp(env, by, app);
     return deliveryOf(await standingOf(env, id, build));
-  }
-
-  async startRun(workflow: string, input?: unknown): Promise<WorkflowRun> {
-    const { env, app } = this.#connection;
-    return await this.#delivered(
-      "startRun",
-      async (by) => await startScreenRun(env, by, app, workflow, input)
-    );
-  }
-
-  async runs(workflow: string): Promise<ScreenRun[]> {
-    const { env, app } = this.#connection;
-    return await this.#delivered(
-      "runs",
-      async (by) => await screenRuns(env, by, app, workflow)
-    );
-  }
-
-  async run(run: string): Promise<ScreenRun> {
-    const { env, app } = this.#connection;
-    return await this.#delivered(
-      "run",
-      async (by) => await screenRun(env, by, app, run)
-    );
-  }
-
-  async summary(run: string): Promise<RunSummary> {
-    const { env, app } = this.#connection;
-    return await this.#delivered(
-      "summary",
-      async (by) => await runSummary(env, by, app, run)
-    );
   }
 
   async reviewDecision(
@@ -1572,37 +1237,10 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     );
   }
 
-  async control(run: string, kind: RunControl["kind"]): Promise<RunControl> {
-    const { env, app } = this.#connection;
-    return await this.#delivered(
-      "control",
-      async (by) => await controlScreenRun(env, by, app, run, kind)
-    );
-  }
-
-  async watchRuns(
-    workflow: string,
-    onChange: (change: RunChange) => void
-  ): Promise<RunSubscription> {
-    const by = await this.#person();
-    const { env, app, runSubscriptions } = this.#connection;
-    return await this.#hold(
-      async (ended) =>
-        await watchRuns(
-          env,
-          by,
-          { app, workflow, onChange },
-          this.#frame,
-          runSubscriptions,
-          ended
-        )
-    );
-  }
-
   async watchQuery(
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     const by = await this.#person();
     const { env, app, build, queries } = this.#connection;
     // Following is a request like any other; what core then pushes is
@@ -1651,17 +1289,8 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
-  /** This connection's run subscriptions that haven't been released. */
-  readonly #runSubscriptions = new Set<Disposable>();
-
   /** This connection's version subscriptions that haven't been released. */
   readonly #versionSubscriptions = new Set<Disposable>();
-
-  /** Each build's standing being read for a look, by App and build. */
-  readonly #standings = new Map<string, Promise<Standing>>();
-
-  /** Whether the person may still use each App, shared by its callbacks. */
-  readonly #access = new Map<AppId, StillOpen>();
 
   /** This connection's live queries (query-subscriptions.ts). */
   readonly #queries: QuerySubscriptions;
@@ -1682,49 +1311,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         });
       })
     );
-  }
-
-  /**
-   * What core holds now for `build` of `app` (`standingOf`), read once
-   * for every look that asks in the same turn: a revocation starts all
-   * its looks at once, so it costs one read per build. Shared only within
-   * that turn, never with a read begun before, which may predate the
-   * revocation a look checks.
-   */
-  async #standingNow(
-    app: AppId,
-    build: LeasedBuild | undefined
-  ): Promise<Standing> {
-    const key = canonicalJson([
-      app,
-      build?.artifact ?? null,
-      build?.version ?? null,
-    ]);
-    const reading = this.#standings.get(key);
-    if (reading !== undefined) {
-      return await reading;
-    }
-    const read = standingOf(this.#env, app, build);
-    this.#standings.set(key, read);
-    queueMicrotask(() => {
-      if (this.#standings.get(key) === read) {
-        this.#standings.delete(key);
-      }
-    });
-    return await read;
-  }
-
-  /**
-   * Whether the person may still use `app`, for this connection's callbacks:
-   * one answer per reading of the session, shared by every push meanwhile.
-   */
-  #stillOpen(app: AppId): StillOpen {
-    let open = this.#access.get(app);
-    if (open === undefined) {
-      open = stillHasRole(this.#env, this.#check, app);
-      this.#access.set(app, open);
-    }
-    return open;
   }
 
   async open(
@@ -1772,11 +1358,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         userId: by.userId,
         app: id,
         build,
-        stillOpen: (frameApp) => this.#stillOpen(frameApp),
         queries: this.#queries,
-        runSubscriptions: this.#runSubscriptions,
-        standingNow: async (frameApp, frameBuild) =>
-          await this.#standingNow(frameApp, frameBuild),
       });
     });
   }
@@ -1784,7 +1366,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   async watchVersion(
     app: string,
     onVersion: (push: AppVersionPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     return await withPerson(this.#check, async (by) => {
       // Following is a request like any other: a page that follows and
       // lets go over and over is held to what a person may ask.

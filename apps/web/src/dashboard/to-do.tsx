@@ -15,8 +15,6 @@ import {
   DashboardGroup,
   ItemMark,
 } from "./dashboard-card.tsx";
-import { FailedWorkflows } from "./failed-workflows.tsx";
-import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
 import { InboxGroup, inInbox } from "./in-inbox.tsx";
 import { TodoPile } from "./todo-pile.tsx";
 import type { PileItem } from "./todo-pile.tsx";
@@ -31,9 +29,8 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // packages proposed for an engine, which wait for someone given the
 // permission to approve them. The rest is settled on its own page, and is
 // listed under the pile with the way there, not counted on it:
-// workflows failed while acting for the person, with a way to ask the
-// agent to fix it, connections they can sign in to again, and what the
-// inbox settles (`in-inbox.tsx`), each a way to its item there.
+// connections they can sign in to again, and what the inbox settles
+// (`in-inbox.tsx`), each a way to its item there.
 
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
@@ -77,29 +74,6 @@ const PartNotLoaded = ({ part }: { part: Loaded<unknown> }) =>
       <NotLoaded page={part} />
     </div>
   );
-
-const FailedGroup = ({
-  failed,
-  older,
-  onOlder,
-}: {
-  failed: Loaded<NotificationsPage>;
-  older: OlderFailures;
-  onOlder: (older: OlderFailures) => void;
-}) => {
-  const { t } = useLingui();
-  if (failed.state !== "ready") {
-    return <PartNotLoaded part={failed} />;
-  }
-  if (failed.data.page.notifications.length === 0) {
-    return null;
-  }
-  return (
-    <DashboardGroup title={t`Workflows that failed`}>
-      <FailedWorkflows older={older} onOlder={onOlder} page={failed.data} />
-    </DashboardGroup>
-  );
-};
 
 const ReconnectGroup = ({
   reconnect,
@@ -166,8 +140,7 @@ const pileOf = (
 
 /**
  * What waits on the person: the pile, and under it what is settled on its
- * own page. It keeps the older failures shown on asking, for the read they
- * followed: a new read of the failures starts them again.
+ * own page.
  */
 export const ToDo = ({
   waiting,
@@ -178,19 +151,13 @@ export const ToDo = ({
 }) => {
   const { t } = useLingui();
   const [said, setSaid] = useState("");
-  const [kept, setKept] = useState<{
-    after: Waiting["failed"];
-    older: OlderFailures;
-  }>();
-  const older: OlderFailures =
-    kept?.after === waiting.failed ? kept.older : { rows: [], more: undefined };
   // When the dashboard read what waits: it dates only what core lists
   // undated, which the dashboard doesn't show.
   const readAt = new Date(
     useMatch({ from: "/_shell/dashboard", select: (match) => match.updatedAt })
   ).toISOString();
   const inbox = inInbox(waiting, identity, readAt);
-  const { failed, reconnect } = waiting;
+  const { reconnect } = waiting;
   // A part of the pile that couldn't be read says so below it.
   const notLoaded = (
     [
@@ -198,6 +165,7 @@ export const ToDo = ({
       ["outcomes", waiting.outcomes],
       ["requests", waiting.requests],
       ["dependencies", waiting.dependencies],
+      ["notifications", waiting.notifications],
     ] as const
   ).flatMap(([key, part]) =>
     part === undefined || part.state === "ready" ? [] : [{ key, part }]
@@ -205,8 +173,6 @@ export const ToDo = ({
   const elsewhere =
     notLoaded.length > 0 ||
     inbox.length > 0 ||
-    failed.state !== "ready" ||
-    failed.data.page.notifications.length > 0 ||
     reconnect.state !== "ready" ||
     reconnect.data.length > 0;
   return (
@@ -235,13 +201,6 @@ export const ToDo = ({
             <PartNotLoaded key={key} part={part} />
           ))}
           <InboxGroup items={inbox} />
-          <FailedGroup
-            failed={failed}
-            older={older}
-            onOlder={(next) => {
-              setKept({ after: failed, older: next });
-            }}
-          />
           <ReconnectGroup reconnect={reconnect} />
         </DashboardCard>
       ) : null}

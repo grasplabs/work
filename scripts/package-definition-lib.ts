@@ -100,7 +100,6 @@ import {
   generatedServerFolder,
   hostGeneratedFolder,
   screensFolder,
-  workflowsFolder,
 } from "../packages/compiler/src/inputs.ts";
 import { screenReferences } from "../packages/compiler/src/kit.ts";
 import { designNote } from "../packages/compiler/src/lint.ts";
@@ -109,7 +108,6 @@ import {
   compilerOptions,
   computeTarget,
   generatedTarget,
-  workflowTarget,
 } from "../packages/compiler/src/type-check.ts";
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 import {
@@ -807,9 +805,9 @@ const kindConfig = (
 /**
  * The project's tsconfigs, one a kind of code, each as the platform checks
  * it, and the root tsconfig.json that lists them (an editor's, and the
- * check's): the App's screens with the DOM and JSX; its server code and
- * workflows with a worker's lib and no DOM; and each workflow version's
- * compute modules likewise, and the module the host generated from it.
+ * check's): the App's screens with the DOM and JSX; its server code with
+ * a worker's lib and no DOM; and each workflow version's compute modules
+ * likewise, and the module the host generated from it.
  */
 const planTypeCheck = (project: Plan): void => {
   const configs: Record<string, ReturnType<typeof kindConfig>> = {
@@ -830,10 +828,6 @@ const planTypeCheck = (project: Plan): void => {
     ),
     "app/tsconfig.server.json": kindConfig("server", appCodeTarget, {
       include: [...serverCodeIncludes, "tests/**/*.ts"],
-      exclude: ["**/*.d.ts"],
-    }),
-    "app/tsconfig.workflows.json": kindConfig("workflows", workflowTarget, {
-      include: ["workflows/**/*.ts", ...serverCodeIncludes],
       exclude: ["**/*.d.ts"],
     }),
   };
@@ -876,14 +870,13 @@ const planTypeCheck = (project: Plan): void => {
 /**
  * What the project's lint and format leave alone in `app/`, the only
  * folder they read: all but the App's TypeScript as Grasp lints and
- * formats it (core's `lintedFiles`), so not its declarations, the modules
- * the host generates, nor what is under `workflows/`, which the App never
- * changes. The workflow versions, the vendored packages and the
- * compiler's check are outside `app/`.
+ * formats it (core's `lintedFiles`), so not its declarations, nor the
+ * modules the host generates. The workflow versions, the vendored
+ * packages and the compiler's check are outside `app/`.
  */
 const ignoredGlobs = [
   `**/*${declarationExtension}`,
-  ...[generatedServerFolder, hostGeneratedFolder, workflowsFolder.folder].map(
+  ...[generatedServerFolder, hostGeneratedFolder].map(
     (folder) => `app/${folder}**`
   ),
 ];

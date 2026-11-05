@@ -72,8 +72,8 @@ const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 
 /** The code step whose calls these tests follow. */
 const stepCode = `export default async (self, env) => {
-  const attachments = await env.chat.attachments();
-  const workflows = await env.workflows.list();
+  const files = await env.chat.files();
+  const workflows = await env.workflows.independent();
   const found = await env.knowledge.search("the secret parental leave policy");
   let refused = false;
   try {
@@ -81,7 +81,7 @@ const stepCode = `export default async (self, env) => {
   } catch {
     refused = true;
   }
-  return { attachments: attachments.length, workflows: workflows.length, hits: found.hits.length, refused };
+  return { files: files.length, workflows: workflows.length, hits: found.hits.length, refused };
 };`;
 
 describe("a chat's tool lines", () => {
@@ -110,21 +110,21 @@ describe("a chat's tool lines", () => {
       code: /^[a-z_]+\.[a-z_]+$/u.test(tools[3]?.reason ?? ""),
       unique: new Set(tools.map(({ id }) => id)).size,
     }).toStrictEqual({
-      result: `Returned:\n${JSON.stringify({ attachments: 0, workflows: 0, hits: 0, refused: true })}`,
+      result: `Returned:\n${JSON.stringify({ files: 0, workflows: 0, hits: 0, refused: true })}`,
       lines: [
         {
           id: tools[0]?.id,
           callId,
-          method: "chat.attachments",
+          method: "chat.files",
           target: null,
-          summary: { attachments: 0 },
+          summary: { files: 0 },
           outcome: "ok",
           reason: null,
         },
         {
           id: tools[1]?.id,
           callId,
-          method: "workflows.list",
+          method: "workflows.independent",
           target: null,
           summary: { workflows: 0 },
           outcome: "ok",
@@ -161,11 +161,11 @@ describe("a chat's tool lines", () => {
     await answering(
       ann,
       codeStep(
-        "export default async (self, env) => (await env.chat.attachments()).length;"
+        "export default async (self, env) => (await env.chat.files()).length;"
       ),
       says("None."),
       codeStep(
-        "export default async (self, env) => (await env.workflows.list()).length;"
+        "export default async (self, env) => (await env.workflows.independent()).length;"
       ),
       says("None either.")
     );
@@ -215,8 +215,8 @@ describe("a chat's tool lines", () => {
       restarted: restarted.updates[0]?.tools,
     }).toStrictEqual({
       methods: [
-        ["chat.attachments", steps[0]],
-        ["workflows.list", steps[1]],
+        ["chat.files", steps[0]],
+        ["workflows.independent", steps[1]],
       ],
       later: streamed,
       restarted: streamed,

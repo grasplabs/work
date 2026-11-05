@@ -659,7 +659,6 @@ const reportOf = async (
     // the version rather than report, so every one named here passed.
     selected: {
       appTests: observed.appTests,
-      workflowTests: observed.workflowTests,
     },
     authority: await authorityOf(env, row),
     environment: {

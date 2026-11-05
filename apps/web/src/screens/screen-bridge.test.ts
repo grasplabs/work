@@ -49,7 +49,7 @@ const nullAnswer = { result: { ok: true, value: null } };
 /** What reached core, and what it handed out: `answer` to a function call. */
 const coreStandIn = (answer: unknown = nullAnswer) => {
   const functionCalls: string[] = [];
-  const runStarts: { workflow: string; input: unknown }[] = [];
+  const decided: { decision: string; answer: unknown }[] = [];
   const reports: string[] = [];
   const draftRequests: string[] = [];
   const navigations: ScreenNavigation[] = [];
@@ -80,19 +80,9 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       reports.push(problem.message);
       await Promise.resolve();
     },
-    startRun: async (workflow, input) => {
-      runStarts.push({ workflow, input });
-      return await Promise.resolve("started");
-    },
-    runs: async () => await Promise.resolve([]),
-    run: async () => await Promise.resolve("a run"),
-    decide: async () => await Promise.resolve("decided"),
-    control: async () => await Promise.resolve("controlled"),
-    summary: async () => await Promise.resolve("summarised"),
-    watchRuns: async () => {
-      const subscription = new Subscription();
-      subscriptions.push(subscription);
-      return await Promise.resolve(subscription);
+    decide: async (_run, decision, given) => {
+      decided.push({ decision, answer: given });
+      return await Promise.resolve("decided");
     },
     drafts: async () => {
       draftRequests.push("drafts");
@@ -135,7 +125,7 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     serverCalls,
     draftRequests,
     functionCalls,
-    runStarts,
+    decided,
     guards,
     navigations,
     opening,
@@ -222,12 +212,12 @@ const rawFramed = () => {
   return { ...core, broken, close, push, pull };
 };
 
-/** A start of a run of `notes` with one string, as Cap'n Web writes it. */
+/** An answer to decision `notes` of a run, one string, as Cap'n Web writes it. */
 const notesCall = (text: string): unknown => [
   "pipeline",
   0,
-  ["startRun"],
-  ["notes", text],
+  ["decide"],
+  ["run-1", "notes", text],
 ];
 
 /**
@@ -284,9 +274,9 @@ const noop = (): void => {
   // Nothing to update.
 };
 
-/** Follows a workflow's runs once more, as a screen may over and over. */
+/** Follows a query once more, as a screen may over and over. */
 const follow = async (page: RpcStub<ScreenBridge>): Promise<string> => {
-  await page.watchRuns("invoices", noop);
+  await page.watchQuery("{}", noop);
   return "followed";
 };
 
@@ -306,9 +296,9 @@ describe("the page's bridge to a screen", () => {
 
   it("serves the frame only an object that holds each call to the frame's bounds", () => {
     // What `openBridge` serves, and what every call of a frame's lands on
-    // first. Its answers are its target's: `watchRuns` passes on core's
+    // first. Its answers are its target's: `watchQuery` passes on core's
     // stub of the subscription, whose calls go back to core over the
-    // page's own connection, to a target core bounds (RunSubscription, a
+    // page's own connection, to a target core bounds (Subscription, a
     // CoreRpcTarget: core's rpc-targets.test.ts).
     expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
       FrameRpcTarget
@@ -422,7 +412,7 @@ describe("the page's bridge to a screen", () => {
         // Malformed ones count too.
         index % 2 === 0
           ? await poke(frame)
-          : await outcome(frame.page.runs(unchecked(index)))
+          : await outcome(frame.page.decide(unchecked(index), "notes", null))
       )
     );
     const reachedInFlood = frame.functionCalls.length;
@@ -504,7 +494,7 @@ describe("the page's bridge to a screen", () => {
     const exact = atLimit.pull(
       atLimit.push(paddedCall(screenLimits.rpc.maxMessageSize))
     );
-    await expect(exact).resolves.toStrictEqual({ answered: "started" });
+    await expect(exact).resolves.toStrictEqual({ answered: "decided" });
     atLimit.close();
 
     const pastLimit = rawFramed();
@@ -514,8 +504,8 @@ describe("the page's bridge to a screen", () => {
     });
     pastLimit.close();
     expect({
-      exactReached: atLimit.runStarts.length,
-      pastReached: pastLimit.runStarts.length,
+      exactReached: atLimit.decided.length,
+      pastReached: pastLimit.decided.length,
     }).toStrictEqual({ exactReached: 1, pastReached: 0 });
   });
 
@@ -567,24 +557,24 @@ describe("the page's bridge to a screen", () => {
   it("passes on a value as deep as values may be, and ends the session over one level more", async () => {
     const frame = framed();
     const deepest = await outcome(
-      frame.page.startRun("notes", nested(valueDepth + 1))
+      frame.page.decide("run-1", "notes", nested(valueDepth + 1))
     );
     const tooDeep = await outcome(
-      frame.page.startRun("notes", nested(valueDepth + 2))
+      frame.page.decide("run-1", "notes", nested(valueDepth + 2))
     );
     frame.close();
 
     expect({
       deepest,
       tooDeep,
-      reached: frame.runStarts,
+      reached: frame.decided,
       broken: frame.broken.times,
     }).toStrictEqual({
-      deepest: "started",
+      deepest: "decided",
       tooDeep: "refused",
       // Whole, every level of it: an argument passed straight may be one
       // level deeper than values nest (`rpcArgumentDepth`).
-      reached: [{ workflow: "notes", input: nested(valueDepth + 1) }],
+      reached: [{ decision: "notes", answer: nested(valueDepth + 1) }],
       broken: 1,
     });
   });
@@ -605,8 +595,8 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["startRun"],
-          ["notes", ["pipeline", pushed]],
+          ["decide"],
+          ["run-1", "notes", ["pipeline", pushed]],
         ])
       );
 
@@ -614,13 +604,13 @@ describe("the page's bridge to a screen", () => {
     const oneMore = await called(built(valueDepth - 8, 10));
     // Thousands of levels: refused as such, not by running out of stack.
     const farDeeper = await called(built(30, 100));
-    // Passed as a run's input, straight.
+    // Passed as a decision's answer, straight.
     const asInput = await frame.pull(
       frame.push([
         "pipeline",
         0,
-        ["startRun"],
-        ["invoices", ["pipeline", built(30, 100)]],
+        ["decide"],
+        ["run-1", "invoices", ["pipeline", built(30, 100)]],
       ])
     );
     const after = await called(built(1, 0));
@@ -632,17 +622,17 @@ describe("the page's bridge to a screen", () => {
       farDeeper,
       asInput,
       after,
-      reached: frame.runStarts,
+      reached: frame.decided,
       broken: frame.broken.times,
     }).toStrictEqual({
-      deepest: { answered: "started" },
+      deepest: { answered: "decided" },
       oneMore: "request.too_deep",
       farDeeper: "request.too_deep",
       asInput: "request.too_deep",
-      after: { answered: "started" },
+      after: { answered: "decided" },
       reached: [
-        { workflow: "notes", input: nested(valueDepth + 1) },
-        { workflow: "notes", input: "bottom" },
+        { decision: "notes", answer: nested(valueDepth + 1) },
+        { decision: "notes", answer: "bottom" },
       ],
       // The session goes on.
       broken: 0,
@@ -666,13 +656,13 @@ describe("the page's bridge to a screen", () => {
       after,
       reached: {
         server: frame.serverCalls,
-        runs: frame.runStarts,
+        decisions: frame.decided,
         functions: frame.functionCalls,
       },
     }).toStrictEqual({
       called: false,
       after: { answered: nullAnswer },
-      reached: { server: [], runs: [], functions: ["{}"] },
+      reached: { server: [], decisions: [], functions: ["{}"] },
     });
   });
 
@@ -688,8 +678,8 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["startRun"],
-          ["notes", { [key]: ["pipeline", pushed] }],
+          ["decide"],
+          ["run-1", "notes", { [key]: ["pipeline", pushed] }],
         ])
       );
 
@@ -703,8 +693,9 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["startRun"],
+          ["decide"],
           [
+            "run-1",
             "notes",
             [
               "error",
@@ -719,7 +710,7 @@ describe("the page's bridge to a screen", () => {
     };
     frame.close();
 
-    expect({ outcomes, reached: frame.runStarts }).toStrictEqual({
+    expect({ outcomes, reached: frame.decided }).toStrictEqual({
       outcomes: {
         protoDeep: "request.unsupported_value",
         protoShallow: "request.unsupported_value",
@@ -746,11 +737,16 @@ describe("the page's bridge to a screen", () => {
       ]);
     }
     const held = await frame.pull(
-      frame.push(["pipeline", 0, ["startRun"], ["notes", ["pipeline", pushed]]])
+      frame.push([
+        "pipeline",
+        0,
+        ["decide"],
+        ["run-1", "notes", ["pipeline", pushed]],
+      ])
     );
     frame.close();
 
-    expect({ held, reached: frame.runStarts }).toStrictEqual({
+    expect({ held, reached: frame.decided }).toStrictEqual({
       held: "request.too_large",
       reached: [],
     });
@@ -765,12 +761,12 @@ describe("the page's bridge to a screen", () => {
 
     expect({
       after,
-      reached: frame.runStarts,
+      reached: frame.decided,
       broken: frame.broken.times,
     }).toStrictEqual({ after: "refused", reached: [], broken: 1 });
   });
 
-  it("counts following a workflow's runs as a request, however often a screen does", async () => {
+  it("counts following a query as a request, however often a screen does", async () => {
     const frame = framed();
     const followed: unknown[] = [];
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -853,8 +849,8 @@ describe("the page's bridge to a screen", () => {
 
   it("lets go of what the frame followed, and answers nothing more, once closed", async () => {
     const frame = framed();
-    await frame.page.watchRuns("invoices", noop);
-    await frame.page.watchRuns("payouts", noop);
+    await frame.page.watchQuery("{}", noop);
+    await frame.page.watchQuery("[]", noop);
     const before = frame.subscriptions.map(({ released }) => released);
     frame.close();
     // Twice does nothing more.
@@ -869,7 +865,7 @@ describe("the page's bridge to a screen", () => {
     expect({
       before,
       after,
-      reached: frame.runStarts,
+      reached: frame.decided,
       // Closed by the page itself: nothing broke.
       broken: frame.broken.times,
     }).toStrictEqual({

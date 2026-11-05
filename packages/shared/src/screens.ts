@@ -16,7 +16,6 @@ import {
   screenLimits,
   screenModulePath,
 } from "./screen-limits.ts";
-import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web): a
 // document core serves for one build (core's screen-frame.ts), which runs
@@ -360,38 +359,6 @@ export interface AppErrorLog {
   suppressed: number;
 }
 
-/** A decision a run waits for, as its App's screens see it. */
-export interface WaitingDecision {
-  /** Its name in the workflow (`step.decision(name, …)`), with its key. */
-  name: string;
-  /**
-   * What it asks, as the workflow describes it: only for whoever sees the
-   * run's details (its starter, admins) or may answer the decision. It is
-   * written by workflow code, and can hold what the run read.
-   */
-  description?: string;
-  /** Its deadline, ISO 8601: no answer counts after it. */
-  expiresAt: string;
-}
-
-/**
- * A run as its App's screens see it: `waiting` exactly while a decision of
- * it is open, with the decisions it waits for; `running` while it waits
- * on anything else; none once it has ended. While decisions are switched
- * off, it waits for none, as nobody can answer one.
- */
-export interface ScreenRun extends WorkflowRun {
-  waitingFor: WaitingDecision[];
-}
-
-/**
- * What core tells a screen following its App's runs (`watchRuns`): which
- * run changed. The screen reads it again (`run`, `runs`), as its person.
- */
-export interface RunChange {
-  run: string;
-}
-
 /**
  * The bounds of live queries (spec 11.3, 11.4): what core holds one
  * page's connection (one browser tab) and one person to, and how it
@@ -466,11 +433,11 @@ export type AppVersionPush =
   | { type: "refused"; error: { code: string; message: string } };
 
 /**
- * A screen's hold on its App's runs of one workflow (`watchRuns`), until
- * it releases it: then core calls its callback no more, and the slot it
- * took of the 20 a screen may hold is free again.
+ * A page's hold on updates it follows (a screen's live query, its App's
+ * version, a chat), until it releases it: then core calls its callback no
+ * more.
  */
-export interface RunSubscriptionApi {
+export interface SubscriptionApi {
   release: () => Promise<void>;
 }
 
@@ -485,32 +452,16 @@ export interface RunSubscriptionApi {
  * data isn't `ordinary`, read before the call, before its answer and
  * before each push.
  * `close` (or letting go of the stub) releases everything the frame
- * follows through it, its live queries and its runs' updates, at once;
+ * follows through it, its live queries, at once;
  * a closed frame is refused every call (`screen.invalid`).
  */
 export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
   delivery: () => Promise<ScreenDelivery>;
   /**
-   * Starts a run of the App's workflow, for the person: anyone with a role
-   * in the App. Audited as started on a screen (`via: "screen"`).
-   */
-  startRun: (workflow: string, input?: unknown) => Promise<WorkflowRun>;
-  /** The App's latest 100 runs of `workflow`, newest first. */
-  runs: (workflow: string) => Promise<ScreenRun[]>;
-  /** One of the App's runs as it is now; another App's is not found. */
-  run: (run: string) => Promise<ScreenRun>;
-  /**
-   * The summary of one of the App's runs, all of one revision: status,
-   * identity, times, the decisions it waits for, a compensation, and what
-   * the person may do with it now (`control`). Another App's run is not
-   * found.
-   */
-  summary: (run: string) => Promise<RunSummary>;
-  /**
    * What the trusted host decision UI shows the person before they
-   * confirm the screen's answer to the decision `decision` (its name in
-   * the workflow) of one of the App's runs (`DecisionsApi.review`).
+   * confirm the screen's answer to the decision `decision` of one of the
+   * runs the App started (`DecisionsApi.review`).
    */
   reviewDecision: (
     run: string,
@@ -530,8 +481,8 @@ export interface ScreenFrameApi {
     answer: DecisionAnswerInput
   ) => Promise<DecisionConfirmation>;
   /**
-   * Answers the decision `decision` (its name in the workflow) of one of
-   * the App's runs, as the person, by the decision's own rules: only
+   * Answers the decision `decision` of one of the runs the App started,
+   * as the person, by the decision's own rules: only
    * someone it is from, and never the run's starter unless it names
    * exactly them, with the one-use confirmation the page minted once the
    * person confirmed exactly this answer (`DecisionsApi.confirm`); the
@@ -543,28 +494,6 @@ export interface ScreenFrameApi {
     answer: DecisionAnswerInput,
     confirmation?: string
   ) => Promise<DecisionView>;
-  /**
-   * Pauses, resumes or cancels one of the App's runs, for a builder of the
-   * App, and answers the host's receipt once it admitted the request: not
-   * that the run has got there yet, which its status says. The same
-   * request again, while its receipt is unresolved, answers that receipt.
-   * Refused with `workflow.control_conflict` while a cancel, or the other
-   * of pause and resume, is unresolved, and `workflow.control_refused`
-   * once the run has ended. Audited as asked on a screen.
-   */
-  control: (run: string, kind: RunControl["kind"]) => Promise<RunControl>;
-  /**
-   * Calls `onChange` each time one of the App's runs of `workflow` starts,
-   * waits for a decision, has it answered or closed, or ends, for as long
-   * as the person may use the App and until the screen releases the
-   * subscription it answers. Core lets go of `onChange` when it stops
-   * calling it, which tells the screen to follow again. One tab's
-   * connection holds at most 20 subscriptions at once.
-   */
-  watchRuns: (
-    workflow: string,
-    onChange: (change: RunChange) => void
-  ) => Promise<RunSubscriptionApi>;
   /**
    * Follows one of the App's public queries (spec 11): `request` is the
    * call as a function call sends it (its reference and input, as JSON
@@ -582,7 +511,7 @@ export interface ScreenFrameApi {
   watchQuery: (
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   close: () => Promise<void>;
 }
 
@@ -647,7 +576,7 @@ export interface ScreensApi {
   watchVersion: (
     app: string,
     onVersion: (push: AppVersionPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   /**
    * Adds a problem in a screen at `version` to the App's error log:
    * `screen.rate_limited` past what one person's screens, or all of the

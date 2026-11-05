@@ -234,7 +234,7 @@ describe(
             ),
           },
         },
-        selected: { appTests: [], workflowTests: [] },
+        selected: { appTests: [] },
         // As it was verified: no permission, not yet approved, no policy.
         authority: {
           permissions: await sha256Hex(canonicalText([])),
@@ -311,13 +311,11 @@ export default appTest({
           .object({
             selected: z.object({
               appTests: z.array(z.string()),
-              workflowTests: z.array(z.string()),
             }),
           })
           .parse(JSON.parse(row?.report ?? "{}")).selected
       ).toStrictEqual({
         appTests: ["tests/hello.test.ts"],
-        workflowTests: [],
       });
     });
 

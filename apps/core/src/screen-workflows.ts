@@ -463,7 +463,7 @@ interface SeenRun {
  * That a decision of the run in the statement asks `asking`'s person now,
  * as SQL: one still pending they may answer (`answerableByNow`), never for
  * staff, and only where the run's restricted mode is the App's
- * (`appRestricted`), as answering it requires (screen-runs.ts,
+ * (`appRestricted`), as answering it requires (screen-decisions.ts,
  * `appDecision`). What lets a reviewer watch the run they decide on.
  */
 const askedNowSql = (env: Env, asking: Asking, appRestricted: boolean): SQL => {

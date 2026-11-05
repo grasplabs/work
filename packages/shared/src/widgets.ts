@@ -33,8 +33,8 @@ export type WidgetMeasure = (typeof widgetMeasures)[number];
 export const widgetTrendMeasures = ["started", "completed", "failed"] as const;
 export type WidgetTrendMeasure = (typeof widgetTrendMeasures)[number];
 
-/** What rows are put together by: their engine, their workflow, or their workflow's state. */
-export const widgetGroupings = ["engine", "workflow", "state"] as const;
+/** What rows are put together by: their workflow, or its state. */
+export const widgetGroupings = ["workflow", "state"] as const;
 export type WidgetGrouping = (typeof widgetGroupings)[number];
 
 /** A workflow's state: its latest run's status, or `none` before its first. */
@@ -56,7 +56,6 @@ export type WidgetWindow = (typeof widgetWindows)[number];
 
 /** The columns a widget's table may have: what names a row, then what it counts. */
 export const widgetColumns = [
-  "engine",
   "workflow",
   "state",
   "started",
@@ -67,16 +66,13 @@ export const widgetColumns = [
 export type WidgetColumn = (typeof widgetColumns)[number];
 
 /**
- * One of the person's workflows, as a widget counts it: its engine and
- * itself, by ID and name, its state now, and its runs over the widget's
- * window. Core reads them as the person (dashboard-widgets.ts): only the
- * workflows of the engines they can open.
+ * One of the person's workflows, as a widget counts it: by ID and name,
+ * its state now, and its runs over the widget's window. Core reads them as
+ * the person (dashboard-widgets.ts): only the independent workflows they
+ * have a role in.
  */
 export interface WidgetRow {
-  /** Its engine (App) ID. */
-  engine: string;
-  engineName: string;
-  /** `<engine>/<workflow>`. */
+  /** The workflow's ID. */
   workflow: string;
   workflowName: string;
   state: WidgetState;
@@ -109,15 +105,14 @@ const mostIds = 40;
 /** A widget's own words: its title, a part's label. */
 const label = z.string().trim().min(1).max(60);
 
-/** An ID a filter names: an engine's, or `<engine>/<workflow>`. */
+/** An ID a filter names: a workflow's. */
 const filterId = z.string().min(1).max(200);
 
 /**
- * Which of the person's rows a part counts: those of these engines, these
- * workflows and these states, each when given. None given counts them all.
+ * Which of the person's rows a part counts: those of these workflows and
+ * these states, each when given. None given counts them all.
  */
 const filterSchema = z.strictObject({
-  engines: z.array(filterId).min(1).max(mostIds).optional(),
   workflows: z.array(filterId).min(1).max(mostIds).optional(),
   states: z
     .array(z.enum(widgetStates))
@@ -249,7 +244,6 @@ export const widgetRoom = (spec: WidgetSpec): number =>
 
 /** Whether `row` is one `filter` counts. */
 const counts = (row: WidgetRow, filter: WidgetFilter | undefined): boolean =>
-  (filter?.engines === undefined || filter.engines.includes(row.engine)) &&
   (filter?.workflows === undefined ||
     filter.workflows.includes(row.workflow)) &&
   (filter?.states === undefined || filter.states.includes(row.state));
@@ -306,9 +300,6 @@ const groupOf = (
   by: WidgetGrouping
 ): { key: string; name: string } => {
   switch (by) {
-    case "engine": {
-      return { key: row.engine, name: row.engineName };
-    }
     case "workflow": {
       return { key: row.workflow, name: row.workflowName };
     }
@@ -349,9 +340,6 @@ const barsOf = (
 
 const cellOf = (row: WidgetRow, column: WidgetColumn): WidgetCell => {
   switch (column) {
-    case "engine": {
-      return row.engineName;
-    }
     case "workflow": {
       return row.workflowName;
     }
@@ -458,7 +446,7 @@ const leavesOf = (spec: WidgetSpec): { at: string; part: WidgetLeafPart }[] =>
 
 /**
  * What is wrong with `spec` against the person's rows, in words its
- * maker reads to put it right: a filter naming an engine or a workflow
+ * maker reads to put it right: a filter naming a workflow
  * they don't have, a part whose filter matches none of their rows, or a
  * widget that needs more room than a block has. None for one that works.
  */
@@ -466,7 +454,6 @@ export const widgetProblems = (
   spec: WidgetSpec,
   { rows }: WidgetData
 ): string[] => {
-  const engines = new Set(rows.map(({ engine }) => engine));
   const workflows = new Set(rows.map(({ workflow }) => workflow));
   const problems: string[] = [];
   for (const { at, part } of leavesOf(spec)) {
@@ -474,13 +461,6 @@ export const widgetProblems = (
       continue;
     }
     const { filter } = part;
-    for (const engine of filter?.engines ?? []) {
-      if (!engines.has(engine)) {
-        problems.push(
-          `${at}.filter.engines: "${engine}" is not one of the engines given.`
-        );
-      }
-    }
     for (const workflow of filter?.workflows ?? []) {
       if (!workflows.has(workflow)) {
         problems.push(

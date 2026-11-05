@@ -6,7 +6,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import {
   workflowResourceErrors,
   workflowRunsListed,
@@ -40,6 +40,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requireStillOpen } from "../app-access.ts";
 import {
   auditedBatch,
   outboxed,
@@ -48,9 +49,11 @@ import {
   outboxedWhere,
   storedEvent,
 } from "../audit-outbox.ts";
+import { currentMembership } from "../auth/auth.ts";
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
+  members,
   runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
@@ -64,8 +67,6 @@ import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
-import { attemptMethods, loadRunIsolate, runModule } from "./code.ts";
-import type { Settled, StepError } from "./code.ts";
 import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { childEndType } from "./event-envelopes.ts";
@@ -98,6 +99,12 @@ import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+} from "./sealed-isolate.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
 import {
   generatedForRunHost,
   sealedRun,
@@ -619,20 +626,54 @@ const startAbandoned = async (
  * past {@link maxStartAttempts} tries or {@link maxStartingMs}, it is
  * marked failed.
  */
-/** Whether run `runId`'s start receipt names an App that is archived now. */
-const startedByArchived = async (env: Env, runId: string): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ one: sql`1` })
+/**
+ * Whether run `runId`'s start may no longer be sent for the App its
+ * receipt names, as a start would be decided now: the App archived, or
+ * its person no longer able to use it, their role and teams read now
+ * (`requireStillOpen`: a draft is its builders' alone). A start no App
+ * made passes.
+ */
+const appRefusesStart = async (env: Env, runId: string): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const receipt = await db
+    .select({
+      app: workflowStartReceipts.invokerId,
+      principal: workflowStartReceipts.principalId,
+    })
     .from(workflowStartReceipts)
     .where(
       and(
         eq(workflowStartReceipts.id, runId),
-        eq(workflowStartReceipts.invokerType, "app"),
-        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${workflowStartReceipts.invokerId} AND apps.status = 'archived')`
+        eq(workflowStartReceipts.invokerType, "app")
       )
     )
     .get();
-  return row !== undefined;
+  if (receipt === undefined) {
+    return false;
+  }
+  const membership = await db
+    .select({ role: members.role })
+    .from(members)
+    .where(currentMembership(receipt.principal))
+    .get();
+  const role = roleSchema.safeParse(membership?.role);
+  if (!role.success) {
+    return true;
+  }
+  try {
+    // Their teams are read again by the check itself.
+    await requireStillOpen(
+      env,
+      { userId: receipt.principal, role: role.data, teams: [] },
+      appIdSchema.parse(receipt.app)
+    );
+    return false;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return true;
+    }
+    throw error;
+  }
 };
 
 const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
@@ -685,12 +726,13 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
     await tellQueryFollowers(env, row.id);
     return;
   }
-  // Started by an App archived since: nothing of it starts any more
-  // (app-status.ts), so the start is abandoned rather than sent again.
+  // Started by an App archived since, or for someone who may no longer
+  // use it: nothing of it starts for them any more (app-status.ts), so the
+  // start is abandoned rather than sent again.
   if (
     row.startAttempts >= maxStartAttempts ||
     pastStarting ||
-    (await startedByArchived(env, row.id))
+    (await appRefusesStart(env, row.id))
   ) {
     await startAbandoned(env, row, now);
     return;
@@ -1031,7 +1073,7 @@ const resourceHostActivation = async (
             await admitAttempt(env, { ...admission, resource: owner }, attempt),
         }),
   });
-  const code = loadRunIsolate<ResourceAttemptHost>(
+  const code = loadSealedIsolate<ResourceAttemptHost>(
     env,
     {
       owner,
@@ -1042,7 +1084,7 @@ const resourceHostActivation = async (
           ...run.build.modules,
           [openRunModule]: openRunMain,
         }),
-      attemptMethods: resourceAttemptMethods,
+      attemptHostMethods: resourceAttemptMethods,
     },
     {
       onSession: (id) => {
@@ -1171,13 +1213,13 @@ export const sealedActivation = async (
           : await admitAttempt(env, { ...admission, resource: owner }, attempt),
     }
   );
-  const code = loadRunIsolate(
+  const code = loadSealedIsolate(
     env,
     {
       owner,
-      mainModule: runModule,
+      mainModule: sealedMainModule,
       modules: async () => await Promise.resolve(modules()),
-      attemptMethods,
+      attemptHostMethods,
     },
     {
       onSession: (id) => {

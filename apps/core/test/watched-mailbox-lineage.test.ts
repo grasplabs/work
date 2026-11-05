@@ -1,11 +1,9 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { appHost } from "../src/durable-objects.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -25,11 +23,9 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { runMinuteTasks, runQuarterHourTasks } from "./maintenance.ts";
 import { configuredLimits } from "./quota-limits.ts";
-import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, unique } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
-import { appWith } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts in a mailbox a connection watches, as
 // its descendants (mail-stamps.ts, `stampedEventRun`;
@@ -54,8 +50,8 @@ import { appWith } from "./workflow-apps.ts";
 // lineage's limit, each run under the last"); the App's own workflows'
 // refusal records went with them.
 //
-// Kept as an App run until a JSON run's mail can wait for its person to
-// confirm it: that mail joining its run's lineage once confirmed. A
+// Not yet shown for a JSON run (GRA-1584): its mail that waited for its
+// person to confirm it joining its run's lineage once confirmed. A
 // trigger's JSON run is never restricted, so its mail never waits.
 
 const idp = mockIdp();
@@ -818,151 +814,6 @@ describe(
           });
         }
       );
-    });
-  }
-);
-
-/**
- * The `echo` App workflow: on mail arriving in a mailbox its App watches,
- * it mails `to` from `from`, with the same subject.
- */
-const echoApp = (from: string, to: string): Record<string, string> => ({
-  "workflows/echo.ts": `import { connectorEvent, workflow } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "echo",
-  { params: {}, input: connectorEvent.loose(), triggers: [{ type: "event", event: "m365.mail.received", filter: { folder: "inbox" } }] },
-  async (step, { env, input }) =>
-    await step.do(
-      "send",
-      { description: "Mail the mailbox again", sideEffect: true, retries: { limit: 0 }, input: { mailbox: "${from}", subject: String((input.payload as { subject?: string }).subject), body: "Again.", to: ["${to}"] } },
-      async ({ idempotencyKey, input: mail }) => {
-        await env.MAIL.call("mail.send", mail, { idempotencyKey });
-        return input.id;
-      }
-    )
-);
-`,
-  "workflows/echo.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./echo.ts";
-
-const input = { id: "e", connection: "c", owner: null, action: "mail.list", type: "m365.mail.received", payload: { subject: "x" } };
-
-export default workflowTests(definition, [{ name: "runs", input, mocks: { send: "e" }, expect: {} }]);
-`,
-});
-
-/** An App with the `echo` workflow, watching a shared mailbox it mails. */
-const watchingApp = async (admin: Person) => {
-  const subject = `team-${crypto.randomUUID()}`;
-  const watched = await connectShared(admin, subject);
-  const address = `${subject}@acme.test`;
-  const app = await appWith(admin, echoApp(watched.signInName, address));
-  await requestGranted(idp, admin, {
-    subject: { type: "app", appId: app },
-    object: { type: "connection", connectionId: watched.id },
-    actions: ["mail.list", "mail.send"],
-    binding: "MAIL",
-  });
-  // Connect starts listening where the App listens.
-  await runMinuteTasks();
-  return { app, address, user: subject };
-};
-
-/** Where each of the App's runs sits: a root, or under the run before. */
-const appPlacesOf = async (app: string): Promise<string[]> => {
-  const events = await allEvents();
-  const started = events
-    .filter(
-      ({ action, detail }) =>
-        action === "workflow.run.started" && detail.app === app
-    )
-    .map(({ target, detail }) => ({
-      id: target?.id ?? "",
-      parent: typeof detail.parent === "string" ? detail.parent : undefined,
-    }));
-  const ids = new Set(started.map(({ id }) => id));
-  return started.map(({ parent }) => {
-    if (parent === undefined) {
-      return "root";
-    }
-    return ids.has(parent) ? "child" : "other";
-  });
-};
-
-/** The App's runs, once there are `count` and every one has ended. */
-const appRunsEnded = async (admin: Person, app: string, count: number) => {
-  const runs = await vi.waitFor(
-    async () => {
-      const listed = await admin.api.workflows.list(app);
-      expect(listed).toHaveLength(count);
-      return listed;
-    },
-    { timeout: 20_000, interval: 200 }
-  );
-  await Promise.all(
-    runs.map(async ({ id }) => {
-      await finished(id);
-    })
-  );
-};
-
-// Kept until a JSON run's mail can wait for its person: an App's
-// restricted run, as before.
-describe(
-  "runs an App run's mail to a watched mailbox starts",
-  { timeout: 180_000 },
-  () => {
-    afterEach(endLiveRuns);
-
-    it("join its lineage when its mail waited for its person to confirm it", async () => {
-      const admin = await signedIn("admin");
-      const watching = await watchingApp(admin);
-      // Its App read restricted data: each side effect waits for its person.
-      await appHost(env, appIdSchema.parse(watching.app)).restrict();
-      const subject = `Ping ${crypto.randomUUID()}`;
-      await arrive(
-        watching.user,
-        inboxMessage({ subject, from: "ann@customer.test" })
-      );
-      const held = await vi.waitFor(
-        async () => {
-          const waiting = await admin.api.pendingActions.list();
-          const found = waiting.find(({ action }) => action === "mail.send");
-          expect(found).toBeDefined();
-          return found;
-        },
-        { timeout: 20_000, interval: 200 }
-      );
-      await admin.api.pendingActions.confirm(
-        held?.id ?? "",
-        held?.inputHash ?? ""
-      );
-      await appRunsEnded(admin, watching.app, 1);
-      const sent = await sentMail(subject, 0);
-      await arrive(
-        watching.user,
-        // Its From padded, as a provider may hand it over.
-        inboxMessage({
-          subject,
-          from: ` ${watching.address} `,
-          stamp: stampOf(sent),
-        })
-      );
-      await vi.waitFor(
-        async () => {
-          await expect(
-            admin.api.workflows.list(watching.app)
-          ).resolves.toHaveLength(2);
-        },
-        { timeout: 20_000, interval: 200 }
-      );
-
-      await expect(appPlacesOf(watching.app)).resolves.toStrictEqual([
-        "root",
-        "child",
-      ]);
     });
   }
 );

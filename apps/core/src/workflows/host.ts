@@ -47,16 +47,16 @@ import { askAgainMs } from "./admission.ts";
 import { aiWaitEnded, aiWaitStarted, aiWakeType } from "./ai-waits.ts";
 import type { AiWait, AiWaitRun } from "./ai-waits.ts";
 import type { AttemptHost } from "./attempt-host.ts";
-import type { Settled, StepError } from "./code.ts";
 import { storedEventSchema } from "./event-envelopes.ts";
 import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
 import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
 // `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
 // (Workerflow, engine.ts). The
-// run's main module (code.ts) sends each engine call here over RPC. The
+// run's main module (sealed-isolate.ts) sends each engine call here over RPC. The
 // isolate is untrusted, so everything it sends is checked, and what it can
 // do is only this run's: steps, waits and model calls, all as this
 // run and this workflow, for the person it acts for while they are there.
@@ -81,10 +81,8 @@ export interface HostedRun {
    */
   rootRunId?: RunId;
   /**
-   * The run its work is charged to, for a run of another App than its
-   * lineage root's, or of the root's App under another App's run, or of
-   * the root's App under a run of that App charged to either, which it
-   * inherits (quotas.ts, `accountClaimed`):
+   * The run its work is charged to, when another than its lineage root,
+   * which it inherits (quotas.ts, `accountClaimed`):
    * from its row, as the root is. None for a run charged to its lineage's
    * own.
    */
@@ -191,11 +189,6 @@ export interface StepAttempt {
    * `heldKeysKept`.
    */
   heldKeys: string[];
-  /**
-   * How many of its App's functions its code has called so far: each
-   * call's place, which its key is derived from (app-run.ts, `#callFunction`).
-   */
-  functionCalls: number;
   /**
    * The first of its calls refused as one its review doesn't show, or
    * made from another attempt's code that had one refused: the attempt
@@ -316,7 +309,7 @@ const aiWaitSchema = z.object({
  * What a model call's failure tells of its provider, when it failed on
  * the organization's own key for what the provider showed; none else.
  */
-export const aiWaitOf = (error: unknown): AiWait | undefined =>
+const aiWaitOf = (error: unknown): AiWait | undefined =>
   isExpectedError(error) && modelErrors.codeOf(error) !== undefined
     ? aiWaitSchema.safeParse(error.details).data
     : undefined;
@@ -507,7 +500,7 @@ const maxStepName = 256;
 /** Control characters, which the engine refuses in a step's name. */
 const controlCharacter = /\p{Cc}/u;
 
-export const stepNameSchema = z
+const stepNameSchema = z
   .string()
   .min(1)
   .max(maxStepName)
@@ -1162,7 +1155,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
  * called into it. Known by its message, which is all that survives RPC.
  * The run's own code can't make a call into its isolate reject so: every
  * entrypoint and step function settles what its code threw into a report
- * (code.ts, `settled`).
+ * (sealed-isolate.ts, `settled`).
  */
 const cpuLimit = /\bCPU time limit\b/u;
 export const isCpuLimitKill = (error: unknown): boolean =>
@@ -1171,7 +1164,7 @@ export const isCpuLimitKill = (error: unknown): boolean =>
 /**
  * A CPU-limit kill as the Loader throws it (`isCpuLimitKill`): for a call
  * into an isolate already so stopped, and for the on-prem sandbox's `cpu`
- * verdict (code.ts), so both go the way the Loader's own kill does.
+ * verdict (sealed-isolate.ts), so both go the way the Loader's own kill does.
  */
 export const cpuLimitKill = (cause?: unknown): Error =>
   new Error("Worker exceeded CPU time limit.", { cause });
@@ -1337,7 +1330,7 @@ export interface HostHooks {
  * names it: the host runs any kind's steps, waits, holds and retries alike,
  * and leaves to its kind which steps it may run, who must still be there,
  * what its attempts' code may call, and the records that name the run.
- * An App's run is one kind (app-run.ts).
+ * A sealed run is the one kind (sealed-run.ts).
  */
 export interface RunKind {
   /** The run, as every kind has it. */
@@ -1386,21 +1379,20 @@ export interface RunKind {
   /**
    * Hears what `attempt` failed with, as its code reported it, while it
    * still held: a sealed run keeps it for a later attempt of a step whose
-   * call goes out once (sealed-run.ts). None of an App's.
+   * call goes out once (sealed-run.ts).
    */
   attemptFailed?: (attempt: StepAttempt, error: StepError) => void;
   /**
    * Step `step`'s limits in place of what its code declared: a sealed
    * run's engine retries, and the longest an attempt may take, its task's
    * timeout or its catch's retry policy's attempt duration
-   * (sealed-run.ts). None of an App's.
+   * (sealed-run.ts).
    */
   limitsOf?: (step: string) => StepLimits;
   /**
    * What `attempt` settled with, as the host takes it, from what its
    * code reported (`result`): a sealed run's checks of what its step
    * records, and of the failures only its code reports (sealed-run.ts).
-   * An App's run takes what its code reported.
    */
   attemptSettled?: (
     attempt: StepAttempt,
@@ -1432,7 +1424,7 @@ export interface RunKind {
   /**
    * The retry the host may run of step `step` after its round `round`
    * failed with `error`, under a catch's retry policy (sealed-run.ts);
-   * none when it may not. None of an App's.
+   * none when it may not.
    */
   retryOffer?: (
     step: string,
@@ -1443,14 +1435,14 @@ export interface RunKind {
    * The wait step `step` makes for one of the run's decisions, in place of
    * what its code asked (`wait`), or a refusal of it: a sealed run waits
    * only for the decision its task opened, until that decision's deadline
-   * (sealed-run.ts). An App's run waits as its code asks.
+   * (sealed-run.ts).
    */
   decisionWait?: (step: string, wait: DecisionWait) => DecisionWait | Error;
   /**
    * The outcome wait step `step` answers, from how its decision ended
    * (`outcome`), inside the step that records it: a sealed run takes an
    * answer only as its decision binding still allows it (sealed-run.ts),
-   * and fails the step otherwise. An App's run answers the outcome.
+   * and fails the step otherwise.
    */
   decisionTaken?: (
     step: string,
@@ -1458,15 +1450,15 @@ export interface RunKind {
   ) => Promise<DecisionOutcome>;
   /**
    * Refuses a durable wait the run may not wait, before it starts: a
-   * sleep, a sleep until a deadline, an event wait, or a retry's backoff. A test run's
-   * are held to its limit (sealed-run.ts); an App's run waits any.
+   * sleep, a sleep until a deadline, an event wait, or a retry's backoff.
+   * A test run's are held to its limit (sealed-run.ts).
    */
   requireWait?: (wait: WaitLength) => void;
   /**
    * What event wait step `step` takes from the run's own inbox, and how
    * long it waits from when it is first reached, decided by the kind
    * alone, its authority to take them checked first: a sealed run's
-   * (sealed-run.ts). None of an App's run, which waits for no events.
+   * (sealed-run.ts).
    */
   eventWait?: (step: string) => Promise<EventWaitPlan>;
 }
@@ -1517,10 +1509,10 @@ export interface StepLimits {
 }
 
 /**
- * How the host is asked to run a step: as an App's run is
- * (`StepUse`), or, only by a sealed run, as a sleep until the deadline
- * its step recorded (`sleepUntil`), a `try` task's catch (`caught`) or
- * an event wait (`listen`).
+ * How the host is asked to run a step: as the SDK's steps are
+ * (`StepUse`), or as a sleep until the deadline its step recorded
+ * (`sleepUntil`), a `try` task's catch (`caught`) or an event wait
+ * (`listen`).
  */
 export type HostStepUse = StepUse | "sleepUntil" | "caught" | "listen";
 
@@ -1645,7 +1637,7 @@ export class RunHost extends RpcTarget {
    * The attempts whose functions run now, in the order they began: the
    * last is the step running now, which every reviewed call and kind is
    * checked against as well as the step whose host it came through
-   * (`HostControls.running`, as an App run's checks use it: app-run.ts).
+   * (`HostControls.running`).
    *
    * The SDK runs steps one after another, never inside or next to one
    * another (`exclusive`, workflow.ts), so a workflow it runs has one
@@ -1666,7 +1658,7 @@ export class RunHost extends RpcTarget {
 
   /**
    * A host for the run `kind` makes of the host's checks of it
-   * (`HostControls`): an App's run (app-run.ts, `appRun`).
+   * (`HostControls`): a sealed run (sealed-run.ts, `sealedRun`).
    */
   constructor(
     env: Env,
@@ -2054,7 +2046,7 @@ export class RunHost extends RpcTarget {
     fn: (attempt: AttemptHost) => Promise<unknown>,
     /**
      * A sealed run's choice of a retry after a failure, its code's
-     * (`RunKind.retryOffer`, `#retried`); an App's run has none.
+     * (`RunKind.retryOffer`, `#retried`).
      */
     retry?: unknown
   ): Promise<Settled<unknown>> {
@@ -2066,7 +2058,7 @@ export class RunHost extends RpcTarget {
       typeof retry === "function"
         ? async (error: Json): Promise<unknown> =>
             // SAFETY: the isolate's function, over RPC, answering
-            // `Settled` as every one of its functions does (code.ts).
+            // `Settled` as every one of its functions does (sealed-isolate.ts).
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
             await (retry as (error: Json) => Promise<unknown>)(error)
         : undefined
@@ -2438,7 +2430,6 @@ export class RunHost extends RpcTarget {
       held: false,
       unknown: false,
       heldKeys: [],
-      functionCalls: 0,
       last,
     };
   }
@@ -2607,7 +2598,7 @@ export class RunHost extends RpcTarget {
    * every call `admission` admits as one of its lineage's host calls,
    * `stepDone` settling
    * once its step ends in this activation: what it settled with, or, once
-   * the Loader (on-prem, the sandbox: code.ts, `stepCodeFailure`) stopped
+   * the Loader (on-prem, the sandbox: sealed-isolate.ts, `stepCodeFailure`) stopped
    * the isolate past its CPU time while it ran, a timeout, which its step's retries retry in a fresh activation with a
    * fresh isolate (dispatcher.ts, `afterCpuKill`). An isolate so stopped
    * runs nothing more: an attempt that comes after it in this activation
@@ -2676,8 +2667,7 @@ export class RunHost extends RpcTarget {
   /**
    * Sleeps durably until `until`, in ms since the epoch: at once once
    * past. Only a sealed run's sleeping task sleeps so, until exactly the
-   * deadline its step recorded (`RunKind.stepRefusal`); an App's run has
-   * no such step.
+   * deadline its step recorded (`RunKind.stepRefusal`).
    */
   async sleepUntil(name: unknown, until: unknown): Promise<Settled<null>> {
     let step = "";
@@ -2705,8 +2695,8 @@ export class RunHost extends RpcTarget {
 
   /**
    * Waits durably for an event of the run's own inbox, holding no
-   * isolate: only a sealed run's event wait does (an App's run's kind
-   * refuses the step as tampering). What it takes, and until when, are its kind's
+   * isolate: only a sealed run's event wait does. What it takes, and until
+   * when, are its kind's
    * (`RunKind.eventWait`), never its code's. When it was first reached is
    * recorded, so its deadline is the same on every replay; the engine
    * journals the event it took, so a replay answers that event, and no

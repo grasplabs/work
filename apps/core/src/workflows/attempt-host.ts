@@ -1,28 +1,13 @@
 import { RpcTarget } from "cloudflare:workers";
 
 import type { DecisionRecipient } from "../decisions/decisions.ts";
-import type { Settled } from "./code.ts";
+import type { Settled } from "./sealed-isolate.ts";
 
 /** What an attempt's host does, each call as its attempt (`AttemptHost`). */
 export interface AttemptCalls {
-  callModel: (request: unknown) => Promise<Settled<unknown>>;
-  callCollection: (
-    binding: unknown,
-    method: unknown,
-    args: unknown
-  ) => Promise<Settled<unknown>>;
   callConnection: (
     binding: unknown,
     call: unknown
-  ) => Promise<Settled<unknown>>;
-  callBrain: (
-    binding: unknown,
-    operation: unknown,
-    request: unknown
-  ) => Promise<Settled<unknown>>;
-  callFunction: (
-    reference: unknown,
-    input: unknown
   ) => Promise<Settled<unknown>>;
   openDecision: (
     request: unknown
@@ -31,10 +16,6 @@ export interface AttemptCalls {
     decision: unknown,
     reminder: unknown
   ) => Promise<Settled<DecisionRecipient[]>>;
-  readAttachment: (
-    stored: unknown,
-    index: unknown
-  ) => Promise<Settled<Uint8Array>>;
 }
 
 /**
@@ -64,14 +45,9 @@ export type AttemptCallAdmission = (
 export const attemptCallLabels: {
   readonly [Name in keyof AttemptCalls]: string;
 } = {
-  callModel: "model",
-  callCollection: "collection",
   callConnection: "connection",
-  callBrain: "brain",
-  callFunction: "APP",
   openDecision: "decision",
   decisionRecipients: "decision",
-  readAttachment: "attachment",
 };
 
 /** The names of the calls an attempt's code makes (`AttemptCalls`). */
@@ -126,7 +102,7 @@ const fenced = (
 /**
  * The host of one attempt of a step, minted when the engine claims it and
  * handed to that attempt's code alone: what the code does inside a step
- * (its bindings, a model call, a decision) goes through it, each call as
+ * (its bindings, a decision) goes through it, each call as
  * that attempt, with that attempt's identity whenever the call lands. So
  * a call made late, by an attempt the engine gave up on, can never act
  * with a newer attempt's authority: it is checked against its own
@@ -145,38 +121,11 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
     this.#calls = fenced(calls, check, admit);
   }
 
-  async callModel(request: unknown): Promise<Settled<unknown>> {
-    return await this.#calls.callModel(request);
-  }
-
-  async callCollection(
-    binding: unknown,
-    method: unknown,
-    args: unknown
-  ): Promise<Settled<unknown>> {
-    return await this.#calls.callCollection(binding, method, args);
-  }
-
   async callConnection(
     binding: unknown,
     call: unknown
   ): Promise<Settled<unknown>> {
     return await this.#calls.callConnection(binding, call);
-  }
-
-  async callBrain(
-    binding: unknown,
-    operation: unknown,
-    request: unknown
-  ): Promise<Settled<unknown>> {
-    return await this.#calls.callBrain(binding, operation, request);
-  }
-
-  async callFunction(
-    reference: unknown,
-    input: unknown
-  ): Promise<Settled<unknown>> {
-    return await this.#calls.callFunction(reference, input);
   }
 
   async openDecision(
@@ -190,12 +139,5 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
     reminder: unknown
   ): Promise<Settled<DecisionRecipient[]>> {
     return await this.#calls.decisionRecipients(decision, reminder);
-  }
-
-  async readAttachment(
-    stored: unknown,
-    index: unknown
-  ): Promise<Settled<Uint8Array>> {
-    return await this.#calls.readAttachment(stored, index);
   }
 }

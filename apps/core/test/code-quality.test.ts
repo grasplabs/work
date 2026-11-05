@@ -350,7 +350,6 @@ describe("a draft's lint", { timeout: 60_000 }, () => {
       files: {
         "server/_generated/api.ts": unused,
         ".grasp/references.ts": unused,
-        "workflows/intake/1/code/step.ts": unused,
         "components/own.ts": unused,
       },
     });

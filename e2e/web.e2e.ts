@@ -570,10 +570,19 @@ test("says an address no page has, and an App that isn't there, are not found, i
     page.getByRole("navigation", { name: "Breadcrumb" })
   ).toContainText("Not found");
 
-  // A workflow of an App that isn't there, the same way.
-  await page.goto("/workflows/no-such-app/no-such-workflow");
+  // A workflow that isn't there, on its own page, the same way.
+  await page.goto("/workflows/no-such-workflow");
   await expect(
     page.getByRole("heading", { name: "Workflow not found" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText("Not found");
+
+  // Apps own no workflows: an App's workflow address is no page.
+  await page.goto("/workflows/no-such-app/no-such-workflow");
+  await expect(
+    page.getByRole("heading", { name: "This page is not here" })
   ).toBeVisible();
 });
 

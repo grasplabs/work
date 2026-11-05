@@ -7,6 +7,7 @@ import { z } from "zod";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { grantReviewed, release as releaseFiles } from "./apps.ts";
 import type { Idp } from "./idp.ts";
+import { seedResourceRun } from "./runs.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -126,46 +127,55 @@ export const boardPageOf = (idp: Idp) => ({
   },
 });
 
-const workflowFile = `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "pay",
-  { input: z.unknown(), params: {} },
-  async (step) => await step.do("count", { description: "Count" }, async () => 1)
-);
-`;
-
-const workflowTestsFile = `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import pay from "./pay.ts";
-
-export default workflowTests(pay, [{ name: "counts", mocks: { count: 1 }, expect: { output: 1 } }]);
-`;
-
-/** An App whose running version has the workflow `pay`, released by `admin`. */
+/**
+ * An App that binds an independent workflow under the alias `pay`, made
+ * by `admin`: the "App workflow" the map links to, and whose runs the
+ * platform's statistics count for it.
+ */
 const payablesApp = async (admin: Person): Promise<AppId> => {
   const { id } = await admin.api.apps.create({ name: `Payables ${unique()}` });
-  await releaseFiles(admin, id, {
-    "workflows/pay.ts": workflowFile,
-    "workflows/pay.workflow-tests.ts": workflowTestsFile,
-  });
+  await releaseFiles(admin, id, { "AGENTS.md": "# Payables\n" });
+  const workflow = await admin.api.workflowResources.create(`pay-${unique()}`);
+  await env.DB.prepare(
+    "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) VALUES (?, ?, 'pay', ?, 1, 'active', ?, ?)"
+  )
+    .bind(crypto.randomUUID(), id, workflow.id, admin.userId, Date.now())
+    .run();
   return appIdSchema.parse(id);
 };
 
-/** `count` runs of `app`'s workflow `pay`, started `ago` milliseconds back. */
+/** The workflow `app` binds as `pay`, and who bound it. */
+export const payOf = async (
+  app: AppId
+): Promise<{ workflow: string; principal: string }> => {
+  const bound = await env.DB.prepare(
+    "SELECT workflow_resource_id AS workflow, bound_by AS principal FROM app_workflow_bindings WHERE app_id = ? AND alias = 'pay' AND status = 'active'"
+  )
+    .bind(app)
+    .first<{ workflow: string; principal: string }>();
+  if (bound === null) {
+    throw new Error(`App ${app} binds no pay workflow`);
+  }
+  return bound;
+};
+
+/** `count` runs of the workflow `app` binds as `pay`, started `ago` milliseconds back. */
 export const seedRuns = async (
   app: AppId,
   count: number,
   ago: number
 ): Promise<void> => {
+  const { workflow, principal } = await payOf(app);
   const at = Date.now() - ago;
-  await env.DB.batch(
-    Array.from({ length: count }, () =>
-      env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'pay', 1, NULL, 'completed', ?, ?)"
-      ).bind(`run-${unique()}-${unique()}`, app, at, at)
-    )
-  );
+  for (let run = 0; run < count; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a few rows, in order
+    await seedResourceRun({
+      workflow,
+      principal,
+      status: "completed",
+      createdAt: at,
+    });
+  }
 };
 
 /**

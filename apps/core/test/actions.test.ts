@@ -15,11 +15,7 @@ import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import { connectErrors } from "@grasp-os/shared/connect";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { streamMaxEmits } from "@grasp-os/shared/operation-limits";
@@ -32,7 +28,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { operationRoles } from "../src/app-access.ts";
-import { invocationFor, runInvocationFor } from "../src/app-functions.ts";
+import { invocationFor } from "../src/app-functions.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
@@ -2419,7 +2415,7 @@ describe("evidence of a refused use", () => {
     });
   });
 
-  it("is kept by core as app.use.refused, from a person's call and a run's", async () => {
+  it("is kept by core as app.use.refused, from a person's call", async () => {
     const fixture = await appWith({
       "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
@@ -2466,77 +2462,33 @@ export default app({
       { path: "notes.probe", kind: "action" },
       {}
     );
-    const runId = runIdSchema.parse(crypto.randomUUID());
-    const runRequest = crypto.randomUUID();
-    const byRun = await callOperation(
-      { manifest: release.app, run },
-      await runInvocationFor(
-        env,
-        release,
-        {
-          run: {
-            app: appId,
-            workflow: workflowIdSchema.parse("probing"),
-            runId,
-            version: 1,
-            shareSubject: fixture.owner.userId,
-            authority: {
-              subject: { type: "app", appId },
-              onBehalfOf: fixture.owner.userId,
-              mode: "workflow",
-              appVersion: 1,
-            },
-          },
-          requestId: runRequest,
-          deadline: Date.now() + 30_000,
-          stillCurrent: async () => {
-            await Promise.resolve();
-          },
-          requireHolds: () => {
-            // The step holds its lease throughout.
-          },
-          held: () => {
-            throw new Error("Nothing is held here");
-          },
-        },
-        "notes.probe"
-      ),
-      { path: "notes.probe", kind: "action" },
-      {}
-    );
     const events = await allEvents();
     const kept = events
       .filter(
         (event) =>
-          event.action === "app.use.refused" && event.target?.id === appId
+          event.action === "app.use.refused" &&
+          event.target?.id === appId &&
+          event.requestId === personRequest
       )
       .map(({ actor, requestId, detail }) => ({ actor, requestId, detail }));
-    const evidence = (requestId: string, from: string | null) => ({
-      actor: { type: "app", appId, part: "server" },
-      requestId,
-      detail: {
-        version: 1,
-        person: fixture.owner.userId,
-        runId: from,
-        function: "notes.probe",
-        useKind: "function",
-        useName: "notes.label",
-        reason: "use_undeclared",
-        errorCode: "operation.not_found",
-      },
-    });
-    const ofRequest = (requestId: string) =>
-      kept.filter((event) => event.requestId === requestId);
-    expect({
-      byPerson: codeOf(byPerson),
-      byRun: codeOf(byRun),
-      person: ofRequest(personRequest),
-      run: ofRequest(runRequest),
-    }).toStrictEqual({
+    expect({ byPerson: codeOf(byPerson), kept }).toStrictEqual({
       byPerson: "ok",
-      byRun: "ok",
-      person: [evidence(personRequest, null)],
-      run: [evidence(runRequest, runId)],
+      kept: [
+        {
+          actor: { type: "app", appId, part: "server" },
+          requestId: personRequest,
+          detail: {
+            version: 1,
+            person: fixture.owner.userId,
+            runId: null,
+            function: "notes.probe",
+            useKind: "function",
+            useName: "notes.label",
+            reason: "use_undeclared",
+            errorCode: "operation.not_found",
+          },
+        },
+      ],
     });
   });
 });

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import type { FixRunResult } from "./chat.ts";
 import type {
   CatalogSource,
   ListedConnection,
@@ -19,7 +18,6 @@ import type {
   AppMessageNotification,
   EventsStoppedNotification,
   GapAskedNotification,
-  RunFailedNotification,
   PackageRevokedNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
@@ -129,14 +127,6 @@ export interface WorkflowGoLiveItem extends ItemBase {
   selfApproval: boolean;
 }
 
-/** A workflow that failed while acting for the person, which they can ask the agent to fix. */
-export interface FailedRunItem extends ItemBase {
-  kind: "failedRun";
-  /** `askToFix` while chats have a model to ask with. */
-  verdicts: "askToFix"[];
-  notification: RunFailedNotification;
-}
-
 /** One of the brain's open questions an admin asked the person: answered in the brain. */
 export interface OpenQuestionItem extends ItemBase {
   kind: "openQuestion";
@@ -216,7 +206,6 @@ export type WaitingItem =
   | PackagesItem
   | GoLiveItem
   | WorkflowGoLiveItem
-  | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
   | RevokedPackageItem
@@ -260,8 +249,6 @@ export interface WaitingFeed {
   moreNotifications: boolean;
   /** How many of the person's notifications are unread, of all they can see. */
   unreadNotifications: number;
-  /** The model a fix is asked with (`askToFix`); null while chats have none. */
-  fixModel: string | null;
 }
 
 /** A verdict on one item, with what the person reviewed as they gave it. */
@@ -322,19 +309,13 @@ export const waitingVerdictSchema = z.union([
     revision: z.int().min(0),
     verdict: z.enum(["approve", "reject"]),
   }),
-  z.strictObject({
-    kind: z.literal("failedRun"),
-    run: identifierSchema,
-    verdict: z.literal("askToFix"),
-    model: identifierSchema,
-  }),
 ]);
 export type WaitingVerdict = z.input<typeof waitingVerdictSchema>;
 
-/** What a verdict came to: for asking a fix, the chat it started. */
-export type WaitingSettled =
-  | { kind: "failedRun"; fix: FixRunResult }
-  | { kind: Exclude<WaitingVerdict["kind"], "failedRun"> };
+/** What a verdict came to. */
+export interface WaitingSettled {
+  kind: WaitingVerdict["kind"];
+}
 
 /** What waits on the signed-in person, and their verdicts on it. */
 export interface WaitingApi {

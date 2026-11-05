@@ -17,7 +17,7 @@ import type {
 import { and, asc, desc, eq, ne, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appContents, appFor } from "./apps.ts";
+import { appFor } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   improvementSignalComputations as computations,
@@ -96,36 +96,16 @@ const waitsFor = (by: Identity) =>
     : notLike(improvementSignals.subject, "person:%");
 
 /**
- * Refuses a workflow the App's running version doesn't have: a filter that
- * could never match anything is a mistake, not an empty list.
- */
-const requireWorkflow = async (
-  env: Env,
-  by: Identity,
-  app: string,
-  workflow: string
-): Promise<void> => {
-  const { workflows } = await appContents(env, by, app);
-  if (!workflows.includes(workflow)) {
-    throw signalErrors.create("signal.invalid", {
-      issues: [
-        `workflow: the version of App ${app} that runs has no workflow ${workflow}`,
-      ],
-    });
-  }
-};
-
-/**
  * The signals `by` asked for, as of the latest finished computation: all
- * of them for an admin, whole; an App's (or one workflow of it) for its
- * builders, as `forBuilders` has them.
+ * of them for an admin, whole; an App's for its builders, as
+ * `forBuilders` has them.
  */
 export const listSignals = async (
   env: Env,
   by: Identity,
   filter: unknown
 ): Promise<ImprovementSignals> => {
-  const { app, workflow } = signalErrors.parse(
+  const { app } = signalErrors.parse(
     "signal.invalid",
     signalFilterSchema,
     filter
@@ -134,15 +114,12 @@ export const listSignals = async (
     requireAdmin(by);
   } else {
     await appFor(env, by, app, "builder");
-    if (workflow !== undefined) {
-      await requireWorkflow(env, by, app, workflow);
-    }
   }
   const db = drizzle(env.DB);
   await keepAuditEvent(env, db, {
     actor: actorOf(by),
     action: "improvement.signals.read",
-    detail: { app: app ?? null, workflow: workflow ?? null },
+    detail: { app: app ?? null },
   });
   // The computation and its signals in one batch (`latestComputation`).
   const [current, ...kinds] = await db.batch([
@@ -159,10 +136,7 @@ export const listSignals = async (
             eq(improvementSignals.computation, latestComputation),
             eq(improvementSignals.kind, kind),
             kind === "waiting_for_person" ? waitsFor(by) : undefined,
-            app === undefined ? undefined : eq(improvementSignals.appId, app),
-            workflow === undefined
-              ? undefined
-              : eq(improvementSignals.workflowId, workflow)
+            app === undefined ? undefined : eq(improvementSignals.appId, app)
           )
         )
         .orderBy(

@@ -53,15 +53,15 @@ import {
 
 const idp = mockIdp();
 
-const screenCode = `import { useWorkflow } from "@grasp-os/sdk/screen";
+const screenCode = `import { useRetryFailed } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 
 export default function Notes() {
-  const { runs } = useWorkflow("notes");
+  const retry = useRetryFailed();
   return (
     <main className="flex flex-col gap-2 p-4">
-      <p>{runs.length} runs</p>
-      <Button>Add a note</Button>
+      <p>Notes</p>
+      <Button onClick={retry}>Add a note</Button>
     </main>
   );
 }
@@ -115,11 +115,11 @@ const atStoppedClock = async <T>(
   }
 };
 
-/** Follows the App's runs of a workflow, and lets go of them again. */
+/** Follows a query of the App, and lets go of it again. */
 const followAndRelease = async (person: Person, app: string): Promise<void> => {
   const subscription = await person.api.screens
     .frame(app, "")
-    .watchRuns("invoices", noop);
+    .watchQuery("{}", noop);
   await subscription.release();
 };
 
@@ -219,52 +219,6 @@ const sweptAt = async (ahead: number): Promise<void> => {
 };
 
 describe("screens", { timeout: 60_000 }, () => {
-  it("is refused to people without a role in the App, and to nobody signed in", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const user = await personApi("user");
-
-    const asUser = await Promise.all([
-      outcome(user.api.screens.open(app, "notes")),
-      outcome(user.api.screens.frame(app, "").startRun("notes")),
-      outcome(
-        firstVersion(
-          async (onVersion) =>
-            await user.api.screens.watchVersion(app, onVersion)
-        )
-      ),
-      outcome(
-        user.api.screens.report(
-          app,
-          { version: 1, screen: "notes" },
-          { kind: "error", message: "boom" }
-        )
-      ),
-      outcome(user.api.screens.errors(app)),
-    ]);
-    const { core } = await openRpc();
-    const signedOut = await Promise.all([
-      outcome(core.authenticate().screens.frame(app, "").startRun("notes")),
-      outcome(
-        firstVersion(
-          async (onVersion) =>
-            await core.authenticate().screens.watchVersion(app, onVersion)
-        )
-      ),
-    ]);
-    expect({ asUser, signedOut }).toStrictEqual({
-      // As for an App that isn't there (app-roles.test.ts).
-      asUser: [
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-      ],
-      signedOut: ["auth.unauthenticated", "auth.unauthenticated"],
-    });
-  });
-
   it("opens a screen at the App's current version, with only the kit modules it needs", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -289,7 +243,7 @@ describe("screens", { timeout: 60_000 }, () => {
       entry: appModulesOf(frame).includes(frame.entry),
       kit: {
         runtime: Object.hasOwn(kit, frame.screen.runtime),
-        hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/sdk/screen")),
+        hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/sdk/react")),
         button: Object.hasOwn(
           kit,
           kitModuleName("@grasp-os/ui/components/button")
@@ -1195,7 +1149,7 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("counts following an App's runs as a request, however often a screen lets go again", async () => {
+  it("counts following a query as a request, however often a screen lets go again", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
 
@@ -1241,13 +1195,13 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["startRun"],
-            ["missing", ["pipeline", pushed]],
+            ["reviewDecision"],
+            ["run-1", "review", ["pipeline", pushed]],
           ])
         )
       );
 
-    // A run's input, passed straight: one level deeper than values nest
+    // A decision's answer, passed straight: one level deeper than values nest
     // gets in (screen-limits.ts, `rpcArgumentDepth`), to core's own code;
     // one level more doesn't.
     const deepest = await echoed(built(valueDepth - 8, 9));
@@ -1259,12 +1213,12 @@ describe("screens", { timeout: 60_000 }, () => {
 
     expect({ deepest, oneMore, farDeeper, after }).toStrictEqual({
       // Past the connection's checks, refused by core's own code.
-      deepest: "workflow.not_found",
+      deepest: "decision.not_found",
       // Core's own code would have said `screen.invalid`.
       oneMore: "request.too_deep",
       farDeeper: "request.too_deep",
       // The connection goes on.
-      after: "workflow.not_found",
+      after: "decision.not_found",
     });
   });
 
@@ -1311,7 +1265,7 @@ describe("screens", { timeout: 60_000 }, () => {
       deep = raw.push([[["pipeline", deep]]]);
     }
     const shallow = raw.push({ approved: true });
-    // `{ [key]: <a pushed value> }` as a run's input: Cap'n Web
+    // `{ [key]: <a pushed value> }` as a decision's answer: Cap'n Web
     // puts the value in place under the key once the message is checked.
     const echoed = async (key: string, pushed: number): Promise<unknown> =>
       rawOutcome(
@@ -1319,8 +1273,8 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["startRun"],
-            ["missing", { [key]: ["pipeline", pushed] }],
+            ["reviewDecision"],
+            ["run-1", "review", { [key]: ["pipeline", pushed] }],
           ])
         )
       );
@@ -1339,9 +1293,10 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["startRun"],
+            ["reviewDecision"],
             [
-              "missing",
+              "run-1",
+              "review",
               [
                 "error",
                 "AggregateError",
@@ -1362,7 +1317,7 @@ describe("screens", { timeout: 60_000 }, () => {
       constructorDeep: "request.too_deep",
       toJSONDeep: "request.too_deep",
       // Past the connection's checks, refused by core's own code.
-      constructorShallow: JSON.stringify("workflow.not_found"),
+      constructorShallow: JSON.stringify("decision.not_found"),
       aggregateDeep: "request.too_deep",
     });
   });

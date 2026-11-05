@@ -25,7 +25,6 @@ import {
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { viaProjectSql } from "./project-sql.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { openTo } from "./workflows/owners.ts";
 
 // An App's settings besides its code: its name and description, who
 // answers for it, whom it is made for, and the business process it serves
@@ -38,15 +37,41 @@ import { openTo } from "./workflows/owners.ts";
 // created it and is whom its triggered runs act for and whose personal
 // connections its event triggers listen on, so changing them would hand
 // the App's reach to someone else; that never changes here. Who answers
-// for it, like a workflow's owner (workflows/owners.ts), only says whom to
-// ask: a current member of the organization who can open the App when
-// named. Whom it is made for grants nothing either: whom it is open to is
+// for it only says whom to ask: a current member of the organization who
+// can open the App when named. Whom it is made for grants nothing either: whom it is open to is
 // its members (app-members.ts). Naming either is the client's decision,
 // so Grasp staff don't, as they don't share Apps.
 
 /** That the column holds `value`, null included, as SQL. */
 const holds = (column: SQLiteColumn, value: string | null): SQL =>
   sql`${column} IS ${value}`;
+
+// `openTo`'s own reads, aliased: a caller's column of one of these tables
+// is that caller's row, never these reads'.
+const ownedApp = alias(apps, "open_to_app");
+const sharedWith = alias(appMembers, "open_to_share");
+const inTeam = alias(teamMembers, "open_to_team");
+
+/**
+ * That the person `userId` (an ID, or a column holding one) has a role in
+ * App `app` now, as SQL: an admin, its owner, or someone it is shared with,
+ * as a person, through a team or through a project they are in. As
+ * `appsFoundBy` decides it; what the App read (app-provenance.ts) can't be
+ * decided in SQL, and isn't part of it.
+ */
+export const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
+  ${activeMember(userId, ["admin"])}
+  OR EXISTS (SELECT 1 FROM ${apps} AS ${ownedApp} WHERE ${ownedApp.id} = ${app} AND ${ownedApp.ownerId} = ${userId})
+  OR EXISTS (
+    SELECT 1 FROM ${appMembers} AS ${sharedWith}
+    WHERE ${sharedWith.appId} = ${app}
+      AND ((${sharedWith.memberType} = 'person' AND ${sharedWith.memberId} = ${userId})
+        OR (${sharedWith.memberType} = 'team' AND ${sharedWith.memberId} IN (
+          SELECT ${inTeam.teamId} FROM ${teamMembers} AS ${inTeam}
+          WHERE ${inTeam.userId} = ${userId}))
+        OR ${viaProjectSql(sharedWith.memberType, sharedWith.memberId, userId)})
+  )
+)`;
 
 /** That `audience` is a member or a team of the organization now, as SQL. */
 const ofOrganization = (audience: AppAudience): SQL =>

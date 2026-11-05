@@ -103,10 +103,9 @@ interface SubmissionFields<Kind extends ReferenceKind> {
  * A streaming action (spec 10.7.6), as App code declares it (its
  * progress schema in `stream`). It runs only for a screen following it
  * (`useStream`, `client.stream`): wherever a call answers once
- * (`client.action`, `ctx.runAction`, a workflow's
- * `appFunctions(env).action`, a test's `action`), its type is refused, as
- * the host refuses the call (`operation.mode_mismatch`). A definition is
- * told by its `stream`, a reference by what it streams.
+ * (`client.action`, `ctx.runAction`, a test's `action`), its type is
+ * refused, as the host refuses the call (`operation.mode_mismatch`). A
+ * definition is told by its `stream`, a reference by what it streams.
  */
 export interface StreamingFunction {
   readonly stream: object;

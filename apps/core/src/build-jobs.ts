@@ -37,7 +37,7 @@ import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
-import { keepTests, reviewVersion } from "./version-review.ts";
+import { reviewVersion } from "./version-review.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import type { RunStep } from "./workflows/host.ts";
 import type { BuildJob, Draft } from "./workspace.ts";
@@ -448,8 +448,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
  * it commits (authorized again, the draft still at its revision, and the
  * job still open), and once only. A version it recorded it was about to commit
  * and did is its receipt: a commit run again takes it, rather than making
- * another. The tests its check ran are kept with the version, and the
- * draft's revision is dropped.
+ * another. Then the draft's revision is dropped.
  */
 const commitStep = async (
   env: Env,
@@ -497,13 +496,6 @@ const commitStep = async (
       }
     );
     ({ version, tree } = proposed);
-  }
-  // The check ran the tests of exactly these files: kept with the version,
-  // before its receipt, so a commit cut off here takes the version again.
-  if (checked.check.tests.status !== "not_run") {
-    await keepTests(env, app, tree, checked.check.tests).catch(
-      afterProposal("keep_tests", app, version)
-    );
   }
   await chats.recordBuildReceipt(scope.chatId, job.id, version);
   await chats

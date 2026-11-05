@@ -1,6 +1,6 @@
-import type { Goal, GoalWorkflow } from "@grasp-os/shared/brain";
+import type { Goal } from "@grasp-os/shared/brain";
 import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
-import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -27,7 +27,7 @@ import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { listAppWorkflows } from "../workflows/reads.ts";
+import { listWorkflows } from "../workflows/reads.ts";
 import {
   newGoalRecords,
   relinkedRecords,
@@ -172,8 +172,6 @@ const WordingDialog = ({
   );
 };
 
-const keyOf = ({ app, workflow }: GoalWorkflow): string => `${app}/${workflow}`;
-
 /** Links the company's workflows that serve `goal`, and takes others off. */
 const WorkflowsDialog = ({
   goal,
@@ -191,16 +189,18 @@ const WorkflowsDialog = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [chosen, setChosen] = useState<ReadonlySet<string>>(
-    () => new Set(goal.workflows.map(keyOf))
+    () => new Set(goal.workflows)
   );
   const { title } = wordingOf(goal);
   const save = async (): Promise<void> => {
     const picked = workflows
-      .map(({ app, workflow }) => ({ app, workflow }))
-      .filter((each) => chosen.has(keyOf(each)));
-    // A linked workflow the list doesn't show (its App went) stays linked.
-    const shown = new Set(workflows.map(keyOf));
-    const kept = goal.workflows.filter((each) => !shown.has(keyOf(each)));
+      .map(({ workflowId }) => workflowId)
+      .filter((each) => chosen.has(each));
+    // A linked workflow the list doesn't show (deleted since) stays linked.
+    const shown = new Set<string>(
+      workflows.map(({ workflowId }) => workflowId)
+    );
+    const kept = goal.workflows.filter((each) => !shown.has(each));
     const records = relinkedRecords(goal, [...kept, ...picked], todayUtc());
     if (records.length === 0) {
       onOpenChange(false);
@@ -238,7 +238,7 @@ const WorkflowsDialog = ({
           ) : (
             <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
               {workflows.map((each) => {
-                const key = keyOf(each);
+                const key = each.workflowId;
                 const id = `${ids}-${key}`;
                 return (
                   <li className="flex items-center gap-2.5 py-1" key={key}>
@@ -256,14 +256,8 @@ const WorkflowsDialog = ({
                         setChosen(next);
                       }}
                     />
-                    <label
-                      className="flex min-w-0 flex-col text-sm"
-                      htmlFor={id}
-                    >
-                      <span className="truncate">{each.workflow}</span>
-                      <span className="text-muted-foreground truncate">
-                        {each.appName}
-                      </span>
+                    <label className="min-w-0 truncate text-sm" htmlFor={id}>
+                      {each.name}
                     </label>
                   </li>
                 );
@@ -359,8 +353,7 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
       next.what === "workflows" &&
       workflows === undefined
     ) {
-      // A goal links engines' workflows.
-      const listed = await run(listAppWorkflows);
+      const listed = await run(listWorkflows);
       if (listed === undefined) {
         return;
       }
@@ -371,7 +364,7 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
   const close = (isOpen: boolean): void => {
     if (!isOpen) {
       setChange(undefined);
-      // Read again next time: an App may have changed meanwhile.
+      // Read again next time: a workflow may have changed meanwhile.
       setWorkflows(undefined);
     }
   };

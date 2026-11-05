@@ -62,13 +62,7 @@ export interface FrameTarget {
   /** Cancels a streaming action's invocation, for everyone following it. */
   cancelStream: (request: string) => Promise<unknown>;
   report: (problem: ScreenProblem) => Promise<void>;
-  startRun: (workflow: string, input: unknown) => Promise<unknown>;
-  runs: (workflow: string) => Promise<unknown>;
-  run: (run: string) => Promise<unknown>;
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
-  control: (run: string, kind: string) => Promise<unknown>;
-  summary: (run: string) => Promise<unknown>;
-  watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
   watchQuery: (
     request: string,
     onSnapshot: unknown
@@ -307,21 +301,6 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     return await this.#target.cancelStream(request);
   }
 
-  async startRun(workflow: unknown, input: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.startRun(text(workflow), input);
-  }
-
-  async runs(workflow: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.runs(text(workflow));
-  }
-
-  async run(run: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.run(text(run));
-  }
-
   async decide(
     run: unknown,
     decision: unknown,
@@ -331,31 +310,10 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     return await this.#target.decide(text(run), text(decision), answer);
   }
 
-  async summary(run: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.summary(text(run));
-  }
-
-  async control(run: unknown, kind: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.control(text(run), text(kind));
-  }
-
-  /**
-   * The frame's callback goes on to core, which may only call it; the
-   * subscription core answers goes back to the frame, to release.
-   * Following counts as a request; what core then pushes doesn't, and
-   * core holds a screen to a number of subscriptions at once.
-   */
-  async watchRuns(workflow: unknown, onChange: unknown): Promise<unknown> {
-    this.#request();
-    return await this.#target.watchRuns(text(workflow), onChange);
-  }
-
   /**
    * Follows a query of the App (spec 11): its request goes on as the
-   * frame sent it, bounded as a function call's is, and its callback as
-   * `watchRuns`'s does; the subscription core answers goes back to the
+   * frame sent it, bounded as a function call's is, and its callback goes
+   * on to core, which may only call it; the subscription core answers goes back to the
    * frame, to release. Following counts as a request; what core pushes
    * doesn't, and core bounds what a connection follows.
    */

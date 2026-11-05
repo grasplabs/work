@@ -30,14 +30,14 @@ export const html = query({
 /** The registration of an App of `screens`, each `screens/<name>.tsx`. */
 const registration = (
   screens: readonly string[]
-): string => `import { app } from "@grasp-os/sdk";
+): string => `import { app, v } from "@grasp-os/sdk";
 import schema from "./schema.ts";
 
 export default app({
   name: "Attacks",
   schema,
   access: { tables: {} },
-  screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx" }`).join(", ")}],
+  screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx", input: v.object({ note: v.string().optional() }) }`).join(", ")}],
 });
 `;
 
@@ -80,18 +80,18 @@ export default function Wandering() {
 /**
  * Renders, then sends more in one message than the page takes over the
  * frame's port. The SDK's client bounds a function's request before it
- * sends it, so this starts a run through the legacy workflow hook, whose
- * input crosses the port before anything reads it; no workflow is
- * involved.
+ * sends it, so this opens a screen with input its route takes, whose
+ * request crosses the port before anything reads it.
  */
-const oversizedScreen = `import { useWorkflow } from "@grasp-os/sdk/screen";
+const oversizedScreen = `import { useNavigate } from "@grasp-os/sdk/react";
 import { useEffect } from "react";
+import { screens } from "@server/_generated/api";
 
 export default function Oversized() {
-  const { start } = useWorkflow("secret");
+  const navigate = useNavigate();
   useEffect(() => {
-    void start("x".repeat(300_000)).catch(() => undefined);
-  }, []);
+    void navigate(screens.oversized, { note: "x".repeat(300_000) }).catch(() => undefined);
+  }, [navigate]);
   return <main><h1>Oversized</h1></main>;
 }
 `;

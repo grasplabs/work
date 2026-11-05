@@ -572,10 +572,7 @@ const requireHeldEvidenceReadable = async (
  * authority as it stands now, so a child's output loses none of its
  * protection in its parent's hands.
  *
- * The walk follows workflow parents alone. A JSON run an App's run
- * started went through that run's App function call, which its own gate
- * checked first (app-run.ts, `#callFunction`). It isn't held to the App
- * run's evidence after it started: that gap is recorded on GRA-1093.
+ * The walk follows workflow parents alone: no other run starts one.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,

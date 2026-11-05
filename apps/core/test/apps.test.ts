@@ -370,9 +370,9 @@ describe("App code", { timeout: 60_000 }, () => {
       beforeCurrent,
       current: await apps.contents(app.id),
     }).toStrictEqual({
-      none: { version: null, screens: [], workflows: [] },
-      beforeCurrent: { version: 1, screens: ["inbox"], workflows: [] },
-      current: { version: 2, screens: ["archive", "inbox"], workflows: [] },
+      none: { version: null, screens: [] },
+      beforeCurrent: { version: 1, screens: ["inbox"] },
+      current: { version: 2, screens: ["archive", "inbox"] },
     });
     await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
       "app.not_found"
@@ -512,14 +512,11 @@ describe("App code", { timeout: 60_000 }, () => {
         by: actor,
         action: "app.version.current",
         on: target,
-        // With what it registered: this version has no workflows.
+        // What it replaced, and the candidate it was verified as.
         detail: {
           version: 1,
           previous: null,
           candidate,
-          schedules: 0,
-          emails: "",
-          events: "",
         },
       },
     ]);

@@ -24,13 +24,13 @@ import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
-import type { Settled } from "../src/workflows/code.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import type { RunEventDelivery } from "../src/workflows/run-events.ts";
+import type { Settled } from "../src/workflows/sealed-isolate.ts";
 import {
   admittedFreely,
   liveStatus,

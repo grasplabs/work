@@ -18,7 +18,7 @@
  * - every App file parses as the platform's compile parses it, with
  *   Babel, which reads its comments and ambient declarations for the two
  *   rules below through the platform's own steering.ts;
- * - code whose types are checked (server code, workflows, compute
+ * - code whose types are checked (server code, compute
  *   modules) steers nothing: no triple-slash directive, no suppression
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
  *   global` or `declare module` (imports.ts, `typeChecked`);
@@ -86,14 +86,12 @@ interface Kind {
 const every = (): boolean => true;
 const none = (): boolean => false;
 const generated = (file: string): boolean => file.startsWith(".grasp/");
-const workflow = (file: string): boolean => file.startsWith("workflows/");
 
 /**
  * The kinds of code, as each tsconfig's `grasp.kind` names it. Server
  * code's migrations are checked for what they name, not yet for their
- * own type errors (compiler `checkAppCode`, GRA-690); a workflow's check
- * reads the App's server code for the types it names, reporting only the
- * workflows'; and the host's generated modules are its own.
+ * own type errors (compiler `checkAppCode`, GRA-690); and the host's
+ * generated modules are its own.
  */
 const kinds: Readonly<Record<string, Kind>> = {
   screens: { reports: every, steered: none, declares: none, lenient: none },
@@ -102,12 +100,6 @@ const kinds: Readonly<Record<string, Kind>> = {
     steered: (file) => !generated(file),
     declares: generated,
     lenient: (file) => file.startsWith("server/migrations/"),
-  },
-  workflows: {
-    reports: workflow,
-    steered: workflow,
-    declares: none,
-    lenient: none,
   },
   compute: { reports: every, steered: every, declares: none, lenient: none },
   generated: { reports: every, steered: none, declares: every, lenient: none },
@@ -564,8 +556,7 @@ const configProblem = (config: string): Problem[] => [
  * (a `/// <reference lib="dom" />` in one file can't give every other
  * file the DOM here either); and the triple-slash directives it refuses
  * beside the check's own errors. Each only for the files the kind
- * reports: a file two kinds read (server code, which a workflow's check
- * reads for its types) is refused once, by its own kind.
+ * reports, so a file two kinds read is refused once, by its own kind.
  */
 const readFiles = (
   texts: ReadonlyMap<string, string>,

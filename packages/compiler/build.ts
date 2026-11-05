@@ -51,7 +51,6 @@ import {
   previewRefresh,
   previewRuntime,
   referenceOf,
-  screenHooks,
   screenRuntime,
   screenSdk,
   sdkRoot,
@@ -182,16 +181,14 @@ const uiEntries = (): Entry[] =>
  * module, so the provider the runtime mounts is the one the hooks read.
  */
 const sdkEntries = (extra: readonly string[] = []): Entry[] =>
-  [sdkRoot, screenHooks, screenSdk, screenRuntime, ...extra].map(
-    (specifier) => {
-      const target =
-        exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
-      if (typeof target !== "string") {
-        throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
-      }
-      return { specifier, id: path.join(sdk, target) };
+  [sdkRoot, screenSdk, screenRuntime, ...extra].map((specifier) => {
+    const target =
+      exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
+    if (typeof target !== "string") {
+      throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
     }
-  );
+    return { specifier, id: path.join(sdk, target) };
+  });
 
 /**
  * lucide-react's icons, one module each, and the export names App code
@@ -547,9 +544,10 @@ const jqWasmExternal: Plugin = {
 };
 
 /**
- * The SDK's modules for `specifiers`, which App code runs with outside
- * screens: the workflow SDK, which App workflows import (`sdkImports`),
- * or what an App's server isolate loads (`serverSdkImports`), each a set
+ * The SDK's modules for `specifiers`, which code runs with outside
+ * screens: what a workflow's or an App test's isolate loads (`sdkImports`
+ * and the JSON workflows' own), or what an App's server isolate loads
+ * (`serverSdkImports`), each a set
  * of its own, so each isolate carries only what it uses. One module per
  * specifier, named by it (`@grasp-os~sdk~workflow.js`), and chunks for
  * what they share (Zod), importing each other by flat name like the kit's
@@ -1736,7 +1734,6 @@ const buildAppCompiler = async (
   const imports = [
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
-    screenHooks,
     screenSdk,
     sdkRoot,
   ];
@@ -1755,8 +1752,6 @@ const buildAppCompiler = async (
     "@grasp-os/sdk/database",
     // And its tests, against the SDK's testing module (app-code.ts).
     "@grasp-os/sdk/testing",
-    // And its workflows, against the SDK's workflow modules.
-    ...sdkImports,
   ];
   const typeSources = collectTypes(typed);
   const kit: Kit = {
@@ -1791,7 +1786,7 @@ const buildAppCompiler = async (
   const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
   const kitPreviewModules = modulesOf(previewKitCode);
-  // App workflows and the code generated from JSON workflows share one set:
+  // The run hosts', App tests' and JSON workflows' isolates share one set:
   // each imports only its own entry of it (imports.ts).
   const workflowSdkModules = modulesOf(
     await buildSdkModules([

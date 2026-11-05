@@ -1,5 +1,5 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
-import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
+import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import {
@@ -7,7 +7,7 @@ import {
   appIdSchema,
   storeIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
+import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
@@ -19,19 +19,16 @@ import type {
   AppErrorPayload,
   OperationResult,
 } from "@grasp-os/shared/operations";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import type { WriterRoles } from "@grasp-os/shared/stores";
-import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
-import { callTimeoutMs } from "./app-call-timeout.ts";
 import { appPeopleNotifications } from "./app-notifications.ts";
 import {
   answerPeople,
@@ -56,17 +53,10 @@ import {
 } from "./app-webhook-queue.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
-import type {
-  Invocation,
-  ProgressSink,
-  ResourceBindings,
-  UseRefusal,
-} from "./operations.ts";
-import { requireApprovedVersion } from "./permissions.ts";
+import type { Invocation, ProgressSink, UseRefusal } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
@@ -400,232 +390,6 @@ export const invocationFor = async (
           notifyPeople: appPeopleNotifications(env, authority, agent ?? null),
         }),
   };
-};
-
-/** What core resolved of a workflow run calling a function of its App. */
-export interface RunCaller {
-  /** The run, as its host loaded it: never anything its isolate sent. */
-  readonly run: {
-    readonly app: AppId;
-    readonly workflow: WorkflowId;
-    readonly runId: RunId;
-    readonly rootRunId?: RunId;
-    /**
-     * The account the run is charged to, when another App's run in its
-     * lineage (workflows/host.ts, `HostedRun`): its model requests through
-     * the App's functions count there, as its steps' do (`runActorOf`).
-     */
-    readonly accountRunId?: RunId;
-    /** The version the run is pinned to: the release that runs. */
-    readonly version: number;
-    /** Who the run acts for in this execution, in workflow mode. */
-    readonly authority: Authority;
-    /** Whose share its model requests take (workflows/host.ts, `HostedRun`). */
-    readonly shareSubject: string;
-  };
-  readonly requestId: string;
-  readonly deadline: number;
-  /**
-   * Throws once the step's attempt the call comes from no longer holds
-   * its lease: it timed out, the run was cancelled or paused, another
-   * activation took over, or its function returned.
-   */
-  readonly stillCurrent: () => Promise<void>;
-  /**
-   * The same, synchronously: for the last check before an effect, with
-   * nothing awaited between it and the effect's start.
-   */
-  readonly requireHolds: () => void;
-  /** Hears each side effect connect held for the person (`BindingCaller.held`). */
-  readonly held: (key: string) => void;
-}
-
-/**
- * `bindings` for a run: each request's key under the run's
- * (`stepIdempotencyKey`), behind core's own prefix, so no step's own key
- * is ever one of them, and connect finds a run's held side effects, and
- * drops them once the run has ended, by the run their key names
- * (pending-actions.ts, workflows/retention.ts). Under it is still the key
- * the operation host derived, so the same call made again sends the same
- * key. The attempt's lease is checked once more as the binding is
- * resolved, with nothing awaited between that and the request's start
- * (`resourceCall`, operations.ts): a cancel landing during the gate's or
- * the binding's reads stops it.
- */
-const keyedUnderRun =
-  (
-    bindings: ResourceBindings,
-    runId: RunId,
-    requireHolds: () => void
-  ): ResourceBindings =>
-  async (declaration) => {
-    const bound = await bindings(declaration);
-    requireHolds();
-    return bound === undefined
-      ? undefined
-      : {
-          ...bound,
-          call: async (method, args, context) =>
-            await bound.call(method, args, {
-              ...context,
-              idempotencyKey: stepIdempotencyKey(
-                runId,
-                `${coreStepPrefix}${context.idempotencyKey}`
-              ),
-            }),
-        };
-  };
-
-/**
- * The invocation of `release` (the run's own App, at the version the run
- * is pinned to) for a step of `caller`'s run: as the person the run acts
- * for, in workflow mode, with the run as its work context, and with the
- * run as whoever the audit log names and whose spend a model request
- * counts in besides its binding's (`BindingCaller.actor`), for the
- * call of `operation`, its public function's path. Nothing of it comes
- * from the run's isolate.
- */
-export const runInvocationFor = async (
-  env: Env,
-  release: Release,
-  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
-  operation: string,
-  callApp?: AppFunctionCall
-): Promise<Invocation> => {
-  const { app, runId, version, authority } = run;
-  // A version nobody approved refused, recorded once for the call, as the
-  // v1 path's refused calls are (`workflow.call.refused`, workflows/
-  // host.ts): the App, the version and the function, never its input.
-  let refusalAudited = false;
-  const auditRefusal = async () => {
-    if (refusalAudited) {
-      return;
-    }
-    refusalAudited = true;
-    await keepAuditEvent(env, drizzle(env.DB), {
-      actor: runActorOf(run),
-      action: "workflow.call.refused",
-      target: { type: "workflow_run", id: runId },
-      requestId,
-      detail: {
-        app,
-        workflow: run.workflow,
-        version,
-        step: null,
-        call: operation,
-        errorCode: "permission.denied",
-        reason: "version.unapproved",
-      },
-    });
-  };
-  // The one gate, as for a screen's call: before the call starts, each
-  // mutation commits and each resource request. The release; the version
-  // an admin approved, while the App holds a permission that changes
-  // things (`requireApprovedVersion`), as a run's calls into the App
-  // always were: a run waiting on a version nobody approved does nothing
-  // more once an admin grants for a later one, not even to the App's own
-  // data. Then the person, still a member with a role in the App; then,
-  // last, after every read, the step's attempt, so nothing runs for an
-  // attempt the engine let go of meanwhile. The commit and the request
-  // check the lease once more, synchronously, just before they start.
-  // The roles the gate read last, which who calls is told (`people`).
-  let admitted: WriterRoles | undefined;
-  const authorize = async () => {
-    await requireNotRevoked(env, app, version);
-    await requireApprovedVersion(env, app, version, auditRefusal);
-    const role = await memberRole(env.DB, authority.onBehalfOf);
-    if (role === undefined) {
-      throw permissionErrors.create("permission.person_inactive");
-    }
-    // A run in flight goes on when its App is taken back to a draft; an
-    // archive stops it (app-status.ts).
-    const roles = await operationRoles(
-      env,
-      { userId: authority.onBehalfOf, role },
-      app,
-      true
-    );
-    await stillCurrent();
-    admitted = roles;
-    return roles;
-  };
-  const bindings = resourceBindingsFor(env, {
-    app,
-    authority: { ...authority, mode: "workflow", appVersion: version },
-    context: { type: "run", appId: app, runId },
-    sources: invocationSources(),
-    actor: runActorOf(run),
-    held,
-    shareSubject: run.shareSubject,
-    requireHolds,
-    admit: authorize,
-    chain: [app],
-    ...(callApp === undefined ? {} : { callApp }),
-    fromRun: true,
-  });
-  return {
-    principal: authority.onBehalfOf,
-    actor: runActorOf(run),
-    sensitiveReads: keptSensitiveReads(env, {
-      actor: runActorOf(run),
-      target: { type: "app", id: app },
-      version,
-      principal: authority.onBehalfOf,
-      requestId,
-      runId,
-    }),
-    consumer: { resourceId: app, resourceVersion: version },
-    // Who calls: the person the run acts for, the one who started it.
-    people: memberPeople(env, {
-      app,
-      userId: authority.onBehalfOf,
-      roles: async () => admitted ?? (await authorize()),
-      declared: release.app.people === true,
-      actor: runActorOf(run),
-      requestId,
-    }),
-    store:
-      release.store === null
-        ? noStore()
-        : fencedStore(
-            await openStore(env, release.store.storeId),
-            requireHolds
-          ),
-    requestId,
-    deadline,
-    runId,
-    authorize,
-    refusedUse: keptUseRefusals(env, {
-      app,
-      version,
-      principal: authority.onBehalfOf,
-      requestId,
-      runId,
-    }),
-    // No `workflows`: a run's call starts no workflow (operations.ts,
-    // `Invocation.workflows`), so its step can't open a lineage of its own.
-    resources: keyedUnderRun(bindings, runId, requireHolds),
-  };
-};
-
-/**
- * The public function `reference` names in `release`, of its kind: an
- * internal one is refused as one that doesn't exist.
- */
-const publicFunctionOf = (
-  release: Release,
-  reference: { readonly name: string; readonly kind: string }
-) => {
-  const operation = Object.hasOwn(release.app.operations, reference.name)
-    ? release.app.operations[reference.name]
-    : undefined;
-  if (operation === undefined || operation.visibility !== "public") {
-    throw operationErrors.create("operation.not_found");
-  }
-  if (operation.kind !== reference.kind) {
-    throw operationErrors.create("operation.kind_mismatch");
-  }
-  return operation;
 };
 
 const encoder = new TextEncoder();
@@ -1837,63 +1601,5 @@ export const invokeAppAction = async (
       effects,
       ...(resolved === undefined ? {} : { path: resolved }),
     };
-  }
-};
-
-/**
- * A function as a workflow step names it: a generated reference, its name
- * and kind. The run is pinned to its version (`caller.run`), so nothing
- * more is read.
- */
-const runReferenceSchema = z.strictObject({
-  name: z.string().min(1).max(256),
-  kind: z.enum(["query", "mutation", "action"]),
-});
-
-/**
- * Calls a public function of a workflow run's own App for one of its
- * steps (`env.APP.callFunction`, workflows/app-run.ts): only in the release
- * of the version the run is pinned to, as the run (`runInvocationFor`),
- * under `idempotencyKey`, which core derived from the step's. What it
- * answers, or why it failed, as a screen's call gets it (spec 32.6).
- * Never throws.
- */
-export const callRunFunction = async (
-  env: Env,
-  caller: RunCaller,
-  reference: unknown,
-  input: unknown,
-  idempotencyKey: string
-): Promise<OperationResult> => {
-  const { app, version } = caller.run;
-  try {
-    const named = runReferenceSchema.safeParse(reference);
-    if (!named.success) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    const release = await loadRelease(env, app, version);
-    const operation = publicFunctionOf(release, named.data);
-    return await callOperation(
-      hostedRelease(env, release),
-      await runInvocationFor(
-        env,
-        release,
-        {
-          ...caller,
-          // No longer than the step's attempt, nor than any call of an App's.
-          deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
-        },
-        operation.path,
-        // Another App's function, as a screen's call of it runs, for the
-        // person the run acts for.
-        async (person, called, request, options) =>
-          await callFunction(env, person, called, request, options)
-      ),
-      { path: operation.path, kind: operation.kind },
-      input,
-      { idempotencyKey }
-    );
-  } catch (error) {
-    return { ok: false, error: refusalOf(error, caller.requestId) };
   }
 };

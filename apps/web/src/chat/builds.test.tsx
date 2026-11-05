@@ -63,13 +63,11 @@ const review: VersionReview = {
   server: null,
   serverFiles: [],
   migrations: [],
-  workflows: [],
   permissions: [],
   grants: [],
   handsFilesToWorkflows: false,
   readsPeople: false,
   rowRules: [],
-  tests: { status: "none", failures: [] },
 };
 
 /** Core's `apps`, recording what the release asked of it. */

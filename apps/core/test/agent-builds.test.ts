@@ -1,7 +1,5 @@
-import { compilerVersion } from "@grasp-os/compiler";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
-import type { VersionReview } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -23,14 +21,13 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { outlook, published, release, requestGranted } from "./apps.ts";
+import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
-import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.
@@ -84,24 +81,6 @@ export default workflowTests(definition, [
 
 /** Code that finds the App the agent created, by its name, as `app`. */
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
-
-/** Creates the App and writes the restyled screen: the write says what fails. */
-const firstTry = `export default async (self, env) => {
-  const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
-  return {
-    errors: written.errors,
-    found: written.diagnostics.map(({ file, line, rule }) => ({ file, line, rule })),
-  };
-};`;
-
-/** Writes the fixed screen: nothing fails. */
-const repair = `export default async (self, env) => {
-  ${findApp}
-  const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
-  const draft = await env.build.files(app.id);
-  return { ...written, screen: draft.files["screens/desk.tsx"] };
-};`;
 
 /** A diagnostic of the App's layout about `file`, as a write reports it. */
 const layout = (file: string | null) => ({ file, rule: "server" });
@@ -273,76 +252,6 @@ const createdApp = async (
   return app;
 };
 
-/** The invoices workflow, with a limit and, when `booked`, a booking. */
-const invoices = (limit: number, booked: boolean) => ({
-  "workflows/invoices.ts": `import { money, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "invoices",
-  { input: z.unknown(), params: { limit: money({ label: "Limit", currency: "EUR", default: ${limit} }) } },
-  async (step, { params }) => {
-const limit = await step.do("limit", { description: "Read the limit" }, async () => params.limit);
-${booked ? `await step.do("book", { description: "Book it", sideEffect: true, input: { limit } }, async () => 1);` : ""}
-return limit;
-  }
-);
-`,
-  "workflows/invoices.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./invoices.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { limit: 1, book: 1 }, expect: { output: 1 } }]);
-`,
-});
-
-/** A workflow whose first step calls a helper, the second a connection. */
-const digest = (to: string) => ({
-  "workflows/lib/total.ts": "export const total = (n: number) => n + 1;\n",
-  "workflows/digest.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-import { total } from "./lib/total.ts";
-
-export default workflow("digest", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  const sum = await step.do("sum", { description: "Sum" }, async () => total(1));
-  await step.do("mail", { description: "Mail" }, async () => (await env.MAIL.call("mail.send", ${JSON.stringify(to)})) as Json);
-  return sum;
-});
-`,
-  "workflows/digest.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./digest.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { sum: 2, mail: 1 }, expect: { output: 2 } }]);
-`,
-});
-
-/**
- * The weekly workflow, run by `triggers`; with `nested`, its step called
- * from a function of its own, which the step list can't read.
- */
-const weekly = (
-  triggers: string,
-  nested = false,
-  acting = false
-): Record<string, string> => ({
-  "workflows/weekly.ts": `import { schedule, workflow } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "weekly",
-  { params: { every: schedule({ label: "Runs", default: "0 8 * * 1" }) }, triggers: ${triggers} },
-  async (step) => {
-    ${nested ? 'const run = async () => await step.do("report", { description: "Write the report" }, async () => "sent");\n    return await run();' : `return await step.do("report", { description: "Write the report"${acting ? ', sideEffect: true, input: "report"' : ""} }, async () => "sent");`}
-  }
-);
-`,
-  "workflows/weekly.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./weekly.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { report: "sent" }, expect: { output: "sent" } }]);
-`,
-});
-
 /** Code that writes `changes` into the draft of `app`. */
 const writing = (changes: Record<string, string>): string =>
   `await env.build.write(app.id, ${JSON.stringify(changes)})`;
@@ -352,12 +261,6 @@ const noWorkflows = (issues: string[]) => ({
   message: appErrors.create("app.no_workflows").message,
   issues,
 });
-
-/** Each workflow's changed steps, by name, as a review lists them. */
-const changedSteps = (workflows: VersionReview["workflows"]) =>
-  workflows.map(({ steps }) =>
-    steps?.map(({ name, change, sharedCode }) => ({ name, change, sharedCode }))
-  );
 
 /** The model renames the Ledger in its AGENTS.md, with `editFile`. */
 const editing = (app: string) =>
@@ -369,66 +272,6 @@ const editing = (app: string) =>
   });
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
-  it("repairs a restyled button without the person, in a draft nobody else sees, and puts nothing live", async () => {
-    const { builder, person, chat, grant } = await setUp([
-      codeStep(firstTry),
-      codeStep(repair),
-      says("The invoice desk passes its checks."),
-    ]);
-    await grant();
-
-    // One question: every step after it is the agent's own.
-    const answer = await chat.ask("Build an invoice desk for invoices@");
-
-    expect(answer.outcome).toBe("answered");
-    const results = await codeResults(chat.stub, chat.chat.id);
-    expect(results.map(({ isError }) => isError)).toStrictEqual([false, false]);
-    const [first, second] = results;
-    expect(returned(first?.text)).toStrictEqual({
-      errors: 1,
-      found: [{ file: "screens/desk.tsx", line: 6, rule: "shadcn/no-restyle" }],
-    });
-    expect(returned(second?.text)).toStrictEqual({
-      base: null,
-      changed: ["screens/desk.tsx"],
-      errors: 0,
-      warnings: 0,
-      diagnostics: [],
-      leftOut: 0,
-      notChecked: {},
-      screen: fixed,
-    });
-
-    // The App is the person's, and has nothing of the draft: no version,
-    // nothing current, and no files for its builders.
-    const app = await createdApp(person.api);
-    expect({
-      app,
-      versions: await builder.api.apps.versions.list(app.id),
-      files: await builder.api.apps.files.read(app.id),
-    }).toMatchObject({
-      app: { owner: person.userId, currentVersion: null, pendingVersion: null },
-      versions: [],
-      files: {},
-    });
-    // Created by the agent acting for the person, as the audit log says.
-    await vi.waitFor(
-      async () => {
-        const events = await allEvents();
-        const created = events.find(
-          ({ action, target }) =>
-            action === "app.created" && target?.id === app.id
-        );
-        expect(created?.actor).toStrictEqual({
-          type: "agent",
-          agentId: chat.agent.agentId,
-          onBehalfOf: person.userId,
-        });
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-  });
-
   it("keeps the draft apart from what a builder commits meanwhile, both ways", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const { builder, existing, chat, grant } = await setUp([
@@ -1453,175 +1296,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("proposes a passing draft for review, and nothing goes live until a builder makes it current", async () => {
-    const { person, chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
-        const permission = await env.build.requestPermission(app.id, {
-          object: { type: "connection", connectionId: "connection-outlook" },
-          actions: ["mail.list"],
-          binding: "INVOICES",
-        });
-        const proposal = await env.build.propose(app.id, "An invoice desk for invoices@");
-        const tried = async (call) => { try { await call(); return "done"; } catch (error) { return error.message; } };
-        return {
-          permission: permission.status,
-          version: proposal.version,
-          passed: proposal.check.passed,
-          review: proposal.review,
-          reviewUnavailable: proposal.reviewUnavailable,
-          // No way to make it current, under any name.
-          setCurrent: await tried(() => env.build.setCurrent(app.id, proposal.version)),
-          appsSetCurrent: await tried(() => env.apps.setCurrent(app.id, proposal.version)),
-          left: (await env.build.files(app.id)).changed,
-        };
-      };`),
-      says("Proposed: a builder makes it current."),
-    ]);
-    await grant();
-
-    await chat.ask("Build an invoice desk for invoices@");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    const app = await createdApp(person.api);
-    const review = await person.api.apps.versions.review(app.id, 1);
-    const noSetCurrent = 'The RPC receiver does not implement "setCurrent".';
-    expect(returned(result?.text)).toStrictEqual({
-      permission: "requested",
-      version: 1,
-      passed: true,
-      review: structuredClone(review),
-      reviewUnavailable: false,
-      // Neither API has such a method: the call reaches nothing.
-      setCurrent: noSetCurrent,
-      appsSetCurrent: noSetCurrent,
-      left: [],
-    });
-    const agent = {
-      type: "agent",
-      agentId: chat.agent.agentId,
-      onBehalfOf: person.userId,
-    };
-    const proposer = {
-      ...agent,
-      workspaceId: chat.id,
-      chatId: chat.chat.id,
-    };
-    expect(review).toMatchObject({
-      version: {
-        version: 1,
-        parent: null,
-        author: person.userId,
-        proposedBy: proposer,
-      },
-      // The chat's title, for the person the agent acted for.
-      proposedBy: { ...proposer, ownChat: true, chatTitle: "Questions" },
-      current: null,
-      files: [{ path: "screens/desk.tsx", change: "added" }],
-      server: null,
-      serverFiles: [],
-      workflows: [],
-      permissions: [
-        {
-          subject: { type: "app", appId: app.id },
-          binding: "INVOICES",
-          status: "requested",
-          requestedBy: person.userId,
-          requestedVia: proposer,
-        },
-      ],
-      grants: [],
-      tests: { status: "none", failures: [] },
-    });
-    // Pending, not live, until a builder makes it current.
-    await expect(createdApp(person.api)).resolves.toMatchObject({
-      currentVersion: null,
-      pendingVersion: 1,
-    });
-    await expect(
-      person.api.apps.versions.setCurrent(app.id, 1)
-    ).resolves.toMatchObject({ currentVersion: 1, pendingVersion: null });
-    // Committed and proposed by the agent, acting for the person.
-    await vi.waitFor(
-      async () => {
-        const events = await allEvents();
-        const actors = Object.fromEntries(
-          events
-            .filter(({ target }) => target?.id === app.id)
-            .map(({ action, actor }) => [action, actor])
-        );
-        expect(actors).toMatchObject({
-          "app.committed": agent,
-          "app.version.proposed": agent,
-          "app.version.current": { type: "person", userId: person.userId },
-        });
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-  });
-
-  it("stands by a proposal once committed, when what follows it fails", async () => {
-    const { builder, existing, chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
-        const proposal = await env.build.propose(app.id, "A desk");
-        return {
-          version: proposal.version,
-          review: proposal.review,
-          reviewUnavailable: proposal.reviewUnavailable,
-          left: (await env.build.files(app.id)).changed,
-        };
-      };`),
-      says("Proposed; its review comes later."),
-    ]);
-    await grant();
-    // A workflow its builder wrote, whose tests the check runs.
-    await release(builder, existing, intake);
-    // After the commit, keeping the check's tests and reading them for the
-    // review fail: the proposal is made all the same.
-    const { FILES: files } = env;
-    const failing = new Proxy(files, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (
-          (property === "get" || property === "put") &&
-          typeof value === "function"
-        ) {
-          return (key: string, ...rest: unknown[]): unknown =>
-            key.includes("/tests/")
-              ? Promise.reject(new Error("The test results can't be reached"))
-              : Reflect.apply(value, target, [key, ...rest]);
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-    try {
-      env.FILES = failing;
-      await chat.ask("Build an invoice desk");
-    } finally {
-      env.FILES = files;
-    }
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
-      version: 3,
-      review: null,
-      reviewUnavailable: true,
-      left: [],
-    });
-    // Pending, and its review reads once the test results can be reached.
-    const listed = await builder.api.apps.list();
-    const app = listed.find(({ id }) => id === existing);
-    expect(app).toMatchObject({ currentVersion: 2, pendingVersion: 3 });
-    await expect(
-      builder.api.apps.versions.review(existing, 3)
-    ).resolves.toMatchObject({ tests: { status: "passed" } });
-  });
-
   it("proposes nothing that fails its checks", async () => {
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
@@ -1794,12 +1468,10 @@ export const titles = action({
     });
   });
 
-  it("writes no workflow into an App, whatever the path, the company it keeps or the blueprint it comes from, and changes none a builder wrote but to delete it", async () => {
+  it("writes no workflow into an App, whatever the path or the company it keeps", async () => {
     // The attack: code the agent writes under workflows/ would run as the
     // App's own workflow, its calls read from the code rather than from a
-    // definition an admin approves binding by binding. A builder's
-    // workflow is there for the agent to tamper with, and a blueprint
-    // marked from that version for the agent to copy it from.
+    // definition an admin approves binding by binding.
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const calls = {
       added: writing(
@@ -1810,7 +1482,6 @@ export const titles = action({
           ])
         )
       ),
-      changed: writing({ "workflows/intake.ts": "export default 1;\n" }),
       imported: writing({
         "workflows/lib/take.ts": "export const take = 1;\n",
       }),
@@ -1818,9 +1489,8 @@ export const titles = action({
         "screens/desk.tsx": fixed,
         "workflows/intake.workflow-tests.ts": "export default [];\n",
       }),
-      copied: `await env.build.createFromBlueprint((await env.build.blueprints()).find(({ name }) => name === "Ledger").id, { name: "Ledger copy" })`,
     };
-    const { builder, person, existing, chat, grant } = await setUp([
+    const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
         const refusal = async (call) => {
@@ -1839,15 +1509,11 @@ export const titles = action({
           )
           .join("\n        ")}
         results.unchanged = (await env.build.files(app.id)).changed;
-        results.deleted = (await env.build.write(app.id, ${JSON.stringify({ "workflows/intake.ts": null, "workflows/intake.workflow-tests.ts": null })})).changed;
-        results.proposed = (await env.build.propose(app.id, "No intake")).version;
         return results;
       };`),
       says("Done."),
     ]);
     await grant();
-    await release(builder, existing, intake);
-    await builder.api.apps.blueprints.mark(existing, 2);
 
     await chat.ask("Add an intake workflow to the ledger");
 
@@ -1857,28 +1523,12 @@ export const titles = action({
         "workflows/outtake.ts",
         "workflows/outtake.workflow-tests.ts",
       ]),
-      changed: noWorkflows(["workflows/intake.ts"]),
       imported: noWorkflows(["workflows/lib/take.ts"]),
       // Refused as a whole, naming only the workflow's file: the screen
       // beside it didn't land either.
       alongside: noWorkflows(["workflows/intake.workflow-tests.ts"]),
-      copied: noWorkflows([
-        "workflows/intake.ts",
-        "workflows/intake.workflow-tests.ts",
-      ]),
       unchanged: [],
-      deleted: ["workflows/intake.ts", "workflows/intake.workflow-tests.ts"],
-      proposed: 3,
     });
-    // What the version holds is the builder's code less what was deleted,
-    // and no App was created from the blueprint.
-    const listed = await person.api.apps.list();
-    expect({
-      files: Object.keys(
-        await builder.api.apps.files.read(existing, 3)
-      ).toSorted(),
-      copies: listed.filter(({ name }) => name === "Ledger copy"),
-    }).toStrictEqual({ files: ["AGENTS.md"], copies: [] });
   });
 
   it("proposes no draft saved with a workflow change before its writes were refused, committing nothing", async () => {
@@ -1901,17 +1551,15 @@ export const titles = action({
       says("Done."),
     ]);
     await grant();
-    await release(builder, existing, intake);
     const chatId = chatIdSchema.parse(chat.chat.id);
     await runInDurableObject(chat.stub, (instance) => {
       const run = instance.openCodeRun(chatId, testRunOpening);
       return instance.saveDraft(
         chatId,
         existing,
-        2,
+        1,
         {
           "workflows/intake.ts": "export default 1;\n",
-          "workflows/intake.workflow-tests.ts": null,
           "notes.md": "the agent's",
         },
         [],
@@ -1923,14 +1571,11 @@ export const titles = action({
     await chat.ask("Propose the ledger's draft");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    // Named alone: deleting the builder's tests is no workflow change.
     expect(returned(result?.text)).toStrictEqual(
       noWorkflows(["workflows/intake.ts"])
     );
     const versions = await builder.api.apps.versions.list(existing);
-    expect(
-      versions.map(({ version }) => version).toSorted((a, b) => a - b)
-    ).toStrictEqual([1, 2]);
+    expect(versions.map(({ version }) => version)).toStrictEqual([1]);
   });
 
   it("proposes over what builders committed since, and never undoes it", async () => {
@@ -1981,527 +1626,6 @@ export const titles = action({
       "AGENTS.md": "# Ledger\n\nWith notes.\n",
       "board.md": "the builder's",
       "notes.md": "the agent's",
-    });
-  });
-
-  it("reviews a version's tests as they ran, not as results rewritten in R2's cache say", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
-    const failing = invoices(500, false);
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      {
-        ...failing,
-        "workflows/invoices.workflow-tests.ts": failing[
-          "workflows/invoices.workflow-tests.ts"
-        ].replace("expect: { output: 1 }", "expect: { output: 2 }"),
-      },
-      "Fails its tests"
-    );
-    const ran = await builder.api.apps.versions.review(app, version);
-    // Rewritten to pass, as someone who can write to the bucket but doesn't
-    // hold core's secret could, keeping what each was written with.
-    const page = await env.FILES.list({
-      prefix: `apps/${app}/tests/`,
-      include: ["customMetadata"],
-    });
-    await Promise.all(
-      page.objects.map(async ({ key, customMetadata }) => {
-        await env.FILES.put(
-          key,
-          JSON.stringify({ status: "passed", failures: [] }),
-          customMetadata === undefined ? {} : { customMetadata }
-        );
-      })
-    );
-
-    const reviewed = await builder.api.apps.versions.review(app, version);
-
-    expect({
-      ran: ran.tests.status,
-      rewrote: page.objects.length,
-      reviewed: reviewed.tests.status,
-    }).toStrictEqual({ ran: "failed", rewrote: 1, reviewed: "failed" });
-  });
-
-  it("reviews what a version changes against the current one, for its builders only", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const user = await signedInApi(idp, "user");
-    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
-    await published(app);
-    await release(builder, app, {
-      ...invoices(500, false),
-      "notes.md": "old",
-    });
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      {
-        ...invoices(900, true),
-        "notes.md": null,
-      },
-      "Book them"
-    );
-
-    const review = await builder.api.apps.versions.review(app, version);
-
-    expect(review).toMatchObject({
-      version: { version: 2, parent: 1, message: "Book them" },
-      current: 1,
-      files: [
-        { path: "notes.md", change: "removed" },
-        { path: "workflows/invoices.ts", change: "modified" },
-      ],
-      workflows: [
-        {
-          id: "invoices",
-          change: "modified",
-          steps: [{ name: "book", change: "added", sideEffect: true }],
-          params: [{ name: "limit", change: "modified" }],
-        },
-      ],
-      permissions: [],
-      tests: { status: "passed", failures: [] },
-    });
-    // Someone who uses its screens, but doesn't build it.
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    await expect(user.api.apps.versions.review(app, version)).rejects.toThrow(
-      roleErrors.create("role.forbidden").message
-    );
-  });
-
-  it("reviews the grants a version uses, asking again for those its reviewer can't grant", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await signedInApi(idp, "admin");
-    const notify = workflowFiles(
-      "notify",
-      `  return await step.do("save", { description: "Save it" }, async () => await ${hitCall(`"notify"`)});`,
-      { save: 1 }
-    );
-    const app = await appWith(builder, notify);
-    await requestGranted(idp, builder, outlook(app));
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      {
-        "workflows/notify.ts": `// Saves it.\n${notify["workflows/notify.ts"] ?? ""}`,
-      },
-      "Noted"
-    );
-
-    const grant = {
-      subject: { type: "app", appId: app },
-      binding: "OUTLOOK",
-      status: "active",
-    };
-    // A builder can't grant it: making the version current asks again.
-    await expect(
-      builder.api.apps.versions.review(app, version)
-    ).resolves.toMatchObject({
-      grants: [{ permission: grant, askedAgain: true }],
-    });
-    // An admin can: nothing is asked for again.
-    await expect(
-      admin.api.apps.versions.review(app, version)
-    ).resolves.toMatchObject({
-      grants: [{ permission: grant, askedAgain: false }],
-    });
-  });
-
-  it("reviews code a workflow may use, the steps that call the App, and the grants the version uses", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await signedInApi(idp, "admin");
-    const notify = {
-      "workflows/notify.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("notify", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("save", { description: "Save it" }, async () => ((await env.APP.callFunction({ name: "counter.hits", kind: "query" }, { name: "notify" })).ok ? 1 : 0));
-});
-`,
-      "workflows/notify.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./notify.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, expect: { output: 1 } }]);
-`,
-    };
-    const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
-    await release(builder, app, {
-      ...notesFiles,
-      "server/books.ts": "export const twice = false;\n",
-      ...notify,
-    });
-    await requestGranted(idp, builder, outlook(app));
-    // Only server code changes: the workflow's steps call the App's
-    // functions.
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      {
-        "server/books.ts": "export const twice = true;\n",
-      },
-      "Server"
-    );
-
-    const review = await builder.api.apps.versions.review(app, version);
-
-    const grant = {
-      subject: { type: "app", appId: app },
-      binding: "OUTLOOK",
-      status: "active",
-    };
-    expect(review).toMatchObject({
-      proposedBy: null,
-      server: "modified",
-      serverFiles: [{ path: "server/books.ts", change: "modified" }],
-      workflows: [
-        {
-          id: "notify",
-          change: "modified",
-          shared: ["server/books.ts"],
-          // Code it may use changed: it may change things through it.
-          steps: [
-            {
-              name: "save",
-              change: "modified",
-              sideEffect: true,
-              calls: ["APP"],
-              sharedCode: true,
-            },
-          ],
-          params: [],
-        },
-      ],
-      // A builder can't grant it: making the version current asks again.
-      grants: [{ permission: grant, askedAgain: true }],
-      tests: { status: "passed", failures: [] },
-    });
-    // An admin can: nothing is asked for again.
-    await expect(
-      admin.api.apps.versions.review(app, version)
-    ).resolves.toMatchObject({
-      grants: [{ permission: grant, askedAgain: false }],
-    });
-
-    // A change to one step's function alone shows that step as changed.
-    const { version: bodyOnly } = await builder.api.apps.files.commit(
-      app,
-      {
-        "workflows/notify.ts": (notify["workflows/notify.ts"] ?? "").replace(
-          'name: "notify"',
-          'name: "notified"'
-        ),
-      },
-      "Body"
-    );
-    await expect(
-      builder.api.apps.versions.review(app, bodyOnly)
-    ).resolves.toMatchObject({
-      server: "modified",
-      workflows: [
-        {
-          id: "notify",
-          steps: [{ name: "save", change: "modified", calls: ["APP"] }],
-        },
-      ],
-    });
-  });
-
-  it("lists every step of a workflow whose shared code changed, and a step changed only in its code", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Digest" });
-    await published(app);
-    await release(builder, app, digest("hwczrv0to6"));
-    // Only the mail's address: two calls a 32-bit hash couldn't tell apart.
-    const { version: address } = await builder.api.apps.files.commit(
-      app,
-      digest("flfoi83s5j"),
-      "Address"
-    );
-    const addressReview = await builder.api.apps.versions.review(app, address);
-    // Then only the helper the first step calls, without reading env.
-    const { version: helper } = await builder.api.apps.files.commit(
-      app,
-      {
-        ...digest("hwczrv0to6"),
-        "workflows/lib/total.ts":
-          "export const total = (n: number) => n + 2;\n",
-      },
-      "Helper"
-    );
-    const helperReview = await builder.api.apps.versions.review(app, helper);
-
-    expect({
-      address: addressReview.workflows,
-      helper: helperReview.workflows,
-    }).toStrictEqual({
-      address: [
-        {
-          id: "digest",
-          change: "modified",
-          shared: [],
-          sideEffect: true,
-          triggers: [],
-          steps: [
-            // Calls MAIL: may change things, though it doesn't say so.
-            {
-              name: "mail",
-              change: "modified",
-              sideEffect: true,
-              calls: ["MAIL"],
-              sharedCode: false,
-            },
-          ],
-          calls: ["MAIL"],
-          params: [],
-        },
-      ],
-      helper: [
-        {
-          id: "digest",
-          change: "modified",
-          shared: ["workflows/lib/total.ts"],
-          sideEffect: true,
-          triggers: [],
-          // Every step, and each may change things: the workflow calls
-          // bindings, and the helper may too.
-          steps: [
-            {
-              name: "mail",
-              change: "modified",
-              sideEffect: true,
-              calls: ["MAIL"],
-              sharedCode: true,
-            },
-            {
-              name: "sum",
-              change: "modified",
-              sideEffect: true,
-              calls: [],
-              sharedCode: true,
-            },
-          ],
-          calls: ["MAIL"],
-          params: [],
-        },
-      ],
-    });
-  });
-
-  it("lists a step whose option is chosen at run time when its file changed outside the steps' calls, as through a helper it reads", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const paced = workflowFiles(
-      "paced",
-      `  await step.do("fetch", { description: "Fetch it" }, async () => 1);
-  await step.sleep("pause", { description: "Wait a while", duration: wait(2) });
-  return "done";`,
-      { fetch: 1 }
-    );
-    const files = (factor: number) => ({
-      ...paced,
-      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
-        "export default",
-        `const wait = (n: number): number => n * ${factor};\n\nexport default`
-      ),
-    });
-    const app = await appWith(builder, files(1000));
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      files(60_000),
-      "Longer"
-    );
-    // Another App whose helper changes only inside a string, which only
-    // its spaces tell apart.
-    const risky = (kind: string) => ({
-      ...paced,
-      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
-        "export default",
-        `const wait = (n: number): number => ("${kind}" === "high risk" ? n : 2 * n);\n\nexport default`
-      ),
-    });
-    const other = await appWith(builder, risky("high risk"));
-    const { version: respaced } = await builder.api.apps.files.commit(
-      other,
-      risky("highrisk"),
-      "Respaced"
-    );
-
-    // And one whose helper's string becomes a step's very call as written:
-    // only the call itself is cut out of the comparison, never the same
-    // text elsewhere.
-    const fetchCall =
-      'step.do("fetch", { description: "Fetch it" }, async () => 1)';
-    const echoing = (text: string) => ({
-      ...paced,
-      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
-        "export default",
-        `const wait = (n: number): number => ('${text}' === '' ? n : 2 * n);\n\nexport default`
-      ),
-    });
-    const third = await appWith(builder, echoing(""));
-    const { version: echoed } = await builder.api.apps.files.commit(
-      third,
-      echoing(fetchCall),
-      "Echoed"
-    );
-
-    const review = await builder.api.apps.versions.review(app, version);
-    const respacedReview = await builder.api.apps.versions.review(
-      other,
-      respaced
-    );
-    const echoedReview = await builder.api.apps.versions.review(third, echoed);
-
-    expect({
-      respaced: changedSteps(respacedReview.workflows),
-      echoed: changedSteps(echoedReview.workflows),
-    }).toStrictEqual({
-      respaced: [[{ name: "pause", change: "modified", sharedCode: true }]],
-      echoed: [[{ name: "pause", change: "modified", sharedCode: true }]],
-    });
-    expect(review.workflows).toMatchObject([
-      {
-        id: "paced",
-        change: "modified",
-        shared: [],
-        // Neither call changed; the helper the pause reads at run time
-        // did. `fetch` reads nothing outside its call.
-        steps: [
-          {
-            name: "pause",
-            change: "modified",
-            sharedCode: true,
-            dynamic: ["duration"],
-          },
-        ],
-      },
-    ]);
-  });
-
-  it("calls out new triggers, and steps it can't read as possibly acting", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Weekly" });
-    await published(app);
-    await release(builder, app, {
-      ...weekly(`[{ type: "manual" }]`),
-      "data/totals.json": JSON.stringify({ totals: "read" }),
-    });
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      {
-        // Now on a schedule, and its step inside a function of its own.
-        ...weekly(`[{ type: "schedule", param: "every" }]`, true),
-        "data/totals.json": JSON.stringify({ totals: "write" }),
-      },
-      "Weekly"
-    );
-
-    const review = await builder.api.apps.versions.review(app, version);
-
-    expect({
-      workflows: review.workflows,
-    }).toStrictEqual({
-      workflows: [
-        {
-          id: "weekly",
-          change: "modified",
-          // Code it may import: JSON too.
-          shared: ["data/totals.json"],
-          sideEffect: true,
-          steps: null,
-          calls: [],
-          params: [],
-          triggers: [
-            {
-              trigger: { type: "schedule", param: "every" },
-              change: "added",
-              count: 1,
-              countBefore: 0,
-              countAfter: 1,
-            },
-            {
-              trigger: { type: "manual" },
-              change: "removed",
-              count: 1,
-              countBefore: 1,
-              countAfter: 0,
-            },
-          ],
-        },
-      ],
-    });
-  });
-
-  it("counts a second identical trigger as added, and a workflow with an unchanged acting step as acting", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Weekly" });
-    await published(app);
-    const once = `[{ type: "schedule", param: "every" }]`;
-    await release(builder, app, weekly(once, false, true));
-    // Only a second schedule, the same as the first: both run it.
-    const { version } = await builder.api.apps.files.commit(
-      app,
-      weekly(
-        `[{ type: "schedule", param: "every" }, { type: "schedule", param: "every" }]`,
-        false,
-        true
-      ),
-      "Twice"
-    );
-
-    const review = await builder.api.apps.versions.review(app, version);
-
-    expect(review.workflows).toStrictEqual([
-      {
-        id: "weekly",
-        change: "modified",
-        shared: [],
-        // Its step, unchanged, says it changes things: so the workflow can.
-        sideEffect: true,
-        steps: [],
-        calls: [],
-        params: [],
-        triggers: [
-          {
-            trigger: { type: "schedule", param: "every" },
-            change: "added",
-            count: 1,
-            countBefore: 1,
-            countAfter: 2,
-          },
-        ],
-      },
-    ]);
-  });
-
-  it("runs a version's tests once", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
-    await published(app);
-    await release(builder, app, invoices(500, false));
-    const [latest] = await builder.api.apps.versions.list(app);
-    const kept = `apps/${app}/tests/${latest?.tree ?? ""}-${compilerVersion}.json`;
-
-    const first = await builder.api.apps.versions.review(app, 1);
-    const keptFirst = await env.FILES.head(kept);
-    const second = await builder.api.apps.versions.review(app, 1);
-    // What the first review kept is what the next one reads: running the
-    // tests again would have kept their results again.
-    const keptSecond = await env.FILES.head(kept);
-
-    expect({
-      reviewed: [first.tests, second.tests],
-      kept: keptFirst !== null,
-      keptAgain: keptSecond?.version !== keptFirst?.version,
-    }).toStrictEqual({
-      reviewed: [
-        { status: "passed", failures: [] },
-        { status: "passed", failures: [] },
-      ],
-      kept: true,
-      keptAgain: false,
     });
   });
 });

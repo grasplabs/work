@@ -1,31 +1,19 @@
 import type { Goal } from "@grasp-os/shared/brain";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
-import type {
-  AppWorkflowSummary as WorkflowSummary,
-  RunActivity,
-  RunActivityWorkflow,
-} from "@grasp-os/shared/workflows";
+import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { goalProgressOf, teamProgressOf } from "./returns.ts";
+import { goalProgressOf } from "./returns.ts";
 
 // The board's goals as the goals widget draws them (returns.ts): each by
 // its newest wording, with the workflows linked to it and how far each is.
 
-/** A workflow of the invoices App that handled `handled` items this week. */
+/** A workflow `name` that handled `handled` items this week. */
 const workflow = (name: string, handled: number): WorkflowSummary => ({
-  type: "app",
-  app: appIdSchema.parse("invoices"),
-  appName: "Invoices",
-  workflow: workflowIdSchema.parse(name),
+  workflowId: workflowResourceIdSchema.parse(`wf-${name}`),
+  name,
   version: 1,
   owner: { userId: "owner", name: null },
-  changesOwner: false,
-  team: null,
   lastRun: {
     id: runIdSchema.parse(`run-${name}`),
     status: "completed",
@@ -34,7 +22,6 @@ const workflow = (name: string, handled: number): WorkflowSummary => ({
   waiting: 0,
   failed: 0,
   handled,
-  scheduleStopped: false,
 });
 
 const goal: Goal = {
@@ -53,12 +40,8 @@ const goal: Goal = {
       date: "2026-10-15",
     },
   ],
-  workflows: [
-    { app: "invoices", workflow: "chase" },
-    { app: "invoices", workflow: "remind" },
-    // Linked, but not among the workflows the person reads: left out.
-    { app: "invoices", workflow: "archive" },
-  ],
+  // The last is linked, but not among the workflows the person reads: left out.
+  workflows: ["wf-chase", "wf-remind", "wf-archive"],
 };
 
 describe("the board's goals", () => {
@@ -69,7 +52,8 @@ describe("the board's goals", () => {
     );
     expect({
       title: progress?.title,
-      rows: progress?.rows.map(({ workflow: { name, goalId }, stage }) => [
+      rows: progress?.rows.map(({ workflow: { id, name, goalId }, stage }) => [
+        id,
         name,
         goalId,
         stage,
@@ -82,112 +66,13 @@ describe("the board's goals", () => {
     }).toStrictEqual({
       title: "Close the books in two days",
       rows: [
-        ["chase", "goal-close", "live"],
-        ["remind", "goal-close", "testing"],
+        ["wf-chase", "chase", "goal-close", "live"],
+        ["wf-remind", "remind", "goal-close", "testing"],
       ],
       live: 1,
       back: 0,
       coming: 0,
       basis: ["unknown", "unknown"],
-    });
-  });
-});
-
-/** What `name` of the invoices App did over the week: completed runs, and how many asked no one. */
-const ran = (
-  name: string,
-  completed: number,
-  completedAlone: number
-): RunActivityWorkflow => ({
-  type: "app",
-  app: appIdSchema.parse("invoices"),
-  appName: "Invoices",
-  workflow: workflowIdSchema.parse(name),
-  current: true,
-  started: completed,
-  completed,
-  failed: 0,
-  completedAlone,
-});
-
-/** A week's activity of `workflows`. */
-const week = (...workflows: RunActivityWorkflow[]): RunActivity => ({
-  from: "2026-10-21",
-  to: "2026-10-27",
-  days: [],
-  runs: { total: 0, withPerson: 0, withoutPerson: 0 },
-  decisions: { approved: 0, rejected: 0, timedOut: 0, open: 0 },
-  workflows,
-});
-
-const finance = { id: "team-finance", name: "Finance" };
-const sales = { id: "team-sales", name: "Sales" };
-
-describe("the teams with AI", () => {
-  it("are the teams that own workflows, the furthest first, with what their workflows handled and how much of it without a person", () => {
-    const read = teamProgressOf(
-      [
-        { ...workflow("chase", 12), team: finance },
-        { ...workflow("remind", 0), team: finance },
-        { ...workflow("quote", 0), team: sales },
-        // No team owns it: no team counts it.
-        workflow("archive", 3),
-      ],
-      week(ran("chase", 12, 9), ran("quote", 0, 0), ran("archive", 3, 3))
-    );
-    expect({
-      teams: read.teams.map(
-        ({ name, level, workflows, live, testing, handled, alone }) => ({
-          name,
-          level,
-          workflows,
-          live,
-          testing,
-          handled,
-          alone,
-        })
-      ),
-      rows: read.rows.map(({ workflow: { name, teamId }, stage }) => [
-        name,
-        teamId,
-        stage,
-      ]),
-      // No hours are kept: nothing to say of cost, share or help.
-      unknowns: read.teams.map(({ share, cost, needsHelp }) => [
-        share,
-        cost,
-        needsHelp,
-      ]),
-    }).toStrictEqual({
-      teams: [
-        {
-          name: "Finance",
-          level: "live",
-          workflows: 2,
-          live: 1,
-          testing: 1,
-          handled: 12,
-          alone: 9,
-        },
-        {
-          name: "Sales",
-          level: "testing",
-          workflows: 1,
-          live: 0,
-          testing: 1,
-          handled: 0,
-          alone: 0,
-        },
-      ],
-      rows: [
-        ["chase", "team-finance", "live"],
-        ["remind", "team-finance", "testing"],
-        ["quote", "team-sales", "testing"],
-      ],
-      unknowns: [
-        [null, 0, false],
-        [null, 0, false],
-      ],
     });
   });
 });

@@ -170,10 +170,11 @@ describe("screen checks", { timeout: 60_000 }, () => {
     const built = await buildScreens(
       env,
       app({
-        "screens/server.tsx": `import { callServer } from "@grasp-os/sdk/screen";
+        "server/tickets.ts": `export const secret = (): string => "fictional-marker";\n`,
+        "screens/server.tsx": `import { secret } from "../server/tickets.ts";
 
 export default function Server() {
-  return <button type="button" onClick={() => void callServer("secret")}>Go</button>;
+  return <button type="button" onClick={() => void secret()}>Go</button>;
 }
 `,
       }),
@@ -183,7 +184,14 @@ export default function Server() {
     expect({
       ok: built.ok,
       files: [...new Set(built.diagnostics.map(({ file }) => file))],
-    }).toStrictEqual({ ok: false, files: ["screens/server.tsx"] });
+      serverCode: built.diagnostics.some(({ message }) =>
+        message.includes("is the App's server code")
+      ),
+    }).toStrictEqual({
+      ok: false,
+      files: ["screens/server.tsx"],
+      serverCode: true,
+    });
   });
 
   it("fails a type error in the App's server types", async () => {

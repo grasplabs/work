@@ -1,9 +1,4 @@
-import {
-  isAppLayout,
-  isAppTestSuite,
-  workflowIdOf,
-  workflowPaths,
-} from "@grasp-os/compiler";
+import { isAppLayout, isAppTestSuite } from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -29,19 +24,12 @@ import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type {
-  AppId,
-  BlueprintId,
-  StoreId,
-  WorkflowId,
-} from "@grasp-os/shared/ids";
+import type { AppId, BlueprintId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
 import { dataErrors } from "@grasp-os/shared/stores";
-import { workflowErrors } from "@grasp-os/shared/workflows";
-import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -81,7 +69,7 @@ import {
 } from "./db/core/schema.ts";
 import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
-import { appBindingKinds, madeCurrent } from "./permissions.ts";
+import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import {
   applyRulesAfterCommit,
@@ -90,17 +78,6 @@ import {
 } from "./store-backfill.ts";
 import type { OwedRules } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
-import {
-  requireWorkflowTestsPass,
-  workflowCallsIn,
-  workflowIdsIn,
-} from "./workflows/code.ts";
-import {
-  registerTriggers,
-  registrationHolds,
-  triggerRegistration,
-  triggerSummary,
-} from "./workflows/trigger-registry.ts";
 
 // The App registry and each App's code. The registry and the versions are
 // rows in the core database. A version's files are one object in R2 (EU),
@@ -680,13 +657,6 @@ const namesIn = (
     return name === undefined ? [] : [name];
   });
 
-/**
- * The IDs of the workflows in a version's files, sorted: what its row
- * keeps (`app_versions.workflows`) when it is committed.
- */
-export const workflowsIn = (files: ReadonlyMap<string, string>): string[] =>
-  namesIn([...files.keys()].toSorted(), workflowIdOf);
-
 /** The names of the screens in an App's files (`screens/<name>.tsx`), sorted. */
 export const screensIn = (files: ReadonlyMap<string, string>): string[] =>
   namesIn(
@@ -694,50 +664,7 @@ export const screensIn = (files: ReadonlyMap<string, string>): string[] =>
     (path) => screenPath.exec(path)?.groups?.name
   );
 
-/**
- * What a version's workflow calls of the App's bindings, as its row keeps
- * it (`app_versions.workflow_calls`, written from `workflowCallsIn` as the
- * version is committed): what its review shows (version-review.ts) and
- * what its runs are held to (workflows/host.ts). `undefined` when the row
- * keeps no entry for the workflow: nothing is read from its files instead.
- */
-export const keptCallsOf = (
-  workflowCalls: Record<string, WorkflowCalls>,
-  workflow: WorkflowId
-): WorkflowCalls | undefined =>
-  Object.hasOwn(workflowCalls, workflow) ? workflowCalls[workflow] : undefined;
-
-/**
- * What a run of `workflow` in version `version` of `app` is held to
- * (`keptCallsOf`). A version whose row keeps no entry for it doesn't run:
- * the run fails with `workflow.calls_not_kept`.
- */
-export const callsFor = async (
-  env: Env,
-  {
-    app,
-    version,
-    workflow,
-  }: { app: AppId; version: number; workflow: WorkflowId }
-): Promise<WorkflowCalls> => {
-  const { workflowCalls } = await findVersion(env, app, version);
-  const kept = keptCallsOf(workflowCalls, workflow);
-  if (kept === undefined) {
-    throw workflowErrors.create("workflow.calls_not_kept");
-  }
-  // A row kept before kinds, models or keys were: none of them, so every
-  // reviewed step is refused as running another way (`stepRunsAs`), every
-  // model call as asking a model its review doesn't show (`modelReviewed`)
-  // and every keyed name (`stepReviewed`), each audited.
-  return {
-    ...kept,
-    kinds: Object.hasOwn(kept, "kinds") ? kept.kinds : {},
-    models: Object.hasOwn(kept, "models") ? kept.models : {},
-    keyed: Object.hasOwn(kept, "keyed") ? kept.keyed : [],
-  };
-};
-
-/** The screens and workflows of an App's current version. */
+/** The screens of an App's current version. */
 export const appContents = async (
   env: Env,
   by: Person,
@@ -745,7 +672,7 @@ export const appContents = async (
 ): Promise<AppContents> => {
   const { id, currentVersion } = await appFor(env, by, app, "user");
   if (currentVersion === null) {
-    return { version: null, screens: [], workflows: [] };
+    return { version: null, screens: [] };
   }
   const files = new Map(
     Object.entries(await versionFiles(env, id, currentVersion))
@@ -753,14 +680,13 @@ export const appContents = async (
   return {
     version: currentVersion,
     screens: screensIn(files),
-    workflows: workflowsIn(files),
   };
 };
 
 /**
  * The Apps `by` has a role in, as `listApps` gives them, each with what
  * `appContents` says of it: one query, from its current version's row
- * (`app_versions.screens`, `workflows`), so no files are read.
+ * (`app_versions.screens`), so no files are read.
  */
 export const listAppOverviews = async (
   env: Env,
@@ -770,7 +696,6 @@ export const listAppOverviews = async (
     .select({
       app: apps,
       screens: appVersions.screens,
-      workflows: appVersions.workflows,
     })
     .from(apps)
     .leftJoin(
@@ -788,13 +713,12 @@ export const listAppOverviews = async (
     by,
     found.map(({ app }) => app.id)
   );
-  return found.map(({ app, screens, workflows }) => ({
+  return found.map(({ app, screens }) => ({
     app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
     // None without a current version, whose row the join doesn't find.
     contents: {
       version: app.currentVersion,
       screens: (screens ?? []).toSorted(),
-      workflows: (workflows ?? []).toSorted(),
     },
   }));
 };
@@ -914,8 +838,7 @@ export const commitFiles = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   refuseV1Server(files.keys());
-  const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const workflowBindings = await appBindingKinds(env, appId);
+  refuseAppWorkflows(files.keys());
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -929,11 +852,8 @@ export const commitFiles = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    workflows: workflowsIn(files),
     screens: screensIn(files),
-    workflowCalls,
     proposedBy: null,
-    workflowBindings,
   };
   const db = drizzle(env.DB);
   let undone: unknown[];
@@ -988,7 +908,6 @@ export const commitFiles = async (
       app: appId,
       version: row.version,
       files: saved,
-      bindings: workflowBindings,
     },
     { profile: "production" }
   );
@@ -1043,15 +962,6 @@ export const draftOverLatest = async (
   app: AppId,
   { base, changes }: DraftChanges
 ): Promise<DraftOverLatest> => {
-  // A draft saved before its agent was refused writes under `workflows/`
-  // may hold such a change still: it goes over the latest version, to be
-  // proposed, no more than it is written. A builder's workflow it doesn't change, or deletes,
-  // stands (app-no-workflows.ts).
-  refuseAppWorkflows(
-    Object.entries(changes).flatMap(([path, content]) =>
-      content === null ? [] : [path]
-    )
-  );
   const { latest, files } = await latestFiles(env, app);
   const parent = latest?.version ?? null;
   if (parent !== base) {
@@ -1116,8 +1026,7 @@ export const proposeDraft = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   refuseV1Server(files.keys());
-  const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const workflowBindings = await appBindingKinds(env, appId);
+  refuseAppWorkflows(files.keys());
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
@@ -1130,11 +1039,8 @@ export const proposeDraft = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    workflows: workflowsIn(files),
     screens: screensIn(files),
-    workflowCalls,
     proposedBy: by.via ?? null,
-    workflowBindings,
   };
   const db = drizzle(env.DB);
   let undone: unknown;
@@ -1422,8 +1328,7 @@ export const setCurrentVersion = async (
  * `setCurrentVersion` then requires. A version of spec 8's layout must
  * have a runnable release, migrations that passed their fixtures, a store
  * whose contract holds its schema (or a ready explicit migration to it),
- * and passing App tests; every version, AI steps through declared models
- * only and passing workflow tests.
+ * and passing App tests.
  */
 export const verifyVersion = async (
   env: Env,
@@ -1451,33 +1356,21 @@ export const verifyVersion = async (
     const { requireAppTestsPass } = await import("./app-tests.ts");
     await requireAppTestsPass(env, appId, number, files);
   }
-  // Its workflows' AI steps go only through models its release declares
-  // (app-activation.ts): for every candidate, however it was frozen, so
-  // one verified here is never made current without it. Imported here:
-  // activation reaches back into this module.
-  const { requireDeclaredModels } = await import("./app-activation.ts");
-  await requireDeclaredModels(env, appId, number, files);
-  await requireWorkflowTestsPass(env, appId, number, files);
   // What the gates selected to run, each with no failure, or they had
   // refused. The runners' own lists of what they ran aren't returned.
   return {
     appTests: layout
       ? Object.keys(files).filter(isAppTestSuite).toSorted()
       : [],
-    workflowTests: workflowIdsIn(files)
-      .filter((id) => Object.hasOwn(files, workflowPaths(id).tests))
-      .toSorted(),
   };
 };
 
 /**
  * What `verifyVersion` selected to run, all passing: the App test suites
- * by path and the workflows with tests by ID, as the version's files list
- * them. Not a record of what each runner executed.
+ * by path, as the version's files list them. Not a record of what each runner executed.
  */
 export interface VerifiedObservations {
   readonly appTests: readonly string[];
-  readonly workflowTests: readonly string[];
 }
 
 /**
@@ -1653,14 +1546,12 @@ export const makeCurrent = async (
     await requireMigrationEvidence(env, appId, number);
     await requireStoreSchemaActive(env, appId, number);
   }
-  const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
       previous,
       candidate: candidate.id,
-      ...triggerSummary(triggers),
     }),
     "core"
   );
@@ -1699,9 +1590,8 @@ export const makeCurrent = async (
     owing = bound.map(({ storeId }) => storeId);
   }
   // Only over the current version read above, so the event's `previous`
-  // is the version this replaced, and only while what its triggers were
-  // worked out from still holds (trigger-registry.ts). The event is stored
-  // only if this batch made it current, and what follows it only then.
+  // is the version this replaced. The event is stored only if this batch
+  // made it current, and what follows it only then.
   const batch = async () =>
     await retriedBatch(
       async () =>
@@ -1718,7 +1608,6 @@ export const makeCurrent = async (
                 sql`${apps.currentVersion} IS ${previous}`,
                 // Archived since `editableApp` let it in: read-only now.
                 ne(apps.status, "archived"),
-                registrationHolds(appId, triggers),
                 sealedLayout ? runnableReleaseSql(appId, number) : undefined,
                 sealedLayout
                   ? releaseAsReportedSql(appId, number, candidate)
@@ -1754,13 +1643,6 @@ export const makeCurrent = async (
             // blueprint (app-blueprints.ts), made current for the first time.
             keep: previous === null && approved === 1,
           }),
-          ...registerTriggers(
-            db,
-            appId,
-            number,
-            triggers,
-            storedEvent(event.id)
-          ),
           // Its webhooks told of the version, with the change or not at all.
           ...queuedWebhookDeliveries(
             db,

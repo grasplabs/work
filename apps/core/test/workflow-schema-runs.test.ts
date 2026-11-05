@@ -1,5 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { appModuleName } from "@grasp-os/compiler";
+import { appModuleName, openWorkflowEntry } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -10,7 +10,7 @@ import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { buildWorkflows } from "../src/screens.ts";
+import { buildOpenWorkflow } from "../src/screens.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -132,12 +132,12 @@ const objectOf = (properties: Record<string, unknown>) => ({
   additionalProperties: false,
 });
 
-/** Where a build of the generated module keeps it. */
-const generatedPath = "workflows/generated.ts";
+/** Where a build of the generated module keeps it: as the host's own. */
+const generatedPath = openWorkflowEntry;
 
 /**
  * `steps` and their `output` (its schema and value), generated: the
- * module, built as a workflow's code is (type-checked against the SDK,
+ * module, built as the host's generated workflow is (type-checked against the SDK,
  * its types stripped, its imports by their flat names), and the run with
  * its table.
  */
@@ -167,11 +167,10 @@ const generated = async (
       limits: generation.limits,
     })
   );
-  const build = await buildWorkflows(
+  const build = await buildOpenWorkflow(
     env,
     { [generatedPath]: generation.source },
-    "workflow-schema-runs",
-    {}
+    "workflow-schema-runs"
   );
   const source = build.ok
     ? build.modules[appModuleName(generatedPath)]

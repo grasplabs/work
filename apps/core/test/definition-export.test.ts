@@ -663,25 +663,6 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     });
   });
 
-  it("scans a version's packages for known secret formats like its files, naming the record and never the match", async () => {
-    // Built here, so no file of the repository holds one.
-    const token = ["ghp", "_", "Q".repeat(36)].join("");
-    const { owner, app, workflow } = await appSealingPackage(token);
-    const refused = await refusal(exportAppDefinition(env, owner, app));
-    expect({
-      refused: refusedSchema.parse(refused),
-      echoed: JSON.stringify(refused).includes(token),
-    }).toStrictEqual({
-      refused: {
-        code: "version.export_secret_found",
-        details: {
-          path: `workflows/${workflowNamespace}/${workflow.name}/1.0.0/packages`,
-        },
-      },
-      echoed: false,
-    });
-  });
-
   it("refuses a package past its byte budget, or one whose files hold a known secret format, naming the file and never the match", async () => {
     const budgeted = await appWith(files(), "Requests");
     await seal(budgeted);

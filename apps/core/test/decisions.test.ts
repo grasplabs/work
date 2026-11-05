@@ -3,7 +3,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { fencesIn } from "../src/workflows/run-object.ts";
-import { approvalApp, appAsksOf } from "./approval-app.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   approvalWorkflow,
@@ -190,42 +189,6 @@ describe("decisions", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       unshared: [{ id: workflow.id, name: workflow.name }, undefined],
       shared: [{ id: workflow.id, name: workflow.name }, true],
-    });
-  });
-
-  // Until App-owned TypeScript workflows go (GRA-1367).
-  it("say on their page whether the person answering may open the App whose workflow asks", async () => {
-    const { admin } = await owners();
-    const decider = await signedIn("user");
-    const app = await approvalApp(admin);
-    await admin.api.workflows.start(app, "approval", {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    const decision = await vi.waitFor(
-      async () => {
-        const [waiting] = await decider.api.decisions.waiting();
-        if (waiting === undefined) {
-          throw new Error("No decision yet");
-        }
-        return waiting.id;
-      },
-      { timeout: 20_000, interval: 100 }
-    );
-    const notMember = await decider.api.decisions.get(decision);
-    await admin.api.apps.members.add(app, {
-      type: "person",
-      id: decider.userId,
-      role: "user",
-    });
-    const member = await decider.api.decisions.get(decision);
-
-    expect({
-      notMember: [notMember.app?.id, notMember.opens],
-      member: [member.app?.id, member.opens],
-    }).toStrictEqual({
-      notMember: [app, undefined],
-      member: [app, true],
     });
   });
 
@@ -851,41 +814,5 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
     const asks = await askedOf(decision);
 
     expect(asks.map(({ detail }) => detail.reminder)).toStrictEqual([false]);
-  });
-
-  // Until App-owned TypeScript workflows go (GRA-1367): an App run's
-  // decision reminds as `step.decision`'s `remindAfter` says.
-  it("reminds in an App run's decision by asking again, whoever is in the team then", async () => {
-    const { admin } = await owners();
-    const anna = await signedIn("user");
-    const ben = await signedIn("user");
-    const team = await newTeam(admin, [anna]);
-    const app = await approvalApp(admin);
-    const run = await admin.api.workflows.start(app, "approval", {
-      from: `team:${team}`,
-      ...reminding,
-    });
-    await appAsksOf(admin, app, 1);
-    // Ben joins the team before the reminder goes out.
-    await joinTeam(admin, team, ben);
-    await decisionTimePassed(run.id, reminding.remindAfter);
-    const asks = await appAsksOf(admin, app, 2);
-    await decisionTimePassed(run.id, reminding.timeout);
-    await finished(run.id);
-    const { output } = await admin.api.workflows.status(run.id);
-
-    expect({
-      asks: asks.map(({ recipients, reminder }) => ({
-        reminder,
-        to: recipients.map(({ userId }) => userId).toSorted(),
-      })),
-      output,
-    }).toStrictEqual({
-      asks: [
-        { reminder: false, to: [anna.userId] },
-        { reminder: true, to: [anna.userId, ben.userId].toSorted() },
-      ],
-      output: { timedOut: true },
-    });
   });
 });

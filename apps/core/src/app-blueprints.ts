@@ -58,7 +58,6 @@ import {
   toVersion,
   versionFiles,
   versionTree,
-  workflowsIn,
 } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -73,10 +72,7 @@ import {
 import { appMemoryPath } from "./knowledge/memory-files.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import {
-  appBindingKinds,
-  bindingKindsOf,
   declarableOf,
-  workflowBindingKinds,
   declaredRequests,
   toPermission,
   workflowStartRequests,
@@ -91,7 +87,6 @@ import {
   deleteWorkflowResource,
   publishWorkflowVersion,
 } from "./workflow-resources.ts";
-import { workflowCallsIn } from "./workflows/code.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
 // an App marks one of its versions as a blueprint, which whoever has a
@@ -522,9 +517,7 @@ export const createFromBlueprint = async (
   id: unknown,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>,
-  /** Whether a chat's agent creates it, which writes no workflow into one. */
-  byAgent = false
+  admit?: () => Promise<void>
 ): Promise<CreatedFromBlueprint> => {
   requireBuilder(by);
   requireNotStaff(by);
@@ -571,11 +564,7 @@ export const createFromBlueprint = async (
   // A blueprint marked from a version holding the v1 server's files: no
   // App is created from it as none is committed with them.
   refuseV1Server(files.keys());
-  // A chat's agent writes no workflow into an App, so it creates none from
-  // a blueprint whose code carries one (app-no-workflows.ts).
-  if (byAgent) {
-    refuseAppWorkflows(files.keys());
-  }
+  refuseAppWorkflows(files.keys());
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
@@ -631,26 +620,8 @@ export const createFromBlueprint = async (
     // (`madeCurrent`) only when an admin approved it, unlike a version its
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
-    workflows: workflowsIn(files),
     screens: screensIn(files),
-    workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     proposedBy: null,
-    // Typed as the code it copies was: the requests it is created with,
-    // and over them the source version's binding names, which a copy
-    // keeps though it asks only for what it may declare (no connection or
-    // workflow), and which hold even where a name the
-    // blueprint declares is now another kind. Types grant nothing: a call
-    // is refused until the copy holds the permission.
-    workflowBindings: {
-      ...bindingKindsOf(requests.rows),
-      ...(blueprint.appId === null || blueprint.version === null
-        ? {}
-        : await workflowBindingKinds(
-            env,
-            appIdSchema.parse(blueprint.appId),
-            blueprint.version
-          )),
-    },
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
@@ -948,6 +919,7 @@ export const acceptBlueprintUpdate = async (
     files.keys(),
     new Set([...files.keys()].filter((path) => !ours.has(path)))
   );
+  refuseAppWorkflows(files.keys());
   const tree = await versionTree(files);
   const base = await versionTree(theirs);
   await storeTree(env, appId, base);
@@ -995,11 +967,8 @@ export const acceptBlueprintUpdate = async (
     message: `Updated from the blueprint ${blueprint.name}.`,
     createdAt: new Date(),
     approved: null,
-    workflows: workflowsIn(files),
     screens: screensIn(files),
-    workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     proposedBy: null,
-    workflowBindings: await appBindingKinds(env, appId),
   };
   // Nothing of the App's files changes when each of the blueprint's
   // changes was the App's already, or conflicts: only its origin moves on.

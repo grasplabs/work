@@ -14,7 +14,6 @@ import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
-import type { TriggerDeclaration } from "./workflows.ts";
 
 // An App's code is a tree of text files, versioned as a whole: builders
 // commit changes over the App's latest version as the next version; the
@@ -273,15 +272,12 @@ export interface AgentProposer {
 
 /**
  * What an App's current version offers people: its screens by name (`inbox`
- * for `screens/inbox.tsx`) and its workflows by ID (`report` for
- * `workflows/report.ts`), each sorted. Empty while it has no current
- * version.
+ * for `screens/inbox.tsx`), sorted. Empty while it has no current version.
  */
 export interface AppContents {
   /** The current version; null while it has none. */
   version: number | null;
   screens: string[];
-  workflows: string[];
 }
 
 /** An App as `AppsApi.list` gives it, with its current version's contents. */
@@ -366,71 +362,6 @@ export interface VersionReview {
       }[]
     | null;
   /**
-   * Its workflows that differ from the current version's: their own files,
-   * or code outside `screens/` they may import (`shared`), such as the
-   * server code their steps call.
-   */
-  workflows: {
-    id: string;
-    change: ReviewChange;
-    /** The changed files outside screens and its own that it may use. */
-    shared: string[];
-    /**
-     * Its steps that differ, by name, each compared as its code is
-     * written: whether each may change something outside Grasp (it says
-     * so, or it calls any of the App's bindings), and the App's bindings
-     * its code calls (`APP`, a connection). While `shared` code changed, every step is listed
-     * (`sharedCode`), as any may now behave differently through it, and
-     * may change things if the workflow calls bindings at all; so is
-     * every step while its own file changed outside its steps' calls (a
-     * helper an option reads, say). Null when the code can't be read as
-     * steps. Its runs are held to what each step calls, by binding, not
-     * by method.
-     */
-    steps:
-      | {
-          name: string;
-          change: ReviewChange;
-          sideEffect: boolean;
-          calls: string[];
-          sharedCode: boolean;
-          /**
-           * Its options chosen at run time, not written in its
-           * code (`StepOutline.dynamic`): a decision's reviewer from the
-           * run's input, say. Absent when there are none.
-           */
-          dynamic?: string[];
-        }[]
-      | null;
-    /**
-     * Every one of the App's bindings its code calls, in any step: what
-     * each step is held to when `steps` is null; none once it's removed.
-     */
-    calls: string[];
-    /** Its parameters that differ, by name; null when they can't be read. */
-    params: { name: string; change: ReviewChange }[] | null;
-    /**
-     * Its triggers added or removed, with how many of each (identical
-     * triggers each register), and how many it had before and has after:
-     * what makes it run on its own, such as a schedule, an event or mail
-     * to an address; null when they can't be read.
-     */
-    triggers:
-      | {
-          trigger: TriggerDeclaration;
-          change: "added" | "removed";
-          count: number;
-          countBefore: number;
-          countAfter: number;
-        }[]
-      | null;
-    /**
-     * The workflow can change something outside Grasp: any of its steps,
-     * changed or not, may, or its steps can't be read at all.
-     */
-    sideEffect: boolean;
-  }[];
-  /**
    * Whether its server code may hand files people can read to the
    * workflows it binds (GRA-976): it declares a files resource with
    * `read` and a bound workflow whose input can hold a file. Its
@@ -468,11 +399,6 @@ export interface VersionReview {
    * again, as this reviewer can't grant it (`AppVersionsApi.setCurrent`).
    */
   grants: { permission: Permission; askedAgain: boolean }[];
-  /**
-   * Its workflows' tests: what making it current needs. Run once per
-   * version's files, or taken from the check that proposed it.
-   */
-  tests: { status: "passed" | "failed" | "none"; failures: string[] };
 }
 
 /**
@@ -530,7 +456,6 @@ export interface SavedBuild {
 export interface CommittedVersion extends AppVersion {
   builds: {
     screens: SavedBuild;
-    workflows: SavedBuild;
   };
 }
 
@@ -543,8 +468,8 @@ export interface AppFilesApi {
   read: (app: string, version?: number) => Promise<AppFiles>;
   /**
    * Commits `changes` over the App's latest version as its next version,
-   * and builds its screens and workflows, so the version opens without
-   * building. Answers once they are done with how they went (`builds`).
+   * and builds its screens, so the version opens without building.
+   * Answers once they are done with how they went (`builds`).
    * A build never fails the commit. Files under `app/` (the v1 server's,
    * `appV1ServerFolder`) do: the commit is refused with `app.v1_server`,
    * naming them.

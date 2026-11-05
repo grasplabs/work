@@ -4,9 +4,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { endLiveRuns } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // The board's weekly weekly, read in one call (`dashboard.report()` in
 // src/board-weekly.ts). The ways it can fail, tried here: a report on
@@ -35,13 +34,6 @@ const planToday = async (): Promise<void> => {
   );
 };
 
-/** A workflow that completes in its one step. */
-const tally = workflowFiles(
-  "tally",
-  `  return await step.do("count", { description: "Count" }, async () => 3);`,
-  { count: 3 }
-);
-
 describe("the board's weekly report", slow, () => {
   afterEach(endLiveRuns);
 
@@ -57,42 +49,6 @@ describe("the board's weekly report", slow, () => {
     }).toStrictEqual({
       programme: { state: "read", data: null },
       runs: "read",
-      people: false,
-    });
-  });
-
-  it("is on the week the programme says, of the runs its window holds", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    await admin.api.onboarding.saveRoster(roster);
-    await planToday();
-    const app = await appWith(builder, tally);
-    const run = await builder.api.workflows.start(app, "tally");
-    await finished(run.id);
-
-    const [weekly, programme] = await Promise.all([
-      builder.api.dashboard.report(),
-      builder.api.onboarding.programme(),
-    ]);
-    const runs = weekly.runs.state === "read" ? weekly.runs.data : undefined;
-    expect({
-      programme: weekly.programme,
-      to: runs?.to,
-      days: runs?.days.length,
-      ran: runs?.workflows.map((ran) => ({
-        workflow: ran.type === "app" ? ran.workflow : ran.name,
-        started: ran.started,
-      })),
-      // Its one workflow ran, so none of the builder's sat idle.
-      idle: weekly.idleWorkflows,
-      // Only admins are told how many the interviews heard.
-      people: "people" in weekly,
-    }).toStrictEqual({
-      programme: { state: "read", data: programme },
-      to: programme?.reportWindow.to,
-      days: programme?.reportWindow.days,
-      ran: [{ workflow: "tally", started: 1 }],
-      idle: { state: "read", data: 0 },
       people: false,
     });
   });

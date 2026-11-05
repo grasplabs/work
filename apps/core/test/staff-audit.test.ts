@@ -441,15 +441,10 @@ describe("Grasp staff's views, audited", () => {
           userId: staff.userId,
           app: appIdSchema.parse(app),
           build: undefined,
-          stillOpen: () => async () => await Promise.resolve(false),
           // SAFETY: never reached: the Apps don't exist, so no call goes
-          // past its check to follow a query or read a standing.
+          // past its check to follow a query.
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
           queries: {} as never,
-          runSubscriptions: new Set(),
-          // SAFETY: never reached either, as for `queries`.
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          standingNow: async () => await Promise.resolve({} as never),
         })
     );
 
@@ -568,15 +563,10 @@ describe("Grasp staff's views, audited", () => {
       userId: staff.userId,
       app: appIdSchema.parse(crypto.randomUUID()),
       build: undefined,
-      stillOpen: () => async () => await Promise.resolve(false),
       // SAFETY: never reached: every call is checked first, and the App
-      // doesn't exist, so none follows a query or reads a standing.
+      // doesn't exist, so none follows a query.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       queries: {} as never,
-      runSubscriptions: new Set(),
-      // SAFETY: never reached either, as for `queries`.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      standingNow: async () => await Promise.resolve({} as never),
     });
     // Closing lets go of what the frame follows: it reads and changes
     // nothing of the client's.
@@ -605,7 +595,7 @@ describe("Grasp staff's views, audited", () => {
       }
     }
 
-    expect(calls.length).toBeGreaterThan(5);
+    expect(calls.length).toBeGreaterThan(3);
     expect(unaudited).toStrictEqual([]);
   });
 });

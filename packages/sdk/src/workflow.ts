@@ -1,7 +1,6 @@
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { CollectionReader } from "@grasp-os/shared/knowledge";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -9,10 +8,8 @@ import {
   stepIdempotencyKey,
   triggerDeclarationsSchema,
 } from "@grasp-os/shared/workflows";
-import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
-import type { BrainBinding } from "./brain.ts";
 import type {
   Backoff,
   DecisionRecipient,
@@ -27,14 +24,6 @@ import {
 } from "./expression-runtime.ts";
 import { currencySchema, paramValueSchemas } from "./params.ts";
 import type { ParamDefault, ParamKind, ParamValue } from "./params.ts";
-import type {
-  AppErrorPayload,
-  ArgsOf,
-  Callable,
-  ReferenceKind,
-  ReturnOf,
-  IsStreaming,
-} from "./references.ts";
 import {
   generatedStepOptionSchemas,
   namePattern,
@@ -57,9 +46,6 @@ import {
  *     async ({ idempotencyKey, input }) => ...);
  * });
  * ```
- *
- * The code is the only source of truth: `describeWorkflow` in
- * `@grasp-os/sdk/describe` reads the step list from it.
  */
 
 // Workflow code imports only this module, so it gets Zod from here too.
@@ -137,7 +123,7 @@ export type {
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
- * module (core's workflows/code.ts) loads it before any of the App's code,
+ * module (core's workflows/sealed-isolate.ts) loads it before any of the App's code,
  * which could otherwise put its own in its place.
  */
 const { freeze } = Object;
@@ -390,22 +376,6 @@ export interface DoOptions<Input extends StepInput = StepInput>
    */
   input?: Input;
 }
-
-/**
- * The code a connector call's error has when its answer was lost, and the
- * person the run acts for has since said it took effect. The run waited
- * for them, then ran the step again under the same key: the call isn't
- * sent again, and what it returned isn't known. Catch it as success with
- * no output:
- *
- *   try {
- *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
- *   } catch (error) {
- *     if (error.code === resolvedDone) return { sent: true };
- *     throw error;
- *   }
- */
-export const resolvedDone = "connect.resolved_done";
 
 /** Passed to a side-effect step: hand `idempotencyKey` to connector calls. */
 export interface SideEffectContext {
@@ -664,106 +634,6 @@ interface UntypedStepRunner {
   listen: (name: string, options: unknown) => Promise<EventWait>;
 }
 
-/**
- * What a connection's action answered, as the run gets it: its output as
- * JSON text, and the IDs of what it read, as its connector names them. A
- * run's call is never held to answer later: a held call fails the step
- * (`connect.held`) and runs again once the person decided.
- */
-export interface ConnectionAnswer {
-  readonly output: string;
-  readonly provenance: string[];
-}
-
-/**
- * A connection the run's App has a permission for, by its binding name:
- * `await env.OUTLOOK.call("mail.send", mail, { idempotencyKey })`.
- */
-export interface ConnectionBinding {
-  readonly call: (
-    action: string,
-    input: Json,
-    options?: { readonly idempotencyKey?: string }
-  ) => Promise<ConnectionAnswer>;
-}
-
-/**
- * A Knowledge collection the run's App may read, by its binding name:
- * `await env.HANDBOOK.search("refunds")`. A run recalls through the Brain
- * binding (`WorkflowBrainBinding`), never a collection's.
- */
-export type CollectionBinding = Readonly<Omit<CollectionReader, "recall">>;
-
-/**
- * The Brain, when the run's App holds the `brain` permission, by its
- * binding name: `await brain(env.BRAIN).recall({ query })`, a skill's
- * selection and pinned read (`.skills.select`, `.skills.read`), and its
- * entities and relations (`.entities.list`, `.entities.sources`,
- * `.relations.get`, `.relations.explain`), the same contract every caller of the Brain uses
- * (`@grasp-os/sdk/brain`). Keep a selection's pin in the step's result: a
- * replay reads the same version.
- */
-export type WorkflowBrainBinding = Required<
-  Pick<
-    BrainBinding,
-    | "recall"
-    | "skillsRead"
-    | "skillsSelect"
-    | "entitiesList"
-    | "entitySources"
-    | "relationsGet"
-    | "relationsExplain"
-  >
->;
-
-/**
- * Which of the App's functions `callFunction` calls: its generated
- * reference, or its name and kind. A query's reference holds no kind, so
- * a reference without one calls a query. The host resolves it in the
- * release the run is pinned to.
- */
-export interface FunctionReferenceName {
-  readonly name: string;
-  readonly kind?: ReferenceKind;
-}
-
-/**
- * The run's own App (`env.APP`): its public functions (`callFunction`,
- * typed with `appFunctions<Tree>(env)`).
- */
-export interface OwnAppBinding {
-  readonly callFunction: (
-    reference: FunctionReferenceName,
-    input: Json
-  ) => Promise<FunctionResult<Json>>;
-}
-
-/**
- * The run's bindings, by name, as its App's permissions make them. Empty
- * here: where an App's workflows are type-checked, the host declares
- * each binding the App holds a permission for in it, as what it is (a
- * `ConnectionBinding` or a `CollectionBinding`), with `APP` (`OwnAppBinding`), so reading one binding's answer as
- * another's is a type error.
- */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- declared per App by the host, by declaration merging
-export interface WorkflowBindings {}
-
-/**
- * A run's `env`: each binding `WorkflowBindings` declares, typed as what
- * it is; any other name as `WorkflowEnv` has it, its methods answering
- * `unknown`, which the workflow narrows before it uses. Another name is no
- * type error: a binding the App has no permission for is refused when it
- * is called (`permission.denied`), whatever its code says, so the type
- * check adds no order between asking for a permission and making a
- * version current.
- */
-export type RunEnv = Readonly<WorkflowBindings> & WorkflowEnv;
-
-/** What `appFunctions` reads of a run's `env`: its `APP`. */
-export interface AppEnv {
-  readonly APP?: Partial<OwnAppBinding>;
-}
-
 /** Everything a workflow reads besides its steps. */
 export interface WorkflowContext<P extends Params, Input> {
   runId: RunId;
@@ -786,184 +656,13 @@ export interface WorkflowContext<P extends Params, Input> {
    */
   inbox: Readonly<Record<string, string>>;
   /**
-   * The App's connections and other permissions, and its own functions,
-   * by binding name; call them in a step's own function, each written out
-   * as `env.NAME.method(…)` or `appFunctions(env).query(…)` (or
-   * `mutation`, `action`) (see `WorkflowEnv`). Where the
-   * App's workflows are type-checked, each name the App holds a permission
-   * for is typed as the binding it is (`WorkflowBindings`); any other
-   * answers `unknown` (`RunEnv`).
+   * The run's bindings, by name; call them in a step's own function, each
+   * written out as `env.NAME.method(…)` (see `WorkflowEnv`). A binding the
+   * run has no permission for is refused when it is called
+   * (`permission.denied`).
    */
-  env: RunEnv;
-  /**
-   * The content of attachment `index` (its place in `message.attachments`)
-   * of a message an email trigger received, as it arrived. Call it inside
-   * a step, and pass the content on there (to a connection, say): a
-   * step's result must be JSON, so return what you made of it, not the
-   * bytes. A message is kept for 30 days from when it arrived; after
-   * that, and for a message its App didn't receive, an attachment it
-   * doesn't have, or a message that isn't kept (`stored: null`: it has
-   * no attachments but inline ones), it
-   * fails with `workflow.attachment_not_found`; a kept message that can't
-   * be read any more fails with `workflow.attachment_unreadable`. Neither
-   * is retried. Every read is audited, a refused one too. The content,
-   * its name and its type are whatever the sender sent: treat them as
-   * untrusted data.
-   *
-   * ```ts
-   * await step.do("file", { description: "File the invoice" }, async () => {
-   *   const pdf = await readAttachment(input, 0);
-   *   ...
-   * });
-   * ```
-   */
-  readAttachment: (
-    message: Pick<InboundEmail, "stored">,
-    index: number
-  ) => Promise<Uint8Array>;
+  env: WorkflowEnv;
 }
-
-export type { AppErrorPayload } from "./references.ts";
-
-/**
- * What a call of one of the App's functions answers, as the host answers
- * it (spec 32.6): its value, or why it failed.
- */
-export type FunctionResult<Value> =
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly error: AppErrorPayload };
-
-/** How deep `FunctionPaths` reads groups of functions. */
-type GroupDepth = [never, 0, 1, 2, 3];
-
-/**
- * The paths (`drafts.propose`) of the public functions of kind `Kind` in
- * `Tree`, the App's functions grouped by their server modules, as their
- * paths are: a definition by its path, a group by the paths in it.
- * Never a streaming action's: it runs only for a screen following it
- * (spec 10.7.6), and a workflow's call answers once, so the host refuses
- * it (`operation.mode_mismatch`).
- */
-export type FunctionPaths<
-  Tree,
-  Kind extends ReferenceKind,
-  Prefix extends string = "",
-  Depth extends number = 4,
-> = [Depth] extends [never]
-  ? never
-  : {
-      [Key in keyof Tree & string]: Tree[Key] extends Callable
-        ? Tree[Key] extends Callable<Kind, "public">
-          ? true extends IsStreaming<Tree[Key]>
-            ? never
-            : `${Prefix}${Key}`
-          : never
-        : Tree[Key] extends object
-          ? FunctionPaths<
-              Tree[Key],
-              Kind,
-              `${Prefix}${Key}.`,
-              GroupDepth[Depth]
-            >
-          : never;
-    }[keyof Tree & string];
-
-/** The function of `Tree` at registered path `Path`. */
-export type FunctionAt<
-  Tree,
-  Path extends string,
-> = Path extends `${infer Group}.${infer Rest}`
-  ? Group extends keyof Tree
-    ? FunctionAt<Tree[Group], Rest>
-    : never
-  : Path extends keyof Tree
-    ? Tree[Path]
-    : never;
-
-/** A call of one of `Tree`'s public functions of kind `Kind`, by its path. */
-type FunctionCall<Tree, Kind extends ReferenceKind> = <
-  Path extends FunctionPaths<Tree, Kind>,
->(
-  name: Path,
-  input: ArgsOf<FunctionAt<Tree, Path>>
-) => Promise<FunctionResult<ReturnOf<FunctionAt<Tree, Path>>>>;
-
-/** A call of any of the App's functions, untyped: by path, with JSON. */
-type UntypedFunctionCall = (
-  name: string,
-  input: Json
-) => Promise<FunctionResult<Json>>;
-
-/**
- * The run's own App's public functions as a workflow calls them, one
- * method per kind; typed by `Tree` when given, untyped otherwise.
- */
-export type AppFunctionsStub<Tree> = unknown extends Tree
-  ? {
-      readonly query: UntypedFunctionCall;
-      readonly mutation: UntypedFunctionCall;
-      readonly action: UntypedFunctionCall;
-    }
-  : {
-      readonly query: FunctionCall<Tree, "query">;
-      readonly mutation: FunctionCall<Tree, "mutation">;
-      readonly action: FunctionCall<Tree, "action">;
-    };
-
-/**
- * A typed stub of the run's own App's public functions (spec 8, GRA-711):
- * `appFunctions<Intake>(env).mutation("drafts.propose", input)` is
- * `env.APP.callFunction({ name: "drafts.propose", kind: "mutation" },
- * input)`, typed by the App's own definitions, which a workflow imports
- * as types only, grouped by their server modules, as their paths are:
- *
- * ```ts
- * import type * as drafts from "../server/drafts.ts";
- *
- * type Intake = { drafts: typeof drafts };
- *
- * await step.do("propose", { description: "Keep the draft", sideEffect: true }, async () => {
- *   const answered = await appFunctions<Intake>(env).mutation("drafts.propose", input);
- *   if (!answered.ok) throw new Error(answered.error.message);
- *   return answered.value;
- * });
- * ```
- *
- * Each call answers what the host answers: `{ ok: true, value }`, the
- * function's answer checked against its contract, or `{ ok: false,
- * error }`. Like `env.APP`, it works only inside a step and acts for the
- * person the run acts for; the host calls only a public function of the
- * release the run is pinned to, of the kind the method names
- * (`operation.kind_mismatch` otherwise), so the types offer only those.
- * The review of the workflow's steps reads each call as one of `APP`'s.
- */
-export const appFunctions = <Tree = unknown>(
-  env: AppEnv
-): AppFunctionsStub<Tree> => {
-  const call =
-    (kind: ReferenceKind) =>
-    async (name: string, input: Json): Promise<unknown> => {
-      const app = env.APP;
-      if (app?.callFunction === undefined) {
-        throw invalidCall("The run has no App to call (env.APP)");
-      }
-      return await app.callFunction({ name, kind }, input ?? null);
-    };
-  // Exactly the three methods, with nothing inherited to reach: any other
-  // name is undefined, and calling it fails.
-  const stub = Object.freeze({
-    __proto__: null,
-    query: call("query"),
-    mutation: call("mutation"),
-    action: call("action"),
-  });
-  // SAFETY: each method calls the App's function of that kind by path,
-  // answering what the host answers, which is `FunctionResult` (spec
-  // 32.6); the paths and inputs the types allow are the App's own public
-  // functions', and the host checks both again.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return stub as AppFunctionsStub<Tree>;
-};
 
 // Definition
 
@@ -1055,9 +754,7 @@ export type Trigger<ScheduleParam extends string = string> =
    * or with one lacking an `@` such as `<>`, the same bytes are), so a
    * message that reuses an earlier one's Message-ID starts none. Mail
    * starts at most 60 runs of a workflow an hour. Past that, mail is
-   * refused for now, and its sender tries again later. The input lists the message's attachments; a
-   * message with any is kept for 30 days, and the run reads their content
-   * with `readAttachment`.
+   * refused for now, and its sender tries again later.
    */
   | { type: "email"; address: string };
 
@@ -1077,10 +774,7 @@ export interface ParamMetadata {
   currency?: string;
 }
 
-/**
- * What the UI shows about a workflow besides its steps, as plain JSON. The
- * steps come from the code, through `describeWorkflow`.
- */
+/** What the UI shows about a workflow besides its steps, as plain JSON. */
 export interface WorkflowMetadata {
   id: WorkflowId;
   params: ParamMetadata[];
@@ -1201,7 +895,6 @@ const createRunner = (
   engine: WorkflowEngine
 ): {
   steps: UntypedStepRunner;
-  readAttachment: WorkflowContext<Params, unknown>["readAttachment"];
 } => {
   const started = new Set<string>();
   // The step running now, if any. They run one after another: one started
@@ -1484,25 +1177,7 @@ const createRunner = (
       }),
   };
 
-  // Not a step of its own: bytes can't be recorded, so the step it runs in
-  // reads again whenever it runs again. Every call goes to the engine,
-  // which refuses and records each one it must (see `WorkflowEngine`):
-  // only what isn't data is left out, so the call can cross to it.
-  const readAttachment: WorkflowContext<
-    Params,
-    unknown
-  >["readAttachment"] = async (message, index) => {
-    const stored: unknown =
-      typeof message === "object" && message !== null
-        ? message.stored
-        : undefined;
-    return await engine.readAttachment(
-      typeof stored === "string" || stored === null ? stored : undefined,
-      typeof index === "number" ? index : undefined
-    );
-  };
-
-  return { steps, readAttachment };
+  return { steps };
 };
 
 /**
@@ -1574,13 +1249,10 @@ export const workflow = <
         // schema of its kind, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
-        // The host builds the run's bindings from its App's permissions
-        // (connections, collections) and its App
-        // (`APP`), which is what `WorkflowBindings` declares where the App's
-        // workflows are type-checked; a binding the run doesn't have when it
-        // calls fails then (`permission.denied`).
+        // The host builds the run's bindings from its permissions; a
+        // binding the run doesn't have when it calls fails then
+        // (`permission.denied`).
         env: engine.env,
-        readAttachment: runner.readAttachment,
       }
     );
   };

@@ -1,5 +1,5 @@
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -13,19 +13,11 @@ import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { queuedRuns } from "../src/workflows/admission.ts";
 import { modelWaitRecorded } from "../src/workflows/model-waits.ts";
-import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
-import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import {
-  appWith as serverAppWith,
-  bindModel,
-  modelRegistration,
-  workflowFiles,
-} from "./workflow-apps.ts";
 
 // The client's model requests in flight at once (model-admission.ts),
 // held to fixed limits in the model ledger's one transaction: in all
@@ -199,39 +191,6 @@ const answer = async (
   return "queued" in admitted
     ? `queued:${admitted.queued.waitingFor}`
     : JSON.stringify(admitted);
-};
-
-/** A workflow whose one step asks Mistral Large through its App's `ai`. */
-const readerApp = async (builder: Awaited<ReturnType<typeof signedInApi>>) => {
-  const app = await serverAppWith(builder, {
-    ...modelRegistration(6000),
-    ...workflowFiles(
-      "reader",
-      `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "ai",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-  });`,
-      { extract: { total: 1234 } }
-    ),
-  });
-  await bindModel(app, mistral);
-  return app;
-};
-
-/** What `run` returns with core's own env under the tests' limits. */
-const underPolicy = async <Result>(
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const before = env.TEST_QUOTA_LIMITS;
-  env.TEST_QUOTA_LIMITS = policy;
-  try {
-    return await run();
-  } finally {
-    env.TEST_QUOTA_LIMITS = before;
-  }
 };
 
 describe("model request slots", { timeout: 60_000 }, () => {
@@ -584,97 +543,6 @@ describe("model request slots", { timeout: 60_000 }, () => {
       },
       after: undefined,
     });
-  });
-
-  it("gives a run nobody started its App's slot, never its owner's who it acts for", async () => {
-    const owner = await signedInApi(idp, "builder");
-    const app = await readerApp(owner);
-    const release = Promise.withResolvers<boolean>();
-    const fake = await fakeProviderFor([mistral], paused(release.promise), {
-      text: '{ "total": 1234 }',
-      inputTokens: 10,
-      outputTokens: 5,
-    });
-    try {
-      await underPolicy(async () => {
-        // The owner's own call, elsewhere, fills the owner's limit.
-        const holding = outcome(models(env).call(callBy(owner.userId)));
-        await until(() => fake.requests.length === 1);
-        // Mail, say: a run of the App nobody started, acting for its owner.
-        const run = await startRun(env, {
-          app: appIdSchema.parse(app),
-          workflow: workflowIdSchema.parse("reader"),
-          input: null,
-          startedBy: null,
-          actor: { type: "system" },
-        });
-        // It goes on while the owner's call still holds the owner's slot.
-        const ran = await Promise.race([
-          finished(run.id).then(() => "finished"),
-          stillWaiting(20_000),
-        ]);
-        release.resolve(true);
-
-        expect({ ran, holding: await holding }).toStrictEqual({
-          ran: "finished",
-          holding: "ok",
-        });
-      });
-    } finally {
-      release.resolve(true);
-    }
-  });
-
-  it("shows a run queued while its step's model call waits for a slot, and goes on once it has one", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await readerApp(builder);
-    const release = Promise.withResolvers<boolean>();
-    const fake = await fakeProviderFor(
-      [mistral],
-      paused(release.promise),
-      paused(release.promise),
-      { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 }
-    );
-    try {
-      // The runs the dispatcher runs use core's own env.
-      await underPolicy(async () => {
-        // Two others' calls fill the client's slots.
-        const holding = [outcome(models(env).call(callBy(newPerson())))];
-        await until(() => fake.requests.length === 1);
-        holding.push(outcome(models(env).call(callBy(newPerson()))));
-        await until(() => fake.requests.length === 2);
-        const run = await builder.api.workflows.start(app, "reader");
-        const summary = async () =>
-          await builder.api.screens.frame(app, "").summary(run.id);
-        // A run still starting reads as queued too, with no limit to wait
-        // for (summary.ts): the step's wait shows once its call waits, in
-        // the revision that carries the limit and the time.
-        let queued = await summary();
-        while (queued.queued === undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- until it shows
-          await scheduler.wait(10);
-          // oxlint-disable-next-line no-await-in-loop -- until it shows
-          queued = await summary();
-        }
-        release.resolve(true);
-        await finished(run.id);
-        const done = await summary();
-
-        expect({
-          queued: [queued.status, queued.queued?.waitingFor],
-          retryAt: (queued.queued?.retryAt ?? 0) > Date.now() - 60_000,
-          done: [done.status, done.queued],
-          holding: await Promise.all(holding),
-        }).toStrictEqual({
-          queued: ["queued", "client"],
-          retryAt: true,
-          done: ["completed", undefined],
-          holding: ["ok", "ok"],
-        });
-      });
-    } finally {
-      release.resolve(true);
-    }
   });
 });
 

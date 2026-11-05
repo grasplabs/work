@@ -108,8 +108,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.dependency_admission_refusals": {
     none: "subject is an App or workflow",
   },
-  "core.workflow_param_values": { company: "parameters they set" },
-  "core.workflow_owners": { company: "workflows they own" },
   "core.hidden_connectors": { company: "connectors an admin hid" },
   "core.tool_class_settings": { company: "settings an admin changed" },
   "core.app_pointers": { company: "settings an admin changed" },
@@ -136,7 +134,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
   },
-  "core.workflow_teams": { company: "the team they set as a workflow's owner" },
   "core.run_brain_evidence": {
     company: "what a run recalled, as runs are (D3)",
   },
@@ -258,7 +255,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_run_control_keys": noPerson,
   "core.workflow_resource_run_terminations": noPerson,
   "core.workflow_run_wakes": noPerson,
-  "core.workflow_triggers": noPerson,
   "core.admin_commands": noPerson,
   "core.brain_team_group_saves": noPerson,
   "core.brain_team_groups": noPerson,
@@ -292,7 +288,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.dashboard_widgets": { erased: "workspace" },
   "workspace.audit_outbox": { erased: "workspace" },
   "workspace.brain_capture_intents": { erased: "workspace" },
-  "workspace.chat_attachments": { erased: "workspace" },
   "workspace.chat_build_jobs": { erased: "workspace" },
   "workspace.chat_code_runs": { erased: "workspace" },
   "workspace.chat_documents": { erased: "workspace" },
@@ -592,8 +587,6 @@ export const reviewedPersonColumns: Readonly<
   "core.workflow_emitted_events": ["subject"],
   "core.workflow_item_tests": ["principal_id"],
   "core.workflow_model_waits": ["owner"],
-  "core.workflow_owners": ["owner_id", "set_by"],
-  "core.workflow_param_values": ["set_by"],
   "core.workflow_resource_drafts": ["edited_by"],
   "core.workflow_resource_lifecycles": [
     "go_live_requested_by",
@@ -611,7 +604,6 @@ export const reviewedPersonColumns: Readonly<
   "core.workflow_run_files": ["opened_by"],
   "core.workflow_runs": ["started_by"],
   "core.workflow_start_receipts": ["principal_id"],
-  "core.workflow_teams": ["set_by"],
   "dataStore.sdk_abandoned_targets": ["abandoned_by"],
   "dataStore.sdk_cascade_jobs": ["actor", "principal"],
   "dataStore.sdk_commit_writers": ["principal"],

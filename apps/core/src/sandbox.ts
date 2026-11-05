@@ -3,7 +3,7 @@ import { isolateBase } from "@grasp-os/shared/runtime";
 
 /**
  * How App code runs (its server, app.ts, and a draft's in its preview,
- * preview.ts; and its workflows, workflows/code.ts): no network, no
+ * preview.ts; and its workflows, workflows/sealed-isolate.ts): no network, no
  * importable env, and a CPU limit per call, enforced by Cloudflare's
  * runtime (a busy loop ends there; memory is the runtime's limit per
  * isolate). Plain workerd (tests, local development, on-prem) doesn't

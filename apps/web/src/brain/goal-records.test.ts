@@ -24,10 +24,7 @@ const goal: Goal = {
       date: "2026-10-01",
     },
   ],
-  workflows: [
-    { app: "invoices", workflow: "chase" },
-    { app: "invoices", workflow: "remind" },
-  ],
+  workflows: ["wf-chase", "wf-remind"],
 };
 
 describe("an admin's change to the board's goals", () => {
@@ -71,27 +68,20 @@ describe("an admin's change to the board's goals", () => {
   });
 
   it("links what was chosen anew and takes off what no longer is, and sends nothing when nothing changed", () => {
-    const records = relinkedRecords(
-      goal,
-      [
-        { app: "invoices", workflow: "chase" },
-        { app: "ledger", workflow: "book" },
-      ],
-      day
-    );
+    const records = relinkedRecords(goal, ["wf-chase", "wf-book"], day);
     expect({
       valid: brainRecordsSchema.safeParse(records).success,
       links: records.map((record) =>
         record.type === "goalLink"
-          ? [record.app, record.workflow, record.linked]
+          ? [record.workflow, record.linked]
           : record.type
       ),
       unchanged: relinkedRecords(goal, goal.workflows, day),
     }).toStrictEqual({
       valid: true,
       links: [
-        ["ledger", "book", true],
-        ["invoices", "remind", false],
+        ["wf-book", true],
+        ["wf-remind", false],
       ],
       unchanged: [],
     });

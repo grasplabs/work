@@ -12,15 +12,6 @@ export const TargetLink = ({
   destination,
   ...props
 }: { destination: Target } & Omit<ComponentProps<"a">, "href">) => {
-  if (destination.kind === "workflow") {
-    return (
-      <Link
-        params={{ app: destination.app, workflow: destination.workflow }}
-        to="/workflows/$app/$workflow"
-        {...props}
-      />
-    );
-  }
   if (destination.kind === "independentWorkflow") {
     return (
       <Link

@@ -13,12 +13,11 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { formatEuro, formatPercent } from "../format.ts";
+import { formatEuro } from "../format.ts";
 import {
   returnKey,
   returnTotals,
@@ -30,16 +29,14 @@ import type {
   GoalProgress,
   ReturnWorkflow,
   Stage,
-  TeamLevel,
-  TeamProgress,
   Way,
   WorkflowReturn,
 } from "./returns.ts";
 import { useFull } from "./widget-block.tsx";
 
 // The prototype's standard widgets that the dashboard starts with, besides
-// the workflows (`components/dashboard/widget-parts.tsx`: `ReturnChartView`,
-// `GoalListView`, `TeamListView`), as they show on the board and in full.
+// the workflows (`components/dashboard/widget-parts.tsx`: `ReturnChartView`
+// and `GoalListView`), as they show on the board and in full.
 // A widget is read in one look: one picture that says where things stand,
 // and in full every line, and what the colours mean. One set of colours
 // runs through all of them: green for what is live or measured, a light
@@ -190,7 +187,7 @@ export const Nothing = ({ children }: { children: ReactNode }) => (
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-/** A workflow's name, opening it. */
+/** A workflow's name, as the way to its page. */
 const WorkflowLink = ({
   workflow,
   className,
@@ -200,8 +197,8 @@ const WorkflowLink = ({
 }) => (
   <Link
     className={className}
-    params={{ app: workflow.app, workflow: workflow.name }}
-    to="/workflows/$app/$workflow"
+    params={{ workflow: workflow.id }}
+    to="/workflows/$workflow"
   >
     {workflow.name}
   </Link>
@@ -557,309 +554,5 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
         </span>
       ) : null}
     </>
-  );
-};
-
-/** What each team level says, as its name and what it means. */
-const useLevelText = (): Record<
-  TeamLevel,
-  { name: string; meaning: string }
-> => {
-  const { t } = useLingui();
-  return {
-    notStarted: {
-      name: t({ message: "Not started", context: "how far a team is with AI" }),
-      meaning: t`None of this team's work is mapped yet.`,
-    },
-    mapped: {
-      name: t({ message: "Work mapped", context: "how far a team is with AI" }),
-      meaning: t`Its work is mapped; nothing is redesigned with AI yet.`,
-    },
-    redesign: {
-      name: t({ message: "Redesigning", context: "how far a team is with AI" }),
-      meaning: t`A workflow is redesigned with AI and waits for its test.`,
-    },
-    testing: {
-      name: t({ message: "Testing", context: "how far a team is with AI" }),
-      meaning: t`A workflow with AI is in its test run.`,
-    },
-    live: {
-      name: t({ message: "Live", context: "how far a team is with AI" }),
-      meaning: t`A workflow with AI runs on real work.`,
-    },
-    scaling: {
-      name: t({ message: "Scaling", context: "how far a team is with AI" }),
-      meaning: t`Several workflows run with AI, across most of its work by hand.`,
-    },
-  };
-};
-
-/** A team's mark: orange when it needs help, green once something of its work runs, light green while it redesigns or tests, grey before that. */
-const toneOfTeam = (team: TeamProgress): Tone => {
-  if (team.needsHelp) {
-    return "attention";
-  }
-  if (team.level === "live" || team.level === "scaling") {
-    return "live";
-  }
-  return team.level === "redesign" || team.level === "testing"
-    ? "coming"
-    : "rest";
-};
-
-/**
- * What matters for a workflow now, saying what kind of number it is: once
- * it is designed, its expected return a month; before that, its current
- * cost.
- */
-const WorkflowValue = ({ row }: { row: WorkflowReturn }) => {
-  const { t } = useLingui();
-  if (row.before === null) {
-    return t`not counted yet`;
-  }
-  const before = formatEuro(row.before);
-  if (row.back === null) {
-    return t`${before} a month current cost`;
-  }
-  const back = formatEuro(row.back);
-  return t`${back} a month expected return`;
-};
-
-/** Why a team needs help, if it does. */
-const useNeedsHelp = (team: TeamProgress): string => {
-  const { t } = useLingui();
-  const cost = formatEuro(team.cost);
-  if (!team.needsHelp) {
-    return "";
-  }
-  return team.share !== null && team.share > 0
-    ? t`Needs help: less redesigned than the company, and nothing tested yet`
-    : t`Needs help: ${cost} a month current cost, nothing redesigned yet`;
-};
-
-/** What a team's work is, pointed at: what its level means; why it needs help, if it does; its workflows by step, their return, and what its live work handled. */
-const TeamDetails = ({
-  team,
-  meaning,
-}: {
-  team: TeamProgress;
-  meaning: string;
-}) => {
-  const { t } = useLingui();
-  const help = useNeedsHelp(team);
-  const measured = formatEuro(team.measured);
-  const expected = formatEuro(team.expected);
-  const { workflows, live, testing, redesign, mapped, handled, alone } = team;
-  const steps = [
-    live ? t`${live} live` : "",
-    testing ? t`${testing} testing` : "",
-    redesign ? t`${redesign} redesigning` : "",
-    mapped ? t`${mapped} mapped` : "",
-  ]
-    .filter(Boolean)
-    .join(", ");
-  return [
-    meaning,
-    help,
-    workflows
-      ? t`${plural(workflows, { one: "# workflow", other: "# workflows" })}: ${steps}`
-      : t`No workflows yet`,
-    team.measured ? t`${measured} a month measured return` : "",
-    team.expected ? t`${expected} a month expected return` : "",
-    handled ? t`${alone} of ${handled} items without a person` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-};
-
-/** The steps a team takes with AI, as the teams widget's columns: each with the stages of the workflows that stand there. */
-const useSteps = (): { key: string; name: string; stages: Stage[] }[] => {
-  const { t } = useLingui();
-  const levels = useLevelText();
-  return [
-    {
-      key: "mapped",
-      name: t({
-        message: "Mapped",
-        context:
-          "short name of the first step a team takes with AI, over a narrow column",
-      }),
-      stages: ["check", "agreed"],
-    },
-    { key: "redesign", name: levels.redesign.name, stages: ["redesign"] },
-    { key: "testing", name: levels.testing.name, stages: ["testing"] },
-    { key: "live", name: levels.live.name, stages: ["live"] },
-  ];
-};
-
-/** One workflow in a team's row: it says which when it is pointed at, and a press opens it. */
-const TeamWorkflowDot = ({ row }: { row: WorkflowReturn }) => {
-  const { i18n } = useLingui();
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Link
-            aria-label={row.workflow.name}
-            className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
-            params={{ app: row.workflow.app, workflow: row.workflow.name }}
-            to="/workflows/$app/$workflow"
-          />
-        }
-      >
-        <span
-          className={cn("size-3 rounded-full", fills[toneOfStage(row.stage)])}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top" variant="quiet">
-        <span className="flex flex-col text-left">
-          <span className="text-foreground font-medium">
-            {row.workflow.name}
-          </span>
-          <span>{i18n._(stageLabel[row.stage])}</span>
-          <span>
-            <WorkflowValue row={row} />
-          </span>
-        </span>
-      </TooltipContent>
-    </Tooltip>
-  );
-};
-
-/**
- * Every team's work with AI, the furthest first. Where a team stands is
- * where its workflows stand, each of them: a team with one of ten live is
- * not where a team with one of two is. So every workflow is a dot in the
- * column of its step, and the row ends with how many of them run. In full
- * the picture has all the room it wants, with how much of each team's work
- * by hand is redesigned. The prototype's way to help a team that is behind
- * asks Grasp in the chat, which comes with the teams' numbers.
- */
-export const TeamListView = ({
-  teams,
-  rows: all,
-}: {
-  teams: readonly TeamProgress[];
-  rows: readonly WorkflowReturn[];
-}) => {
-  const { t } = useLingui();
-  const full = useFull();
-  const levels = useLevelText();
-  const steps = useSteps();
-  if (teams.length === 0) {
-    return (
-      <Nothing>
-        <Trans>No teams yet.</Trans>
-      </Nothing>
-    );
-  }
-  // In full its least width fits the dialog on a laptop; on a narrower screen it moves sideways under the team's name, which stays where it is.
-  const fixed = full
-    ? "bg-popover sticky left-0 z-10 flex h-full min-w-0 items-center gap-2.5"
-    : "flex items-center gap-2.5 pr-3 whitespace-nowrap";
-  // One grid for the whole picture: every row takes its columns from it, so a dot always stands under its step, whatever the names are.
-  const track = full
-    ? "team-columns-full grid gap-x-4"
-    : "team-columns @md:team-columns-steps grid h-full auto-rows-fr gap-x-3";
-  const columns = "col-span-full grid grid-cols-subgrid items-center";
-  return (
-    <div className={full ? "overflow-x-auto" : "min-h-0 flex-1"}>
-      <div className={track}>
-        <div
-          className={cn(
-            columns,
-            "text-muted-foreground",
-            full ? "pb-3" : "pb-2 text-xs"
-          )}
-        >
-          <span className={full ? "bg-popover sticky left-0 z-10" : undefined}>
-            <Trans>Team</Trans>
-          </span>
-          {steps.map((step) => (
-            <span
-              className={
-                full
-                  ? "text-center"
-                  : "hidden text-center whitespace-nowrap @md:block"
-              }
-              key={step.key}
-            >
-              {step.name}
-            </span>
-          ))}
-          {/* The last column says what it is in its own words on every row. */}
-          <span />
-          {full ? (
-            <>
-              <span className="text-right">
-                <Trans context="column: the share of a team's work by hand that is redesigned">
-                  Redesigned
-                </Trans>
-              </span>
-              <span />
-            </>
-          ) : null}
-        </div>
-        {teams.map((team) => {
-          const own = all.filter((row) => row.workflow.teamId === team.id);
-          const { live } = team;
-          const count = team.workflows;
-          return (
-            <div
-              className={cn(columns, "border-t", full ? "h-14" : "min-h-0")}
-              key={team.id}
-            >
-              <Tooltip>
-                <TooltipTrigger delay={250} render={<span className={fixed} />}>
-                  <Mark tone={toneOfTeam(team)} />
-                  {team.name}
-                </TooltipTrigger>
-                <TooltipContent align="start" side="bottom" variant="quiet">
-                  <span className="text-left">
-                    <TeamDetails
-                      meaning={levels[team.level].meaning}
-                      team={team}
-                    />
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-              {steps.map((step) => (
-                <span
-                  className={
-                    full
-                      ? "flex flex-wrap items-center justify-center gap-1"
-                      : "hidden flex-wrap items-center justify-center gap-1 @md:flex"
-                  }
-                  key={step.key}
-                >
-                  {own
-                    .filter((row) => step.stages.includes(row.stage))
-                    .map((row) => (
-                      <TeamWorkflowDot key={returnKey(row)} row={row} />
-                    ))}
-                </span>
-              ))}
-              {/* How many of its workflows run, of how many: what "where it stands" comes to in one number. */}
-              <span
-                className={cn(
-                  "text-right whitespace-nowrap tabular-nums",
-                  live === 0 && "text-muted-foreground"
-                )}
-              >
-                {t`${live} of ${count} live`}
-              </span>
-              {full ? (
-                <>
-                  <span className="text-right tabular-nums">
-                    {team.share === null ? dash : formatPercent(team.share)}
-                  </span>
-                  <span />
-                </>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 };

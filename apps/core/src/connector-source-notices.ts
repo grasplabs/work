@@ -13,8 +13,8 @@ import { listenersOf } from "./workflows/connector-events.ts";
 // events.ts), and can't reach core; its audit events reach core as the
 // clock drains connect's outbox, and that is where this tells the owners
 // of the triggers listening there, as core lists them for connect
-// (`listenersOf`: the owners of Apps with an event trigger there, and of
-// independent connector triggers). What could go wrong, and what stops it:
+// (`listenersOf`: the owners of the connector triggers listening there).
+// What could go wrong, and what stops it:
 //
 // - Told twice, or never: a drain cut short hands the same events over
 //   again, and each notice's ID comes from the event's and the person's,

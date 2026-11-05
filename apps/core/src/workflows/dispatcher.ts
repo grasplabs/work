@@ -1,46 +1,21 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import { runLinking } from "@grasp-os/brain/entities";
 import { runIndexing } from "@grasp-os/brain/indexing";
 import { runConsolidation } from "@grasp-os/brain/lessons";
-import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, RunId } from "@grasp-os/shared/ids";
-import type { Authority } from "@grasp-os/shared/permissions";
-import { coreStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   WorkflowEvent,
   WorkflowStep,
 } from "@grasp-os/workerflow/contracts";
 
-import { callRunFunction } from "../app-functions.ts";
-import { callsFor, versionFiles } from "../apps.ts";
 import { runBackfill } from "../backfill-run.ts";
-import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import { brainOf } from "../knowledge/ports.ts";
-import { stepModelBinding } from "../resource-bindings.ts";
-import type { WorkContext } from "../restricted.ts";
-import { appRun } from "./app-run.ts";
-import type { HostedAppRun } from "./app-run.ts";
-import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
-import type { AttemptCall } from "./attempt-calls.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
-import { declaredParams, loadRun } from "./code.ts";
-import type { Settled, StepError } from "./code.ts";
 import { engineCall } from "./engine-asks.ts";
 import { runParamsSchema } from "./engine.ts";
-import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
+import type { InternalWorkflow, RunPin } from "./engine.ts";
 import { runFixtureWorkflow } from "./fixture-runs.ts";
-import {
-  countedStep,
-  fromIsolate,
-  RunHost,
-  settle,
-  stepLimitOf,
-} from "./host.ts";
-import type { AiCalls, FailedStep, HostHooks, RunStep } from "./host.ts";
-import { paramValues } from "./param-values.ts";
-import { accountOf, admitAttempt } from "./quotas.ts";
+import type { AiCalls, HostHooks, RunStep } from "./host.ts";
 import type {
   ActionModelCalls,
   ScopeFences,
@@ -48,151 +23,19 @@ import type {
 } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { childRunsOf } from "./run-children.ts";
-import { requireRunEvidenceReadable } from "./run-evidence.ts";
-import type { EvidenceRun } from "./run-evidence.ts";
-import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
-import type { RunRow, Stopped } from "./runs.ts";
 import type { SentCalls } from "./sealed-run.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
-// it afresh: the run's row, who it acts for now, an env built from the
-// App's permissions as they are now, and the workflow's code at the run's
-// own version, which the engine keeps as the run's pin (engine.ts). So a
-// run keeps its code when a new version becomes current, and a permission
-// revoked while it waited is gone from its next step on.
-//
-// Who a run acts for (threat model decision Q10): the person who started
-// it, or, for a run a trigger started, the App's owner. A run acts for
-// nobody who has left, checked at every load and before every step: once
-// they have, the run fails, whoever started it.
-//
-// Core's own workflows run here too (engine.ts): a run pinned to the
-// internal workflow it is, not an App version, runs that workflow's code,
-// which is core's, with core's env.
+// it afresh by what it is pinned to (engine.ts): an independent
+// workflow's sealed version, a test run of its draft's checkpoint, a run
+// an App's test started, or one of core's own workflows, which runs
+// core's code with core's env.
 //
 // A run the engine has paused, terminated or taken over (a newer
 // activation) is fenced by the engine: its calls of the step API never
-// settle, so none of its code, core's or the App's, runs on in an
-// activation that is over (@grasp-os/workerflow, activation.ts).
-//
-// A run's parameter values are the ones people set (params.ts), read as
-// the version it is pinned to declares them, never the current version:
-// so a stored value counts only where that version declares it of that
-// kind. The SDK records them in the run's first step, so a run keeps the
-// values it started with.
-
-/**
- * Whose person share of the model requests in flight a run's calls take
- * (model-admission.ts): the person who started it; for a run nobody
- * started, its account's (quotas.ts, `accountOf`): its lineage root's for
- * a run of the root's App (a run started under another, by mail or a
- * connector event its parent's step caused, keeps its parent's), and its
- * App's first run in the lineage for a run of another App, so one App's
- * runs never take the share of a person who never used it; or, for an
- * account nobody started (a trigger, mail, a connector event), its App's
- * triggers', `trigger:<app>`, a person share of their own. It is not who
- * the run acts for: those runs act for the App's owner, but outsiders who
- * can send mail or events never take the owner's own share.
- */
-const admissionSubjectOf = async (env: Env, row: RunRow): Promise<string> => {
-  if (row.startedBy !== null) {
-    return row.startedBy;
-  }
-  const account = accountOf(row);
-  const origin =
-    account === row.id
-      ? row
-      : ((await findRun(env, runIdSchema.parse(account))) ?? row);
-  return origin.startedBy ?? `trigger:${origin.appId}`;
-};
-
-/**
- * Who a run acts for now: its person, or its App's owner; and the App
- * version whose code it runs, for the audit log.
- */
-const authorityOf = async (env: Env, row: RunRow): Promise<Authority> => {
-  const app = appIdSchema.parse(row.appId);
-  const { ownerId } = await appRecord(env, app);
-  return {
-    subject: { type: "app", appId: app },
-    onBehalfOf: row.startedBy ?? ownerId,
-    mode: "workflow",
-    appVersion: row.version,
-  };
-};
-
-/**
- * What a failed run reports: the step it stopped at, when it failed with
- * the error of the step that failed last (workflow code that caught that
- * error and failed otherwise, or failed before any step, stopped at none),
- * and its error's code and message.
- */
-const stoppedWith = (
-  error: StepError,
-  last: FailedStep | undefined
-): Stopped => {
-  const atStep =
-    last !== undefined &&
-    last.error.name === error.name &&
-    last.error.message === error.message &&
-    last.error.code === error.code;
-  return {
-    step: atStep ? last.step : null,
-    input: atStep ? last.input : null,
-    error: {
-      code: error.code ?? "workflow.run_failed",
-      message: error.message,
-    },
-  };
-};
-
-/** The error a failed run ends with: its own name and message. */
-const runError = ({ name, message }: StepError): Error => {
-  const error = new Error(message);
-  error.name = name;
-  return error;
-};
-
-/**
- * The refusal of a run's output once it may no longer read what it
- * recalled, if so (run-evidence.ts); undefined when it may.
- */
-const evidenceRefusal = async (
-  env: Env,
-  run: EvidenceRun
-): Promise<StepError | undefined> => {
-  try {
-    await requireRunEvidenceReadable(env, run);
-    return undefined;
-  } catch (error) {
-    if (
-      brainErrors.codeOf(error) !== "brain.revoked" ||
-      !(error instanceof Error)
-    ) {
-      throw error;
-    }
-    return { name: error.name, message: error.message, code: "brain.revoked" };
-  }
-};
-
-/**
- * How the run's code ended: as it reports it, or as loading it failed
- * (its person has left, say, or its code doesn't build).
- */
-const settledRun = async (
-  run: () => Promise<unknown>
-): Promise<Settled<unknown>> => {
-  const outer = await settle(run);
-  return outer.ok ? fromIsolate(outer.value) : outer;
-};
-
-/** The run's App, as a context for its restricted mode. */
-const contextOf = (app: AppId, runId: RunId): WorkContext => ({
-  type: "run",
-  appId: app,
-  runId,
-});
+// settle, so none of its code runs on in an activation that is over
+// (@grasp-os/workerflow, activation.ts).
 
 /**
  * The delay before every step's retry, in milliseconds, when tests set one
@@ -273,175 +116,6 @@ export interface RunMemory {
   current?: () => boolean;
 }
 
-/** Runs (or resumes) one run of an App's workflow. */
-const runWorkflow = async (
-  env: Env,
-  pinned: PinnedRun,
-  event: Pick<WorkflowEvent, "instanceId" | "payload">,
-  engineStep: RunStep,
-  memory: RunMemory
-): Promise<unknown> => {
-  const runId = runIdSchema.parse(event.instanceId);
-  const row = await findRun(env, runId);
-  if (
-    !row ||
-    row.appId !== pinned.app ||
-    row.workflowId !== pinned.workflow ||
-    row.version !== pinned.version
-  ) {
-    throw new Error(`Run ${runId} doesn't match its record`);
-  }
-  // Cancelled (its tombstone written, the engine maybe not yet told) or
-  // ended otherwise in core's record (its start failed): it does nothing
-  // more. Every activation, its first and every later one, comes here
-  // before any step, so such a run takes no step.
-  if (row.cancelRequestedAt !== null) {
-    throw new Error(`Run ${runId} has been cancelled`);
-  }
-  if (row.status === "cancelled" || row.status === "failed") {
-    throw new Error(`Run ${runId} has ended: ${row.status}`);
-  }
-  // Its details were removed (retention.ts), the engine's record of its
-  // steps with them: a run under its ID now would run every step again,
-  // side effects too, with nothing to replay. Nothing creates one (a
-  // start sent again finds it deleted, engine.ts); if something did, it
-  // takes no step.
-  if (row.detailsRemovedAt !== null) {
-    throw new Error(`Run ${runId} has ended: its details were removed`);
-  }
-  const step = countedStep(engineStep, stepLimitOf(env));
-  let lastFailed: FailedStep | undefined;
-  const stepFailed = (failure: FailedStep): void => {
-    lastFailed = failure;
-  };
-  // The refusal that caught the run's isolate tampering (host.ts), if any:
-  // the run fails with it, whatever its code made of the refusal.
-  let tampered: StepError | undefined;
-  // Whose recalls the run's output is checked against (run-evidence.ts).
-  let hosted: EvidenceRun | undefined;
-  const result = await settledRun(async () => {
-    const authority = await authorityOf(env, row);
-    const { bindings, connections, brains } = await runBindingsFor(
-      env,
-      authority,
-      contextOf(pinned.app, runId)
-    );
-    const files = await versionFiles(env, pinned.app, pinned.version);
-    const run: HostedAppRun = {
-      ...pinned,
-      runId,
-      // The engine's record of the run, never its input.
-      ...(row.rootRunId === null
-        ? {}
-        : { rootRunId: runIdSchema.parse(row.rootRunId) }),
-      ...(row.accountRunId === null
-        ? {}
-        : { accountRunId: runIdSchema.parse(row.accountRunId) }),
-      authority,
-      // Its lineage, its person and its App from its row and its root's,
-      // never from its input: whose shares its attempts and model requests
-      // take.
-      shareSubject: await admissionSubjectOf(env, row),
-      collections: bindings,
-      connections,
-      brains,
-      calls: await callsFor(env, pinned),
-    };
-    // Read on every load, though only the run's first uses them: after
-    // that the SDK replays the values its `$params` step recorded.
-    const params = await paramValues(
-      env,
-      run.app,
-      run.workflow,
-      await declaredParams(env, run.app, run.version, run.workflow, files)
-    );
-    const code = loadRun(
-      env,
-      { app: run.app, version: run.version, workflow: run.workflow, files },
-      {
-        ...(memory.over === undefined ? {} : { over: memory.over }),
-        ...(memory.current === undefined ? {} : { current: memory.current }),
-      }
-    );
-    hosted = run;
-    const calls: AttemptCall[] = [];
-    const kind = appRun(env, run, {
-      callFunction: async (caller, reference, input, idempotencyKey) =>
-        await callRunFunction(env, caller, reference, input, idempotencyKey),
-      modelBinding: async (alias) =>
-        await stepModelBinding(env, run.app, run.version, alias),
-    });
-    const host = new RunHost(env, step, kind, {
-      stepFailed,
-      attemptCall: trackAttemptCalls(calls),
-      aiCalls: memory.aiCalls,
-      leaseOf: memory.leaseOf,
-      tampered: (error) => {
-        tampered ??= error;
-      },
-      waiting: async (why) => {
-        await recordWaiting(env, row, why);
-      },
-      admitAttempt: async (attempt) =>
-        await admitAttempt(
-          env,
-          {
-            run: runId,
-            // Its account: its App's in the lineage, which it joined.
-            root: accountOf(row),
-            resource: run.app,
-          },
-          attempt
-        ),
-    });
-    try {
-      return await code.run(host, {
-        runId,
-        params: Object.fromEntries(params),
-        input: event.payload,
-        collections: Object.keys(bindings),
-        connections: Object.keys(connections),
-        brains: Object.keys(brains),
-      });
-    } catch (error) {
-      return await afterCpuKill(error, calls);
-    }
-  });
-  if (!result.ok && memory.current?.() === false) {
-    // Cancelled or taken over as it ran (its load let go, say): whoever
-    // ended it, or the newer activation, records what comes of it.
-    throw new Error(`Run ${runId} is no longer this activation's`);
-  }
-  // Its output leaves the run too (its screens and details show it), and
-  // so does its error, which its code may have made of recalled text
-  // (catching a refusal and throwing what it recalled, say): neither once
-  // it may no longer read what it recalled (run-evidence.ts). A run caught
-  // tampering fails all the same, but checked first: the refusal can hold
-  // what the run said (a step it named with what it recalled, say).
-  const evidenceRefused =
-    hosted === undefined ? undefined : await evidenceRefusal(env, hosted);
-  const failed =
-    evidenceRefused ?? tampered ?? (result.ok ? undefined : result.error);
-  if (failed) {
-    // A failed run stops here, whatever failed: the step's retries (only
-    // for failures trying again may fix, host.ts) are behind it. Its
-    // report is kept in a step, once, before the run ends; its end, and
-    // that it failed, are the engine's to say (runs.ts, `projectStatus`).
-    // Refused for its evidence, it reports no step: the step it stopped at
-    // and that step's input may hold what it recalled.
-    const stopped = stoppedWith(
-      failed,
-      evidenceRefused === undefined ? lastFailed : undefined
-    );
-    await step.do(`${coreStepPrefix}end`, {}, async () => {
-      await recordFailure(env, row, stopped);
-      return null;
-    });
-    throw runError(failed);
-  }
-  return result.ok ? result.value : undefined;
-};
-
 /** Each of core's own workflows, by name. */
 const internalRuns: Record<
   InternalWorkflow,
@@ -463,7 +137,7 @@ const internalRuns: Record<
 
 /**
  * Runs (or resumes) one activation of the run `event` names, as it is
- * pinned: an App's workflow at its version, or one of core's own.
+ * pinned (engine.ts, `RunPin`).
  */
 export const runPinned = async (
   env: Env,
@@ -494,12 +168,9 @@ export const runPinned = async (
     // input is its own record's.
     return await runFixtureWorkflow(env, pin, event.instanceId, step, memory);
   }
-  const { app, workflow, version } = pin;
-  return await runWorkflow(
-    env,
-    { app, workflow, version },
-    { instanceId: event.instanceId, payload: input },
-    step,
-    memory
+  // An App's own workflow: Apps hold none (GRA-1367), so a run pinned to
+  // one, started before they went, runs nothing.
+  throw new Error(
+    `Run ${event.instanceId} is of an App's own workflow, which no longer runs`
   );
 };

@@ -126,7 +126,6 @@ const shown = async (answer: Answer, made: readonly CustomWidget[] = []) => {
     made: { state: "ready", data: [...made] },
     returns: noReturns,
     goals: never,
-    teams: never,
     workflows: never,
     engines: never,
     runs: never,

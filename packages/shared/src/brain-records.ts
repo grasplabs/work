@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import { appIdSchema, workflowIdSchema } from "./ids.ts";
+import { workflowResourceIdSchema } from "./ids.ts";
 
 // The brain's records as core keeps them (core's brain-records.ts), and
 // what `brain.addRecords` takes: where a fact came from (`source`), the
@@ -33,7 +33,7 @@ import { appIdSchema, workflowIdSchema } from "./ids.ts";
 // The board's goals are records too (GRA-516): a goal (`goal`, its first
 // wording), each later wording of it (`goalVersion`, the newest counting),
 // and each time one of the company's workflows was linked to it or taken
-// off (`goalLink`, the newest for an App's workflow counting).
+// off (`goalLink`, the newest for each workflow counting).
 //
 // The onboarding adds records of its own (GRA-367): each roster team as a
 // team record (`team-<id>`), the statements its people agreed to, and each
@@ -427,16 +427,15 @@ const goalVersionRecordSchema = z.strictObject({
 });
 
 /**
- * One of the company's workflows linked to a board goal it serves
- * (`linked: true`), or taken off it (`false`): the newest for the App's
+ * One of the company's independent workflows linked to a board goal it
+ * serves (`linked: true`), or taken off it (`false`): the newest for the
  * workflow counts.
  */
 const goalLinkRecordSchema = z.strictObject({
   type: z.literal("goalLink"),
   id: ownIdSchema,
   goalId: brainRecordIdSchema,
-  app: appIdSchema,
-  workflow: workflowIdSchema,
+  workflow: workflowResourceIdSchema,
   linked: z.boolean(),
   date: day,
 });

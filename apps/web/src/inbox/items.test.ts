@@ -211,23 +211,11 @@ const waiting = (ranOut = true) =>
       state: "ready",
       data: [outcome("mail-1", "2026-10-12T08:00:00.000Z")],
     },
-    failed: {
+    notifications: {
       state: "ready",
       data: {
-        model: "model-1",
         page: {
           notifications: [
-            {
-              id: "failure-1",
-              type: "run_failed",
-              app,
-              appName: "Invoices",
-              workflow: "tally",
-              run: "run-1",
-              failures: 2,
-              at: "2026-10-13T10:00:00.000Z",
-              read: false,
-            },
             {
               id: "asked-1",
               type: "gap_asked",
@@ -347,7 +335,6 @@ describe(inboxItems, () => {
         "asked:asked-1",
         "bindingApproval:workflow-quotes:2",
         "decision:decision-1",
-        "failed:failure-1",
         "goLive:app-invoices:4",
         "heldStart:held-start-1",
         "held:held-new",
@@ -547,13 +534,12 @@ describe(inboxItems, () => {
 describe(inInbox, () => {
   it("leads the dashboard to every item it has no card or row of its own for", () => {
     // The pile settles changes, lost answers, requests and packages; rows
-    // under it lead to failed workflows and connections.
+    // under it lead to connections.
     const onDashboard = new Set([
       "held",
       "outcome",
       "request",
       "packages",
-      "failed",
       "reconnect",
     ]);
     const all = inboxItems(waiting(), admin, readAt);
@@ -597,7 +583,6 @@ describe(listed, () => {
       "stoppedEvents",
       "heldStart",
       "goLive",
-      "failedRun",
       "goLive",
       "stoppedSchedule",
     ]);
@@ -635,7 +620,7 @@ describe(listed, () => {
         tab: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 9);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 8);
   });
 });
 

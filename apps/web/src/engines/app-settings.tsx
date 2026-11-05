@@ -56,9 +56,6 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { listAppWorkflows, listRuns } from "../workflows/reads.ts";
-import { RunsLog } from "../workflows/runs.tsx";
-import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 import { ExportDefinition } from "./app-definition.tsx";
 import { AppIntegrations } from "./app-integrations.tsx";
@@ -88,7 +85,7 @@ import type { AppRead } from "./use-app-read.ts";
 // Everything about an App besides the App itself, in one place, grouped
 // plainly, a section at a time: what it is called and where it stands
 // (General), whom it is shared with (Sharing), its versions, its
-// workflows and their runs, its connections, webhooks, the npm packages
+// connections (with the workflows it binds), webhooks, the npm packages
 // approved for it, and the settings screen the App
 // declares itself (Options). Its builders reach it beside the chat in
 // the App's workspace (app-workspace.tsx); anyone else who opens the
@@ -101,7 +98,6 @@ const appSettingsSections = [
   "general",
   "sharing",
   "versions",
-  "workflows",
   "connections",
   "webhooks",
   "packages",
@@ -120,10 +116,6 @@ const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
   general: msg({ message: "General", context: "an app's settings section" }),
   sharing: msg({ message: "Sharing", context: "an app's settings section" }),
   versions: msg({ message: "Versions", context: "an app's settings section" }),
-  workflows: msg({
-    message: "Workflows",
-    context: "an app's settings section",
-  }),
   connections: msg({
     message: "Connections",
     context: "an app's settings section",
@@ -701,61 +693,6 @@ const Sharing = ({ app, identity }: { app: ViewedApp; identity: Identity }) => {
   );
 };
 
-// --- Workflows -----------------------------------------------------------
-
-// Core lists every App's workflows at once: there is no read of one App's.
-const readWorkflows = async (session: Session) =>
-  await listAppWorkflows(session);
-
-const readRuns = async (session: Session, app: string) =>
-  await listRuns(session, { app });
-
-const Workflows = ({
-  app,
-  identity,
-}: {
-  app: ViewedApp;
-  identity: Identity;
-}) => {
-  const { t } = useLingui();
-  const workflows = useAppRead(app.id, readWorkflows);
-  const runs = useAppRead(app.id, readRuns);
-  return (
-    <div className="flex flex-col gap-6">
-      <RefreshFailed reads={[workflows, runs]} />
-      <Read notedAbove read={workflows}>
-        {(rows) => (
-          <WorkflowsTable
-            empty={
-              <p className="text-muted-foreground">
-                <Trans>No workflow in this App yet.</Trans>
-              </p>
-            }
-            rows={rows.filter((row) => row.app === app.id)}
-            withEngine={false}
-          />
-        )}
-      </Read>
-      <section aria-labelledby="app-runs" className="flex flex-col gap-3">
-        <h3 className="font-medium" id="app-runs">
-          <Trans>Runs</Trans>
-        </h3>
-        <Read notedAbove read={runs}>
-          {(page) => (
-            <RunsLog
-              empty={t`No runs yet.`}
-              me={identity.userId}
-              model={undefined}
-              more={page.more}
-              runs={page.runs}
-            />
-          )}
-        </Read>
-      </section>
-    </div>
-  );
-};
-
 // --- Connections ---------------------------------------------------------
 
 /** The catalog's entries, or null when it can't be read in time. */
@@ -1032,7 +969,6 @@ const shownSections = (
     sharing: true,
     // Core lists versions and webhooks to its builders alone.
     versions: builder,
-    workflows: true,
     connections: canBuild(identity.role),
     webhooks: builder,
     packages: approvesByRole(app, identity) || packages,
@@ -1095,9 +1031,6 @@ const SectionBody = ({
   if (section === "versions") {
     return <AppVersions app={app} identity={identity} />;
   }
-  if (section === "workflows") {
-    return <Workflows app={app} identity={identity} />;
-  }
   if (section === "connections") {
     return <Connections app={app} builds={builds} identity={identity} />;
   }
@@ -1113,7 +1046,6 @@ const SectionBody = ({
 const sectionDescriptions = {
   sharing: msg`Who opens the App besides you, and as what.`,
   versions: msg`Every version of the App, which one runs, and going back to one.`,
-  workflows: msg`The workflows the App runs, and how their runs went.`,
   connections: msg`The integrations, connections and resources the App uses, and asking for more.`,
   webhooks: msg`Where Grasp sends the App's events.`,
   packages: msg`The npm packages approved for the App, and taking an approval back.`,

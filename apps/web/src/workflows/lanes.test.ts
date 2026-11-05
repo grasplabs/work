@@ -1,4 +1,3 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { TodayRun, WorkflowsToday } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -46,7 +45,6 @@ const dayOf = (
   now: new Date(now).toISOString(),
   timeZone: "Europe/Amsterdam",
   lanes: lanes.map(({ id, runs }) => ({
-    kind: "independent" as const,
     id,
     name: id.toUpperCase(),
     runs,
@@ -160,24 +158,6 @@ describe(laneDay, () => {
     expect(listedRuns(lane, 12).map(({ id }) => id)).toStrictEqual([
       "w",
       ...later.slice(-12).map(({ id }) => id),
-    ]);
-  });
-
-  it("names an App's lane by its App and workflow", () => {
-    const day = laneDay({
-      ...dayOf([]),
-      lanes: [
-        {
-          kind: "app",
-          app: appIdSchema.parse("app-1"),
-          appName: "Invoices",
-          workflow: workflowIdSchema.parse("approve"),
-          runs: [run("1", now - hour)],
-        },
-      ],
-    });
-    expect(day.lanes.map(({ name }) => name)).toStrictEqual([
-      "Invoices · approve",
     ]);
   });
 

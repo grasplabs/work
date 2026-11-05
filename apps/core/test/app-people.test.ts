@@ -1,9 +1,5 @@
 import { peopleReferences } from "@grasp-os/sdk/host";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
@@ -11,8 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
-import type { RunCaller } from "../src/app-functions.ts";
+import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { setCurrentVersion } from "../src/apps.ts";
@@ -348,58 +343,6 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       },
       mutation: ana.userId,
       action: ana.userId,
-    });
-  });
-
-  it("tell a workflow run's call of the App who the run acts for", async () => {
-    const app = await directoryApp();
-    const ben = await member(`Ben ${unique()}`);
-    await share(app, ben);
-    const runId = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'asker', 1, ?, 'running', ?, NULL)"
-    )
-      .bind(runId, app.app, ben.userId, Date.now())
-      .run();
-    const caller: RunCaller = {
-      run: {
-        app: appIdSchema.parse(app.app),
-        workflow: workflowIdSchema.parse("asker"),
-        runId: runIdSchema.parse(runId),
-        version: 1,
-        shareSubject: ben.userId,
-        authority: {
-          subject: { type: "app", appId: appIdSchema.parse(app.app) },
-          onBehalfOf: ben.userId,
-          mode: "workflow",
-          appVersion: 1,
-        },
-      },
-      requestId: crypto.randomUUID(),
-      deadline: Date.now() + 30_000,
-      stillCurrent: async () => {
-        await Promise.resolve();
-      },
-      requireHolds: () => {
-        // The step's attempt holds its lease throughout.
-      },
-      held: () => {
-        throw new Error("Nothing is held here");
-      },
-    };
-
-    const answered = await callRunFunction(
-      env,
-      caller,
-      { name: "dir.me", kind: "query" },
-      {},
-      `step:${crypto.randomUUID()}`
-    );
-
-    expect(callerOf(answered)).toStrictEqual({
-      id: ben.userId,
-      name: ben.name,
-      email: ben.email,
     });
   });
 
