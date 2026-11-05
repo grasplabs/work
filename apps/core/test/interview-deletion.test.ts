@@ -667,13 +667,17 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     await drawAll(ids);
-    // Max deletes his interview as the brain is about to keep the team.
+    // Max deletes his interview as the brain is about to keep the team: as
+    // its records are written, not as a model call's usage is.
     let deleting: Promise<number> | undefined;
     const batch = env.DB.batch.bind(env.DB);
     const spy = vi
       .spyOn(env.DB, "batch")
       .mockImplementation(async (statements) => {
-        if (deleting === undefined) {
+        if (
+          deleting === undefined &&
+          new Error("where").stack?.includes("writeRecords") === true
+        ) {
           deleting = deleteOnLink(ids.max);
           await goneFromStore(ids.max);
         }
