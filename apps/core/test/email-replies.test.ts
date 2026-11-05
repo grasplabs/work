@@ -1,8 +1,7 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { decode } from "@grasp-os/workerflow/codec";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -79,20 +78,19 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /**
- * A workflow that waits out its hour (`task:hold`), then waits for a reply
+ * A workflow that waits out its hour (`hold:task`), then waits for a reply
  * to its mail through each of `aliases` (`replies` unless given) in turn
- * and returns the subject of the last one it took, each binding approved.
+ * (`reply1`, `reply2` …) and returns the subject of the last one it took,
+ * each binding approved.
  */
 const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
   const admin = await person("admin");
@@ -109,40 +107,30 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
   );
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: Object.fromEntries(
-              aliases.map((alias) => [
-                alias,
-                { kind: "event", contract: emailReplyContract },
-              ])
-            ),
+      $schema: workflowSchemaUrl,
+      input: objectSchema({}),
+      output: {
+        schema: objectSchema({ subject: { type: "string" } }),
+        value: {
+          subject: {
+            $expr: `steps.reply${aliases.length}.output.event?.data.subject ?? ""`,
           },
         },
       },
-      input: { schema: objectSchema({}) },
-      output: { schema: objectSchema({ subject: { type: "string" } }) },
-      do: [
-        { hold: { wait: "PT1H" } },
-        ...aliases.map((alias) => ({
-          [`await-${alias}`]: {
-            listen: {
-              to: { any: [{ with: { type: emailReplyType } }] },
-              read: "data",
-            },
-            timeout: { after: { minutes: 5 } },
-            metadata: { grasp: { binding: alias } },
-          },
+      bindings: Object.fromEntries(
+        aliases.map((alias) => [
+          alias,
+          { kind: "event", contract: emailReplyContract },
+        ])
+      ),
+      steps: [
+        { id: "hold", type: "wait", for: "1 hour" },
+        ...aliases.map((alias, index) => ({
+          id: `reply${index + 1}`,
+          type: "wait",
+          event: { from: alias, type: emailReplyType },
+          timeout: "5 minutes",
         })),
-        { answer: { set: { subject: "${ .[0].subject }" } } },
       ],
     }),
     basedOn: null,
@@ -195,7 +183,7 @@ const holdingRun = async ({ admin, workflow }: ReplyWorkflow) => {
 
 /** How the run ended, once it waited out its hour: what it returned. */
 const endedRun = async ({ admin, workflow }: ReplyWorkflow, runId: string) => {
-  await woken(runId, "task:hold");
+  await woken(runId, "hold:task");
   const run = await vi.waitFor(
     async () => {
       const ended = await resourceRunFor(env, admin, workflow.id, runId);

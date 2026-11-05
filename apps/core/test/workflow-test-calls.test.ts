@@ -1,9 +1,8 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -33,59 +32,63 @@ import { auditedDuring, unique } from "./sign-in.ts";
 // a real one; a replay repeats a store write. Then what a test sees: the
 // fixture's answer, and its own store holding what the run wrote.
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A workflow `name` of `tasks`, its input `who` and output `status`. */
+/** A workflow's steps, and the `status` it ends with. */
+interface Flow {
+  steps: unknown[];
+  status: unknown;
+}
+
+/** A workflow of `flow`, its input `who` and output `status`. */
 const definitionOf = (
-  name: string,
-  tasks: unknown[],
+  { steps, status }: Flow,
   bindings: Record<string, unknown>
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    bindings,
+    steps,
   });
 
 /** Asks the `summary` model binding for a line about the input's `who`. */
 const summarize = {
-  summarize: {
-    call: "grasp.model",
-    with: {
-      binding: "summary",
-      instructions: "Greet them.",
-      input: { who: "${ $workflow.input.who }" },
-      outputSchema: objectSchema({ line: { type: "string" } }),
-    },
-    export: { as: "${ {line: .line} }" },
-  },
+  id: "summarize",
+  type: "agent",
+  binding: "summary",
+  instructions: "Greet them.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
 };
+
+/** The line `summarize` answered. */
+const line = { $expr: "steps.summarize.output.line" };
 
 /** Saves the input's `who` through the `save` operation binding. */
 const save = {
-  save: {
-    call: "grasp.operation",
-    with: { binding: "save", arguments: { who: "${ $workflow.input.who }" } },
-  },
+  id: "save",
+  type: "do",
+  binding: "save",
+  arguments: { who: { $expr: "input.who" } },
 };
+
+/** A wait of `duration` (`"1 second"`) in step `hold`. */
+const hold = (duration: string) => ({
+  id: "hold",
+  type: "wait",
+  for: duration,
+});
 
 /** What a test's fixture gives the workflow the App binds as `followUp`. */
 interface WorkflowFixture {
@@ -161,12 +164,12 @@ const contracts = async (admin: Identity) => {
 };
 
 /**
- * The Requests App binding a workflow of `tasks` as `followUp`, its model
+ * The Requests App binding a workflow of `flow` as `followUp`, its model
  * binding `summary` and its operation binding `save`, with `workflow` as
  * its fixture and `tests` as its tests.
  */
 const requestsApp = async (
-  tasks: unknown[],
+  flow: Flow,
   workflow: WorkflowFixture,
   tests: Record<string, string> = {}
 ) => {
@@ -181,7 +184,7 @@ const requestsApp = async (
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(resource.name, tasks, {
+    definition: definitionOf(flow, {
       summary: { kind: "model", contract: keys.model },
       save: { kind: "operation", contract: keys.operation },
     }),
@@ -329,7 +332,7 @@ describe(
     it("answer a model call with the fixture's answer, and never ask a model or leave a trace of one", async () => {
       const provider = await watchedProvider();
       const app = await requestsApp(
-        [summarize, { finish: { set: { status: "${ $context.line }" } } }],
+        { steps: [summarize], status: line },
         { models: { summary: { line: "Hello from the fixture" } } },
         {
           "tests/greet.test.ts": suiteOf(`
@@ -365,10 +368,7 @@ describe(
 
     it("fail a model call the fixture gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
       const provider = await watchedProvider();
-      const tasks = [
-        summarize,
-        { finish: { set: { status: "${ $context.line }" } } },
-      ];
+      const tasks = { steps: [summarize], status: line };
       expect({
         unfixtured: await endedIn(await requestsApp(tasks, {})),
         otherBinding: await endedIn(
@@ -377,38 +377,18 @@ describe(
         wrongShape: await endedIn(
           await requestsApp(tasks, { models: { summary: { words: 3 } } })
         ),
-        // A model no binding could be approved for, as the real call
-        // refuses one its binding doesn't name.
-        otherModel: await endedIn(
-          await requestsApp(
-            [
-              {
-                summarize: {
-                  ...summarize.summarize,
-                  with: {
-                    ...summarize.summarize.with,
-                    model: "nobody/no-model",
-                  },
-                },
-              },
-              tasks[1],
-            ],
-            { models: { summary: { line: "Hi" } } }
-          )
-        ),
         asked: provider.requests.length,
       }).toMatchObject({
         unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
         otherBinding: { status: "failed", code: "workflow.test_unfixtured" },
         wrongShape: { status: "failed", code: "workflow.call_invalid" },
-        otherModel: { status: "failed", code: "workflow.call_invalid" },
         asked: 0,
       });
     });
 
     it("run a store call on the test's own store, which the test reads back, and never on the App's own store", async () => {
       const app = await requestsApp(
-        [save, { finish: { set: { status: "saved" } } }],
+        { steps: [save], status: "saved" },
         { operations: { save: "requests.add" } },
         {
           "tests/save.test.ts": suiteOf(`
@@ -433,11 +413,7 @@ describe(
     });
 
     it("refuse a store call whose run names the App's own store or another App's test store, and change neither", async () => {
-      const tasks = [
-        { hold: { wait: "PT1S" } },
-        save,
-        { finish: { set: { status: "saved" } } },
-      ];
+      const tasks = { steps: [hold("1 second"), save], status: "saved" };
       const app = await requestsApp(tasks, {
         operations: { save: "requests.add" },
       });
@@ -500,7 +476,7 @@ describe(
     });
 
     it("refuse an operation the release doesn't serve as the binding's contract, and fail a binding the fixture gives none", async () => {
-      const tasks = [save, { finish: { set: { status: "saved" } } }];
+      const tasks = { steps: [save], status: "saved" };
       expect({
         otherShape: await endedIn(
           await requestsApp(tasks, { operations: { save: "requests.list" } })
@@ -519,19 +495,14 @@ describe(
     it("write once and answer once, though the run stops after its calls and starts again", async () => {
       const provider = await watchedProvider();
       const app = await requestsApp(
-        [
-          save,
-          summarize,
-          { hold: { wait: "PT2S" } },
-          { finish: { set: { status: "${ $context.line }" } } },
-        ],
+        { steps: [save, summarize, hold("2 seconds")], status: line },
         {
           models: { summary: { line: "Hello" } },
           operations: { save: "requests.add" },
         }
       );
       const { session, run, runId } = await runningIn(app);
-      await sleeping(runId, "task:hold");
+      await sleeping(runId, "hold:task");
       // Down while it waits, then back: the workflow runs again from its
       // start, its finished steps replayed.
       await stopped(runId);

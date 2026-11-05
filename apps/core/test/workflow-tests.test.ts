@@ -1,9 +1,8 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -24,6 +23,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { fixtureRunSessionOf } from "../src/workflows/fixture-run-sessions.ts";
+import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
@@ -41,44 +41,54 @@ import { connectDb } from "./test-env.ts";
 // bind. Then what a test sees: the run's end, and how often each
 // task completed.
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A workflow `name` of `tasks`, its input `who` and output `status`. */
+/** What a greeting ends with: `{ status: "Hello, <who>" }`. */
+const greetingStatus = { $expr: '"Hello, " + input.who' };
+
+/**
+ * A grasp-workflow/1 workflow of `steps`, its input `who` and output
+ * `status` (a greeting unless said), with `bindings` and `params`.
+ */
 const definitionOf = (
-  name: string,
-  tasks: unknown[],
-  bindings: Record<string, unknown> = {},
-  params: Record<string, unknown> = {}
+  steps: unknown[],
+  {
+    bindings = {},
+    params = {},
+    status = greetingStatus,
+  }: {
+    bindings?: Record<string, unknown>;
+    params?: Record<string, unknown>;
+    status?: unknown;
+  } = {}
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    params,
+    bindings,
+    steps,
   });
 
-/** Greets its input's `who`, after `before`. */
-const greeting = (before: unknown[] = []) => [
-  ...before,
-  { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-];
+/** Greets its input's `who` in step `greet`, after `before`. */
+const greeting = (before: unknown[] = []) => [...before, passing("greet")];
+
+/** A wait of `duration` (`"1 hour"`) in step `hold`. */
+const hold = (duration: string) => ({
+  id: "hold",
+  type: "wait",
+  for: duration,
+});
 
 /** The App's files: it binds `followUp`, with `tests` as its tests. */
 const filesWith = (
@@ -136,22 +146,20 @@ const mailContract = async (admin: Identity): Promise<string> => {
   return key;
 };
 
-/** A workflow of `by`'s, its version 1 `tasks`, and `bindings`. */
+/** A workflow of `by`'s, its version 1 `steps`, with `modules` of its own. */
 const workflowOf = async (
   by: Acting,
-  tasks: unknown[],
-  bindings: Record<string, unknown> = {},
+  steps: unknown[],
   {
-    params = {},
     modules,
-  }: {
-    params?: Record<string, unknown>;
+    ...shape
+  }: Parameters<typeof definitionOf>[1] & {
     modules?: Record<string, string>;
   } = {}
 ): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, tasks, bindings, params),
+    definition: definitionOf(steps, shape),
     basedOn: null,
     ...(modules === undefined ? {} : { modules }),
   });
@@ -330,8 +338,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
 
   it("run the workflow the release binds on the engine, to its end, each task completed once, and leave nothing of the organization's", async () => {
     const { builder, app, workflowId } = await requestsApp(
-      async (by) =>
-        await workflowOf(by, greeting([{ hold: { wait: "PT1S" } }])),
+      async (by) => await workflowOf(by, greeting([hold("1 second")])),
       {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
@@ -366,9 +373,9 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       async (by) =>
         await workflowOf(by, [
           {
-            greet: {
-              set: { status: "${ $workflow.input.who | tonumber | tostring }" },
-            },
+            id: "greet",
+            type: "raise",
+            error: { type: "urn:grasp:error:greet", status: 422 },
           },
         ]),
       {
@@ -446,20 +453,18 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
           by,
           [
             {
-              greet: {
-                call: "grasp.model",
-                with: {
-                  binding: "summary",
-                  instructions: "Greet them.",
-                  input: { who: "${ $workflow.input.who }" },
-                  outputSchema: objectSchema({ line: { type: "string" } }),
-                },
-                export: { as: "${ {line: .line} }" },
-              },
+              id: "greet",
+              type: "agent",
+              binding: "summary",
+              instructions: "Greet them.",
+              input: { who: { $expr: "input.who" } },
+              output: objectSchema({ line: { type: "string" } }),
             },
-            { finish: { set: { status: "${ $context.line }" } } },
           ],
-          { summary: { kind: "model", contract: key } }
+          {
+            bindings: { summary: { kind: "model", contract: key } },
+            status: { $expr: "steps.greet.output.line" },
+          }
         )
     );
     const provider = await fakeProvider({
@@ -605,7 +610,7 @@ export default workflowTest({
 
   it("start at most ten runs in one test, however many it asks for at once", async () => {
     const { release, app } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
     );
     const session = await sessionOf(release);
     const request = await startOf(release, { who: "Ada" });
@@ -633,7 +638,7 @@ export default workflowTest({
 
   it("remove a test's runs from the engine as it ends, ended or not, and the sweep those a dead test left", async () => {
     const { release, app } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
     );
     const ended = await sessionOf(release);
     startedAs(
@@ -748,7 +753,7 @@ export default workflowTest({
 
   it("stop an activation once its test's time is up", async () => {
     const { release } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT2S" } }]))
+      async (by) => await workflowOf(by, greeting([hold("2 seconds")]))
     );
     const session = await sessionOf(release);
     const run = startedAs(
@@ -767,7 +772,7 @@ export default workflowTest({
 
   it("stop waiting for a run's end once its test's session closes", async () => {
     const { release } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
     );
     const session = await sessionOf(release);
     const run = startedAs(
@@ -788,7 +793,7 @@ export default workflowTest({
 
   it("keep a start's room once it was recorded, and remove its run, when the engine fails it", async () => {
     const { release, app } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
     );
     let failed = false;
     const failingStart = <T extends object>(namespace: T): T =>
@@ -870,37 +875,24 @@ export default workflowTest({
           by,
           [
             {
-              count: {
-                set: { status: "${ $params.word | tonumber | tostring }" },
-              },
-            },
-            {
-              send: {
-                call: "grasp.connector",
-                with: {
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: { to: "Ada", subject: "${ $params.token }" },
-                },
-              },
+              id: "send",
+              type: "do",
+              binding: "mail",
+              operation: "mail.send",
+              arguments: { to: "Ada", subject: { $expr: "params.word" } },
             },
           ],
-          { mail: { kind: "connector", contract: key } },
           {
+            bindings: { mail: { kind: "connector", contract: key } },
             params: {
               word: {
-                schema: { type: "string", maxLength: 64 },
+                kind: "text",
                 label: "Word",
                 default: "default-word",
                 sensitive: false,
               },
-              token: {
-                schema: { type: "string", maxLength: 64 },
-                label: "Token",
-                default: "none",
-                sensitive: true,
-              },
             },
+            status: { $expr: "params.word" },
           }
         );
         return workflowId;
@@ -914,7 +906,7 @@ export default workflowTest({
     );
     await setWorkflowParams(env, builder, workflowId, {
       expectedRevision: 0,
-      values: { word: "org-secret-word", token: "org-secret-token" },
+      values: { word: "org-secret-word" },
     });
     const report = JSON.stringify(await activated(builder, app));
     expect({
@@ -926,7 +918,7 @@ export default workflowTest({
 
   it("tell a test of a run that failed for a reason of core's own only the platform's words for a step's failure", async () => {
     const { release, app } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1S" } }]))
+      async (by) => await workflowOf(by, greeting([hold("1 second")]))
     );
     const session = await sessionOf(release);
     const run = startedAs(
@@ -957,18 +949,17 @@ export default workflowTest({
           by,
           [
             {
-              send: {
-                call: "grasp.connector",
-                with: {
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: { to: "Ada", subject: "Hi" },
-                },
-              },
+              id: "send",
+              type: "do",
+              binding: "mail",
+              operation: "mail.send",
+              arguments: { to: "Ada", subject: "Hi" },
             },
-            { greet: { set: { status: "sent" } } },
           ],
-          { mail: { kind: "connector", contract: key } }
+          {
+            bindings: { mail: { kind: "connector", contract: key } },
+            status: "sent",
+          }
         )
     );
     const actionRun = await requestsApp(
@@ -977,23 +968,20 @@ export default workflowTest({
           by,
           [
             {
-              notify: {
-                call: "grasp.operation",
-                with: {
-                  binding: "notify",
-                  arguments: { to: "${ $workflow.input.who }" },
-                },
-              },
+              id: "notify",
+              type: "do",
+              binding: "notify",
+              arguments: { to: { $expr: "input.who" } },
             },
-            { greet: { set: { status: "notified" } } },
           ],
           {
-            notify: {
-              kind: "operation",
-              contract: "local:code/notify.ts#notify",
+            bindings: {
+              notify: {
+                kind: "action",
+                contract: "local:code/notify.ts#notify",
+              },
             },
-          },
-          {
+            status: "notified",
             modules: {
               "code/notify.ts": `import { action, v } from "@grasp-os/sdk/action";
 
@@ -1055,16 +1043,13 @@ export const notify = action({
       );
       await publishWorkflowVersion(env, by, workflow.id, {
         definition: JSON.stringify({
-          ...JSON.parse(
-            definitionOf(workflow.name, [
-              { greet: { set: { status: "hello", secret: "ultramarine" } } },
-            ])
-          ),
+          ...JSON.parse(definitionOf([])),
           output: {
             schema: objectSchema({
               status: { type: "string" },
               secret: { type: "string" },
             }),
+            value: { status: "hello", secret: "ultramarine" },
           },
         }),
         basedOn: null,
@@ -1089,7 +1074,7 @@ export const notify = action({
   it("run with the fixture's parameter values or their defaults, never the organization's", async () => {
     const params = {
       greeting: {
-        schema: { type: "string", maxLength: 64 },
+        kind: "text",
         label: "Greeting",
         default: "Hello",
         sensitive: false,
@@ -1099,20 +1084,10 @@ export const notify = action({
     let builder: Acting | undefined;
     const { release } = await requestsApp(async (by) => {
       builder = by;
-      workflowId = await workflowOf(
-        by,
-        [
-          {
-            greet: {
-              set: {
-                status: '${ $params.greeting + ", " + $workflow.input.who }',
-              },
-            },
-          },
-        ],
-        {},
-        { params }
-      );
+      workflowId = await workflowOf(by, [], {
+        params,
+        status: { $expr: 'params.greeting + ", " + input.who' },
+      });
       return workflowId;
     });
     if (builder === undefined) {
