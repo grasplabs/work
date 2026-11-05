@@ -1,60 +1,38 @@
-// What the receiving server found of a message's SPF, DKIM and DMARC, as
-// its ARC set records it (`ARC-Authentication-Results`, RFC 8617, whose
-// payload is RFC 8601's): what a reply to a run's mail carries for the
-// workflow to check who sent it (`emailReplyData`, release-contracts.ts).
-// Core checks none of it itself, and refuses no mail on it: it only
-// reports what Email Routing found.
+// What the receiving server found of a message's SPF, DKIM and DMARC: what
+// a reply to a run's mail carries for the workflow to check who sent it
+// (`emailReplyData`, release-contracts.ts). Core refuses no mail on it; it
+// only reports what Email Routing found, and never guesses a verdict.
 //
-// Anyone can write these headers into a message they send, so only Email
-// Routing's own ARC set is read. Email Routing seals every message it
-// hands over with a set of its own, numbered past every set the message
-// carries, on top of it, its results under its authserv-id
-// (`trustedAuthservId`). So only the topmost ARC results header is read
-// (of the others, only their instances),
-// and only when it is the message's one set at the highest instance (one
-// results header, one message signature and one seal there, none
-// higher: RFC 8617 4.1's complete set), its seal doesn't say
-// the chain failed, its instance isn't the last there may be (50), and
-// its authserv-id is Email Routing's. A sealer adds no set to a chain
-// that failed or is full (RFC 8617 5.1.1), so those are what a sender
-// would forge to keep Email Routing's set off the top: they report
-// nothing. A plain `Authentication-Results` header is never read: Email
-// Routing records its results in its ARC set, so one claiming its
-// authserv-id is a sender's. Anything else (no such set, a header that
-// doesn't parse) reports nothing, each method `null`: a verdict is never
-// guessed. What this rests on is Email Routing sealing every message it
-// hands over: one it didn't seal would show a sender's own complete set
-// on top, under its authserv-id, as its own.
+// Trust rule. Anyone can write results headers into a message they send,
+// so only Email Routing's own are read: the ARC-Authentication-Results
+// header (RFC 8617 4.1.1) of the ARC set it seals every message with,
+// prepended above every header the message came with and numbered past
+// every set the message carries. So the topmost such header counts, and
+// only when it is under Email Routing's authserv-id (`trustedAuthservId`)
+// and its set is the message's one complete set at the highest instance.
+// A sealer adds no set to a chain whose last seal says `cv=fail` or that
+// is full at instance 50 (RFC 8617 5.1, 4.2.1), so those are what a sender
+// would forge to keep Email Routing's set off the top, and they report
+// nothing; so does a top seal saying anything but `cv=none` or `cv=pass`,
+// and any ARC header whose instance doesn't read. A plain
+// Authentication-Results header is never read: Email Routing records its
+// results only in its ARC set, so one under its authserv-id is a sender's.
+// This holds only for mail Email Routing received: an ingress without it in
+// front (mail-ingress.ts) must seal mail with an ARC set of its own, or
+// remove every ARC set under Email Routing's authserv-id.
 //
-// The parser follows the RFC's grammar strictly where it decides what is
-// reported (RFC 8601 2.2, RFC 8617 4.1.1, with RFC 5322's CFWS and quoted
-// strings and RFC 2045's tokens): the authserv-id, each method, result
-// and property name, the `;` between results. A property's value is
-// taken as the grammar's quoted string, or else as any visible text up to
-// the next whitespace, comment or `;`: receiving servers write values the
-// grammar doesn't allow unquoted (a signature's start with `/` or `=`,
-// `smtp.remote-ip=2a00:1440::32e`, `smtp.mailfrom=<>`), and a value only
-// ever becomes a domain reported once it is one (`domainOf`).
-//
-// The trust above holds only for mail Email Routing received: an ingress
-// without it in front (mail-ingress.ts) must seal mail with an ARC set of
-// its own, or remove every ARC set under Email Routing's authserv-id.
+// The results follow RFC 8601 2.2's grammar, with RFC 5322 3.2's CFWS and
+// quoted strings and RFC 6532's UTF-8: a header that doesn't parse reports
+// nothing. One deliberate widening: a property's value is any run of text
+// up to CFWS or `;`, since receiving servers write values the grammar
+// doesn't allow unquoted (`header.b=/Gj4+R==`, `smtp.remote-ip=2a00::1`,
+// `smtp.mailfrom=<>`); a value is only reported as a domain once it is one
+// (`domainOf`).
 
 /** The authserv-id Email Routing writes its results under. */
 export const trustedAuthservId = "mx.cloudflare.net";
 
-/** A result RFC 8601 2.7 names for SPF, DKIM or DMARC. */
-export type MethodVerdict =
-  | "pass"
-  | "fail"
-  | "softfail"
-  | "neutral"
-  | "none"
-  | "temperror"
-  | "permerror"
-  | "policy";
-
-const verdicts: readonly MethodVerdict[] = [
+const verdicts = [
   "pass",
   "fail",
   "softfail",
@@ -63,7 +41,10 @@ const verdicts: readonly MethodVerdict[] = [
   "temperror",
   "permerror",
   "policy",
-];
+] as const;
+
+/** A result RFC 8601 2.7 names for SPF, DKIM or DMARC. */
+export type MethodVerdict = (typeof verdicts)[number];
 
 const isVerdict = (result: string): result is MethodVerdict =>
   verdicts.some((verdict) => verdict === result);
@@ -81,372 +62,291 @@ export interface Authentication {
   readonly dmarc: MethodResult;
 }
 
-/** Nothing said: no header core reads, or one that doesn't parse. */
-export const unauthenticated: Authentication = {
-  spf: null,
-  dkim: null,
-  dmarc: null,
-};
+/** The grammar's punctuation, each a token of its own. */
+const punctuation = [";", "=", ".", "/"] as const;
 
-/** One result of a header (RFC 8601 `resinfo`), its names lower case. */
-export interface ResultInfo {
-  readonly method: string;
-  readonly result: string;
-  readonly reason: string | undefined;
-  /** Each property by `ptype.property` (`smtp.mailfrom`), its value as given. */
-  readonly properties: ReadonlyMap<string, string>;
+type Punctuation = (typeof punctuation)[number];
+
+/** One token of a header: a run of text, a quoted string or punctuation. */
+interface Token {
+  readonly kind: "word" | "quoted" | Punctuation;
+  /** Its text; a quoted string's content, its quoted pairs undone. */
+  readonly text: string;
+  /** Whether CFWS comes before it. */
+  readonly spaced: boolean;
 }
 
-/** A header's payload (RFC 8601 `authres-payload`). */
-export interface ResultsHeader {
-  /** The authserv-id, lower case. */
-  readonly authservId: string;
-  readonly results: readonly ResultInfo[];
-}
+/** The cause of an error thrown where a header isn't the grammar's. */
+const notTheGrammar = Symbol("not the grammar");
 
-/** The longest header read: longer is no header Email Routing writes. */
-const maxHeaderLength = 16 * 1024;
+const unparsable = (why: string): Error =>
+  new Error(why, { cause: notTheGrammar });
 
-/** The deepest comments nest. */
-const maxCommentDepth = 16;
-
-/** A character of an RFC 2045 token: visible US-ASCII but its `tspecials`. */
-const tokenCharPattern = /^[!#$%&'*+\-.0-9A-Z^_`a-z{|}~]$/u;
-
-/** A character of a property's value as written unquoted (see above). */
-const valueCharPattern = /^[!#-'*-:<-[\]-~]$/u;
+const isPunctuation = (char: string): char is Punctuation =>
+  punctuation.some((each) => each === char);
 
 const isWhitespace = (char: string): boolean =>
   char === " " || char === "\t" || char === "\r" || char === "\n";
 
-const isTokenChar = (char: string): boolean => tokenCharPattern.test(char);
+/** A character of a word: visible or UTF-8, not CFWS, a quote or punctuation. */
+const isWordChar = (char: string): boolean =>
+  char > " " &&
+  char !== "\u007F" &&
+  !'"()\\'.includes(char) &&
+  !isPunctuation(char);
 
-const isLetDig = (char: string): boolean => /^[A-Za-z0-9]$/u.test(char);
+/**
+ * Where the RFC 5322 comment or quoted string opening at `start` ends (past
+ * its closing character), and its content, quoted pairs undone. Comments
+ * nest; quoted strings don't.
+ */
+const delimited = (
+  text: string,
+  start: number
+): { end: number; content: string } => {
+  const nests = text.charAt(start) === "(";
+  const close = nests ? ")" : '"';
+  let depth = 1;
+  let content = "";
+  for (let at = start + 1; at < text.length; at += 1) {
+    let char = text.charAt(at);
+    if (char === "\\") {
+      at += 1;
+      char = text.charAt(at);
+    } else if (char === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return { end: at + 1, content };
+      }
+    } else if (nests && char === "(") {
+      depth += 1;
+    }
+    content += char;
+  }
+  throw unparsable("A comment or quoted string never ends");
+};
+
+/** `text` as tokens, CFWS dropped (RFC 8601 2.2's lexical level). */
+const tokensOf = (text: string): Token[] => {
+  const tokens: Token[] = [];
+  let spaced = false;
+  let at = 0;
+  while (at < text.length) {
+    const char = text.charAt(at);
+    if (isWhitespace(char) || char === "(") {
+      at = char === "(" ? delimited(text, at).end : at + 1;
+      spaced = true;
+      continue;
+    }
+    if (char === '"') {
+      const { end, content } = delimited(text, at);
+      tokens.push({ kind: "quoted", text: content, spaced });
+      at = end;
+    } else if (isPunctuation(char)) {
+      tokens.push({ kind: char, text: char, spaced });
+      at += 1;
+    } else {
+      const start = at;
+      while (at < text.length && isWordChar(text.charAt(at))) {
+        at += 1;
+      }
+      if (at === start) {
+        throw unparsable(`Unexpected ${char}`);
+      }
+      tokens.push({ kind: "word", text: text.slice(start, at), spaced });
+    }
+    spaced = false;
+  }
+  return tokens;
+};
 
 /** RFC 5321 `Keyword`: a letter or digit, then letters, digits and inner hyphens. */
 const keywordPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
 
-/** RFC 6376 3.5's `domain-name`: sub-domains, each a Keyword, by dots. */
-const domainNamePattern =
-  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/u;
+const digitsPattern = /^\d+$/u;
 
-/** What marks an error as a header that isn't the grammar's (`unparsable`). */
-const notTheGrammar = Symbol("not the grammar");
-
-/** An error saying a header isn't the grammar's, and why. */
-const unparsable = (why: string): Error =>
-  new Error(why, { cause: notTheGrammar });
-
-/** A cursor over a header's text, with the grammar's productions. */
-class Cursor {
+/** A reader over a header's tokens, with the grammar's productions. */
+class Reader {
   #at = 0;
-  readonly #text: string;
+  readonly #tokens: readonly Token[];
 
   constructor(text: string) {
-    this.#text = text;
-  }
-
-  /** Where it is, to come back to (`rewind`). */
-  get position(): number {
-    return this.#at;
-  }
-
-  rewind(position: number): void {
-    this.#at = position;
+    this.#tokens = tokensOf(text);
   }
 
   get done(): boolean {
-    return this.#at >= this.#text.length;
+    return this.#at === this.#tokens.length;
   }
 
-  peek(): string {
-    return this.#text.charAt(this.#at);
+  peek(ahead = 0): Token | undefined {
+    return this.#tokens[this.#at + ahead];
   }
 
-  /** `char`, taken, or nothing taken. */
-  take(char: string): boolean {
-    if (this.peek() !== char) {
+  take(kind: Token["kind"]): boolean {
+    if (this.peek()?.kind !== kind) {
       return false;
     }
     this.#at += 1;
     return true;
   }
 
-  expect(char: string): void {
-    if (!this.take(char)) {
-      throw unparsable(`Expected ${char}`);
+  expect(kind: Token["kind"]): void {
+    if (!this.take(kind)) {
+      throw unparsable(`Expected ${kind}`);
     }
   }
 
-  /** RFC 5322 `CFWS`, or nothing: whether any was taken. */
-  cfws(): boolean {
-    const start = this.#at;
-    for (;;) {
-      if (isWhitespace(this.peek())) {
-        this.#at += 1;
-      } else if (this.peek() === "(") {
-        this.#comment(0);
-      } else {
-        return this.#at > start;
-      }
+  /** A word matching `pattern`. */
+  word(pattern: RegExp): string {
+    const token = this.peek();
+    if (token?.kind !== "word" || !pattern.test(token.text)) {
+      throw unparsable(`Expected ${String(pattern)}`);
     }
+    this.#at += 1;
+    return token.text;
   }
 
-  /** An RFC 5322 `comment`, nested at most `maxCommentDepth` deep. */
-  #comment(depth: number): void {
-    if (depth >= maxCommentDepth) {
-      throw unparsable("Comments nest too deep");
-    }
-    this.expect("(");
-    for (;;) {
-      if (this.done) {
-        throw unparsable("A comment never ends");
-      }
-      const char = this.peek();
-      if (char === ")") {
-        this.#at += 1;
-        return;
-      }
-      if (char === "(") {
-        this.#comment(depth + 1);
-      } else if (char === "\\") {
-        this.#at += 2;
-      } else {
-        this.#at += 1;
-      }
-    }
-  }
-
-  /** An RFC 5322 `quoted-string`'s content, its quoted pairs undone. */
-  quotedString(): string {
-    this.expect('"');
-    let content = "";
-    for (;;) {
-      if (this.done) {
-        throw unparsable("A quoted string never ends");
-      }
-      const char = this.peek();
-      this.#at += 1;
-      if (char === '"') {
-        return content;
-      }
-      if (char === "\\") {
-        if (this.done) {
-          throw unparsable("A quoted pair never ends");
-        }
-        content += this.peek();
-        this.#at += 1;
-      } else {
-        content += char;
-      }
-    }
-  }
-
-  /** The longest run of characters `allowed` takes from here. */
-  run(allowed: (char: string) => boolean): string {
-    const start = this.#at;
-    while (!this.done && allowed(this.peek())) {
-      this.#at += 1;
-    }
-    return this.#text.slice(start, this.#at);
-  }
-
-  /** An RFC 5321 `Keyword`, lower case. */
+  /** A Keyword, lower case: a method, result, ptype or property. */
   keyword(): string {
-    const word = this.run((char) => isLetDig(char) || char === "-");
-    if (!keywordPattern.test(word)) {
-      throw unparsable("Expected a keyword");
-    }
-    return word.toLowerCase();
-  }
-
-  /** RFC 2045's `value`: a token or a quoted string. */
-  value(): string {
-    if (this.peek() === '"') {
-      return this.quotedString();
-    }
-    const token = this.run(isTokenChar);
-    if (token === "") {
-      throw unparsable("Expected a value");
-    }
-    return token;
+    return this.word(keywordPattern).toLowerCase();
   }
 
   /**
-   * RFC 8601's `pvalue`, without its CFWS: a quoted string (a quoted
-   * local part and its domain), or visible text up to the next
-   * whitespace, comment, quote or `;` (see above).
+   * A value: its first token, then every token up to CFWS or `;` (RFC
+   * 2045's value, widened for property values: see above).
    */
-  pvalue(): string {
-    if (this.peek() === '"') {
-      const quoted = this.quotedString();
-      if (!this.take("@")) {
-        return quoted;
+  value(): string {
+    const start = this.#at;
+    let text = "";
+    for (let token = this.peek(); token !== undefined; token = this.peek()) {
+      if (token.kind === ";" || (this.#at > start && token.spaced)) {
+        break;
       }
-      return `${quoted}@${this.#domainName()}`;
+      text += token.text;
+      this.#at += 1;
     }
-    const word = this.run((char) => valueCharPattern.test(char));
-    if (word === "") {
-      throw unparsable("Expected a property's value");
+    if (this.#at === start) {
+      throw unparsable("Expected a value");
     }
-    return word;
-  }
-
-  #domainName(): string {
-    const domain = this.run((char) => isLetDig(char) || "-.".includes(char));
-    if (!domainNamePattern.test(domain)) {
-      throw unparsable("Expected a domain");
-    }
-    return domain;
+    return text;
   }
 }
 
+/** Whether `token` is the word `word`, in any case. */
+const isWord = (token: Token | undefined, word: string): boolean =>
+  token?.kind === "word" && token.text.toLowerCase() === word;
+
+/** One result (RFC 8601 `resinfo`), its names lower case. */
+interface ResultInfo {
+  /** Its method, with its version when that isn't 1 (`dkim/2`). */
+  readonly method: string;
+  readonly result: string;
+  /** Each property by `ptype.property` (`smtp.mailfrom`), the first given. */
+  readonly properties: ReadonlyMap<string, string>;
+}
+
 /**
- * One `resinfo` (RFC 8601 2.2), its leading `;` taken already:
- * `methodspec [CFWS reasonspec] [CFWS 1*propspec]`.
+ * One `resinfo`, its `;` taken: `method[/version] = result [reason = value]
+ * *(ptype.property = value)`. A method version other than 1 makes it
+ * another method, so it is never read as SPF, DKIM or DMARC (RFC 8601 2.6).
  */
-const resultInfo = (cursor: Cursor): ResultInfo => {
-  cursor.cfws();
-  const method = cursor.keyword();
-  cursor.cfws();
-  if (cursor.take("/")) {
-    cursor.cfws();
-    if (cursor.run((char) => /\d/u.test(char)) === "") {
-      throw unparsable("Expected a method version");
-    }
-    cursor.cfws();
+const resultInfo = (reader: Reader): ResultInfo => {
+  const name = reader.keyword();
+  const version = reader.take("/") ? reader.word(digitsPattern) : "1";
+  reader.expect("=");
+  const result = reader.keyword();
+  if (isWord(reader.peek(), "reason") && reader.peek(1)?.kind === "=") {
+    reader.keyword();
+    reader.expect("=");
+    reader.value();
   }
-  cursor.expect("=");
-  cursor.cfws();
-  const result = cursor.keyword();
-  let reason: string | undefined;
   const properties = new Map<string, string>();
-  for (;;) {
-    const spaced = cursor.cfws();
-    if (cursor.done || cursor.peek() === ";") {
-      return { method, result, reason, properties };
-    }
-    if (!spaced) {
-      throw unparsable("Expected whitespace before a property");
-    }
-    const name = cursor.keyword();
-    cursor.cfws();
-    if (name === "reason" && reason === undefined && properties.size === 0) {
-      cursor.expect("=");
-      cursor.cfws();
-      reason = cursor.value();
-      continue;
-    }
-    cursor.expect(".");
-    cursor.cfws();
-    const property = cursor.keyword();
-    cursor.cfws();
-    cursor.expect("=");
-    cursor.cfws();
-    const key = `${name}.${property}`;
-    const value = cursor.pvalue();
-    if (!properties.has(key)) {
-      properties.set(key, value);
+  while (!reader.done && reader.peek()?.kind !== ";") {
+    const ptype = reader.keyword();
+    reader.expect(".");
+    const property = `${ptype}.${reader.keyword()}`;
+    reader.expect("=");
+    const value = reader.value();
+    if (!properties.has(property)) {
+      properties.set(property, value);
     }
   }
+  const method = version === "1" ? name : `${name}/${version}`;
+  return { method, result, properties };
+};
+
+/** The instance an ARC header gives: 1 to 50 (RFC 8617 4.2.1). */
+const instanceOf = (digits: string | undefined): number => {
+  const instance = Number(digits);
+  if (!/^\d{1,2}$/u.test(digits ?? "") || instance < 1 || instance > 50) {
+    throw unparsable("Expected an instance from 1 to 50");
+  }
+  return instance;
+};
+
+/** An ARC-Authentication-Results header's instance (`i=N;`, RFC 8617 4.1.1). */
+const arcInstance = (reader: Reader): number => {
+  reader.word(/^i$/u);
+  reader.expect("=");
+  const instance = instanceOf(reader.word(digitsPattern));
+  reader.expect(";");
+  return instance;
 };
 
 /**
- * RFC 8601 2.2's `no-result`, `; none` and nothing after, taken; nothing
- * taken otherwise.
+ * An ARC-Authentication-Results header's authserv-id, lower case, and
+ * results (RFC 8601 2.2's `authres-payload`): none for `; none`.
  */
-const noResult = (cursor: Cursor): boolean => {
-  const start = cursor.position;
-  if (cursor.take(";")) {
-    cursor.cfws();
-    if (cursor.run(isLetDig).toLowerCase() === "none") {
-      cursor.cfws();
-      if (cursor.done) {
-        return true;
-      }
-    }
-  }
-  cursor.rewind(start);
-  return false;
-};
-
-/**
- * An `authres-payload` (RFC 8601 2.2): the authserv-id, an optional
- * version (only 1 exists), then `; none` or its results.
- */
-const payload = (cursor: Cursor): ResultsHeader => {
-  cursor.cfws();
-  const authservId = cursor.value().toLowerCase();
-  const spaced = cursor.cfws();
-  if (spaced && /\d/u.test(cursor.peek())) {
-    if (cursor.run((char) => /\d/u.test(char)) !== "1") {
-      throw unparsable("An unknown version");
-    }
-    cursor.cfws();
-  }
-  if (noResult(cursor)) {
-    return { authservId, results: [] };
+const arcResults = (
+  value: string
+): { authservId: string; results: ResultInfo[] } => {
+  const reader = new Reader(value);
+  arcInstance(reader);
+  const authservId = reader.value().toLowerCase();
+  // A version not known stops the parse (RFC 8601 2.6): only 1 exists.
+  if (reader.peek()?.kind === "word") {
+    reader.word(/^1$/u);
   }
   const results: ResultInfo[] = [];
-  while (cursor.take(";")) {
-    results.push(resultInfo(cursor));
+  const noResult =
+    reader.peek()?.kind === ";" &&
+    isWord(reader.peek(1), "none") &&
+    reader.peek(2) === undefined;
+  if (noResult) {
+    return { authservId, results };
   }
-  cursor.cfws();
-  if (!cursor.done || results.length === 0) {
+  while (reader.take(";")) {
+    results.push(resultInfo(reader));
+  }
+  if (!reader.done || results.length === 0) {
     throw unparsable("Expected results");
   }
   return { authservId, results };
 };
 
-/** Parses `text` with `production`; none when it isn't the grammar's. */
-const parsed = <T>(
-  text: string,
-  production: (cursor: Cursor) => T
-): T | undefined => {
-  if (text.length > maxHeaderLength) {
-    return undefined;
-  }
-  try {
-    return production(new Cursor(text));
-  } catch (error) {
-    if (error instanceof Error && error.cause === notTheGrammar) {
-      return undefined;
+/**
+ * An ARC-Seal's or ARC-Message-Signature's instance and `cv` tag (RFC 6376
+ * 3.2's tag-list: `name=value` by `;`, each name once).
+ */
+const arcTagsOf = (
+  value: string
+): { instance: number; cv: string | undefined } => {
+  const tags = new Map<string, string>();
+  for (const spec of value.split(";")) {
+    const [name = "", ...rest] = spec.split("=").map((part) => part.trim());
+    if (name === "" && rest.length === 0) {
+      continue;
     }
-    throw error;
+    if (rest.length === 0 || !/^[A-Za-z]\w*$/u.test(name) || tags.has(name)) {
+      throw unparsable("Expected a tag-list");
+    }
+    tags.set(name, rest.join("="));
   }
+  return {
+    instance: instanceOf(tags.get("i")),
+    cv: tags.get("cv")?.toLowerCase(),
+  };
 };
-
-/** An `Authentication-Results` header's value, parsed; none if it isn't one. */
-export const parseAuthenticationResults = (
-  value: string
-): ResultsHeader | undefined => parsed(value, payload);
-
-/** An ARC header's instance (RFC 8617 4.2.1's `i=`), its `;` taken. */
-const instanceOf = (cursor: Cursor): number => {
-  cursor.cfws();
-  cursor.expect("i");
-  cursor.cfws();
-  cursor.expect("=");
-  cursor.cfws();
-  const digits = cursor.run((char) => /\d/u.test(char));
-  const instance = Number(digits);
-  // RFC 8617 4.2.1: 1 to 50.
-  if (digits === "" || digits.length > 2 || instance < 1 || instance > 50) {
-    throw unparsable("Expected an instance from 1 to 50");
-  }
-  cursor.cfws();
-  cursor.expect(";");
-  return instance;
-};
-
-/** An `ARC-Authentication-Results` header's value, parsed; none if it isn't one. */
-export const parseArcAuthenticationResults = (
-  value: string
-): (ResultsHeader & { instance: number }) | undefined =>
-  parsed(value, (cursor) => {
-    const instance = instanceOf(cursor);
-    return { instance, ...payload(cursor) };
-  });
 
 /** A message's header, as postal-mime gives it: its name lower case. */
 interface Header {
@@ -454,128 +354,68 @@ interface Header {
   readonly value: string;
 }
 
-const arcResultsKey = "arc-authentication-results";
-const arcSealKey = "arc-seal";
-const arcSignatureKey = "arc-message-signature";
-
-/** The highest instance an ARC set may have (RFC 8617 4.2.1). */
-const maxInstance = 50;
-
 /**
- * An ARC-Seal's or ARC-Message-Signature's tags (RFC 8617 4.1.2, 4.1.3,
- * RFC 6376 3.2's tag-list), by name.
+ * The results Email Routing recorded of a message with `headers` (see
+ * above); none when it recorded none core trusts. Throws `unparsable`
+ * when an ARC header doesn't read.
  */
-const arcTags = (value: string): Map<string, string> | undefined => {
-  const tags = new Map<string, string>();
-  for (const spec of value.split(";")) {
-    const trimmed = spec.trim();
-    if (trimmed === "") {
-      continue;
-    }
-    const equals = trimmed.indexOf("=");
-    const name = trimmed.slice(0, Math.max(equals, 0)).trim();
-    if (!/^[A-Za-z]\w*$/u.test(name) || tags.has(name)) {
-      return undefined;
-    }
-    tags.set(name, trimmed.slice(equals + 1).trim());
-  }
-  return tags;
-};
-
-/** The instance tags `tags` give (`i=`, 1 to 50); none if they give none. */
-const instanceTagged = (
-  tags: Map<string, string> | undefined
-): number | undefined => {
-  const tag = tags?.get("i") ?? "";
-  const instance = Number(tag);
-  return /^\d{1,2}$/u.test(tag) && instance >= 1 && instance <= maxInstance
-    ? instance
-    : undefined;
-};
-
-/** An ARC-Seal's instance and chain validation status; none if it isn't one. */
-const parseArcSeal = (
-  value: string
-): { instance: number; cv: string } | undefined => {
-  const tags = arcTags(value);
-  const instance = instanceTagged(tags);
-  const cv = tags?.get("cv")?.toLowerCase();
-  return instance !== undefined &&
-    (cv === "none" || cv === "pass" || cv === "fail")
-    ? { instance, cv }
-    : undefined;
-};
-
-/** An ARC-Message-Signature's instance; none if it isn't one. */
-const parseArcSignature = (value: string): { instance: number } | undefined => {
-  const instance = instanceTagged(arcTags(value));
-  return instance === undefined ? undefined : { instance };
-};
-
-/**
- * The results Email Routing recorded of a message with `headers`, as the
- * header says: its own ARC set's, on top, at the highest instance.
- */
-const trustedResults = (
-  headers: readonly Header[]
-): ResultsHeader | undefined => {
-  const resultHeaders = headers.filter(({ key }) => key === arcResultsKey);
-  // Only the topmost is read whole: the rest are other servers' (or a
-  // sender's), whose results needn't be the grammar's (`action=none`),
-  // and only their instances count.
-  const top =
-    resultHeaders[0] === undefined
-      ? undefined
-      : parseArcAuthenticationResults(resultHeaders[0].value);
-  const results = resultHeaders.map(({ value }) => {
-    const instance = parsed(value, instanceOf);
-    return instance === undefined ? undefined : { instance };
-  });
-  const seals = headers
-    .filter(({ key }) => key === arcSealKey)
-    .map(({ value }) => parseArcSeal(value));
-  const signatures = headers
-    .filter(({ key }) => key === arcSignatureKey)
-    .map(({ value }) => parseArcSignature(value));
-  if (
-    top === undefined ||
-    results.includes(undefined) ||
-    seals.includes(undefined) ||
-    signatures.includes(undefined)
-  ) {
-    return undefined;
-  }
-  const instances = [...results, ...seals, ...signatures].map(
-    (each) => each?.instance ?? 0
+const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
+  // A name is compared trimmed: postal-mime keeps the space of RFC 5322
+  // 4.5's obsolete `ARC-Seal :`, which a sealer may read as an ARC-Seal.
+  const values = (name: string) =>
+    headers.filter(({ key }) => key.trim() === name).map(({ value }) => value);
+  const resultsHeaders = values("arc-authentication-results");
+  const resultsInstances = resultsHeaders.map((value) =>
+    arcInstance(new Reader(value))
   );
-  const highest = Math.max(...instances);
-  const atTop = (each: { instance: number } | undefined) =>
-    each?.instance === highest;
-  const seal = seals.find(atTop);
-  return top.instance === highest &&
-    highest < maxInstance &&
-    results.filter(atTop).length === 1 &&
-    seals.filter(atTop).length === 1 &&
-    signatures.filter(atTop).length === 1 &&
-    seal?.cv !== "fail" &&
-    top.authservId === trustedAuthservId
-    ? top
-    : undefined;
+  const seals = values("arc-seal").map(arcTagsOf);
+  const sealInstances = seals.map(({ instance }) => instance);
+  const signatureInstances = values("arc-message-signature").map(
+    (value) => arcTagsOf(value).instance
+  );
+  const highest = Math.max(
+    ...resultsInstances,
+    ...sealInstances,
+    ...signatureInstances
+  );
+  const onceAtHighest = (instances: readonly number[]) =>
+    instances.filter((instance) => instance === highest).length === 1;
+  const topCv = seals.find(({ instance }) => instance === highest)?.cv;
+  const [top] = resultsHeaders;
+  const topSetTrusted =
+    top !== undefined &&
+    resultsInstances[0] === highest &&
+    highest < 50 &&
+    onceAtHighest(resultsInstances) &&
+    onceAtHighest(sealInstances) &&
+    onceAtHighest(signatureInstances) &&
+    (topCv === "none" || topCv === "pass");
+  if (!topSetTrusted) {
+    return [];
+  }
+  const { authservId, results } = arcResults(top);
+  return authservId === trustedAuthservId ? results : [];
 };
 
-/** The domain of `address` (a domain, or `local@domain`), lower case. */
+/**
+ * The domain of `address` (a domain, or `local@domain`), lower case, when
+ * it is RFC 6376 3.5's `domain-name`: two or more Keywords by dots.
+ */
 const domainOf = (address: string | undefined): string | null => {
-  if (address === undefined) {
-    return null;
-  }
-  const domain = address.slice(address.lastIndexOf("@") + 1).toLowerCase();
-  return domainNamePattern.test(domain) ? domain : null;
+  const domain = address?.slice(address.lastIndexOf("@") + 1).toLowerCase();
+  const labels = domain?.split(".") ?? [];
+  return domain !== undefined &&
+    labels.length > 1 &&
+    labels.every((label) => keywordPattern.test(label))
+    ? domain
+    : null;
 };
 
 /**
  * Whether `domain` and `from` are aligned, as DMARC's relaxed mode would
  * take them without the public suffix list: the same, or one under the
- * other.
+ * other. It only picks which DKIM result is reported; the domain reported
+ * is the signature's own.
  */
 const aligned = (domain: string | null, from: string | null): boolean =>
   domain !== null &&
@@ -584,7 +424,7 @@ const aligned = (domain: string | null, from: string | null): boolean =>
     from.endsWith(`.${domain}`) ||
     domain.endsWith(`.${from}`));
 
-/** `info` as a method's result, of `domain`; null for a result not one of RFC 8601's. */
+/** `info` as a method's result, of `domain`; null for a result not RFC 8601's. */
 const methodResultOf = (
   info: ResultInfo | undefined,
   domain: string | null
@@ -609,9 +449,13 @@ export const authenticationOf = (
   headers: readonly Header[],
   fromAddress: string | undefined
 ): Authentication => {
-  const results = trustedResults(headers)?.results;
-  if (results === undefined) {
-    return unauthenticated;
+  let results: ResultInfo[] = [];
+  try {
+    results = trustedResults(headers);
+  } catch (error) {
+    if (!(error instanceof Error && error.cause === notTheGrammar)) {
+      throw error;
+    }
   }
   const of = (method: string) =>
     results.filter((info) => info.method === method);
