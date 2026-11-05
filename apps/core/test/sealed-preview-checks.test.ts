@@ -60,7 +60,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     );
     // The App's own release, called by its screens: nothing of it said.
     const live = await calledAs(asBuilder, app, {
-      contractId: "notes.broken",
+      name: "notes.broken",
       kind: "query",
     });
     // The agent's own call: what it threw, beside the answer it got.
@@ -261,13 +261,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       "server/notes.ts": "export const titles = ;\n",
     });
     const request = JSON.stringify({
-      reference: {
-        resourceId: app,
-        resourceVersion: 2,
-        contractId: "notes.titles",
-        fingerprint: "0".repeat(64),
-        kind: "query",
-      },
+      reference: { name: "notes.titles", kind: "query" },
       input: {},
     });
     const called = outcome(

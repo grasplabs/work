@@ -1943,8 +1943,11 @@ describe("failures across the host's boundary", () => {
       retryable: false,
       details: {
         issues: [
-          "name: The object has a key that isn't declared.",
-          "title: A value is required.",
+          {
+            message: "The object has a key that isn't declared.",
+            path: ["name"],
+          },
+          { message: "A value is required.", path: ["title"] },
         ],
       },
     });

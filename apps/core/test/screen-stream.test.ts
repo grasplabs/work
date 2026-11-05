@@ -22,12 +22,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { accessOf, invocationName } from "../src/action-invocation.ts";
+import { invokeAppAction } from "../src/app-functions.ts";
 import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { referenceTo } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
@@ -191,55 +193,35 @@ export default function Writer() {
 `,
 };
 
-/** What a reference to `path` of `release` holds, as the App's `@server/_generated/api` has it. */
-const referenceData = (release: Release, path: string) => {
+/** The operation at `path` of `release`. */
+const operationAt = (release: Release, path: string) => {
   const operation = release.app.operations[path];
-  const fingerprint = release.fingerprints[path];
-  if (operation === undefined || fingerprint === undefined) {
+  if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: path,
-    fingerprint,
-    visibility: "public",
-    args: operation.args,
-    returns: operation.returns,
-    stream: operation.stream,
-  } as const;
+  return operation;
 };
 
-/** A reference to a function of `release` that answers once. */
+/**
+ * A reference to a function of `release` that answers once, as the App's
+ * `@server/_generated/api` has it.
+ */
 const singleTo = <Args, Return, Kind extends ReferenceKind>(
   release: Release,
   path: string,
-  kind: Kind
-): OperationReference<Args, Return, Kind> => {
-  const { stream: _stream, ...data } = referenceData(release, path);
-  return { ...data, kind, mode: "single" };
-};
+  _kind: Kind
+): OperationReference<Args, Return, Kind> =>
+  referenceTo<Args, Return, Kind>(release, path);
 
 /** A reference to a streaming action of `release`. */
 const streamTo = <Args, Return, Progress>(
   release: Release,
   path: string
 ): OperationReference<Args, Return, "action", "public", Progress> => {
-  const { stream, ...data } = referenceData(release, path);
-  if (stream === null) {
+  if (operationAt(release, path).stream === null) {
     throw new Error(`${path} doesn't stream`);
   }
-  // SAFETY: `Progress` is never `never` here, so the mode is "stream";
-  // TypeScript leaves the conditional unresolved for a type parameter.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const mode = "stream" as OperationReference<
-    Args,
-    Return,
-    "action",
-    "public",
-    Progress
-  >["mode"];
-  return { ...data, kind: "action", mode, stream };
+  return referenceTo<Args, Return, "action", Progress>(release, path);
 };
 
 /** The App's `api`, typed as its screens get it. */
@@ -612,13 +594,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     // The same reference, key and input, from another person's screen:
     // no invocation of theirs has it.
     const request = JSON.stringify({
-      reference: {
-        resourceId: api.draft.resourceId,
-        resourceVersion: api.draft.resourceVersion,
-        contractId: api.draft.contractId,
-        fingerprint: api.draft.fingerprint,
-        kind: "action",
-      },
+      reference: { name: api.draft.name, kind: "action" },
       input: { topic: "a", pauseMs: 0 },
       idempotencyKey: "mine",
     });
@@ -647,13 +623,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     const running = client.stream(api.slow, { title: "Started" }, keyed);
     await until(() => steps >= 2);
     const request = JSON.stringify({
-      reference: {
-        resourceId: api.slow.resourceId,
-        resourceVersion: api.slow.resourceVersion,
-        contractId: api.slow.contractId,
-        fingerprint: api.slow.fingerprint,
-        kind: "action",
-      },
+      reference: { name: api.slow.name, kind: "action" },
       input: { title: "Started" },
       idempotencyKey: "cancel-me",
     });
@@ -719,25 +689,20 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     ).resolves.toBe("contract.progress_too_large");
   });
 
-  it("refuses a reference of the wrong mode, in the client and in core", async () => {
+  it("refuses a reference of the wrong mode, by its type and in core", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
+    // A reference is a name: core, which knows the function, refuses it.
     await expect(
       // @ts-expect-error -- a streaming action isn't a single answer's
       failureOf(client.action(api.draft, { topic: "x" }))
-    ).resolves.toMatchObject({ code: "contract.mode_mismatch" });
+    ).resolves.toMatchObject({ code: "operation.mode_mismatch" });
     await expect(
       // @ts-expect-error -- an action that answers once doesn't stream
       failureOf(client.stream(api.echo, {}, { onProgress: ignoreProgress }))
-    ).resolves.toMatchObject({ code: "contract.mode_mismatch" });
-    const reference = {
-      resourceId: api.draft.resourceId,
-      resourceVersion: api.draft.resourceVersion,
-      contractId: api.draft.contractId,
-      fingerprint: api.draft.fingerprint,
-      kind: "action",
-    };
+    ).resolves.toMatchObject({ code: "operation.mode_mismatch" });
+    const reference = { name: api.draft.name, kind: "action" };
     const single = await post(
       opened.app,
       opened.builder,
@@ -747,11 +712,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     await expect(single.json()).resolves.toMatchObject({
       result: { ok: false, error: { code: "operation.mode_mismatch" } },
     });
-    const echo = {
-      ...reference,
-      contractId: api.echo.contractId,
-      fingerprint: api.echo.fingerprint,
-    };
+    const echo = { ...reference, name: api.echo.name };
     const streamed = await post(
       opened.app,
       opened.builder,
@@ -767,13 +728,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const key = crypto.randomUUID();
-    const reference = {
-      resourceId: api.counts.resourceId,
-      resourceVersion: api.counts.resourceVersion,
-      contractId: api.counts.contractId,
-      fingerprint: api.counts.fingerprint,
-      kind: "action",
-    };
+    const reference = { name: api.counts.name, kind: "action" };
     const windowed = await post(
       opened.app,
       opened.builder,
@@ -807,22 +762,11 @@ describe("a streaming action", { timeout: 120_000 }, () => {
 
 /** The request of a call of `reference` with `input` under `key`, as the client sends it. */
 const requestFor = (
-  reference: {
-    resourceId: string;
-    resourceVersion: number;
-    contractId: string;
-    fingerprint: string;
-  },
+  reference: { name: string },
   input: Json,
   key: string
 ): FunctionRequest => ({
-  reference: {
-    resourceId: reference.resourceId,
-    resourceVersion: reference.resourceVersion,
-    contractId: reference.contractId,
-    fingerprint: reference.fingerprint,
-    kind: "action",
-  },
+  reference: { name: reference.name, kind: "action" },
   input,
   idempotencyKey: key,
 });
@@ -1446,6 +1390,45 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     const second = await published(opened);
     const again = await client.stream(apiOf(second).counts, {}, keyed);
     expect({ first, again }).toStrictEqual({ first: 0, again: 0 });
+  });
+
+  it("runs an action only in the version its invocation recorded, refused once another is current", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const by = {
+      userId: opened.builderId,
+      role: "builder" as const,
+      teams: [],
+    };
+    const app = appIdSchema.parse(opened.app);
+    // As the invocation object runs it, after recording `version`: a
+    // publish in between never runs code its record doesn't name, so
+    // revoking what ran stops its result.
+    const runIn = async (version: number) => {
+      const { result } = await invokeAppAction(
+        env,
+        by,
+        app,
+        requestFor(api.echo, { word: "recorded" }, `in-${version}`),
+        {
+          version,
+          cancelled: new AbortController().signal,
+          deadline: Date.now() + 30_000,
+        }
+      );
+      return result.ok ? result.value : result.error.code;
+    };
+    const current = await runIn(1);
+    await published(opened);
+    expect({
+      current,
+      passed: await runIn(1),
+      now: await runIn(2),
+    }).toStrictEqual({
+      current: "recorded",
+      passed: "version.mismatch",
+      now: "recorded",
+    });
   });
 
   it("refuses a receipt of a release revoked since", async () => {

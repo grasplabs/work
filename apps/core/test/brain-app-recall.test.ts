@@ -217,13 +217,7 @@ const ask = async (
     owner,
     app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: "brain.ask",
-        fingerprint: release.fingerprints["brain.ask"] ?? "",
-        kind: operation.kind,
-      },
+      reference: { name: "brain.ask", kind: operation.kind },
       input,
     })
   );

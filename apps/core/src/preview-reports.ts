@@ -62,11 +62,11 @@ const functionOf = (request: unknown): string => {
       typeof parsed === "object" && parsed !== null
         ? Reflect.get(parsed, "reference")
         : undefined;
-    const contract: unknown =
+    const name: unknown =
       typeof reference === "object" && reference !== null
-        ? Reflect.get(reference, "contractId")
+        ? Reflect.get(reference, "name")
         : undefined;
-    return typeof contract === "string" ? contract.slice(0, 256) : "function";
+    return typeof name === "string" ? name.slice(0, 256) : "function";
   } catch {
     return "function";
   }

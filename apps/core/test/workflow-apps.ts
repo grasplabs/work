@@ -8,7 +8,6 @@ import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
 import { findApp } from "../src/apps.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { startRun } from "../src/workflows/runs.ts";
@@ -198,7 +197,7 @@ export const appCall = (
   /** The value's type, as the step code reads it (a type, as code). */
   type = "Json"
 ): string =>
-  `((answer) => { if (!answer.ok) { throw Object.assign(new Error(answer.error.message), { code: answer.error.code }); } return answer.value as ${type}; })((await env.APP.callFunction({ contractId: ${JSON.stringify(path)}, kind: ${JSON.stringify(kind)} }, ${input})) as { ok: true; value: unknown } | { ok: false; error: { message: string; code: string } })`;
+  `((answer) => { if (!answer.ok) { throw Object.assign(new Error(answer.error.message), { code: answer.error.code }); } return answer.value as ${type}; })((await env.APP.callFunction({ name: ${JSON.stringify(path)}, kind: ${JSON.stringify(kind)} }, ${input})) as { ok: true; value: unknown } | { ok: false; error: { message: string; code: string } })`;
 
 /** Workflow code counting a run of `name` (code), answering the count. */
 export const hitCall = (name: string): string =>
@@ -226,20 +225,12 @@ export const sampleCall = async (
   input: unknown
 ): Promise<unknown> => {
   const appId = appIdSchema.parse(app);
-  const { currentVersion } = await findApp(env, appId);
-  const current = await loadRelease(env, appId, currentVersion ?? 0);
   const answered = await callAppFunction(
     env,
     await by.api.whoami(),
     appId,
     JSON.stringify({
-      reference: {
-        resourceId: appId,
-        resourceVersion: current.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: current.fingerprints[path] ?? "",
-        kind,
-      },
+      reference: { name: path, kind },
       input,
     })
   );

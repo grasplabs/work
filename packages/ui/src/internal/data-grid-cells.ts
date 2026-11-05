@@ -13,8 +13,12 @@ import type { DataGridText } from "./data-grid-text.ts";
  * union of a page with more and the last one.
  */
 export const recordFieldsOf = (
-  returns: ValueDescriptor
+  returns: ValueDescriptor | null
 ): Readonly<Record<string, ValueDescriptor>> => {
+  // A query that declares no `returns` says nothing of its rows' fields.
+  if (returns === null) {
+    return {};
+  }
   const pages = returns.kind === "union" ? returns.members : [returns];
   for (const page of pages) {
     if (page.kind !== "object" || !Object.hasOwn(page.fields, "items")) {

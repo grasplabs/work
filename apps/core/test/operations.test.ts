@@ -342,52 +342,73 @@ const secret = internalQuery({
   handler: () => "internal",
 });
 
-const notesApp = registerFunctions(
-  app({
-    name: "Notes",
-    schema,
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operationAccess: {
-      "notes.insertOnly": { tables: { notes: { insert: true } } },
-      "notes.peek": { tables: { notes: { insert: true } } },
-    },
-    screens: [],
-  }),
-  {
-    notes: {
-      list,
-      get,
-      create,
-      update,
-      remove,
-      createAndCount,
-      insertOnly,
-      peek,
-      stress,
-      readPastThenWrite,
-      insertThenGuard,
-      echo,
-      repeated,
-      editTwice,
-      takeFirst,
-      guardedOrFallback,
-      readTimes,
-      floatingBadWrite,
-      assertMany,
-      secret,
-    },
-  }
-);
+const notesRegistration = app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operationAccess: {
+    "notes.insertOnly": { tables: { notes: { insert: true } } },
+    "notes.peek": { tables: { notes: { insert: true } } },
+  },
+  screens: [],
+});
+
+const notesFunctions = {
+  list,
+  get,
+  create,
+  update,
+  remove,
+  createAndCount,
+  insertOnly,
+  peek,
+  stress,
+  readPastThenWrite,
+  insertThenGuard,
+  echo,
+  repeated,
+  editTwice,
+  takeFirst,
+  guardedOrFallback,
+  readTimes,
+  floatingBadWrite,
+  assertMany,
+  secret,
+};
+
+const notesApp = registerFunctions(notesRegistration, {
+  notes: notesFunctions,
+});
 
 const { manifest } = inspectApp(notesApp);
 
+/**
+ * A later version of Notes whose `notes.create` takes a tag as well: a
+ * function at the same path with another contract.
+ */
+const taggedNotesApp = registerFunctions(notesRegistration, {
+  notes: {
+    ...notesFunctions,
+    create: mutation({
+      args: {
+        title: noteFields.title,
+        body: noteFields.body,
+        tag: v.string().optional(),
+      },
+      returns: v.id("notes"),
+      handler: async (ctx, { title, body }) =>
+        await ctx.db.insert("notes", { title, body }),
+    }),
+  },
+});
+
 /** The Notes App as the host runs it, with `run` in place of its runner. */
-const hosted = (run?: Runner): HostedApp => ({
-  manifest,
+const hosted = (run?: Runner, code = notesApp): HostedApp => ({
+  manifest: code === notesApp ? manifest : inspectApp(code).manifest,
   run:
     run ??
     (async (path, args, channel) =>
-      await runFunction(notesApp, path, args, channel)),
+      await runFunction(code, path, args, channel)),
 });
 
 /** A person of the organization in `role`, as their session has them. */
@@ -469,10 +490,15 @@ const call = async (
   kind: string,
   path: string,
   args: unknown,
-  more: { run?: Runner; idempotencyKey?: string; version?: number } = {}
+  more: {
+    run?: Runner;
+    idempotencyKey?: string;
+    version?: number;
+    code?: typeof notesApp;
+  } = {}
 ): Promise<OperationResult> =>
   await callOperation(
-    hosted(more.run),
+    hosted(more.run, more.code),
     invocationOf(fixture, by, more.version),
     { path, kind },
     args,
@@ -1422,25 +1448,44 @@ describe("bounds on one mutation", () => {
     ).toBe(1);
   });
 
-  it("answers a retry across an App upgrade that kept the contract with the original outcome", async () => {
+  it("answers a retry across App upgrades with the original outcome, whether or not they changed the function's contract", async () => {
     const fixture = await notes();
     const { owner } = fixture;
-    const createAt = async (version: number) =>
+    const createAt = async (version: number, code = notesApp) =>
       await call(
         fixture,
         owner,
         "mutation",
         "notes.create",
         { title: "Once" },
-        { idempotencyKey: "upgrade", version }
+        { idempotencyKey: "upgrade", version, code }
       );
     const before = await createAt(1);
-    const after = await createAt(2);
+    const kept = await createAt(2);
+    // Version 3's `notes.create` takes a tag too: the same key, sent
+    // again, still names the call that ran.
+    const changed = await createAt(3, taggedNotesApp);
+    // Another input under the key is refused, whatever the version.
+    const otherInput = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.create",
+      { title: "Twice" },
+      { idempotencyKey: "upgrade", version: 3, code: taggedNotesApp }
+    );
     const page = valueOf(
       await call(fixture, owner, "query", "notes.list", { pagination: {} })
     );
-    expect({ same: after, stored: idsOf(page).length }).toStrictEqual({
-      same: before,
+    expect({
+      kept,
+      changed,
+      otherInput: codeOf(otherInput),
+      stored: idsOf(page).length,
+    }).toStrictEqual({
+      kept: before,
+      changed: before,
+      otherInput: "submission.key_conflict",
       stored: 1,
     });
   });

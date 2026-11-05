@@ -145,13 +145,7 @@ const fixturesLeft = async (): Promise<number> => {
 const requestFor = (release: Release, path: string, input: unknown): string => {
   const operation = release.app.operations[path];
   return JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path],
-      kind: operation?.kind,
-    },
+    reference: { name: path, kind: operation?.kind },
     input,
   });
 };
@@ -190,7 +184,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       t.equal(last.items.map((note) => note.title), ["Theirs"]);`,
         "a refusal it expects": `
       const owner = await t.as("note-owner");
-      const live = await owner.subscribe({ ...api.notes.list, contractId: "notes.nothing" }, page);
+      const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
       await t.rejectsCode(live.next(), "operation.not_found");`,
       }),
     });
@@ -203,7 +197,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       "tests/failing.test.ts": suiteOf({
         "follows a query the App doesn't have": `
       const owner = await t.as("note-owner");
-      const live = await owner.subscribe({ ...api.notes.list, contractId: "notes.nothing" }, page);
+      const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
       await live.next();`,
         "waits for a note nobody makes": `
       const owner = await t.as("note-owner");

@@ -290,13 +290,7 @@ const callFor = async (
     callee,
     // As a screen sends it: text, bounded before it is read.
     JSON.stringify({
-      reference: {
-        resourceId: callee,
-        resourceVersion: version,
-        contractId: path,
-        fingerprint,
-        kind: operation.kind,
-      },
+      reference: { name: path, kind: operation.kind },
       input: args,
       // A query takes no key; a mutation's or action's is the request's
       // own, so the same call made again answers from its receipt.
@@ -308,6 +302,9 @@ const callFor = async (
     }),
     {
       deadline: context.deadline,
+      // Pinned by the reviewed binding: the release and contract it was
+      // checked against, never one published since.
+      pinned: { version, fingerprint },
       ...(context.session === undefined
         ? {}
         : { parentSession: context.session }),

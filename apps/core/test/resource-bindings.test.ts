@@ -201,13 +201,7 @@ const requestFor = (release: Release, path: string, input: unknown): string => {
     throw new Error(`No ${path}`);
   }
   return JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path] ?? "",
-      kind: operation.kind,
-    },
+    reference: { name: path, kind: operation.kind },
     input,
   });
 };

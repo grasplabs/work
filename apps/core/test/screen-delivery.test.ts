@@ -311,20 +311,12 @@ const requestFor = async (
   if (currentVersion === null) {
     throw new Error("The App has no current version");
   }
+  // Its kind as the current release declares it, a query's for a name it
+  // doesn't have: a page names a function by its name and kind alone.
   const released = await loadRelease(env, id, currentVersion);
-  const operation = released.app.operations[contractId];
-  const fingerprint = released.fingerprints[contractId];
-  if (operation === undefined || fingerprint === undefined) {
-    throw new Error(`The release has no ${contractId}`);
-  }
+  const kind = released.app.operations[contractId]?.kind ?? "query";
   return JSON.stringify({
-    reference: {
-      resourceId: app,
-      resourceVersion: currentVersion,
-      contractId,
-      fingerprint,
-      kind: operation.kind,
-    },
+    reference: { name: contractId, kind },
     input,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });
@@ -435,7 +427,7 @@ const tookStep = async (
   step: string
 ): Promise<boolean> => {
   const result = await calledAs(await person.api.whoami(), app, {
-    contractId: "notes.live",
+    name: "notes.live",
     kind: "query",
   });
   return result.ok && JSON.stringify(result.value).includes(step);
@@ -450,7 +442,7 @@ const letGo = async (
   const marked = await calledAs(
     await person.api.whoami(),
     app,
-    { contractId: "notes.mark", kind: "mutation" },
+    { name: "notes.mark", kind: "mutation" },
     { step: `${step}: release` }
   );
   if (!marked.ok) {
@@ -567,7 +559,7 @@ describe("screen delivery", { timeout: 60_000 }, () => {
         otherBuild: second.artifact !== first.artifact,
         answer: await called(builder, app, { lease: second.lease }),
       },
-      // The frame opened on version 1 still answers, pinned to it.
+      // The frame opened on version 1 is answered by the version current now.
       firstFrameAfter: await called(builder, app, { lease: first.lease }),
       refused: refusals(events),
     }).toStrictEqual({
@@ -577,6 +569,40 @@ describe("screen delivery", { timeout: 60_000 }, () => {
       second: { version: 2, otherBuild: true, answer: data },
       firstFrameAfter: data,
       refused: [],
+    });
+  });
+
+  it("answers a frame's calls with the version current now, whatever lease it keeps from the one before", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const first = await openFrame(builder, app);
+    // Version 2 answers `read` with other code.
+    await release(builder, app, {
+      "server/notes.ts": operationsCode.replace(
+        "handler: async () => [secret],",
+        'handler: async () => ["version 2"],'
+      ),
+    });
+    const replayed = await called(builder, app, { lease: first.lease });
+    // Version 3 takes `read` out of its API, and its screen no longer reads it.
+    await release(builder, app, {
+      "server/notes.ts": operationsCode
+        .replace(
+          "import { action, mutation, query }",
+          "import { action, internalQuery, mutation, query }"
+        )
+        .replace(
+          "export const read = query(",
+          "export const read = internalQuery("
+        ),
+      "screens/notes.tsx": plainScreenOf("Notes"),
+    });
+    expect({
+      replayed,
+      gone: await called(builder, app, { lease: first.lease }),
+    }).toMatchObject({
+      replayed: { ok: true, value: ["version 2"] },
+      gone: { ok: false, error: { code: "operation.not_found" } },
     });
   });
 

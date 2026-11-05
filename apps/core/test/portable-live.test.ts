@@ -53,7 +53,7 @@ import {
 // real routes. The ways it can fail come first: anything reachable before
 // a token connects, a cookie standing in for one, a token for another App
 // or expired; a session that ends, a role lost or a token that expires
-// mid-subscription; a renewal for someone else; another App's query;
+// mid-subscription; a renewal for someone else;
 // code nobody approved getting sensitive data; a connection followed past
 // its bounds. Then the client: changes reach it without a read of its
 // own, an expired token is replaced without clearing what it shows, and
@@ -121,13 +121,7 @@ const requestFor = (
   input: unknown
 ): string =>
   JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path],
-      kind: release.app.operations[path]?.kind,
-    },
+    reference: { name: path, kind: release.app.operations[path]?.kind },
     input,
   });
 
@@ -761,19 +755,12 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     }
   });
 
-  it("refuses another App's query, sensitive data, and a connection's queries past its bound", async () => {
+  it("refuses sensitive data, and a connection's queries past its bound", async () => {
+    // A query names a function only: the token's App answers it, so no
+    // other App's query can be named.
     const notes = await notesApp();
-    const other = await notesApp();
     const sensitive = await notesApp({ sensitive: true });
     const token = await tokenFor(notes.builder.session, notes.app);
-    const { live } = await openLive(notes.app);
-    const queries = live.connect(token);
-    const { got, onSnapshot } = pushes();
-    await queries.watchQuery(listOf(other), onSnapshot);
-    await eventually(() => {
-      expect(got).toHaveLength(1);
-    });
-    expect(got[0]?.result).toMatchObject({ ok: false });
 
     const sensitiveToken = await tokenFor(
       sensitive.builder.session,

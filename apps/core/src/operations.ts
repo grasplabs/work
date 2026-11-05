@@ -574,9 +574,8 @@ type ValueDescriptorLike = OperationManifest["args"];
 /** What the host derives from a manifest once. */
 interface Compiled {
   readonly hash: Promise<string>;
-  /** Each function's receipt contract, once computed (`contractIdOf`). */
-  readonly contracts: Map<string, Promise<string>>;
   readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  /** Each declared return; none for a function that declares none. */
   readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   /** Each streaming action's progress snapshot. */
   readonly streams: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
@@ -610,7 +609,11 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   const streams = new Map<string, ValueSchema<unknown, unknown>>();
   for (const [path, operation] of Object.entries(manifest.operations)) {
     args.set(path, schemaOfDescriptor(operation.args));
-    returns.set(path, schemaOfDescriptor(operation.returns));
+    // A function that declares no `returns` answers what its handler
+    // returns, checked as JSON within the output limit only.
+    if (operation.returns !== null) {
+      returns.set(path, schemaOfDescriptor(operation.returns));
+    }
     if (operation.stream !== null) {
       streams.set(path, schemaOfDescriptor(operation.stream));
     }
@@ -624,7 +627,6 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   }
   const compiled: Compiled = {
     hash: schemaHash(manifest.schema),
-    contracts: new Map(),
     args,
     returns,
     streams,
@@ -639,6 +641,28 @@ const encoder = new TextEncoder();
 /** The bytes of `value`'s JSON text, as UTF-8. */
 const bytesOf = (value: Json): number =>
   encoder.encode(JSON.stringify(value)).byteLength;
+
+/**
+ * Argument issues as a refusal's details carry them to the caller: each
+ * one's message and its path as keys and indexes, never a value, the shape
+ * the SDK's own refusals have, so a form shows each beside its field.
+ */
+const argumentIssues = (
+  issues: readonly {
+    readonly path?: readonly unknown[];
+    readonly message: string;
+  }[]
+): { message: string; path: (string | number)[] }[] =>
+  issues.map(({ path = [], message }) => ({
+    message,
+    path: path.map((segment) => {
+      const key =
+        typeof segment === "object" && segment !== null && "key" in segment
+          ? segment.key
+          : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
 
 /** Issues as an error's details say them: `path: message`, never a value. */
 const issuesOf = (
@@ -760,14 +784,14 @@ const admittedArgs = (
   }
   if (read === undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: ["The arguments aren't JSON"],
+      issues: argumentIssues([{ message: "The arguments aren't JSON" }]),
     });
   }
   const schema = compiled.args.get(operation.path);
   const result = schema?.["~standard"].validate(read.json);
   if (result === undefined || result.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: issuesOf(result?.issues ?? []),
+      issues: argumentIssues(result?.issues ?? []),
     });
   }
   const normalized = jsonOf(result.value);
@@ -779,9 +803,9 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * the public operation output limit (`operationResultMaxBytes`), valid,
- * and already as the contract normalizes it (no default left out,
- * nothing to trim). The value is App code's: reading it can run
+ * the public operation output limit (`operationResultMaxBytes`) and, where
+ * it declares a return, valid and already as the contract normalizes it
+ * (no default left out, nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
  * (`fromApp`), never an error the caller would take for the host's.
  */
@@ -806,13 +830,15 @@ const checkedReturn = (
     );
   }
   const { json } = read;
-  const result = compiled.returns
-    .get(operation.path)
-    ?.["~standard"].validate(json);
-  if (result === undefined || result.issues !== undefined) {
+  const schema = compiled.returns.get(operation.path);
+  if (schema === undefined) {
+    return json;
+  }
+  const result = schema["~standard"].validate(json);
+  if (result.issues !== undefined) {
     throw hostError(
       operationErrors.create("contract.invalid_return", {
-        issues: issuesOf(result?.issues ?? []),
+        issues: issuesOf(result.issues),
       })
     );
   }
@@ -870,43 +896,6 @@ const checkedProgress = (
     });
   }
   return json;
-};
-
-/**
- * The receipt contract of `operation`: its path and a fingerprint of its
- * argument and return descriptors, which a compatible revision of the App
- * keeps, so a retry across such an upgrade gets the outcome it had (spec
- * 9.5: the receipt identity holds the contract ID and version, and host
- * contract IDs survive compatible revisions, 7.1).
- */
-/**
- * The contract ID a mutation's receipt is scoped by: its path and a hash
- * of its argument and return descriptors, so a retry across an upgrade
- * that kept them gets the outcome it had.
- */
-const operationContractId = async (
-  operation: Pick<OperationManifest, "path" | "args" | "returns">
-): Promise<string> => {
-  const hash = await sha256Hex(
-    canonicalJson(
-      // Descriptors are JSON data, as the manifest holds them.
-      jsonOf({ args: operation.args, returns: operation.returns }) ?? null
-    )
-  );
-  return `${operation.path}@${hash.slice(0, 32)}`;
-};
-
-const contractIdOf = async (
-  compiled: Compiled,
-  operation: OperationManifest
-): Promise<string> => {
-  const known = compiled.contracts.get(operation.path);
-  if (known !== undefined) {
-    return await known;
-  }
-  const made = operationContractId(operation);
-  compiled.contracts.set(operation.path, made);
-  return await made;
 };
 
 /** Domain failures App code threw, as the host rebuilt them: code and details. */
@@ -2177,7 +2166,7 @@ const workflowStart = (
   }
   if (checked.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: issuesOf(checked.issues),
+      issues: argumentIssues(checked.issues),
     });
   }
   const input = jsonOf(checked.value);
@@ -3242,7 +3231,8 @@ const startNested = async (
       callee,
       admitted,
       // A query needs no key: only what changes something holds a place.
-      callee.kind === "query" ? [] : await within.derived()
+      callee.kind === "query" ? [] : await within.derived(),
+      args
     );
   } catch (error) {
     throw forCaller(error, run);
@@ -3312,7 +3302,8 @@ const runMutation = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  inputHash: string
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const { store } = invocation;
@@ -3324,14 +3315,17 @@ const runMutation = async (
           principal: invocation.principal,
           resource: invocation.consumer.resourceId,
           binding: null,
-          // The contract, not the App's version: a retry across an upgrade
-          // that kept the function's contract gets the outcome it had.
-          contractId: await contractIdOf(compiled, operation),
+          // The function's path alone, not its contract or the App's
+          // version: a page's call runs in whatever release is current,
+          // so a retry after a publish, even one that changed the
+          // function's arguments, finds the receipt and runs nothing
+          // again. Other input under the key is refused by its hash.
+          contractId: operation.path,
           contractVersion: 1,
           operationKind: "mutation",
         },
         key: [...key],
-        inputHash: await sha256Hex(canonicalJson(args)),
+        inputHash,
         runId: invocation.runId,
         deadline: invocation.deadline,
       })
@@ -3608,7 +3602,8 @@ const runAction = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  inputHash: string
 ): Promise<Json> => {
   const { invocation, compiled, progress: sink } = run;
   await admit(invocation);
@@ -3620,8 +3615,10 @@ const runAction = async (
     canonicalJson({
       principal: invocation.principal,
       resource: invocation.consumer.resourceId,
-      contract: await contractIdOf(compiled, operation),
-      inputHash: await sha256Hex(canonicalJson(args)),
+      // Its path, as a mutation's receipt is scoped: the same call
+      // retried after a publish derives the same keys.
+      contract: operation.path,
+      inputHash,
       key: [...key],
     })
   );
@@ -3743,20 +3740,35 @@ const runAction = async (
   });
 };
 
-/** Runs `operation` with `args`, by its kind, under the call key `key`. */
+/**
+ * The hash a receipt binds a call's key to: of the input as the caller
+ * sent it, not as the release normalized it, so the same input sent again
+ * under the key after a publish that adds or changes a default still
+ * finds its receipt. `admitted` stands in only for input JSON can't hold,
+ * which the release's validator took.
+ */
+const submittedHash = async (input: unknown, admitted: Json): Promise<string> =>
+  await sha256Hex(canonicalJson(jsonOf(input) ?? admitted));
+
+/**
+ * Runs `operation` with `args` (`submitted` as the caller sent them), by
+ * its kind, under the call key `key`.
+ */
 const execute = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  submitted: unknown
 ): Promise<Json> => {
   if (operation.kind === "query") {
     return await runQuery(run, operation, args);
   }
+  const inputHash = await submittedHash(submitted, args);
   if (operation.kind === "mutation") {
-    return await runMutation(run, operation, args, key);
+    return await runMutation(run, operation, args, key, inputHash);
   }
-  return await runAction(run, operation, args, key);
+  return await runAction(run, operation, args, key, inputHash);
 };
 
 /**
@@ -3904,7 +3916,8 @@ const answer = async (
       },
       operation,
       admitted,
-      ["call", key]
+      ["call", key],
+      args
     );
     return { ok: true, value };
   } catch (error) {

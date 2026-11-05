@@ -363,7 +363,7 @@ describe(
         app: await calledAs(
           { userId: builder.userId, role: "builder", teams: [] },
           app,
-          { contractId: "notes.titles", kind: "query" }
+          { name: "notes.titles", kind: "query" }
         ),
       }).toStrictEqual({
         end: "ok",
@@ -914,13 +914,7 @@ describe(
       const { builder, app, chatId, revision } = await setUp();
       const seat = { chatId, app, revision };
       const request = JSON.stringify({
-        reference: {
-          resourceId: app,
-          resourceVersion: 2,
-          contractId: "notes.draft",
-          fingerprint: "0".repeat(64),
-          kind: "action",
-        },
+        reference: { name: "notes.draft", kind: "action" },
         input: { topic: "none" },
         idempotencyKey: crypto.randomUUID(),
       });

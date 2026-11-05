@@ -54,20 +54,8 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.create",
-      "fingerprint": "ba23056070707a2e017a3c339121091a8042714248085ca7a75e72de5d57c6e7",
       "kind": "mutation",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "kind": "id",
-        "nullable": false,
-        "presence": "required",
-        "tableName": "notes"
-      },
-      "visibility": "public"
+      "name": "notes.create"
     },
     exportAll: {
       "args": {
@@ -88,60 +76,11 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.exportAll",
-      "fingerprint": "a5ef08e937e411ee3495748fe9ae51a633cf502e563c6dab2814f714ad7b2bb7",
       "kind": "action",
-      "mode": "stream",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "email": false,
-        "kind": "string",
-        "nullable": false,
-        "presence": "required",
-        "trim": false
-      },
-      "stream": {
-        "descriptorVersion": 1,
-        "fields": {
-          "done": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 0,
-            "nullable": false,
-            "presence": "required"
-          }
-        },
-        "kind": "object",
-        "nullable": false,
-        "presence": "required"
-      },
-      "visibility": "public"
+      "name": "notes.exportAll"
     },
     get: {
-      "args": {
-        "descriptorVersion": 1,
-        "fields": {
-          "id": {
-            "descriptorVersion": 1,
-            "kind": "id",
-            "nullable": false,
-            "presence": "required",
-            "tableName": "notes"
-          }
-        },
-        "kind": "object",
-        "nullable": false,
-        "presence": "required"
-      },
-      "contractId": "notes.get",
-      "fingerprint": "a58fc261bfc8463b6e21329120d32f2543f6cce8487a0f1981d929e50b64416a",
-      "kind": "query",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
+      "name": "notes.get",
       "returns": {
         "descriptorVersion": 1,
         "fields": {
@@ -215,53 +154,10 @@ export const api: {
         "kind": "object",
         "nullable": true,
         "presence": "required"
-      },
-      "visibility": "public"
+      }
     },
     list: {
-      "args": {
-        "descriptorVersion": 1,
-        "fields": {
-          "pagination": {
-            "descriptorVersion": 1,
-            "fields": {
-              "cursor": {
-                "defaultValue": null,
-                "descriptorVersion": 1,
-                "email": false,
-                "kind": "string",
-                "max": 4096,
-                "min": 1,
-                "nullable": true,
-                "presence": "default",
-                "trim": false
-              },
-              "pageSize": {
-                "defaultValue": 50,
-                "descriptorVersion": 1,
-                "integer": true,
-                "kind": "number",
-                "max": 100,
-                "min": 1,
-                "nullable": false,
-                "presence": "default"
-              }
-            },
-            "kind": "object",
-            "nullable": false,
-            "presence": "required"
-          }
-        },
-        "kind": "object",
-        "nullable": false,
-        "presence": "required"
-      },
-      "contractId": "notes.list",
-      "fingerprint": "eea491531bf8012a045ccefdd99abb52ba3e5a0fe55a0f4ab00f130abb05a23d",
-      "kind": "query",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
+      "name": "notes.list",
       "returns": {
         "descriptorVersion": 1,
         "kind": "union",
@@ -478,8 +374,7 @@ export const api: {
         ],
         "nullable": false,
         "presence": "required"
-      },
-      "visibility": "public"
+      }
     },
     remove: {
       "args": {
@@ -505,19 +400,8 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.remove",
-      "fingerprint": "07d9e9f250f7ff4be4bc3644a8bf49559f3e6093cf9c36610bd173da2169d39d",
       "kind": "mutation",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "kind": "null",
-        "nullable": false,
-        "presence": "required"
-      },
-      "visibility": "public"
+      "name": "notes.remove"
     },
     setSummary: {
       "args": {
@@ -552,19 +436,8 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.setSummary",
-      "fingerprint": "8875a82b24a69592cde4e53bde258785812b3081c484f7c719f3559436847d56",
       "kind": "mutation",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "kind": "null",
-        "nullable": false,
-        "presence": "required"
-      },
-      "visibility": "public"
+      "name": "notes.setSummary"
     },
     tally: {
       "args": {
@@ -574,21 +447,8 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.tally",
-      "fingerprint": "11e6f589b365b259403d95f63c69223048d779a59a294809db7f8b8532544c42",
       "kind": "action",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "integer": true,
-        "kind": "number",
-        "min": 0,
-        "nullable": false,
-        "presence": "required"
-      },
-      "visibility": "public"
+      "name": "notes.tally"
     },
     update: {
       "args": {
@@ -633,87 +493,8 @@ export const api: {
         "nullable": false,
         "presence": "required"
       },
-      "contractId": "notes.update",
-      "fingerprint": "495ee4187247940ac77baf864cd21d448e4b14fa952ac5d1af7b068882b49d88",
       "kind": "mutation",
-      "mode": "single",
-      "resourceId": "app_0000000000000000000000notes",
-      "resourceVersion": 1,
-      "returns": {
-        "descriptorVersion": 1,
-        "fields": {
-          "_createdAt": {
-            "descriptorVersion": 1,
-            "kind": "timestamp",
-            "nullable": false,
-            "presence": "required"
-          },
-          "_id": {
-            "descriptorVersion": 1,
-            "kind": "id",
-            "nullable": false,
-            "presence": "required",
-            "tableName": "notes"
-          },
-          "_ownerId": {
-            "descriptorVersion": 1,
-            "email": false,
-            "kind": "string",
-            "min": 1,
-            "nullable": false,
-            "presence": "required",
-            "trim": false
-          },
-          "_rev": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 1,
-            "nullable": false,
-            "presence": "required"
-          },
-          "_updatedAt": {
-            "descriptorVersion": 1,
-            "kind": "timestamp",
-            "nullable": false,
-            "presence": "required"
-          },
-          "body": {
-            "defaultValue": "",
-            "descriptorVersion": 1,
-            "email": false,
-            "kind": "string",
-            "max": 100000,
-            "nullable": false,
-            "presence": "default",
-            "trim": false
-          },
-          "summary": {
-            "defaultValue": null,
-            "descriptorVersion": 1,
-            "email": false,
-            "kind": "string",
-            "max": 10000,
-            "nullable": true,
-            "presence": "default",
-            "trim": false
-          },
-          "title": {
-            "descriptorVersion": 1,
-            "email": false,
-            "kind": "string",
-            "max": 200,
-            "min": 1,
-            "nullable": false,
-            "presence": "required",
-            "trim": true
-          }
-        },
-        "kind": "object",
-        "nullable": false,
-        "presence": "required"
-      },
-      "visibility": "public"
+      "name": "notes.update"
     },
   },
 });
@@ -850,40 +631,7 @@ export const workflows: {
     },
     "queries": {
       "decision": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "decisionId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.archiveNotes.queries.decision",
-        "fingerprint": "da319596af4597f91026eb42b3a62c18023c523a82d8fdcc73fa3df0bff37f4a",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.archiveNotes.queries.decision",
         "returns": {
           "descriptorVersion": 1,
           "fields": {
@@ -997,63 +745,10 @@ export const workflows: {
           "kind": "object",
           "nullable": true,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "decisions": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "optional",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.archiveNotes.queries.decisions",
-        "fingerprint": "f3adc81e633edcf534aed0c200225b0d35a2a14ed9f858865115453c35a9ca89",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.archiveNotes.queries.decisions",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -1368,63 +1063,10 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "history": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.archiveNotes.queries.history",
-        "fingerprint": "e495db47613dc61302dbcdf6d49243cd6251ea5e664663a31a8f70554a4a4d87",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.archiveNotes.queries.history",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -3043,69 +2685,10 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "runs": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "status": {
-              "descriptorVersion": 1,
-              "kind": "enum",
-              "nullable": false,
-              "presence": "optional",
-              "values": [
-                "queued",
-                "running",
-                "waiting",
-                "paused",
-                "compensating",
-                "completed",
-                "failed",
-                "cancelled"
-              ]
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.archiveNotes.queries.runs",
-        "fingerprint": "9299329be3c51d932ae3ebcb8e3731086b92017f1885afde1bdae47ccac2d43a",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.archiveNotes.queries.runs",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -3564,8 +3147,7 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       }
     },
     "resourceId": "app_0000000000000000000000notes",
@@ -3800,40 +3382,7 @@ export const workflows: {
     },
     "queries": {
       "decision": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "decisionId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.summarizeNote.queries.decision",
-        "fingerprint": "eec6859d4513cf746de819539b9e826333de454143e2952b1691a66ccdb8df26",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.summarizeNote.queries.decision",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -4077,63 +3626,10 @@ export const workflows: {
           ],
           "nullable": true,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "decisions": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "optional",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.summarizeNote.queries.decisions",
-        "fingerprint": "5ecfe0b46a721845c1c43df7dc759e023a8122fbc6072c0acd55ef2c2ceca013",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.summarizeNote.queries.decisions",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -4710,63 +4206,10 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "history": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "runId": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "max": 256,
-              "min": 1,
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.summarizeNote.queries.history",
-        "fingerprint": "e81eb0a79a9288d3adddd586acf7612b0ef4765b16d0fb688b143dcc00f2ac80",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.summarizeNote.queries.history",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -6389,69 +5832,10 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       },
       "runs": {
-        "args": {
-          "descriptorVersion": 1,
-          "fields": {
-            "pagination": {
-              "descriptorVersion": 1,
-              "fields": {
-                "cursor": {
-                  "defaultValue": null,
-                  "descriptorVersion": 1,
-                  "email": false,
-                  "kind": "string",
-                  "max": 4096,
-                  "min": 1,
-                  "nullable": true,
-                  "presence": "default",
-                  "trim": false
-                },
-                "pageSize": {
-                  "defaultValue": 50,
-                  "descriptorVersion": 1,
-                  "integer": true,
-                  "kind": "number",
-                  "max": 100,
-                  "min": 1,
-                  "nullable": false,
-                  "presence": "default"
-                }
-              },
-              "kind": "object",
-              "nullable": false,
-              "presence": "required"
-            },
-            "status": {
-              "descriptorVersion": 1,
-              "kind": "enum",
-              "nullable": false,
-              "presence": "optional",
-              "values": [
-                "queued",
-                "running",
-                "waiting",
-                "paused",
-                "compensating",
-                "completed",
-                "failed",
-                "cancelled"
-              ]
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "contractId": "workflows.summarizeNote.queries.runs",
-        "fingerprint": "9299329be3c51d932ae3ebcb8e3731086b92017f1885afde1bdae47ccac2d43a",
-        "kind": "query",
-        "mode": "single",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
+        "name": "workflows.summarizeNote.queries.runs",
         "returns": {
           "descriptorVersion": 1,
           "kind": "union",
@@ -6910,8 +6294,7 @@ export const workflows: {
           ],
           "nullable": false,
           "presence": "required"
-        },
-        "visibility": "public"
+        }
       }
     },
     "resourceId": "app_0000000000000000000000notes",
@@ -7033,19 +6416,7 @@ export const preferences: {
   readonly update: OperationReference<{ expectedRevision: number; patch: { compact?: boolean } }, { _rev: number; compact: boolean }, "mutation", "public">;
 } = frozen({
   get: {
-    "args": {
-      "descriptorVersion": 1,
-      "fields": {},
-      "kind": "object",
-      "nullable": false,
-      "presence": "required"
-    },
-    "contractId": "preferences.get",
-    "fingerprint": "d86c1eed356ac6acad17c5c11341032d326b6659a0601f06759b0ec437d6762a",
-    "kind": "query",
-    "mode": "single",
-    "resourceId": "app_0000000000000000000000notes",
-    "resourceVersion": 1,
+    "name": "preferences.get",
     "returns": {
       "descriptorVersion": 1,
       "fields": {
@@ -7068,8 +6439,7 @@ export const preferences: {
       "kind": "object",
       "nullable": false,
       "presence": "required"
-    },
-    "visibility": "public"
+    }
   },
   update: {
     "args": {
@@ -7102,35 +6472,7 @@ export const preferences: {
       "nullable": false,
       "presence": "required"
     },
-    "contractId": "preferences.update",
-    "fingerprint": "a4a7814b169c26739c32e49029d1ad92115e2899e86788e82e2e57c0c5ea8839",
     "kind": "mutation",
-    "mode": "single",
-    "resourceId": "app_0000000000000000000000notes",
-    "resourceVersion": 1,
-    "returns": {
-      "descriptorVersion": 1,
-      "fields": {
-        "_rev": {
-          "descriptorVersion": 1,
-          "integer": true,
-          "kind": "number",
-          "min": 0,
-          "nullable": false,
-          "presence": "required"
-        },
-        "compact": {
-          "defaultValue": false,
-          "descriptorVersion": 1,
-          "kind": "boolean",
-          "nullable": false,
-          "presence": "default"
-        }
-      },
-      "kind": "object",
-      "nullable": false,
-      "presence": "required"
-    },
-    "visibility": "public"
+    "name": "preferences.update"
   },
 } as const);

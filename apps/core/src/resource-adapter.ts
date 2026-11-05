@@ -251,6 +251,15 @@ export type AppFunctionCall = (
     readonly fromRun: boolean;
     readonly agent?: CallingAgent;
     readonly appCalls: { used: number };
+    /**
+     * The release and contract the reviewed binding was checked against:
+     * the call runs only there (`version.mismatch` otherwise), never on
+     * a version published since, whatever the request names.
+     */
+    readonly pinned?: {
+      readonly version: number;
+      readonly fingerprint: string;
+    };
     /** For a run's chain: its lease, checked just before each commit. */
     readonly requireHolds?: () => void;
     /** For a run's chain: the run (`BindingCaller.runOrigin`). */

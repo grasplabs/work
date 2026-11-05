@@ -97,11 +97,13 @@ const originOf = (url: unknown): string => {
 /** What the client reads of a token, without checking it. */
 interface TokenClaims {
   readonly sub: string;
+  /** The one App it is good for: where its calls go. */
+  readonly app: string;
   /** Its `exp`, in milliseconds, when it says one. */
   readonly expiresAt: number | undefined;
 }
 
-/** `token`'s `sub` and `exp`, read without checking them; or `undefined`. */
+/** `token`'s `sub`, `app` and `exp`, read without checking them; or `undefined`. */
 const claimsOf = (token: string): TokenClaims | undefined => {
   const [, payload, signature, ...more] = token.split(".");
   if (payload === undefined || signature === undefined || more.length > 0) {
@@ -112,10 +114,15 @@ const claimsOf = (token: string): TokenClaims | undefined => {
       new TextDecoder().decode(fromBase64Url(payload))
     );
     const sub = isPlainObject(claims) ? claims.sub : undefined;
+    const app = isPlainObject(claims) ? claims.app : undefined;
     const exp = isPlainObject(claims) ? claims.exp : undefined;
-    return typeof sub === "string" && sub.length > 0
+    return typeof sub === "string" &&
+      sub.length > 0 &&
+      typeof app === "string" &&
+      app.length > 0
       ? {
           sub,
+          app,
           expiresAt:
             typeof exp === "number" && Number.isFinite(exp)
               ? exp * 1000
@@ -144,7 +151,16 @@ const keepUntil = (claims: TokenClaims, now: number): number =>
 /** A token as the client read it: what it sends, and whose it is. */
 export interface PortableToken {
   readonly text: string;
+  /**
+   * Whose it is: the person in the App it is good for. Calls name
+   * functions by name alone, so what the client holds (results, keys left
+   * unknown, drafts) is one App's: a token for another App, even the same
+   * person's, is a switch the client clears everything for, as for
+   * someone else.
+   */
   readonly principal: string;
+  /** The App it is good for, as it says (core checks it): where calls go. */
+  readonly app: string;
   /** Its `exp`, in milliseconds, as it says (not trusted: core checks). */
   readonly expiresAt: number | undefined;
 }
@@ -275,7 +291,8 @@ export class PortableTransport {
       }
       const token = {
         text,
-        principal: claims.sub,
+        principal: JSON.stringify([claims.app, claims.sub]),
+        app: claims.app,
         expiresAt: claims.expiresAt,
       };
       if (number >= this.#current) {

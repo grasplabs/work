@@ -71,7 +71,7 @@ export default function Asks() {
 const approval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 /** The App's \`remember\`, as the ask names it. */
-const remember = { contractId: "asks.remember", kind: "mutation" } as const;
+const remember = { name: "asks.remember", kind: "mutation" } as const;
 
 export default workflow(
   "approval",

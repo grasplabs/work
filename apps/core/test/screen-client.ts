@@ -160,9 +160,9 @@ const network = (transport: ClientTransport) => {
   return {
     transport: {
       watch: transport.watch,
-      call: async (request: string, app: string) => {
+      call: async (request: string) => {
         sent += 1;
-        const answer = await transport.call(request, app);
+        const answer = await transport.call(request);
         if (dropping > 0) {
           dropping -= 1;
           await meanwhile?.();
@@ -255,16 +255,11 @@ export const shown = (snapshot: {
 /** A query's call as the client sends it, for a raw subscription. */
 export const requestOf = (
   reference: OperationReference<unknown, unknown, ReferenceKind>,
-  input: unknown
+  input: unknown,
+  kind: ReferenceKind = "query"
 ): string =>
   JSON.stringify({
-    reference: {
-      resourceId: reference.resourceId,
-      resourceVersion: reference.resourceVersion,
-      contractId: reference.contractId,
-      fingerprint: reference.fingerprint,
-      kind: reference.kind,
-    },
+    reference: { name: reference.name, kind },
     input,
   });
 

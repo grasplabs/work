@@ -188,13 +188,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
         bob,
         app,
         JSON.stringify({
-          reference: {
-            resourceId: release.manifest.resourceId,
-            resourceVersion: release.manifest.resourceVersion,
-            contractId: path,
-            fingerprint: release.fingerprints[path] ?? "",
-            kind: operation?.kind,
-          },
+          reference: { name: path, kind: operation?.kind },
           input,
         })
       );
@@ -385,13 +379,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         who,
         app,
         JSON.stringify({
-          reference: {
-            resourceId: release.manifest.resourceId,
-            resourceVersion: release.manifest.resourceVersion,
-            contractId: "requests.kickOff",
-            fingerprint: release.fingerprints["requests.kickOff"] ?? "",
-            kind: "action",
-          },
+          reference: { name: "requests.kickOff", kind: "action" },
           input: { who: "Someone" },
         })
       );
@@ -412,8 +400,8 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     );
 
     const references = {
-      runs: await queryReference(release, "followUp", "runs"),
-      history: await queryReference(release, "followUp", "history"),
+      runs: queryReference(release, "followUp", "runs"),
+      history: queryReference(release, "followUp", "history"),
     };
     const ask = async (
       who: Identity,
@@ -511,7 +499,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const forged = { ...references.runs, fingerprint: "0".repeat(64) };
     const unknown = {
       ...references.runs,
-      contractId: "workflows.other.queries.runs",
+      name: "workflows.other.queries.runs",
     };
     expect({
       forged: codeOf(await ask(bob, forged, { pagination: {} })),
@@ -528,7 +516,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         await ask(bob, references.history, { runId: first }, 10)
       ),
     }).toStrictEqual({
-      forged: "version.mismatch",
+      forged: "contract.invalid_request",
       unknown: "operation.not_found",
       status: "contract.invalid_args",
       cursor: "data.invalid_cursor",
@@ -566,7 +554,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     // 150 runs of Bob's through the first App, 3 through the second.
     await startedRuns(first.app, workflow.id, bob.userId, 150);
     await startedRuns(second.app, workflow.id, bob.userId, 3);
-    const runs = await queryReference(first.release, "followUp", "runs");
+    const runs = queryReference(first.release, "followUp", "runs");
     const ask = async (input: unknown, window?: number) => {
       const request = JSON.stringify({
         reference: runs,
@@ -594,7 +582,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         bob,
         second.app,
         JSON.stringify({
-          reference: await queryReference(second.release, "followUp", "runs"),
+          reference: queryReference(second.release, "followUp", "runs"),
           input: { pagination: {} },
         })
       );
@@ -656,7 +644,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
           reference:
             app === first.app
               ? runs
-              : await queryReference(second.release, "followUp", "runs"),
+              : queryReference(second.release, "followUp", "runs"),
           input: { pagination: {} },
         }),
         Date.now() + 30_000,
@@ -822,13 +810,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
       bob,
       app,
       JSON.stringify({
-        reference: {
-          resourceId: release.manifest.resourceId,
-          resourceVersion: release.manifest.resourceVersion,
-          contractId: "requests.kickOff",
-          fingerprint: release.fingerprints["requests.kickOff"] ?? "",
-          kind: "action",
-        },
+        reference: { name: "requests.kickOff", kind: "action" },
         input: { who: "Ada" },
       })
     );
@@ -839,7 +821,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     // A run of the App's that no App version's contract accounts for: its
     // receipt names no version that started it.
     await startedRuns(app, workflow.id, bob.userId, 1);
-    const runs = await queryReference(release, "followUp", "runs");
+    const runs = queryReference(release, "followUp", "runs");
     const declared = declaredWorkflows(release.app, release.workflows).find(
       (bound) => bound.alias === "followUp"
     );
@@ -1000,13 +982,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         who,
         through.app,
         JSON.stringify({
-          reference: {
-            resourceId: through.release.manifest.resourceId,
-            resourceVersion: through.release.manifest.resourceVersion,
-            contractId: "requests.kickOff",
-            fingerprint: through.release.fingerprints["requests.kickOff"] ?? "",
-            kind: "action",
-          },
+          reference: { name: "requests.kickOff", kind: "action" },
           input: { who: name },
         })
       );
@@ -1041,7 +1017,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       { version: 1, input: { who: "Owner" }, key: `key-${unique()}` }
     );
 
-    const history = await queryReference(release, "followUp", "history");
+    const history = queryReference(release, "followUp", "history");
     const ask = async (
       who: Identity,
       input: unknown,
@@ -1240,7 +1216,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     );
     const next = await seal(fixture, 2);
     await setCurrentVersion(env, owner, app, 2);
-    const nextHistory = await queryReference(next, "followUp", "history");
+    const nextHistory = queryReference(next, "followUp", "history");
     const askNext = async (input: unknown) => {
       const answer = await callAppFunction(
         env,
@@ -1311,13 +1287,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       bob,
       fixture.app,
       JSON.stringify({
-        reference: {
-          resourceId: release.manifest.resourceId,
-          resourceVersion: release.manifest.resourceVersion,
-          contractId: "requests.kickOff",
-          fingerprint: release.fingerprints["requests.kickOff"] ?? "",
-          kind: "action",
-        },
+        reference: { name: "requests.kickOff", kind: "action" },
         input: { who: "Bob" },
       })
     );
@@ -1331,7 +1301,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       },
       { timeout: 60_000, interval: 200 }
     );
-    const history = await queryReference(release, "followUp", "history");
+    const history = queryReference(release, "followUp", "history");
     const read = async (input: unknown, window?: number) => {
       const request = JSON.stringify({
         reference: history,
@@ -1378,7 +1348,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const cutOff = await readWorkflowWindow(
       env,
       { app: fixture.app, userId: bob.userId },
-      await workflowQueryOf(release, history),
+      workflowQueryOf(release, history),
       { runId },
       {
         extent: 500,
@@ -1400,7 +1370,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const rebound = await readWorkflowWindow(
       env,
       { app: fixture.app, userId: bob.userId },
-      await workflowQueryOf(release, history),
+      workflowQueryOf(release, history),
       { runId },
       {
         extent: 500,

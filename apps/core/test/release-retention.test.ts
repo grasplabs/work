@@ -729,13 +729,7 @@ describe("revocation", { timeout: 120_000 }, () => {
       owner,
       app,
       JSON.stringify({
-        reference: {
-          resourceId: app,
-          resourceVersion: 2,
-          contractId: "notes.label",
-          fingerprint: second.fingerprints["notes.label"],
-          kind: "query",
-        },
+        reference: { name: "notes.label", kind: "query" },
         input: {},
       })
     );

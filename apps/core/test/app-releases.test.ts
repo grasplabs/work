@@ -243,8 +243,9 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       artifactKey(artifactAt(release, "server/_generated/api.ts").sha256)
     );
     const text = (await references?.text()) ?? "";
-    expect(text).toContain(`"resourceId": "${fixture.app}"`);
-    expect(text).toContain('"contractId": "notes.create"');
+    // Names, the same for every release: no App or version in them.
+    expect(text).not.toContain(fixture.app);
+    expect(text).toContain('"name": "notes.create"');
     expect(text).not.toContain("notes.count");
   });
 
@@ -1838,7 +1839,7 @@ import { action, query } from "@server/_generated/server";
 export const defaults = query({
   args: {},
   returns: v.boolean(),
-  handler: () => preferences.get.contractId === "preferences.get",
+  handler: () => preferences.get.name === "preferences.get",
 });
 
 export const reach = action({

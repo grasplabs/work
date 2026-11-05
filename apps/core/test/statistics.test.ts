@@ -219,13 +219,7 @@ const callAs = async (
     await callerOf(userId),
     app,
     JSON.stringify({
-      reference: {
-        resourceId: sealed.manifest.resourceId,
-        resourceVersion: sealed.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: sealed.fingerprints[path] ?? "",
-        kind: operation.kind,
-      },
+      reference: { name: path, kind: operation.kind },
       input,
     })
   );
@@ -1216,7 +1210,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
 
 /** A function of the Stats App, as a step names it. */
 const statsFunction = (name: string, kind = "action") =>
-  JSON.stringify({ contractId: `stats.${name}`, kind });
+  JSON.stringify({ name: `stats.${name}`, kind });
 
 /** The input of `stats.platformRead`, as a step passes it. */
 const statsInput = (value: unknown) =>

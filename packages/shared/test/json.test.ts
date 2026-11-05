@@ -2,6 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { canonicalJson, valueAtPointer } from "../src/json.ts";
 
+/** `canonicalJson` of what untyped data can hold, past the `Json` type. */
+const untyped = (value: unknown): unknown =>
+  Reflect.apply(canonicalJson, undefined, [value]);
+
 describe("canonical JSON", () => {
   it("gives the same text whatever order the keys were written in", () => {
     expect(
@@ -27,6 +31,11 @@ describe("canonical JSON", () => {
 
   it("refuses numbers JSON can't represent", () => {
     expect(() => canonicalJson({ amount: Number.NaN })).toThrow(TypeError);
+  });
+
+  it("refuses an array entry JSON can't write, never making text that isn't JSON", () => {
+    expect(() => untyped([undefined, undefined])).toThrow(TypeError);
+    expect(() => untyped({ items: [() => 1] })).toThrow(TypeError);
   });
 });
 

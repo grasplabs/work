@@ -993,10 +993,7 @@ describe(appFunctions, () => {
     expect({ run: run.status, calls }).toStrictEqual({
       run: "completed",
       calls: [
-        [
-          { contractId: "drafts.propose", kind: "mutation" },
-          { title: "Notes" },
-        ],
+        [{ name: "drafts.propose", kind: "mutation" }, { title: "Notes" }],
       ],
     });
     expect(run).toMatchObject({ output: "draft-1" });

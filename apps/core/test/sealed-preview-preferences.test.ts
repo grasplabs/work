@@ -1,10 +1,8 @@
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { discardFixtureStore } from "../src/data-stores.ts";
@@ -14,7 +12,6 @@ import { mockIdp } from "./idp.ts";
 import {
   deskDraft,
   deskFiles,
-  draftVersion,
   livePushes,
   notesFiles,
   preferenceCall,
@@ -24,7 +21,6 @@ import {
 import {
   chatsOf,
   chatWithDraft,
-  keptManifestSchema,
   outcome,
   outcomeOfText,
   previewStores,
@@ -64,7 +60,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
         asBuilder,
         app,
         JSON.stringify({
-          reference: await preferenceReference(app, 1, name),
+          reference: preferenceReference(name),
           input,
         })
       );
@@ -88,23 +84,9 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
           JSON.stringify({ reference, input })
         )
       );
-    /** The draft release's version at `at`, from a call of its own. */
-    const versionAt = async (at: number): Promise<number> =>
-      z
-        .object({ reference: z.object({ resourceVersion: z.int() }) })
-        .parse(
-          JSON.parse(
-            await requestFor(
-              builder,
-              { chatId, app, revision: at },
-              "notes.titles"
-            )
-          )
-        ).reference.resourceVersion;
-    const versionNow = await versionAt(revision);
     const draft = {
-      get: await preferenceReference(app, versionNow, "get"),
-      update: await preferenceReference(app, versionNow, "update"),
+      get: preferenceReference("get"),
+      update: preferenceReference("update"),
     };
     const first = {
       // The defaults, not what they chose on the App.
@@ -113,17 +95,11 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
         expectedRevision: 0,
         patch: { theme: "dark" },
       }),
-      // A version's reference names nothing in the preview.
-      versionsReference: await previewed(
-        revision,
-        await preferenceReference(app, 1, "get"),
-        {}
-      ),
       runs: await previewed(
         revision,
         {
           ...draft.get,
-          contractId: "workflows.followUp.queries.runs",
+          name: "workflows.followUp.queries.runs",
         },
         { pagination: {} }
       ),
@@ -137,18 +113,12 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       },
       revision
     );
-    const nextVersion = await versionAt(next);
-    const again = await previewed(
-      next,
-      await preferenceReference(app, nextVersion, "get"),
-      {}
-    );
+    const again = await previewed(next, preferenceReference("get"), {});
 
     expect({ first, real, again }).toStrictEqual({
       first: {
         read: { compact: false, theme: "light", _rev: 0 },
         written: { compact: false, theme: "dark", _rev: 1 },
-        versionsReference: "version.mismatch",
         runs: "resource.unavailable",
       },
       real: { compact: true, theme: "light", _rev: 1 },
@@ -167,35 +137,13 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
 }
 `,
     });
-    // The draft release's version: the one its contracts were sealed for.
-    await chatsOf(builder).previewReferences(
-      chatId,
-      builder.userId,
-      app,
-      revision
-    );
-    const version = await runInDurableObject(
-      chatsOf(builder),
-      (_instance, state) =>
-        keptManifestSchema.parse(
-          JSON.parse(
-            state.storage.sql
-              .exec<{ manifest: string }>(
-                "SELECT manifest FROM preview_releases WHERE chat_id = ? AND app_id = ?",
-                chatId,
-                app
-              )
-              .one().manifest
-          )
-        ).resourceVersion
-    );
     const answered = outcome(
       await builder.api.chats.previewFunction(
         chatId,
         app,
         revision,
         JSON.stringify({
-          reference: await preferenceReference(app, version, "update"),
+          reference: preferenceReference("update"),
           input: { expectedRevision: 0, patch: { compact: true } },
         })
       )
@@ -212,7 +160,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
         app,
         revision,
         JSON.stringify({
-          reference: await preferenceReference(app, version, "get"),
+          reference: preferenceReference("get"),
           input: {},
         })
       )
@@ -404,11 +352,7 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
       draft.app,
       draft.revision,
       JSON.stringify({
-        reference: await preferenceReference(
-          draft.app,
-          await draftVersion(builder, draft.chatId, draft.app, draft.revision),
-          "get"
-        ),
+        reference: preferenceReference("get"),
         input: {},
       }),
       live.push
@@ -435,11 +379,7 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const draft = await deskDraft(builder);
     const request = JSON.stringify({
-      reference: await preferenceReference(
-        draft.app,
-        await draftVersion(builder, draft.chatId, draft.app, draft.revision),
-        "get"
-      ),
+      reference: preferenceReference("get"),
       input: {},
       window: { extent: 500 },
     });

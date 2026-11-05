@@ -10,7 +10,7 @@ import type {
   Callable,
   ReferenceKind,
   ReturnOf,
-  StreamingFunction,
+  SingleAnswer,
   WorkflowInputOf,
   WorkflowOutputOf,
 } from "./references.ts";
@@ -45,12 +45,7 @@ export const appTestTimeoutMs = 30_000;
 export type PublicReference<Kind extends ReferenceKind> = Callable<
   Kind,
   "public"
-> & {
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-  readonly contractId: string;
-  readonly fingerprint: string;
-};
+> & { readonly name: string };
 
 /**
  * The most snapshots a live query keeps that `next` hasn't taken: one
@@ -104,10 +99,7 @@ export interface TestPrincipal {
     // 10.7.6), never through a call that answers once: its type is
     // refused here, as the host refuses it (`operation.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
-    reference: Reference &
-      ([Extract<Reference, StreamingFunction>] extends [never]
-        ? unknown
-        : never),
+    reference: SingleAnswer<Reference>,
     args: ArgsOf<Reference>
   ) => Promise<ReturnOf<Reference>>;
   /**
@@ -535,14 +527,19 @@ const requestFor = (
   kind: ReferenceKind,
   args: unknown
 ): string => {
-  if (!isRecord(reference) || reference.kind !== kind) {
+  // A reference names its function; a mutation's or an action's also says
+  // its kind, which must be the call's.
+  if (
+    !isRecord(reference) ||
+    typeof reference.name !== "string" ||
+    (reference.kind !== undefined && reference.kind !== kind)
+  ) {
     throw new TestAssertionError(
       `expected a reference to one of the App's ${kind === "query" ? "queries" : `${kind}s`}, from @server/_generated/api`
     );
   }
-  const { resourceId, resourceVersion, contractId, fingerprint } = reference;
   return JSON.stringify({
-    reference: { resourceId, resourceVersion, contractId, fingerprint, kind },
+    reference: { name: reference.name, kind },
     input: args,
   });
 };
@@ -597,10 +594,10 @@ const shown = (value: unknown): string => {
     : text;
 };
 
-/** The contract a reference names, for a failure's text. */
+/** The function a reference names, for a failure's text. */
 const contractOf = (reference: unknown): string =>
-  isRecord(reference) && typeof reference.contractId === "string"
-    ? reference.contractId
+  isRecord(reference) && typeof reference.name === "string"
+    ? reference.name
     : "a query";
 
 /** A push of core's, as far as a live query reads it. */

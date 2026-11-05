@@ -1,6 +1,5 @@
 import {
   isPeopleOperationName,
-  peopleFingerprints,
   peopleLimits,
   peopleOperations,
   schemaFromDescriptor,
@@ -12,7 +11,6 @@ import type {
   TeamRef,
   User,
 } from "@grasp-os/sdk/host";
-import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -143,19 +141,16 @@ export const answerPeople = async (
 };
 
 /**
- * The read `contractId` names, for a screen's call of `people.<read>`
- * (`peopleReferences`, people.ts): undefined for any other path. Its
- * fingerprint must be the one this SDK makes (`version.mismatch`
- * otherwise): a screen sealed with another contract is told so, never
- * answered in a shape it doesn't expect. The reference names no App: the
- * App is the one the call was made through.
+ * The read `name` names, for a screen's call of `people.<read>`
+ * (`peopleReferences`, people.ts): undefined for any other path. What it
+ * takes is checked by the read's own contract (`checkedArgs`). The
+ * reference names no App: the App is the one the call was made through.
  */
 export const peopleReadOf = (reference: {
-  readonly contractId: string;
-  readonly fingerprint: string;
+  readonly name: string;
   readonly kind: string;
 }): PeopleOperationName | undefined => {
-  const [segment, name, ...rest] = reference.contractId.split(".");
+  const [segment, name, ...rest] = reference.name.split(".");
   if (segment !== "people") {
     return undefined;
   }
@@ -165,15 +160,12 @@ export const peopleReadOf = (reference: {
   if (reference.kind !== "query") {
     throw operationErrors.create("operation.kind_mismatch");
   }
-  if (reference.fingerprint !== peopleFingerprints[name]) {
-    throw versionErrors.create("version.mismatch");
-  }
   return name;
 };
 
-/** Whether `contractId` is under the platform's `people` segment. */
-export const isPeoplePath = (contractId: string): boolean =>
-  contractId.startsWith("people.");
+/** Whether `name` is under the platform's `people` segment. */
+export const isPeoplePath = (name: string): boolean =>
+  name.startsWith("people.");
 
 /** The organization's current members: a membership, and no removal. */
 const currentMember = and(

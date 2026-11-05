@@ -259,7 +259,7 @@ describe(
       ],
       [
         "an App function's answer read as a connection's",
-        '    return (await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "x" })).output;',
+        '    return (await env.APP.callFunction({ name: "counter.hits", kind: "query" }, { name: "x" })).output;',
       ],
       [
         "a call of the App's server methods, which a run no longer has",
@@ -318,7 +318,7 @@ describe(
     it("make current a workflow that reads its bindings as what its App's permissions make them", async () => {
       await expect(
         refusedActivation(
-          checked(`    const answered = await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "x" });
+          checked(`    const answered = await env.APP.callFunction({ name: "counter.hits", kind: "query" }, { name: "x" });
     const sent = await env.MAIL.call("mail.send", { to: "ada@acme.test" });
     return answered.ok ? sent.output.length + crypto.randomUUID().length : 0;`),
           true

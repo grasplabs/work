@@ -33,7 +33,7 @@ import type {
   Callable,
   ReferenceKind,
   ReturnOf,
-  StreamingFunction,
+  IsStreaming,
 } from "./references.ts";
 import {
   generatedStepOptionSchemas,
@@ -718,15 +718,13 @@ export type WorkflowBrainBinding = Required<
 
 /**
  * Which of the App's functions `callFunction` calls: its generated
- * reference, or just its `contractId` and `kind`. The host checks the
- * rest against the release the run is pinned to.
+ * reference, or its name and kind. A query's reference holds no kind, so
+ * a reference without one calls a query. The host resolves it in the
+ * release the run is pinned to.
  */
 export interface FunctionReferenceName {
-  readonly contractId: string;
-  readonly kind: ReferenceKind;
-  readonly resourceId?: string;
-  readonly resourceVersion?: number;
-  readonly fingerprint?: string;
+  readonly name: string;
+  readonly kind?: ReferenceKind;
 }
 
 /**
@@ -840,7 +838,7 @@ export type FunctionPaths<
   : {
       [Key in keyof Tree & string]: Tree[Key] extends Callable
         ? Tree[Key] extends Callable<Kind, "public">
-          ? Tree[Key] extends StreamingFunction
+          ? true extends IsStreaming<Tree[Key]>
             ? never
             : `${Prefix}${Key}`
           : never
@@ -870,13 +868,13 @@ export type FunctionAt<
 type FunctionCall<Tree, Kind extends ReferenceKind> = <
   Path extends FunctionPaths<Tree, Kind>,
 >(
-  contractId: Path,
+  name: Path,
   input: ArgsOf<FunctionAt<Tree, Path>>
 ) => Promise<FunctionResult<ReturnOf<FunctionAt<Tree, Path>>>>;
 
 /** A call of any of the App's functions, untyped: by path, with JSON. */
 type UntypedFunctionCall = (
-  contractId: string,
+  name: string,
   input: Json
 ) => Promise<FunctionResult<Json>>;
 
@@ -899,7 +897,7 @@ export type AppFunctionsStub<Tree> = unknown extends Tree
 /**
  * A typed stub of the run's own App's public functions (spec 8, GRA-711):
  * `appFunctions<Intake>(env).mutation("drafts.propose", input)` is
- * `env.APP.callFunction({ contractId: "drafts.propose", kind: "mutation" },
+ * `env.APP.callFunction({ name: "drafts.propose", kind: "mutation" },
  * input)`, typed by the App's own definitions, which a workflow imports
  * as types only, grouped by their server modules, as their paths are:
  *
@@ -928,12 +926,12 @@ export const appFunctions = <Tree = unknown>(
 ): AppFunctionsStub<Tree> => {
   const call =
     (kind: ReferenceKind) =>
-    async (contractId: string, input: Json): Promise<unknown> => {
+    async (name: string, input: Json): Promise<unknown> => {
       const app = env.APP;
       if (app?.callFunction === undefined) {
         throw invalidCall("The run has no App to call (env.APP)");
       }
-      return await app.callFunction({ contractId, kind }, input ?? null);
+      return await app.callFunction({ name, kind }, input ?? null);
     };
   // Exactly the three methods, with nothing inherited to reach: any other
   // name is undefined, and calling it fails.

@@ -1,4 +1,4 @@
-import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
+import { preferenceOperations } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -95,13 +95,7 @@ export default app({
 /** The call of `path` with `input`, as the chat's code writes it. */
 const callOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path],
-      kind: release.app.operations[path]?.kind,
-    },
+    reference: { name: path, kind: release.app.operations[path]?.kind },
     input,
   });
 
@@ -109,24 +103,18 @@ const callOf = (release: Release, path: string, input: unknown): string =>
  * The call of the App's preference operation `name` with `input`, as the
  * chat's code writes it, naming `kind` (the operation's own unless given).
  */
-const preferenceCallOf = async (
+const preferenceCallOf = (
   release: Release,
   name: "get" | "update",
   input: unknown,
   kind?: string
-): Promise<string> => {
+): string => {
   if (release.app.preferences === null) {
     throw new Error("The App declares no preferences");
   }
   const operation = preferenceOperations(release.app.preferences)[name];
   return JSON.stringify({
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: operation.path,
-      fingerprint: await contractFingerprint(operation),
-      kind: kind ?? operation.kind,
-    },
+    reference: { name: operation.path, kind: kind ?? operation.kind },
     input,
   });
 };
@@ -348,10 +336,10 @@ describe(
       const app = JSON.stringify(notes.app);
       const update = { expectedRevision: 0, patch: { compact: true } };
       const calls = {
-        get: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "get", {}))}))`,
-        update: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "update", update))}))`,
+        get: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "get", {}))}))`,
+        update: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "update", update))}))`,
         // The update, named a query so a read permission would let it by.
-        disguised: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "update", update, "query"))}))`,
+        disguised: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "update", update, "query"))}))`,
       };
 
       const reading = await run(notes, tryEach(calls), ["read"]);

@@ -554,29 +554,36 @@ const dataOf = (value: unknown, depth: number): string => {
   );
 };
 
-/** A function reference, as the data a generated module holds. */
-const referenceOf = (
-  identity: ReleaseIdentity,
-  operation: OperationManifest,
-  fingerprint: string
-) => ({
-  resourceId: identity.resourceId,
-  resourceVersion: identity.resourceVersion,
-  contractId: operation.path,
-  fingerprint,
-  kind: operation.kind,
-  mode: operation.stream === null ? "single" : "stream",
-  ...(operation.stream === null ? {} : { stream: operation.stream }),
-  visibility: operation.visibility,
-  args: operation.args,
-  returns: operation.returns,
-});
+/**
+ * A function reference, as the data a generated module holds, built with
+ * the server code: its name, and a mutation's or an action's kind and
+ * argument descriptor (`useForm` sends and checks a form with them), or a query's declared return
+ * (`DataGrid` reads its columns from it). Nothing that changes
+ * from one release to the next: core resolves the name in the release
+ * that answers the call, and checks the call with the function's own
+ * validator.
+ */
+const referenceOf = (operation: OperationManifest) => {
+  if (operation.kind !== "query") {
+    return { name: operation.path, kind: operation.kind, args: operation.args };
+  }
+  return operation.returns === null
+    ? { name: operation.path }
+    : { name: operation.path, returns: operation.returns };
+};
 
-/** A function reference's type. */
+/**
+ * A function reference's type, from its descriptors: what it takes, what
+ * it answers (`unknown` where it declares no `returns`) and, for a
+ * streaming action, what it streams. The same for every release that
+ * declares the function alike.
+ */
 const referenceTypeOf = (operation: OperationManifest): string => {
   const parts = [
     valueTypeOf(operation.args, "input"),
-    valueTypeOf(operation.returns, "output"),
+    operation.returns === null
+      ? "unknown"
+      : valueTypeOf(operation.returns, "output"),
     JSON.stringify(operation.kind),
     JSON.stringify(operation.visibility),
   ];
@@ -675,9 +682,7 @@ export type ActionCtx<Uses extends readonly Use[] = readonly []> =
 /** A tree of function references as a module's typed, frozen export. */
 const referenceExport = (
   name: string,
-  operations: readonly OperationManifest[],
-  identity: ReleaseIdentity,
-  fingerprints: Readonly<Record<string, string>>
+  operations: readonly OperationManifest[]
 ): string => {
   const tree = treeOf(
     operations.map((operation) => [operation.path, operation])
@@ -692,11 +697,7 @@ const referenceExport = (
   );
   const value = renderTree(
     tree,
-    (operation, depth) =>
-      dataOf(
-        referenceOf(identity, operation, fingerprints[operation.path] ?? ""),
-        depth
-      ),
+    (operation, depth) => dataOf(referenceOf(operation), depth),
     key,
     ",",
     0
@@ -714,17 +715,8 @@ const operationsOf = (
     .toSorted((a, b) => (a.path < b.path ? -1 : 1));
 
 /** `@server/_generated/internal`: the internal tree. */
-const serverReferencesText = (
-  manifest: AppManifest,
-  identity: ReleaseIdentity,
-  fingerprints: Readonly<Record<string, string>>
-): string => {
-  const body = referenceExport(
-    "internal",
-    operationsOf(manifest, "internal"),
-    identity,
-    fingerprints
-  );
+const serverReferencesText = (manifest: AppManifest): string => {
+  const body = referenceExport("internal", operationsOf(manifest, "internal"));
   return `${banner}${typeImports(body, ["OperationReference", ...valueTypes])}\n${freezer}\n${body}`;
 };
 
@@ -915,12 +907,7 @@ export const workflowReferenceOf = async (
   const queries: Record<string, unknown> = {};
   for (const [name, operation] of Object.entries(workflowQueries(workflow))) {
     if (operation !== undefined) {
-      queries[name] = referenceOf(
-        identity,
-        operation,
-        // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
-        await contractFingerprint(operation)
-      );
+      queries[name] = referenceOf(operation);
     }
   }
   return {
@@ -973,16 +960,10 @@ const workflowsExport = async (
 const referencesText = async (
   manifest: AppManifest,
   identity: ReleaseIdentity,
-  fingerprints: Readonly<Record<string, string>>,
   workflows: readonly BoundWorkflow[]
 ): Promise<string> => {
   const parts: string[] = [
-    referenceExport(
-      "api",
-      operationsOf(manifest, "public"),
-      identity,
-      fingerprints
-    ),
+    referenceExport("api", operationsOf(manifest, "public")),
     await workflowsExport(identity, workflows),
   ];
 
@@ -1073,11 +1054,8 @@ const referencesText = async (
       ([name, operation]) =>
         `  readonly ${name}: ${referenceTypeOf(operation)};`
     );
-    const values = await Promise.all(
-      operations.map(
-        async ([name, operation]) =>
-          `  ${name}: ${dataOf(referenceOf(identity, operation, await contractFingerprint(operation)), 1)},`
-      )
+    const values = operations.map(
+      ([name, operation]) => `  ${name}: ${dataOf(referenceOf(operation), 1)},`
     );
     parts.push(
       `export const preferences: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`
@@ -1140,17 +1118,8 @@ export const generateModules = async (
   return {
     [generatedPaths.server]: serverModuleSource,
     [generatedPaths.dataModel]: dataModelSource,
-    [generatedPaths.internal]: serverReferencesText(
-      manifest,
-      identity,
-      fingerprints
-    ),
-    [generatedPaths.api]: await referencesText(
-      manifest,
-      identity,
-      fingerprints,
-      workflows
-    ),
+    [generatedPaths.internal]: serverReferencesText(manifest),
+    [generatedPaths.api]: await referencesText(manifest, identity, workflows),
     [generatedPaths.contracts]: `${contracts}\n`,
   };
 };
@@ -1197,11 +1166,10 @@ ${contracts.join("\n")}
 
 /**
  * A tree of symbolic references, for inspection only: any path read of it
- * is a reference of `visibility` to that path, which the registration
- * resolves (its kind is what is registered there) or refuses.
+ * is a reference to that path, which the registration resolves or
+ * refuses.
  */
-const symbolicTree = (visibility: "public" | "internal"): string =>
-  `symbolic(${JSON.stringify(visibility)})`;
+const symbolicTree = "symbolic()";
 
 /**
  * The modules inspection loads in place of `@server/_generated/api` and
@@ -1225,33 +1193,31 @@ const standInImport =
  * The stand-in trees' type: at every path, a reference that takes and
  * answers `any`, so a call through one (`useQuery`, `ctx.runQuery`) types
  * its answer `any` too, never `unknown`, and nothing that uses it fails
- * for want of the real references. Its `mode` is `any`, so it is taken
- * where a reference that answers once is (`useQuery`) and where one that
- * streams is (`useStream`); real references keep their own.
+ * for want of the real references. A reference's fields follow its kind,
+ * and an `any` kind makes them a query's or a mutation's, never both, so
+ * the stand-in also holds a mutation's and an action's `kind` and `args`:
+ * it passes for a reference of every kind.
  */
 const standInTree = `
-type StandIn = Omit<OperationReference<any, any, any, any, any>, "mode"> & { readonly mode: any; readonly [name: string]: StandIn };
+type StandIn = OperationReference<any, any, any, any, any> & { readonly kind: any; readonly args: any } & { readonly [name: string]: StandIn };
 `;
 
 export const symbolicModules = (): Record<string, string> => {
-  const prelude = `${banner}const symbolic = (visibility: string) => {
+  const prelude = `${banner}const symbolic = () => {
   const nodes = new Map<string, object>();
   const node = (path: string): object => {
     const known = nodes.get(path);
     if (known !== undefined) {
       return known;
     }
-    const target = Object.freeze({ contractId: path, visibility });
+    const target = Object.freeze({ name: path });
     const made: object = new Proxy(target, {
       get: (_target, name) => {
         if (typeof name !== "string" || name === "then") {
           return undefined;
         }
-        if (name === "contractId" || name === "visibility") {
-          return target[name];
-        }
-        if (name === "kind") {
-          return undefined;
+        if (name === "name") {
+          return target.name;
         }
         return node(path === "" ? name : \`\${path}.\${name}\`);
       },
@@ -1263,7 +1229,7 @@ export const symbolicModules = (): Record<string, string> => {
 };
 `;
   return {
-    [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree("internal")} as unknown as StandIn;\n`,
-    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree("public")} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
+    [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree} as unknown as StandIn;\n`,
+    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
   };
 };

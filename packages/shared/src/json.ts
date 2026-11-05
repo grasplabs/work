@@ -36,7 +36,15 @@ export const canonicalJson = (value: Json): string => {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new TypeError("JSON has no representation for this number");
   }
-  return JSON.stringify(value);
+  // `undefined`, a function or a symbol, past the `Json` type: refused,
+  // as a number JSON can't hold is, never written as text that isn't JSON
+  // (`[,]`) or as a `null` the data never held. Only an object's
+  // `undefined` member is left out above, as an absent one.
+  const text: string | undefined = JSON.stringify(value);
+  if (text === undefined) {
+    throw new TypeError("JSON has no representation for this value");
+  }
+  return text;
 };
 
 /**

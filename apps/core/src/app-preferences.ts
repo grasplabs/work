@@ -38,10 +38,12 @@ import type { StoredPreferences } from "./store-host.ts";
 //   arguments are strict objects with no person in them, so naming one is
 //   refused as any unknown key. No role reads another's, an admin's
 //   neither.
-// - A reference made up, or of another App, release or contract: it
-//   resolves only against the App's current sealed release and the
-//   preferences it declares, rebuilt here, and must name exactly that
-//   release, kind and fingerprint. An App that declares none has none.
+// - A reference made up, or kept from another release: it is a name and
+//   a kind, resolved by name in the release that answers the call (the
+//   App's current one) against the preferences that release declares,
+//   rebuilt here. A name it doesn't declare is `operation.not_found`,
+//   another kind `operation.kind_mismatch`, and arguments are checked by
+//   that release's own descriptors. An App that declares none has none.
 //   No function of the App's shadows them: the SDK keeps the top-level
 //   `preferences` segment for the platform.
 // - Keys, values or sizes the App didn't declare: a patch is the strict,
@@ -104,28 +106,26 @@ export interface ResolvedPreferenceOperation {
   readonly preferences: unknown;
   readonly args: unknown;
   readonly returns: unknown;
-  /** Its exact contract's fingerprint, which the reference named. */
+  /**
+   * Its contract's fingerprint in the release that answers: part of what
+   * an `update`'s idempotency key is bound to, so a resend under a release
+   * whose contract differs is another change.
+   */
   readonly fingerprint: string;
 }
 
 /**
- * The preference operation `reference` names in `release`, checked as a
- * function reference is: one the release generates, of its exact App and
- * version, kind and fingerprint (`operation.not_found`,
- * `operation.kind_mismatch`, `version.mismatch`).
+ * The preference operation `reference` names in `release`, resolved as a
+ * function reference is, by its name in the release that answers
+ * (`operation.not_found`, `operation.kind_mismatch`); what it takes is
+ * that release's preferences' to check.
  */
 export const preferenceOperationOf = async (
   release: Release,
-  reference: {
-    readonly resourceId: string;
-    readonly resourceVersion: number;
-    readonly contractId: string;
-    readonly fingerprint: string;
-    readonly kind: string;
-  }
+  reference: { readonly name: string; readonly kind: string }
 ): Promise<ResolvedPreferenceOperation> => {
   const declared = release.app.preferences;
-  const name = pathPattern.exec(reference.contractId)?.groups?.name;
+  const name = pathPattern.exec(reference.name)?.groups?.name;
   if (declared === null || (name !== "get" && name !== "update")) {
     throw operationErrors.create("operation.not_found");
   }
@@ -137,13 +137,6 @@ export const preferenceOperationOf = async (
     throw operationErrors.create("operation.kind_mismatch");
   }
   const fingerprint = await contractFingerprint(operation);
-  if (
-    reference.resourceId !== release.manifest.resourceId ||
-    reference.resourceVersion !== release.manifest.resourceVersion ||
-    reference.fingerprint !== fingerprint
-  ) {
-    throw versionErrors.create("version.mismatch");
-  }
   return {
     name,
     preferences: declared,

@@ -111,13 +111,7 @@ export const requestFor = async (
   });
   const read = contractsSchema.parse(JSON.parse(kept.text ?? "null"));
   return JSON.stringify({
-    reference: {
-      resourceId: app,
-      resourceVersion: kept.version,
-      contractId: path,
-      fingerprint: read.fingerprints[path],
-      kind: read.manifest.operations[path]?.kind,
-    },
+    reference: { name: path, kind: read.manifest.operations[path]?.kind },
     input,
   });
 };

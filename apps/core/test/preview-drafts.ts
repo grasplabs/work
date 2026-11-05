@@ -1,20 +1,14 @@
 import { v } from "@grasp-os/sdk";
-import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
+import { preferenceOperations } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import type { previewStores } from "./previews.ts";
-import {
-  chatsOf,
-  chatWithDraft,
-  keptManifestSchema,
-  outcomeOfText,
-} from "./previews.ts";
+import { chatsOf, chatWithDraft, outcomeOfText } from "./previews.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The sealed previews' tests' helpers, shared by their test files
@@ -330,19 +324,9 @@ export const withPreferences = (
  * The reference to the preference operation `name` of a release of `app`
  * at `version`, as `@server/_generated/api` generates it from those preferences.
  */
-export const preferenceReference = async (
-  app: string,
-  version: number,
-  name: "get" | "update"
-) => {
+export const preferenceReference = (name: "get" | "update") => {
   const operation = preferenceOperations(preferencesDeclared)[name];
-  return {
-    resourceId: app,
-    resourceVersion: version,
-    contractId: operation.path,
-    fingerprint: await contractFingerprint(operation),
-    kind: operation.kind,
-  };
+  return { name: operation.path, kind: operation.kind };
 };
 
 /** An App with preferences and no tables, and one screen. */
@@ -367,31 +351,6 @@ export default app({
 }
 `,
 });
-
-/** The version `person`'s chat's draft release of `app` at `revision` is sealed as. */
-export const draftVersion = async (
-  person: Person,
-  chatId: Parameters<typeof previewStores>[1],
-  app: AppId,
-  revision: number
-): Promise<number> => {
-  await chatsOf(person).previewReferences(chatId, person.userId, app, revision);
-  return await runInDurableObject(
-    chatsOf(person),
-    (_instance, state) =>
-      keptManifestSchema.parse(
-        JSON.parse(
-          state.storage.sql
-            .exec<{ manifest: string }>(
-              "SELECT manifest FROM preview_releases WHERE chat_id = ? AND app_id = ?",
-              chatId,
-              app
-            )
-            .one().manifest
-        )
-      ).resourceVersion
-  );
-};
 
 /**
  * What a call of the draft's preference operation `name` answers in its
@@ -420,11 +379,7 @@ export const preferenceCall = async (
       app,
       revision,
       JSON.stringify({
-        reference: await preferenceReference(
-          app,
-          await draftVersion(person, chatId, app, revision),
-          name
-        ),
+        reference: preferenceReference(name),
         input,
       }),
       options

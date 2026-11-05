@@ -1,4 +1,9 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -9,8 +14,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
-import type { FunctionAnswer } from "../src/app-functions.ts";
+import {
+  callAppFunction,
+  callRunFunction,
+  callScreenFunction,
+} from "../src/app-functions.ts";
+import type { FunctionAnswer, RunCaller } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import {
@@ -238,7 +247,7 @@ let reads = 0;
  * listed.
  */
 const shifty = {
-  get contractId() {
+  get name() {
     reads += 1;
     return reads <= 2 ? "notes.count" : "notes.create";
   },
@@ -322,13 +331,7 @@ const referenceTo = (release: Release, path: string) => {
   if (operation === undefined) {
     throw new Error(`No ${path}`);
   }
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: path,
-    fingerprint: release.fingerprints[path] ?? "",
-    kind: operation.kind,
-  };
+  return { name: path, kind: operation.kind };
 };
 
 type Caller = Fixture["owner"];
@@ -613,159 +616,325 @@ describe("another App's store", { timeout: 120_000 }, () => {
   });
 });
 
-describe(
-  "a reference that isn't the contract that runs",
-  { timeout: 120_000 },
-  () => {
-    it.each([
-      [
-        "another fingerprint",
-        { fingerprint: "0".repeat(64) },
-        "version.mismatch",
-      ],
-      ["another version", { resourceVersion: 2 }, "version.mismatch"],
-      ["another App", { resourceId: "app_other" }, "version.mismatch"],
-      [
-        "another kind",
-        { kind: "mutation" as const },
-        "operation.kind_mismatch",
-      ],
-      [
-        "a path nothing is at",
-        { contractId: "notes.missing" },
-        "operation.not_found",
-      ],
-    ])(
-      "is refused with %s, before its input is read",
-      async (_case, forged, code) => {
-        const notes = await sealedNotes();
-        // Input that would be refused if it were read.
-        expect(
-          codeOf(await call(notes, notes.owner, "notes.get", { id: 1 }, forged))
-        ).toBe(code);
-      }
-    );
-
-    it("is refused to an internal function as to one that doesn't exist, fingerprint and all", async () => {
+// A page names a function by its name and kind, nothing more, and core
+// resolves the name in the App's current release, checking what the call
+// passes with that function's own validator. Threat model, each closed
+// here: a reference forged to name something else, or to carry a version
+// or contract; a call of an internal function; arguments the function
+// doesn't take; a page still open after a publish, calling a function the
+// new version changed or dropped; a lease kept from an older version, which
+// never makes core run that version's code (screen-delivery.test.ts
+// replays one through the page's route). Calls between Apps stay pinned by
+// their reviewed binding (app-function-calls.test.ts).
+describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
+  it.each([
+    ["another kind", { kind: "mutation" as const }, "operation.kind_mismatch"],
+    ["a name nothing is at", { name: "notes.missing" }, "operation.not_found"],
+    [
+      "a version beside the name",
+      { resourceVersion: 1 },
+      "contract.invalid_request",
+    ],
+    [
+      "a contract beside the name",
+      { fingerprint: "0".repeat(64) },
+      "contract.invalid_request",
+    ],
+  ])(
+    "is refused with %s, before its input is read",
+    async (_case, forged, code) => {
       const notes = await sealedNotes();
-      expect(codeOf(await call(notes, notes.owner, "notes.count", {}))).toBe(
-        "operation.not_found"
+      // Input that would be refused if it were read.
+      expect(
+        codeOf(
+          await callAppFunction(
+            env,
+            notes.owner,
+            notes.app,
+            JSON.stringify({
+              reference: {
+                ...referenceTo(notes.release, "notes.get"),
+                ...forged,
+              },
+              input: { id: 1 },
+            })
+          )
+        )
+      ).toBe(code);
+    }
+  );
+
+  it("finds nothing at a name that only imitates a function's, while the name itself answers", async () => {
+    const notes = await sealedNotes();
+    const imitations = [
+      // The prototype of whatever map resolves a name.
+      "__proto__",
+      "constructor",
+      "toString",
+      "hasOwnProperty",
+      "notes.__proto__",
+      "notes.get.__proto__",
+      "notes.constructor",
+      // Empty segments, padding, other separators and another case.
+      "notes..get",
+      ".notes.get",
+      "notes.get.",
+      " notes.get",
+      "notes.get ",
+      "notes/get",
+      "notes:get",
+      "NOTES.get",
+      "notes.GET",
+      // An internal function.
+      "notes.count",
+      // The names the host answers itself: people, preferences, workflows.
+      "people.__proto__",
+      "people.constructor",
+      "preferences.constructor",
+      "preferences.get",
+      "workflows.x.queries.constructor",
+      "workflows.__proto__.queries.runs",
+    ];
+    const codes = new Map<string, string>();
+    for (const name of imitations) {
+      // One at a time: each is its own call, and order doesn't matter.
+      // oxlint-disable-next-line no-await-in-loop
+      const answer = await callAppFunction(
+        env,
+        notes.owner,
+        notes.app,
+        JSON.stringify({ reference: { name, kind: "query" }, input: {} })
       );
-    });
+      codes.set(name, codeOf(answer));
+    }
+    const noteId = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Real" })
+    );
+    codes.set(
+      "notes.get",
+      codeOf(await call(notes, notes.owner, "notes.get", { id: noteId }))
+    );
+    expect(codes).toStrictEqual(
+      new Map([
+        ...imitations.map((name) => [name, "operation.not_found"] as const),
+        ["notes.get", "ok"],
+      ])
+    );
+  });
 
-    it("is held to its contract, from a screen still open on the version before: the same contract runs on the version current now, another never", async () => {
-      const notes = await sealedNotes();
-      const pinned = {
-        same: referenceTo(notes.release, "notes.bump"),
-        changed: referenceTo(notes.release, "notes.get"),
-      };
-      // Version 2 keeps `bump`'s contract, and renames `get`'s argument.
-      const files = notesFiles("Notes, renamed");
-      const operations = files["server/notes.ts"] ?? "";
-      const get = `export const get = query({
+  it("is refused to an internal function as to one that doesn't exist", async () => {
+    const notes = await sealedNotes();
+    expect(codeOf(await call(notes, notes.owner, "notes.count", {}, {}))).toBe(
+      "operation.not_found"
+    );
+  });
+
+  it("is checked by the function's own validator", async () => {
+    const notes = await sealedNotes();
+    expect({
+      wrongType: codeOf(await call(notes, notes.owner, "notes.get", { id: 1 })),
+      undeclared: codeOf(
+        await call(notes, notes.owner, "notes.bump", { extra: true })
+      ),
+      missing: codeOf(await call(notes, notes.owner, "notes.create", {})),
+    }).toStrictEqual({
+      wrongType: "contract.invalid_args",
+      undeclared: "contract.invalid_args",
+      missing: "contract.invalid_args",
+    });
+  });
+
+  it("recovers a save sent again under its key after a publish that gives its arguments a new default", async () => {
+    const notes = await sealedNotes();
+    const save = async (): Promise<unknown> => {
+      const answered = await callAppFunction(
+        env,
+        notes.owner,
+        notes.app,
+        JSON.stringify({
+          reference: { name: "notes.create", kind: "mutation" },
+          input: { title: "Kept" },
+          idempotencyKey: "save-once",
+        })
+      );
+      return answered.result.ok ? answered.result.value : codeOf(answered);
+    };
+    const first = await save();
+    // Version 2 gives `create` an argument with a default, which the
+    // version normalizes the same input to.
+    const files = notesFiles();
+    const operations = files["server/notes.ts"] ?? "";
+    const create = `export const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});`;
+    expect(operations).toContain(create);
+    files["server/notes.ts"] = operations.replace(
+      create,
+      `export const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body, tag: v.string().default("none") },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", { title: args.title, body: args.body }),
+});`
+    );
+    await commitFiles(env, notes.owner, notes.app, files, "Tag");
+    await seal(notes, 2);
+    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    const again = await save();
+    const page = valueOf(
+      await call(notes, notes.owner, "notes.list", { pagination: {} })
+    );
+    expect({ again, titles: titlesOn(page) }).toStrictEqual({
+      again: first,
+      titles: ["Kept"],
+    });
+  });
+
+  it("is answered by the version current now, from a page still open on the one before", async () => {
+    const notes = await sealedNotes();
+    const opened = {
+      get: referenceTo(notes.release, "notes.get"),
+      bump: referenceTo(notes.release, "notes.bump"),
+    };
+    // Version 2 renames `get`'s argument and takes `bump` out of its API.
+    const files = notesFiles("Notes, renamed");
+    const operations = files["server/notes.ts"] ?? "";
+    const get = `export const get = query({
   args: { id: v.id("notes") },
   returns: doc("notes").nullable(),
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });`;
-      expect(operations).toContain(get);
-      files["server/notes.ts"] = operations.replace(
+    expect(operations).toContain(get);
+    files["server/notes.ts"] = operations
+      .replace(
         get,
         get
           .replace("{ id: v.id", "{ noteId: v.id")
           .replace("args.id", "args.noteId")
+      )
+      .replace(
+        "export const bump = query(",
+        "export const bump = internalQuery("
       );
-      await commitFiles(env, notes.owner, notes.app, files, "Rename");
-      const next = await seal(notes, 2);
-      await setCurrentVersion(env, notes.owner, notes.app, 2);
-      const fromScreen = async (
-        reference: ReturnType<typeof referenceTo>,
-        input: unknown
-      ): Promise<string> =>
-        codeOf(
-          await callScreenFunction(
-            env,
-            notes.owner,
-            notes.app,
-            JSON.stringify({ reference, input }),
-            Date.now() + 30_000,
-            async () => {
-              // A window's pages cost nothing here.
-            },
-            // Opened on version 1, as its lease says.
-            { pinnedVersion: 1 }
-          )
-        );
-      const before = {
-        same: await fromScreen(pinned.same, {}),
-        changed: await fromScreen(pinned.changed, { id: "0" }),
-        // Anyone else names the version that runs.
-        agent: codeOf(
-          await call(
-            { ...notes, release: next },
-            notes.owner,
-            "notes.bump",
-            {},
-            pinned.same
-          )
-        ),
-      };
-      const admin = await person("admin");
-      await revokeRelease(
-        env,
-        admin,
-        { app: notes.app, version: 1 },
-        "Leaks data"
+    await commitFiles(env, notes.owner, notes.app, files, "Rename");
+    await seal(notes, 2);
+    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    const fromScreen = async (
+      reference: ReturnType<typeof referenceTo>,
+      input: unknown
+    ): Promise<string> =>
+      codeOf(
+        await callScreenFunction(
+          env,
+          notes.owner,
+          notes.app,
+          JSON.stringify({ reference, input }),
+          Date.now() + 30_000,
+          async () => {
+            // A window's pages cost nothing here.
+          }
+        )
       );
-      expect({
-        before,
-        revoked: {
-          pinned: await fromScreen(pinned.same, {}),
-          // The screen's own word for its version counts for nothing.
-          forged: await fromScreen({ ...pinned.same, resourceVersion: 2 }, {}),
-          // And its build, opened on version 1, gets nothing more either.
-          delivery: deliveryOf(
-            await standingOf(env, notes.app, {
-              artifact: "a".repeat(64),
-              version: 1,
-            })
-          ),
-        },
-      }).toStrictEqual({
-        before: {
-          same: "ok",
-          changed: "version.mismatch",
-          agent: "version.mismatch",
-        },
-        revoked: {
-          pinned: "version.revoked",
-          forged: "version.revoked",
-          delivery: "revoked",
-        },
-      });
+    const noteId = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Kept" })
+    );
+    const before = {
+      changed: await fromScreen(opened.get, { id: noteId }),
+      renamed: await fromScreen(opened.get, { noteId }),
+      gone: await fromScreen(opened.bump, {}),
+    };
+    // Version 1's release revoked: the calls are version 2's, so they go on,
+    // while a build opened on version 1 gets nothing more.
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: notes.app, version: 1 },
+      "Leaks data"
+    );
+    expect({
+      before,
+      afterRevoked: await fromScreen(opened.get, { noteId }),
+      oldBuild: deliveryOf(
+        await standingOf(env, notes.app, {
+          artifact: "a".repeat(64),
+          version: 1,
+        })
+      ),
+    }).toStrictEqual({
+      before: {
+        changed: "contract.invalid_args",
+        renamed: "ok",
+        gone: "operation.not_found",
+      },
+      afterRevoked: "ok",
+      oldBuild: "revoked",
     });
+  });
+});
 
-    it("is refused once another version runs, which runs its own code", async () => {
-      const notes = await sealedNotes();
-      const old = referenceTo(notes.release, "notes.bump");
-      await commitFiles(
+// A workflow run's step names a function of its own App as a page does:
+// its name and kind, nothing more. The run is pinned to its version, so a
+// version or contract beside the name is refused, never quietly dropped.
+describe("a workflow run's call of its own App", { timeout: 120_000 }, () => {
+  it("is refused with anything beside the function's name and kind, while the name and kind alone answer", async () => {
+    const notes = await sealedNotes();
+    const runId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'noter', 1, ?, 'running', ?, NULL)"
+    )
+      .bind(runId, notes.app, notes.owner.userId, Date.now())
+      .run();
+    const caller: RunCaller = {
+      run: {
+        app: appIdSchema.parse(notes.app),
+        workflow: workflowIdSchema.parse("noter"),
+        runId: runIdSchema.parse(runId),
+        version: 1,
+        shareSubject: notes.owner.userId,
+        authority: {
+          subject: { type: "app", appId: appIdSchema.parse(notes.app) },
+          onBehalfOf: notes.owner.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+      },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 30_000,
+      stillCurrent: async () => {
+        await Promise.resolve();
+      },
+      requireHolds: () => {
+        // The step's attempt holds its lease throughout.
+      },
+      held: () => {
+        throw new Error("Nothing is held here");
+      },
+    };
+    const codeOfRun = async (reference: unknown): Promise<string> => {
+      const answered = await callRunFunction(
         env,
-        notes.owner,
-        notes.app,
-        notesFiles("Notes, renamed"),
-        "Rename"
+        caller,
+        reference,
+        {},
+        `step:${crypto.randomUUID()}`
       );
-      const next = await seal(notes, 2);
-      await setCurrentVersion(env, notes.owner, notes.app, 2);
-      const current = { ...notes, release: next };
-      expect(
-        codeOf(await call(current, notes.owner, "notes.bump", {}, old))
-      ).toBe("version.mismatch");
-      expect(codeOf(await call(current, notes.owner, "notes.bump", {}))).toBe(
-        "ok"
-      );
+      return answered.ok ? "ok" : answered.error.code;
+    };
+    const named = { name: "notes.bump", kind: "query" };
+    expect({
+      version: await codeOfRun({ ...named, resourceVersion: 1 }),
+      app: await codeOfRun({ ...named, resourceId: "another-app" }),
+      contract: await codeOfRun({ ...named, fingerprint: "0".repeat(64) }),
+      named: await codeOfRun(named),
+    }).toStrictEqual({
+      version: "contract.invalid_request",
+      app: "contract.invalid_request",
+      contract: "contract.invalid_request",
+      named: "ok",
     });
-  }
-);
+  });
+});
 
 describe("what a function answers", { timeout: 120_000 }, () => {
   it("is read as it is, never as JSON would quietly make it", async () => {
@@ -779,6 +948,82 @@ describe("what a function answers", { timeout: 120_000 }, () => {
       "contract.invalid_return",
       "contract.invalid_return",
     ]);
+  });
+});
+
+/**
+ * An App whose functions, one of each kind, declare no `returns`: what
+ * each handler answers is its return, held only to JSON and the output
+ * limit; one that returns nothing answers null.
+ */
+const undeclaredReturnFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+export const greet = query({
+  args: { who: v.string() },
+  handler: (_ctx, args) => \`Hello, \${args.who}\`,
+});
+
+export const create = mutation({
+  args: { title: v.string() },
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const greetTwice = action({
+  args: {},
+  uses: [greet],
+  handler: async (ctx) => ({
+    greetings: [
+      await ctx.runQuery(greet, { who: "one" }),
+      await ctx.runQuery(greet, { who: "two" }),
+    ],
+  }),
+});
+
+export const notJson = query({ args: {}, handler: () => Number.NaN });
+
+export const nothing = mutation({ args: {}, handler: async () => {} });
+
+export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024) });
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Greetings",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  screens: [],
+});
+`,
+};
+
+describe("a function that declares no return", { timeout: 120_000 }, () => {
+  it("answers what its handler returns, of each kind, still held to JSON and the output limit", async () => {
+    const app = await sealedNotes(undeclaredReturnFiles);
+    const id = valueOf(
+      await call(app, app.owner, "notes.create", { title: "Kept" })
+    );
+    expect({
+      query: valueOf(await call(app, app.owner, "notes.greet", { who: "you" })),
+      mutation: typeof id,
+      action: valueOf(await call(app, app.owner, "notes.greetTwice", {})),
+      notJson: codeOf(await call(app, app.owner, "notes.notJson", {})),
+      flood: codeOf(await call(app, app.owner, "notes.flood", {})),
+      nothing: valueOf(await call(app, app.owner, "notes.nothing", {})),
+    }).toStrictEqual({
+      query: "Hello, you",
+      mutation: "string",
+      action: { greetings: ["Hello, one", "Hello, two"] },
+      notJson: "contract.invalid_return",
+      flood: "contract.result_too_large",
+      nothing: null,
+    });
   });
 });
 

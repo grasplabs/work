@@ -64,11 +64,12 @@ import { sessionHost } from "./sandboxed.ts";
 //   release, as the host sealed it, and the host's own record of that
 //   binding (`loadRelease`). No request, reference or App code can.
 // - A caller names a contract that isn't the one that runs: a reference
-//   is only data. It runs only if it names the App, the version that runs
-//   now (the App's current one, never one the caller picks, so no caller
-//   reaches an older version's looser access), a public function there,
-//   of its kind, and that function's exact fingerprint; otherwise it is
-//   refused before any of its input is read.
+//   is only data, a name and a kind. It is resolved by name in the
+//   release that answers (the App's current one, never one the caller
+//   picks, so no caller reaches an older version's looser access), and
+//   runs only if it names a public function there, of its kind, with
+//   arguments that function's own validator accepts; otherwise it is
+//   refused before any of its code runs.
 // - A release changed since it was sealed, or between admission and run:
 //   every load checks every hash (`loadRelease`), and the invocation runs
 //   the code of the manifest it was admitted under, never source.
@@ -153,10 +154,11 @@ export class Run extends WorkerEntrypoint {
       return failed(error);
     }
     // Read as the host reads a value, before it is serialized: JSON alone
-    // would turn NaN or an undefined in an array into a valid null.
+    // would turn NaN or an undefined in an array into a valid null. A
+    // handler that returns nothing answers null, as Convex's do.
     let text;
     try {
-      text = jsonAnswer(value);
+      text = value === undefined ? "null" : jsonAnswer(value);
     } catch {
       return { ok: true, answer: "unreadable" };
     }

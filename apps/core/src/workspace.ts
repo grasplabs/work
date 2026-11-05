@@ -4679,11 +4679,7 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<string> {
     const { id, draft } = this.#draftToPreview(chatId, personId, appId);
     const app = appIdSchema.parse(appId);
-    const { release, version } = await this.#sealedPreviews.release(
-      id,
-      app,
-      draft
-    );
+    const { release } = await this.#sealedPreviews.release(id, app, draft);
     const operation = Object.hasOwn(release.app.operations, path)
       ? release.app.operations[path]
       : undefined;
@@ -4691,13 +4687,7 @@ export class Workspace extends DurableObject<Env> {
       throw operationErrors.create("operation.not_found");
     }
     const request = JSON.stringify({
-      reference: {
-        resourceId: app,
-        resourceVersion: version,
-        contractId: path,
-        fingerprint: release.fingerprints[operation.path],
-        kind: operation.kind,
-      },
+      reference: { name: path, kind: operation.kind },
       input,
     });
     // What the draft's code threw, for the agent's own call: as data in

@@ -193,7 +193,6 @@ export { planPreferenceChange } from "./preference-plan.ts";
 // itself (people.ts).
 export {
   isPeopleOperationName,
-  peopleFingerprints,
   peopleLimits,
   peopleOperations,
   peopleReferences,

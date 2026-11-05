@@ -262,13 +262,7 @@ const sentOnly = async (
       [screenLeaseHeader]: sender.lease,
     },
     body: JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path],
-        kind: release.app.operations[path]?.kind,
-      },
+      reference: { name: path, kind: release.app.operations[path]?.kind },
       input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     }),
@@ -321,13 +315,7 @@ const streamed = async (
       [screenLeaseHeader]: lease,
     },
     body: JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path],
-        kind: release.app.operations[path]?.kind,
-      },
+      reference: { name: path, kind: release.app.operations[path]?.kind },
       input,
       idempotencyKey: key,
     }),
@@ -343,10 +331,7 @@ const streamed = async (
 
 /** The reference of `path` in the open screen's release. */
 const referenceOf = ({ release }: Open, path: string) => ({
-  resourceId: release.manifest.resourceId,
-  resourceVersion: release.manifest.resourceVersion,
-  contractId: path,
-  fingerprint: release.fingerprints[path] ?? "",
+  name: path,
   kind: release.app.operations[path]?.kind ?? "action",
 });
 
@@ -1164,10 +1149,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       open.builder.userId,
       open.app,
       {
-        reference: {
-          contractId: "notes.add",
-          fingerprint: open.release.fingerprints["notes.add"] ?? "",
-        },
+        reference: { name: "notes.add" },
       },
       "fresh",
       false
@@ -1756,9 +1738,9 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     const input = { title: "Resolved" };
     // Started as a screen's keyed action is, given only its key: what it
     // sends to is the run's own to resolve.
-    const started = async (fingerprint: string, key: string) => {
+    const started = async (named: string, key: string) => {
       const call = {
-        reference: { ...referenceOf(open, "notes.add"), fingerprint },
+        reference: { ...referenceOf(open, "notes.add"), name: named },
         input,
         idempotencyKey: key,
       };
@@ -1784,13 +1766,10 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     };
 
     // Its release can't resolve what it names: the run fails, told nothing.
-    const failed = await started("0".repeat(64), "resolved-1");
+    const failed = await started("notes.missing", "resolved-1");
     await drainWebhookDeliveries(env);
     const afterFailure = await countAt(url);
-    const ran = await started(
-      referenceOf(open, "notes.add").fingerprint,
-      "resolved-2"
-    );
+    const ran = await started("notes.add", "resolved-2");
     await drainWebhookDeliveries(env);
     const payloads = await payloadsAt(url);
 

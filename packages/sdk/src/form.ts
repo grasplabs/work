@@ -30,13 +30,16 @@ import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject, unsafeKeys, valueLimits } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
+import { readDescriptor } from "./value-read.ts";
 import { descriptorOf } from "./value-schema.ts";
 
 // Forms (spec 10.2.1–10.3): one `useForm`, three ways in.
 //
 // - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })` binds a
-//   public mutation or action: its fields are the operation's input, and
-//   the operation's argument contract is the validator.
+//   public mutation or action: its fields are its input, checked by the
+//   argument descriptor its reference carries, built with the App's server
+//   code. Core checks the submission again with the function's own
+//   validator, and what it refuses shows by the fields it names.
 // - `useForm(ref, { record, fields, args, onSuccess? })` edits a live
 //   document with explicit Save: the chosen fields are editable, `args`
 //   maps the captured baseline to the rest, and the baseline stays frozen
@@ -1517,10 +1520,16 @@ export class FormBinding {
       const issues = detailIssues(error.details);
       const errors = errorsOf(issues, (field) => this.#editable(field));
       Object.assign(fieldIssues, errors?.fields ?? {});
-      failure =
-        errors?.form === undefined
-          ? undefined
-          : { ...failureOf(error), message: errors.form };
+      // Shown beside its fields when every issue names one; otherwise the
+      // rest, or the refusal itself when it names no issue at all, so a
+      // refused submit always says why.
+      if (errors === undefined) {
+        failure = failureOf(error);
+      } else if (errors.form === undefined) {
+        failure = undefined;
+      } else {
+        failure = { ...failureOf(error), message: errors.form };
+      }
     }
     this.#set({
       phase: "idle",
@@ -1643,7 +1652,16 @@ const isSchema = (value: unknown): value is StandardSchemaV1 =>
   typeof value === "object" &&
   value !== null &&
   "~standard" in value &&
-  !("contractId" in value);
+  !("name" in value);
+
+/** A reference's argument descriptor, read as data; undefined for anything else. */
+const readArgs = (value: unknown): ValueDescriptor | undefined => {
+  try {
+    return readDescriptor(value, 1, { nodes: 0 });
+  } catch {
+    return undefined;
+  }
+};
 
 /** The way `target` and `options` make the form, read once. */
 const targetOf = (
@@ -1654,7 +1672,10 @@ const targetOf = (
   if (isSchema(target)) {
     return { kind: "schema", schema: target };
   }
-  const internals = clientInternals(client);
+  // A form binds a mutation or an action: its reference carries its kind
+  // and the argument descriptor the form checks with, built with the App's
+  // server code. Core checks the submission again with the function's own
+  // validator, and the form shows what it refuses by the fields it names.
   const kind = isPlainObject(target) ? target.kind : undefined;
   // A record form binds a mutation only.
   if (
@@ -1663,7 +1684,11 @@ const targetOf = (
   ) {
     throw clientError("contract.invalid_request");
   }
-  const { args } = internals.readReference(target, kind);
+  clientInternals(client).readReference(target, kind);
+  const args = isPlainObject(target) ? readArgs(target.args) : undefined;
+  if (args === undefined) {
+    throw clientError("contract.invalid_request");
+  }
   if (kind === "action") {
     const send: Send = async (input, submit) =>
       // SAFETY: read as an action reference just above.
@@ -1711,17 +1736,15 @@ const draftSlotOf = (
     return undefined;
   }
   const internals = clientInternals(client);
-  const { resourceId, contractId, fingerprint } = internals.readReference(
-    reference,
-    "mutation"
-  );
-  // Named by the App too, as the client's queries are: a portable client
-  // reaches several Apps, whose paths may be the same.
+  const { name } = internals.readReference(reference, "mutation");
+  // The client serves one App. A draft made under other arguments than
+  // the save takes now is dropped (`restored`): what it kept beside the
+  // edited fields may no longer be what the save takes.
   return {
     store: internals.drafts,
     epoch: internals.drafts.epoch,
-    key: `record:${canonicalText([resourceId, contractId, identity.id])}`,
-    fingerprint,
+    key: `record:${canonicalText([name, identity.id])}`,
+    fingerprint: canonicalText(target.args),
   };
 };
 

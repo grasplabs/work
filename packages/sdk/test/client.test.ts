@@ -193,6 +193,116 @@ describe("the session client and the request budget", () => {
   });
 });
 
+/** The code a call failed with, or "ok". */
+const codeOf = async (call: () => Promise<unknown>): Promise<string> => {
+  try {
+    await call();
+    return "ok";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : String(error);
+  }
+};
+
+/** `args`, deliberately not what a reference takes, as unchecked data may be. */
+const loose = (args: object): never =>
+  // SAFETY: never read as the type it claims; the client checks it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  args as never;
+
+describe("the session client's paginated list", () => {
+  it("asks Load More for the arguments it was given, whatever the caller does to them after", async () => {
+    const followed: { input?: unknown }[] = [];
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async (request, onSnapshot) => {
+        const sent: unknown = JSON.parse(request);
+        followed.push(
+          typeof sent === "object" && sent !== null && "input" in sent
+            ? { input: sent.input }
+            : {}
+        );
+        await Promise.resolve();
+        onSnapshot({
+          revision: followed.length,
+          result: {
+            ok: true,
+            value: { items: [], hasMore: true, nextCursor: "next" },
+          },
+        });
+        return { release: () => {} };
+      },
+    });
+    const internals = clientInternals(client);
+    const args = { search: "launch" };
+    const pager = internals.pager(api.notes.list, args, 2);
+    const stop = internals.subscribePager(pager, () => {});
+    for (let tick = 0; tick < 20 && followed.length === 0; tick += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- waits for the first follow
+      await Promise.resolve();
+    }
+    // Shown once its first page is.
+    await pager.loadMore();
+    // The caller's object, changed once the list was asked for.
+    args.search = "changed";
+    await pager.loadMore();
+    expect(followed.map(({ input }) => input)).toStrictEqual([
+      // The first page, then the larger window Load More asks for.
+      { search: "launch" },
+      { search: "launch" },
+    ]);
+    stop();
+  });
+});
+
+describe("the session client and arguments JSON can't hold", () => {
+  it("refuses them as invalid arguments, sending nothing", async () => {
+    const { client, calls } = network(async () => {
+      await Promise.resolve();
+      return answered(null);
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect({
+      nan: await codeOf(
+        async () => await client.query(api.notes.get, loose({ id: Number.NaN }))
+      ),
+      infinity: await codeOf(
+        async () =>
+          await client.query(
+            api.notes.get,
+            loose({ id: Number.POSITIVE_INFINITY })
+          )
+      ),
+      bigint: await codeOf(
+        async () => await client.query(api.notes.get, loose({ id: 1n }))
+      ),
+      cycle: await codeOf(
+        async () => await client.query(api.notes.get, loose(cyclic))
+      ),
+      saved: await codeOf(
+        async () =>
+          await client.mutation(api.notes.create, loose({ title: Number.NaN }))
+      ),
+      holes: await codeOf(
+        async () =>
+          await client.query(
+            api.notes.get,
+            loose({ id: [undefined, undefined] })
+          )
+      ),
+      sent: calls(),
+    }).toStrictEqual({
+      nan: "contract.invalid_args",
+      infinity: "contract.invalid_args",
+      bigint: "contract.invalid_args",
+      cycle: "contract.invalid_args",
+      saved: "contract.invalid_args",
+      holes: "contract.invalid_args",
+      sent: 0,
+    });
+  });
+});
+
 describe("the session client and an outcome it can't tell", () => {
   afterEach(() => {
     vi.useRealTimers();

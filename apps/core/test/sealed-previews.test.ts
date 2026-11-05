@@ -58,7 +58,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     await calledAs(
       asBuilder,
       app,
-      { contractId: "notes.create", kind: "mutation" },
+      { name: "notes.create", kind: "mutation" },
       {
         title: "live",
       }
@@ -82,7 +82,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       // It reads the preview's notes, none of the App's.
       preview: await call(revision, "notes.titles"),
       app: await calledAs(asBuilder, app, {
-        contractId: "notes.titles",
+        name: "notes.titles",
         kind: "query",
       }),
     };

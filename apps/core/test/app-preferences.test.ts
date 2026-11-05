@@ -1,5 +1,5 @@
 import { v } from "@grasp-os/sdk";
-import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
+import { preferenceOperations } from "@grasp-os/sdk/host";
 import type { PreferenceOperationName } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
@@ -113,18 +113,12 @@ const share = async ({ app, owner }: Sealed, by: Identity): Promise<void> => {
 };
 
 /** The reference to `name` of `release`'s preferences, as `@server/_generated/api` has it. */
-const referenceTo = async (release: Release, name: PreferenceOperationName) => {
+const referenceTo = (release: Release, name: PreferenceOperationName) => {
   if (release.app.preferences === null) {
     throw new Error("The App declares no preferences");
   }
   const operation = preferenceOperations(release.app.preferences)[name];
-  return {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: operation.path,
-    fingerprint: await contractFingerprint(operation),
-    kind: operation.kind,
-  };
+  return { name: operation.path, kind: operation.kind };
 };
 
 /** What `by` gets calling the reference with `input`, as a screen calls it. */
@@ -153,7 +147,7 @@ const get = async (
   desk: Sealed,
   by: Pick<Identity, "userId" | "role" | "teams">
 ): Promise<OperationResult> =>
-  await callWith(desk, by, await referenceTo(desk.release, "get"), {});
+  await callWith(desk, by, referenceTo(desk.release, "get"), {});
 
 /** `by` changing their preferences of `desk` from `expectedRevision`. */
 const update = async (
@@ -166,7 +160,7 @@ const update = async (
   await callWith(
     desk,
     by,
-    await referenceTo(desk.release, "update"),
+    referenceTo(desk.release, "update"),
     { expectedRevision, patch },
     idempotencyKey
   );
@@ -279,24 +273,18 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     }
     expect(
       codeOf(
-        await callWith(
-          desk,
-          desk.owner,
-          await referenceTo(desk.release, "get"),
-          {
-            personId: other.userId,
-          }
-        )
+        await callWith(desk, desk.owner, referenceTo(desk.release, "get"), {
+          personId: other.userId,
+        })
       )
     ).toBe("contract.invalid_args");
     expect(
       codeOf(
-        await callWith(
-          desk,
-          desk.owner,
-          await referenceTo(desk.release, "update"),
-          { expectedRevision: 0, patch: {}, personId: other.userId }
-        )
+        await callWith(desk, desk.owner, referenceTo(desk.release, "update"), {
+          expectedRevision: 0,
+          patch: {},
+          personId: other.userId,
+        })
       )
     ).toBe("contract.invalid_args");
     expect(valueOf(await get(desk, desk.owner))).toMatchObject({ _rev: 0 });
@@ -357,9 +345,10 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     expect(told).toStrictEqual([[preferencesWatch(desk.owner.userId)]]);
   });
 
-  it("resolve only references the App's current release generates", async () => {
+  it("resolve a reference by its name, in the App's current release", async () => {
     const desk = await sealedDesk();
-    const getReference = await referenceTo(desk.release, "get");
+    const getReference = referenceTo(desk.release, "get");
+    // A reference is a name and a kind: nothing more is read.
     expect(
       codeOf(
         await callWith(
@@ -369,7 +358,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
           {}
         )
       )
-    ).toBe("version.mismatch");
+    ).toBe("contract.invalid_request");
     expect(
       codeOf(
         await callWith(
@@ -385,35 +374,24 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
         await callWith(
           desk,
           desk.owner,
-          { ...getReference, contractId: "preferences.reset" },
+          { ...getReference, name: "preferences.reset" },
           {}
         )
       )
     ).toBe("operation.not_found");
-    // Another App's reference, of the same preferences, names nothing here.
+    // Another App's reference of the same preferences is the same name: it
+    // reads this App's, as the call is made to this App.
     const other = await sealedDesk();
     expect(
       codeOf(
-        await callWith(
-          desk,
-          desk.owner,
-          await referenceTo(other.release, "get"),
-          {}
-        )
+        await callWith(desk, desk.owner, referenceTo(other.release, "get"), {})
       )
-    ).toBe("version.mismatch");
+    ).toBe("ok");
     // An App that declares none has none.
     const plain = await sealedDesk(filesWith("", { withNotes: true }));
-    expect(
-      codeOf(
-        await callWith(
-          plain,
-          plain.owner,
-          { ...getReference, resourceId: plain.app },
-          {}
-        )
-      )
-    ).toBe("operation.not_found");
+    expect(codeOf(await callWith(plain, plain.owner, getReference, {}))).toBe(
+      "operation.not_found"
+    );
   });
 
   it("read and write nothing for someone who lost access, or once the release is revoked", async () => {
@@ -444,7 +422,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
   it("pass the caller's own check and the deadline as late as they can, so access lost mid-call reads and writes nothing", async () => {
     const desk = await sealedDesk();
     const request = JSON.stringify({
-      reference: await referenceTo(desk.release, "update"),
+      reference: referenceTo(desk.release, "update"),
       input: { expectedRevision: 0, patch: { compact: true } },
     });
     // An agent's permission revoked once the call began, say.
@@ -901,7 +879,7 @@ const followingDesk = async () => {
     .frame(desk.app, bundle.lease)
     .watchQuery(
       JSON.stringify({
-        reference: await referenceTo(desk.release, "get"),
+        reference: referenceTo(desk.release, "get"),
         input: {},
       }),
       follower.callback
@@ -939,7 +917,7 @@ const routedGet = async (
       [screenLeaseHeader]: lease,
     },
     body: JSON.stringify({
-      reference: await referenceTo(desk.release, "get"),
+      reference: referenceTo(desk.release, "get"),
       input: {},
     }),
   });
@@ -1006,7 +984,7 @@ describe(
         .frame(desk.app, bundle.lease)
         .watchQuery(
           JSON.stringify({
-            reference: await referenceTo(desk.release, "get"),
+            reference: referenceTo(desk.release, "get"),
             input: {},
           }),
           follower.callback

@@ -101,11 +101,10 @@ import type { SessionCheck } from "./session-check.ts";
 //   read one is read again, under the new rules, and drops the rows it no
 //   longer may see.
 // - A subscription outlives its session or the App's version: a session
-//   that ended refuses the read (`check`) and ends it; a reference to a
-//   version that is no longer current is read on the current release only
-//   while its contract there is the same (app-functions.ts,
-//   `pinnedReference`), and refused otherwise (`version.*`), which ends
-//   it, never read against another contract.
+//   that ended refuses the read (`check`) and ends it; every read is of
+//   the App's current release, by the function's name (app-functions.ts,
+//   `publicOperationOf`), so a page open across a publish reads the new
+//   code, and one whose function is gone is refused, which ends it.
 // - Results cross people or builds: a connection is one session's, and
 //   one read is shared only by subscriptions of the same App, build,
 //   person and canonical request on it; the build is the one the
@@ -438,15 +437,7 @@ export const screenReads = (
       build,
       "watchQuery",
       async () =>
-        await evaluateAppQuery(
-          env,
-          by,
-          app,
-          request,
-          deadline,
-          chargePages,
-          build?.version
-        )
+        await evaluateAppQuery(env, by, app, request, deadline, chargePages)
     );
     return {
       result: answer.result,

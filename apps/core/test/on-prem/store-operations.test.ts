@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction } from "../../src/app-functions.ts";
-import type { Release } from "../../src/app-releases.ts";
 import { setCurrentVersion } from "../../src/apps.ts";
 import { approveResourceBinding } from "../../src/resource-bindings.ts";
 import { deepFiles, fieldDepth } from "../deep-records.ts";
@@ -84,17 +83,15 @@ export default app({
 `,
 };
 
-type Sealed = Fixture & { release: Release };
-
 /** An App with `files`, sealed and current. */
 const sealedApp = async (
   files: Record<string, string>,
   name: string
-): Promise<Sealed> => {
+): Promise<Fixture> => {
   const fixture = await appWith(files, name);
-  const release = await seal(fixture);
+  await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
-  return { ...fixture, release };
+  return fixture;
 };
 
 type Person = Awaited<ReturnType<typeof person>>;
@@ -103,7 +100,7 @@ type Person = Awaited<ReturnType<typeof person>>;
  * `desk`'s `crm` bound by `admin` to the CRM, whose user `desk`'s owner
  * is: a call through another App runs under that App's own roles.
  */
-const bound = async (admin: Person, desk: Sealed, crm: Sealed) => {
+const bound = async (admin: Person, desk: Fixture, crm: Fixture) => {
   await env.DB.prepare(
     "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
   )
@@ -118,20 +115,13 @@ const bound = async (admin: Person, desk: Sealed, crm: Sealed) => {
 };
 
 /** What `sealed`'s owner gets calling `desk.list`. */
-const list = async (sealed: Sealed): Promise<unknown> => {
-  const { release } = sealed;
+const list = async (sealed: Fixture): Promise<unknown> => {
   const answer = await callAppFunction(
     env,
     sealed.owner,
     sealed.app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: "desk.list",
-        fingerprint: release.fingerprints["desk.list"] ?? "",
-        kind: "action",
-      },
+      reference: { name: "desk.list", kind: "action" },
       input: {},
     })
   );
@@ -154,7 +144,7 @@ describe("another App's function on-prem", () => {
 
 /** What `sealed`'s owner gets calling `path` of its App with `input`. */
 const called = async (
-  { owner, app, release }: Sealed,
+  { owner, app }: Fixture,
   path: string,
   kind: "query" | "mutation",
   input: unknown
@@ -164,13 +154,7 @@ const called = async (
     owner,
     app,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path] ?? "",
-        kind,
-      },
+      reference: { name: path, kind },
       input,
     })
   );

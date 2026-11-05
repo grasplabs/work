@@ -11,13 +11,13 @@ import type {
   AnyOperationReference,
   ArgsOf,
   Id,
-  Infer,
-  InferInput,
   OperationReference,
   ProgressOf,
   ReturnOf,
   ScreenInputOf,
 } from "../src/index.ts";
+import type { ValueDescriptor } from "../src/value-descriptor.ts";
+import type { OwnAppBinding } from "../src/workflow.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
 import {
   api,
@@ -59,9 +59,7 @@ declare const action: <
 ) => Promise<ReturnOf<Reference>>;
 /** A single answer only: a streaming reference has its own entry. */
 declare const single: (
-  reference: OperationReference<unknown, unknown, "action"> & {
-    readonly mode: "single";
-  }
+  reference: OperationReference<unknown, unknown, "action">
 ) => void;
 declare const noteId: Id<"notes">;
 
@@ -70,41 +68,42 @@ expectTypeOf<ArgsOf<typeof api.notes.create>>().toEqualTypeOf<
   ArgsOf<typeof create>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.create>>().toEqualTypeOf<
-  Infer<(typeof create)["returns"]>
+  ReturnOf<typeof create>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.list>>().toEqualTypeOf<
-  InferInput<(typeof list)["args"]>
+  ArgsOf<typeof list>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.list>>().toEqualTypeOf<
-  Infer<(typeof list)["returns"]>
+  ReturnOf<typeof list>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.get>>().toEqualTypeOf<
-  Infer<(typeof get)["returns"]>
+  ReturnOf<typeof get>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.update>>().toEqualTypeOf<
   ArgsOf<typeof update>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.update>>().toEqualTypeOf<
-  Infer<(typeof update)["returns"]>
+  ReturnOf<typeof update>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.remove>>().toEqualTypeOf<
   ArgsOf<typeof remove>
 >();
 expectTypeOf<ReturnOf<typeof api.notes.tally>>().toEqualTypeOf<
-  Infer<(typeof tally)["returns"]>
+  ReturnOf<typeof tally>
 >();
 expectTypeOf<ArgsOf<typeof api.notes.exportAll>>().toEqualTypeOf<
   ArgsOf<typeof exportAll>
 >();
 
-// Kind, visibility and mode are literals, never a union to fall back on.
+// A mutation's and an action's reference always holds its kind, which
+// `useForm` sends by, and its arguments' descriptor; a query's holds neither.
 expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation">();
-expectTypeOf(api.notes.list.kind).toEqualTypeOf<"query">();
 expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action">();
-expectTypeOf(api.notes.create.visibility).toEqualTypeOf<"public">();
-expectTypeOf(internal.notes.count.visibility).toEqualTypeOf<"internal">();
-expectTypeOf(api.notes.create.mode).toEqualTypeOf<"single">();
-expectTypeOf(api.notes.exportAll.mode).toEqualTypeOf<"stream">();
+expectTypeOf(api.notes.create.args).toEqualTypeOf<ValueDescriptor>();
+// @ts-expect-error a query's reference holds no kind
+void api.notes.get.kind;
+// @ts-expect-error nor its arguments
+void api.notes.get.args;
 
 // A streaming reference carries its progress type; any other none.
 expectTypeOf<ProgressOf<typeof api.notes.exportAll>>().toEqualTypeOf<{
@@ -117,16 +116,10 @@ single(api.notes.exportAll);
 
 // The phantom members are no names an editor offers or JSON holds.
 expectTypeOf<Extract<keyof typeof api.notes.create, string>>().toEqualTypeOf<
-  | "resourceId"
-  | "resourceVersion"
-  | "contractId"
-  | "fingerprint"
-  | "kind"
-  | "mode"
-  | "stream"
-  | "visibility"
-  | "args"
-  | "returns"
+  "name" | "kind" | "args"
+>();
+expectTypeOf<Extract<keyof typeof api.notes.get, string>>().toEqualTypeOf<
+  "name" | "returns"
 >();
 
 // Calls infer from the reference alone: no cast, no generic argument.
@@ -134,10 +127,10 @@ expectTypeOf(
   mutation(api.notes.create, { title: "Launch" })
 ).resolves.toEqualTypeOf<Id<"notes">>();
 expectTypeOf(query(api.notes.get, { id: noteId })).resolves.toEqualTypeOf<
-  Infer<(typeof get)["returns"]>
+  ReturnOf<typeof get>
 >();
 expectTypeOf(query(api.notes.list, { pagination: {} })).resolves.toEqualTypeOf<
-  Infer<(typeof list)["returns"]>
+  ReturnOf<typeof list>
 >();
 expectTypeOf(action(api.notes.tally, {})).resolves.toEqualTypeOf<number>();
 
@@ -222,6 +215,11 @@ const anyReferences: readonly AnyOperationReference[] = [
   internal.notes.count,
 ];
 void anyReferences;
-// And its mode says so: either, never only a stream.
-const anyModes: readonly AnyOperationReference["mode"][] = ["single", "stream"];
-void anyModes;
+
+// A workflow calls its App's functions through the same references
+// (`env.APP.callFunction`): a query's, which holds no kind, as well as a
+// mutation's and an action's.
+declare const ownApp: OwnAppBinding;
+void ownApp.callFunction(api.notes.list, {});
+void ownApp.callFunction(api.notes.create, { title: "A" });
+void ownApp.callFunction(api.notes.exportAll, {});

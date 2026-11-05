@@ -158,13 +158,8 @@ export default appTest({
     },
     "the host refuses what a screen's call is refused": async (t) => {
       const owner = await t.as("note-owner");
-      const internal = { ...api.notes.titles, contractId: "notes.count" };
+      const internal = { ...api.notes.titles, name: "notes.count" };
       await t.rejectsCode(owner.query(internal, {}), "operation.not_found");
-      const later = {
-        ...api.notes.titles,
-        resourceVersion: api.notes.titles.resourceVersion + 1,
-      };
-      await t.rejectsCode(owner.query(later, {}), "version.mismatch");
       await t.rejectsCode(
         () => owner.mutation(api.notes.create, { title: "" }),
         "contract.invalid_args"
@@ -312,19 +307,12 @@ describe("an App's tests", { timeout: 180_000 }, () => {
     });
 
     // The App's own store holds nothing the tests wrote.
-    const release = await loadRelease(env, built.app, 1);
     const answer = await callAppFunction(
       env,
       built.owner,
       built.app,
       JSON.stringify({
-        reference: {
-          resourceId: release.manifest.resourceId,
-          resourceVersion: 1,
-          contractId: "notes.titles",
-          fingerprint: release.fingerprints["notes.titles"],
-          kind: "query",
-        },
+        reference: { name: "notes.titles", kind: "query" },
         input: {},
       })
     );

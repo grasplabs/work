@@ -492,8 +492,20 @@ export const bindings = ({ connections, collections, brains = [] }) => {
   const all = {
     __proto__: null,
     APP: {
+      // A generated reference carries more than its name and kind (a
+      // mutation's arguments' descriptor, a query's return); the host's
+      // request is exactly those two, so only they are sent. A query's
+      // reference holds no kind: one without is a query's. Anything else
+      // core refuses.
       callFunction: async (reference, input) =>
-        unwrapped(await currentAttempt().callFunction(reference, input)),
+        unwrapped(
+          await currentAttempt().callFunction(
+            typeof reference === "object" && reference !== null
+              ? { name: reference.name, kind: reference.kind ?? "query" }
+              : reference,
+            input
+          )
+        ),
     },
   };
   for (let index = 0; index < collections.length; index += 1) {

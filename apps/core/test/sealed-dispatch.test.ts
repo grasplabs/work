@@ -618,13 +618,7 @@ const savedIn = async (
       await session.call(
         "desk-user",
         JSON.stringify({
-          reference: {
-            resourceId: app.release.manifest.resourceId,
-            resourceVersion: app.release.manifest.resourceVersion,
-            contractId: "requests.list",
-            fingerprint: app.release.fingerprints["requests.list"],
-            kind: "query",
-          },
+          reference: { name: "requests.list", kind: "query" },
           input: {},
         })
       )

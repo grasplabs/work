@@ -44,7 +44,7 @@ const sentOf = (body: string): Sent => {
   const parsed: unknown = JSON.parse(body);
   const read = (value: unknown, key: string): unknown =>
     isRecord(value) ? value[key] : undefined;
-  const contractId = read(read(parsed, "reference"), "contractId");
+  const contractId = read(read(parsed, "reference"), "name");
   const input = read(parsed, "input");
   const extent = read(read(parsed, "window"), "extent");
   return {
@@ -168,20 +168,22 @@ export const pageOf = (records: readonly unknown[], extent = 25) =>
 /** A public reference of an App's function, as the host generates one. */
 export const reference = <Args, Return, Kind extends "query" | "mutation">(
   kind: Kind,
-  contractId: string,
+  name: string,
   args: ValueSchema<Args, unknown>,
   returns: ValueSchema<Return, unknown>
-): OperationReference<Args, Return, Kind> => ({
-  kind,
-  contractId,
-  visibility: "public",
-  mode: "single",
-  resourceId: "app_0000000000000000000000notes",
-  resourceVersion: 1,
-  fingerprint: "0".repeat(64),
-  args: args.descriptor,
-  returns: returns.descriptor,
-});
+): OperationReference<Args, Return, Kind> =>
+  // What `_generated` builds for a function of `kind`: a query's declared
+  // return, a mutation's kind and arguments.
+  // SAFETY: the reference type follows `Kind`, which `kind` is; a generic
+  // conditional type isn't narrowed by checking it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  (kind === "query"
+    ? { name, returns: returns.descriptor }
+    : { name, kind, args: args.descriptor }) as OperationReference<
+    Args,
+    Return,
+    Kind
+  >;
 
 /** Lets queued work and the renders it causes land. */
 export const settle = async (ms = 0): Promise<void> => {

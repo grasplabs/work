@@ -246,6 +246,21 @@ export const findApp = async (env: Env, input: unknown): Promise<App> => {
 };
 
 /**
+ * The version of App `app` that runs now: what a page's calls are
+ * answered by. `version.not_sealed` while none is current.
+ */
+export const currentVersionOf = async (
+  env: Env,
+  app: AppId
+): Promise<number> => {
+  const { currentVersion } = await findApp(env, app);
+  if (currentVersion === null) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  return currentVersion;
+};
+
+/**
  * The App `input` names, for `by` with at least `needed` in it
  * (app-access.ts).
  */

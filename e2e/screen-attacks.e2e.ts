@@ -171,7 +171,9 @@ test("a screen reaches nothing but its own App's functions", async ({
   await screen.getByRole("button", { name: "Ask" }).click();
   const askRequest = await asked;
   const validRequest = askRequest.postData() ?? "";
-  expect(validRequest).toContain('"contractId":"notes.lookLikeThePlatform"');
+  expect(validRequest).toContain(
+    '"reference":{"name":"notes.lookLikeThePlatform","kind":"action"}'
+  );
   await expect(screen.getByRole("status", { name: "Answer" })).toHaveText(
     "an answer"
   );

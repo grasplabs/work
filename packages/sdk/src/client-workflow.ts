@@ -7,7 +7,7 @@ import { clientInternals } from "./client-core.ts";
 import type {
   DecisionTransport,
   GraspClient,
-  SubmissionTarget,
+  ReadReference,
   WorkflowLink,
 } from "./client-core.ts";
 import {
@@ -917,10 +917,9 @@ const eventOf = (
 };
 
 /** What a workflow's commands are scoped by, as a mutation's are. */
-const targetOf = (read: ReadWorkflow): SubmissionTarget => ({
+const targetOf = (read: ReadWorkflow): ReadReference => ({
   kind: "mutation",
-  resourceId: read.resourceId,
-  contractId: read.contractId,
+  name: read.contractId,
 });
 
 /**

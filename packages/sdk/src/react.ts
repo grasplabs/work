@@ -92,6 +92,7 @@ import type {
   FilesReference,
   ProgressOf,
   ReturnOf,
+  Streaming,
   WorkflowEventsOf,
   WorkflowInputOf,
   WorkflowOutputOf,
@@ -667,8 +668,9 @@ interface UseForm {
  * A form (spec 10.2.1–10.3), one hook with three ways in:
  *
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
- *   public mutation or action, its input the fields, its argument
- *   contract the validator.
+ *   public mutation or action, its input the fields, the argument
+ *   descriptor its reference carries the validator (core checks again
+ *   with its own).
  * - `useForm(ref, { record, fields, args, onSuccess? })`: a live document
  *   edited with explicit Save, through a mutation that returns the record
  *   it saved (or `null`, delete-style); a save answering anything else
@@ -880,7 +882,7 @@ class StreamRun {
  * follows.
  */
 export const useStream = <Reference extends StreamReference>(
-  reference: Reference
+  reference: Streaming<Reference>
 ): StreamHandle<Reference> => {
   const client = useClient();
   // One run per client and action: another of either starts afresh, and

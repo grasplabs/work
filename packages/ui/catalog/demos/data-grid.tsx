@@ -34,17 +34,7 @@ const listPeople: OperationReference<
   InferInput<typeof args>,
   Infer<typeof page>,
   "query"
-> = {
-  kind: "query",
-  contractId: "people.list",
-  visibility: "public",
-  mode: "single",
-  resourceId: "app_0000000000000000000000demos",
-  resourceVersion: 1,
-  fingerprint: "0".repeat(64),
-  args: args.descriptor,
-  returns: page.descriptor,
-};
+> = { name: "people.list", returns: page.descriptor };
 
 const people = [
   "Ada",

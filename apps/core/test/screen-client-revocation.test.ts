@@ -846,8 +846,8 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     );
     const isSecrets = (request: string): boolean =>
       z
-        .object({ reference: z.object({ contractId: z.string() }) })
-        .parse(JSON.parse(request)).reference.contractId === secrets.contractId;
+        .object({ reference: z.object({ name: z.string() }) })
+        .parse(JSON.parse(request)).reference.name === secrets.name;
     // The secrets are followed once, then lost after their first push, and
     // followed again only once the test is over: meanwhile the query
     // waits to follow again, showing what it kept.

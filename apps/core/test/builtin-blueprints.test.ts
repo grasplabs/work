@@ -310,7 +310,7 @@ describe("the built-in blueprints", () => {
       greeting: await calledAs(
         await builder.api.whoami(),
         created.app.id,
-        { contractId: "greetings.hello", kind: "mutation" },
+        { name: "greetings.hello", kind: "mutation" },
         { name: "Ann" }
       ),
     }).toStrictEqual({

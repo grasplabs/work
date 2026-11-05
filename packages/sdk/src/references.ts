@@ -5,22 +5,22 @@ import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
 // References (spec 8, 32.1): how code names one of an App's functions, a
-// browser-facing resource or a screen, without holding any of them. A reference is data: the App and version it belongs to,
-// the contract it pins (its ID and exact fingerprint), its kind and
-// visibility and the descriptors of its arguments and return. It holds no
-// handler and grants nothing: the host resolves every reference against
-// the sealed release it runs, and refuses one that doesn't match exactly,
-// however it was made.
+// browser-facing resource or a screen, without holding any of them. A
+// function's reference is its name and kind, nothing more: core resolves
+// the name in the release that answers the call (the App's current one,
+// for a page) and checks the call's arguments with that function's own
+// validator. It holds no handler and grants nothing, so a forged one
+// reaches only what its name does: a public function of the App, with
+// arguments its validator accepts.
 //
 // The generated modules hold them: `@server/_generated/api` the public
 // `api`, the browser resources, the screens and the preferences (two
 // function references, preference-operations.ts);
 // `@server/_generated/internal` the `internal` tree, for the App's own
-// server code. Their types come from the descriptors, through the phantom
-// members below,
-// which exist in types only: they are keyed by symbols that are declared,
-// never created, so no reference carries them at run time, JSON never
-// holds them and an editor never offers them.
+// server code. Their types come from the functions' descriptors, through
+// the phantom members below, which exist in types only: they are keyed by
+// symbols that are declared, never created, so no reference carries them
+// at run time, JSON never holds them and an editor never offers them.
 
 /** The kinds of server function. */
 export type ReferenceKind = "query" | "mutation" | "action";
@@ -28,84 +28,130 @@ export type ReferenceKind = "query" | "mutation" | "action";
 /** Who may call a function directly. */
 export type ReferenceVisibility = "public" | "internal";
 
+declare const kindType: unique symbol;
+declare const visibilityType: unique symbol;
 declare const argsType: unique symbol;
 declare const returnType: unique symbol;
 declare const progressType: unique symbol;
 
 /**
  * What every callable reference has, the definitions App code declares
- * and the references generated for them alike: its kind, its visibility,
- * and the phantom types of its arguments (as a caller passes them) and
- * return.
+ * and the references generated for them alike, as types only: its kind,
+ * its visibility, its arguments (as a caller passes them), its return and
+ * what it streams. A reference holds none of them at run time: a page's
+ * hook says which kind of call it makes, as Convex's do, and core refuses
+ * a call of a function of another kind.
  */
 export interface Callable<
   Kind extends ReferenceKind = ReferenceKind,
   Vis extends ReferenceVisibility = ReferenceVisibility,
   Args = unknown,
   Return = unknown,
+  Progress = never,
 > {
-  readonly kind: Kind;
-  readonly visibility: Vis;
+  /** Types only: never set. */
+  readonly [kindType]?: Kind;
+  /** Types only: never set. */
+  readonly [visibilityType]?: Vis;
   /** Types only: never set. */
   readonly [argsType]?: Args;
   /** Types only: never set. */
   readonly [returnType]?: Return;
+  /** Types only: never set. What a streaming action streams; never otherwise. */
+  readonly [progressType]?: Progress;
 }
 
 /**
- * A generated reference to one of an App's functions (spec 32.1). `mode`
- * follows `Progress`: a function that streams progress is `"stream"` and
- * carries the progress descriptor in `stream`; any other is `"single"`
- * and has no `stream`.
+ * A generated reference to one of an App's functions (spec 32.1): its
+ * name, its path (`tasks.list`), and what the page needs of it, built with
+ * the App's server code (`_generated`): a mutation's or an action's kind
+ * and argument descriptor, which `useForm` sends and checks a form with,
+ * or a query's declared return, which a grid reads its columns from. Core
+ * still checks every call with the function's own validator: a page of an
+ * older release whose descriptor is stale is at most told something
+ * slightly off before core answers with its issues. Its visibility, what
+ * it takes, answers and streams are its types.
  */
-export interface OperationReference<
+export type OperationReference<
   Args,
   Return,
   Kind extends ReferenceKind,
   Vis extends ReferenceVisibility = "public",
   Progress = never,
-> extends Callable<Kind, Vis, Args, Return> {
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-  /** Its registered path, which a compatible revision keeps. */
-  readonly contractId: string;
-  /** The SHA-256 of its exact contract, in hex. */
-  readonly fingerprint: string;
-  readonly mode: [Progress] extends [never] ? "single" : "stream";
-  readonly stream?: ValueDescriptor;
+> = Callable<Kind, Vis, Args, Return, Progress> &
+  (Kind extends "query" ? QueryFields : SubmissionFields<Kind>);
+
+/** What a query's reference holds. */
+interface QueryFields {
+  /** Its name, as `api.tasks.list` names it: `tasks.list`. */
+  readonly name: string;
+  /** Its declared return, where it declares one. */
+  readonly returns?: ValueDescriptor;
+}
+
+/** What a mutation's or an action's reference holds. */
+interface SubmissionFields<Kind extends ReferenceKind> {
+  /** Its name, as `api.tasks.create` names it: `tasks.create`. */
+  readonly name: string;
+  /** What `useForm` sends a submission as. */
+  readonly kind: Kind;
+  /** Its arguments, as `useForm` checks them. */
   readonly args: ValueDescriptor;
-  readonly returns: ValueDescriptor;
-  /** Types only: never set. */
-  readonly [progressType]?: Progress;
 }
 
 /**
  * A streaming action (spec 10.7.6), as App code declares it (its
- * progress schema in `stream`) or as a reference names it (`mode:
- * "stream"`). It runs only for a screen following it (`useStream`,
- * `client.stream`): wherever a call answers once (`client.action`,
- * `ctx.runAction`, a workflow's `appFunctions(env).action`, a test's
- * `action`), its type is refused, as the host refuses the call
- * (`operation.mode_mismatch`).
+ * progress schema in `stream`). It runs only for a screen following it
+ * (`useStream`, `client.stream`): wherever a call answers once
+ * (`client.action`, `ctx.runAction`, a workflow's
+ * `appFunctions(env).action`, a test's `action`), its type is refused, as
+ * the host refuses the call (`operation.mode_mismatch`). A definition is
+ * told by its `stream`, a reference by what it streams.
  */
-export type StreamingFunction =
-  | { readonly stream: object }
-  | { readonly mode: "stream" };
+export interface StreamingFunction {
+  readonly stream: object;
+}
+
+/** Whether `Reference`, a definition or a reference, streams its progress. */
+export type IsStreaming<Reference> = Reference extends StreamingFunction
+  ? true
+  : [ProgressOf<Reference>] extends [never]
+    ? false
+    : true;
+
+/**
+ * `Reference`, only if it streams: compared through its type parameters
+ * alone, a reference that answers once (its progress `never`) would pass
+ * for one that streams.
+ */
+export type Streaming<Reference> = Reference &
+  (true extends IsStreaming<Reference> ? unknown : never);
+
+/**
+ * `Reference`, only if it answers once: a union any member of which
+ * streams is refused too (not distributed).
+ */
+export type SingleAnswer<Reference> = Reference &
+  (true extends IsStreaming<Reference> ? never : unknown);
 
 /** Any generated function reference: a single answer's or a stream's. */
-export type AnyOperationReference =
-  | OperationReference<unknown, unknown, ReferenceKind, ReferenceVisibility>
-  | OperationReference<
-      unknown,
-      unknown,
-      ReferenceKind,
-      ReferenceVisibility,
-      unknown
-    >;
+export type AnyOperationReference = OperationReference<
+  unknown,
+  unknown,
+  ReferenceKind,
+  ReferenceVisibility,
+  unknown
+>;
 
 /** The arguments a caller passes to `Reference`. */
 export type ArgsOf<Reference> =
-  Reference extends Callable<ReferenceKind, ReferenceVisibility, infer Args>
+  Reference extends Callable<
+    ReferenceKind,
+    ReferenceVisibility,
+    infer Args,
+    unknown,
+    unknown
+  >
     ? Args
     : never;
 
@@ -115,21 +161,32 @@ export type ReturnOf<Reference> =
     ReferenceKind,
     ReferenceVisibility,
     unknown,
-    infer Return
+    infer Return,
+    unknown
   >
     ? Return
     : never;
 
-/** The progress `Reference` streams; never for a single answer. */
+/**
+ * The progress `Reference` streams; never for a single answer. Read in
+ * two steps: inferring from a progress of `never` finds nothing, which
+ * would answer `unknown`. A progress of `any` (a draft's stand-in
+ * references, save-builds.ts) stays `any`, though it also passes for
+ * `never`: a stand-in is any kind of call, a stream's too.
+ */
 export type ProgressOf<Reference> =
-  Reference extends OperationReference<
-    unknown,
-    unknown,
+  Reference extends Callable<
     ReferenceKind,
     ReferenceVisibility,
+    unknown,
+    unknown,
     infer Progress
   >
-    ? Progress
+    ? 0 extends 1 & Progress
+      ? Progress
+      : Reference extends Callable
+        ? never
+        : Progress
     : never;
 
 /** The operations a files resource declares. */
@@ -646,49 +703,18 @@ export type WorkflowDecisionsOf<Reference> =
     ? Decisions
     : never;
 
-const kinds: ReadonlySet<unknown> = new Set(["query", "mutation", "action"]);
-const visibilities: ReadonlySet<unknown> = new Set(["public", "internal"]);
-
 /**
- * A reference to a function as App code may list it in `uses` or call it
- * through its context: a generated one, by its registered path, or a
- * symbolic one the host lends inspection, whose kind is resolved from the
- * registration. Read once, as data: the path, the visibility and the kind
- * when it has one.
+ * The name of the function `value` refers to, as App code lists it in
+ * `uses` or calls it through its context (generated or symbolic), read
+ * once; undefined when it isn't a plain object with a string `name`.
+ * Nothing about it is trusted: the registration resolves the name.
  */
-export interface ReferenceData {
-  readonly path: string;
-  readonly visibility: ReferenceVisibility;
-  /** Unknown for a symbolic reference, until the registration resolves it. */
-  readonly kind: ReferenceKind | undefined;
-}
-
-/**
- * The function reference `value` is, read as data, or undefined when it
- * isn't one: a plain object with a string `contractId` and a visibility,
- * and, unless it is symbolic, a kind. Nothing about it is trusted: the
- * registration resolves it by its path, and refuses one whose visibility
- * or kind doesn't match.
- */
-export const referenceData = (value: unknown): ReferenceData | undefined => {
+export const referenceName = (value: unknown): string | undefined => {
   if (!isPlainObject(value)) {
     return undefined;
   }
-  const { contractId, visibility, kind } = value;
-  if (
-    typeof contractId !== "string" ||
-    !visibilities.has(visibility) ||
-    (kind !== undefined && !kinds.has(kind))
-  ) {
-    return undefined;
-  }
-  // SAFETY: each was checked against its set just above.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const read = { visibility, kind } as Pick<
-    ReferenceData,
-    "visibility" | "kind"
-  >;
-  return { path: contractId, ...read };
+  const { name } = value;
+  return typeof name === "string" ? name : undefined;
 };
 
 /** An event reference as server code lists it in `uses`, read as data. */

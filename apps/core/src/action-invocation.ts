@@ -28,6 +28,7 @@ import { invokeAppAction, refusalOf } from "./app-functions.ts";
 import type { FunctionRequest } from "./app-functions.ts";
 import { formSubmissionOf, queueFormSent } from "./app-webhook-queue.ts";
 import type { FormSubmission } from "./app-webhook-queue.ts";
+import { currentVersionOf } from "./apps.ts";
 import { actionInvocations } from "./db/core/schema.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -108,12 +109,6 @@ export interface InvocationOpen {
   readonly streaming: boolean;
   /** Only read what already runs or ran; never start it. */
   readonly attach: boolean;
-  /**
-   * A screen's: the version its lease says it was opened on, whose
-   * references are held to their contract in the one that runs
-   * (app-functions.ts, `pinnedReference`). None for a portable host.
-   */
-  readonly pinnedVersion?: number;
   /**
    * A screen's form, sent as this action under its key: told to the App's
    * webhooks once the run it starts succeeds, whoever reads it
@@ -584,12 +579,12 @@ export class ActionInvocation extends DurableObject<Env> {
       );
     }
     // Nothing of what ran under a release revoked since is handed over,
-    // nor to a caller whose own release was revoked, as a new call of
-    // either would be refused.
+    // nor while the App's current release is revoked, as a new call would
+    // be refused.
     try {
       for (const version of new Set([
         record.version,
-        spec.call.reference.resourceVersion,
+        await currentVersionOf(this.env, spec.app),
       ])) {
         // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
         await requireNotRevoked(this.env, spec.app, version);
@@ -655,6 +650,21 @@ export class ActionInvocation extends DurableObject<Env> {
       (spec.streaming
         ? platformLimits.serverInvocationWallMs
         : actionInvocationWallMs);
+    // The release it runs under: the App's current one, as every page's
+    // call (app-functions.ts, `publicOperationOf`); read before anything
+    // is held, so a refusal holds nothing. The run gets this version, never
+    // a later read of the current one: the record names what ran, so
+    // revoking it stops the result. A publish between this read and the
+    // run's own (`invokeAppAction`) refuses it with `version.mismatch`
+    // before any of the App's code runs: no receipt is kept
+    // (`keepsReceipt`), so the same key may be sent again and runs in the
+    // new version.
+    let version: number;
+    try {
+      version = await currentVersionOf(this.env, spec.app);
+    } catch (error) {
+      return resultOf(refused(error));
+    }
     const host = appHost(this.env, spec.app);
     const held = await host.holdInvocation(
       spec.by.userId,
@@ -702,7 +712,7 @@ export class ActionInvocation extends DurableObject<Env> {
       owner: spec.by.userId,
       inputHash,
       access: spec.access,
-      version: spec.call.reference.resourceVersion,
+      version,
       name: spec.name,
       startedAt: Date.now(),
       state: "running",
@@ -736,9 +746,7 @@ export class ActionInvocation extends DurableObject<Env> {
           spec.app,
           spec.call,
           {
-            ...(spec.pinnedVersion === undefined
-              ? {}
-              : { pinnedVersion: spec.pinnedVersion }),
+            version,
             ...(spec.streaming
               ? {
                   progress: {
@@ -891,31 +899,21 @@ export class ActionInvocation extends DurableObject<Env> {
  * The name of the invocation `call` starts, for `userId` in `app`, as a
  * streaming action's or a plain one's: never both, so a plain call and a
  * stream under one key never share an object. Not the App's version:
- * like a mutation's receipt, an action's outlives a publish that keeps its
- * contract (`fingerprint`); other input is refused by its input's hash.
+ * like a mutation's receipt, an action's outlives a publish that keeps the
+ * function; other input is refused by its input's hash.
  */
 export const invocationName = async (
   userId: string,
   app: string,
   call: {
-    readonly reference: Pick<
-      FunctionRequest["reference"],
-      "contractId" | "fingerprint"
-    >;
+    readonly reference: Pick<FunctionRequest["reference"], "name">;
   },
   key: string,
   streaming: boolean
 ): Promise<string> => {
-  const { contractId, fingerprint } = call.reference;
+  const { name } = call.reference;
   return await sha256Hex(
-    canonicalJson([
-      streaming ? "stream" : "action",
-      userId,
-      app,
-      contractId,
-      fingerprint,
-      key,
-    ])
+    canonicalJson([streaming ? "stream" : "action", userId, app, name, key])
   );
 };
 

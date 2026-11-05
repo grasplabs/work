@@ -275,10 +275,7 @@ const call = async (
   const release = await loadRelease(env, appIdSchema.parse(app), version);
   const request = JSON.stringify({
     reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: path,
-      fingerprint: release.fingerprints[path] ?? "0".repeat(64),
+      name: path,
       kind: release.app.operations[path]?.kind ?? "query",
     },
     input,
@@ -310,13 +307,7 @@ const read = async (
     token: who.token,
     lease: who.lease,
     request: JSON.stringify({
-      reference: {
-        resourceId: reference.resourceId,
-        resourceVersion: reference.resourceVersion,
-        contractId: reference.contractId,
-        fingerprint: reference.fingerprint,
-        kind: reference.kind,
-      },
+      reference: { name: reference.name, kind: "query" },
       input,
     }),
   });

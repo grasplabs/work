@@ -187,13 +187,7 @@ const call = async (
     by,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path] ?? "",
-        kind: operation?.kind ?? "action",
-      },
+      reference: { name: path, kind: operation?.kind ?? "action" },
       input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })

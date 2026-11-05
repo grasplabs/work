@@ -221,13 +221,7 @@ const call = async (
     await callerOf(userId),
     app,
     JSON.stringify({
-      reference: {
-        resourceId: sealed.manifest.resourceId,
-        resourceVersion: sealed.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: sealed.fingerprints[path] ?? "",
-        kind: operation.kind,
-      },
+      reference: { name: path, kind: operation.kind },
       input,
     })
   );
