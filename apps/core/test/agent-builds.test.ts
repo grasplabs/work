@@ -1132,14 +1132,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ]);
 
     // The write is let in at once, then waits on the App's files while the
-    // person presses Stop: refused as it commits.
+    // person presses Stop: refused as it commits. The chat shows the
+    // question, then the call under way.
     await slowFilesDuring(chat.stub, async () => {
       const reply = chat.ask("Write it.");
       await vi.waitFor(
         async () => {
           await expect(
             transcript(chat.stub, chat.chat.id)
-          ).resolves.toHaveLength(3);
+          ).resolves.toHaveLength(2);
         },
         { timeout: 10_000 }
       );
@@ -1147,16 +1148,40 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
     });
 
+    // pi ends the aborted call with its own result; the run's record says
+    // how the call itself ended.
     const [written] = await toolResults(chat.stub, chat.chat.id);
-    expect({
-      written: [written?.tool, written?.isError],
-      cancelled: written?.text.startsWith("Error (cancelled)"),
-      draft: await chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing),
-    }).toStrictEqual({
-      written: ["writeFile", true],
-      cancelled: true,
-      draft: { base: null, changes: {}, revision: 0 },
+    expect([written?.tool, written?.isError, written?.text]).toStrictEqual([
+      "writeFile",
+      true,
+      "Tool writeFile was aborted",
+    ]);
+    await vi.waitFor(async () => {
+      await expect(
+        runInDurableObject(chat.stub, (_instance, state) =>
+          state.storage.sql
+            .exec<{ status: string }>(
+              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              chat.chat.id
+            )
+            .toArray()
+            .map(({ status }) => status)
+        )
+      ).resolves.toStrictEqual(["cancelled"]);
     });
+    // pi's result doesn't wait for the call: the write is refused as it
+    // commits, after it.
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.write",
+        ]);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await expect(
+      chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
+    ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
   });
 
   it("commits no proposal whose run ran out of time while it was checked", async () => {

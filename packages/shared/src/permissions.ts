@@ -246,6 +246,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "BETTER_AUTH_SECRET",
   // The Chat SDK's state for Stephen's door (core's @grasp-os/chat/state).
   "CHAT_STATE",
+  // One chat's agent (core's src/chat-session.ts).
+  "CHAT_SESSIONS",
   "BRAIN_OBJECTS",
   "BUILD_WAIT_MS",
   "BUILTINS",

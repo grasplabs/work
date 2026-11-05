@@ -211,6 +211,13 @@
       "when": 1793726778481,
       "tag": "0029_drop_chat_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1793885506718,
+      "tag": "0030_build_job_notice_owed",
+      "breakpoints": true
     }
   ]
 }

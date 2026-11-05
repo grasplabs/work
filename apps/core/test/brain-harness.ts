@@ -33,7 +33,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type { ChatPartial } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
@@ -44,7 +44,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { turnSource } from "../src/brain-capture.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import { model, setObjectEnv, transcript } from "./agent-chat.ts";
@@ -1890,17 +1890,45 @@ export interface DurabilityCase {
   };
 }
 
+/** Chat `chatId`'s own object in `place`, where its turns run (chat-session.ts). */
+const sessionOf = (place: Workspace, chatId: string) =>
+  chatSession(
+    env,
+    workspaceIdSchema.parse(place.agent.agentId),
+    chatIdSchema.parse(chatId)
+  );
+
 /**
- * Restarts `place`'s object where it is, whatever it is doing, as a deploy
- * or a crash does: its memory and every request in flight end, its storage
- * stays. The stub it was restarted through is broken, so `place` gets a
- * new one.
+ * Restarts `place`'s object, and chat `chatId`'s own object, where its
+ * turn runs, wherever they are, whatever they are doing, as a deploy or a
+ * crash does: their memory and every request in flight end, their storage
+ * stays. The stub `place`'s was restarted through is broken, so `place`
+ * gets a new one.
  */
-const restart = async (place: Workspace) => {
-  await runInDurableObject(place.stub, (_instance, state) => {
-    state.abort("Restarted by the Brain harness");
-  }).catch(noop);
+const restart = async (place: Workspace, chatId: string) => {
+  for (const stub of [sessionOf(place, chatId), place.stub]) {
+    // oxlint-disable-next-line no-await-in-loop -- the turn's object first
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Restarted by the Brain harness");
+    }).catch(noop);
+  }
   place.stub = workspace(env, workspaceIdSchema.parse(place.agent.agentId));
+};
+
+/**
+ * Waits until chat `chatId` has no turn under way: the turn a restart cut
+ * short goes on as its object wakes, and ends, as its person sees it end.
+ */
+const settledTurn = async (place: Workspace, chatId: string) => {
+  const deadline = Date.now() + pollMs.most;
+  // oxlint-disable-next-line no-await-in-loop -- one look at a time
+  while ((await sessionOf(place, chatId).activeTurn()) !== undefined) {
+    if (Date.now() > deadline) {
+      throw new Error(`The chat's turn still runs after ${pollMs.most} ms`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await scheduler.wait(pollMs.every);
+  }
 };
 
 /** What the chat's agent said last, as the chat keeps it. */
@@ -2026,10 +2054,10 @@ const runDurabilityCase = async (
           );
         }
         shownBeforeRestart = shownText();
-        await restart(place);
+        await restart(place, chat.id);
       } catch (error) {
         // Ends whatever the ask still does: nothing outlives a failed case.
-        await restart(place);
+        await restart(place, chat.id);
         await asking;
         throw error;
       } finally {
@@ -2038,6 +2066,11 @@ const runDurabilityCase = async (
       }
     }
     await asking;
+    if (crashHold !== null) {
+      // The turn the restart cut short, gone on with and ended: the
+      // attempt's, its requests and their charges too.
+      await settledTurn(place, chat.id);
+    }
     const latencyMs =
       performance.now() - started - (provider.observingMs() - observedBefore);
     // Woken again, as the next call to the object would.

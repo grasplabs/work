@@ -5,26 +5,18 @@ import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import {
-  memoryCharactersPerToken,
-  memoryLimits,
-} from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { maxToolCallsPerResponse } from "../src/agent-tools.ts";
-import {
-  latestSections,
-  maxRunsPerResponse,
-  maxRunsPerTurn,
-  maxSteps,
-  requestChars,
-} from "../src/agent.ts";
 import {
   codeLimits,
   codeRuntime,
@@ -33,7 +25,7 @@ import {
   sourceHash,
   utf8Bytes,
 } from "../src/code-mode.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import { endedRunsKept } from "../src/workspace.ts";
 import {
   chatOf,
@@ -46,8 +38,6 @@ import {
   says,
   setObjectEnv,
   testRunOpening,
-  toolResults,
-  toolStep,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
@@ -63,71 +53,6 @@ import { signedInApi, signedInWithRole } from "./sign-in.ts";
 // in isolates of their own, and the model gateway, all real (agent-chat.ts).
 
 const idp = mockIdp();
-
-/**
- * Models of different context windows, as pi's catalog gives them: one of
- * 1,000,000 tokens, one of 200,000 and one of 32,768. Each request keeps
- * 16,384 of them for the answer, or a quarter of a window too small for that
- * (8,192 of the 32,768).
- */
-const largeModel = "anthropic/claude-sonnet-5-5";
-const smallModel = "anthropic/claude-haiku-4-5";
-const tinyModel = "mistral/voxtral-small-latest";
-const answerTokens = 16_384;
-const inputTokens = {
-  large: 1_000_000 - answerTokens,
-  small: 200_000 - answerTokens,
-  tiny: 32_768 - 32_768 / 4,
-};
-
-/** The organization's models: all of them. */
-const bothModels = [model, largeModel, smallModel, tinyModel];
-
-/**
- * Adds `count` turns to the chat as the object keeps them: questions of
- * `chars` characters (30,000 unless given), each answered.
- */
-const addTurns = async (
-  stub: WorkspaceStub,
-  chatId: string,
-  count: number,
-  chars = 30_000
-): Promise<void> => {
-  const question = JSON.stringify({
-    role: "user",
-    content: "q".repeat(chars),
-    timestamp: 1,
-  });
-  const answer = JSON.stringify({
-    role: "assistant",
-    content: [{ type: "text", text: "Answered." }],
-    api: "anthropic-messages",
-    provider: "anthropic",
-    model: "claude-sonnet-4-5",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: "stop",
-    timestamp: 1,
-  });
-  await runInDurableObject(stub, (_instance, state) => {
-    for (let i = 0; i < count; i += 1) {
-      for (const message of [question, answer]) {
-        state.storage.sql.exec(
-          "INSERT INTO chat_messages (chat_id, message, created_at) VALUES (?, ?, ?)",
-          chatId,
-          message,
-          Date.now()
-        );
-      }
-    }
-  });
-};
 
 /** A new chat for a person no other test uses, answered by `replies`. */
 const newChat = async (...replies: ProviderReply[]) => {
@@ -249,58 +174,6 @@ const runEndedSchema = z.object({
   runId: z.string(),
 });
 
-describe("a request's system prompt", () => {
-  it("gives each section only where it was given last, so an earlier value never goes again", () => {
-    const at = 1;
-    expect(
-      latestSections([
-        {
-          role: "system",
-          content: "Instructions.",
-          sections: { apis: "A1", memory: "M1", skills: "S1" },
-          timestamp: at,
-        },
-        { role: "user", content: "Q1", timestamp: at },
-        {
-          role: "system",
-          content: "",
-          sections: { skills: "S2", memory: null },
-          timestamp: at,
-        },
-        { role: "user", content: "Q2", timestamp: at },
-        {
-          role: "system",
-          content: "",
-          sections: { skills: "S3" },
-          timestamp: at,
-        },
-      ])
-    ).toStrictEqual([
-      {
-        role: "system",
-        content: "Instructions.",
-        sections: { apis: "A1" },
-        timestamp: at,
-      },
-      { role: "user", content: "Q1", timestamp: at },
-      // Its skills are given again later: only the memory's removal is left.
-      {
-        role: "system",
-        content: "",
-        sections: { memory: null },
-        timestamp: at,
-      },
-      { role: "user", content: "Q2", timestamp: at },
-      {
-        role: "system",
-        content: "",
-        sections: { skills: "S3" },
-        timestamp: at,
-      },
-    ]);
-  });
-});
-
 describe("chat agent", () => {
   it("answers a question with a code step against the chat's API, its declaration read first", async () => {
     const { stub, chat, personId, provider, ask } = await newChat(
@@ -347,7 +220,6 @@ describe("chat agent", () => {
     });
     const messages = await transcript(stub, chat.id);
     expect(messages.map(({ role }) => role)).toStrictEqual([
-      "system",
       "user",
       "assistant",
       "toolResult",
@@ -506,127 +378,6 @@ describe("chat agent", () => {
     expect(result?.text).toMatch(/Looking\.[\s\S]*Error: No such invoice/u);
   });
 
-  it("stops at the most steps a turn may take", async () => {
-    const { stub, chat, provider, ask } = await newChat(
-      ...Array.from({ length: maxSteps }, () =>
-        codeStep("export default async () => 'again';")
-      )
-    );
-
-    const reply = await ask("Keep going.");
-
-    expect(reply.outcome).toBe("max_steps");
-    expect(provider.requests).toHaveLength(maxSteps);
-    // The last step's code isn't run: nobody would read its result.
-    const results = await codeResults(stub, chat.id);
-    expect(results.at(-1)).toStrictEqual({
-      isError: true,
-      text: "Not run: this turn has reached its last step. Answer with what you have.",
-    });
-    expect(results.filter(({ isError }) => !isError)).toHaveLength(
-      maxSteps - 1
-    );
-  });
-
-  it("runs code at most 5 times per response", async () => {
-    const { stub, chat, ask } = await newChat(
-      codeStep("export default async () => 'ran';", 30),
-      says("Done.")
-    );
-
-    await ask("Run it all.");
-
-    const results = await codeResults(stub, chat.id);
-    expect(results.filter(({ isError }) => !isError)).toHaveLength(
-      maxRunsPerResponse
-    );
-    expect(results.filter(({ isError }) => isError)).toHaveLength(
-      30 - maxRunsPerResponse
-    );
-    expect(results.at(-1)?.text).toMatch(/at most 5 times/u);
-  });
-
-  it("counts reading an API's declaration as no code run", async () => {
-    const read = readApiStep("chat");
-    const run = codeStep(
-      "export default async () => 'ran';",
-      maxRunsPerResponse
-    );
-    const { stub, chat, ask } = await newChat(
-      // Reads, then runs code as often as one response may, in one response.
-      {
-        ...run,
-        toolCalls: [...(read.toolCalls ?? []), ...(run.toolCalls ?? [])],
-      },
-      says("Done.")
-    );
-
-    await ask("Read, then run it all.");
-
-    const results = await codeResults(stub, chat.id);
-    expect(results.filter(({ isError }) => !isError)).toHaveLength(
-      maxRunsPerResponse
-    );
-  });
-
-  it("runs code at most 30 times per turn", async () => {
-    const { stub, chat, ask } = await newChat(
-      ...Array.from({ length: 7 }, () =>
-        codeStep("export default async () => 'ran';", maxRunsPerResponse)
-      ),
-      says("Done.")
-    );
-
-    await ask("Run it all.");
-
-    const results = await codeResults(stub, chat.id);
-    expect(results.filter(({ isError }) => !isError)).toHaveLength(
-      maxRunsPerTurn
-    );
-    expect(results.at(-1)?.text).toMatch(/30 times, the most it may/u);
-  });
-
-  it("calls its other tools at most 20 times per response, and counts none as a code run", async () => {
-    const reads = toolStep("readFile", { app: "app_none", path: "app.ts" });
-    const read = reads.toolCalls?.[0];
-    const { stub, chat, ask } = await newChat(
-      {
-        ...reads,
-        toolCalls: Array.from(
-          { length: maxToolCallsPerResponse + 1 },
-          (_, at) => ({
-            id: `call_read_${at}`,
-            name: read?.name ?? "readFile",
-            arguments: read?.arguments ?? {},
-          })
-        ),
-      },
-      // Then as many code runs as a turn may make, all of them run.
-      ...Array.from({ length: maxRunsPerTurn / maxRunsPerResponse }, () =>
-        codeStep("export default async () => 'ran';", maxRunsPerResponse)
-      ),
-      says("Done.")
-    );
-
-    await ask("Read it twenty-one times, then run it all.");
-
-    const steps = await toolResults(stub, chat.id);
-    const reading = steps.filter(({ tool }) => tool === "readFile");
-    const running = steps.filter(({ tool }) => tool === "executeCode");
-    expect({
-      // Each read made is refused by the App it names, not by the limit.
-      made: reading
-        .slice(0, maxToolCallsPerResponse)
-        .every(({ text }) => !text.includes("Not done")),
-      last: reading.at(-1)?.text,
-      ran: running.filter(({ isError }) => !isError).length,
-    }).toStrictEqual({
-      made: true,
-      last: `Not done: one response may call these tools at most ${maxToolCallsPerResponse} times. Make the rest in your next response.`,
-      ran: maxRunsPerTurn,
-    });
-  });
-
   it("stops the turn when the person leaves during it", async () => {
     // The model is still answering, with code to run, when they leave.
     const { reply, release } = pausedReply(
@@ -652,32 +403,6 @@ describe("chat agent", () => {
 
     await expect(turn).resolves.toBe("permission.person_inactive");
     // No request for them after they left.
-    expect(provider.requests).toHaveLength(1);
-  });
-
-  it("stops the turn when its person leaves during it", async () => {
-    const { reply, release } = pausedReply(
-      { ...codeStep("export default async () => 'done';"), text: "Running." },
-      1
-    );
-    const { personId, provider, ask } = await newChat(
-      reply,
-      says("Never asked.")
-    );
-
-    const turn = codeOf(ask("Wait."));
-    await vi.waitFor(
-      () => {
-        expect(provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
-      .bind(personId)
-      .run();
-    release();
-
-    await expect(turn).resolves.toBe("permission.person_inactive");
     expect(provider.requests).toHaveLength(1);
   });
 });
@@ -1015,7 +740,7 @@ describe("chat agent sandbox", () => {
     const reply = ask("Wait, then look.");
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(3);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
       },
       { timeout: 10_000 }
     );
@@ -1169,16 +894,31 @@ describe("chat agent turns", () => {
       async () => {
         expect(provider.requests).toHaveLength(1);
         // The step has started once its call is kept.
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(3);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
       },
       { timeout: 10_000 }
     );
     await stub.cancel(chat.id, personId);
 
     await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
+    // pi ends the aborted call with its own result; the run's record says
+    // how the run itself ended.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: true, text: "Error (cancelled):\nThe run was cancelled." },
+      { isError: true, text: "Tool executeCode was aborted" },
     ]);
+    await vi.waitFor(async () => {
+      await expect(
+        runInDurableObject(stub, (_instance, state) =>
+          state.storage.sql
+            .exec<{ status: string }>(
+              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              chat.id
+            )
+            .toArray()
+            .map(({ status }) => status)
+        )
+      ).resolves.toStrictEqual(["cancelled"]);
+    });
     // No request after the cancelled step.
     expect(provider.requests).toHaveLength(1);
   });
@@ -1235,23 +975,31 @@ describe("chat agent turns", () => {
     const { stub, chat, personId, provider } = await newChatOn(
       [model, openai],
       { ...says("Hi."), cache: { read: 900, write: 100 } },
-      says("Hi again.")
+      says("Hi again."),
+      says("Hi once more.")
     );
     await stub.ask(chat.id, { text: "Hi.", model });
     await stub.ask(chat.id, { text: "Hi again.", model: openai });
+    await stub.ask(chat.id, { text: "Hi once more.", model: openai });
 
-    // OpenAI's responses carry the chat as their cache key. (Anthropic's
-    // cache markers are pi's default either way; its session headers stop
-    // at connect.)
-    const responses = provider.requests.at(-1);
+    // OpenAI's responses carry the chat's conversation as their cache key,
+    // the same on every turn (pi's session). (Anthropic's cache markers are
+    // pi's default either way; its session headers stop at connect.)
+    const responses = provider.requests.at(-2);
+    const [key, next] = provider.requests
+      .slice(-2)
+      .map(
+        ({ body }) =>
+          z.looseObject({ prompt_cache_key: z.string() }).parse(body)
+            .prompt_cache_key
+      );
     expect({
       responses:
         responses && new URL(responses.url).pathname.endsWith("/responses"),
-      key: z
-        .looseObject({ prompt_cache_key: z.string() })
-        .parse(responses?.body).prompt_cache_key,
-    }).toStrictEqual({ responses: true, key: chat.id });
-    const calls = await modelCallsBy(personId, 2);
+      stable: key === next,
+      keyed: (key ?? "").length > 0,
+    }).toStrictEqual({ responses: true, stable: true, keyed: true });
+    const calls = await modelCallsBy(personId, 3);
     expect(
       calls.map(({ model: used, detail }) => ({
         inputTokens: used?.inputTokens,
@@ -1261,6 +1009,7 @@ describe("chat agent turns", () => {
     ).toStrictEqual([
       // The cache's tokens are among the prompt's.
       { inputTokens: 1200, cacheReadTokens: 900, cacheWriteTokens: 100 },
+      { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
       { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
     ]);
 
@@ -1290,6 +1039,7 @@ describe("chat agent turns", () => {
       cached: [
         { requests: 1, inputTokens: 1200, cacheReadTokens: 900, share: 0.75 },
         { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
+        { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
       ],
       cancelled: [],
     });
@@ -1305,282 +1055,6 @@ describe("chat agent turns", () => {
       "permission.person_inactive"
     );
     expect(provider.requests).toStrictEqual([]);
-  });
-
-  it("shortens a long turn's oldest code results to fit the model's window, keeping its latest and every call's result", async () => {
-    const { stub, chat, provider } = await newChatOn(
-      bothModels,
-      // 30 code runs of a result the model reads cut to 32 KiB each: more
-      // than the small model takes.
-      ...Array.from({ length: maxRunsPerTurn / maxRunsPerResponse }, () =>
-        codeStep(
-          "export default async () => 'r'.repeat(40_000);",
-          maxRunsPerResponse
-        )
-      ),
-      says("Done.")
-    );
-
-    await expect(
-      stub.ask(chat.id, { text: "Run it all.", model: smallModel })
-    ).resolves.toMatchObject({ outcome: "answered" });
-
-    // What the last request sent, in Anthropic's wire format.
-    const blockSchema = z.looseObject({
-      type: z.string(),
-      id: z.string().optional(),
-      tool_use_id: z.string().optional(),
-    });
-    const bodySchema = z.looseObject({
-      messages: z.array(
-        z.looseObject({
-          content: z.union([z.string(), z.array(blockSchema)]),
-        })
-      ),
-    });
-    const last = provider.requests.at(-1)?.body;
-    const blocks = bodySchema
-      .parse(last)
-      .messages.flatMap(({ content }) =>
-        typeof content === "string" ? [] : content
-      );
-    const calls = blocks.flatMap(({ type, id }) =>
-      type === "tool_use" ? [id] : []
-    );
-    const results = blocks.filter(({ type }) => type === "tool_result");
-    const stored = await codeResults(stub, chat.id);
-    const shortened = results.filter((result) =>
-      JSON.stringify(result).includes("(output left out to fit;")
-    );
-    const latest = results.at(-1);
-    expect({
-      calls: calls.length,
-      withinWindow:
-        JSON.stringify(last).length < requestChars(inputTokens.small),
-      // Every call still has its result, in the same order.
-      pairs: results.map(({ tool_use_id: id }) => id),
-      someShortened: shortened.length > 0,
-      latestWhole:
-        latest !== undefined &&
-        !shortened.includes(latest) &&
-        JSON.stringify(latest).includes(
-          JSON.stringify(stored.at(-1)?.text ?? "missing").slice(1, -1)
-        ),
-    }).toStrictEqual({
-      calls: maxRunsPerTurn,
-      withinWindow: true,
-      pairs: calls,
-      someShortened: true,
-      latestWhole: true,
-    });
-  });
-
-  it("sends as much of a long chat as the model's window takes, and stops a chat that is too long", async () => {
-    const { stub, chat, provider, ask } = await newChatOn(
-      bothModels,
-      codeStep("export default async () => 'early' + '-result';"),
-      says("Noted."),
-      says("Still here."),
-      says("All here.")
-    );
-    await ask("Remember this.");
-    // A long chat since, of 1.2 million characters: more than the small
-    // model takes, and well within the large one's window.
-    await addTurns(stub, chat.id, 40);
-    /** What the request for `question` sent of the chat, to `to`. */
-    const sentTo = async (to: string, question: string, answered: string) => {
-      await expect(
-        stub.ask(chat.id, { text: question, model: to })
-      ).resolves.toMatchObject({ outcome: "answered", answer: answered });
-      const sent = JSON.stringify(provider.requests.at(-1)?.body);
-      return {
-        // The first turn: its question, and what its code returned.
-        early: [sent.includes("Remember this."), sent.includes("early-result")],
-        note: sent.includes("Earlier messages of this chat are left out"),
-        question: sent.includes(question),
-        // The instructions always go along.
-        instructions: sent.includes("You are the Grasp assistant"),
-        chars: sent.length,
-      };
-    };
-
-    const small = await sentTo(smallModel, "And now?", "Still here.");
-    const large = await sentTo(largeModel, "And again?", "All here.");
-
-    expect({
-      small: { ...small, chars: undefined },
-      smallWithinWindow: small.chars < requestChars(inputTokens.small),
-      large: { ...large, chars: undefined },
-      largeWithinWindow: large.chars < requestChars(inputTokens.large),
-    }).toStrictEqual({
-      small: {
-        early: [false, false],
-        note: true,
-        question: true,
-        instructions: true,
-        chars: undefined,
-      },
-      smallWithinWindow: true,
-      // The same chat, whole: the first turn and all since.
-      large: {
-        early: [true, true],
-        note: false,
-        question: true,
-        instructions: true,
-        chars: undefined,
-      },
-      largeWithinWindow: true,
-    });
-
-    await addTurns(stub, chat.id, 100);
-    await expect(codeOf(ask("More?"))).resolves.toBe("agent.chat_full");
-  });
-
-  it("leaves a long chat's turns only the room the memory it carries doesn't take", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { memory } = await admin.api.memory.collections();
-    if (memory === null) {
-      throw new Error("An admin gets the Memory collection");
-    }
-    const { stub, chat, provider } = await newChatOn(
-      bothModels,
-      says("Still here.")
-    );
-    /** Saves the company's AGENTS.md, over what is there. */
-    const saveRules = async (text: string) => {
-      const { documents } = await admin.api.knowledge.listDocuments(memory);
-      const current = documents.find(({ path }) => path === "AGENTS.md");
-      await admin.api.knowledge.saveDocument({
-        collectionId: memory,
-        path: "AGENTS.md",
-        text,
-        ifVersion: current?.currentVersion ?? 0,
-      });
-    };
-    // As large as the company's AGENTS.md may be, which every request of
-    // the chat carries.
-    const rules = `# Rules\n\n${"m".repeat(
-      memoryLimits["AGENTS.md"] * memoryCharactersPerToken - 100
-    )} the last rule`;
-    let sent = "";
-    try {
-      await saveRules(rules);
-      await addTurns(stub, chat.id, 40);
-
-      await expect(
-        stub.ask(chat.id, { text: "And now?", model: smallModel })
-      ).resolves.toMatchObject({ outcome: "answered" });
-      sent = JSON.stringify(provider.requests.at(-1)?.body);
-    } finally {
-      // The company's memory is every later chat's too.
-      await saveRules("# Rules");
-    }
-
-    expect({
-      // The memory whole, the recent turns, and no more than the model
-      // takes of both together.
-      memory: sent.includes("the last rule"),
-      note: sent.includes("Earlier messages of this chat are left out"),
-      question: sent.includes("And now?"),
-      withinWindow: sent.length < requestChars(inputTokens.small),
-      // Most of the room that is left is used: ten turns and more.
-      turns: sent.split("q".repeat(30_000)).length > 10,
-    }).toStrictEqual({
-      memory: true,
-      note: true,
-      question: true,
-      withinWindow: true,
-      turns: true,
-    });
-  });
-
-  it("keeps a request that nearly fills the model's window within it, its note and tool declaration included", async () => {
-    const { stub, chat, provider } = await newChatOn(
-      bothModels,
-      says("Still here.")
-    );
-    // Turns of 5,000 characters, more than twice what the small model
-    // takes: those sent fill its window to within one of them.
-    await addTurns(stub, chat.id, 250, 5000);
-
-    await expect(
-      stub.ask(chat.id, { text: "And now?", model: smallModel })
-    ).resolves.toMatchObject({ outcome: "answered" });
-
-    // The whole request as the provider got it: instructions, the tool's
-    // declaration, the note and the turns.
-    const sent = JSON.stringify(provider.requests.at(-1)?.body);
-    const windowChars = requestChars(inputTokens.small);
-    expect({
-      tool: sent.includes('"name":"executeCode"'),
-      note: sent.includes("Earlier messages of this chat are left out"),
-      question: sent.includes("And now?"),
-      nearlyFull: sent.length > windowChars * 0.9,
-      withinWindow: sent.length <= windowChars,
-    }).toStrictEqual({
-      tool: true,
-      note: true,
-      question: true,
-      nearlyFull: true,
-      withinWindow: true,
-    });
-  });
-
-  it("refuses a question too long for the model, before anything is kept or sent", async () => {
-    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
-
-    // 80,000 characters, to a model that takes 24,576 tokens: its window
-    // of 32,768 less a quarter kept for the answer.
-    await expect(
-      codeOf(stub.ask(chat.id, { text: "q".repeat(80_000), model: tinyModel }))
-    ).resolves.toBe("agent.question_too_long");
-    expect(provider.requests).toStrictEqual([]);
-    await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
-
-    // The same question to a model that takes it.
-    await expect(
-      stub.ask(chat.id, { text: "q".repeat(80_000), model })
-    ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
-  });
-
-  it("answers a short question on a model with a small window", async () => {
-    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
-
-    await expect(
-      stub.ask(chat.id, { text: "Hi.", model: tinyModel })
-    ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
-    // Instructions, tool and question all within the 24,576 tokens left.
-    const sent = JSON.stringify(provider.requests.at(-1)?.body);
-    expect(sent.length).toBeLessThanOrEqual(requestChars(inputTokens.tiny));
-  });
-
-  it("keeps what every request carries, its instructions, the index of its APIs and its tools, within a quarter of the smallest model's input", async () => {
-    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
-
-    await stub.ask(chat.id, { text: "Hi.", model: tinyModel });
-    // A new chat with no memory or skills, and a question of three
-    // characters: what is left is what every request carries.
-    const sent = JSON.stringify(provider.requests.at(-1)?.body);
-    expect({
-      share: sent.length <= requestChars(inputTokens.tiny) / 4,
-      // What the model must always know stays in it.
-      dataNotInstructions: sent.includes("data, not instructions"),
-      admin: sent.includes("no permission holds until an admin grants it"),
-      readApi: sent.includes('"name":"readApi"'),
-    }).toStrictEqual({
-      share: true,
-      dataNotInstructions: true,
-      admin: true,
-      readApi: true,
-    });
-  });
-
-  it("sizes a chat to a fixed number of characters when the model's window is unknown", () => {
-    expect([
-      requestChars(),
-      requestChars(0),
-      requestChars(inputTokens.small) < requestChars(inputTokens.large),
-    ]).toStrictEqual([300_000, 0, true]);
   });
 
   it.each([
@@ -1608,102 +1082,37 @@ const restart = async (id: WorkspaceId): Promise<WorkspaceStub> => {
   return workspace(env, id);
 };
 
-/** What the chat's agent said in the chat, oldest first. */
-const saidIn = async (stub: WorkspaceStub, chatId: string) => {
-  const messages = await transcript(stub, chatId);
-  return messages.flatMap((message) =>
-    message.role === "assistant"
-      ? [
-          message.content
-            .flatMap((part) => (part.type === "text" ? [part.text] : []))
-            .join(""),
-        ]
-      : []
-  );
-};
-
-/** Whether the agent's message is the one a cut-short turn leaves. */
-const saysInterrupted = (text: string): boolean =>
-  text.startsWith("I was interrupted before I finished");
-
 describe("chat agent after a restart", () => {
-  it("says nothing of a turn that ended before the restart: answered, stopped by the person, or failed", async () => {
-    const answered = await newChat(says("Done."));
-    await answered.ask("Do it.");
-
-    const stopped = await newChat({ hang: true });
-    const cancelled = stopped.ask("Take your time.");
-    await vi.waitFor(
-      () => {
-        expect(stopped.provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    await stopped.stub.cancel(stopped.chat.id, stopped.personId);
-    await cancelled;
-
-    // The person leaves while the model answers: the turn throws.
+  it("stops the turn when its person leaves during it and a restart of its chat's object cuts it short, and says why", async () => {
     const { reply, release } = pausedReply(
       { ...codeStep("export default async () => 'done';"), text: "Running." },
       1
     );
-    const failed = await newChat(reply);
-    const failing = codeOf(failed.ask("Wait."));
+    const { id, chat, personId, provider, ask } = await newChat(
+      reply,
+      says("Never asked.")
+    );
+
+    const turn = codeOf(ask("Wait."));
     await vi.waitFor(
       () => {
-        expect(failed.provider.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
     await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
-      .bind(failed.personId)
+      .bind(personId)
       .run();
-    release();
-    await expect(failing).resolves.toBe("permission.person_inactive");
-
-    const said: boolean[] = [];
-    for (const { id, chat } of [answered, stopped, failed]) {
-      // oxlint-disable-next-line no-await-in-loop -- one chat after the other
-      const woken = await restart(id);
-      // oxlint-disable-next-line no-await-in-loop -- one chat after the other
-      const texts = await saidIn(woken, chat.id);
-      said.push(texts.some(saysInterrupted));
-    }
-    expect(said).toStrictEqual([false, false, false]);
-  });
-
-  it("says nothing when the restart came before the turn's question was kept, or after its answer was", async () => {
-    const { id, stub, chat, ask } = await newChat(says("Done."));
-    await ask("Do it.");
-    // The mark of a turn taken when the chat's last message had ID
-    // `before`, left as the object leaves it when it dies before the turn
-    // clears it.
-    const markedAt = async (before: number) => {
-      await runInDurableObject(workspace(env, id), (_instance, state) => {
-        state.storage.kv.put(`turn:${chat.id}`, before);
-      });
-    };
-    const lastId = await runInDurableObject(
-      stub,
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ last: number }>("SELECT max(id) AS last FROM chat_messages")
-          .one().last
-    );
-
-    // A second turn died before its question reached the chat: nothing of
-    // it was stored.
-    await markedAt(lastId);
-    const beforeQuestion = await saidIn(await restart(id), chat.id);
-    // The first turn died after its answer was stored, before it cleared
-    // its mark.
-    await markedAt(0);
-    const afterAnswer = await saidIn(await restart(id), chat.id);
-
-    expect({ beforeQuestion, afterAnswer }).toStrictEqual({
-      beforeQuestion: ["Done."],
-      afterAnswer: ["Done."],
+    // The turn is set up again as the object wakes, for a person who left.
+    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
     });
+
+    await expect(turn).resolves.toBe("permission.person_inactive");
+    release();
+    expect(provider.requests).toHaveLength(1);
   });
 
   it("continues the conversation with everything before it", async () => {
@@ -1732,41 +1141,110 @@ describe("chat agent after a restart", () => {
     }
   });
 
-  it("goes on from a turn a restart cut short", async () => {
-    const { stub, ask } = await newChat(
-      codeStep("export default async () => 6 * 7;"),
-      says("42.")
+  it("goes on from a turn a restart of its ChatSession cut short, the chat shown running throughout", async () => {
+    // The answer after the restart pauses, so the turn is still under way
+    // when the chat is read.
+    const answer = pausedReply(says("42."), 1);
+    const { id, stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
+      ),
+      answer.reply
     );
-    await ask("What is 6 * 7?");
-    // The object died while the step ran: the step's call was kept, as the
-    // loop keeps each message it finishes, but its result and the answer
-    // weren't. A message is kept with what it said for searches, so
-    // neither row of the last two exists.
-    await runInDurableObject(stub, (_instance, state) => {
-      const lastTwo = "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2";
-      state.storage.sql.exec(
-        `DELETE FROM chat_search_text WHERE message_id IN (${lastTwo})`
-      );
-      state.storage.sql.exec(
-        `DELETE FROM chat_messages WHERE id IN (${lastTwo})`
+    // The question's call breaks with the restarts: the turn goes on.
+    const reply = ask("What is 6 * 7?").then(
+      () => "settled",
+      () => "settled"
+    );
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // The chat's object restarts mid-step, as a crash would cut it short.
+    const session = chatSession(env, id, chat.id);
+    await runInDurableObject(session, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The Workspace restarts too: the chat still shows its turn running,
+    // as the ChatSession says.
+    const woken = await restart(id);
+    const { running } = await woken.chatSummary(chat.id, personId);
+    // Its heartbeat alarm picks the turn up again, if it hasn't yet.
+    await runDurableObjectAlarm(chatSession(env, id, chat.id));
+    answer.release();
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(woken, chat.id)).resolves.toHaveLength(4);
+      },
+      { timeout: 15_000 }
+    );
+    const results = await codeResults(woken, chat.id);
+    const messages = await transcript(woken, chat.id);
+    expect({
+      running,
+      answered: messages.at(-1)?.role,
+      results: results.length,
+      settled: await reply,
+    }).toStrictEqual({
+      running: true,
+      answered: "assistant",
+      results: 1,
+      settled: "settled",
+    });
+    await vi.waitFor(async () => {
+      await expect(woken.chatSummary(chat.id, personId)).resolves.toMatchObject(
+        {
+          running: false,
+        }
       );
     });
+  });
 
-    await evictDurableObject(stub);
-    const after = await fakeProvider(says("It was 42."));
-    const reply = await ask("So?");
-
-    const sent = JSON.stringify(after.requests[0]?.body);
-    expect({
-      answer: reply.answer,
-      // The first question, its step's call (closed as having no result)
-      // and the new question.
-      sent: ["What is 6 * 7?", "6 * 7;", "No result provided", "So?"].map(
-        (text) => sent.includes(text)
+  it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession", async () => {
+    const answer = pausedReply(says("42."), 1);
+    const { id, stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
       ),
-    }).toStrictEqual({
-      answer: "It was 42.",
-      sent: [true, true, true, true],
+      answer.reply
+    );
+    // The question's call breaks with the restarts: the turn goes on.
+    void ask("What is 6 * 7?").catch(() => "settled");
+    await vi.waitFor(
+      async () => {
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // The Workspace first, so nothing asks for the turn again, then the
+    // chat's object, mid-step.
+    const woken = await restart(id);
+    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // A connection decided meanwhile: its note wakes the chat's object.
+    await woken.connectionDecided(chat.id, personId, {
+      binding: "MAIL",
+      decision: "denied",
+    });
+    answer.release();
+    const messages = await vi.waitFor(
+      async () => {
+        const kept = await transcript(woken, chat.id);
+        expect(kept).toHaveLength(4);
+        return kept;
+      },
+      { timeout: 15_000 }
+    );
+    expect(messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "42." }],
     });
   });
 });
@@ -2099,13 +1577,15 @@ describe("chat agent code run leases", () => {
         records.map(({ status }) => status)
       )
     ).resolves.toStrictEqual(["revoked"]);
+    // Noticed at the line it logged, which comes before its end and is
+    // checked before the run closes: once, there.
     await vi.waitFor(
       async () => {
         await expect(
           refusalsIn(chat.id, "agent.run_revoked")
         ).resolves.toStrictEqual([
           {
-            method: "executeCode",
+            method: "output",
             outcome: "refused",
             reason: "agent.run_revoked",
           },
@@ -2191,14 +1671,12 @@ describe("chat agent code run leases", () => {
     ]);
     const [record] = await runRecords(stub, chat.id);
     expect(record?.status).toBe("revoked");
-    await expect(
-      runInDurableObject(stub, (instance) =>
-        instance.admitFromCodeRun(
-          chatIdSchema.parse(chat.id),
-          String(record?.id)
-        )
-      )
-    ).resolves.toStrictEqual({ call: "ended" });
+    const { call } = await runInDurableObject(stub, (instance) =>
+      instance.admitFromCodeRun(chatIdSchema.parse(chat.id), String(record?.id))
+    );
+    // Closed, as ended or, once the chat's guard withheld it first, as
+    // revoked: nothing more of it is admitted either way.
+    expect(["ended", "revoked"]).toContain(call);
   });
 
   it("admits nothing a run does while its end reads revocations", async () => {
@@ -2299,7 +1777,7 @@ describe("chat agent code run leases", () => {
     ).toStrictEqual([]);
   });
 
-  it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {
+  it("ends a run's lease a Workspace restart cuts short: its record says interrupted, its later calls are refused, and the turn goes on in its ChatSession", async () => {
     const { id, stub, chat, provider, ask } = await newChat(
       codeStep(
         "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); return (await env.chat.info()).chatId; };"
@@ -2334,9 +1812,16 @@ describe("chat agent code run leases", () => {
           String(record?.id)
         )
       )
-    ).resolves.toStrictEqual({ call: "ended", first: false });
-    // Not run again: one step asked for, no result, no second request.
-    await scheduler.wait(6000);
+    ).resolves.toMatchObject({ call: "ended" });
+    // The turn goes on in the chat's ChatSession at once, not at its
+    // heartbeat alarm a minute on: the run's call fails with the object it
+    // went to, its step fails, and the model answers. Not run again.
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(2);
+      },
+      { timeout: 15_000 }
+    );
     const [calls, results, runs] = await Promise.all([
       toolCallIds(woken, chat.id),
       codeResults(woken, chat.id),
@@ -2344,10 +1829,9 @@ describe("chat agent code run leases", () => {
     ]);
     expect({
       calls: calls.length,
-      results: results.length,
+      failed: results.map(({ isError }) => isError),
       runs: runs.length,
-      requests: provider.requests.length,
-    }).toStrictEqual({ calls: 1, results: 0, runs: 1, requests: 1 });
+    }).toStrictEqual({ calls: 1, failed: [true], runs: 1 });
   });
 });
 

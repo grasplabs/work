@@ -8,8 +8,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { BuildJobRecords, jobRecordsKept } from "../src/build-job-records.ts";
+import { ChatSession } from "../src/chat-session.ts";
 import { personOf } from "../src/connections.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
   codeStep,
@@ -33,6 +34,7 @@ import {
   screenBuilds,
   submittedJob,
   endedJob,
+  noticed,
   runRecords,
   createdApp,
   jobEvents,
@@ -63,7 +65,7 @@ const { setUp } = buildJobsOf(idp);
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
 describe("build jobs", { timeout: 180_000 }, () => {
-  it("finishes a proposal after the run that submitted it ended, tells that turn how it ended, and no later turn", async () => {
+  it("finishes a proposal after the run that submitted it ended, has that turn answer how it ended, and tells no later turn", async () => {
     const waiting = pausedReply(says("I'll say once the build is done."), 3);
     const { builder, chat } = await setUp([
       codeStep(submitProposal),
@@ -101,28 +103,41 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }).toMatchObject({ status: "completed", version: 1, afterItsRun: true });
 
     // The turn is still answering: once its answer is in, it reads how
-    // the job ended, before it answers again.
+    // the job ended, and answers that too, in the same turn.
+    await noticed(job.id);
     waiting.release();
     const answer = await answering;
-    const messages = await transcript(chat.stub, chat.chat.id);
+    const followed = await vi.waitFor(
+      async () => {
+        const messages = await transcript(chat.stub, chat.chat.id);
+        expect(messages.at(-1)).toMatchObject({
+          role: "assistant",
+          content: [
+            { type: "text", text: "The invoice desk is proposed for review." },
+          ],
+        });
+        return messages;
+      },
+      { timeout: 30_000, interval: 50 }
+    );
     const { app, versions } = await createdApp(builder);
     const lastRequest = JSON.stringify(chat.provider.requests.at(-1)?.body);
     // A later turn of the chat.
     const later = await fakeProvider(says("Anything else?"));
     await chat.ask("Thanks.");
+    const notice = `Build job ${job.id} (`;
     expect({
       answer,
-      // The model was sent the notice with its last request of the turn,
+      // The model was sent the notice with the turn's last request,
       // naming the run that submitted it.
-      sent: lastRequest.includes(`Build job ${job.id}`),
+      sent: lastRequest.includes(notice),
       byItsRun: lastRequest.includes("submitted by code run"),
-      // It isn't stored with the chat, so no later request carries it.
+      // The chat doesn't show it: the person asked nothing.
       stored: await jobEvents(chat.stub, chat.chat.id, job.id),
-      // (Its ID is still there, in what the code that submitted it returned.)
-      laterSent: JSON.stringify(later.requests[0]?.body).includes(
-        `Build job ${job.id}`
-      ),
-      last: messages.at(-1)?.role,
+      // A later turn reads it as the history it is, and isn't told again.
+      laterSent:
+        JSON.stringify(later.requests[0]?.body).split(notice).length - 1,
+      last: followed.at(-1)?.role,
       // It proposed the draft once, as the chat's agent, for review.
       app: { pending: app.pendingVersion, current: app.currentVersion },
       versions: versions.map(({ version, proposedBy }) => ({
@@ -138,10 +153,113 @@ describe("build jobs", { timeout: 180_000 }, () => {
       sent: true,
       byItsRun: true,
       stored: [],
-      laterSent: false,
+      laterSent: 1,
       last: "assistant",
       app: { pending: 1, current: null },
       versions: [{ version: 1, chat: chat.chat.id, job: job.id }],
+    });
+  });
+
+  it("tells the turn that submitted a job how it ended once, when the first notice failed on its way and the job's end is tried again", async () => {
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      waiting.reply,
+      says("The invoice desk is proposed for review."),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    let job: z.infer<typeof jobRowSchema>;
+    const answering = chat.ask("Build an invoice desk for invoices@");
+    // The chat's object refuses the first notice, as one out of reach
+    // does: the job's end is tried again.
+    const refused = vi
+      .spyOn(ChatSession.prototype, "notify")
+      .mockRejectedValueOnce(new Error("Out of reach"));
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+    } finally {
+      checking.restore();
+    }
+    await noticed(job.id);
+    refused.mockRestore();
+    waiting.release();
+    await expect(answering).resolves.toMatchObject({ outcome: "answered" });
+    const notice = `Build job ${job.id} (`;
+    expect(
+      JSON.stringify(chat.provider.requests.at(-1)?.body).split(notice).length -
+        1
+    ).toBe(1);
+  });
+
+  it("tells the turn that submitted a job how it ended through a restart of both its chat's objects, the notice the first call to wake the turn", async () => {
+    const cut = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      cut.reply,
+      says("I'll say once the build is done."),
+      says("The invoice desk is proposed for review."),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    let job: z.infer<typeof jobRowSchema>;
+    void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+      await vi.waitFor(
+        () => {
+          expect(chat.provider.requests).toHaveLength(2);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+      // The Workspace first, so nothing asks for the turn again, then the
+      // chat's own object, mid-answer: nothing wakes it but the job.
+      for (const object of [
+        chat.stub,
+        chatSession(env, chat.id, chatIdSchema.parse(chat.chat.id)),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await runInDurableObject(object, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+    } finally {
+      checking.restore();
+      cut.release();
+    }
+    await noticed(job.id);
+    const woken = workspace(env, chat.id);
+    const notice = `Build job ${job.id} (`;
+    await vi.waitFor(
+      async () => {
+        await expect(
+          woken.chatSummary(chat.chat.id, chat.personId)
+        ).resolves.toMatchObject({ running: false });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    const messages = await transcript(woken, chat.chat.id);
+    expect({
+      // The model was sent the notice once the turn went on.
+      sent: JSON.stringify(chat.provider.requests.at(-1)?.body).includes(
+        notice
+      ),
+      // And answered it, in the same turn; the chat doesn't show it.
+      last: messages.at(-1),
+      stored: await jobEvents(woken, chat.chat.id, job.id),
+    }).toMatchObject({
+      sent: true,
+      last: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "The invoice desk is proposed for review." },
+        ],
+      },
+      stored: [],
     });
   });
 
@@ -189,6 +307,57 @@ describe("build jobs", { timeout: 180_000 }, () => {
     expect(versions).toHaveLength(1);
   });
 
+  it("takes a job from a turn its Workspace's restart left running, refuses another question meanwhile, and ends the job when the person stops that turn", async () => {
+    const building = pausedReply(
+      { ...codeStep(submitProposal), text: "Building." },
+      1
+    );
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([building.reply, waiting.reply]);
+
+    const checking = holdFiles(screenBuilds());
+    void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
+    const woken = workspace(env, chat.id);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await vi.waitFor(
+        () => {
+          expect(chat.provider.requests).toHaveLength(1);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+      // The Workspace restarts before the turn's code runs: the turn goes
+      // on in the chat's own object, its asker gone.
+      await runInDurableObject(chat.stub, (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+      building.release();
+      job = await submittedJob(woken, chat.chat.id);
+      await checking.reached();
+      // Another question, and the person's stop while it would be taken.
+      const asked = await runInDurableObject(woken, async (instance) => {
+        const sent = instance
+          .send(chat.chat.id, chat.personId, { text: "Another?", model })
+          .then(
+            () => "sent",
+            (error: unknown) => agentErrors.codeOf(error) ?? "failed"
+          );
+        const stopped = await instance.cancel(chat.chat.id, chat.personId);
+        return { sent: await sent, stopped };
+      });
+      expect(asked).toStrictEqual({ sent: "agent.busy", stopped: true });
+    } finally {
+      checking.restore();
+      waiting.release();
+    }
+    await expect(endedJob(woken, chat.chat.id, job.id)).resolves.toMatchObject({
+      status: "cancelled",
+      version: null,
+    });
+  });
+
   it("ends a job when the person stops the turn that submitted it, and commits nothing", async () => {
     const waiting = pausedReply(says("I'll say once the build is done."), 3);
     const { builder, chat } = await setUp([
@@ -216,6 +385,65 @@ describe("build jobs", { timeout: 180_000 }, () => {
     expect({ ended, versions }).toMatchObject({
       ended: { status: "cancelled", version: null, result: null },
       versions: [],
+    });
+  });
+
+  it("stops a turn the person stops while its code runs to answer how its job ended, and shows it stopped, through a restart too", async () => {
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      waiting.reply,
+      codeStep("export default async () => { await scheduler.wait(30_000); };"),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    const answering = chat.ask("Build an invoice desk for invoices@");
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+    } finally {
+      checking.restore();
+    }
+    await endedJob(chat.stub, chat.chat.id, job.id);
+    await noticed(job.id);
+    waiting.release();
+    // Its answer to the notice runs code, stopped in the middle.
+    await vi.waitFor(
+      async () => {
+        const records = await runRecords(chat.stub, chat.chat.id);
+        expect(records.map(({ status }) => status)).toStrictEqual([
+          "completed",
+          "running",
+        ]);
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    await expect(
+      chat.stub.cancel(chat.chat.id, chat.personId)
+    ).resolves.toBeTruthy();
+    const { outcome } = await answering;
+    const { running } = await chat.stub.chatSummary(
+      chat.chat.id,
+      chat.personId
+    );
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    const woken = await workspace(env, chat.id).chatSummary(
+      chat.chat.id,
+      chat.personId
+    );
+    expect({
+      outcome,
+      running,
+      afterRestart: woken.running,
+    }).toStrictEqual({
+      outcome: "cancelled",
+      running: false,
+      afterRestart: false,
     });
   });
 

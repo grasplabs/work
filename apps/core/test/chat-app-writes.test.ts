@@ -110,7 +110,7 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
     undefined,
     via
   );
-  await fakeProvider(...replies);
+  const provider = await fakeProvider(...replies);
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: id },
     object: { type: "connection", connectionId: mail.id },
@@ -118,7 +118,7 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
     binding: "MAIL",
   });
   const ask = async (text: string) => await stub.ask(chat.id, { text, model });
-  return { person, mail, stub, chat, ask };
+  return { person, mail, stub, chat, ask, provider };
 };
 
 /** Code that reads the mail first when `read`, then asks to reply with `input`. */
@@ -293,19 +293,16 @@ describe("a chat app's answers", setUpTime, () => {
           )
         : []
     );
-    const declared = messages.flatMap((message) =>
-      message.role === "system" && typeof message.sections?.channel === "string"
-        ? [message.sections.channel]
-        : []
-    );
+    // The model was told the mark with the channel's rules.
+    const [request] = set.provider.requests;
     const shown =
       "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see.";
     expect({
       answer: answer.answer,
       kept,
-      marked:
-        declared.length === 1 &&
-        declared[0]?.includes(`mark="${answer.channelText}"`) === true,
+      marked: JSON.stringify(request?.body).includes(
+        `<channel mark=\\"${answer.channelText}\\">`
+      ),
       mark: answer.channelText?.length,
     }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
   });

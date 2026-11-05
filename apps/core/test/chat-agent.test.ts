@@ -180,10 +180,10 @@ const openChat = async (
       personId: "person-1",
     },
     runs: {
-      open: () => {
+      open: async () => {
         const runId = `run-${runs.opened.length + 1}`;
         runs.opened.push(runId);
-        return runId;
+        return await Promise.resolve(runId);
       },
       close: async (runId, status): Promise<CodeRunStatus> =>
         await Promise.resolve(runs.revoked.has(runId) ? "revoked" : status),
@@ -864,7 +864,7 @@ describe("a restart", () => {
     const chat = await openChat({
       withheld: async () => await Promise.resolve(revoked),
       runs: {
-        open: () => "run-1",
+        open: async () => await Promise.resolve("run-1"),
         close: async (_runId, status) => await Promise.resolve(status),
         output: () => {
           logged.resolve(true);

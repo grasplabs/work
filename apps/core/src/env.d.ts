@@ -131,6 +131,11 @@ interface __BaseEnv_Env {
   CONNECTOR_EVENTS_PER_RUN?: string;
   /** Tests only: a shorter wall-clock limit for one code run (src/code-mode.ts). */
   CODE_RUN_TIMEOUT_MS?: string;
+  /**
+   * Tests only: fewer restarts that may cut a chat's task off before pi
+   * parks it (`restartLimit`, src/chat-harness.ts).
+   */
+  CHAT_RESTART_LIMIT?: string;
   /** Tests only: a shorter limit for one call into an App (src/app.ts). */
   APP_CALL_TIMEOUT_MS?: string;
   /**

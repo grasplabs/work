@@ -9,6 +9,7 @@ import type { WorkspaceStub } from "./agent-chat.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { runInstance } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The chat, the App and the ways the build jobs tests (build-job-*.test.ts)
@@ -217,6 +218,22 @@ export const endedJob = async (
     { timeout: 90_000, interval: 100 }
   );
 
+/**
+ * Waits until build job `id`'s workflow is done: its last step ends the
+ * job in its chat and, while the chat runs, tells the turn that submitted
+ * it how it ended (`endBuildJob`).
+ */
+export const noticed = async (id: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      await expect(runInstance(id).status()).resolves.toMatchObject({
+        status: "complete",
+      });
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+};
+
 /** How the chat's code runs ended, as their records say, and when. */
 export const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
@@ -243,7 +260,7 @@ export const createdApp = async (
   };
 };
 
-/** The system messages of the chat that name the job `id`. */
+/** The messages the chat shows that carry the notice of how job `id` ended. */
 export const jobEvents = async (
   stub: WorkspaceStub,
   chatId: string,
@@ -251,7 +268,7 @@ export const jobEvents = async (
 ) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message, index) =>
-    message.role === "system" && JSON.stringify(message.content).includes(id)
+    JSON.stringify(message.content).includes(`Build job ${id} (`)
       ? [{ index, content: JSON.stringify(message.content) }]
       : []
   );

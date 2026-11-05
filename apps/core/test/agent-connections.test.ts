@@ -5,14 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
-import {
-  chatOf,
-  codeResults,
-  codeStep,
-  model,
-  says,
-  transcript,
-} from "./agent-chat.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -710,8 +703,15 @@ describe("a chat's connections", setUpTime, () => {
       `export default async (self, env) => await env.connections.call("MAIL", "MAIL_SEND", ${JSON.stringify(invoiceMail)});`
     );
     const waits = says("It waits for you to confirm it.");
-    // One turn in the Teams chat, then one in the web chat.
-    const { person, admin, chat } = await setUp(send, waits, send, waits);
+    // One turn in the Teams chat, then one in the web chat, then one more
+    // in the Teams chat once its write ended.
+    const { person, admin, chat } = await setUp(
+      send,
+      waits,
+      send,
+      waits,
+      says("It ended.")
+    );
     const timeZone = "Pacific/Auckland";
     await admin.api.organization.update({ timeZone });
     // A send whose fields its server lists, so core can check a Teams
@@ -771,25 +771,26 @@ describe("a chat's connections", setUpTime, () => {
       )
     ).resolves.toBe("connect.pending_expired");
     // Its chat's agent is told it ended; the web chat's still waits.
-    const messages = await transcript(chat.stub, teams.id);
-    const told = messages.filter(
-      ({ role, content }) =>
-        role === "system" &&
-        typeof content === "string" &&
-        content.includes(`pending ID ${fromTeams?.id}`)
-    );
+    // It reads that with its next request there.
+    await chat.stub.ask(teams.id, { text: "Did it go?", model });
+    const sent = chat.provider.requests.map(({ body }) => JSON.stringify(body));
     const after = await person.api.pendingActions.list();
     expect({
       sent: await mail.did(),
       waiting: after.map(({ id }) => id),
-      told: told.map(
-        ({ content }) =>
-          typeof content === "string" && content.includes("ended")
+      told: sent.some(
+        (body) =>
+          body.includes("Did it go?") &&
+          body.includes(
+            `pending ID ${fromTeams?.id}), was decided. It waited past the end of the company's day`
+          )
       ),
+      toldWeb: sent.some((body) => body.includes(`pending ID ${fromWeb?.id})`)),
     }).toStrictEqual({
       sent: { calls: 0, sent: [] },
       waiting: [fromWeb?.id],
-      told: [true],
+      told: true,
+      toldWeb: false,
     });
   });
 });

@@ -33,7 +33,6 @@ import {
   askQuestions,
   executeCode,
   instructions,
-  latestSections,
   filesNoteText,
   readApi,
   resultRunId,
@@ -140,10 +139,18 @@ export const historyKind = "grasp.history";
 export const questionKind = "grasp.question";
 
 /**
- * What the host tells a turn under way between its steps (a build job's
- * end), steered in as a user message: no turn of its own.
+ * What the host tells the turn under way that it answers (a build job's
+ * end): pi's steer while its tools run, else pi's follow-up, which starts a
+ * run of its own once the run answers. Part of the turn, as the person
+ * asked nothing.
  */
 export const noticeKind = "grasp.notice";
+
+/**
+ * What the host tells the chat's agent that asks no answer (a held write
+ * decided): written into its context at the next boundary, starting no run.
+ */
+export const noteKind = "grasp.note";
 
 const copiedSchema = z.object({ kind: z.string() });
 
@@ -208,6 +215,22 @@ export const questionText = (message: UserMessage): string => {
   }
   const [first] = message.content;
   return first?.type === "text" ? first.text : "";
+};
+
+/** What the recall `questionContent` put in `message` found, if it recalled. */
+export const recallTextOf = (message: UserMessage): string | undefined => {
+  if (typeof message.content === "string") {
+    return undefined;
+  }
+  for (const part of message.content) {
+    if (part.type === "text") {
+      const header = recallPattern.exec(part.text);
+      if (header !== null) {
+        return part.text.slice(header[0].length);
+      }
+    }
+  }
+  return undefined;
 };
 
 /** A user message with each recall of a run in `withheld` read as a note. */
@@ -314,7 +337,12 @@ interface Copied {
  * a recall's, read as a note, and so is everything the model wrote after
  * it in its turn, which may repeat what it read, up to the next question.
  * A notice steered in mid-turn ends no turn. Each call keeps its ID and
- * its result; the person's words stay as they are.
+ * its result; the person's words stay as they are. The note never says
+ * what was read, from where or how long it was.
+ *
+ * Accepted residual: what the model wrote in a later turn, without reading
+ * again, from its own earlier answer stays: that turn's reads were its
+ * own. And nothing is withheld for a run that recorded no source.
  */
 const withheldFrom = (
   history: readonly EntryRecord[],
@@ -477,6 +505,43 @@ export const rebase = async (
     base.base = reset;
     base.rebasing = false;
   }, context);
+};
+
+/**
+ * `history` with each section of the system prompt (the APIs, memory,
+ * skills) given only where it was given last: an earlier value,
+ * which may hold what the chat can no longer read (memory a person lost,
+ * a skill unlisted), never reaches the model, on a provider that replays
+ * every system message as on one that keeps the latest. A system message
+ * left with nothing to say is dropped; one that declares tools is kept.
+ */
+const latestSections = (history: readonly Message[]): Message[] => {
+  const given = new Set<string>();
+  const kept: Message[] = [];
+  for (const message of history.toReversed()) {
+    if (message.role !== "system" || message.sections === undefined) {
+      kept.push(message);
+      continue;
+    }
+    const sections = Object.fromEntries(
+      Object.entries(message.sections).filter(([name]) => !given.has(name))
+    );
+    for (const name of Object.keys(message.sections)) {
+      given.add(name);
+    }
+    const { sections: _all, ...rest } = message;
+    const empty =
+      Object.keys(sections).length === 0 &&
+      message.content.length === 0 &&
+      message.toolsAdded === undefined &&
+      message.toolsRemoved === undefined;
+    if (!empty) {
+      kept.push(
+        Object.keys(sections).length === 0 ? rest : { ...rest, sections }
+      );
+    }
+  }
+  return kept.toReversed();
 };
 
 /** Why a turn stops when what it may read can't be told. */

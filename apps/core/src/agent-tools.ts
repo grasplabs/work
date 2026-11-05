@@ -30,9 +30,6 @@ import type { CodeRunStatus } from "./code-run-statuses.ts";
 // where a code step shows its code: code is for computing, reading what
 // no tool reads, and testing what the agent built.
 
-/** Most calls of these tools one model response may make. */
-export const maxToolCallsPerResponse = 20;
-
 /** Most lines `searchFiles` answers with. */
 const maxMatches = 100;
 
@@ -65,7 +62,7 @@ const callAs = async (
   call: (scope: AgentScope, guard: () => void) => Promise<unknown>
 ) => {
   const source = JSON.stringify({ tool, input });
-  const runId = runs.open({
+  const runId = await runs.open({
     toolCallId,
     sourceHash: await sourceHash(source),
     sourceChars: source.length,
@@ -706,6 +703,15 @@ export const durableTool = <P extends TSchema>(
   ...(agentTool.executionMode === undefined
     ? {}
     : { executionMode: agentTool.executionMode }),
+  // Every tool here bounds its own result to a run's output budget
+  // (`codeLimits.outputBytes`), saying where it cut: pi's own bound, 50 KB
+  // and 2,000 lines unless set, is that same budget in bytes, and none in
+  // lines, so a result is never cut twice, nor shorter than its tool kept
+  // it.
+  outputLimits: {
+    maxBytes: codeLimits.outputBytes,
+    maxLines: Number.POSITIVE_INFINITY,
+  },
   execute: async (args, api, context) => {
     // What a tool streams isn't mirrored into the call's running output: a
     // call cut short by a restart becomes a result of that output alone,

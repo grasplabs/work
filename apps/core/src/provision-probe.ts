@@ -167,6 +167,7 @@ const objectNamespaces = (
   WORKFLOW_RUNS: env.WORKFLOW_RUNS,
   ACTION_INVOCATIONS: env.ACTION_INVOCATIONS,
   CHAT_STATE: env.CHAT_STATE,
+  CHAT_SESSIONS: env.CHAT_SESSIONS,
 });
 
 /** A namespace's no-op: an object's ID in core's jurisdiction, made but never used. */
