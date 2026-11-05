@@ -51,25 +51,28 @@ export const ultraciteBatch = { files: 100, characters: 250_000 } as const;
  * Calls `call` with `batch`; one stopped at a bound (`PlatformBoundError`)
  * is split in half and each half called again. `call` is to run once
  * (`run`'s `once`, which still tries a stop another call could cause in
- * a fresh isolate first): the split is its retry. Each file that stopped
- * alone, which nothing answered, with its stop: its caller says what
- * became of it, and blames it only for a stop of its own
- * (`PlatformBoundError.own`), never for the load's (a deadline, a crash).
+ * a fresh isolate first): the split is its retry. Only a stop the files
+ * can cause (`PlatformBoundError.own`: their CPU time, their memory) is
+ * split; a stop of the load's (a deadline, a crash) is thrown at once, for
+ * the caller to take the batch as not done, as splitting it would only
+ * wait out a deadline for each half (an overloaded sandbox host: 99 calls
+ * of 75 s for a 50-file write). The paths of the files each stopped
+ * alone, which nothing answered: its caller says what became of them.
  */
 export const callSplitting = async (
   batch: Record<string, string>,
   call: (batch: Record<string, string>) => Promise<void>
-): Promise<(readonly [string, PlatformBoundError])[]> => {
+): Promise<string[]> => {
   try {
     await call(batch);
     return [];
   } catch (error) {
-    if (!(error instanceof PlatformBoundError)) {
+    if (!(error instanceof PlatformBoundError) || !error.own) {
       throw error;
     }
     const entries = Object.entries(batch);
     if (entries.length < 2) {
-      return entries.map(([path]) => [path, error] as const);
+      return entries.map(([path]) => path);
     }
     const half = Math.ceil(entries.length / 2);
     return [

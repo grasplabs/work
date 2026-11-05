@@ -437,12 +437,9 @@ export const draftLintBuild = async (
           );
           Object.assign(linted, found);
         });
-        for (const [file, stop] of stopped) {
-          if (!stop.own) {
-            // The load's, not the file's: this lint couldn't run, and a
-            // later one tries it again.
-            throw stop;
-          }
+        // A stop of the load's (a deadline, a crash) is thrown, not split:
+        // this lint couldn't run, and a later one tries it again.
+        for (const file of stopped) {
           linted[file] = [unlinted(file)];
         }
       }

@@ -52,7 +52,7 @@ import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
 import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
-import { platformRunner } from "./platform-sandbox.ts";
+import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import {
@@ -660,12 +660,17 @@ const tidied = async (
           )
         );
       });
-      for (const [file] of stopped) {
+      for (const file of stopped) {
         tidy[file] = null;
       }
     } catch (error) {
-      // This batch is saved as written; the next is tidied as ever.
+      // This batch is saved as written.
       log.warn("build.tidy_failed", errorFields(error));
+      if (error instanceof PlatformBoundError) {
+        // The load's (a deadline, a crash; `callSplitting` splits only
+        // the files' own): the rest too, rather than wait out another.
+        break;
+      }
     }
   }
   const kept = Object.keys(tidy).filter((path) => tidy[path] === null);

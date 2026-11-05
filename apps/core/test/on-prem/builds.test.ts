@@ -432,9 +432,10 @@ const probing = (program: string) => ({
 });
 
 describe("Ultracite's lint on-prem", () => {
-  it("fails a draft's lint as one that couldn't run, never as the file's, when the sandbox stops it at its deadline", async () => {
+  it("fails a draft's lint as one that couldn't run, at its first deadline, never splitting it nor blaming a file", async () => {
     // A lint that never ends, as one the shared machine starved would: its
-    // deadline is the load's, not the file's (`PlatformBoundError.own`).
+    // deadline is the load's, not the files' (`PlatformBoundError.own`),
+    // so splitting the call would only wait out a deadline for each half.
     const spinning = `import { WorkerEntrypoint } from "cloudflare:workers";
 export default class extends WorkerEntrypoint {
   lint() {
@@ -442,9 +443,23 @@ export default class extends WorkerEntrypoint {
   }
 }
 `;
+    const { SANDBOX_HOST: host } = env;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    let sessions = 0;
     const stopped = {
       ...onPrem,
       SANDBOX_DEADLINE_MS: "1500",
+      SANDBOX_HOST: {
+        fetch: async (...args: Parameters<Fetcher["fetch"]>) => {
+          if (new Request(...args).url === "http://sandbox/session") {
+            sessions += 1;
+          }
+          return await host.fetch(...args);
+        },
+        connect: host.connect.bind(host),
+      },
       ASSETS: {
         fetch: async (...args: Parameters<Fetcher["fetch"]>) =>
           new Request(...args).url.endsWith("/ultracite.js")
@@ -459,15 +474,19 @@ export default class extends WorkerEntrypoint {
     const linted = await draftLintBuild(stopped, {
       app: appIdSchema.parse(crypto.randomUUID()),
       version: 0,
-      files: {
-        "components/same.ts": `export const same = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
-      },
+      files: Object.fromEntries(
+        Array.from({ length: 4 }, (_, at) => [
+          `components/same-${at}.ts`,
+          `export const same${at} = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
+        ])
+      ),
     });
 
     expect({
       status: linted.status,
       diagnostics: linted.diagnostics,
-    }).toStrictEqual({ status: "error", diagnostics: [] });
+      sessions,
+    }).toStrictEqual({ status: "error", diagnostics: [], sessions: 1 });
   }, 60_000);
 });
 

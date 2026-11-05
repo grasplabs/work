@@ -485,8 +485,17 @@ const transformInBatches = async (
     Object.assign(made, fresh.modules);
   };
   for (const batch of batchesOf(missing, { characters })) {
-    // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
-    await callSplitting(batch, transform);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
+      await callSplitting(batch, transform);
+    } catch (error) {
+      // The load's stop (a deadline, a crash), which `callSplitting` never
+      // splits: what is left goes to the build, as a file stopped alone does.
+      if (error instanceof PlatformBoundError) {
+        break;
+      }
+      throw error;
+    }
   }
   return { made, calls };
 };
