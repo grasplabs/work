@@ -1,15 +1,21 @@
 import { startUltracite } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { draftLintBuild } from "../src/save-builds.ts";
+import { stoppingUltracite } from "./ultracite-stops.ts";
 
 // App code held to Ultracite, in the isolate of its own, by oxlint and
 // oxfmt compiled to WebAssembly: what a write saves (`tidy`: fixed and
 // formatted) and what it reports (`lint`).
 
 const ultracite = () => startUltracite(env.LOADER, env.ASSETS);
+
+/** An array nested `depth` deep. */
+const deep = (depth: number): string =>
+  `export const deep = ${"[".repeat(depth)}${"]".repeat(depth)};\n`;
 
 /** Each of `linted`'s findings: its file, line, column and rule. */
 const findings = (
@@ -226,6 +232,52 @@ describe("linting App code", { timeout: 60_000 }, () => {
       })
     ).resolves.toStrictEqual({ "screens/broken.tsx": [] });
   });
+
+  it("fails only a file nested too deep for oxc, and lints and tidies the files after it, any App's", async () => {
+    // Nested deeper than oxc's recursion has stack for: oxc.wasm traps on
+    // it, in the isolate every App's lint shares.
+    const tidied = await ultracite().tidy({
+      "components/deep.ts": deep(5000),
+      "components/after.ts": "export const after = 1\n",
+    });
+    const linted = await ultracite().lint({
+      "components/deep.ts": deep(1000),
+      "components/after.ts": "export const after = (a: number) => a == 1;\n",
+    });
+
+    // Another App's write and check, in the same isolate.
+    expect({
+      tidied,
+      linted: findings(linted).map(({ file, rule }) => `${file} ${rule}`),
+      other: await ultracite().lint({ "b/clean.ts": "export const a = 1;\n" }),
+      tidiedOther: await ultracite().tidy({
+        "b/clean.ts": "export const a = 1\n",
+      }),
+    }).toStrictEqual({
+      // Saved as written.
+      tidied: {
+        "components/deep.ts": null,
+        "components/after.ts": "export const after = 1;\n",
+      },
+      linted: ["components/deep.ts lint", "components/after.ts eqeqeq"],
+      other: { "b/clean.ts": [] },
+      tidiedOther: { "b/clean.ts": "export const a = 1;\n" },
+    });
+  });
+
+  it("keeps as written a file oxfmt would make larger than an App's file may be", async () => {
+    // Formatted, each array nested 300 deep is a line a level, indented:
+    // 180,000 characters, from 600 written.
+    const grows = Array.from(
+      { length: 3 },
+      (_, at) =>
+        `export const grows${at} = ${"[".repeat(300)}${"]".repeat(300)};`
+    ).join("\n");
+
+    await expect(
+      ultracite().tidy({ "components/grows.ts": grows })
+    ).resolves.toStrictEqual({ "components/grows.ts": null });
+  });
 });
 
 /** `count` files of an App, each with one finding (`eqeqeq`) and its own text. */
@@ -237,6 +289,12 @@ const manyFiles = (count: number): Record<string, string> =>
     ])
   );
 
+/** Each of `diagnostics`' file and rule, sorted. */
+const fileRules = (
+  diagnostics: readonly { file?: string | null; rule?: string }[]
+): string[] =>
+  diagnostics.map(({ file, rule }) => `${file ?? ""} ${rule ?? ""}`).toSorted();
+
 /** How many files of `diagnostics` have a finding. */
 const filesFound = (diagnostics: readonly { file?: string | null }[]): number =>
   new Set(diagnostics.map(({ file }) => file)).size;
@@ -244,8 +302,9 @@ const filesFound = (diagnostics: readonly { file?: string | null }[]): number =>
 describe("a draft's lint", { timeout: 120_000 }, () => {
   it("lints a large App in batches, keeping each batch's results as it answers", async () => {
     const app = appIdSchema.parse(crypto.randomUUID());
-    // More files than one call takes (`ultraciteBatch`: 100).
-    const files = manyFiles(450);
+    // As many files as an App may have (`authoringFiles`), more than one
+    // call takes (`ultraciteBatch`: 100).
+    const files = manyFiles(platformLimits.authoringFiles);
     const first = await draftLintBuild(env, { app, version: 0, files });
 
     // Every batch's results were kept: with the lint unable to start, a
@@ -265,10 +324,87 @@ describe("a draft's lint", { timeout: 120_000 }, () => {
       expect({
         first: [first.status, filesFound(first.diagnostics)],
         kept: [kept.status, filesFound(kept.diagnostics)],
-      }).toStrictEqual({ first: ["failed", 450], kept: ["failed", 450] });
+      }).toStrictEqual({
+        first: ["failed", platformLimits.authoringFiles],
+        kept: ["failed", platformLimits.authoringFiles],
+      });
     } finally {
       env.LOADER = loader;
     }
+  });
+
+  it("splits a call stopped at its CPU time until the file that stops alone, and fails that file alone until a lint of it gets through", async () => {
+    const app = appIdSchema.parse(crypto.randomUUID());
+    const files = manyFiles(6);
+    const [marker = ""] = Object.keys(files);
+    const { LOADER: loader } = env;
+    env.LOADER = stoppingUltracite(loader, {
+      marker,
+      limit: "CPU time",
+      fresh: true,
+    });
+    let stopped: Awaited<ReturnType<typeof draftLintBuild>>;
+    try {
+      stopped = await draftLintBuild(env, { app, version: 0, files });
+    } finally {
+      env.LOADER = loader;
+    }
+    // Never kept: the next lint lints it.
+    const later = await draftLintBuild(env, { app, version: 0, files });
+
+    const others = Object.keys(files)
+      .filter((file) => file !== marker)
+      .map((file) => `${file} eqeqeq`);
+    expect({
+      stopped: fileRules(stopped.diagnostics),
+      unlinted: stopped.diagnostics.some(
+        ({ file, message }) =>
+          file === marker && message.includes("on this file alone")
+      ),
+      later: fileRules(later.diagnostics),
+    }).toStrictEqual({
+      stopped: [`${marker} lint`, ...others].toSorted(),
+      unlinted: true,
+      later: [`${marker} eqeqeq`, ...others].toSorted(),
+    });
+  });
+
+  it("tries a memory stop in the isolate every App shares again in a fresh one, and blames a file only for its own", async () => {
+    const { LOADER: loader } = env;
+    /** The rule each of four files (the first stopping) is found breaking. */
+    const lintedWith = async (fresh: boolean) => {
+      // Text of their own, so no lint before has kept their results.
+      const files = manyFiles(4);
+      const [marker = ""] = Object.keys(files);
+      env.LOADER = stoppingUltracite(loader, {
+        marker,
+        limit: "memory",
+        fresh,
+      });
+      try {
+        const { diagnostics } = await draftLintBuild(env, {
+          app: appIdSchema.parse(crypto.randomUUID()),
+          version: 0,
+          files,
+        });
+        return Object.keys(files).map(
+          (file) => diagnostics.find((found) => found.file === file)?.rule
+        );
+      } finally {
+        env.LOADER = loader;
+      }
+    };
+
+    expect({
+      // Another call's memory, as far as this one knows: the fresh
+      // isolate lints every file.
+      shared: await lintedWith(false),
+      // Its own: the fresh isolate stops on it too.
+      own: await lintedWith(true),
+    }).toStrictEqual({
+      shared: ["eqeqeq", "eqeqeq", "eqeqeq", "eqeqeq"],
+      own: ["lint", "eqeqeq", "eqeqeq", "eqeqeq"],
+    });
   });
 
   it("lints only the files that changed, keeping each file's result by its content", async () => {

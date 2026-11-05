@@ -30,6 +30,7 @@ import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
+import { stoppingUltracite } from "./ultracite-stops.ts";
 import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
@@ -50,6 +51,10 @@ const lines = (at: number): string =>
     { length: 300 },
     (_, line) => `export const value${at}x${line} = ${line};`
   ).join("\n");
+
+/** File `at` of a write of rates, as the agent might write it: unformatted, a `var`, a body that only returns. */
+const rates = (at: number): string =>
+  `var rate${at} = ${at}\nexport const total${at} = (n: number) => { return n*rate${at} }\n`;
 
 const appName = "Invoice desk";
 
@@ -1000,6 +1005,39 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect([first?.text, last?.text]).toStrictEqual([
       `Returned:\nconst rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`,
       `Returned:\nconst rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`,
+    ]);
+  });
+
+  it("saves as written a file whose tidy stops at its isolate's limits by itself, and tidies the rest of the write", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 4 }, (_, at) => [
+        `components/rate-${at}.ts`,
+        rates(at),
+      ])
+    );
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", { app, files }),
+      toolStep("readFile", { app, path: "components/rate-0.ts" }),
+      toolStep("readFile", { app, path: "components/rate-3.ts" }),
+      says("Written."),
+    ]);
+
+    const { LOADER: loader } = env;
+    env.LOADER = stoppingUltracite(loader, {
+      marker: "components/rate-0.ts",
+      limit: "CPU time",
+      fresh: true,
+    });
+    try {
+      await chat.ask("Add the rates");
+    } finally {
+      env.LOADER = loader;
+    }
+
+    const [, stopped, tidied] = await toolResults(chat.stub, chat.chat.id);
+    expect([stopped?.text, tidied?.text]).toStrictEqual([
+      `Returned:\n${rates(0)}`,
+      "Returned:\nconst rate3 = 3;\nexport const total3 = (n: number) => n * rate3;\n",
     ]);
   });
 

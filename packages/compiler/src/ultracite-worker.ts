@@ -14,7 +14,7 @@ import type { Diagnostic } from "./diagnostic.ts";
 import oxcWasm from "./oxc.wasm";
 import { ultraciteOf } from "./ultracite.ts";
 
-/** Configured once per isolate, on its first call: oxc keeps nothing of a file. */
+/** Made once per isolate, on its first call: oxc keeps nothing of a file. */
 let ultracite: ReturnType<typeof ultraciteOf> | undefined;
 
 const ultraciteHere = () => {
@@ -26,9 +26,10 @@ export default class UltraciteLinter extends WorkerEntrypoint {
   /**
    * `files` (by path in the App) as the agent's write saves them: its
    * TypeScript with what oxlint fixes safely fixed, and formatted, as
-   * Ultracite would; every other file as it is.
+   * Ultracite would; every other file as it is; null for one to keep as
+   * written (`Ultracite.tidy`).
    */
-  tidy(files: Record<string, string>): Record<string, string> {
+  tidy(files: Record<string, string>): Record<string, string | null> {
     assertNoBindings(this.env, this.ctx.props, "Ultracite's lint");
     return ultraciteHere().tidy(files);
   }

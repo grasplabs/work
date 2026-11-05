@@ -26,9 +26,19 @@ export const ultracitePresets = { core, react, tanstack, vitest } as const;
 /**
  * The presets' rules App code isn't held to, in Grasp or an export: they
  * read the App's other files (the module graph oxlint builds from disk),
- * and the isolate lints a file at a time with no file system.
+ * and the isolate lints a file at a time with no file system, so they
+ * would find in an export what Grasp never does. Until oxc.wasm is handed
+ * the App's other files.
  */
-export const leftOut = ["import/no-cycle", "oxc/no-barrel-file"] as const;
+export const leftOut = [
+  "import/default",
+  "import/namespace",
+  "import/no-cycle",
+  "import/no-named-as-default",
+  "import/no-named-as-default-member",
+  "import/no-self-import",
+  "oxc/no-barrel-file",
+] as const;
 
 type Levels = Readonly<Record<string, unknown>>;
 

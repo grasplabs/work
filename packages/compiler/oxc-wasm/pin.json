@@ -1,6 +1,7 @@
 {
   "oxlint": "1.90.0",
   "oxfmt": "0.75.0",
-  "release": "oxc-wasm-v1.90.0-1",
-  "sha256": "67ff5ff252234d96486a0f0d7f3e021e0004763d0589e808f68b02fe7d1842b0"
+  "oxc": "9b6fff42fa6edf0bec55861b6f0764c7b9acd86b",
+  "glue": "1230c1240c33360abf193443566c0c0bf3e2ddbd7c8a7c927704993490f519e6",
+  "sha256": "9e09dee5a6dd5d5e998e787bdad795556ad4ee03d38d6c6d6e0b52d726a847bd"
 }

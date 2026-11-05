@@ -1,8 +1,8 @@
 /**
- * oxlint and oxfmt, as oxc.wasm (oxc-wasm/src/lib.rs) runs them: one
- * instance, configured once, through WASI with no files, environment or
- * preopens (@tybys/wasm-util, the WASI napi-rs loads oxc's own WebAssembly
- * with): nothing they do with App code reads a file.
+ * oxlint and oxfmt, as oxc.wasm (oxc-wasm/src/lib.rs) runs them: an
+ * instance configured once and kept, through WASI with no files,
+ * environment or preopens (@tybys/wasm-util, the WASI napi-rs loads oxc's
+ * own WebAssembly with): nothing they do with App code reads a file.
  */
 import { WASI } from "@tybys/wasm-util";
 import { z } from "zod";
@@ -37,20 +37,37 @@ const exportsSchema = z.object({
 });
 
 export interface Oxc {
-  /** What oxlint says of `source` (`path`); null if it doesn't parse. */
+  /**
+   * What oxlint says of `source` (`path`); null if it doesn't parse.
+   * Throws if oxc.wasm can't lint it, even in a fresh instance.
+   */
   lint: (path: string, source: string) => Finding[] | null;
-  /** `source` (`path`) with what `oxlint --fix` fixes fixed, then formatted by oxfmt. */
+  /**
+   * `source` (`path`) with what `oxlint --fix` fixes fixed, then formatted
+   * by oxfmt. Throws if oxc.wasm can't tidy it, even in a fresh instance.
+   */
   tidy: (path: string, source: string) => string;
 }
 
 /**
- * oxc.wasm's `module`, configured with an `.oxlintrc.json` with no
- * `extends` (`lint`) and oxfmt's config (`format`).
+ * The memory past which an instance is dropped after its call, so the
+ * next starts fresh: WebAssembly's memory never shrinks, and an instance
+ * kept warm would hold its largest file's for the isolate's life. Half
+ * of the 64 MiB build.sh lets it grow to.
  */
-export const oxcOf = (
+const recycledBytes = 32 * 1024 * 1024;
+
+/** An instance of oxc.wasm, configured. */
+interface Instance extends Oxc {
+  /** How much memory it holds now. */
+  bytes: () => number;
+}
+
+/** oxc.wasm's `module`, instantiated and configured. */
+const configured = (
   module: WebAssembly.Module,
   { lint, format }: { lint: unknown; format: unknown }
-): Oxc => {
+): Instance => {
   const wasi = new WASI({ version: "preview1" });
   const instance = new WebAssembly.Instance(module, wasi.getImportObject());
   // Synchronous: oxc.wasm uses no Asyncify, so nothing is awaited.
@@ -66,18 +83,62 @@ export const oxcOf = (
   };
   const out = (length: number): string =>
     decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.out_ptr(), length));
-  const configured = wasm.configure(
+  const refused = wasm.configure(
     ...put(JSON.stringify(lint)),
     ...put(JSON.stringify(format))
   );
-  if (configured < 0) {
-    throw new Error(`oxc.wasm refused its config: ${out(-configured)}`);
+  if (refused < 0) {
+    throw new Error(`oxc.wasm refused its config: ${out(-refused)}`);
   }
   return {
+    bytes: () => wasm.memory.buffer.byteLength,
     lint: (path, source) =>
       lintedSchema.parse(
         JSON.parse(out(wasm.lint(...put(path), ...put(source))))
       ),
     tidy: (path, source) => out(wasm.tidy(...put(path), ...put(source))),
+  };
+};
+
+/**
+ * oxc.wasm's `module`, configured with an `.oxlintrc.json` with no
+ * `extends` (`lint`) and oxfmt's config (`format`): an instance kept for
+ * the calls after it.
+ *
+ * oxc recurses, and has no option that bounds how deep: a file nested
+ * deep enough runs out of V8's stack or the Rust stack, and one large
+ * enough out of the memory's ceiling (build.sh); a panic aborts. Each
+ * traps, and leaves the instance's stack pointer, allocator and cells as
+ * they were, so every later call into it would fail too, whoever's file it
+ * is. So an instance that threw is never called again: the call is tried
+ * once more in a fresh one, so a file never fails for what the one before
+ * it left, and throws only if it fails there too.
+ */
+export const oxcOf = (
+  module: WebAssembly.Module,
+  config: { lint: unknown; format: unknown }
+): Oxc => {
+  let kept: Instance | undefined;
+  const run = <T>(answer: (instance: Instance) => T): T => {
+    const fresh = kept === undefined;
+    const instance = kept ?? configured(module, config);
+    kept = undefined;
+    let answered: T;
+    try {
+      answered = answer(instance);
+    } catch (error) {
+      if (fresh) {
+        throw error;
+      }
+      return run(answer);
+    }
+    if (instance.bytes() <= recycledBytes) {
+      kept = instance;
+    }
+    return answered;
+  };
+  return {
+    lint: (path, source) => run((instance) => instance.lint(path, source)),
+    tidy: (path, source) => run((instance) => instance.tidy(path, source)),
   };
 };

@@ -663,8 +663,11 @@ export interface SubmittedJob {
   revision: number;
 }
 
-/** What Ultracite's `tidy` answers: the files it was handed, by path. */
-const tidiedSchema = z.record(z.string(), z.string());
+/**
+ * What Ultracite's `tidy` answers: the files it was handed, by path; null
+ * for one to keep as written.
+ */
+const tidiedSchema = z.record(z.string(), z.string().nullable());
 
 /**
  * `changes` (new content by path, or null to delete a file), each file as
@@ -673,8 +676,9 @@ const tidiedSchema = z.record(z.string(), z.string());
  * on what a rule fixes itself. Before they are applied (`applyChanges`),
  * so the App's limits hold for what is saved. A batch at a time
  * (`ultraciteBatch`), a batch stopped at a bound split (`callSplitting`).
- * A write is never refused for it: a file the lint can't tidy now is
- * saved as it was written.
+ * A write is never refused for it: a file the lint can't tidy now, or
+ * whose tidied text would be past the App's file limit, is saved as it
+ * was written, and the App's limits are checked on what is saved.
  */
 const tidied = async (
   env: Env,
@@ -687,12 +691,12 @@ const tidied = async (
       content === null ? [] : [[path, content]]
     )
   );
-  const tidy: Record<string, string> = {};
+  const tidy: Record<string, string | null> = {};
   const runner = platformRunner(env, app);
-  try {
-    for (const batch of batchesOf(Object.entries(contents), ultraciteBatch)) {
+  for (const batch of batchesOf(Object.entries(contents), ultraciteBatch)) {
+    try {
       // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its bounds
-      await callSplitting(batch, async (part) => {
+      const stopped = await callSplitting(batch, async (part) => {
         Object.assign(
           tidy,
           tidiedSchema.parse(
@@ -700,9 +704,19 @@ const tidied = async (
           )
         );
       });
+      for (const [file] of stopped) {
+        tidy[file] = null;
+      }
+    } catch (error) {
+      // This batch is saved as written; the next is tidied as ever.
+      log.warn("build.tidy_failed", errorFields(error));
     }
-  } catch (error) {
-    log.warn("build.tidy_failed", errorFields(error));
+  }
+  const kept = Object.keys(tidy).filter((path) => tidy[path] === null);
+  if (kept.length > 0) {
+    // Too large or too deep for the lint to tidy, or past a limit once
+    // tidied (`Ultracite.tidy`): saved as written.
+    log.warn("build.tidy_kept", { files: kept.length });
   }
   return Object.fromEntries(
     Object.entries(written).map(([path, content]) => [

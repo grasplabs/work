@@ -13,6 +13,11 @@
 //! freed by the callee), and the answer is read from `out_ptr` for the
 //! length a call returns. Each file gets its own arena, dropped after it,
 //! so memory grows with the largest file, not with how many are linted.
+//!
+//! A call that traps (a panic, which aborts; the stack or the memory's
+//! ceiling, build.sh, run out on a file nested too deep or too large)
+//! leaves the instance's stack pointer, allocator and cells where they
+//! were: src/oxc.ts never calls it again, and starts a fresh one.
 use std::{cell::RefCell, path::Path, sync::Arc};
 
 use oxc::{
@@ -259,12 +264,31 @@ struct Finding {
     column: usize,
 }
 
-/// Where byte `offset` of `source` is.
-fn place(source: &str, offset: usize) -> (usize, usize) {
-    let before = &source[..offset.min(source.len())];
-    let line_start = before.rfind('\n').map_or(0, |at| at + 1);
-    let line = before.matches('\n').count() + 1;
-    (line, before[line_start..].encode_utf16().count() + 1)
+/// Where each of `offsets` (bytes into `source`) is, in one pass over
+/// `source` whatever the number of findings: 1-based lines, and columns in
+/// UTF-16 code units. An offset inside a character is placed at it.
+fn places(source: &str, offsets: &[usize]) -> Vec<(usize, usize)> {
+    let mut order: Vec<usize> = (0..offsets.len()).collect();
+    order.sort_unstable_by_key(|&at| offsets[at]);
+    let mut places = vec![(1, 1); offsets.len()];
+    let (mut line, mut column) = (1, 1);
+    let mut chars = source.char_indices().peekable();
+    for at in order {
+        while let Some(&(byte, char)) = chars.peek() {
+            if byte >= offsets[at] {
+                break;
+            }
+            if char == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += char.len_utf16();
+            }
+            chars.next();
+        }
+        places[at] = (line, column);
+    }
+    places
 }
 
 /// Lints `source` (`path`, which picks the language and the overrides
@@ -279,23 +303,23 @@ pub extern "C" fn lint(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src
         messages(&tools.report, Path::new(&path), &source)
     });
     let findings = found.map(|messages| {
+        let offsets: Vec<usize> =
+            messages.iter().map(|message| message.span.start as usize).collect();
         messages
             .into_iter()
-            .map(|message| {
-                let (line, column) = place(&source, message.span.start as usize);
-                Finding {
-                    rule: oxc_code_short_canonical_name(&message.error.code)
-                        .unwrap_or_else(|| "lint".to_string()),
-                    severity: if message.error.severity == Severity::Error {
-                        "error"
-                    } else {
-                        "warning"
-                    },
-                    message: message.error.message.to_string(),
-                    help: message.error.help.as_ref().map(ToString::to_string),
-                    line,
-                    column,
-                }
+            .zip(places(&source, &offsets))
+            .map(|(message, (line, column))| Finding {
+                rule: oxc_code_short_canonical_name(&message.error.code)
+                    .unwrap_or_else(|| "lint".to_string()),
+                severity: if message.error.severity == Severity::Error {
+                    "error"
+                } else {
+                    "warning"
+                },
+                message: message.error.message.to_string(),
+                help: message.error.help.as_ref().map(ToString::to_string),
+                line,
+                column,
             })
             .collect::<Vec<_>>()
     });

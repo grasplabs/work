@@ -12,7 +12,13 @@
  * - `lintCode`, in what every write and check reports: every rule, no
  *   fixes, a file at a time (core keeps each file's result:
  *   module-cache.ts).
+ *
+ * A file oxc.wasm can't take (nested too deep, or too large for its
+ * memory) fails alone: the others in its call, and every other App's,
+ * are linted and tidied as ever (oxc.ts).
  */
+import { appLimits } from "@grasp-os/shared/app-limits";
+
 import type { UltraciteConfig } from "../ultracite-config.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { isLintedCode } from "./inputs.ts";
@@ -20,8 +26,13 @@ import { oxcOf } from "./oxc.ts";
 import type { Finding } from "./oxc.ts";
 
 export interface Ultracite {
-  /** `files` (by path in the App), their TypeScript tidied, the rest as they are. */
-  tidy: (files: Record<string, string>) => Record<string, string>;
+  /**
+   * `files` (by path in the App), their TypeScript tidied, the rest as
+   * they are; null for a file to keep as written, which `tidy` couldn't
+   * take, or whose tidied text is past the App's file limit or the
+   * answer's (`tidiedCharacters`).
+   */
+  tidy: (files: Record<string, string>) => Record<string, string | null>;
   /**
    * What the rules say of each of `files`' TypeScript (by path in the
    * App), at its own level, by file: every file it lints has an entry,
@@ -30,6 +41,23 @@ export interface Ultracite {
    */
   lintCode: (files: Record<string, string>) => Record<string, Diagnostic[]>;
 }
+
+/**
+ * The most characters one `tidy` answers: what a call hands Workers RPC
+ * is at most two bytes a character, so this keeps an answer at half its
+ * 32 MiB. oxfmt can make a file far larger than it was (an array nested
+ * 500 deep, 1 kB written, is half a megabyte formatted).
+ */
+const tidiedCharacters = 8_000_000;
+
+/** What a file oxc.wasm couldn't lint says: an error, so a draft never passes unlinted. */
+const unlintable = (file: string): Diagnostic => ({
+  file,
+  rule: "lint",
+  severity: "error",
+  message:
+    "Ultracite's lint couldn't read this file: it nests too deeply or is too large. Flatten what nests deepest, or split the file.",
+});
 
 const diagnosticOf = (
   file: string,
@@ -50,24 +78,47 @@ export const ultraciteOf = (
   config: UltraciteConfig
 ): Ultracite => {
   const oxc = oxcOf(module, config);
+  /** `source` tidied, or null to keep it as written. */
+  const tidied = (path: string, source: string): string | null => {
+    try {
+      const text = oxc.tidy(path, source);
+      return text.length > appLimits.fileLength ? null : text;
+    } catch {
+      return null;
+    }
+  };
+  const linted = (path: string, source: string): Diagnostic[] => {
+    try {
+      return (oxc.lint(path, source) ?? [])
+        .toSorted((a, b) => a.line - b.line || a.column - b.column)
+        .map((finding) => diagnosticOf(path, finding));
+    } catch {
+      return [unlintable(path)];
+    }
+  };
   return {
-    tidy: (files) =>
-      Object.fromEntries(
-        Object.entries(files).map(([path, source]) => [
-          path,
-          isLintedCode(path) ? oxc.tidy(path, source) : source,
-        ])
-      ),
+    tidy: (files) => {
+      let answered = 0;
+      return Object.fromEntries(
+        Object.entries(files).map(([path, source]) => {
+          if (!isLintedCode(path)) {
+            answered += source.length;
+            return [path, source];
+          }
+          const text = tidied(path, source);
+          if (text === null || answered + text.length > tidiedCharacters) {
+            return [path, null];
+          }
+          answered += text.length;
+          return [path, text];
+        })
+      );
+    },
     lintCode: (files) =>
       Object.fromEntries(
         Object.entries(files)
           .filter(([path]) => isLintedCode(path))
-          .map(([path, source]) => [
-            path,
-            (oxc.lint(path, source) ?? [])
-              .toSorted((a, b) => a.line - b.line || a.column - b.column)
-              .map((finding) => diagnosticOf(path, finding)),
-          ])
+          .map(([path, source]) => [path, linted(path, source)])
       ),
   };
 };
