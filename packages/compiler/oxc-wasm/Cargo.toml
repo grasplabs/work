@@ -1,0 +1,25 @@
+# oxlint's linter and oxfmt's formatter as one threadless wasm32-wasip1
+# module, for the isolate that lints and formats App code (src/oxc.ts).
+# Built inside oxc's own workspace at the tag pin.json names (build.sh),
+# so every dependency is the version that oxlint and oxfmt release ship.
+#
+# Delete this folder once oxc publishes a threadless WebAssembly build of
+# its linter and formatter, as it does for its parser (`oxc-parser/workerd`).
+[package]
+name = "grasp_oxc_wasm"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+oxc = { workspace = true, features = ["semantic"] }
+oxc_formatter = { workspace = true }
+oxc_formatter_core = { workspace = true }
+oxc_linter = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

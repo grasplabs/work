@@ -39,6 +39,7 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
@@ -624,10 +625,12 @@ const tidiedSchema = z.record(z.string(), z.string());
 /**
  * `changes` (new content by path, or null to delete a file), each file as
  * Ultracite's lint tidies it (`tidy`: what oxlint fixes safely fixed, then
- * formatted): so the agent never spends a turn on formatting, nor on what
- * a rule fixes itself. Before they are applied (`applyChanges`), so the
- * App's limits hold for what is saved. A write is never refused for it:
- * where the lint can't run now, what was written is saved as it is.
+ * formatted by oxfmt): so the agent never spends a turn on formatting, nor
+ * on what a rule fixes itself. Before they are applied (`applyChanges`),
+ * so the App's limits hold for what is saved. A batch at a time
+ * (`ultraciteBatch`), a batch stopped at a bound split (`callSplitting`).
+ * A write is never refused for it: a file the lint can't tidy now is
+ * saved as it was written.
  */
 const tidied = async (
   env: Env,
@@ -640,14 +643,22 @@ const tidied = async (
       content === null ? [] : [[path, content]]
     )
   );
-  let tidy: Record<string, string>;
+  const tidy: Record<string, string> = {};
+  const runner = platformRunner(env, app);
   try {
-    tidy = tidiedSchema.parse(
-      await platformRunner(env, app).run("ultracite", "tidy", [contents])
-    );
+    for (const batch of batchesOf(Object.entries(contents), ultraciteBatch)) {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its bounds
+      await callSplitting(batch, async (part) => {
+        Object.assign(
+          tidy,
+          tidiedSchema.parse(
+            await runner.run("ultracite", "tidy", [part], { once: true })
+          )
+        );
+      });
+    }
   } catch (error) {
     log.warn("build.tidy_failed", errorFields(error));
-    return written;
   }
   return Object.fromEntries(
     Object.entries(written).map(([path, content]) => [

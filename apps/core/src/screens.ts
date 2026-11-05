@@ -47,6 +47,7 @@ import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { z } from "zod";
 
+import { batchesOf, callSplitting } from "./batches.ts";
 import {
   forgetReceipts,
   keySchema,
@@ -405,32 +406,6 @@ const batchCharacters = (env: BuildEnv): number => {
 };
 
 /**
- * `sources` in batches of at most `characters` each, in order: a source
- * larger than that is a batch of its own.
- */
-const batchesOf = (
-  sources: readonly (readonly [string, string])[],
-  characters: number
-): Record<string, string>[] => {
-  const batches: Record<string, string>[] = [];
-  let batch: Record<string, string> = {};
-  let size = 0;
-  for (const [path, source] of sources) {
-    if (Object.keys(batch).length > 0 && size + source.length > characters) {
-      batches.push(batch);
-      batch = {};
-      size = 0;
-    }
-    batch[path] = source;
-    size += source.length;
-  }
-  if (Object.keys(batch).length > 0) {
-    batches.push(batch);
-  }
-  return batches;
-};
-
-/**
  * Transforms what a screens build of `files` (`target`) would and `reuse`
  * lacks, a batch at a time, before the build: the whole of a large App's
  * first build (after a release, every App's) is many times one call's CPU
@@ -488,30 +463,15 @@ const transformInBatches = async (
     // The build holds its lease while its batches run, each a lease's
     // time from its start: one that died gives it up as one call would.
     await renew();
-    let answer: unknown;
     calls += 1;
-    try {
-      // Once: a stop splits the batch, which is its retry, and nothing of
-      // a stopped batch is kept as failed.
-      answer = await runner.run(
-        "compiler",
-        "transform",
-        [target, batch, { known, typeFiles }],
-        { once: true }
-      );
-    } catch (error) {
-      if (!(error instanceof PlatformBoundError)) {
-        throw error;
-      }
-      const entries = Object.entries(batch);
-      if (entries.length < 2) {
-        return;
-      }
-      const half = Math.ceil(entries.length / 2);
-      await transform(Object.fromEntries(entries.slice(0, half)));
-      await transform(Object.fromEntries(entries.slice(half)));
-      return;
-    }
+    // Once: a stop splits the batch (`callSplitting`), which is its retry,
+    // and nothing of a stopped batch is kept as failed.
+    const answer: unknown = await runner.run(
+      "compiler",
+      "transform",
+      [target, batch, { known, typeFiles }],
+      { once: true }
+    );
     const fresh: Increments = { modules: {} };
     for (const [key, value] of Object.entries(
       typeof answer === "object" && answer !== null ? answer : {}
@@ -524,9 +484,9 @@ const transformInBatches = async (
     await keepIncrements(env, keys, fresh, leaseMs);
     Object.assign(made, fresh.modules);
   };
-  for (const batch of batchesOf(missing, characters)) {
+  for (const batch of batchesOf(missing, { characters })) {
     // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
-    await transform(batch);
+    await callSplitting(batch, transform);
   }
   return { made, calls };
 };
