@@ -72,13 +72,13 @@ const hash = (digit: string): string => digit.repeat(64);
  */
 const confirmations = `import { workflows } from "@server/_generated/api";
 
-export const confirmed = workflows.archiveNotes.events.confirmed;
+export const { confirmed } = workflows.archiveNotes.events;
 `;
 
 /** A screen, which has the DOM as its frame does. */
-const notesScreen = `export default function Notes() {
-  return <p>{window.location.pathname}</p>;
-}
+const notesScreen = `const Notes = () => <p>{window.location.pathname}</p>;
+
+export default Notes;
 `;
 
 /** The Notes fixture's source, as an App version's tree holds it. */
@@ -1056,9 +1056,7 @@ describe(
             locked("@grasp-os/sdk", "9.9.9", "MIT"),
           ]),
           lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")]),
-          lockOf({ typescript: "5.0.0" }, [
-            locked("typescript", "5.0.0", "MIT"),
-          ]),
+          lockOf({ oxlint: "1.0.0" }, [locked("oxlint", "1.0.0", "MIT")]),
           lockOf({ "date-kit": "1.2.0" }, [
             locked("date-kit", "1.2.0", "MIT", { react: "18.0.0" }),
             locked("react", "18.0.0", "MIT"),
@@ -1566,10 +1564,10 @@ describe(
 
     it("holds the App's code to what Grasp holds it to: what Grasp's tidy wrote passes its typecheck, lint, format and build, and its lint finds what Grasp's finds", async () => {
       const { out } = scratch();
-      // A blueprint's App as Grasp saves an agent's writes (`tidy`), and a
-      // component Grasp keeps as it is though oxfmt wouldn't: imports out
-      // of oxfmt's order, and classes Tailwind's sorter would reorder; and
-      // a GraphQL template, whose query Grasp leaves as written.
+      // A blueprint's App as Grasp saves an agent's writes (`tidy`): a
+      // component with imports out of order, which oxfmt sorts, and
+      // classes Tailwind's sorter would reorder, which neither sorts; and
+      // a GraphQL template, whose query both leave as written.
       const written = tidy({
         ...blueprintFiles("workflow-map"),
         "components/count.tsx": `import type { ReactNode } from "react";
@@ -1604,14 +1602,13 @@ export const query = gql\`
         project: rulesOf(run(out, "lint", "--format=json").stdout),
       };
 
-      // What Grasp's lint finds, the project's finds, no more: an error
-      // (a debugger); a sonarjs hint, a warning; and what Grasp leaves out
-      // reports nothing (a forEach, a spread in an accumulator, a
-      // comparison that is always false, a function declaration, and in a
-      // test what a preset's override turns on: vitest's rules). A disable
-      // comment holds whatever plugin it names a rule by
-      // (`@typescript-eslint/…`), and an inline config comment, which
-      // oxlint doesn't read, turns nothing on.
+      // What Grasp's lint finds, the project's finds, no more: a debugger,
+      // a forEach, a spread in an accumulator, a comparison that is always
+      // false, a function declaration, and in a test what a preset's
+      // override turns on (vitest's rules). A disable comment holds
+      // whatever plugin it names a rule by (`@typescript-eslint/…`), and
+      // an inline config comment, which oxlint doesn't read, turns nothing
+      // on.
       const findings = `export const stop = (): void => {
   debugger;
 };
@@ -1732,14 +1729,21 @@ export const Off = () => (
       const unformatted = run(out, "format:check");
 
       const foundRules = [
+        "app/components/findings.ts error func-style",
         "app/components/findings.ts error no-debugger",
-        "app/components/findings.ts warning sonarjs/no-identical-expressions",
+        "app/components/findings.ts error oxc/const-comparisons",
+        "app/components/findings.ts error oxc/no-accumulating-spread",
+        "app/components/findings.ts error unicorn/no-array-for-each",
         "app/components/spanning.ts error no-debugger",
         "app/components/spanning.ts error no-inline-comments",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
+        "app/tests/count.test.ts error vitest/prefer-strict-equal",
+        "app/tests/count.test.ts error vitest/prefer-to-be",
+        "app/tests/count.test.ts error vitest/prefer-to-have-length",
+        "app/tests/count.test.ts error vitest/require-top-level-describe",
       ];
       expect({
         install: install.status,

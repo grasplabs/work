@@ -41,18 +41,25 @@ import { signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
+/** 300 lines of constants, about 8,000 characters, as file `at` of a write has them. */
+const lines = (at: number): string =>
+  Array.from(
+    { length: 300 },
+    (_, line) => `export const value${at}x${line} = ${line};`
+  ).join("\n");
+
 const appName = "Invoice desk";
 
 /** A screen whose button is restyled, which @shadcn/lint refuses. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
 
-export default function Desk() {
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button className="rounded-full">Approve</Button>
-    </main>
-  );
-}
+const Desk = () => (
+  <main className="flex flex-col gap-4 p-6">
+    <Button className="rounded-full">Approve</Button>
+  </main>
+);
+
+export default Desk;
 `;
 
 /** The same screen with the button's own variant: what the lint asks for. */
@@ -377,10 +384,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("answers a write tool with a type error and a lint error together, by file", async () => {
-    const mistyped = restyled.replace(
-      "export default function Desk() {",
-      'const count: number = "seven";\n\nexport default function Desk() {\n  void count;'
-    );
+    const mistyped = restyled
+      .replace(
+        "const Desk = () => (",
+        'const count: number = "seven";\n\nconst Desk = () => ('
+      )
+      .replace("    <Button", "    <p>{count}</p>\n    <Button");
     const { chat } = await setUp((app) => [
       toolStep("writeFile", { app, files: { "screens/desk.tsx": mistyped } }),
       says("Two things fail."),
@@ -394,7 +403,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       errors: 2,
       diagnostics: [
         { file: "screens/desk.tsx", line: 3, rule: "TS2322" },
-        { file: "screens/desk.tsx", line: 9, rule: "shadcn/no-restyle" },
+        { file: "screens/desk.tsx", line: 8, rule: "shadcn/no-restyle" },
       ],
       leftOut: 0,
     });
@@ -430,8 +439,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       errors: 1,
       diagnostics: [
         {
+          // Where the throw is once the write is tidied: its imports
+          // grouped, a line apart.
           file: "app.ts",
-          line: 5,
+          line: 6,
           rule: "server",
           severity: "error",
           says: true,
@@ -769,7 +780,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("saves what it writes fixed and formatted, as Ultracite would, and reports what is left by file", async () => {
-    // Formatted as Prettier formats it, a `var` that never changes is a
+    // Formatted as oxfmt formats it, a `var` that never changes is a
     // `const` and a body that only returns is the arrow's: each fixes
     // itself. A loose `==` doesn't: oxlint's fix of it may change what the
     // code does, so it is reported, at its line.
@@ -808,6 +819,31 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       written: [{ line: 3, rule: "eqeqeq" }],
       read: "Returned:\nconst rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n",
     });
+  });
+
+  it("tidies a write of more than one call of the lint takes, every file of it", async () => {
+    // 50 files (as many as a write takes) of about 8,000 characters each:
+    // more than one call's 250,000 (`ultraciteBatch`).
+    const files = Object.fromEntries(
+      Array.from({ length: 50 }, (_, at) => [
+        `components/rate-${at}.ts`,
+        `var rate${at} = ${at}\nexport const total${at} = (n: number) => { return n*rate${at} }\n${lines(at)}\n`,
+      ])
+    );
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", { app, files }),
+      toolStep("readFile", { app, path: "components/rate-0.ts" }),
+      toolStep("readFile", { app, path: "components/rate-49.ts" }),
+      says("Written."),
+    ]);
+
+    await chat.ask("Add the rates");
+
+    const [, first, last] = await toolResults(chat.stub, chat.chat.id);
+    expect([first?.text, last?.text]).toStrictEqual([
+      `Returned:\nconst rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`,
+      `Returned:\nconst rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`,
+    ]);
   });
 
   it("searches a draft's files in a folder or all of them, ignoring case, up to a hundred lines and how many more", async () => {
@@ -1371,7 +1407,7 @@ export const titles = action({
         const sound = server(await env.build.write(app.id, ${JSON.stringify(sound)}));
         const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
         const proposal = await env.build.propose(app.id, "Notes");
-        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })}));
+        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })}));
         const unregistered = server(await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })}));
         return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
       };`),

@@ -37,6 +37,12 @@ on:
 permissions:
   contents: read
 
+# What downloads oxc.wasm, oxlint and oxfmt as the compiler builds them in,
+# reads it from this repo's pre-release through GitHub's API
+# (packages/compiler/oxc-wasm/wasm.ts): the run's own token, read-only.
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
 # The nightly and by-hand runs on main in a group of their own: in main's,
 # a push would wait for the full suite to end before it could publish.
 concurrency:
