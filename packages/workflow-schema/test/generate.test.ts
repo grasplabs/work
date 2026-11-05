@@ -1,14 +1,27 @@
 import { parse } from "@babel/parser";
+import type { ParserOptions } from "@babel/parser";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow } from "../src/generate.ts";
-import { checked, everyStep } from "./fixtures.ts";
+import {
+  checked,
+  decision,
+  everyStep,
+  withDecisions,
+  withLoops,
+} from "./fixtures.ts";
 
 // The generator, from its threat model: no text of a document becomes
 // code, whatever it holds (quotes, `*\/`, `${`, backticks, line
 // separators, `__proto__`), no ID becomes a name, the module imports only
 // the workflow SDK and has no loop, and the sealed table holds every call
 // as the document has it.
+
+/** How a generated module is parsed: TypeScript, as a module. */
+const asModule = {
+  sourceType: "module",
+  plugins: ["typescript"],
+} satisfies ParserOptions;
 
 /** Every identifier and every call's callee name in `source`, a module. */
 const namesIn = (source: string): Set<string> => {
@@ -37,7 +50,7 @@ const namesIn = (source: string): Set<string> => {
       }
     }
   };
-  visit(parse(source, { sourceType: "module" }).program);
+  visit(parse(source, asModule).program);
   return names;
 };
 
@@ -61,7 +74,7 @@ const nodeTypesIn = (source: string): Set<string> => {
       visit(value);
     }
   };
-  visit(parse(source, { sourceType: "module" }).program);
+  visit(parse(source, asModule).program);
   return types;
 };
 
@@ -115,6 +128,71 @@ const retitled = (steps: unknown): unknown =>
 /** Any value, as a matcher. */
 const anything: unknown = expect.anything();
 
+/** What a node of a module's syntax tree has that this file reads. */
+interface Node {
+  readonly type: string;
+  readonly start?: number | null;
+  readonly end?: number | null;
+  readonly name?: unknown;
+  readonly callee?: unknown;
+  readonly test?: unknown;
+}
+
+const isNode = (value: unknown): value is Node =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  typeof value.type === "string";
+
+/**
+ * Where `source`, a generated module, evaluates anything between its
+ * steps: every call of an expression's guards (`$read`, `$call`, `$opt`)
+ * in no function but the workflow's own, and the test of each `if`
+ * statement there, as written. A step's function is the second function
+ * down, as is a try's condition, which only a step's function calls.
+ */
+const betweenSteps = (
+  source: string
+): { guards: string[]; conditions: string[] } => {
+  const guards: string[] = [];
+  const conditions: string[] = [];
+  const guardNames = new Set(["$read", "$call", "$opt"]);
+  const text = (node: unknown): string =>
+    isNode(node) ? source.slice(node.start ?? 0, node.end ?? 0) : "";
+  const visit = (node: unknown, functions: number): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, functions);
+      }
+      return;
+    }
+    if (!isNode(node)) {
+      return;
+    }
+    const inside =
+      node.type === "ArrowFunctionExpression" ? functions + 1 : functions;
+    if (
+      inside < 2 &&
+      node.type === "CallExpression" &&
+      isNode(node.callee) &&
+      typeof node.callee.name === "string" &&
+      guardNames.has(node.callee.name)
+    ) {
+      guards.push(text(node));
+    }
+    if (inside < 2 && node.type === "IfStatement") {
+      conditions.push(text(node.test).replaceAll(/\d+/gu, ""));
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key !== "loc" && key !== "start" && key !== "end") {
+        visit(value, inside);
+      }
+    }
+  };
+  visit(parse(source, asModule).program, 0);
+  return { guards, conditions };
+};
+
 describe("generating a workflow", () => {
   it("keeps every string, key and title of the document data", () => {
     const document = everyStep();
@@ -143,8 +221,7 @@ describe("generating a workflow", () => {
     expect({
       pwned: names.has("pwned"),
       // The only comment is the fixed header.
-      comments: parse(generated.source, { sourceType: "module" }).comments
-        ?.length,
+      comments: parse(generated.source, asModule).comments?.length,
       sealed: generated.tasks.find(({ id }) => id === "send")?.call,
     }).toStrictEqual({
       pwned: false,
@@ -160,9 +237,9 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("makes no name of an ID, imports only the workflow SDK, and has no loop", () => {
-    const generated = generateWorkflow(checked(everyStep()), "workflow");
-    const { body } = parse(generated.source, { sourceType: "module" }).program;
+  it("makes no name of an ID, imports only the workflow SDK, and loops only as a forEach", () => {
+    const generated = generateWorkflow(checked(withLoops()), "workflow");
+    const { body } = parse(generated.source, asModule).program;
     const imports = body.flatMap((statement) =>
       statement.type === "ImportDeclaration" ? [statement.source.value] : []
     );
@@ -180,18 +257,93 @@ describe("generating a workflow", () => {
         "guarded",
         "fetch",
         "notice",
+        "pages",
+        "rows",
+        "hold",
+        "guard",
+        "mail",
       ].filter((id) => names.has(id)),
       loops: [
         "ForStatement",
         "WhileStatement",
         "DoWhileStatement",
         "ForInStatement",
-        "ForOfStatement",
       ].filter((type) => types.has(type)),
     }).toStrictEqual({
       imports: ["@grasp-os/sdk/workflow"],
       ids: [],
       loops: [],
+    });
+  });
+
+  it("seals a loop's tasks with the loops around them", () => {
+    const generated = generateWorkflow(checked(withLoops()), "workflow");
+    const slotOf = (pointer: string) =>
+      generated.expressions.find((expression) => expression.pointer === pointer)
+        ?.slot;
+    const tasks = generated.tasks.filter(({ pointer }) =>
+      pointer.startsWith("/steps/5")
+    );
+    expect({
+      tasks: tasks.map(({ id, kind, steps, scope, branches, loop }) => ({
+        id,
+        kind,
+        steps,
+        scope,
+        branches,
+        ...(loop === undefined ? {} : { loop }),
+      })),
+    }).toStrictEqual({
+      tasks: [
+        {
+          id: "pages",
+          kind: "for",
+          steps: ["enter"],
+          scope: [],
+          branches: [],
+          loop: {
+            in: { slot: slotOf("/steps/5/items") },
+            each: "item",
+            at: "index",
+            concurrency: 1,
+          },
+        },
+        {
+          id: "rows",
+          kind: "for",
+          steps: ["enter", "item"],
+          scope: ["pages"],
+          branches: [null],
+          loop: {
+            in: { slot: slotOf("/steps/5/do/0/items") },
+            each: "item",
+            at: "index",
+            concurrency: 1,
+            while: slotOf("/steps/5/do/0/while"),
+          },
+        },
+        {
+          id: "hold",
+          kind: "call",
+          steps: ["enter", "task"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+        {
+          id: "guard",
+          kind: "try",
+          steps: ["catch"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+        {
+          id: "mail",
+          kind: "call",
+          steps: ["task"],
+          scope: ["pages", "rows"],
+          branches: [null, null],
+        },
+      ],
     });
   });
 
@@ -222,6 +374,7 @@ describe("generating a workflow", () => {
         { id: "linger", kind: "wait", pointer: "/steps/0", steps: ["task"] },
         { id: "send", kind: "call", pointer: "/steps/1", steps: ["task"] },
         { id: "greet", kind: "call", pointer: "/steps/2", steps: ["task"] },
+        { id: "known", kind: "switch", pointer: "/steps/3", steps: ["task"] },
         {
           id: "pause",
           kind: "call",
@@ -329,6 +482,95 @@ describe("generating a workflow", () => {
     expect(generateWorkflow(checked(renamed), "workflow")).toStrictEqual(
       generateWorkflow(checked(document), "workflow")
     );
+  });
+
+  it("seals a decision's whom, what, on what, and its timeout where it names one", () => {
+    const generated = generateWorkflow(
+      checked(
+        withDecisions(
+          decision({ if: { $expr: 'input.who !== "Ada"' } }),
+          decision({ id: "later", timeout: "2 days" })
+        )
+      ),
+      "workflow"
+    );
+    const slotOf = (pointer: string) =>
+      generated.expressions.find((expression) => expression.pointer === pointer)
+        ?.slot;
+    const approve = generated.tasks.find(({ id }) => id === "approve");
+    expect({
+      approve: approve && {
+        kind: approve.kind,
+        steps: approve.steps,
+        call: approve.call,
+      },
+      later: generated.tasks.find(({ id }) => id === "later")?.call,
+    }).toStrictEqual({
+      approve: {
+        kind: "call",
+        steps: ["enter", "task"],
+        call: {
+          name: "grasp.decision",
+          binding: "approvers",
+          recipients: {
+            array: [
+              { literal: "person:ada" },
+              { slot: slotOf("/steps/5/recipients/1") },
+            ],
+          },
+          prompt: { literal: "Approve this?" },
+          input: {
+            object: [["who", { slot: slotOf("/steps/5/input/who") }]],
+          },
+          // No timeoutMs: it names none, so the host's applies.
+        },
+      },
+      later: {
+        name: "grasp.decision",
+        binding: "approvers",
+        recipients: {
+          array: [
+            { literal: "person:ada" },
+            { slot: slotOf("/steps/6/recipients/1") },
+          ],
+        },
+        prompt: { literal: "Approve this?" },
+        input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
+        timeoutMs: 2 * 86_400_000,
+      },
+    });
+  });
+
+  it("evaluates every expression inside a recorded step, none between steps", () => {
+    const generated = generateWorkflow(
+      checked(
+        withDecisions(decision({ if: { $expr: "input.who.length > 2" } }), {
+          id: "late",
+          type: "wait",
+          if: { $expr: "input.who.length > 3" },
+          for: "1 minute",
+        })
+      ),
+      "workflow"
+    );
+    const nested = generateWorkflow(checked(withLoops()), "workflow");
+    const { guards, conditions } = betweenSteps(generated.source);
+    const inLoops = betweenSteps(nested.source);
+    expect({
+      guards: [...guards, ...inLoops.guards],
+      // Only what a step recorded decides the code's flow.
+      conditions: [
+        ...new Set([...conditions, ...inLoops.conditions]),
+      ].toSorted(),
+    }).toStrictEqual({
+      guards: [],
+      conditions: [
+        '"skipped" in decided',
+        "!holds.while",
+        "caught === undefined",
+        "decided.then",
+      ].toSorted(),
+    });
   });
 
   it("generates the same module from the same document", () => {

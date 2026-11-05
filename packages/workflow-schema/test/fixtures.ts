@@ -206,6 +206,81 @@ export const everyOperator = () => ({
   ],
 });
 
+/**
+ * `everyStep` with a decision binding, `approvers`, and `steps` after its
+ * own: the first of them is at `/steps/5`.
+ */
+export const withDecisions = (...steps: unknown[]) => {
+  const document = everyStep();
+  return {
+    ...document,
+    bindings: {
+      ...document.bindings,
+      approvers: { kind: "decision", contract: "grasp.approvals@1" },
+    },
+    steps: [...document.steps, ...steps],
+  };
+};
+
+/** A decision step asking a person and someone of the input. */
+export const decision = (change: Record<string, unknown> = {}) => ({
+  id: "approve",
+  type: "decision",
+  binding: "approvers",
+  recipients: ["person:ada", { $expr: "input.who" }],
+  prompt: "Approve this?",
+  input: { who: { $expr: "input.who" } },
+  ...change,
+});
+
+/**
+ * `everyStep` with `steps` after its own (the first at `/steps/5`): pages
+ * of rows, the rows of each page mailed while they have a name, a deadline
+ * waited for and a failure caught in each row.
+ */
+export const withLoops = (...steps: unknown[]) => ({
+  ...everyStep(),
+  steps: [
+    ...everyStep().steps,
+    {
+      id: "pages",
+      type: "forEach",
+      items: { $expr: "input.pages" },
+      do: [
+        {
+          id: "rows",
+          type: "forEach",
+          items: { $expr: "item.rows" },
+          while: { $expr: 'item.name !== ""' },
+          do: [
+            { id: "hold", type: "wait", until: { $expr: "item.due" } },
+            {
+              id: "guard",
+              type: "try",
+              try: [
+                {
+                  id: "mail",
+                  type: "do",
+                  binding: "mail",
+                  operation: "mail.send",
+                  arguments: {
+                    to: { $expr: "item.name" },
+                    subject: { $expr: "steps.hold.output" },
+                  },
+                },
+              ],
+              catch: {
+                retry: { attempts: 2, delay: "1 minute", backoff: "constant" },
+              },
+            },
+          ],
+        },
+      ],
+    },
+    ...steps,
+  ],
+});
+
 /** `document` checked, failing the test when it isn't valid. */
 export const checked = (document: unknown): CheckedWorkflow => {
   const result = checkWorkflow(document);

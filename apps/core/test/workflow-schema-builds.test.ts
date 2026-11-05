@@ -4,9 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   checked,
+  decision,
   everyBinding,
   everyOperator,
   everyStep,
+  withDecisions,
+  withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildWorkflows } from "../src/screens.ts";
 import { tasksFileSchema } from "../src/workflow-builds.ts";
@@ -19,7 +22,40 @@ import { tasksFileSchema } from "../src/workflow-builds.ts";
 // host reads back (`tasksFileSchema`).
 
 /** Every fixture the generator is tested on, by name. */
-const fixtures = { everyStep, everyBinding, everyOperator };
+const fixtures = {
+  everyStep,
+  everyBinding,
+  everyOperator,
+  decisions: () =>
+    withDecisions(
+      decision(),
+      decision({
+        id: "later",
+        if: { $expr: "steps.approve.output.timedOut" },
+        recipients: { $expr: "[input.who]" },
+        timeout: "2 days",
+      })
+    ),
+  // A decision in items, its loop stopped by a `while`, beside nested loops.
+  loops: () => ({
+    ...withLoops({
+      id: "approvals",
+      type: "forEach",
+      items: { $expr: "input.pages" },
+      while: { $expr: "item.open" },
+      do: [
+        decision({ recipients: [{ $expr: "item.owner" }] }),
+        {
+          id: "refused",
+          type: "raise",
+          if: { $expr: "!steps.approve.output.approved" },
+          error: { type: "urn:grasp:error:refused", status: 409 },
+        },
+      ],
+    }),
+    bindings: withDecisions().bindings,
+  }),
+};
 
 describe("grasp-workflow/1's generated code", () => {
   it("type-checks against the SDK, for every fixture", async () => {

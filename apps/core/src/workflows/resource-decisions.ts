@@ -1,11 +1,15 @@
-import { maxDecisionRecipients } from "@grasp-os/open-workflow/generate";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { decidersSchema } from "@grasp-os/shared/decisions";
+import {
+  decidersSchema,
+  decisionLimits,
+  decisionPromptSchema,
+} from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -76,14 +80,11 @@ import { contractOf, requireShape } from "./resource-calls.ts";
 //   nothing: its decision is answered from its start's fixtures
 //   (`candidateDecision`), checked as a real one is.
 
-/** The longest prompt a decision takes: its description, never cut short. */
-const maxPrompt = 500;
-
 /** The most bytes of JSON a decision's input takes: it is shown with it. */
 const maxInputBytes = 16 * 1024;
 
 /** The furthest a decision's deadline may be: a year, as a sleep's. */
-const maxDecisionMs = 365 * 86_400_000;
+const maxDecisionMs = sealedBuildLimits.deadlineMs;
 
 /** A decision call, its parts built by the host (resource-host.ts). */
 export interface BuiltDecision {
@@ -121,10 +122,10 @@ export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({
 const personId = /^[\w-]{1,128}$/u;
 
 /**
- * The most recipients one decision asks: as many as the generator lets a
+ * The most recipients one decision asks: as many as a generator lets a
  * literal list have, and a decision binding names deciders.
  */
-const maxRecipients = maxDecisionRecipients;
+const maxRecipients = decisionLimits.recipients;
 
 /** One recipient as deciders, from a person's ID or deciders as named. */
 const decidersOfRecipient = (recipient: Json): string => {
@@ -282,18 +283,15 @@ export const responseOf = (contract: { response?: string }): string => {
   return contract.response;
 };
 
-/** `prompt`, as a decision's description: text, at most `maxPrompt` long. */
+/** `prompt`, as a decision's description (`decisionPromptSchema`). */
 export const promptOf = (prompt: Json): string => {
-  if (
-    typeof prompt !== "string" ||
-    prompt.trim() === "" ||
-    prompt.length > maxPrompt
-  ) {
+  const parsed = decisionPromptSchema.safeParse(prompt);
+  if (!parsed.success) {
     throw callInvalid(
-      `prompt: Give text of at most ${maxPrompt} characters, not blank.`
+      `prompt: Give text of at most ${decisionLimits.promptLength} characters, not blank.`
     );
   }
-  return prompt;
+  return parsed.data;
 };
 
 /** `input`, held to the contract's input schema and a decision's size. */

@@ -15,6 +15,11 @@ import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  reviewDecision,
+} from "../src/decisions/decisions.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
@@ -983,3 +988,221 @@ export const failedWith = (code: string) => ({
   why: anyText,
   tampered: [],
 });
+
+/** What a decision's answer may carry: nothing, or a comment. */
+export const decisionAnswers = v.union(
+  v.null(),
+  v.object({ comment: v.string() })
+);
+
+/**
+ * A workflow of `by`'s, published and approved by `admin`: after an hour's
+ * wait, task `review` asks its input's `reviewer` to approve its input's
+ * invoice through decision binding `approval`, whose deciders are
+ * `reviewer` and anyone with the builder role. Then loop `batch` asks
+ * the same of each of its invoices (`sign`), one after another.
+ */
+export const decisionWorkflow = async () => {
+  const admin = await person("admin");
+  const by = await person("builder");
+  const reviewer = await person("user");
+  const builder = await person("builder");
+  const contract = `approval-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: contract,
+    kind: "decision",
+    input: descriptorOf(v.object({ invoice: v.string() })),
+    response: descriptorOf(decisionAnswers),
+  });
+  const workflow = await createWorkflowResource(env, by, `review-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { approval: { kind: "decision", contract } },
+          },
+        },
+      },
+      input: {
+        schema: objectSchema({
+          reviewer: { type: "string" },
+          invoice: { type: "string" },
+        }),
+      },
+      output: {
+        schema: objectSchema({
+          answered: { type: "boolean" },
+          approved: { type: "boolean" },
+          by: { type: "string" },
+          value: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                properties: { comment: { type: "string" } },
+                required: ["comment"],
+                additionalProperties: false,
+              },
+            ],
+          },
+        }),
+      },
+      do: [
+        { linger: { wait: "PT1H" } },
+        {
+          review: {
+            call: "grasp.decision",
+            with: {
+              binding: "approval",
+              recipients: ["${ $workflow.input.reviewer }"],
+              prompt: "Approve the invoice",
+              input: { invoice: "${ $workflow.input.invoice }" },
+            },
+            timeout: { after: { days: 7 } },
+          },
+        },
+        {
+          batch: {
+            for: { each: "inv", at: "invAt", in: '${ ["INV-1", "INV-2"] }' },
+            do: [
+              {
+                sign: {
+                  call: "grasp.decision",
+                  with: {
+                    binding: "approval",
+                    recipients: ["${ $workflow.input.reviewer }"],
+                    prompt: "Approve this one",
+                    input: { invoice: "${ $inv }" },
+                  },
+                  timeout: { after: { days: 7 } },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    basedOn: null,
+  });
+  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "approval",
+    target: {
+      kind: "decision",
+      deciders: [`person:${reviewer.userId}`, "role:builder"],
+    },
+    reviewed: { version: 1 },
+  });
+  return { admin, by, reviewer, builder, workflow, approval };
+};
+
+export type Reviewed = Awaited<ReturnType<typeof decisionWorkflow>>;
+
+/** A run of `reviewed` its builder started for `reviewer`, waiting its hour. */
+export const reviewRun = async (
+  { by, workflow }: Reviewed,
+  reviewer: string
+): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    workflow.id,
+    { version: 1, input: { reviewer, invoice: "INV-7" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  await vi.waitFor(
+    async () => {
+      await expect(liveStatus(runId)).resolves.toBe("waiting");
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+  return runId;
+};
+
+/** The decisions run `runId` opened, as their rows have them. */
+export const decisionsOf = async (runId: string) => {
+  const rows = await env.DB.prepare(
+    "SELECT id, step, deciders, description, input, status FROM workflow_decisions WHERE resource_run_id = ? ORDER BY opened_at"
+  )
+    .bind(runId)
+    .all<{
+      id: string;
+      step: string;
+      deciders: string;
+      description: string;
+      input: string;
+      status: string;
+    }>();
+  return rows.results;
+};
+
+/** `who`'s answer to `decision`, as the decision page gives it. */
+export const answerAs = async (
+  who: Identity,
+  decision: string,
+  answer: { approved: boolean; payload?: { comment: string } | null }
+): Promise<void> => {
+  const review = await reviewDecision(env, who, decision, answer);
+  if (review.state === "recorded") {
+    return;
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    who,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  await answerDecision(env, who, decision, review.response, confirmation);
+};
+
+/** A decision's wait that ends as its deadline passes. */
+export const deadlinePasses = async (): Promise<never> => {
+  const timedOut = new Error("Execution timed out");
+  timedOut.name = "WorkflowTimeoutError";
+  return await Promise.reject(timedOut);
+};
+
+/**
+ * `engine`, each of its waits for a decision's event running `waiting`
+ * on the run's only decision, then ending as woken, or as `waiting`
+ * throws.
+ */
+export const decidingEngine = (
+  runId: string,
+  waiting: (decision: string) => Promise<void>,
+  engine: Engine = newerEngine()
+): Engine => ({
+  leaseOf: engine.leaseOf,
+  step: {
+    ...engine.step,
+    waitForEvent: async () => {
+      const [opened] = await decisionsOf(runId);
+      if (opened === undefined) {
+        throw new Error("No decision to wait for");
+      }
+      await waiting(opened.id);
+      return { payload: null };
+    },
+  },
+});
+
+/** The code a refused or failed step's error carries, as a run's code sees it. */
+export const codeOf = async (
+  work: () => Promise<unknown>
+): Promise<unknown> => {
+  try {
+    return await work();
+  } catch (error) {
+    return error instanceof Error ? Reflect.get(error, "code") : error;
+  }
+};

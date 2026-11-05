@@ -140,7 +140,7 @@ describe("a built-in method, read as a value", () => {
       ),
       items: steps.a.output,
     }).toStrictEqual({
-      outcome: { threw: "TypeError" },
+      outcome: { threw: "ExpressionFailedError" },
       items: { items: [3, 1, 2] },
     });
   });
@@ -151,7 +151,7 @@ describe("a built-in method, read as a value", () => {
       outcome("({ indexOf: input.list.forEach, length: 1e15 }).indexOf(1)", {
         input: { list: [1] },
       })
-    ).toStrictEqual({ threw: "TypeError" });
+    ).toStrictEqual({ threw: "ExpressionFailedError" });
     // Refused before any work, not stopped by a limit.
     expect(performance.now() - started).toBeLessThan(1000);
   });
@@ -195,7 +195,9 @@ describe("a method call", () => {
       ].map((source) =>
         outcome(source, { input: { count: 1, name: "x", list: [] } })
       )
-    ).toStrictEqual(Array.from({ length: 8 }, () => ({ threw: "TypeError" })));
+    ).toStrictEqual(
+      Array.from({ length: 8 }, () => ({ threw: "ExpressionFailedError" }))
+    );
   });
 
   it("takes a function only where a callback goes", () => {
@@ -234,7 +236,40 @@ describe("a member read", () => {
       outcome("({ ...input }).f", { input: { f: () => 1 } }),
       outcome("[...input.list][0]", { input: { list: [() => 1] } }),
       outcome("input.a.b", { input: { a: null } }),
-    ]).toStrictEqual(Array.from({ length: 5 }, () => ({ threw: "TypeError" })));
+    ]).toStrictEqual(
+      Array.from({ length: 5 }, () => ({ threw: "ExpressionFailedError" }))
+    );
+  });
+
+  it("fails as the expression's, coded, saying what it wrote and no value it read", () => {
+    const failure = (source: string, values: Record<string, unknown>) => {
+      try {
+        return run(source, values);
+      } catch (error) {
+        return error instanceof Error
+          ? {
+              code: "code" in error ? error.code : undefined,
+              message: error.message,
+            }
+          : error;
+      }
+    };
+    const secret = { owner: { name: "Ada Secret" } };
+    expect([
+      failure("input.a.b", { input: { a: null } }),
+      failure("input.owner.name.toFixed(2)", { input: secret }),
+      failure("input.n.toFixed(200)", { input: { n: 12_345 } }),
+    ]).toStrictEqual([
+      { code: "expression.failed", message: 'Cannot read "b" of null.' },
+      {
+        code: "expression.failed",
+        message: "`toFixed` can't be called on this value.",
+      },
+      {
+        code: "expression.failed",
+        message: "`toFixed` failed on this value.",
+      },
+    ]);
   });
 
   it("reads an own `__proto__` field as data, never the prototype", () => {
@@ -253,7 +288,7 @@ describe("an optional chain", () => {
       chained: outcome("input.a?.b.c", { input }),
       called: outcome("input.a?.b.join(',')", { input }),
     }).toStrictEqual({
-      grouped: { threw: "TypeError" },
+      grouped: { threw: "ExpressionFailedError" },
       chained: { value: undefined },
       called: { value: undefined },
     });

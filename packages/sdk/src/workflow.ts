@@ -115,6 +115,9 @@ export const callMethod: (
 export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
   optionalGuard;
 export type { ParamKind, ParamValue } from "./params.ts";
+// The value each kind of parameter holds: generated code parses the
+// recipients a decision records as `person` values, as `from` takes one.
+export { paramValueSchemas } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
 export type { Json } from "@grasp-os/shared/json";

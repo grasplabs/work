@@ -1,14 +1,17 @@
 import type { Schema } from "@cfworker/json-schema";
 import { blockedProperties } from "@grasp-os/sdk/expression-check";
+import { decisionLimits } from "@grasp-os/shared/decisions";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import {
   aliasPattern,
   bindingKinds,
+  forEachDescription,
   formatLimits,
   localContractPattern,
   paramKinds,
   paramNamePattern,
+  recipientPattern,
   stepIdPattern,
   workflowSchemaUrl,
 } from "./format.ts";
@@ -66,6 +69,55 @@ const stepKinds = {
     },
     ["binding", "instructions", "input", "output"]
   ),
+  decision: stepOf(
+    "decision",
+    {
+      binding: ref("alias"),
+      recipients: {
+        anyOf: [
+          ref("expression"),
+          {
+            type: "array",
+            minItems: 1,
+            maxItems: decisionLimits.recipients,
+            items: {
+              anyOf: [
+                ref("expression"),
+                { type: "string", pattern: recipientPattern },
+              ],
+            },
+          },
+        ],
+      },
+      prompt: {
+        anyOf: [
+          ref("expression"),
+          {
+            type: "string",
+            // As the host takes one (`decisionPromptSchema`): not blank,
+            // and `maxLength` counts code points, as it does.
+            pattern: "\\S",
+            maxLength: decisionLimits.promptLength,
+          },
+        ],
+      },
+      input: ref("value"),
+      timeout: ref("duration"),
+    },
+    ["binding", "recipients", "prompt", "input"]
+  ),
+  forEach: {
+    description: forEachDescription,
+    ...stepOf(
+      "forEach",
+      {
+        items: ref("expression"),
+        while: ref("expression"),
+        do: ref("steps"),
+      },
+      ["items", "do"]
+    ),
+  },
   wait: {
     ...stepOf("wait", { for: ref("duration"), until: ref("expression") }, []),
     oneOf: [{ required: ["for"] }, { required: ["until"] }],

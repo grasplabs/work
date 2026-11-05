@@ -10,7 +10,8 @@ import type { Json } from "./json.ts";
 // run's starter, unless `from` is exactly `person:<them>`; a decision link
 // (`/decisions/<id>`) only leads them to it (threat model R8, decision Q5).
 
-const decidersPattern =
+/** Who answers a decision, as `decidersSchema` holds it: its pattern. */
+export const decidersPattern =
   /^(?:person:[\w-]{1,128}|role:(?:admin|builder|user)|team:[\w-]{1,128})$/u;
 
 /**
@@ -24,6 +25,29 @@ export const decidersSchema = z
     decidersPattern,
     'a person ("person:<user ID>"), a role ("role:admin") or a team ("team:<team ID>")'
   );
+
+/**
+ * What one workflow's decision may ask, as every generator bounds what it
+ * seals and the run host takes it.
+ */
+export const decisionLimits = {
+  /** The people, teams and roles one decision asks. */
+  recipients: 16,
+  /** Its prompt, which people are shown uncut, in characters. */
+  promptLength: 500,
+} as const;
+
+/**
+ * A decision's prompt: text, not blank, at most
+ * `decisionLimits.promptLength` characters. A character is a code point,
+ * as JSON Schema's `maxLength` counts one (and zod's `max`), so a prompt a
+ * workflow's checker takes is one the host asks: an emoji is one, not the
+ * two UTF-16 units JavaScript's `length` counts.
+ */
+export const decisionPromptSchema = z
+  .string()
+  .regex(/\S/u)
+  .max(decisionLimits.promptLength);
 
 /** Why a decision call was refused. */
 export const decisionErrors = defineErrorFamily({

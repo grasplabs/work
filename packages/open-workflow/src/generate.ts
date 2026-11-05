@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
+import { decisionLimits } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
@@ -1668,18 +1669,12 @@ const modelCallOf = (
 };
 
 /**
- * The most recipients a decision has: as many as a decision binding names
- * deciders. Any of them answers it, the first answer the only one (core's
- * workflows/resource-decisions.ts holds an expression's list to the same).
- */
-export const maxDecisionRecipients = 16;
-
-/**
  * A `grasp.decision` task's call: its parts' templates (`part`), and its
  * deadline from the task's `timeout`, which bounds how long it takes
  * answers rather than an attempt. A literal list of recipients longer
- * than a decision takes is refused as `decision:recipients`; one that an
- * expression builds is held to the same by the host.
+ * than a decision takes (`decisionLimits.recipients`) is refused as
+ * `decision:recipients`; one that an expression builds is held to the
+ * same by the host.
  */
 const decisionCallOf = (
   emitter: Emitter,
@@ -1690,7 +1685,7 @@ const decisionCallOf = (
   const args = isObject(item.task.with) ? item.task.with : {};
   if (
     Array.isArray(args.recipients) &&
-    args.recipients.length > maxDecisionRecipients
+    args.recipients.length > decisionLimits.recipients
   ) {
     emitter.refusals.add(
       pointerJoin(pointerJoin(item.pointer, "with"), "recipients"),
