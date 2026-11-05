@@ -228,7 +228,7 @@ export const emailLocalPartSchema = z
  * can be read: the UTC day it was stored and its ID, `2026-09-29/<id>`. It
  * names no App: a run reads only what its own App received.
  */
-export const storedEmailSchema = z
+const storedEmailSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}\/[0-9a-f]{64}$/u);
 
@@ -446,27 +446,6 @@ export const placeholderOf = (value: unknown): string | undefined => {
     typeof name === "string"
     ? name
     : undefined;
-};
-
-/** Whether `value` holds a placeholder (`placeholderOf`) at any depth. */
-export const holdsPlaceholder = (value: unknown): boolean => {
-  const seen = new Set<unknown>();
-  const pending: unknown[] = [value];
-  while (pending.length > 0) {
-    const node = pending.pop();
-    if (typeof node === "object" && node !== null && !seen.has(node)) {
-      if (placeholderOf(node) !== undefined) {
-        return true;
-      }
-      seen.add(node);
-      const items: unknown[] = Object.values(node);
-      // One at a time: a spread of a large list would overflow the stack.
-      for (const item of items) {
-        pending.push(item);
-      }
-    }
-  }
-  return false;
 };
 
 /**
@@ -1114,9 +1093,4 @@ export interface WorkflowsApi {
    * counted.
    */
   today: () => Promise<WorkflowsToday>;
-  /**
-   * The organization's teams, by name, for choosing one (a collection's,
-   * a person's); for admins and builders, never Grasp staff.
-   */
-  teams: () => Promise<{ id: string; name: string }[]>;
 }

@@ -54,12 +54,7 @@ import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
 import { SpendWidget } from "./spend-widget.tsx";
-import {
-  GoalListView,
-  ReturnChartView,
-  TeamListView,
-  fills,
-} from "./standard-widgets.tsx";
+import { GoalListView, ReturnChartView, fills } from "./standard-widgets.tsx";
 import { ChangeWidget, WidgetAsk } from "./widget-ask.tsx";
 import {
   BlockButton,
@@ -363,10 +358,6 @@ const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
     context: "dashboard widget: what the work costs now and what returns",
   }),
   goals: msg({ message: "Board goals", context: "dashboard widget" }),
-  teams: msg({
-    message: "Teams with AI",
-    context: "dashboard widget: how far each team is with AI",
-  }),
   workflows: msg`Workflows`,
   engines: msg`Apps`,
   runs: msg`Runs this week`,
@@ -399,14 +390,6 @@ const widgetBlocks: Record<
         )
       }
     </Await>
-  ),
-  teams: ({ returns }, title) => (
-    <WidgetBlock
-      full={<TeamListView rows={returns.rows} teams={returns.teams} />}
-      title={title}
-    >
-      <TeamListView rows={returns.rows} teams={returns.teams} />
-    </WidgetBlock>
   ),
   workflows: (board, title) => (
     <Await fallback={<WidgetLoading title={title} />} promise={board.workflows}>

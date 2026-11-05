@@ -1634,7 +1634,7 @@ describe("erasing a person", () => {
         admin.userId
       ),
       env.DB.prepare(
-        "INSERT INTO notifications (id, person_id, type, created_at, updated_at) VALUES (?, ?, 'run_failed', ?, ?)"
+        "INSERT INTO notifications (id, person_id, type, created_at, updated_at) VALUES (?, ?, 'gap_asked', ?, ?)"
       ).bind(crypto.randomUUID(), userId, now, now),
       env.DB.prepare(
         "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES (?, '2026-10-01', 'teams', ?, 'answered', 'done', '[]', '[]')"

@@ -4,7 +4,7 @@ import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
   QuerySnapshotPush,
-  RunSubscriptionApi,
+  SubscriptionApi,
   ScreenBundle,
   ScreenProblem,
 } from "./screens.ts";
@@ -998,7 +998,7 @@ export interface ChatsApi {
     revision: number,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   /**
    * Starts (`stream`) or follows again (`attach`) a streaming action of
    * the draft of an App of spec 8's layout in its preview, as a screen's
@@ -1015,7 +1015,7 @@ export interface ChatsApi {
     what: "stream" | "attach",
     request: string,
     onFrame: (frame: unknown) => Promise<unknown>
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   /**
    * Asks the preview's invocation of the streaming action `request` names
    * to stop: `{ requested }`, whether it was still running.

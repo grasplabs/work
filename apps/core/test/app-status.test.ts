@@ -45,9 +45,6 @@ import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
 // function route. Gone with App workflows: a schedule an App's own
 // workflow declares, firing only while the App is published, and its own
 // workflows' detail and parameters read, never set, once archived.
-// Kept as an App run until a JSON run's start repair shows it: the repair
-// re-checking that the person a start acts for may still use the App,
-// whatever the start's row says.
 // Already covered: a start refused for someone who may no longer use the
 // App once it is decided (workflow-starts.test.ts, "acts only for someone
 // who may use the App now, each with keys of their own").
@@ -645,6 +642,45 @@ describe("an App's status", () => {
     });
   });
 
+  it("sends no start the engine never took once its person may no longer use the App, as when it went back to a draft", async () => {
+    const holding = await holdingApp();
+    const { builder, app } = holding;
+    const { signedIn } = jsonWorkflowAppsOf(idp);
+    const user = await signedIn("user");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    // A user's start the engine never took, and a builder's: both still
+    // starting.
+    const [usersStart, buildersStart] = await whileEngineRefuses(
+      () => true,
+      async () => [
+        await startedFrom(holding, user),
+        await startedFrom(holding, builder),
+      ]
+    );
+    // Published then, a draft now: the user may no longer use it, whatever
+    // their start's row says; its builder still may.
+    await env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
+      .bind(app)
+      .run();
+
+    // Past when the repair first looks at them.
+    await repairResourceStarts(env, new Date(Date.now() + 2 * 60_000));
+    expect({
+      user: await statusOf(holding, usersStart),
+      userEngine: await runObject(usersStart).status(),
+      // Sent again: the engine has it now.
+      builderEngine: (await runObject(buildersStart).status()) !== undefined,
+    }).toStrictEqual({
+      user: "failed",
+      userEngine: undefined,
+      builderEngine: true,
+    });
+  });
+
   it("lets a start the engine took go on when the repair finds its App unpublished", async () => {
     const holding = await holdingApp();
     const { app } = holding;
@@ -704,6 +740,3 @@ describe("an App's status", () => {
     });
   });
 });
-
-// Kept until a JSON run's start repair re-checks its person: an App's own
-// workflow's runs, as before.

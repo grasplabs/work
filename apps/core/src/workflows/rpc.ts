@@ -15,7 +15,6 @@ import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
 import { connectionWorkflows } from "./connection-workflows.ts";
 import { listAllRuns, workflowOverview } from "./overview.ts";
-import { teamChoices } from "./teams.ts";
 import { workflowsToday } from "./today.ts";
 
 /**
@@ -66,13 +65,6 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await workflowsToday(this.#env, by)
-    );
-  }
-
-  async teams(): Promise<{ id: string; name: string }[]> {
-    return await withPerson(
-      this.#check,
-      async (by) => await teamChoices(this.#env, by)
     );
   }
 }

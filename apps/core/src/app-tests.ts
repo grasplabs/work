@@ -63,7 +63,6 @@ import type {
   SnapshotCallback,
 } from "./query-subscriptions.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
-import { RunSubscription } from "./run-subscription.ts";
 import {
   capability,
   noPlaceOf,
@@ -82,6 +81,7 @@ import {
   sessionHost,
 } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
+import { Subscription } from "./subscription.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import { holdFixtureRunSession } from "./workflows/fixture-run-sessions.ts";
 import {
@@ -832,7 +832,7 @@ class FixtureSession extends TestTarget {
   /** Each principal's live queries, by name (`subscribe`). */
   readonly #queries = new Map<string, PrincipalQueries>();
   /** The live queries not released yet, which `close` releases. */
-  readonly #following = new Set<RunSubscription>();
+  readonly #following = new Set<Subscription>();
   /**
    * The workflow runs its principals started, by the number each start
    * answered (`start`): the test asks of these alone, and `close` removes
@@ -1266,7 +1266,7 @@ class FixtureSession extends TestTarget {
     request: unknown,
     onSnapshot: unknown,
     onLost: unknown
-  ): Promise<{ subscription: RunSubscription } | { refusal: string }> {
+  ): Promise<{ subscription: Subscription } | { refusal: string }> {
     try {
       if (this.#closed) {
         throw sessionEnded();
@@ -1295,7 +1295,7 @@ class FixtureSession extends TestTarget {
       );
       // The manager holds a callback of its own; this one is let go of.
       callback[Symbol.dispose]();
-      const subscription: RunSubscription = new RunSubscription(async () => {
+      const subscription: Subscription = new Subscription(async () => {
         this.#following.delete(subscription);
         await held.release();
       });
@@ -1469,7 +1469,7 @@ export const fixtureHostFor = (
 class NumberedFixtureHost extends TestTarget {
   readonly #host: FixtureHost;
   readonly #sessions = new Map<number, FixtureSession>();
-  readonly #subscriptions = new Map<number, RunSubscription>();
+  readonly #subscriptions = new Map<number, Subscription>();
 
   constructor(host: FixtureHost) {
     super();

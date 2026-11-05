@@ -527,12 +527,12 @@ describe("what a browser reaches over core's connection", () => {
       expect.arrayContaining([
         "authenticate: SessionRpc",
         "authenticate.apps.files: AppFilesRpc",
-        "authenticate.chats.watch: RunSubscription",
+        "authenticate.chats.watch: Subscription",
         "authenticate.screens.frame: ScreenFrameRpc",
-        "authenticate.screens.frame.watchQuery: RunSubscription",
-        "authenticate.screens.watchVersion: RunSubscription",
-        "authenticate.chats.previewWatchQuery: RunSubscription",
-        "authenticate.chats.previewStream: RunSubscription",
+        "authenticate.screens.frame.watchQuery: Subscription",
+        "authenticate.screens.watchVersion: Subscription",
+        "authenticate.chats.previewWatchQuery: Subscription",
+        "authenticate.chats.previewStream: Subscription",
       ])
     );
   });
@@ -546,7 +546,7 @@ describe("what a browser reaches over core's connection", () => {
 
       expect(walked.unbounded).toStrictEqual([]);
       expect(walked.targets).toContain(
-        "authenticate.chats.watch: RunSubscription"
+        "authenticate.chats.watch: Subscription"
       );
     }
   );

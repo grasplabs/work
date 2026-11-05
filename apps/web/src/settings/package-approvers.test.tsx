@@ -89,13 +89,13 @@ const fakeCore = (refuse?: string, people = [grace, ada]) => {
       return people;
     },
   };
-  const workflows = {
+  const organization = {
     teams: async () => {
       await Promise.resolve();
       return [platform];
     },
   };
-  return { session: { dependencies, members, workflows }, asked };
+  return { session: { dependencies, members, organization }, asked };
 };
 
 let root: Root | undefined;

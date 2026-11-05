@@ -309,7 +309,7 @@ const aiWaitSchema = z.object({
  * What a model call's failure tells of its provider, when it failed on
  * the organization's own key for what the provider showed; none else.
  */
-export const aiWaitOf = (error: unknown): AiWait | undefined =>
+const aiWaitOf = (error: unknown): AiWait | undefined =>
   isExpectedError(error) && modelErrors.codeOf(error) !== undefined
     ? aiWaitSchema.safeParse(error.details).data
     : undefined;
@@ -500,7 +500,7 @@ const maxStepName = 256;
 /** Control characters, which the engine refuses in a step's name. */
 const controlCharacter = /\p{Cc}/u;
 
-export const stepNameSchema = z
+const stepNameSchema = z
   .string()
   .min(1)
   .max(maxStepName)

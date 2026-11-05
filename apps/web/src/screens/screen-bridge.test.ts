@@ -298,7 +298,7 @@ describe("the page's bridge to a screen", () => {
     // What `openBridge` serves, and what every call of a frame's lands on
     // first. Its answers are its target's: `watchQuery` passes on core's
     // stub of the subscription, whose calls go back to core over the
-    // page's own connection, to a target core bounds (RunSubscription, a
+    // page's own connection, to a target core bounds (Subscription, a
     // CoreRpcTarget: core's rpc-targets.test.ts).
     expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
       FrameRpcTarget

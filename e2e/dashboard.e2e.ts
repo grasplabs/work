@@ -164,16 +164,13 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
   // The board is there, with nothing of theirs on it yet: core counts no
-  // hours or teams' work, and there are no workflows in their columns. The
+  // hours, and there are no workflows in their columns. The
   // board's goals are the company's: another journey's may be on it
   // (e2e/board-goals.e2e.ts).
   await expect(
     page.getByRole("region", { name: "Return a month" })
   ).toContainText("No workflow with counted hours here yet.");
   await expect(page.getByRole("region", { name: "Board goals" })).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Teams with AI" })
-  ).toContainText("No teams yet.");
   const workflows = page.getByRole("region", { name: "Workflows" });
   await expect(workflows.getByRole("list", { name: "Ran" })).toBeAttached(
     pageRead
@@ -201,7 +198,7 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
 const boardTitles = (page: Page) =>
   page.getByRole("heading", {
     level: 2,
-    name: /^(?:Return a month|Board goals|Teams with AI|Workflows|Apps|Runs this week|Could be better)$/u,
+    name: /^(?:Return a month|Board goals|Workflows|Apps|Runs this week|Could be better)$/u,
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
@@ -222,7 +219,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   const begun = [
     "Return a month",
     "Board goals",
-    "Teams with AI",
     "Workflows",
     "Apps",
     "Runs this week",
@@ -250,14 +246,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(titles).toHaveText(without);
   await expect
     .poll(saved)
-    .toStrictEqual([
-      "return",
-      "goals",
-      "teams",
-      "workflows",
-      "runs",
-      "signals",
-    ]);
+    .toStrictEqual(["return", "goals", "workflows", "runs", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(without);
 
@@ -273,7 +262,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "runs",
       "signals",
@@ -296,7 +284,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   const moved = [
     "Return a month",
     "Board goals",
-    "Teams with AI",
     "Workflows",
     "Runs this week",
     "Apps",
@@ -309,7 +296,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "runs",
       "engines",
@@ -327,7 +313,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "engines",
       "runs",

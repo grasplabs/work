@@ -50,8 +50,8 @@ import { connectDb, testBinding } from "./test-env.ts";
 // lineage's limit, each run under the last"); the App's own workflows'
 // refusal records went with them.
 //
-// Kept as an App run until a JSON run's mail can wait for its person to
-// confirm it: that mail joining its run's lineage once confirmed. A
+// Not yet shown for a JSON run (GRA-1584): its mail that waited for its
+// person to confirm it joining its run's lineage once confirmed. A
 // trigger's JSON run is never restricted, so its mail never waits.
 
 const idp = mockIdp();

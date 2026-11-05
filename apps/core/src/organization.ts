@@ -10,17 +10,17 @@ import type {
   OrganizationApi,
   OrganizationChanges,
 } from "@grasp-os/shared/organization";
-import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { defaultTimeZone, nextScheduledRun } from "@grasp-os/shared/workflows";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
-import { organizations } from "./db/core/schema.ts";
+import { organizations, teams } from "./db/core/schema.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -209,6 +209,25 @@ const updateOrganization = async (
   return await readOrganization(env);
 };
 
+/**
+ * The organization's teams, by name, to choose one from (a collection's, a
+ * person's): for admins and builders; not Grasp staff, who never choose.
+ */
+export const teamChoices = async (
+  env: Env,
+  by: Identity
+): Promise<{ id: string; name: string }[]> => {
+  if (by.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  requireBuilder(by);
+  return await drizzle(env.DB)
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, organizationId))
+    .orderBy(asc(teams.name), asc(teams.id));
+};
+
 /** A signed-in person's `organization`. */
 export class OrganizationRpc extends CoreRpcTarget implements OrganizationApi {
   readonly #env: Env;
@@ -231,6 +250,13 @@ export class OrganizationRpc extends CoreRpcTarget implements OrganizationApi {
     return await withPerson(
       this.#check,
       async (person) => await updateOrganization(this.#env, person, changes)
+    );
+  }
+
+  async teams(): Promise<{ id: string; name: string }[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await teamChoices(this.#env, by)
     );
   }
 }

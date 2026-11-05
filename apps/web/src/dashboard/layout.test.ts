@@ -32,16 +32,14 @@ describe("moving a widget", () => {
       "signals",
       "return",
       "goals",
-      "teams",
       "workflows",
       "engines",
       "runs",
     ]);
     expect(placeWidget(defaultWidgets, "return", 2)).toStrictEqual([
       "goals",
-      "teams",
-      "return",
       "workflows",
+      "return",
       "engines",
       "runs",
       "signals",
@@ -55,17 +53,15 @@ describe("moving a widget", () => {
     expect(moveWidget(defaultWidgets, "runs", 5)).toStrictEqual([
       "return",
       "goals",
-      "teams",
       "workflows",
       "engines",
       "signals",
       "runs",
     ]);
-    expect(moveWidget(defaultWidgets, "teams", -2)).toStrictEqual([
-      "teams",
+    expect(moveWidget(defaultWidgets, "workflows", -2)).toStrictEqual([
+      "workflows",
       "return",
       "goals",
-      "workflows",
       "engines",
       "runs",
       "signals",
@@ -83,7 +79,6 @@ describe("taking off and adding widgets", () => {
     const without = removeWidget(defaultWidgets, "goals");
     expect(without).toStrictEqual([
       "return",
-      "teams",
       "workflows",
       "engines",
       "runs",
@@ -93,7 +88,6 @@ describe("taking off and adding widgets", () => {
     const again = addWidget(without, "goals");
     expect(again).toStrictEqual([
       "return",
-      "teams",
       "workflows",
       "engines",
       "runs",
@@ -122,7 +116,6 @@ describe("taking off and adding widgets", () => {
     expect(missingWidgets(saved, defaultWidgets)).toStrictEqual([
       "return",
       "goals",
-      "teams",
     ]);
   });
 });

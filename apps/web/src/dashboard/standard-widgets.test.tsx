@@ -12,15 +12,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { formatEuro } from "../format.ts";
 import { returnTotals } from "./returns.ts";
-import type { GoalProgress, TeamProgress, WorkflowReturn } from "./returns.ts";
-import {
-  GoalListView,
-  ReturnChartView,
-  TeamListView,
-} from "./standard-widgets.tsx";
+import type { GoalProgress, WorkflowReturn } from "./returns.ts";
+import { GoalListView, ReturnChartView } from "./standard-widgets.tsx";
 import { WidgetFull } from "./widget-block.tsx";
 
-// The return, goals and teams widgets with work in them, on the board and
+// The return and goals widgets with work in them, on the board and
 // in full, before core fills them: the totals they add up, a return that
 // is negative (the model costs more than the hours it took), and a
 // workflow with hours by hand but no return yet, and one whose hours aren't
@@ -36,7 +32,7 @@ const row = (
   name: string,
   fields: Partial<WorkflowReturn> & Pick<WorkflowReturn, "stage" | "basis">
 ): WorkflowReturn => ({
-  workflow: { id: `wf-${name}`, name, teamId: "finance", goalId: "close" },
+  workflow: { id: `wf-${name}`, name, goalId: "close" },
   hoursBefore: null,
   hoursAfter: null,
   before: null,
@@ -87,43 +83,6 @@ const goal: GoalProgress = {
   coming: 1200,
 };
 
-const team = (
-  fields: Partial<TeamProgress> & Pick<TeamProgress, "id" | "name">
-): TeamProgress => ({
-  level: "notStarted",
-  workflows: 0,
-  mapped: 0,
-  redesign: 0,
-  testing: 0,
-  live: 0,
-  share: null,
-  cost: 0,
-  measured: 0,
-  expected: 0,
-  handled: 0,
-  alone: 0,
-  needsHelp: false,
-  ...fields,
-});
-const teams = [
-  team({
-    id: "finance",
-    name: "Finance",
-    level: "live",
-    workflows: 4,
-    mapped: 1,
-    testing: 1,
-    live: 2,
-    share: 0.5,
-    cost: 6500,
-    measured: 2800,
-    expected: 1200,
-    handled: 120,
-    alone: 96,
-  }),
-  team({ id: "legal", name: "Legal", needsHelp: true }),
-];
-
 /** The widget's text as a person reads it, on the board or in full. */
 const textOf = (widget: ReactNode, full = false): string =>
   renderToStaticMarkup(
@@ -171,16 +130,5 @@ describe("the goals widget", () => {
     expect(board).toContain("Close the month in a day");
     expect(full).toContain("Close the month in a day");
     expect(full).toContain("Match invoices");
-  });
-});
-
-describe("the teams widget", () => {
-  it("shows each team, one far along and one not started, on the board and in full", () => {
-    const board = textOf(<TeamListView rows={rows} teams={teams} />);
-    const full = textOf(<TeamListView rows={rows} teams={teams} />, true);
-    expect(board).toContain("Finance");
-    expect(board).toContain("Legal");
-    expect(full).toContain("Finance");
-    expect(full).toContain("Legal");
   });
 });

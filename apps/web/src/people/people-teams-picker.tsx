@@ -61,7 +61,7 @@ export const readPeopleAndTeams = async (
 ): Promise<PeopleAndTeams> => {
   const [members, teams] = await Promise.all([
     session.members.list(),
-    session.workflows.teams(),
+    session.organization.teams(),
   ]);
   return {
     people: members

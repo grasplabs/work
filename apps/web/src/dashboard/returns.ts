@@ -53,13 +53,12 @@ export type ReturnBasis =
   | "observed"
   | "unknown";
 
-/** The workflow a return is of: where it opens, and whose work it is. */
+/** The workflow a return is of: where it opens, and the goal it serves. */
 export interface ReturnWorkflow {
   /** The workflow's ID, where it opens, and its name. */
   id: string;
   name: string;
-  /** The team whose work it is, and the board goal it serves, if any. */
-  teamId: string | null;
+  /** The board goal it serves, if any. */
   goalId: string | null;
 }
 
@@ -137,43 +136,6 @@ export interface GoalProgress {
 }
 
 /**
- * How far a team is with AI, read from its own work: nothing drawn yet,
- * its work drawn, a redesign, a test, something live, and live work
- * across most of its hours.
- */
-export type TeamLevel =
-  | "notStarted"
-  | "mapped"
-  | "redesign"
-  | "testing"
-  | "live"
-  | "scaling";
-
-/** One team's work with AI, beside the rest of the company. */
-export interface TeamProgress {
-  id: string;
-  name: string;
-  level: TeamLevel;
-  workflows: number;
-  /** How many of its workflows are at each step, from drawn to live. */
-  mapped: number;
-  redesign: number;
-  testing: number;
-  live: number;
-  /** The share of its hours by hand that is redesigned, 0 to 1; null without counted hours. */
-  share: number | null;
-  /** What its counted work costs by hand a month, the measured return a month and the expected one. */
-  cost: number;
-  measured: number;
-  expected: number;
-  /** Items its live workflows handled, and how many of them without a person. */
-  handled: number;
-  alone: number;
-  /** Behind the company: work drawn, nothing tested yet, and less of it redesigned than the company's. */
-  needsHelp: boolean;
-}
-
-/**
  * The board's goals as core keeps them (`brain.goals`), each by its newest
  * wording, with the workflows linked to it that `workflows` lists: live
  * once it handled items this week, else in its test (it is built, and
@@ -191,7 +153,7 @@ export const goalProgressOf = (
         return [];
       }
       const row: WorkflowReturn = {
-        workflow: { id, name: summary.name, teamId: null, goalId: goal.id },
+        workflow: { id, name: summary.name, goalId: goal.id },
         stage: summary.handled > 0 ? "live" : "testing",
         hoursBefore: null,
         hoursAfter: null,
@@ -213,14 +175,12 @@ export const goalProgressOf = (
     };
   });
 
-/** What the board's return, goals and teams widgets are drawn from. */
+/** What the board's return and goals widgets are drawn from. */
 export interface WorkReturns {
   /** Every workflow's return, the most valuable by hand first. */
   rows: WorkflowReturn[];
   goals: GoalProgress[];
-  /** Every team, the furthest first. */
-  teams: TeamProgress[];
 }
 
 /** What core has of it now: nothing, so each widget shows its empty state. */
-export const noReturns: WorkReturns = { rows: [], goals: [], teams: [] };
+export const noReturns: WorkReturns = { rows: [], goals: [] };

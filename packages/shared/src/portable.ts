@@ -1,4 +1,4 @@
-import type { QuerySnapshotPush, RunSubscriptionApi } from "./screens.ts";
+import type { QuerySnapshotPush, SubscriptionApi } from "./screens.ts";
 
 // Where a portable host (spec 10.7.1: an App's UI outside Grasp's own
 // shell, as `new GraspClient({ url, getToken })` reaches it) gets its
@@ -69,7 +69,7 @@ export interface PortableQueriesApi {
   watchQuery: (
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   /**
    * Swaps the connection's token for a newer one of the same person's,
    * before the one it holds expires: answers the new one's expiry, in

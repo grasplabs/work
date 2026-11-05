@@ -16,8 +16,9 @@ import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Settled tasks' outcomes, captured for the Brain with no learning step in
-// any task (brain-capture.ts): workflow runs as their row ends, chat turns
-// as they settle. The ways capture could fail, tried below:
+// any task (brain-capture.ts): chat turns as they settle. A workflow run's
+// outcome was captured only for App runs, which went with App workflows;
+// a JSON run's is GRA-1587. The ways capture could fail, tried below:
 // 1. A settled task is lost: the process dies, or the Brain is out of
 //    reach, between the settle and the delivery.
 // 2. A delivery made again becomes a second event.

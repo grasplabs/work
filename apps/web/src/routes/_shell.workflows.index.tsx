@@ -226,9 +226,9 @@ const ListedWorkflows = ({
 };
 
 /**
- * What needs a person: the App workflows whose runs wait, failed lately
- * or whose schedule stopped, and the independent workflows waiting for
- * the reader to let them go live, each serving `process`.
+ * What needs a person: the workflows whose runs wait or failed lately,
+ * and those waiting for the reader to let them go live, each serving
+ * `process`.
  */
 const NeedsAttention = ({
   workflows,
@@ -462,10 +462,9 @@ const countNeeds = (
   if (lists.workflows.state !== "ready" || lists.goLives.state !== "ready") {
     return undefined;
   }
-  // Under a process, which go-live serves it is read off the independent
-  // workflows, and which App workflow serves it off the Apps:
-  // without either it can't be told, so no count rather than one that
-  // leaves some out.
+  // Under a process, which workflow serves it is read off the workflows'
+  // own records: without them it can't be told, so no count rather than
+  // one that leaves some out.
   if (domainsUnchecked(lists.independent, process)) {
     return undefined;
   }

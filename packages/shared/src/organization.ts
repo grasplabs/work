@@ -49,6 +49,11 @@ export interface OrganizationApi {
   get: () => Promise<Organization>;
   /** Changes the name, the time zone or both, and returns the result. */
   update: (changes: OrganizationChanges) => Promise<Organization>;
+  /**
+   * The organization's teams, by name, for choosing one (a collection's,
+   * a person's); for admins and builders, never Grasp staff.
+   */
+  teams: () => Promise<{ id: string; name: string }[]>;
 }
 
 /** Why a change to the organization was refused. */

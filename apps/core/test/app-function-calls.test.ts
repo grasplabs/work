@@ -40,13 +40,12 @@ import { signedInApi } from "./sign-in.ts";
 // runs as the called App's owner, or for someone without a role in it; a
 // contract the called App changed still served; calls between Apps going
 // round or too deep; a withdrawn caller still committing; restricted data
-// crossing unmarked; and calls nobody can trace. Kept as App runs until
-// JSON runs reach parity: an App's own workflow calling another App
-// through `env.APP.callFunction`, its run starting no workflow of the App
-// it calls, directly or two Apps down, and committing nothing once its
-// step lets go of its lease. Gone with App workflows: its run inviting no
-// guest down the chain, changing the other App once across a rerun, and
-// calling as the person the run acts for.
+// crossing unmarked; and calls nobody can trace. Gone with App workflows,
+// whose runs called other Apps through `env.APP.callFunction`: a run's
+// calls starting no workflow of the App called, committing nothing once
+// its step let go of its lease, and calling as the person the run acts
+// for. Whether a JSON run calls App functions, and so needs these, is
+// GRA-1586.
 
 const idp = mockIdp();
 

@@ -162,7 +162,8 @@ const appDecision = async (
 
 /**
  * What the page's trusted decision UI shows the person before they
- * confirm the screen's answer to the decision `decision` of the run `run` (`reviewDecision`).
+ * confirm the screen's answer to the decision `decision` of the run
+ * `run` (`reviewDecision`).
  */
 export const reviewScreenDecision = async (
   env: Env,
@@ -209,13 +210,13 @@ export const confirmScreenDecision = async (
 };
 
 /**
- * Answers the decision `decision` of the run `run`, for the person using the screen, as the decision's page does
- * (`answerDecision`): only someone it is from, never the run's starter
- * unless it names exactly them, once, before its deadline, and only with
- * the one-use confirmation the page minted once the person confirmed
- * exactly this answer in its own dialog. The screen asks the page to
- * answer, and never holds the confirmation. Audited as answered on a
- * screen.
+ * Answers the decision `decision` of the run `run`, for the person using
+ * the screen, as the decision's page does (`answerDecision`): only
+ * someone it is from, never the run's starter unless it names exactly
+ * them, once, before its deadline, and only with the one-use confirmation
+ * the page minted once the person confirmed exactly this answer in its
+ * own dialog. The screen asks the page to answer, and never holds the
+ * confirmation. Audited as answered on a screen.
  */
 export const decideScreenRun = async (
   env: Env,

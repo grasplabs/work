@@ -433,10 +433,11 @@ export type AppVersionPush =
   | { type: "refused"; error: { code: string; message: string } };
 
 /**
- * A screen's hold on one of its App's live queries (`watchQuery`), until it
- * releases it: then core calls its callback no more.
+ * A page's hold on updates it follows (a screen's live query, its App's
+ * version, a chat), until it releases it: then core calls its callback no
+ * more.
  */
-export interface RunSubscriptionApi {
+export interface SubscriptionApi {
   release: () => Promise<void>;
 }
 
@@ -510,7 +511,7 @@ export interface ScreenFrameApi {
   watchQuery: (
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   close: () => Promise<void>;
 }
 
@@ -575,7 +576,7 @@ export interface ScreensApi {
   watchVersion: (
     app: string,
     onVersion: (push: AppVersionPush) => void
-  ) => Promise<RunSubscriptionApi>;
+  ) => Promise<SubscriptionApi>;
   /**
    * Adds a problem in a screen at `version` to the App's error log:
    * `screen.rate_limited` past what one person's screens, or all of the

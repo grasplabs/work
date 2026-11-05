@@ -45,9 +45,9 @@ import { outcome } from "./sign-in.ts";
 // Only App workflows had these, written in TypeScript, and they go with
 // them: a step's `timeout` and `retries` options given again on a replay,
 // and options wider than the platform's written past the SDK.
-// Kept as an App run until a JSON run shows it: a lineage's active time
+// Not yet shown for a JSON run (GRA-1583): a lineage's active time
 // counted on across a restart, a long wait and a child, which starts no
-// count of its own, as its steps' own code runs.
+// count of its own.
 
 const idp = mockIdp();
 const { signedIn } = jsonWorkflowAppsOf(idp);
@@ -437,5 +437,3 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     }).toStrictEqual({ accented: "workflow.start_invalid", plain: "ok" });
   });
 });
-
-// Kept until a JSON run shows it: an App run's lineage, as before.

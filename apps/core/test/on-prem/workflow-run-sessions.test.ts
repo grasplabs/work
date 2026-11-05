@@ -24,7 +24,8 @@ import { unique } from "../sign-in.ts";
 // while the sandbox is full. Runs, the engine, the host and the sandbox
 // supervisor are real; a run is started through its builder's session.
 // Already covered: a load across a wait, and a listen's event after it
-// (json-workflow-runs.test.ts).
+// (json-workflow-runs.test.ts). Not yet shown for a JSON run (GRA-1585):
+// a cancel stopping a run that waits for a place.
 
 const idp = mockIdp();
 const { signedIn } = jsonWorkflowAppsOf(idp);
@@ -166,6 +167,3 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
     });
   });
 });
-
-// Kept until JSON cancels stop a run waiting for a place: an App
-// workflow's run, as before.

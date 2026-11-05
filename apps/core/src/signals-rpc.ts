@@ -97,15 +97,15 @@ const waitsFor = (by: Identity) =>
 
 /**
  * The signals `by` asked for, as of the latest finished computation: all
- * of them for an admin, whole; an App's (or one workflow of it) for its
- * builders, as `forBuilders` has them.
+ * of them for an admin, whole; an App's for its builders, as
+ * `forBuilders` has them.
  */
 export const listSignals = async (
   env: Env,
   by: Identity,
   filter: unknown
 ): Promise<ImprovementSignals> => {
-  const { app, workflow } = signalErrors.parse(
+  const { app } = signalErrors.parse(
     "signal.invalid",
     signalFilterSchema,
     filter
@@ -114,19 +114,12 @@ export const listSignals = async (
     requireAdmin(by);
   } else {
     await appFor(env, by, app, "builder");
-    // An App holds no workflows (app-no-workflows.ts): a filter by one
-    // could never match anything, a mistake rather than an empty list.
-    if (workflow !== undefined) {
-      throw signalErrors.create("signal.invalid", {
-        issues: [`workflow: App ${app} has no workflow ${workflow}`],
-      });
-    }
   }
   const db = drizzle(env.DB);
   await keepAuditEvent(env, db, {
     actor: actorOf(by),
     action: "improvement.signals.read",
-    detail: { app: app ?? null, workflow: workflow ?? null },
+    detail: { app: app ?? null },
   });
   // The computation and its signals in one batch (`latestComputation`).
   const [current, ...kinds] = await db.batch([
@@ -143,10 +136,7 @@ export const listSignals = async (
             eq(improvementSignals.computation, latestComputation),
             eq(improvementSignals.kind, kind),
             kind === "waiting_for_person" ? waitsFor(by) : undefined,
-            app === undefined ? undefined : eq(improvementSignals.appId, app),
-            workflow === undefined
-              ? undefined
-              : eq(improvementSignals.workflowId, workflow)
+            app === undefined ? undefined : eq(improvementSignals.appId, app)
           )
         )
         .orderBy(

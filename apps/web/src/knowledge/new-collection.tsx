@@ -95,7 +95,7 @@ const useTeams = () => {
     setTeams({ state: "loading" });
     try {
       const listed = await core.withSession(
-        async (session) => await session.workflows.teams()
+        async (session) => await session.organization.teams()
       );
       setTeams({ state: "ready", teams: listed });
     } catch (error) {

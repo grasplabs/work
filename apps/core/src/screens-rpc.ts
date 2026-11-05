@@ -66,7 +66,6 @@ import type { PageCallback, StillOpen } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { RunSubscription } from "./run-subscription.ts";
 import {
   deliveryOf,
   deliveryAt,
@@ -81,6 +80,7 @@ import { frameAccess, stageFrame } from "./screen-frame.ts";
 import { versionScreenCodes } from "./screen-references.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { Subscription } from "./subscription.ts";
 import {
   confirmScreenDecision,
   decideScreenRun,
@@ -830,7 +830,7 @@ const followVersion = (
   stub: PageCallback,
   queries: QuerySubscriptions,
   subscriptions: Set<Disposable>
-): RunSubscription => {
+): Subscription => {
   const toPage = stub.dup();
   const state: { live: boolean; following?: Disposable; turn: Promise<void> } =
     { live: true, turn: Promise.resolve() };
@@ -913,7 +913,7 @@ const followVersion = (
     }
   );
   void push(false);
-  return new RunSubscription(async () => {
+  return new Subscription(async () => {
     release();
     await Promise.resolve();
   });
@@ -1136,12 +1136,12 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
    * page gets a hold that releases both.
    */
   async #hold(
-    open: (ended: () => void) => RunSubscription | Promise<RunSubscription>
-  ): Promise<RunSubscription> {
+    open: (ended: () => void) => Subscription | Promise<Subscription>
+  ): Promise<Subscription> {
     // Told when the subscription ends on its own (a refusal, a store
     // that can't be watched, a callback the page no longer takes): the
     // frame forgets it then, so ended ones don't pile up while it's open.
-    const state: { hold?: RunSubscription; ended: boolean } = {
+    const state: { hold?: Subscription; ended: boolean } = {
       ended: false,
     };
     // Ended, it is still released: what holds it besides its callback (a
@@ -1150,7 +1150,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
       state.ended = true;
       void state.hold?.release();
     });
-    const hold = new RunSubscription(async () => {
+    const hold = new Subscription(async () => {
       this.#held.delete(hold);
       await subscription.release();
     });
@@ -1240,7 +1240,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
   async watchQuery(
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     const by = await this.#person();
     const { env, app, build, queries } = this.#connection;
     // Following is a request like any other; what core then pushes is
@@ -1366,7 +1366,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   async watchVersion(
     app: string,
     onVersion: (push: AppVersionPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     return await withPerson(this.#check, async (by) => {
       // Following is a request like any other: a page that follows and
       // lets go over and over is held to what a person may ask.

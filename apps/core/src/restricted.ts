@@ -30,12 +30,9 @@ import { appHost, workspace } from "./durable-objects.ts";
 // decision). Knowledge, which stays in the deployment, can be read too.
 //
 // The flag is only as good as the boundaries between contexts: it must
-// follow every way data moves from one to another. A workflow run started
-// by an App starts from that App's flag, and state shared across a
+// follow every way data moves from one to another. State shared across a
 // workspace's chats would need a flag on the workspace, not on each chat.
-// Whatever adds such a flow adds the flag with it: a chat started to
-// fix a failed run starts restricted when the run's App is, since the
-// run's report may hold what it read (run-fixes.ts); an independent
+// Whatever adds such a flow adds the flag with it: an independent
 // workflow's run started by a restricted App, or from a restricted chat,
 // is restricted for good, its receipt and row pinning it
 // (workflow-starts.ts), and restricts any App it calls before its input

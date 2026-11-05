@@ -66,7 +66,6 @@ import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { RunSubscription } from "./run-subscription.ts";
 import type { LeasedBuild } from "./screen-delivery.ts";
 import {
   appModules,
@@ -91,6 +90,7 @@ import {
 import type { PreviewAnswer } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { Subscription } from "./subscription.ts";
 import { questionSchema } from "./workspace.ts";
 
 // A signed-in person's chats (workspace.ts), over `/rpc`. Each person's
@@ -928,7 +928,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     revision: number,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
       await admitPreviewCall(this.#env, by, id);
@@ -975,7 +975,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     what: "stream" | "attach",
     request: string,
     onFrame: (frame: unknown) => Promise<unknown>
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await appFor(this.#env, by, app, "builder");
       await admitPreviewCall(this.#env, by, id);
@@ -1041,7 +1041,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           ),
         requestId: crypto.randomUUID(),
       }).stop;
-      return new RunSubscription(async () => {
+      return new Subscription(async () => {
         await Promise.resolve();
         toPage[Symbol.dispose]();
       });
@@ -1162,7 +1162,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
-  ): Promise<RunSubscription> {
+  ): Promise<Subscription> {
     return await withPerson(this.#check, async ({ userId }) => {
       const id = chatIdOf(chatId);
       if (!isStub(onUpdate)) {
@@ -1183,7 +1183,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         listener[Symbol.dispose]();
         throw error;
       }
-      return new RunSubscription(async () => {
+      return new Subscription(async () => {
         // The slot is free at once, and the listener forwards nothing
         // more; the object drops it now, or at its next update if it
         // can't be reached.

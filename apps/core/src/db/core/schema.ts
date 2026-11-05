@@ -1710,11 +1710,10 @@ export const workflowRuns = sqliteTable(
      */
     engineSequence: integer("engine_sequence").notNull().default(0),
     /**
-     * The start the engine is still to confirm, as it is sent (`{ input }`,
-     * src/workflows/engine.ts): kept until the engine's first notification
-     * of the run, so a start core stopped in the middle of is sent again,
-     * the same, by the repair (src/workflows/runs.ts, `repairStarts`).
-     * Null once confirmed, and for a run whose start failed.
+     * The start the engine was still to confirm, as it was sent
+     * (`{ input }`). Nothing starts an App run any more, nor repairs one:
+     * left until the table goes. Null once confirmed, and for a run whose
+     * start failed.
      */
     pendingStart: text("pending_start", { mode: "json" }).$type<{
       input?: Json;
@@ -1782,8 +1781,9 @@ export const workflowRuns = sqliteTable(
       table.workflowId,
       table.createdAt
     ),
-    // The start repair (src/workflows/runs.ts, `repairStarts`): starts the
-    // engine is still to confirm, by ID, which the repair pages by.
+    // Starts the engine was still to confirm, by ID, as the App runs' start
+    // repair paged them; it went with App workflows, and this with the
+    // table.
     index("workflow_runs_pending_start_idx")
       .on(table.id)
       .where(sql`pending_start IS NOT NULL`),
