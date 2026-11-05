@@ -57,7 +57,6 @@ import {
   usedNow,
 } from "./build-cache.ts";
 import type { Built, CacheEnv } from "./build-cache.ts";
-import { hostModules } from "./host-modules.ts";
 import {
   incrementPrefixes,
   keepIncrements,

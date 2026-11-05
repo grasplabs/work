@@ -31,6 +31,10 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { RunHost } from "../src/workflows/host.ts";
+import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import type { CallingRun } from "../src/workflows/resource-authority.ts";
+import { loadedActivation, runOf } from "../src/workflows/resource-runs.ts";
 import {
   attemptHostMethods,
   loadSealedIsolate,
@@ -38,10 +42,6 @@ import {
   sealedMainModules,
 } from "../src/workflows/sealed-isolate.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
-import { RunHost } from "../src/workflows/host.ts";
-import type { HostHooks, RunStep } from "../src/workflows/host.ts";
-import type { CallingRun } from "../src/workflows/resource-authority.ts";
-import { loadedActivation, runOf } from "../src/workflows/resource-runs.ts";
 import {
   sealedRun,
   sealedRunFrom,

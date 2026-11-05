@@ -1,3 +1,4 @@
+import { openWorkflowEntry } from "@grasp-os/compiler";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
@@ -16,15 +17,15 @@ import {
   withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
-import { buildWorkflows } from "../src/screens.ts";
+import { buildOpenWorkflow } from "../src/screens.ts";
 import { tasksFileSchema } from "../src/workflow-builds.ts";
 
 // grasp-workflow/1's generated code, held to the compiler's own type
-// check against the SDK's real declarations (compiler `buildWorkflows`),
-// as an App workflow is: the generator's output is the host's own, so a
-// type error in it is the generator's, and nothing it generates may fail
-// the check a build holds it to. Its sealed table, likewise, is one the
-// host reads back (`tasksFileSchema`).
+// check against the SDK's real declarations, as the host's generated
+// workflow module is built (`buildOpenWorkflow`): the generator's output
+// is the host's own, so a type error in it is the generator's, and
+// nothing it generates may fail the check a build holds it to. Its sealed
+// table, likewise, is one the host reads back (`tasksFileSchema`).
 
 /** Every fixture the generator is tested on, by name. */
 const fixtures = {
@@ -103,11 +104,10 @@ describe("grasp-workflow/1's generated code", () => {
               checked(fixture()),
               "generated"
             );
-            const build = await buildWorkflows(
+            const build = await buildOpenWorkflow(
               env,
-              { "workflows/generated.ts": source },
-              "workflow-schema-builds",
-              {}
+              { [openWorkflowEntry]: source },
+              "workflow-schema-builds"
             );
             return [
               name,

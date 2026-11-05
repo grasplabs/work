@@ -677,10 +677,15 @@ export const sdkImports = [
 ] as const;
 
 /**
- * The SDK module the code the host generates from a JSON workflow imports
- * (`@grasp-os/sdk/open-workflow`), and nothing else.
+ * The SDK modules the code the host generates from a JSON workflow
+ * imports, and nothing else: an Open Workflow definition's
+ * (`@grasp-os/sdk/open-workflow`) and a grasp-workflow/1 document's
+ * (`@grasp-os/sdk/workflow`, `@grasp-os/workflow-schema`'s generator).
  */
-export const openWorkflowSdkImports = ["@grasp-os/sdk/open-workflow"] as const;
+export const openWorkflowSdkImports = [
+  "@grasp-os/sdk/open-workflow",
+  "@grasp-os/sdk/workflow",
+] as const;
 
 /** Generated workflow code imports only `openWorkflowSdkImports`. */
 export const generatedWorkflowCode: CodeKind = {
