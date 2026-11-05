@@ -1583,6 +1583,28 @@ export class Workspace extends DurableObject<Env> {
     this.#endTurn(chatId, turnId, end);
   }
 
+  /**
+   * Settles turn `turnId`, which the chat's mark holds while this object
+   * waits on none: a restart may have cut it off before its ChatSession
+   * took it, or the hand-over broke on its way every time, so nothing
+   * would end it. Asked of the ChatSession (`turnState`): ended there, or
+   * never taken, it is settled now; still running, it stays.
+   */
+  /** The chat's marked turn, when this object waits on none. */
+  #leftTurnOf(chatId: ChatId): string | undefined {
+    return this.#turns.has(chatId) ? undefined : this.#turnIdOf(chatId);
+  }
+
+  async #settleLeftTurn(chatId: ChatId, turnId: string): Promise<void> {
+    const { running, end } = await this.#toSession(
+      chatId,
+      async (session) => await session.turnState(turnId)
+    );
+    if (!running) {
+      this.#endTurn(chatId, turnId, end);
+    }
+  }
+
   /** The chat's last answer kept after message `after`, if any. */
   #answerAfter(chatId: ChatId, after: number): number | undefined {
     const [row] = this.ctx.storage.sql
@@ -1852,6 +1874,13 @@ export class Workspace extends DurableObject<Env> {
     // The agent acts for the chat's own person, as this object stored it,
     // never for whoever asks, and only while they are still a member.
     const { personId, via } = chat;
+    // A turn this object's restart left marked is settled first if its
+    // ChatSession no longer runs it. Only then awaited: otherwise the
+    // checks below take the question with nothing awaited before them.
+    const left = this.#leftTurnOf(chat.id);
+    if (left !== undefined) {
+      await this.#settleLeftTurn(chat.id, left);
+    }
     // Being deleted: its writes are being rejected, and it takes no more.
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");

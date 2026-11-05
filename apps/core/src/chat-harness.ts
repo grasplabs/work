@@ -860,6 +860,25 @@ export class ChatHarness {
     }
   }
 
+  /**
+   * Where turn `turnId` is here, for a Workspace that marked it and lost
+   * track (`ChatSession.turnState`): still running, ended (with how), or
+   * never taken, as the chat's newest turn is another or none.
+   */
+  async turnState(
+    turnId: string
+  ): Promise<{ running: boolean; end?: TurnEnd }> {
+    if (this.#taking?.turnId === turnId) {
+      return { running: true };
+    }
+    const request = await this.#request();
+    if (request?.turnId !== turnId) {
+      return { running: false };
+    }
+    const end = this.#running ? undefined : await this.#endOfTurn(turnId);
+    return end === undefined ? { running: true } : { running: false, end };
+  }
+
   /** Goes on with what pi left pending, and with what sleeps till now. */
   resume(): void {
     this.#harness.resume();
@@ -1202,6 +1221,14 @@ export class ChatHarness {
       return;
     }
     const { scope, turnId } = request;
+    // Whether the turn is over, decided before the copy: its runs over and
+    // no `run` still taking it, every entry of it is committed, so the copy
+    // below holds its answer. One that ends during this sync is told by the
+    // next, which its last commit asks for.
+    const over =
+      !this.#running &&
+      this.#taking?.turnId !== turnId &&
+      this.#told.ended !== turnId;
     await this.#copy(scope);
     const partial = this.#partial;
     if (partial !== this.#told.partial) {
@@ -1210,12 +1237,7 @@ export class ChatHarness {
       });
       this.#told.partial = partial;
     }
-    // Once its runs are over, and no `run` is still taking it.
-    if (
-      this.#running ||
-      this.#taking?.turnId === turnId ||
-      this.#told.ended === turnId
-    ) {
+    if (!over) {
       return;
     }
     const end = await this.#endOfTurn(turnId);

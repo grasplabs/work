@@ -129,6 +129,13 @@ export class ChatSession extends DurableObject<Env> {
     });
   }
 
+  /** Where turn `turnId` is here: running, ended, or never taken. */
+  async turnState(
+    turnId: string
+  ): Promise<{ running: boolean; end?: TurnEnd }> {
+    return await this.#work(async (harness) => await harness.turnState(turnId));
+  }
+
   /** Stops the turn under way, if there is one, or turn `turnId` as it starts. */
   async abort(turnId?: string): Promise<void> {
     await this.#work(async (harness) => {

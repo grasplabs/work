@@ -584,7 +584,19 @@ describe("a chat turn's outcome", () => {
   });
 
   it("is captured once when the turn settles after its Workspace restarted, nobody waiting on it", async () => {
-    const answer = pausedReply(says("Floor 3."), 1);
+    // It thinks, then writes, each paused until the test goes on.
+    const thought = Promise.withResolvers<boolean>();
+    const answer = pausedReply(
+      {
+        ...says("Floor 3."),
+        thinking: {
+          text: "Count.",
+          tokens: 10,
+          pause: { until: thought.promise },
+        },
+      },
+      1
+    );
     const { person, stub, id, ask, provider } = await chatter(answer.reply);
     void ask().catch(() => "cut short");
     await vi.waitFor(
@@ -599,18 +611,63 @@ describe("a chat turn's outcome", () => {
     }).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
-    answer.release();
     const woken = workspace(env, personalWorkspaceId(person.userId));
-    await vi.waitFor(
+    // The Workspace takes no call for a moment while the answer ends: what
+    // the chat's object tells it meanwhile waits, the answer behind it.
+    // Waited on by flags: workerd won't let one request wait on another's
+    // promise.
+    const hold = { reached: false, released: false };
+    const held = runInDurableObject(woken, async (_instance, state) => {
+      await state.blockConcurrencyWhile(async () => {
+        hold.reached = true;
+        while (!hold.released) {
+          // oxlint-disable-next-line no-await-in-loop -- until the test says
+          await scheduler.wait(20);
+        }
+      });
+    });
+    await vi.waitFor(() => {
+      expect(hold.reached).toBeTruthy();
+    });
+    // It writes: what it shows of that waits on the Workspace, and the
+    // answer ends behind it.
+    thought.resolve(true);
+    await scheduler.wait(500);
+    answer.release();
+    await scheduler.wait(1000);
+    hold.released = true;
+    await held;
+    const [event] = await vi.waitFor(
       async () => {
-        await expect(executionsOf(id)).resolves.toStrictEqual(["completed"]);
+        const events = await eventsOf(id);
+        expect(events.map(({ execution }) => execution)).toStrictEqual([
+          "completed",
+        ]);
+        return events;
       },
       { timeout: 15_000, interval: 100 }
     );
+    // The answer it records is the turn's last, as the chat keeps it.
+    const [answered] = await runInDurableObject(woken, (_instance, state) =>
+      state.storage.sql
+        .exec<{ id: number }>(
+          "SELECT id FROM chat_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+          id
+        )
+        .toArray()
+    );
     expect({
+      answer: event?.evidenceRefs.some(
+        ({ kind, id: ref }) =>
+          kind === "chat_message" && ref === String(answered?.id)
+      ),
       intents: await turnIntents(woken, id),
       summary: await woken.chatSummary(id, person.userId),
-    }).toMatchObject({ intents: [], summary: { running: false } });
+    }).toMatchObject({
+      answer: true,
+      intents: [],
+      summary: { running: false },
+    });
   });
 
   it("survives the Brain being out of reach as the turn settles, through the object's alarm", async () => {

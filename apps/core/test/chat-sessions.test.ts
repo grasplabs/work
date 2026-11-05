@@ -234,6 +234,54 @@ describe("a chat's ChatSession", () => {
     }).toStrictEqual({ answer: "Second.", noticed: false });
   });
 
+  it("takes the next question when both objects restarted before the chat's own object took the last", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const { id, stub, chat } = await chatOf(userId, says("Hi."));
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    // The chat's object takes nothing until the test says, then restarts.
+    // Waited on by flags: workerd won't let one request wait on another's
+    // promise.
+    const hold = { reached: false, restart: false };
+    const held = runInDurableObject(session(), async (_instance, state) => {
+      await state.blockConcurrencyWhile(async () => {
+        hold.reached = true;
+        while (!hold.restart) {
+          // oxlint-disable-next-line no-await-in-loop -- until the test says
+          await scheduler.wait(20);
+        }
+        state.abort("Restarted by the test");
+      });
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    await vi.waitFor(() => {
+      expect(hold.reached).toBeTruthy();
+    });
+    void stub.ask(chat.id, { text: "Hello?", model }).catch(() => "cut short");
+    // Handed over, not taken: the Workspace restarts, then the chat's object.
+    await vi.waitFor(
+      async () => {
+        await expect(stub.chatSummary(chat.id, userId)).resolves.toMatchObject({
+          running: true,
+        });
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    await scheduler.wait(200);
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    hold.restart = true;
+    await held;
+    await fakeProviderFor([model], says("Hi again."));
+    const woken = workspace(env, id);
+    await expect(
+      woken.ask(chat.id, { text: "Hello again?", model })
+    ).resolves.toMatchObject({ outcome: "answered", answer: "Hi again." });
+  });
+
   it("keeps a stopped turn's end once, however often the turn is asked again", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId);
