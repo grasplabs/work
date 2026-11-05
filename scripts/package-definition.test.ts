@@ -382,10 +382,17 @@ const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
  * Grasp's own lint and format of App code (ultracite.ts), on the oxc.wasm
  * its isolate runs.
  */
-const { lintCode, tidy } = ultraciteOf(
-  await oxcWasmModule(),
-  ultraciteConfig()
-);
+const ultracite = ultraciteOf(await oxcWasmModule(), ultraciteConfig());
+const { lintCode } = ultracite;
+
+/** `files` as a write saves them: tidied, or as written where `tidy` keeps them. */
+const tidy = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(ultracite.tidy(files)).map(([file, tidied]) => [
+      file,
+      tidied ?? files[file] ?? "",
+    ])
+  );
 
 /** The Babel the platform parses App files with, its parser bundled. */
 const platformParser = installedVersion(
@@ -1659,6 +1666,15 @@ test("counts", () => {
         // Unused names: an import, a local and a parameter after the last
         // one used, but not one before it, nor a name a type reads.
         "components/unused.ts": unusedNames,
+        // What only the App's other files say (a default or a name they
+        // lack, a file importing itself), which Grasp's lint, a file at a
+        // time, can't read: neither finds it (`leftOut`).
+        "components/imports.ts": `import comments from "./comments";
+import * as spanning from "./spanning";
+import * as imports from "./imports";
+
+export const imported = [comments, spanning.missing, imports];
+`,
       };
       const write = (file: string, source: string): void => {
         mkdirSync(path.dirname(path.join(out, file)), { recursive: true });

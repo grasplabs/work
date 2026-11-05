@@ -1,20 +1,24 @@
 /**
  * oxc.wasm (src/lib.rs), as the Build oxc WASM workflow published it: a
- * pre-release asset of this repo, by the release pin.json names, checked
- * against the SHA-256 it pins. Downloaded once into the compiler's
- * node_modules, by `vp install` (the root's `prepare`) and by whatever
- * needs it first (build.ts, the repo's tests); never built on an install,
- * a pull request or a release. A release build bundles it into the
- * compiler's assets, so a deployment never downloads it.
+ * pre-release asset of this repo, by the release pin.json names
+ * (glue.ts: oxc's commit and the hash of the glue), checked against the
+ * SHA-256 it pins. Downloaded once into the compiler's node_modules, by
+ * whatever needs it first (build.ts, the repo's tests; in CI, each job's
+ * setup, .github/actions/oxc-wasm), never by an install, so installing
+ * needs no token; never built on an install, a pull request or a release.
+ * A release build bundles it into the compiler's assets, so a deployment
+ * never downloads it.
  *
  * It comes through GitHub's API with a token, never a public URL, so it
  * works as well while the repo is private: `GITHUB_TOKEN` (CI's), or the
  * GitHub CLI's sign-in (`gh auth login`).
  *
  * `node packages/compiler/oxc-wasm/wasm.ts` downloads it if it is missing.
- * Working on src/lib.rs: build it with build.sh into `oxcWasmPath`, print
- * its hash with `--print` for the pin; once merged, the workflow publishes
- * it.
+ * Working on the glue: set pin.json's `glue` to what `node glue.ts`
+ * prints, build it with build.sh into `oxcWasmPath` and pin `--print`'s
+ * hash to try it; then run the Build oxc WASM workflow on the branch
+ * (`gh workflow run build-oxc-wasm.yml --ref <branch>`), which publishes
+ * the release, and pin the SHA-256 it prints.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -30,6 +34,8 @@ import { parseArgs } from "node:util";
 
 import { z } from "zod";
 
+import { assertGlue, oxcWasmRelease } from "./glue.ts";
+
 const here = import.meta.dirname;
 
 const pinSchema = z.strictObject({
@@ -39,8 +45,10 @@ const pinSchema = z.strictObject({
    */
   oxlint: z.string().regex(/^\d+\.\d+\.\d+$/u),
   oxfmt: z.string().regex(/^\d+\.\d+\.\d+$/u),
-  /** The release of this repo it is an asset of. */
-  release: z.string().regex(/^oxc-wasm-v\d+\.\d+\.\d+-\d+$/u),
+  /** oxc's commit of the tag `oxlint_v<oxlint>`, which build.sh fetches. */
+  oxc: z.string().regex(/^[0-9a-f]{40}$/u),
+  /** The hash of the glue it is built with (glue.ts). */
+  glue: z.string().regex(/^[0-9a-f]{64}$/u),
   sha256: z.string().regex(/^[0-9a-f]{64}$/u),
 });
 
@@ -48,13 +56,16 @@ export const oxcWasmPin = pinSchema.parse(
   JSON.parse(readFileSync(path.join(here, "pin.json"), "utf-8"))
 );
 
+/** The release of this repo it is an asset of. */
+const release = oxcWasmRelease(oxcWasmPin);
+
 /** Where it is kept, by release: a new pin is a new file. */
 export const oxcWasmPath = path.join(
   here,
-  `../node_modules/.cache/oxc-wasm/${oxcWasmPin.release}/oxc.wasm`
+  `../node_modules/.cache/oxc-wasm/${release}/oxc.wasm`
 );
 
-const releaseApi = `https://api.github.com/repos/grasplabs/work/releases/tags/${oxcWasmPin.release}`;
+const releaseApi = `https://api.github.com/repos/grasplabs/work/releases/tags/${release}`;
 
 /** A token that reads this repo's releases: CI's, or the GitHub CLI's. */
 const githubToken = (): string => {
@@ -81,26 +92,26 @@ const download = async (): Promise<Uint8Array> => {
     authorization: `Bearer ${githubToken()}`,
     "x-github-api-version": "2022-11-28",
   };
-  const release = await fetch(releaseApi, {
+  const found = await fetch(releaseApi, {
     headers: { ...headers, accept: "application/vnd.github+json" },
   });
-  if (!release.ok) {
+  if (!found.ok) {
     throw new Error(
-      `Could not read the release ${oxcWasmPin.release} of grasplabs/work (${release.status}): is the token signed in to it?`
+      `Could not read the release ${release} of grasplabs/work (${found.status}): is the token signed in to it, and was the Build oxc WASM workflow run for this glue?`
     );
   }
   const asset = releaseSchema
-    .parse(await release.json())
+    .parse(await found.json())
     .assets.find(({ name }) => name === "oxc.wasm");
   if (asset === undefined) {
-    throw new Error(`The release ${oxcWasmPin.release} has no oxc.wasm`);
+    throw new Error(`The release ${release} has no oxc.wasm`);
   }
   const response = await fetch(asset.url, {
     headers: { ...headers, accept: "application/octet-stream" },
   });
   if (!response.ok) {
     throw new Error(
-      `Could not download oxc.wasm of ${oxcWasmPin.release} (${response.status})`
+      `Could not download oxc.wasm of ${release} (${response.status})`
     );
   }
   return new Uint8Array(await response.arrayBuffer());
@@ -113,14 +124,18 @@ const pinned = (bytes: Uint8Array): Uint8Array => {
   const found = sha256(bytes);
   if (found !== oxcWasmPin.sha256) {
     throw new Error(
-      `oxc.wasm of ${oxcWasmPin.release} has SHA-256 ${found}, not the ${oxcWasmPin.sha256} packages/compiler/oxc-wasm/pin.json pins`
+      `oxc.wasm of ${release} has SHA-256 ${found}, not the ${oxcWasmPin.sha256} packages/compiler/oxc-wasm/pin.json pins`
     );
   }
   return bytes;
 };
 
-/** oxc.wasm's bytes, downloaded first if they aren't kept yet. */
+/**
+ * oxc.wasm's bytes, downloaded first if they aren't kept yet: only while
+ * the glue is the one it was built with.
+ */
 export const oxcWasm = async (): Promise<Uint8Array> => {
+  assertGlue(oxcWasmPin.glue);
   if (existsSync(oxcWasmPath)) {
     return pinned(readFileSync(oxcWasmPath));
   }

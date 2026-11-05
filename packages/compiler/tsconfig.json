@@ -8,6 +8,7 @@
     "build.ts",
     "build-lock.ts",
     "ultracite-config.ts",
+    "oxc-wasm/glue.ts",
     "oxc-wasm/wasm.ts",
     "build-harness.ts",
     "build-heap.ts",

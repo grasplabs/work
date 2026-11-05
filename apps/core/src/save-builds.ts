@@ -382,9 +382,9 @@ const diagnosticSchema = z.object({
 const lintedSchema = z.record(z.string(), z.array(diagnosticSchema));
 
 /**
- * What a file whose lint stopped at the isolate's bounds by itself says:
- * an error, so a draft never passes unlinted. Never kept: a later lint
- * tries it again.
+ * What a file whose lint stopped at the isolate's bounds by itself, in a
+ * fresh isolate too (`run`'s `once`), says: an error, so a draft never
+ * passes unlinted. Never kept: a later lint tries it again.
  */
 const unlinted = (file: string): Diagnostic => ({
   file,
@@ -437,7 +437,12 @@ export const draftLintBuild = async (
           );
           Object.assign(linted, found);
         });
-        for (const file of stopped) {
+        for (const [file, stop] of stopped) {
+          if (!stop.own) {
+            // The load's, not the file's: this lint couldn't run, and a
+            // later one tries it again.
+            throw stop;
+          }
           linted[file] = [unlinted(file)];
         }
       }
