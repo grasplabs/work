@@ -26,15 +26,6 @@ import { api } from "./notes/server/_generated/api.ts";
 
 const id = "01890000-0000-7000-8000-000000000001";
 
-/** What the save takes, as its reference carries it. */
-const updateArgs = (() => {
-  const { args } = api.notes.update;
-  if (args === undefined) {
-    throw new Error("A mutation's reference carries its arguments");
-  }
-  return args;
-})();
-
 /** A note as `notes.get` answers it, at `rev`. */
 const note = (rev: number, change: Record<string, unknown> = {}) => ({
   _id: id,
@@ -70,7 +61,7 @@ const page = (initial: Record<string, string> = {}) => {
 const slotOf = (store: DraftStore): DraftSlot => ({
   store,
   key: `record:${canonicalText([api.notes.update.name, id])}`,
-  fingerprint: canonicalText(updateArgs),
+  fingerprint: canonicalText(api.notes.update.args),
 });
 
 /** What the host answers a save of a revision someone else's overtook. */
@@ -112,7 +103,7 @@ const editor = (
   record: Record<string, unknown>,
   store: DraftStore,
   send: (input: unknown) => Promise<unknown>,
-  args: ValueDescriptor = updateArgs,
+  args: ValueDescriptor = api.notes.update.args,
   mapper: (baseline: unknown) => unknown = (baseline) =>
     isPlainObject(baseline)
       ? { id: baseline._id, expectedRevision: baseline._rev }
@@ -399,7 +390,7 @@ describe("a record form's draft", () => {
       note(3),
       store,
       saves().send,
-      updateArgs,
+      api.notes.update.args,
       (baseline) => {
         if (failing) {
           throw new Error("The mapper's data is gone.");
@@ -476,7 +467,7 @@ describe("a record form's draft", () => {
     const binding = new FormBinding(
       {
         kind: "record",
-        args: updateArgs,
+        args: api.notes.update.args,
         fields: ["title"],
         send: saves().send,
       },
@@ -658,7 +649,7 @@ describe("a record form's draft", () => {
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
           input as ArgsOf<typeof api.notes.update>
         ),
-      updateArgs
+      api.notes.update.args
     );
     type("title", "Mine");
     await settle(binding.submit());
@@ -776,7 +767,7 @@ const rendered = (store: DraftStore) => {
   const binding = new FormBinding(
     {
       kind: "record",
-      args: updateArgs,
+      args: api.notes.update.args,
       fields: ["title", "body"],
       send: saves().send,
     },
@@ -918,7 +909,7 @@ describe("a draft across a refresh and an abandoned render", () => {
     const later = new FormBinding(
       {
         kind: "record",
-        args: updateArgs,
+        args: api.notes.update.args,
         fields: ["title", "body"],
         send: saves().send,
       },
@@ -982,7 +973,7 @@ describe("a draft across a refresh and an abandoned render", () => {
     void new FormBinding(
       {
         kind: "record",
-        args: updateArgs,
+        args: api.notes.update.args,
         fields: ["title", "body"],
         send: saves().send,
       },

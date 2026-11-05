@@ -16,6 +16,7 @@ import type {
   ReturnOf,
   ScreenInputOf,
 } from "../src/index.ts";
+import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
 import {
   api,
@@ -93,9 +94,15 @@ expectTypeOf<ArgsOf<typeof api.notes.exportAll>>().toEqualTypeOf<
   ArgsOf<typeof exportAll>
 >();
 
-// A mutation's and an action's kind is its literal, which `useForm` sends by.
-expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation" | undefined>();
-expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action" | undefined>();
+// A mutation's and an action's reference always holds its kind, which
+// `useForm` sends by, and its arguments' descriptor; a query's holds neither.
+expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation">();
+expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action">();
+expectTypeOf(api.notes.create.args).toEqualTypeOf<ValueDescriptor>();
+// @ts-expect-error a query's reference holds no kind
+void api.notes.get.kind;
+// @ts-expect-error nor its arguments
+void api.notes.get.args;
 
 // A streaming reference carries its progress type; any other none.
 expectTypeOf<ProgressOf<typeof api.notes.exportAll>>().toEqualTypeOf<{
@@ -108,7 +115,10 @@ single(api.notes.exportAll);
 
 // The phantom members are no names an editor offers or JSON holds.
 expectTypeOf<Extract<keyof typeof api.notes.create, string>>().toEqualTypeOf<
-  "name" | "kind" | "args" | "returns"
+  "name" | "kind" | "args"
+>();
+expectTypeOf<Extract<keyof typeof api.notes.get, string>>().toEqualTypeOf<
+  "name" | "returns"
 >();
 
 // Calls infer from the reference alone: no cast, no generic argument.

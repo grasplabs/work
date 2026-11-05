@@ -174,9 +174,16 @@ export const reference = <Args, Return, Kind extends "query" | "mutation">(
 ): OperationReference<Args, Return, Kind> =>
   // What `_generated` builds for a function of `kind`: a query's declared
   // return, a mutation's kind and arguments.
-  kind === "query"
+  // SAFETY: the reference type follows `Kind`, which `kind` is; a generic
+  // conditional type isn't narrowed by checking it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  (kind === "query"
     ? { name: contractId, returns: returns.descriptor }
-    : { name: contractId, kind, args: args.descriptor };
+    : { name: contractId, kind, args: args.descriptor }) as OperationReference<
+    Args,
+    Return,
+    Kind
+  >;
 
 /** Lets queued work and the renders it causes land. */
 export const settle = async (ms = 0): Promise<void> => {

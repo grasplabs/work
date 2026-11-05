@@ -72,21 +72,31 @@ export interface Callable<
  * slightly off before core answers with its issues. Its visibility, what
  * it takes, answers and streams are its types.
  */
-export interface OperationReference<
+export type OperationReference<
   Args,
   Return,
   Kind extends ReferenceKind,
   Vis extends ReferenceVisibility = "public",
   Progress = never,
-> extends Callable<Kind, Vis, Args, Return, Progress> {
+> = Callable<Kind, Vis, Args, Return, Progress> &
+  (Kind extends "query" ? QueryReferenceData : SubmissionReferenceData<Kind>);
+
+/** What a query's reference holds. */
+interface QueryReferenceData {
   /** Its registered path, as `api.tasks.list` names it: `tasks.list`. */
   readonly name: string;
-  /** A mutation's or an action's: what `useForm` sends a submission as. */
-  readonly kind?: Kind;
-  /** A mutation's or an action's arguments, as `useForm` checks them. */
-  readonly args?: ValueDescriptor;
-  /** A query's declared return, where it declares one. */
+  /** Its declared return, where it declares one. */
   readonly returns?: ValueDescriptor;
+}
+
+/** What a mutation's or an action's reference holds. */
+interface SubmissionReferenceData<Kind extends ReferenceKind> {
+  /** Its registered path, as `api.tasks.create` names it: `tasks.create`. */
+  readonly name: string;
+  /** What `useForm` sends a submission as. */
+  readonly kind: Kind;
+  /** Its arguments, as `useForm` checks them. */
+  readonly args: ValueDescriptor;
 }
 
 /**
