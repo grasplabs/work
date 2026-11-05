@@ -361,21 +361,37 @@ const readReference = (value: unknown, kind: ReferenceKind): ReadReference => {
 
 /**
  * `args` as the request carries them, an omitted input as `{}`;
- * `contract.invalid_args` for anything but an object. What they must be
- * beyond that is the function's validator's to say, in core, which also
- * normalizes them (defaults, trimming) before the handler sees them.
+ * `contract.invalid_args` for anything but an object JSON can hold (a NaN,
+ * an infinity or a BigInt in it is refused, as the cache key and the
+ * request couldn't be made of it). What they must be beyond that is the
+ * function's validator's to say, in core, which also normalizes them
+ * (defaults, trimming) before the handler sees them.
  */
 const inputOf = (args: unknown): Json => {
   const input = args ?? {};
   if (!isPlainObject(input)) {
     throw clientError("contract.invalid_args", {
-      issues: [{ message: "The arguments are an object.", path: [] }],
+      issues: [{ message: "The arguments must be an object.", path: [] }],
     });
   }
-  // SAFETY: sent as JSON text, which keeps only what JSON holds; core
-  // reads it as data and checks it with the function's validator.
+  // SAFETY: an object; whether JSON holds it is checked just below, and
+  // core reads it as data and checks it with the function's validator.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return input as Json;
+  const json = input as Json;
+  try {
+    canonicalJson(json);
+  } catch {
+    throw clientError("contract.invalid_args", {
+      issues: [
+        {
+          message:
+            "The arguments must be JSON: no NaN, infinity, BigInt or cycle.",
+          path: [],
+        },
+      ],
+    });
+  }
+  return json;
 };
 
 const queryOptionKeys: ReadonlySet<string> = new Set(["signal"]);

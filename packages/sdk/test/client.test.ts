@@ -193,6 +193,63 @@ describe("the session client and the request budget", () => {
   });
 });
 
+/** The code a call failed with, or "ok". */
+const codeOf = async (call: () => Promise<unknown>): Promise<string> => {
+  try {
+    await call();
+    return "ok";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : String(error);
+  }
+};
+
+/** `args`, deliberately not what a reference takes, as unchecked data may be. */
+const loose = (args: object): never =>
+  // SAFETY: never read as the type it claims; the client checks it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  args as never;
+
+describe("the session client and arguments JSON can't hold", () => {
+  it("refuses them as invalid arguments, sending nothing", async () => {
+    const { client, calls } = network(async () => {
+      await Promise.resolve();
+      return answered(null);
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect({
+      nan: await codeOf(
+        async () => await client.query(api.notes.get, loose({ id: Number.NaN }))
+      ),
+      infinity: await codeOf(
+        async () =>
+          await client.query(
+            api.notes.get,
+            loose({ id: Number.POSITIVE_INFINITY })
+          )
+      ),
+      bigint: await codeOf(
+        async () => await client.query(api.notes.get, loose({ id: 1n }))
+      ),
+      cycle: await codeOf(
+        async () => await client.query(api.notes.get, loose(cyclic))
+      ),
+      saved: await codeOf(
+        async () =>
+          await client.mutation(api.notes.create, loose({ title: Number.NaN }))
+      ),
+      sent: calls(),
+    }).toStrictEqual({
+      nan: "contract.invalid_args",
+      infinity: "contract.invalid_args",
+      bigint: "contract.invalid_args",
+      cycle: "contract.invalid_args",
+      saved: "contract.invalid_args",
+      sent: 0,
+    });
+  });
+});
+
 describe("the session client and an outcome it can't tell", () => {
   afterEach(() => {
     vi.useRealTimers();
