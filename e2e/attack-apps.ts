@@ -31,7 +31,6 @@ export const html = query({
 const registration = (
   screens: readonly string[]
 ): string => `import { app } from "@grasp-os/sdk";
-import { html, secret } from "./server/attacks.ts";
 import schema from "./schema.ts";
 
 export default app({

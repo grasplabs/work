@@ -293,9 +293,6 @@ export const recover = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import {
-  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sdkMark, sneak, tally, update, notANumber, holey, lateWrite,
-} from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({

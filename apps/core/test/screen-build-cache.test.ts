@@ -1,3 +1,4 @@
+import { appCompilerName } from "@grasp-os/compiler";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -22,12 +23,18 @@ const screen = (): Record<string, string> => ({
 `,
 });
 
-/** A Worker Loader counting the compiler's starts. */
+/**
+ * A Worker Loader counting the compiler's starts: its isolates only, the
+ * shared one and each App's, never the type checker's or any other a
+ * build starts beside it.
+ */
 const counting = () => {
   const started = { count: 0 };
   const loader: WorkerLoader = {
     get: (name, code) => {
-      started.count += 1;
+      if (name?.startsWith(appCompilerName()) === true) {
+        started.count += 1;
+      }
       return env.LOADER.get(name, code);
     },
     load: (code) => env.LOADER.load(code),
