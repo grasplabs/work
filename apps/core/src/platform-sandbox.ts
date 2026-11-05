@@ -325,10 +325,16 @@ const loaderCall = async (
   await boundedInCore(async () => await callStub(entrypoint, method, args));
 
 /**
- * The runner in core's own Loader. The compiler runs warm in an isolate
- * named for `whose` builds (`startAppCompiler`), so no other App's builds
- * share its limits; the App's own builds do, and one heavy build beside
- * another can stop both. A stop there is tried once more in a fresh
+ * The runner in core's own Loader. On Cloudflare the compiler runs warm in
+ * an isolate named for `whose` builds (`startAppCompiler`), so no other
+ * App's builds share its limits; the App's own builds do, and one heavy
+ * build beside another can stop both. Cloudflare unloads an isolate left
+ * idle, so one per App costs only the Apps that build. Plain workerd
+ * (tests and local development; on-prem builds on the sandbox host)
+ * unloads no named isolate while the process runs and enforces no limits
+ * of an isolate's: one per App there is a compiler of over 100 MB kept
+ * for every App ever built, until the process runs out of heap, so every
+ * App's builds share one. A stop in the warm isolate is tried once more in a fresh
  * isolate of the build's own (`loadAppCompiler`), whose stop is the
  * build's alone, and only that is answered: a build is never kept as
  * failed for what another did. The builder runs in a fresh isolate per
@@ -344,7 +350,11 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startAppCompiler(quietLoader(env.LOADER), env.ASSETS, whose),
+        startAppCompiler(
+          quietLoader(env.LOADER),
+          env.ASSETS,
+          env.RUNTIME_PROFILE === "cloudflare" ? whose : undefined
+        ),
         method,
         args
       );
