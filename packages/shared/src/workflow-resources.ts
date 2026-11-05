@@ -9,6 +9,7 @@ import {
   storeOperationPathPattern,
 } from "./operation-limits.ts";
 import type { RunFileListing } from "./run-files.ts";
+import { isEventType } from "./sealed-builds.ts";
 import type {
   WorkflowCandidateTrace,
   WorkflowDiagram,
@@ -322,6 +323,17 @@ export const catalogKeySchema = z
  * value descriptors (as JSON text) of what a call passes and returns, as
  * `@grasp-os/open-workflow`'s catalog reads them.
  */
+/**
+ * A workflow event's CloudEvents type, wherever one is read: as an event
+ * contract admits it, a sealed build names it, and a run's inbox takes it.
+ */
+export const workflowEventTypeSchema = z
+  .string()
+  .refine(
+    isEventType,
+    "1 to 256 characters on one line, with no control character and no space at either end"
+  );
+
 /** The most a catalog contract holds, as JSON. */
 const catalogContractMaxBytes = 512 * 1024;
 
@@ -377,7 +389,7 @@ export const catalogContractSchema = z
      */
     events: z
       .record(
-        z.string().min(1).max(256),
+        workflowEventTypeSchema,
         z.strictObject({
           data: z.string().max(256 * 1024),
           browser: z.boolean(),

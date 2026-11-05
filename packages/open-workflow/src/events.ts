@@ -1,3 +1,4 @@
+import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { parseSlot } from "@grasp-os/workflow-expressions/source";
 
 import { member } from "./checker.ts";
@@ -96,7 +97,22 @@ const checkEventType = (
     return;
   }
   const typePointer = pointerJoin(pointer, "type");
-  const type = literalText(checker, attributes.type, typePointer, site, 256);
+  const type = literalText(
+    checker,
+    attributes.type,
+    typePointer,
+    site,
+    sealedBuildLimits.eventTypeLength
+  );
+  if (type !== undefined && !isEventType(type)) {
+    checker.report.error(
+      "profile.invalid_value",
+      at(site, typePointer),
+      "Write an event type on one line, with no control character and no space at either end.",
+      { expected: "an event type" }
+    );
+    return;
+  }
   const admitted = binding?.contract?.eventTypes;
   if (type !== undefined && admitted !== undefined && !admitted.has(type)) {
     checker.report.error(

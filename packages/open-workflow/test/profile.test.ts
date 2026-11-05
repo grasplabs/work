@@ -715,6 +715,22 @@ describe("tasks and calls", () => {
       },
     ],
     [
+      "an event type with a space at its end",
+      probe([
+        {
+          announce: {
+            emit: { event: { with: { type: "grasp.job.completed " } } },
+            metadata: { grasp: { binding: "jobEvents" } },
+          },
+        },
+      ]),
+      {
+        code: "profile.invalid_value",
+        pointer: "/do/0/announce/emit/event/with/type",
+        taskId: "announce",
+      },
+    ],
+    [
       "a listen without a timeout",
       probe([
         {

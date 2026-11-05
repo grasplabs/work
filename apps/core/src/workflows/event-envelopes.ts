@@ -1,5 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { isEventType } from "@grasp-os/shared/sealed-builds";
+import { workflowEventTypeSchema } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 // The events of a run's inbox as the host keeps them and a listen task
@@ -24,16 +24,11 @@ export const eventTypeKey = async (
   type: string
 ): Promise<string> => `ce-${await sha256Hex(`${alias}\n${type}`)}`;
 
-/** An event's CloudEvents type, wherever core reads one. */
-export const eventTypeSchema = z
-  .string()
-  .refine(isEventType, "An event's type (eventTypePattern)");
-
 /** An event as the engine keeps it for its run: all but its time. */
 export const storedEventSchema = z.strictObject({
   id: z.string().min(1).max(128),
   source: z.string().min(1).max(1024),
-  type: eventTypeSchema,
+  type: workflowEventTypeSchema,
   subject: z.string().max(1024).optional(),
   datacontenttype: z.literal(contentType),
   data: z.json(),

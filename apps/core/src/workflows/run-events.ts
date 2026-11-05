@@ -1,7 +1,10 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowEventTypeSchema,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { decode } from "@grasp-os/workerflow/codec";
 import { z } from "zod";
 
@@ -11,7 +14,6 @@ import {
   attributesOf,
   contentType,
   eventTypeKey,
-  eventTypeSchema,
   storedEventSchema,
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
@@ -82,7 +84,7 @@ const deliverySchema = z.strictObject({
   workflowId: workflowResourceIdSchema,
   runId: runIdSchema,
   binding: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-  type: eventTypeSchema,
+  type: workflowEventTypeSchema,
   data: z.json(),
   subject: z.string().max(1024).regex(oneLine).optional(),
   key: z.string().min(1).max(200).regex(oneLine),

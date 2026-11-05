@@ -589,6 +589,11 @@ describe("event contracts", () => {
         "grasp.job.failed": { data, browser: true },
       }),
       noTypes: await publish({}),
+      // A type no run's inbox takes, so no wait for it could be met.
+      paddedType: await publish({ "grasp.job.done ": { data, browser: true } }),
+      controlType: await publish({
+        "grasp.job\tdone": { data, browser: true },
+      }),
       noEvents: await outcome(
         publishCatalogContract(env, admin, {
           key: `events-${unique()}`,
@@ -602,6 +607,8 @@ describe("event contracts", () => {
       unreadableData: "workflow.contract_invalid",
       twoForScreens: "workflow.contract_invalid",
       noTypes: "workflow.contract_invalid",
+      paddedType: "workflow.contract_invalid",
+      controlType: "workflow.contract_invalid",
       noEvents: "workflow.contract_invalid",
     });
   });
