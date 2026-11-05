@@ -134,11 +134,5 @@
       matchDepTypes: ["pnpm.catalog.oxc"],
       enabled: false,
     },
-
-    // The screen compiler's TypeScript: 7 has no JavaScript API.
-    {
-      matchDepTypes: ["pnpm.catalog.typescript6"],
-      allowedVersions: "<7",
-    },
   ],
 }

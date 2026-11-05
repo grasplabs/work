@@ -4,10 +4,15 @@
 //! JS plugins and parallel runtime need native threads), so this is the
 //! thin layer their own playground has over the same crates: it parses
 //! and lints a file as oxlint's runtime does (`service/runtime.rs`),
-//! fixes as `oxlint --fix` does, and formats as `oxfmt` does.
+//! fixes as `oxlint --fix` does, and formats as `oxfmt` does. It also
+//! parses a file for ESLint as oxc-parser does (napi/parser), with the
+//! tokens oxc-parser gives only by raw transfer, which needs 64-bit memory:
+//! the lint isolate's ESLint lints parse with it (src/eslint-parser.ts).
 //!
 //! Delete this crate once oxc publishes a threadless WebAssembly build of
-//! its linter and formatter, as it does for its parser (`oxc-parser/workerd`).
+//! its linter and formatter, and its parser's (`oxc-parser/workerd`, today
+//! without tokens and asking for 61 MiB of memory at its start) gives
+//! ESLint's tokens in 32-bit memory and starts small.
 //!
 //! The calls are plain C ABI: text goes in through `alloc` (owned and
 //! freed by the callee), and the answer is read from `out_ptr` for the
@@ -22,11 +27,14 @@ use std::{cell::RefCell, path::Path, sync::Arc};
 
 use oxc::{
     allocator::Allocator,
+    ast::CommentKind,
+    ast_visit::utf8_to_utf16::Utf8ToUtf16,
     diagnostics::Severity,
-    parser::{ParseOptions, Parser},
+    parser::{ParseOptions, Parser, ParserReturn, config::RuntimeParserConfig},
     semantic::SemanticBuilder,
     span::SourceType,
 };
+use oxc_estree_tokens::{ESTreeTokenOptions, to_estree_tokens_json};
 use oxc_formatter::{
     ArrowParentheses, BracketSameLine, BracketSpacing, JsFormatOptions, QuoteProperties,
     QuoteStyle, Semicolons, SortImportsOptions, SortOrder, TrailingCommas,
@@ -350,4 +358,100 @@ pub extern "C" fn tidy(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src
             .map_or_else(|| fixed.to_string(), |printed| printed.into_code())
     });
     answer(tidied)
+}
+
+/// A comment as ESTree has it: its kind, and the text between its markers.
+#[derive(Serialize)]
+struct EstreeComment<'a> {
+    r#type: &'static str,
+    value: &'a str,
+    start: u32,
+    end: u32,
+}
+
+/// Why `source` doesn't parse, and where: oxc's first error.
+#[derive(Serialize)]
+struct ParseError {
+    message: String,
+    start: u32,
+}
+
+/// Parses `source` (`path`, which picks the language) as oxc-parser's
+/// `parseSync` does with `preserveParens: false`: JSON of `{ node, fixes,
+/// comments, tokens }`, the program as TS-ESTree has it (`node`), where
+/// its regular expression and BigInt literals are, whose values JSON
+/// can't hold (`fixes`, as oxc-parser's), its comments, and its tokens as
+/// ESLint's, every offset in UTF-16 code units; or `{ error }` if it
+/// doesn't parse. Needs no `configure`.
+///
+/// Its memory is the AST, the tokens' JSON and the program's: about 125
+/// times the source for a file of data, 85 for most code, so 25 MB for
+/// a file of data at an App's 200,000 characters, far below the 64 MiB
+/// ceiling. A file denser still that passes it traps, and src/oxc.ts
+/// starts a fresh instance.
+#[unsafe(no_mangle)]
+pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+    let path = input(path_ptr, path_len);
+    let source = input(src_ptr, src_len);
+    let source_type = SourceType::from_path(&path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ParserReturn { mut program, diagnostics, tokens, .. } =
+        Parser::new(&allocator, &source, source_type)
+            .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
+            .with_config(RuntimeParserConfig::new(true))
+            .parse();
+    let converter = Utf8ToUtf16::new(&source);
+    if let Some(error) = diagnostics.iter().find(|error| error.severity == Severity::Error) {
+        let mut start =
+            error.labels.first().map_or(0, |label| u32::try_from(label.offset()).unwrap_or(0));
+        if let Some(mut offsets) = converter.converter() {
+            offsets.convert_offset(&mut start);
+        }
+        let error = ParseError { message: error.message.to_string(), start };
+        return answer(format!(
+            "{{\"error\":{}}}",
+            serde_json::to_string(&error).unwrap_or_else(|_| "null".to_string())
+        ));
+    }
+    let is_ts = source_type.is_typescript();
+    // Before the program's offsets are converted: the tokens' are read
+    // against it, and converted as they are written.
+    let tokens =
+        to_estree_tokens_json(&tokens, &program, &source, &converter, ESTreeTokenOptions::new(is_ts));
+    converter.convert_program(&mut program);
+    let mut offsets = converter.converter();
+    let comments: Vec<EstreeComment> = program
+        .comments
+        .iter()
+        .map(|comment| {
+            let mut span = comment.span;
+            if let Some(offsets) = offsets.as_mut() {
+                offsets.convert_span(&mut span);
+            }
+            EstreeComment {
+                r#type: match comment.kind {
+                    CommentKind::Line | CommentKind::HtmlOpen | CommentKind::HtmlClose => "Line",
+                    CommentKind::SingleLineBlock | CommentKind::MultiLineBlock => "Block",
+                },
+                value: comment.content_span().source_text(&source),
+                start: span.start,
+                end: span.end,
+            }
+        })
+        .collect();
+    let comments = serde_json::to_string(&comments).unwrap_or_else(|_| "[]".to_string());
+    // One buffer for the answer: the program's JSON, most of it, then the
+    // rest written after it, rather than all three copied into a fourth.
+    // No `range`: it is `[start, end]`, which the caller builds. The AST
+    // is dropped first, so the buffer grows into the room it held.
+    let mut json = program.to_estree_json_with_fixes(is_ts, false);
+    drop(allocator);
+    json.pop();
+    json.reserve_exact(comments.len() + tokens.len() + 24);
+    json.push_str(",\"comments\":");
+    json.push_str(&comments);
+    json.push_str(",\"tokens\":");
+    json.push_str(&tokens);
+    json.push('}');
+    answer(json)
 }

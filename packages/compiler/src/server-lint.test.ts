@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { oxcWasmModule } from "../oxc-wasm/wasm.ts";
+import { startOxcParser } from "./eslint-parser.ts";
+import { oxcOf } from "./oxc.ts";
 import { lintServerCode } from "./server-lint.ts";
+
+// oxc's parser on oxc.wasm, started as the lint's isolate starts it.
+startOxcParser(oxcOf(await oxcWasmModule(), { lint: {}, format: {} }).parse);
 
 // The server code lint (server-lint.ts): a mutation that reads the clock
 // or randomness is warned of, where it reads it; nothing else is.
@@ -14,11 +20,13 @@ ${body}
 });
 
 const warned = (body: string, files: Record<string, string> = module(body)) =>
-  lintServerCode(files).map(({ line, severity, message }) => ({
-    line,
-    severity,
-    read: message.slice(0, message.indexOf(" answers")),
-  }));
+  Object.values(lintServerCode(files))
+    .flat()
+    .map(({ line, severity, message }) => ({
+      line,
+      severity,
+      read: message.slice(0, message.indexOf(" answers")),
+    }));
 
 describe("a mutation's reads of the clock and randomness", () => {
   test("are warned of in a mutation's handler, each where it is", () => {

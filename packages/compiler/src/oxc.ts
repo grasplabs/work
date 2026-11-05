@@ -1,5 +1,5 @@
 /**
- * oxlint and oxfmt, as oxc.wasm (oxc-wasm/src/lib.rs) runs them: an
+ * oxlint, oxfmt and oxc's parser, as oxc.wasm (oxc-wasm/src/lib.rs) runs them: an
  * instance configured once and kept, through WASI with no files,
  * environment or preopens (@tybys/wasm-util, the WASI napi-rs loads oxc's
  * own WebAssembly with): nothing they do with App code reads a file.
@@ -34,6 +34,7 @@ const exportsSchema = z.object({
   configure: call,
   lint: call,
   tidy: call,
+  parse: call,
 });
 
 export interface Oxc {
@@ -47,6 +48,14 @@ export interface Oxc {
    * by oxfmt. Throws if oxc.wasm can't tidy it, even in a fresh instance.
    */
   tidy: (path: string, source: string) => string;
+  /**
+   * `source` (`path`, which picks the language) parsed by oxc's parser:
+   * JSON of TS-ESTree's program, its comments and ESLint's tokens, every
+   * offset in UTF-16 code units, or of why it doesn't parse
+   * (oxc-wasm/src/lib.rs `parse`). Throws if oxc.wasm can't parse it,
+   * even in a fresh instance.
+   */
+  parse: (path: string, source: string) => string;
 }
 
 /**
@@ -97,6 +106,7 @@ const configured = (
         JSON.parse(out(wasm.lint(...put(path), ...put(source))))
       ),
     tidy: (path, source) => out(wasm.tidy(...put(path), ...put(source))),
+    parse: (path, source) => out(wasm.parse(...put(path), ...put(source))),
   };
 };
 
@@ -140,5 +150,6 @@ export const oxcOf = (
   return {
     lint: (path, source) => run((instance) => instance.lint(path, source)),
     tidy: (path, source) => run((instance) => instance.tidy(path, source)),
+    parse: (path, source) => run((instance) => instance.parse(path, source)),
   };
 };

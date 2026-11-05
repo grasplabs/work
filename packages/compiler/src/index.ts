@@ -23,6 +23,7 @@ import type PackageBuilder from "./packages/worker.ts";
 import type UltraciteLinter from "./ultracite-worker.ts";
 import type AppCompiler from "./worker.ts";
 
+export { isDesignRule } from "./diagnostic.ts";
 export type { Diagnostic } from "./diagnostic.ts";
 export { withTypeCheck } from "./checked-build.ts";
 export type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
@@ -57,6 +58,7 @@ export {
   appCodeLimitErrors,
   buildFiles,
   computeModuleErrors,
+  isDesignLinted,
   isGeneratedPath,
   isLintedCode,
   limitErrors,
@@ -74,6 +76,7 @@ export {
   screenRuntime,
 } from "./kit.ts";
 export {
+  designContextKey,
   incrementSchema,
   lintKey,
   lintRecordOf,

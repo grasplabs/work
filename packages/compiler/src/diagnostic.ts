@@ -1,3 +1,5 @@
+import { designRuleLevels } from "./design-rules.ts";
+
 /**
  * A problem the compiler found in an App's files, for whoever fixes them
  * (usually an agent). Errors fail the build; warnings don't.
@@ -22,6 +24,13 @@ export interface Diagnostic {
 
 export const isError = (diagnostic: Diagnostic): boolean =>
   diagnostic.severity === "error";
+
+/**
+ * Whether `rule` is the design system's (lint.ts): @shadcn/lint's, or
+ * one of Grasp's own (design-rules.ts).
+ */
+export const isDesignRule = (rule: string): boolean =>
+  rule.startsWith("shadcn/") || Object.hasOwn(designRuleLevels, rule);
 
 /** What TypeScript names its diagnostics by: `TS` and its code. */
 const typeCode = /^TS\d+$/u;

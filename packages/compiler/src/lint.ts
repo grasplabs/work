@@ -1,13 +1,17 @@
 /**
- * Lints App files with @shadcn/lint's rules, as the repo lints its own
- * code, through ESLint's `Linter` (which needs no file system of its own)
- * and the typescript-eslint parser, on TypeScript 6, the last with a
- * JavaScript API: the lint's parser alone, never the type check's (tsrs).
+ * Lints App screens and components with @shadcn/lint's rules and Grasp's
+ * own (design-rules.ts), as the repo lints its own code, through ESLint's
+ * `Linter` (which needs no file system of its own) and oxc's parser
+ * (eslint-parser.ts). Part of the lint isolate's lint (ultracite-worker.ts), so
+ * what it finds blocks a proposal, not a build or a preview, as an
+ * exported App's oxlint reports it beside every other rule.
  *
  * The rules read the project from disk: `components.json`, the theme and
- * the kit's component sources, for their variants. Each lint writes them
- * (`Kit.lintProject`) and the App's files to `/tmp`, which in a Worker
- * belongs to the request: concurrent lints don't see each other's files.
+ * the kit's component sources, for their variants, and the App's own
+ * components a screen wraps the kit's in. Each lint writes them
+ * (`DesignKit.lintProject`, and the App's screens and components) to
+ * `/tmp`, which in a Worker belongs to the request: concurrent lints
+ * don't see each other's files.
  *
  * Its comments are read as an exported App's oxlint reads them
  * (lint-comments.ts): `oxlint-disable…` too, a disable comment for a rule
@@ -16,15 +20,30 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 
 import { plugin as shadcn } from "@shadcn/lint";
-import * as parser from "@typescript-eslint/parser";
 import { Linter } from "eslint/universal";
 
 import { designRuleLevels, designRules } from "./design-rules.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { declarationExtension } from "./inputs.ts";
-import type { Kit } from "./kit.ts";
+import {
+  isUnparsable,
+  orUnparsable,
+  parser,
+  unparsableMessage,
+} from "./eslint-parser.ts";
+import { isDesignLinted } from "./inputs.ts";
 import { asEslint, namesUnknownRule, placeIn } from "./lint-comments.ts";
 import type { Place } from "./lint-comments.ts";
+
+/** What the design lint reads of the kit, which build.ts works out (`#design-kit`). */
+export interface DesignKit {
+  /**
+   * The kit as the rules read it from disk, by path relative to the App:
+   * `components.json`, the theme and the kit's component sources.
+   */
+  lintProject: Record<string, string>;
+  /** The rules of @shadcn/lint, as the repo lints with them. */
+  lintRules: Linter.RulesRecord;
+}
 
 const root = "/tmp/app";
 
@@ -42,6 +61,11 @@ const writeFiles = (files: Record<string, string>): void => {
     writeFileSync(file, content);
   }
 };
+
+/** What a file the parser couldn't read says: an error, so it never passes unlinted. */
+const unparsable = (file: string): Diagnostic[] => [
+  { file, rule: "lint", severity: "error", message: unparsableMessage },
+];
 
 const toDiagnostic = (
   file: string,
@@ -62,12 +86,19 @@ const toDiagnostic = (
   return diagnostic;
 };
 
-/** Lints App files (by path relative to the App) against the kit. */
-export const lint = (
-  appFiles: Record<string, string>,
-  kit: Kit
-): Diagnostic[] => {
-  writeFiles({ ...kit.lintProject, ...appFiles });
+/**
+ * What the design lint says of each of `files`' screens and components
+ * (`isDesignLinted`), by path relative to the App, against `kit`, with
+ * `app`, the App's screens and components, on disk for the rules to read.
+ * Nothing of a file that doesn't parse: oxlint's lint says nothing of it
+ * either, and the build says why.
+ */
+export const lintDesign = (
+  files: Record<string, string>,
+  app: Record<string, string>,
+  kit: DesignKit
+): Record<string, Diagnostic[]> => {
+  writeFiles({ ...kit.lintProject, ...app, ...files });
   const linter = new Linter({ cwd: root });
   const config: Linter.Config[] = [
     {
@@ -84,14 +115,26 @@ export const lint = (
       rules: { ...kit.lintRules, ...designRuleLevels },
     },
   ];
-  return Object.entries(appFiles)
-    .filter(([path]) => !path.endsWith(declarationExtension))
-    .flatMap(([path, source]) => {
-      const { text, changes } = asEslint(path, source);
-      const place = placeIn(source, text, changes);
-      return linter
-        .verify(text, config, `${root}/${path}`)
-        .filter((message) => !namesUnknownRule(message))
-        .map((message) => toDiagnostic(path, place(message), message));
-    });
+  const linted = (path: string, source: string): Diagnostic[] => {
+    const { text, changes } = asEslint(path, source);
+    const place = placeIn(source, text, changes);
+    const messages = linter.verify(text, config, `${root}/${path}`);
+    if (messages.some((message) => isUnparsable(message))) {
+      return unparsable(path);
+    }
+    return messages
+      .filter((message) => message.fatal !== true && !namesUnknownRule(message))
+      .map((message) => toDiagnostic(path, place(message), message));
+  };
+  return Object.fromEntries(
+    Object.entries(files)
+      .filter(([path]) => isDesignLinted(path))
+      .map(([path, source]) => [
+        path,
+        orUnparsable(
+          () => linted(path, source),
+          () => unparsable(path)
+        ),
+      ])
+  );
 };

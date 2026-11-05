@@ -5,6 +5,7 @@ import {
   buildFiles,
   componentsFolder,
   declarationFile,
+  isDesignLinted,
   screenFile,
 } from "./inputs.ts";
 import { screenReferences } from "./kit.ts";
@@ -135,12 +136,36 @@ export const screenSources = (
 };
 
 /**
+ * What the design lint of a screen or a component reads beside it
+ * (`lintKey`): the App's screens and components (`app`, those
+ * `isDesignLinted` reads), as one key.
+ */
+export const designContextKey = async (
+  app: Readonly<Record<string, string>>
+): Promise<string> =>
+  await keyOf([
+    "design",
+    Object.entries(app).toSorted(([a], [b]) => (a < b ? -1 : 1)),
+  ]);
+
+/**
  * The key Ultracite's lint of `path` (`source`) is kept under (`lint`,
- * ultracite.ts): its result reads that file alone, and the compiler's
+ * ultracite.ts): its result reads that file alone, and, of a screen or a
+ * component, the App's others (`designContext`, `designContextKey`),
+ * which a screen may wrap the kit's components in. The compiler's
  * version, which every cache key holds, stands for the rules.
  */
-export const lintKey = async (path: string, source: string): Promise<string> =>
-  await keyOf(["lint", path, source]);
+export const lintKey = async (
+  path: string,
+  source: string,
+  designContext: string
+): Promise<string> =>
+  await keyOf([
+    "lint",
+    path,
+    source,
+    isDesignLinted(path) ? designContext : "",
+  ]);
 
 /** Ultracite's lint of one file, as core keeps it. */
 export interface LintRecord {

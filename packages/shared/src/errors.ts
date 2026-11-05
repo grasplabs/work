@@ -74,13 +74,30 @@ expect(brainErrors.messages);
 expect(knowledgeErrors.messages);
 
 /**
+ * A family of expected errors (`defineErrorFamily`). Named, so a package
+ * that defines one names its type by this module, which it imports, never
+ * by zod's, which it may not depend on: a declaration of it is portable.
+ */
+export interface ErrorFamily<Code extends string> {
+  create: (code: Code, details?: ErrorPayload["details"]) => CodedError<Code>;
+  /** `input` as `schema` has it, or error `code` saying why not. */
+  parse: <Schema extends z.ZodType>(
+    code: Code,
+    schema: Schema,
+    input: unknown
+  ) => z.output<Schema>;
+  /** The error's code if it belongs to this family, otherwise `undefined`. */
+  codeOf: (error: unknown) => Code | undefined;
+}
+
+/**
  * Defines one family of expected errors: a fixed set of codes, each with the
  * message people see. Create errors from it, and read the code back from
  * anything caught, including errors that crossed an RPC boundary.
  */
 export const defineErrorFamily = <Code extends string>(
   messages: Readonly<Record<Code, string>>
-) => {
+): ErrorFamily<Code> => {
   const codes = new Set<unknown>(Object.keys(messages));
   expect(messages);
   const isCode = (value: unknown): value is Code => codes.has(value);
@@ -95,7 +112,6 @@ export const defineErrorFamily = <Code extends string>(
 
   return {
     create,
-    /** `input` as `schema` has it, or error `code` saying why not. */
     parse: <Schema extends z.ZodType>(
       code: Code,
       schema: Schema,
@@ -107,7 +123,6 @@ export const defineErrorFamily = <Code extends string>(
       }
       return parsed.data;
     },
-    /** The error's code if it belongs to this family, otherwise `undefined`. */
     codeOf: (error: unknown): Code | undefined => {
       if (typeof error !== "object" || error === null || !("code" in error)) {
         return undefined;

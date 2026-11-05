@@ -177,9 +177,9 @@ export interface BuildOptions {
   readonly signal?: AbortSignal;
   /**
    * False for a preview's frame alone: its screens are built without the
-   * type check and lint (the compiler's `preview-frame`), which would
-   * hold up what the person sees and gate nothing it runs. The agent's
-   * check of the draft builds them with both.
+   * type check (the compiler's `preview-frame`), which would hold up what
+   * the person sees and gate nothing it runs. The agent's check of the
+   * draft builds them with it.
    */
   readonly checks?: boolean;
 }
