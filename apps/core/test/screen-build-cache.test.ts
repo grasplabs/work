@@ -1,4 +1,4 @@
-import { appCompilerName } from "@grasp-os/compiler";
+import { appCompilerName, typeCheckerName } from "@grasp-os/compiler";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -24,16 +24,22 @@ const screen = (): Record<string, string> => ({
 });
 
 /**
- * A Worker Loader counting the compiler's starts: its isolates only, the
- * shared one and each App's, never the type checker's or any other a
- * build starts beside it.
+ * A Worker Loader counting the builds that ran, by the isolates they asked
+ * for: the compiler's (the shared one and each App's) and the type
+ * checker's apart, as a build asks for each once. Counted together, a burst
+ * of builds that compiled once but type-checked each time would pass.
  */
 const counting = () => {
-  const started = { count: 0 };
+  const started = { compiler: 0, typeChecker: 0 };
   const loader: WorkerLoader = {
     get: (name, code) => {
+      // By prefix: core's Loader names each isolate with its console's
+      // owner after it (quietLoader, platform-sandbox.ts).
       if (name?.startsWith(appCompilerName()) === true) {
-        started.count += 1;
+        started.compiler += 1;
+      }
+      if (name?.startsWith(typeCheckerName) === true) {
+        started.typeChecker += 1;
       }
       return env.LOADER.get(name, code);
     },
@@ -127,7 +133,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
     expect({
       afterForgery,
       unreceipted,
-      started: started.count,
+      started: { ...started },
       counted: {
         failures: counted?.failures,
         quarantined: counted?.quarantinedAt,
@@ -143,7 +149,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       afterForgery: built,
       unreceipted: built,
-      started: 2,
+      started: { compiler: 2, typeChecker: 2 },
       counted: { failures: 1, quarantined: null },
       receipt: await sha256Hex(text),
       kept: 1,
@@ -190,14 +196,14 @@ describe("the build cache", { timeout: 120_000 }, () => {
       failures: quarantined?.failures,
       quarantined: quarantined?.quarantinedAt !== null,
       again,
-      started: started.count,
+      started: { ...started },
       // Nothing is written to the cache for it any more.
       stored: await stored?.text(),
     }).toStrictEqual({
       failures: quarantineAfter,
       quarantined: true,
       again: built,
-      started: 1,
+      started: { compiler: 1, typeChecker: 1 },
       stored: forged,
     });
   });
@@ -253,12 +259,12 @@ describe("the build cache", { timeout: 120_000 }, () => {
     expect({
       shared,
       takenOver,
-      started: started.count,
+      started: { ...started },
       released: lease?.holder,
     }).toStrictEqual({
       shared: built,
       takenOver: built,
-      started: 1,
+      started: { compiler: 1, typeChecker: 1 },
       released: null,
     });
   });
@@ -283,9 +289,9 @@ describe("the build cache", { timeout: 120_000 }, () => {
       "app-test"
     );
 
-    expect({ rebuilt, started: started.count }).toStrictEqual({
+    expect({ rebuilt, started: { ...started } }).toStrictEqual({
       rebuilt: built,
-      started: 1,
+      started: { compiler: 1, typeChecker: 1 },
     });
   });
 
@@ -315,10 +321,10 @@ describe("the build cache", { timeout: 120_000 }, () => {
       "app-test"
     );
 
-    expect({ ok: built.ok, again, started: started.count }).toStrictEqual({
+    expect({ ok: built.ok, again, started: { ...started } }).toStrictEqual({
       ok: true,
       again: built,
-      started: 1,
+      started: { compiler: 1, typeChecker: 1 },
     });
   });
 
@@ -341,11 +347,11 @@ describe("the build cache", { timeout: 120_000 }, () => {
     );
 
     expect({
-      started: started.count,
+      started: { ...started },
       all: views.every(
         (view) => JSON.stringify(view) === JSON.stringify(built)
       ),
-    }).toStrictEqual({ started: 1, all: true });
+    }).toStrictEqual({ started: { compiler: 1, typeChecker: 1 }, all: true });
   });
 
   it("builds the same files asked for at once by two Apps once", async () => {
@@ -358,9 +364,9 @@ describe("the build cache", { timeout: 120_000 }, () => {
       )
     );
 
-    expect({ same: both[0], started: started.count }).toStrictEqual({
+    expect({ same: both[0], started: { ...started } }).toStrictEqual({
       same: both[1],
-      started: 1,
+      started: { compiler: 1, typeChecker: 1 },
     });
   });
 
@@ -374,7 +380,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
     const preview = await buildScreens(counted, files, "app-test", {
       profile: "preview",
     });
-    const compiled = started.count;
+    const compiled = { ...started };
     const built = { ...env, LOADER: noBuilds };
     const artifacts = {
       production: await screenCode(
@@ -408,7 +414,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
       sameArtifact:
         artifacts.production.artifact === artifacts.preview.artifact,
     }).toStrictEqual({
-      compiled: 2,
+      compiled: { compiler: 2, typeChecker: 2 },
       production,
       preview,
       // A preview's screen is built for React Fast Refresh on the preview

@@ -23,7 +23,7 @@ import {
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
 import { stopModelProviders } from "./model-provider.ts";
-import { closeOpenSockets } from "./open-sockets.ts";
+import { endTest, waitingOnNow } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
@@ -135,7 +135,27 @@ if (await installBuiltinsFirst()) {
   await startEmpty();
 }
 
-afterEach(closeOpenSockets);
+/** Vitest's own words for a test it timed out (@vitest/runner). */
+const timedOutMessage = /\bTest timed out in \d+ms/u;
+
+afterEach(({ task }) => {
+  // What a test that timed out was still waiting on, before its sockets
+  // close: the log otherwise says only that it timed out.
+  const timedOut = (task.result?.errors ?? []).some(({ message }) =>
+    timedOutMessage.test(message)
+  );
+  if (timedOut) {
+    const waiting = waitingOnNow();
+    const lines =
+      waiting.length === 0
+        ? ["no request it sent through the router, and no socket it opened"]
+        : waiting;
+    console.error(
+      `"${task.name}" timed out. Still going:\n- ${lines.join("\n- ")}`
+    );
+  }
+  endTest();
+});
 
 // The model providers a file's tests answer for stop looking for requests
 // once its tests are done (model-provider.ts).

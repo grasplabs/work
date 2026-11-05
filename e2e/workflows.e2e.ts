@@ -1,15 +1,9 @@
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-
 import { expect } from "@playwright/test";
 
+import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
-import { stateDir } from "./stack.ts";
-
-/** The checkout this stack runs from. */
-const repoRoot = path.join(import.meta.dirname, "..");
 
 // The Workflows page, end to end: a builder finds their App's workflows
 // with a waiting run, finds that run at the top of Runs and follows it to
@@ -523,30 +517,6 @@ export default workflowTests(idle, [{ name: "waits, then ends", mocks: {}, expec
 /** Core's IDs: none of them is SQL. */
 const plainId = /^[\w-]+$/u;
 
-/**
- * Runs `statement` on the stack's core database, as the running core
- * keeps it: the test sets a run's place in the admission queue directly,
- * as a step waiting for a share would.
- */
-const coreSql = (statement: string): void => {
-  execFileSync(
-    path.join(repoRoot, "node_modules/.bin/wrangler"),
-    [
-      "d1",
-      "execute",
-      "DB",
-      "--local",
-      "-c",
-      "wrangler.jsonc",
-      "--persist-to",
-      stateDir,
-      "--command",
-      statement,
-    ],
-    { cwd: path.join(repoRoot, "apps/core"), stdio: "pipe" }
-  );
-};
-
 test("a run whose model call waits for a share of its person's requests reads as queued, with when it tries again, not failed or running", async ({
   pageOf,
 }) => {
@@ -575,8 +545,12 @@ test("a run whose model call waits for a share of its person's requests reads as
   // load.
   const asked = Date.now() + 60_000;
   const retryAt = Date.now() + 10 * 60_000;
-  coreSql(
-    `INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES ('${run}', 'e2e-step', 'e2e', 'person', ${retryAt}, ${asked})`
+  // On the database the running core holds too: `execute` waits out the
+  // moments core's own writes lock it, which failed this test's own copy
+  // of it (SQLITE_BUSY in CI, November 2026).
+  await execute(
+    `INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES ('${run}', 'e2e-step', 'e2e', 'person', ${retryAt}, ${asked})`,
+    "core"
   );
   const page = await pageOf(builder);
   try {
@@ -603,7 +577,10 @@ test("a run whose model call waits for a share of its person's requests reads as
     await expect(header).not.toContainText("Failed");
     await expect(header).not.toContainText("Running");
   } finally {
-    coreSql(`DELETE FROM workflow_model_waits WHERE run_id = '${run}'`);
+    await execute(
+      `DELETE FROM workflow_model_waits WHERE run_id = '${run}'`,
+      "core"
+    );
     await withApi(builder, async (api) => {
       await api.workflows.cancel(run);
     });

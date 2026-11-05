@@ -194,7 +194,9 @@ jobs:
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
-      # file and ends the run once it is well past its timeout. So does a
+      # file and ends the run once it is well past its timeout, or once three
+      # tests in a row timed out, a runtime wedged though each test still
+      # times out in time (scripts/stall-reporter.ts). So does a
       # hang outside any test, after the files ended (a worker's teardown
       # after its file): once no file has run for the same grace, the run
       # ends with the workerd stacks, before this step's timeout when the
@@ -208,8 +210,15 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
+      # Beside the tests, the runner's memory once a minute
+      # (scripts/memory-log.ts): a runner that runs out of memory dies with
+      # only "shutdown signal" to say, and this step's log is all it keeps.
       # The plan's `--project` arguments, unquoted, none for every project.
-      - run: vp test $GRASP_TEST_PROJECTS --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+      - run: |
+          node scripts/memory-log.ts &
+          sampler=$!
+          trap 'kill "$sampler"' EXIT
+          vp test $GRASP_TEST_PROJECTS --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
         timeout-minutes: 15
         env:
           GRASP_TEST_PROJECTS: ${{ needs.plan.outputs.projects }}
@@ -418,7 +427,12 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
+      # Beside the journeys, the runner's memory once a minute, as in the
+      # test shards (scripts/memory-log.ts).
       - run: |
+          node scripts/memory-log.ts &
+          sampler=$!
+          trap 'kill "$sampler"' EXIT
           files=""
           if [ "$GRASP_E2E_PART" = parallel ]; then
             files=$(node scripts/e2e-parts.ts "$PART")
@@ -438,13 +452,16 @@ jobs:
           path: ${{ runner.temp }}/e2e-results.json
           if-no-files-found: ignore
           retention-days: 14
-      # A failing test is retried with a trace (playwright.config.ts): keep it.
-      - if: failure()
+      # A failing test is retried with a trace (playwright.config.ts): keep it,
+      # for a test that passed only when retried too, which passes the job:
+      # kept only on failure, a flaky test's trace was lost with the runner.
+      - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # One per part: a run's artifact names are unique.
           name: playwright-traces-${{ matrix.artifact }}
           path: test-results/
+          if-no-files-found: ignore
           retention-days: 14
 
   # The admin's journeys (playwright.admin.config.ts): a stack of

@@ -18,7 +18,7 @@ import worker from "../src/index.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import type { Claims, Idp } from "./idp.ts";
-import { closeWhenTestEnds } from "./open-sockets.ts";
+import { closeWhenTestEnds, untilAnswered } from "./open-sockets.ts";
 import {
   acmeTenant,
   clientOrigin,
@@ -51,7 +51,10 @@ export const routed = async (
     ...init,
     headers,
   });
-  return await worker.fetch(request, coreEnv, createExecutionContext());
+  return await untilAnswered(
+    `${request.method} ${path}`,
+    worker.fetch(request, coreEnv, createExecutionContext())
+  );
 };
 
 /** The `name=value` pairs a response sets, as a `Cookie` header. */

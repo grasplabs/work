@@ -59,18 +59,25 @@ const workOf = (files: readonly ShardFile[]): number =>
 
 /**
  * How long a shard with `files` takes, roughly: its groups one after
- * another, each as long as the longest of its files run at once (their
- * work spread over the files a runner works through together), each of
- * its projects that runs its files one after another (`serial`: their
- * work added up, beside the rest), and its longest file; and the start of
- * each of its projects. A project runs its files one at a time when two
- * at once starve each other, such as the compiler's builds, each of which
- * starts Node, TypeScript and three bundles across the runner's CPUs.
+ * another, each as long as its files run at once (their work spread over
+ * the files a runner works through together, or its longest such file if
+ * that is longer), then those of each project that runs its files one
+ * after another (`serial`: their work added up); and the start of each of
+ * its projects. Vitest runs a serial project's files after the rest of
+ * the group's, not beside them: in CI the compiler's started once core's
+ * had ended (November 2026). A project runs its files one at a time when
+ * two at once starve each other, such as the compiler's builds, each of
+ * which starts Node, TypeScript and three bundles across the runner's CPUs.
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
   const groups = new Map<
     number,
-    { parallel: number; serial: Map<string, number>; longest: number }
+    {
+      parallel: number;
+      serial: Map<string, number>;
+      /** The longest file run at once with others, never a serial one. */
+      longest: number;
+    }
   >();
   for (const file of files) {
     const group = groups.get(file.group) ?? {
@@ -85,14 +92,15 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
       );
     } else {
       group.parallel += costOf(file);
+      group.longest = Math.max(group.longest, costOf(file));
     }
-    group.longest = Math.max(group.longest, costOf(file));
     groups.set(file.group, group);
   }
   let total =
     new Set(files.map(({ project }) => project)).size * projectStartSeconds;
   for (const { parallel, serial, longest } of groups.values()) {
-    total += Math.max(parallel / concurrentFiles, ...serial.values(), longest);
+    const oneByOne = [...serial.values()].reduce((sum, each) => sum + each, 0);
+    total += Math.max(parallel / concurrentFiles, longest) + oneByOne;
   }
   return total;
 };

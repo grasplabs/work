@@ -34,6 +34,12 @@ const testsOf = new WeakMap<ReportedModule, ReportedCase[]>();
  */
 const states = new Map<string, string>();
 
+/** The errors Vitest's state has for each failed test, by ID. */
+const errorsOf = new Map<string, { message: string }[]>();
+
+/** How long Vitest timed each file, hooks included, by ID. */
+const durationsOf = new Map<string, number>();
+
 let files = 0;
 
 const file = (name: string): ReportedModule => {
@@ -47,6 +53,7 @@ const file = (name: string): ReportedModule => {
     relativeModuleId: `test/${name}.test.ts`,
     children: { allTests: () => tests },
     state: () => states.get(id) ?? "pending",
+    diagnostic: () => ({ duration: durationsOf.get(id) ?? 0 }),
   };
   testsOf.set(testModule, tests);
   return testModule;
@@ -70,7 +77,10 @@ const test = (
     module,
     fullName,
     options: options ?? { timeout: 60_000 },
-    result: () => ({ state: states.get(id) ?? "pending" }),
+    result: () => ({
+      state: states.get(id) ?? "pending",
+      errors: errorsOf.get(id),
+    }),
   };
   testsOf.get(module)?.push(testCase);
   return testCase;
@@ -81,6 +91,20 @@ const finish = (testCase: ReportedCase): ReportedCase => {
   states.set(testCase.id, "passed");
   return testCase;
 };
+
+/** `testCase`, failed in Vitest's state with `message`. */
+const fail = (testCase: ReportedCase, message: string): ReportedCase => {
+  states.set(testCase.id, "failed");
+  errorsOf.set(testCase.id, [{ message }]);
+  return testCase;
+};
+
+/** `testCase`, timed out by Vitest, in its own words. */
+const timeOut = (testCase: ReportedCase): ReportedCase =>
+  fail(
+    testCase,
+    'Test timed out in 60000ms.\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".'
+  );
 
 /** `testModule`, run to its end in Vitest's state. */
 const finishFile = (testModule: ReportedModule): ReportedModule => {
@@ -111,6 +135,9 @@ const ending = (graceSeconds = 0.05) => {
 
 /** A progress line's time, and how long its test took when known. */
 const progressPrefix = /^\S+ (?<state>\S+)(?: \d+ms)? /u;
+
+/** A finished file's line, beside its tests'. */
+const fileLine = /^\S+ file \d+ms /u;
 
 /** Well past a 20 ms test's timeout and the 50 ms grace. */
 const pastTheGrace = 300;
@@ -212,7 +239,8 @@ describe("the progress file", () => {
       reporter.onTestCaseReady(each);
       reporter.onTestCaseResult(finish(each));
     }
-    reporter.onTestModuleEnd(builds);
+    durationsOf.set(builds.id, 91_234.5);
+    reporter.onTestModuleEnd(finishFile(builds));
     await reporter.onTestRunEnd();
 
     const written = await readFile(progressFile, "utf-8");
@@ -221,12 +249,15 @@ describe("the progress file", () => {
       lines.map((line) =>
         line.replace(/^\S+ (?<state>\S+) \d+ms /u, "$<state> ")
       )
-    ).toStrictEqual(
-      tests.map(
+    ).toStrictEqual([
+      ...tests.map(
         ({ fullName }) =>
           `passed core test/package-builds.test.ts > ${fullName}`
-      )
-    );
+      ),
+      // The file's own time, its hooks' included, as Vitest timed it.
+      "file core test/package-builds.test.ts",
+    ]);
+    expect(lines.at(-1)).toMatch(/ file 91235ms core /u);
   });
 });
 
@@ -549,6 +580,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const lines = progress
       .trimEnd()
       .split("\n")
+      .filter((line) => !fileLine.test(line))
       .map((line) => line.replace(progressPrefix, "$<state> "))
       .toSorted();
     expect(lines).toStrictEqual([
@@ -582,6 +614,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
       progress
         .trimEnd()
         .split("\n")
+        .filter((line) => !fileLine.test(line))
         .map((line) => line.replace(progressPrefix, "$<state> "))
         .toSorted()
     ).toStrictEqual([
@@ -612,6 +645,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
       progress
         .trimEnd()
         .split("\n")
+        .filter((line) => !fileLine.test(line))
         .map((line) => line.replace(progressPrefix, "$<state> "))
         .toSorted()
     ).toStrictEqual([
@@ -905,5 +939,77 @@ describe("the stacks of a stalled run", () => {
       dumps: 0,
       ended: 0,
     });
+  });
+});
+
+describe("tests that time out one after another", () => {
+  it("end the run once, with the stacks, when the last three to end, in whichever files, all timed out", async () => {
+    let dumps = 0;
+    const { reporter, written, state } = endingWithStacks(async () => {
+      dumps += 1;
+      await Promise.resolve();
+      return "--- workerd 150 ---\n#0 epoll_wait\n";
+    });
+    const removal = file("app-removal");
+    const webhooks = file("app-webhooks");
+    const notifications = file("app-notifications");
+    const passing = test(notifications, "notifies");
+    const hung = [
+      test(removal, "removes it"),
+      test(webhooks, "sends a form"),
+      test(removal, "ends its grants"),
+      test(webhooks, "is approved"),
+    ];
+    reporter.onTestRunStart();
+    for (const testModule of [removal, webhooks, notifications]) {
+      reporter.onTestModuleStart(testModule);
+    }
+    reporter.onTestCaseReady(passing);
+    reporter.onTestCaseResult(finish(passing));
+    for (const each of hung) {
+      reporter.onTestCaseReady(each);
+      reporter.onTestCaseResult(timeOut(each));
+    }
+    await vi.waitFor(
+      () => {
+        expect(state.ended).toBe(1);
+      },
+      { timeout: 10_000, interval: 10 }
+    );
+
+    const beforeEnd = written.slice(0, state.writtenAtEnd).join("");
+    expect({
+      dumps,
+      ended: state.ended,
+      verdict: beforeEnd.includes(
+        "Ending the run, as the last 3 tests to end all timed out"
+      ),
+      stacks: beforeEnd.includes("--- workerd 150 ---\n#0 epoll_wait"),
+    }).toStrictEqual({ dumps: 1, ended: 1, verdict: true, stacks: true });
+  });
+
+  it("leave the run alone when a test between them ends otherwise, or a test fails for another reason", async () => {
+    const { reporter, state } = ending(10);
+    const removal = file("app-removal");
+    const results = [
+      timeOut(test(removal, "times out")),
+      timeOut(test(removal, "times out too")),
+      finish(test(removal, "passes")),
+      timeOut(test(removal, "times out again")),
+      fail(test(removal, "fails"), "expected 1 to be 2"),
+      timeOut(test(removal, "times out once more")),
+      timeOut(test(removal, "and again")),
+    ];
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(removal);
+    for (const each of results) {
+      reporter.onTestCaseReady(each);
+      reporter.onTestCaseResult(each);
+    }
+    await wait(pastTheGrace);
+    reporter.onTestModuleEnd(finishFile(removal));
+    await reporter.onTestRunEnd([removal], [], "failed");
+
+    expect(state.ended).toBe(0);
   });
 });
