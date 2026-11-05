@@ -60,7 +60,6 @@ import type {
   QueryReference,
   QuerySnapshot,
   StreamReference,
-  Streaming,
   SubmitOptions,
 } from "./client-core.ts";
 import { clientError, GraspError } from "./client-error.ts";
@@ -93,6 +92,7 @@ import type {
   FilesReference,
   ProgressOf,
   ReturnOf,
+  Streaming,
   WorkflowEventsOf,
   WorkflowInputOf,
   WorkflowOutputOf,

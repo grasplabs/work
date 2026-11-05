@@ -79,19 +79,19 @@ export type OperationReference<
   Vis extends ReferenceVisibility = "public",
   Progress = never,
 > = Callable<Kind, Vis, Args, Return, Progress> &
-  (Kind extends "query" ? QueryReferenceData : SubmissionReferenceData<Kind>);
+  (Kind extends "query" ? QueryFields : SubmissionFields<Kind>);
 
 /** What a query's reference holds. */
-interface QueryReferenceData {
-  /** Its registered path, as `api.tasks.list` names it: `tasks.list`. */
+interface QueryFields {
+  /** Its name, as `api.tasks.list` names it: `tasks.list`. */
   readonly name: string;
   /** Its declared return, where it declares one. */
   readonly returns?: ValueDescriptor;
 }
 
 /** What a mutation's or an action's reference holds. */
-interface SubmissionReferenceData<Kind extends ReferenceKind> {
-  /** Its registered path, as `api.tasks.create` names it: `tasks.create`. */
+interface SubmissionFields<Kind extends ReferenceKind> {
+  /** Its name, as `api.tasks.create` names it: `tasks.create`. */
   readonly name: string;
   /** What `useForm` sends a submission as. */
   readonly kind: Kind;
@@ -118,6 +118,21 @@ export type IsStreaming<Reference> = Reference extends StreamingFunction
   : [ProgressOf<Reference>] extends [never]
     ? false
     : true;
+
+/**
+ * `Reference`, only if it streams: compared through its type parameters
+ * alone, a reference that answers once (its progress `never`) would pass
+ * for one that streams.
+ */
+export type Streaming<Reference> = Reference &
+  (true extends IsStreaming<Reference> ? unknown : never);
+
+/**
+ * `Reference`, only if it answers once: a union any member of which
+ * streams is refused too (not distributed).
+ */
+export type SingleAnswer<Reference> = Reference &
+  (true extends IsStreaming<Reference> ? never : unknown);
 
 /** Any generated function reference: a single answer's or a stream's. */
 export type AnyOperationReference = OperationReference<
@@ -689,25 +704,17 @@ export type WorkflowDecisionsOf<Reference> =
     : never;
 
 /**
- * A reference to a function as App code may list it in `uses` or call it
- * through its context, generated or symbolic: its registered path, read
- * once, as data. The registration resolves it by its path.
+ * The name of the function `value` refers to, as App code lists it in
+ * `uses` or calls it through its context (generated or symbolic), read
+ * once; undefined when it isn't a plain object with a string `name`.
+ * Nothing about it is trusted: the registration resolves the name.
  */
-export interface ReferenceData {
-  readonly path: string;
-}
-
-/**
- * The function reference `value` is, read as data, or undefined when it
- * isn't one: a plain object with a string `name`. Nothing about it is
- * trusted: the registration resolves it by its path.
- */
-export const referenceData = (value: unknown): ReferenceData | undefined => {
+export const referenceName = (value: unknown): string | undefined => {
   if (!isPlainObject(value)) {
     return undefined;
   }
   const { name } = value;
-  return typeof name === "string" ? { path: name } : undefined;
+  return typeof name === "string" ? name : undefined;
 };
 
 /** An event reference as server code lists it in `uses`, read as data. */

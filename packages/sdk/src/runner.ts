@@ -18,7 +18,7 @@ import {
   isWorkflowPermission,
 } from "./permissions.ts";
 import type { AnyPermission } from "./permissions.ts";
-import { eventReferenceData, referenceData } from "./references.ts";
+import { eventReferenceData, referenceName } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -126,9 +126,7 @@ const usedPath = (
 ): string => {
   const used = fn.uses.find((use) => use === reference);
   const path =
-    used === undefined
-      ? undefined
-      : (paths.get(used) ?? referenceData(used)?.path);
+    used === undefined ? undefined : (paths.get(used) ?? referenceName(used));
   if (path === undefined) {
     throw Object.assign(
       new Error("A function calls only what it lists in `uses`."),

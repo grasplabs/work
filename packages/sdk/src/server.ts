@@ -17,7 +17,7 @@ import type {
   GuestsPermission,
   WorkflowPermission,
 } from "./permissions.ts";
-import { eventReferenceData, referenceData } from "./references.ts";
+import { eventReferenceData, referenceName } from "./references.ts";
 import type {
   ArgsOf,
   Callable,
@@ -25,7 +25,7 @@ import type {
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
-  IsStreaming,
+  SingleAnswer,
   WorkflowEventReference,
 } from "./references.ts";
 import { tablesOf } from "./schema.ts";
@@ -295,8 +295,7 @@ type RunMutation<Uses extends readonly Use[]> = <
 type RunAction<Uses extends readonly Use[]> = <
   Reference extends UsedOfKind<Uses, "action">,
 >(
-  reference: Reference &
-    (true extends IsStreaming<Reference> ? never : unknown),
+  reference: SingleAnswer<Reference>,
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
@@ -680,7 +679,7 @@ const usesOf = (uses: unknown): readonly Use[] => {
       !isServerFunction(use) &&
       !isPermission(use) &&
       !isWorkflowPermission(use) &&
-      referenceData(use) === undefined &&
+      referenceName(use) === undefined &&
       eventReferenceData(use) === undefined
     ) {
       return refuse(

@@ -39,11 +39,11 @@ import { DraftStore } from "./form-drafts.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import type {
   ArgsOf,
-  IsStreaming,
   OperationReference,
   ProgressOf,
   ReferenceKind,
   ReturnOf,
+  Streaming,
 } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -304,14 +304,6 @@ export type StreamReference = OperationReference<
   "public",
   unknown
 >;
-
-/**
- * `Reference`, only if it streams: compared through its type parameters
- * alone, a reference that answers once (its progress `never`) would pass
- * for one that streams.
- */
-export type Streaming<Reference> = Reference &
-  (true extends IsStreaming<Reference> ? unknown : never);
 
 /** Options of a streaming action's call through `client.stream`. */
 export interface StreamOptions<Progress> extends SubmitOptions {
@@ -829,7 +821,7 @@ export interface WorkflowLink {
    * the key.
    */
   readonly command: (
-    target: SubmissionTarget,
+    target: ReadReference,
     request: string,
     key: string,
     events: {
@@ -852,9 +844,6 @@ export interface WorkflowLink {
   /** Calls `listener` at every fence; answers what stops calling it. */
   readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
 }
-
-/** What a submission is scoped by: its function and kind. */
-export type SubmissionTarget = ReadReference;
 
 /** How a streaming action's call goes, beyond its progress and result. */
 export interface StreamEvents {
@@ -1142,7 +1131,7 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
  * Where a key left unknown is remembered: by function and key, as the
  * host scopes a key's receipt (the client serves one App).
  */
-const uncertainScope = (reference: SubmissionTarget, key: string): string =>
+const uncertainScope = (reference: ReadReference, key: string): string =>
   canonicalJson([reference.name, key]);
 
 /**
@@ -3075,7 +3064,7 @@ export class GraspClient {
    * settles.
    */
   async #send(
-    reference: SubmissionTarget,
+    reference: ReadReference,
     request: string,
     key: string,
     held: {

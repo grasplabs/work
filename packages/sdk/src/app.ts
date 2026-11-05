@@ -28,7 +28,7 @@ import type {
   PermissionKind,
   WorkflowPermission,
 } from "./permissions.ts";
-import { eventReferenceData, referenceData } from "./references.ts";
+import { eventReferenceData, referenceName } from "./references.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type {
@@ -1159,13 +1159,12 @@ const usedFunction = (
       return { target: registered, kind: fn.kind };
     }
   }
-  const reference = referenceData(use);
-  const target =
-    reference === undefined ? undefined : functions.get(reference.path);
-  if (reference === undefined || target === undefined) {
+  const name = referenceName(use);
+  const target = name === undefined ? undefined : functions.get(name);
+  if (name === undefined || target === undefined) {
     return refuse(`\`${path}\` uses a function the App doesn't register.`);
   }
-  return { target: reference.path, kind: target.kind };
+  return { target: name, kind: target.kind };
 };
 
 /** What `fn`, registered at `path`, uses, as data, checked against the App. */

@@ -10,7 +10,7 @@ import type {
   Callable,
   ReferenceKind,
   ReturnOf,
-  IsStreaming,
+  SingleAnswer,
   WorkflowInputOf,
   WorkflowOutputOf,
 } from "./references.ts";
@@ -99,8 +99,7 @@ export interface TestPrincipal {
     // 10.7.6), never through a call that answers once: its type is
     // refused here, as the host refuses it (`operation.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
-    reference: Reference &
-      (true extends IsStreaming<Reference> ? never : unknown),
+    reference: SingleAnswer<Reference>,
     args: ArgsOf<Reference>
   ) => Promise<ReturnOf<Reference>>;
   /**

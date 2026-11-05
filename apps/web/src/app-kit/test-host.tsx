@@ -168,7 +168,7 @@ export const pageOf = (records: readonly unknown[], extent = 25) =>
 /** A public reference of an App's function, as the host generates one. */
 export const reference = <Args, Return, Kind extends "query" | "mutation">(
   kind: Kind,
-  contractId: string,
+  name: string,
   args: ValueSchema<Args, unknown>,
   returns: ValueSchema<Return, unknown>
 ): OperationReference<Args, Return, Kind> =>
@@ -178,8 +178,8 @@ export const reference = <Args, Return, Kind extends "query" | "mutation">(
   // conditional type isn't narrowed by checking it.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   (kind === "query"
-    ? { name: contractId, returns: returns.descriptor }
-    : { name: contractId, kind, args: args.descriptor }) as OperationReference<
+    ? { name, returns: returns.descriptor }
+    : { name, kind, args: args.descriptor }) as OperationReference<
     Args,
     Return,
     Kind
