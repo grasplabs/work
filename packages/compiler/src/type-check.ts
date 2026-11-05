@@ -38,8 +38,9 @@ export const compilerOptions = {
   jsx: "react-jsx",
   strict: true,
   // No `noUnusedLocals`: an unused name is the lint's (`no-unused-vars`,
-  // ultracite.ts), which keeps a draft from being proposed. As a type
-  // error, one unused import mid-edit would stop the build and the preview.
+  // ultracite-rules.ts and ultracite-plugins.ts), which keeps a draft from
+  // being proposed. As a type error, one unused import mid-edit would stop
+  // the build and the preview.
   // Babel compiles each file on its own.
   isolatedModules: true,
   allowImportingTsExtensions: true,

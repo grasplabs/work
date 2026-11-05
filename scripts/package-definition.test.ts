@@ -515,7 +515,11 @@ const graspRulesOf = (files: Record<string, string>): string[] =>
     )
     .toSorted();
 
-/** A component with unused names: an import, a local, a trailing parameter. */
+/**
+ * A component with unused names: an import, a local, a trailing
+ * parameter, and one only a type predicate reads (oxlint reports it; it
+ * passes a name only a type query reads).
+ */
 const unusedNames = `import { Badge } from "@grasp-os/ui/components/badge";
 
 const row = { id: 1 };
@@ -525,6 +529,9 @@ export const total = (ctx: number, count: number, spare: number): number => {
   const left = 1;
   return count;
 };
+
+export const isNumber = (value: unknown, extra: unknown): extra is number =>
+  typeof value === "number";
 `;
 
 /** A built-in blueprint's App files, by path. */
@@ -1751,6 +1758,7 @@ export const Off = () => (
         "app/components/findings.ts warning sonarjs/no-identical-expressions",
         "app/components/spanning.ts error no-debugger",
         "app/components/spanning.ts error no-inline-comments",
+        "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",
         "app/components/unused.ts error no-unused-vars",

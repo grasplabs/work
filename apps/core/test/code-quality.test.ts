@@ -232,10 +232,10 @@ describe("linting App code", { timeout: 60_000 }, () => {
   });
 
   it("reports unused names as oxlint does, and a write keeps them, its fix not being safe", async () => {
-    // An unused import, a local and a parameter after the last one used.
-    // Not a parameter before one used (a handler's `ctx`), one starting
-    // with `_`, nor a name a type reads, which is used (as TypeScript and
-    // oxlint read it).
+    // An unused import, a local, a parameter after the last one used, and
+    // one only a type predicate reads. Not a parameter before one used (a
+    // handler's `ctx`), one starting with `_`, nor a name a type query
+    // reads, which is used (as TypeScript and oxlint read it).
     const source = `import { Badge } from "@grasp-os/ui/components/badge";
 
 const row = { id: 1 };
@@ -247,6 +247,9 @@ export const total = (ctx: number, count: number, spare: number): number => {
 };
 
 export const one = (_ignored: number): number => 1;
+
+export const isNumber = (value: unknown, extra: unknown): extra is number =>
+  typeof value === "number";
 `;
 
     const tidied = await ultracite().tidy({ "components/total.ts": source });
@@ -274,6 +277,12 @@ export const one = (_ignored: number): number => 1;
           file: "components/total.ts",
           line: 7,
           column: 9,
+          rule: "no-unused-vars",
+        },
+        {
+          file: "components/total.ts",
+          line: 13,
+          column: 42,
           rule: "no-unused-vars",
         },
       ],
@@ -328,5 +337,30 @@ describe("a draft's lint", { timeout: 60_000 }, () => {
     } finally {
       env.LOADER = loader;
     }
+  });
+
+  it("holds only the App's own code to the rules, never what the host generates", async () => {
+    // An unused name in each: the host writes what every App may use, and
+    // the agent can't change it.
+    const unused = `const spare = 1;\nexport const one = 1;\n// ${crypto.randomUUID()}\n`;
+
+    const linted = await draftLintBuild(env, {
+      app: appIdSchema.parse(crypto.randomUUID()),
+      version: 0,
+      files: {
+        "server/_generated/api.ts": unused,
+        ".grasp/references.ts": unused,
+        "workflows/intake/1/code/step.ts": unused,
+        "components/own.ts": unused,
+      },
+    });
+
+    expect({
+      status: linted.status,
+      found: linted.diagnostics.map(({ file, rule }) => ({ file, rule })),
+    }).toStrictEqual({
+      status: "failed",
+      found: [{ file: "components/own.ts", rule: "no-unused-vars" }],
+    });
   });
 });

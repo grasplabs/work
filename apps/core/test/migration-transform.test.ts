@@ -916,8 +916,7 @@ const sealedSalaries = async () =>
               fromSchema,
               toSchema,
               fixtures: salaryFixtures,
-              // Only the handler that shares it: an unused one is a lint error.
-              prelude: handler.includes("previous") ? salaryPrelude : "",
+              prelude: salaryPrelude,
               input: name.endsWith("refines-amount")
                 ? refinedInput
                 : "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
