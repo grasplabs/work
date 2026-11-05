@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { BuildJobRecords, jobRecordsKept } from "../src/build-job-records.ts";
+import { ChatSession } from "../src/chat-session.ts";
 import { personOf } from "../src/connections.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
@@ -157,6 +158,39 @@ describe("build jobs", { timeout: 180_000 }, () => {
       app: { pending: 1, current: null },
       versions: [{ version: 1, chat: chat.chat.id, job: job.id }],
     });
+  });
+
+  it("tells the turn that submitted a job how it ended once, when the first notice failed on its way and the job's end is tried again", async () => {
+    const waiting = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      waiting.reply,
+      says("The invoice desk is proposed for review."),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    let job: z.infer<typeof jobRowSchema>;
+    const answering = chat.ask("Build an invoice desk for invoices@");
+    // The chat's object refuses the first notice, as one out of reach
+    // does: the job's end is tried again.
+    const refused = vi
+      .spyOn(ChatSession.prototype, "notify")
+      .mockRejectedValueOnce(new Error("Out of reach"));
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+    } finally {
+      checking.restore();
+    }
+    await noticed(job.id);
+    refused.mockRestore();
+    waiting.release();
+    await expect(answering).resolves.toMatchObject({ outcome: "answered" });
+    const notice = `Build job ${job.id} (`;
+    expect(
+      JSON.stringify(chat.provider.requests.at(-1)?.body).split(notice).length -
+        1
+    ).toBe(1);
   });
 
   it("tells the turn that submitted a job how it ended through a restart of both its chat's objects, the notice the first call to wake the turn", async () => {

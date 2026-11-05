@@ -154,6 +154,7 @@ export class BuildJobRecords {
         result: end.status === "completed" ? end.result : null,
         error: end.status === "failed" ? end.error : null,
         endedAt: new Date(),
+        noticeOwed: true,
       })
       .where(
         and(
@@ -165,6 +166,15 @@ export class BuildJobRecords {
       .returning({ id: chatBuildJobs.id })
       .all();
     return ended.length > 0;
+  }
+
+  /** Clears the notice job `id` owed its turn: it was taken, or dropped. */
+  noticed(chatId: ChatId, id: string): void {
+    this.#db
+      .update(chatBuildJobs)
+      .set({ noticeOwed: false })
+      .where(and(eq(chatBuildJobs.id, id), eq(chatBuildJobs.chatId, chatId)))
+      .run();
   }
 
   /**

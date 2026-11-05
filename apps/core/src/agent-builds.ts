@@ -473,6 +473,11 @@ const logReleaseFailure = (failure: unknown): void => {
   log.warn("agent.turn_release_failed", errorFields(failure));
 };
 
+/** Logs a build job's notice that couldn't be sent as the job ended. */
+const logNoticeFailure = (failure: unknown): void => {
+  log.warn("build_job.notice_lost", errorFields(failure));
+};
+
 /**
  * What the preview of the chat's draft of `app` at `revision` ran into so
  * far, as a check answers it (preview-reports.ts): once it reported on
@@ -760,7 +765,11 @@ const failDeadJobs = async (
       if (dead) {
         // As one that committed, if it did before it went.
         const version = await reconcileReceipt(env, workspaceId, chatId, id);
-        await chats.endBuildJob(chatId, id, brokenOff(version ?? null));
+        // Ended either way: a notice it couldn't send leaves the call that
+        // swept it to go on.
+        await chats
+          .endBuildJob(chatId, id, brokenOff(version ?? null))
+          .catch(logNoticeFailure);
       }
     })
   );

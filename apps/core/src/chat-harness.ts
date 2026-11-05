@@ -1131,17 +1131,24 @@ export class ChatHarness {
 
   /**
    * Stops the turn under way, if any: its request or tool call in flight
-   * ends. With `turnId`, kept, so that turn is stopped too if it hasn't
-   * submitted its question yet, as it does.
+   * ends. With `turnId`, only that turn: kept, so it is stopped too if it
+   * hasn't submitted its question yet, as it does; and pi's run stopped
+   * only while that turn is the chat's, so a stop that comes late, or is
+   * sent again, never stops the question after it.
    */
   async abort(turnId?: string): Promise<void> {
-    if (turnId !== undefined) {
-      await this.#conversation.commit(async (tx) => {
-        const stopped = await tx.doc(StoppedDoc);
-        stopped.turnId = turnId;
-      }, context);
+    if (turnId === undefined) {
+      await this.#conversation.abort(context);
+      return;
     }
-    await this.#conversation.abort(context);
+    await this.#conversation.commit(async (tx) => {
+      const stopped = await tx.doc(StoppedDoc);
+      stopped.turnId = turnId;
+    }, context);
+    // After the commit: the turn the chat holds now.
+    if (this.#active === turnId) {
+      await this.#conversation.abort(context);
+    }
   }
 
   async close(): Promise<void> {

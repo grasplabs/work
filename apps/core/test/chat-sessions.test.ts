@@ -318,6 +318,37 @@ describe("a chat's ChatSession", () => {
     }
   });
 
+  it("stops only the turn a stop names: one that comes late, once the next question runs, leaves it to answer", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const second = pausedReply(says("Second."), 1);
+    const provider = await fakeProviderFor(
+      [model],
+      says("First."),
+      second.reply
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().run(request("turn-a", "First?"));
+    try {
+      const asked = session().run(request("turn-b", "Second?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(2);
+        },
+        { timeout: 10_000 }
+      );
+      // The first turn's stop, sent again after the way back broke.
+      await session().abort("turn-a");
+      second.release();
+      await expect(asked).resolves.toMatchObject({
+        outcome: "answered",
+        answer: "Second.",
+      });
+    } finally {
+      second.release();
+    }
+  });
+
   it("compacts a long chat on a small window and goes on, every request the summary's included a model call of the chat's", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const { stub, chat } = await chatOf(userId);

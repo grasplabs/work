@@ -565,6 +565,13 @@ export const chatBuildJobs = sqliteTable(
     version: integer(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    /**
+     * Whether the turn that submitted the job is still owed the notice of
+     * how it ended: set as it ends, cleared once its ChatSession took it.
+     */
+    noticeOwed: integer("notice_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     index("chat_build_jobs_chat").on(table.chatId, table.createdAt),

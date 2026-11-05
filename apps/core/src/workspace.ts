@@ -245,14 +245,14 @@ interface LiveTurn {
 export type BuildJob = BuildJobRow & { agentId: string; personId: string };
 
 /** What the agent of a chat is told as a build job it submitted ends. */
-const jobEnded = (job: BuildJobRow, end: BuildJobEnd): string => {
-  if (end.status === "cancelled") {
+const jobEnded = (job: BuildJobRow, status: BuildJobEnd["status"]): string => {
+  if (status === "cancelled") {
     return "was cancelled";
   }
-  if (end.status === "revoked") {
+  if (status === "revoked") {
     return "ended: a permission of yours was revoked since it was submitted";
   }
-  if (end.status === "failed") {
+  if (status === "failed") {
     return "failed";
   }
   return job.kind === "check"
@@ -2836,7 +2836,9 @@ export class Workspace extends DurableObject<Env> {
    * as the person's: its ChatSession, which owns the turn, takes it only
    * while that turn runs (`ChatSession.notify`), through a restart of
    * either object too, so no other turn ever is. Nothing of its result
-   * goes with it: the agent reads that with `env.build.job`.
+   * goes with it: the agent reads that with `env.build.job`. Asked again,
+   * it sends a notice still owed (`#notifyEnded`); it throws while it
+   * can't, so the job's last step is tried again.
    */
   async endBuildJob(
     chatId: unknown,
@@ -2844,28 +2846,35 @@ export class Workspace extends DurableObject<Env> {
     end: BuildJobEnd
   ): Promise<boolean> {
     const chat = chatIdSchema.safeParse(chatId);
-    const job = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
-    if (job?.status !== "running") {
+    if (!chat.success) {
       return false;
     }
-    this.#jobs.end(job.chatId, id, end);
-    if (!this.#deleting.has(job.chatId)) {
-      const text = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
-      try {
-        // Once a job, however often it is sent.
-        await this.#toSession(job.chatId, async (session) => {
-          await session.notify(job.turnId, id, text);
-        });
-      } catch (error) {
-        log.warn("build_job.notice_lost", {
-          chatId: job.chatId,
-          turnId: job.turnId,
-          jobId: id,
-          ...errorFields(error),
-        });
-      }
+    const ended = this.#jobs.end(chat.data, id, end);
+    await this.#notifyEnded(chat.data, id);
+    return ended;
+  }
+
+  /**
+   * Tells the turn that submitted the chat's ended build job `id` how it
+   * ended, while the job owes it that (`noticeOwed`, set as it ended):
+   * its ChatSession takes it once, by the job's ID, or drops it once that
+   * turn ended. Cleared only once it was sent, so a call that fails, or a
+   * restart before it is cleared, leaves it owed: the job's end, tried
+   * again (its last step), sends it again. Throws when it can't be sent.
+   */
+  async #notifyEnded(chatId: ChatId, id: string): Promise<void> {
+    const job = this.#jobs.byId(chatId, id);
+    if (job === undefined || job.status === "running" || !job.noticeOwed) {
+      return;
     }
-    return true;
+    // Being deleted: it tells nothing, and nothing is owed.
+    if (!this.#deleting.has(chatId)) {
+      const text = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, job.status)}. Read how it ended with \`env.build.job("${id}")\`.`;
+      await this.#toSession(chatId, async (session) => {
+        await session.notify(job.turnId, id, text);
+      });
+    }
+    this.#jobs.noticed(chatId, id);
   }
 
   /**
