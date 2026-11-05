@@ -58,7 +58,9 @@ import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 //   and its count is kept under one period (`lineagePeriod`), so a new
 //   month doesn't start it afresh either.
 // - The ledger fails or can't be reached: the gateway sends nothing
-//   unless its admission answered yes. An admission whose answer was lost
+//   unless its admission answered yes. A call that broke on its way (a
+//   restart, a lost connection) is made again under the same ID, which
+//   admits it once. An admission whose answer was lost for good
 //   may have committed: the gateway settles it as `unsent` only if it
 //   knows the request was never sent, and otherwise it is charged the
 //   most it can cost when it comes due, never lost.

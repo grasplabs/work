@@ -7,7 +7,10 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import type { ModelLedger } from "../src/model-ledger.ts";
+import type {
+  Admission as LedgerAdmission,
+  ModelLedger,
+} from "../src/model-ledger.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
@@ -193,6 +196,40 @@ const failingLedger = (
         });
     },
   });
+
+/**
+ * The ledger's binding whose first `admit` is made, then its answer lost
+ * as a restart loses it (a deploy resets the object under the call): the
+ * platform's error, marked as one that broke on its way.
+ */
+const restartingLedger = (): DurableObjectNamespace<ModelLedger> => {
+  let restarted = false;
+  return new Proxy(env.MODEL_LEDGER, {
+    get: (namespace, name): unknown => {
+      if (name !== "getByName") {
+        return Reflect.get(namespace, name, namespace);
+      }
+      return (id: string) => {
+        const stub = namespace.getByName(id);
+        return new Proxy(stub, {
+          get: (target, member): unknown =>
+            member === "admit" && !restarted
+              ? async (admission: LedgerAdmission) => {
+                  restarted = true;
+                  await target.admit(admission);
+                  throw Object.assign(
+                    new Error(
+                      "Durable Object reset because its code was updated."
+                    ),
+                    { durableObjectReset: true, retryable: true }
+                  );
+                }
+              : Reflect.get(target, member, target),
+        });
+      };
+    },
+  });
+};
 
 /** Whether `sql` writes to or reads an audit outbox. */
 const auditing = (sql: string): boolean => sql.includes("audit_outbox");
@@ -802,6 +839,23 @@ describe("model spend", { timeout: 60_000 }, () => {
         detail: { reason: "model.ledger_unavailable" },
       },
     ]);
+  });
+
+  it("send a request whose admission was lost to the ledger restarting, counted once", async () => {
+    const { fake, call, month } = withProvider([pricedAnswer], {
+      MODEL_LEDGER: restartingLedger(),
+    });
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    // Admitted twice under one ID: once its request comes due, nothing
+    // more is charged than it used.
+    await reconcileNow(userOf(ada));
+    expect({
+      sent: fake.requests.length,
+      admitted: await requestsOf(userOf(ada)),
+      spent: await ledgerOf(month, userOf(ada)),
+    }).toStrictEqual({ sent: 1, admitted: 1, spent: pricedMicros });
   });
 
   it("keep a paid answer when its settlement can't be stored, and charge it the most it can cost once it comes due", async () => {

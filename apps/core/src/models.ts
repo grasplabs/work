@@ -68,6 +68,7 @@ import {
   readModelChoice,
 } from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { callObject } from "./durable-objects.ts";
 import {
   maxAskAgainSeconds,
   modelSharesOf,
@@ -84,6 +85,7 @@ import {
 import type { ModelDocument } from "./model-documents.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
+  Admission as LedgerAdmission,
   Admitted as LedgerAdmitted,
   LedgerRoute,
   LedgerScope,
@@ -1051,7 +1053,10 @@ const settleRequest = async (
   settlement: Settlement
 ): Promise<Settled | undefined> => {
   try {
-    return await modelLedger(env).settle(id, settlement);
+    // A settlement made again answers how the request settled.
+    return await callObject(
+      async () => await modelLedger(env).settle(id, settlement)
+    );
   } catch (error) {
     log.error("model.settle_failed", {
       ...errorFields(error),
@@ -1203,21 +1208,28 @@ const admitRequest = async (
   // whole timeout from now.
   const callDeadline = endsAt;
   const reservedMicros = boundMicros(pinned, bound);
+  const admission: LedgerAdmission = {
+    id,
+    period,
+    scopes,
+    model: call.model,
+    price: pinned,
+    reservedMicros,
+    actor: call.trigger,
+    deadline: callDeadline,
+    reconcileAt: callDeadline + reconcileGraceMs,
+    ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
+    fair,
+    ...(route.way === undefined ? {} : { route: route.way }),
+  };
   try {
-    const admitted = await modelLedger(env).admit({
-      id,
-      period,
-      scopes,
-      model: call.model,
-      price: pinned,
-      reservedMicros,
-      actor: call.trigger,
-      deadline: callDeadline,
-      reconcileAt: callDeadline + reconcileGraceMs,
-      ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
-      fair,
-      ...(route.way === undefined ? {} : { route: route.way }),
-    });
+    // The one ledger takes every request of the deployment, so a long
+    // turn's many requests are bound to meet it restarting (a deploy, a
+    // move) now and then. Asked again with the same admission, it answers
+    // yes once, never counting it twice, even if the first ask committed.
+    const admitted = await callObject(
+      async () => await modelLedger(env).admit(admission)
+    );
     if (admitted.ok) {
       return {
         id,
