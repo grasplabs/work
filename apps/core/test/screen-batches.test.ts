@@ -541,11 +541,22 @@ describe("a first screens build of a large App", () => {
     const { loader, names } = recordingLoader();
     const onWorkerd = { ...env, LOADER: loader, RUNTIME_PROFILE: "workerd" };
 
-    await buildScreens(onWorkerd, syntheticApp(2, 1), `app-${unique()}`);
-    await buildScreens(onWorkerd, syntheticApp(2, 1), `app-${unique()}`);
+    const first = await buildScreens(
+      onWorkerd,
+      syntheticApp(2, 1),
+      `app-${unique()}`
+    );
+    const second = await buildScreens(
+      onWorkerd,
+      syntheticApp(2, 1),
+      `app-${unique()}`
+    );
 
     // Core's Loader suffixes each name with the entrypoint it silences.
     const isolates = new Set(names.map((name) => name.split("\u0000")[0]));
-    expect([...isolates]).toStrictEqual([appCompilerName()]);
+    expect({
+      built: [first.ok, second.ok],
+      isolates: [...isolates],
+    }).toStrictEqual({ built: [true, true], isolates: [appCompilerName()] });
   }, 120_000);
 });
