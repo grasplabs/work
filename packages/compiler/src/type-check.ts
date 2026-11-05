@@ -18,7 +18,6 @@ import type { Diagnostic as TscDiagnostic } from "@tsrs/wasm/core";
 import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { computeSdkImports, sdkImports } from "./imports.ts";
-import { isGeneratedPath } from "./inputs.ts";
 import { screenReferences } from "./kit.ts";
 
 /** A tsconfig's `compilerOptions`, as JSON. */
@@ -38,6 +37,10 @@ export const compilerOptions = {
   moduleResolution: "bundler",
   jsx: "react-jsx",
   strict: true,
+  // No `noUnusedLocals`: an unused name is the lint's (`no-unused-vars`,
+  // ultracite-rules.ts and ultracite-plugins.ts), which keeps a draft from
+  // being proposed. As a type error, one unused import mid-edit would stop
+  // the build and the preview.
   // Babel compiles each file on its own.
   isolatedModules: true,
   allowImportingTsExtensions: true,
@@ -67,26 +70,9 @@ export const generatedTarget: TypeTarget = {
   mapped: new Set([screenReferences.specifier]),
 };
 
-/**
- * What the App's own code is held to beyond `compilerOptions`: no unused
- * locals or imports, as TypeScript itself checks them. Ultracite's
- * `no-unused-vars` disagrees with oxlint's on the repo's code
- * (ultracite-rules.ts), so TypeScript's own check stands in. Not
- * `noUnusedParameters`: it flags every unused parameter, where oxlint
- * flags only those after the last one used, so it would hold App code to
- * more than the repo's own and refuse the SDK's own handler shape,
- * `(ctx, row)` with `ctx` unread. Not for code the host generates
- * (`generatedTarget`, workflows, compute modules), which the agent
- * doesn't write, nor what the host generates beside it
- * (`diagnosticsOfRun`).
- */
-const appCodeOptions = {
-  noUnusedLocals: true,
-} as const satisfies CompilerOptions;
-
 /** A screen's files: the DOM's lib, the kit's modules (`allowed`). */
 export const screenTarget = (allowed: ReadonlySet<string>): TypeTarget => ({
-  options: { ...compilerOptions, ...appCodeOptions },
+  options: compilerOptions,
   mapped: new Set([screenReferences.specifier]),
   allowed,
 });
@@ -135,7 +121,7 @@ export const serverTarget = (
  * and they import: its root, the server constructors, the database's
  * types the constructors name, and nothing else.
  */
-const serverCodeTarget = serverTarget(
+export const appCodeTarget = serverTarget(
   generatedModules,
   new Set([
     ...serverSdkImports,
@@ -144,11 +130,6 @@ const serverCodeTarget = serverTarget(
     "@grasp-os/sdk/testing",
   ])
 );
-
-export const appCodeTarget: TypeTarget = {
-  ...serverCodeTarget,
-  options: { ...serverCodeTarget.options, ...appCodeOptions },
-};
 
 /**
  * How an App's workflows are type-checked: no DOM, which
@@ -302,17 +283,7 @@ export const diagnosticsOfRun = (
   return all.flatMap((diagnostic): Diagnostic[] => {
     const severity = severities[diagnostic.category];
     const { fileName } = diagnostic;
-    // A name the host generated that goes unused (`appCodeOptions`): the
-    // host writes what every App may use, and the agent can't change it.
-    const unusedInGenerated =
-      diagnostic.reportsUnnecessary === true &&
-      fileName !== undefined &&
-      isGeneratedPath(fileName.slice(1));
-    if (
-      severity === undefined ||
-      fileName?.startsWith(root) === true ||
-      unusedInGenerated
-    ) {
+    if (severity === undefined || fileName?.startsWith(root) === true) {
       return [];
     }
     const result: Diagnostic = {

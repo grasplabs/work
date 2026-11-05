@@ -26,7 +26,6 @@ export const disagreeing: Readonly<Record<string, number>> = {
   "no-div-regex": 5,
   "no-irregular-whitespace": 2,
   "no-lone-blocks": 1,
-  "no-unused-vars": 36,
   "prefer-destructuring": 39,
   "promise/prefer-catch": 74,
   "react/function-component-definition": 414,

@@ -27,6 +27,87 @@ const pluginOf = (
   rules: Object.assign({}, ...rules) as ESLint.Plugin["rules"],
 });
 
+const typescriptUnusedVars: unknown = typescriptPlugin.rules["no-unused-vars"];
+// SAFETY: typescript-eslint's rules are ESLint rule modules (`pluginOf`).
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const unusedVarsRule = typescriptUnusedVars as Rule.RuleModule;
+
+/** Whether `node` is in a type query (`typeof row` in a type), by its parents. */
+const inTypeQuery = (node: unknown): boolean => {
+  for (
+    let at: unknown = node;
+    typeof at === "object" && at !== null;
+    at = "parent" in at ? at.parent : undefined
+  ) {
+    if ("type" in at && at.type === "TSTypeQuery") {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Whether every read of the variable `node` declares or writes is in a
+ * type query, as `type Row = typeof row` reads it.
+ */
+const readByTypeQueriesOnly = (
+  { sourceCode }: Rule.RuleContext,
+  node: unknown
+): boolean => {
+  const variable = sourceCode.scopeManager.scopes
+    .flatMap(({ variables }) => variables)
+    .find(
+      ({ identifiers, references }) =>
+        identifiers.some((identifier) => identifier === node) ||
+        references.some(({ identifier }) => identifier === node)
+    );
+  const reads = (variable?.references ?? []).filter((reference) =>
+    reference.isRead()
+  );
+  return (
+    reads.length > 0 && reads.every(({ identifier }) => inTypeQuery(identifier))
+  );
+};
+
+/**
+ * typescript-eslint's `no-unused-vars`, reading a name as oxlint's does:
+ * one a type query reads (`type Row = typeof row`) is used, as TypeScript
+ * counts it too. typescript-eslint reports it as used only as a type
+ * (`usedOnlyAsType`), as it does a parameter only a type predicate reads
+ * (`(value, extra): extra is number`), and has no option to tell them
+ * apart, so only the type query's report is dropped: oxlint reports the
+ * predicate's too.
+ *
+ * Two differences remain until oxlint itself runs here: a variable only
+ * ever written inside a loop or a condition (`subject += 1` in a loop),
+ * which oxlint misses and TypeScript doesn't; and a variable written but
+ * never read, which typescript-eslint reports at its last write and oxlint
+ * at its declaration, so a disable comment for one misses the other.
+ */
+const unusedVars: Rule.RuleModule = {
+  ...unusedVarsRule,
+  create: (context) => {
+    // The context is frozen: one of its own `report`, the rest the context's.
+    // SAFETY: `Object.create` of the context is the context, but `report`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const reporting = Object.create(context, {
+      report: {
+        value: (descriptor: Rule.ReportDescriptor) => {
+          const typeQueried =
+            "messageId" in descriptor &&
+            descriptor.messageId === "usedOnlyAsType" &&
+            "node" in descriptor &&
+            readByTypeQueriesOnly(context, descriptor.node);
+          if (!typeQueried) {
+            context.report(descriptor);
+          }
+        },
+      },
+    }) as Rule.RuleContext;
+    return unusedVarsRule.create(reporting);
+  },
+};
+
 export const ultracitePlugins: Readonly<Record<string, ESLint.Plugin>> = {
   import: pluginOf(importX.rules),
   jsdoc: pluginOf(jsdocRules),
@@ -34,7 +115,9 @@ export const ultracitePlugins: Readonly<Record<string, ESLint.Plugin>> = {
   promise: pluginOf(promise.rules),
   react: pluginOf(reactPlugin.rules, reactHooks.rules),
   sonarjs: pluginOf(sonarjs.rules),
-  typescript: pluginOf(typescriptPlugin.rules),
+  typescript: pluginOf(typescriptPlugin.rules, {
+    "no-unused-vars": unusedVars,
+  }),
   unicorn: pluginOf(unicorn.rules),
 };
 
