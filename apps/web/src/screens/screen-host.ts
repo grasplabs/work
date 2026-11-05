@@ -1701,8 +1701,14 @@ export const runScreen = (
 export interface DraftRevisions {
   latest: number | undefined;
   listener: ((revision: number) => void) | undefined;
-  /** Told the App's version the frame shows (`PreviewRefresh.appVersion`). */
-  onShows?: ((appVersion: number | undefined) => void) | undefined;
+  /**
+   * Told what the frame shows: the App's version, if one
+   * (`PreviewRefresh.appVersion`), and its screen, as core opens it and
+   * as each update comes in.
+   */
+  onShows?:
+    | ((appVersion: number | undefined, screen: string) => void)
+    | undefined;
 }
 
 /**
@@ -1745,8 +1751,18 @@ export const runPreview = (
   return runFrame(
     frame,
     {
-      open: async (session) =>
-        await session.chats.preview(chatId, app, screen, version),
+      open: async (session) => {
+        const bundle = await session.chats.preview(
+          chatId,
+          app,
+          screen,
+          version
+        );
+        // The page core opened, as soon as it said: what keeps this frame
+        // open while the draft's screen to show stays it (studio.tsx).
+        revisions?.onShows?.(bundle.refresh?.appVersion, bundle.screen);
+        return bundle;
+      },
       openMs: screenLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
@@ -1790,7 +1806,7 @@ export const runPreview = (
               moves.to?.(next);
             },
             shows: (appVersion) => {
-              revisions.onShows?.(appVersion);
+              revisions.onShows?.(appVersion, bundle.screen);
             },
           },
           bundle.fallback === true

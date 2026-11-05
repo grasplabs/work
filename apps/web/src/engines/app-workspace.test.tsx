@@ -5,7 +5,11 @@ import type {
   VersionReview,
   ViewedApp,
 } from "@grasp-os/shared/apps";
-import type { ChatDraft, ChatUpdate } from "@grasp-os/shared/chat";
+import type {
+  ChatDraft,
+  ChatUpdate,
+  PreviewBundle,
+} from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
@@ -380,18 +384,21 @@ const draftOf = (app: string): ChatDraft => ({
 /**
  * Core, over the page's own connection (a WebSocket) and a real Cap'n Web
  * session, as far as a preview's load reaches it: who is signed in, and
- * each preview asked for, kept and never answered, or refused with
- * `refusal` when one is given. `reached` resolves at the first.
+ * each preview asked for, kept and never answered, refused with `refusal`
+ * when one is given, or answered with `bundle`. `reached` resolves at the
+ * first.
  */
 class PreviewingCore extends RpcTarget {
   readonly asked: unknown[][] = [];
   readonly #reached = Promise.withResolvers<boolean>();
   readonly reached = this.#reached.promise;
   readonly #refusal: string | undefined;
+  readonly #bundle: PreviewBundle | undefined;
 
-  constructor(refusal?: string) {
+  constructor(refusal?: string, bundle?: PreviewBundle) {
     super();
     this.#refusal = refusal;
+    this.#bundle = bundle;
   }
 
   authenticate(): this {
@@ -408,15 +415,41 @@ class PreviewingCore extends RpcTarget {
     return this;
   }
 
-  async preview(...args: unknown[]): Promise<never> {
+  async preview(...args: unknown[]): Promise<PreviewBundle> {
     this.asked.push(args);
     this.#reached.resolve(true);
     if (this.#refusal !== undefined) {
       throw Object.assign(new Error("Refused."), { code: this.#refusal });
     }
+    if (this.#bundle !== undefined) {
+      return await Promise.resolve(this.#bundle);
+    }
     return await Promise.withResolvers<never>().promise;
   }
 }
+
+/**
+ * Core's preview of the App's `desk` page, of its version 1, as it
+ * answers a chat that hasn't changed the App: at the draft's revision 0.
+ */
+const deskOfVersion1: PreviewBundle = {
+  app: appIdSchema.parse("invoice-desk"),
+  name: "Invoices",
+  revision: 0,
+  screens: ["desk"],
+  screen: "desk",
+  artifact: "a".repeat(64),
+  frameToken: "token",
+  refresh: {
+    revision: 0,
+    screen: "desk",
+    entry: "b".repeat(64),
+    modules: {},
+    css: "",
+    kit: [],
+    appVersion: 1,
+  },
+};
 
 describe(AppWorkspace, () => {
   afterEach(() => {
@@ -764,6 +797,52 @@ describe(AppWorkspace, () => {
       review: "Publish version 2",
       asked: [["chat-proposed", "invoice-desk"]],
     });
+  });
+
+  it("keeps the frame open on the page it shows when the chat's first write changes that page, rather than starting it afresh", async () => {
+    const fake = fakeApps("published");
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    let send: ((update: ChatUpdate) => void) | undefined;
+    let drafts: ChatDraft[] = [];
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-drafting",
+      async (_chat, _after, received) => {
+        send = received;
+        return await Promise.resolve(watching());
+      },
+      undefined,
+      async () => await Promise.resolve(drafts)
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+
+    // The agent's first write changes `desk`, the page the frame shows.
+    drafts = [{ ...draftOf("invoice-desk"), changed: ["screens/desk.tsx"] }];
+    await act(async () => {
+      send?.({
+        messages: [],
+        partial: null,
+        running: false,
+        stopped: null,
+        held: 0,
+        drafts: 1,
+      });
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      // The very frame, with what its page holds: the write comes in as
+      // an update, never by opening the preview again.
+      sameFrame: document.querySelector("iframe") === frame,
+      opens: core.asked.length,
+    }).toStrictEqual({ sameFrame: true, opens: 1 });
   });
 
   it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {

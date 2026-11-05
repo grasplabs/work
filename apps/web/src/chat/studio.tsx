@@ -54,12 +54,28 @@ export const DraftPreview = ({
   /** Told once the frame failed (`PreviewFrame`). */
   onEnded?: ScreenEnded;
   /** Told the App's version the frame shows (`PreviewFrame`). */
-  onShows?: (appVersion: number | undefined) => void;
+  onShows?: (appVersion: number | undefined, screen: string) => void;
 }) => {
   const [picked, setPicked] = useState<string>();
   const { t } = useLingui();
   const screens = draft === undefined ? [] : changedScreens(draft);
   const screen = previewedScreen(screens, picked, version);
+  // The page the open frame was opened for, and the one core said it
+  // shows: a frame opened for none shows the App's first, so a write that
+  // then names that page keeps the frame, and takes the write as an
+  // update, keeping what the page holds. Another page or version opens
+  // the frame afresh, as its key says.
+  const [framed, setFramed] = useState({ app, screen, version });
+  const [showing, setShowing] = useState<string>();
+  const keeps =
+    framed.app === app &&
+    framed.version === version &&
+    (framed.screen === screen || (screen !== undefined && screen === showing));
+  if (!keeps) {
+    setFramed({ app, screen, version });
+    setShowing(undefined);
+  }
+  const open = keeps ? framed : { app, screen, version };
   return (
     <section
       aria-label={t`Preview of ${name}`}
@@ -85,12 +101,15 @@ export const DraftPreview = ({
       <PreviewFrame
         app={app}
         chatId={chatId}
-        key={`${app}:${screen ?? ""}:${version ?? ""}`}
+        key={`${open.app}:${open.screen ?? ""}:${open.version ?? ""}`}
+        onShows={(appVersion, shown) => {
+          setShowing(shown);
+          onShows?.(appVersion, shown);
+        }}
         {...(draft === undefined ? {} : { revision: draft.revision })}
-        {...(screen === undefined ? {} : { screen })}
+        {...(open.screen === undefined ? {} : { screen: open.screen })}
         {...(version === undefined ? {} : { version })}
         {...(onEnded === undefined ? {} : { onEnded })}
-        {...(onShows === undefined ? {} : { onShows })}
       />
     </section>
   );

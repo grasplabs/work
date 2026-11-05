@@ -336,7 +336,7 @@ interface FrameProps extends FrameSource {
    * shows another, or undefined while it shows the draft's own changes
    * (`PreviewRefresh.appVersion`).
    */
-  onShows?: (appVersion: number | undefined) => void;
+  onShows?: (appVersion: number | undefined, screen: string) => void;
   title: string;
   onState: (state: ScreenState) => void;
   onOpened: (appName: string) => void;
@@ -531,7 +531,7 @@ const FramedScreen = ({
   /** A chat's preview's: the draft's newest revision (`FrameProps`). */
   revision?: number;
   /** A chat's preview's: told the App's version it shows (`FrameProps`). */
-  onShows?: (appVersion: number | undefined) => void;
+  onShows?: (appVersion: number | undefined, screen: string) => void;
   title: string;
   label: string;
   embedded: boolean;
@@ -836,7 +836,7 @@ export const PreviewFrame = ({
   version?: number;
   revision?: number;
   onEnded?: ScreenEnded;
-  onShows?: (appVersion: number | undefined) => void;
+  onShows?: (appVersion: number | undefined, screen: string) => void;
 }) => {
   const { t } = useLingui();
   const title =
