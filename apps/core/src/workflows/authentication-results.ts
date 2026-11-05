@@ -13,10 +13,10 @@
 // A sealer adds no set to a chain whose last seal says `cv=fail` or that
 // is full at instance 50 (RFC 8617 5.1, 4.2.1), so those are what a sender
 // would forge to keep Email Routing's set off the top, and they report
-// nothing; so does a top seal saying anything but `cv=none` or `cv=pass`,
-// and any ARC header whose instance doesn't read or whose name is written
-// with a space before its colon. A plain
-// Authentication-Results header is never read: Email Routing records its
+// nothing; so does any seal not saying exactly what a chain that holds
+// has (`cv=none` at 1, `cv=pass` above), and any ARC header whose instance
+// doesn't read or whose name is written with a space before its colon.
+// A plain Authentication-Results header is never read: Email Routing records its
 // results only in its ARC set, so one under its authserv-id is a sender's.
 // This holds only for mail Email Routing received: an ingress without it in
 // front (mail-ingress.ts) must seal mail with an ARC set of its own, or
@@ -252,7 +252,7 @@ interface ResultInfo {
   /** Its method, with its version when that isn't 1 (`dkim/2`). */
   readonly method: string;
   readonly result: string;
-  /** Each property by `ptype.property` (`smtp.mailfrom`), the first given. */
+  /** Each property by `ptype.property` (`smtp.mailfrom`). */
   readonly properties: ReadonlyMap<string, string>;
 }
 
@@ -277,10 +277,13 @@ const resultInfo = (reader: Reader): ResultInfo => {
     reader.expect(".");
     const property = `${ptype}.${reader.keyword()}`;
     reader.expect("=");
-    const value = reader.value();
-    if (!properties.has(property)) {
-      properties.set(property, value);
+    // Refused, though the grammar allows it: a sender's envelope address
+    // that closes and reopens Email Routing's comment could put a property
+    // of its choice ahead of the real one.
+    if (properties.has(property)) {
+      throw unparsable(`${property} twice`);
     }
+    properties.set(property, reader.value());
   }
   const method = version === "1" ? name : `${name}/${version}`;
   return { method, result, properties };
@@ -335,6 +338,19 @@ const arcResults = (
   return { authservId, results };
 };
 
+/** `text` without the FWS around it (RFC 6376 3.2), and nothing else. */
+const trimmed = (text: string): string => {
+  let start = 0;
+  let end = text.length;
+  while (start < end && isWhitespace(text.charAt(start))) {
+    start += 1;
+  }
+  while (end > start && isWhitespace(text.charAt(end - 1))) {
+    end -= 1;
+  }
+  return text.slice(start, end);
+};
+
 /**
  * An ARC-Seal's or ARC-Message-Signature's instance and `cv` tag (RFC 6376
  * 3.2's tag-list: `name=value` by `;`, each name once).
@@ -342,21 +358,19 @@ const arcResults = (
 const arcTagsOf = (
   value: string
 ): { instance: number; cv: string | undefined } => {
+  const specs = value.split(";");
+  if (trimmed(specs.at(-1) ?? "") === "") {
+    specs.pop();
+  }
   const tags = new Map<string, string>();
-  for (const spec of value.split(";")) {
-    const [name = "", ...rest] = spec.split("=").map((part) => part.trim());
-    if (name === "" && rest.length === 0) {
-      continue;
-    }
+  for (const spec of specs) {
+    const [name = "", ...rest] = spec.split("=").map(trimmed);
     if (rest.length === 0 || !/^[A-Za-z]\w*$/u.test(name) || tags.has(name)) {
       throw unparsable("Expected a tag-list");
     }
     tags.set(name, rest.join("="));
   }
-  return {
-    instance: instanceOf(tags.get("i")),
-    cv: tags.get("cv")?.toLowerCase(),
-  };
+  return { instance: instanceOf(tags.get("i")), cv: tags.get("cv") };
 };
 
 /** A message's header, as postal-mime gives it: its name lower case. */
@@ -401,7 +415,6 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
   );
   const onceAtHighest = (instances: readonly number[]) =>
     instances.filter((instance) => instance === highest).length === 1;
-  const topCv = seals.find(({ instance }) => instance === highest)?.cv;
   const [top] = resultsHeaders;
   const topSetTrusted =
     top !== undefined &&
@@ -410,10 +423,11 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
     onceAtHighest(resultsInstances) &&
     onceAtHighest(sealInstances) &&
     onceAtHighest(signatureInstances) &&
-    (topCv === "none" || topCv === "pass") &&
-    // A failed seal anywhere fails the chain (RFC 8617 5.2), so Email
-    // Routing's own would say so: one that doesn't isn't its.
-    seals.every(({ cv }) => cv !== "fail");
+    // Each seal as a chain that holds has it (RFC 8617 5.2): one that
+    // doesn't makes Email Routing's own say `cv=fail`, or stops it sealing.
+    seals.every(
+      ({ instance, cv }) => cv === (instance === 1 ? "none" : "pass")
+    );
   if (!topSetTrusted) {
     return [];
   }

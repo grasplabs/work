@@ -28,9 +28,13 @@ const nothing = { spf: null, dkim: null, dmarc: null };
 /**
  * An ARC set at `instance` (its seal, message signature and results), as
  * postal-mime gives headers (names lower case, topmost first): the seal
- * saying `cv`.
+ * saying `cv`, by default what a chain that holds has.
  */
-const arcSet = (instance: number, results: string, cv = "none") => [
+const arcSet = (
+  instance: number,
+  results: string,
+  cv = instance === 1 ? "none" : "pass"
+) => [
   {
     key: "arc-seal",
     value: `i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=abc/def==`,
@@ -116,6 +120,11 @@ describe("Authentication-Results grammar (RFC 8601 2.2)", () => {
       swallowed: routing(
         'dkim=fail header.d=a"b header.s=s; dmarc=fail header.from=bank.test; spf=none smtp.helo=x" ;dmarc=pass header.from=bank.test'
       ),
+      // An envelope sender closing and reopening Email Routing's comment
+      // (a quoted local part may hold both, RFC 5321 4.1.2).
+      repeated: routing(
+        'spf=pass (mx.cloudflare.net: domain of "x)smtp.mailfrom=boss@bank.test("@evil.test designates 192.0.2.1 as permitted sender) smtp.mailfrom="x)smtp.mailfrom=boss@bank.test("@evil.test'
+      ),
       // `\)` is a quoted pair (RFC 5322 3.2.1): the comment goes on.
       escapedClose: routing(
         "dkim=pass (x \\) header.d=bank.test) header.d=evil.test"
@@ -125,6 +134,7 @@ describe("Authentication-Results grammar (RFC 8601 2.2)", () => {
       inReason: nothing,
       inValue: nothing,
       swallowed: nothing,
+      repeated: nothing,
       escapedClose: { result: "pass", domain: "evil.test" },
     });
   });
@@ -387,6 +397,11 @@ describe("a reply's authentication", () => {
         ...arcSet(1, forged)
       ),
       sameInstanceTwice: bossReport(...arcSet(2, forged), ...arcSet(2, forged)),
+      // Tag values are case-sensitive (RFC 6376 3.2), and only the first
+      // seal of a chain that holds says `cv=none` (RFC 8617 5.2).
+      casedCv: bossReport(...arcSet(1, forged, "NONE")),
+      passAtOne: bossReport(...arcSet(1, forged, "pass")),
+      noneAbove: bossReport(...arcSet(2, forged, "none"), ...arcSet(1, forged)),
       unreadableSeal: bossReport(
         { key: "arc-seal", value: "i=1; cv=maybe" },
         ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
@@ -423,6 +438,9 @@ describe("a reply's authentication", () => {
       noSignature: nothing,
       signedHigher: nothing,
       sameInstanceTwice: nothing,
+      casedCv: nothing,
+      passAtOne: nothing,
+      noneAbove: nothing,
       unreadableSeal: nothing,
       unreadableInstance: nothing,
       lowerUnreadable: { result: "pass", domain: "bank.test" },
