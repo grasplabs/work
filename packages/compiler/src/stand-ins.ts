@@ -1,6 +1,8 @@
 import Babel from "@babel/standalone";
 import { symbolicModules } from "@grasp-os/sdk/host";
 
+import { parserPlugins } from "./steering.ts";
+
 // While an App's server code doesn't register, the modules generated from
 // it are stand-ins typed `any` (the SDK's `symbolicModules`): a screen or
 // a workflow is checked against them for everything else, and the one
@@ -118,12 +120,7 @@ export const callbackParameters = (
         configFile: false,
         sourceType: "module",
         code: false,
-        parserOpts: {
-          plugins: [
-            ["typescript", { dts: path.endsWith(".d.ts") }],
-            ...(path.endsWith(".tsx") ? ["jsx"] : []),
-          ],
-        },
+        parserOpts: { plugins: parserPlugins(path) },
         plugins: [collect],
       });
     } catch {

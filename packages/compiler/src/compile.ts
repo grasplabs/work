@@ -2,6 +2,8 @@ import Babel from "@babel/standalone";
 import reactCompiler from "babel-plugin-react-compiler";
 import reactRefresh from "react-refresh/babel";
 
+import { parserPlugins } from "./steering.ts";
+
 /**
  * The directives that switch the React Compiler off for the function (or
  * module) that holds them, as it matches them: exactly this text.
@@ -150,6 +152,8 @@ export const stripTypes = (
     // Each line where the source has it, so a stack trace of the module
     // names the line of the file to fix (`transformModule`).
     retainLines: true,
+    // Parsed as a project's check parses it: a declaration file as one.
+    parserOpts: { plugins: parserPlugins(filename) },
     plugins,
     presets: [["typescript", { allExtensions: true }]],
   }).code ?? "";

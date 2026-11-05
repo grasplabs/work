@@ -73,6 +73,19 @@ const directiveIn = (
     ? `//${value}`.trim()
     : suppressionIn(value);
 
+/**
+ * The parser options a file is read with, on the platform (compile.ts
+ * `stripTypes`, stand-ins.ts) and in a project's check alike: TypeScript,
+ * a `.d.ts` as declarations (`export const x: number;`, no initializers),
+ * and JSX in a `.tsx`.
+ */
+export const parserPlugins = (
+  file: string
+): (["typescript", { dts: boolean }] | "jsx")[] => [
+  ["typescript", { dts: file.endsWith(".d.ts") }],
+  ...(file.endsWith(".tsx") ? (["jsx"] as const) : []),
+];
+
 /** Where Babel's parser puts a node or a comment: a 1-based line, a 0-based column. */
 interface Location {
   readonly start: { readonly line: number; readonly column: number };

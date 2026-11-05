@@ -390,6 +390,12 @@ const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
 /** The repo's TypeScript, 7: the project's, never 6. */
 const repoTypescript = installedVersion(".", "typescript");
 
+/** The Babel the platform parses App files with, its parser bundled. */
+const platformParser = installedVersion(
+  "packages/compiler",
+  "@babel/standalone"
+);
+
 const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
 
 /**
@@ -560,6 +566,9 @@ describe(
           "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
         "app/screens/prose.tsx":
           "/// The notes screen.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
+        // A declaration file read as declarations, as the platform reads it.
+        "app/declared.d.ts":
+          "export const limit: number;\nexport type Limit = typeof limit;\n",
       };
       const write = (files: Record<string, string>): void => {
         for (const [file, source] of Object.entries(files)) {
@@ -601,6 +610,15 @@ describe(
       // could steer the check, in a workflow, server code and a compute
       // module alike.
       const steering: Record<string, string> = {
+        // Globals a screen declares, which the platform refuses in every
+        // kind of App code; and server code the parser refuses, or that
+        // names a missing file, refused once, though the workflows' check
+        // reads it too.
+        "app/screens/globals.tsx":
+          "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
+        "app/server/unparsed.ts": "export const = ;\n",
+        "app/server/reference.ts":
+          '/// <reference path="./missing.ts" />\nexport const one = 1;\n',
         // A suppression after a division by a non-null value, never a
         // regular expression.
         "app/workflows/lib/non-null.ts":
@@ -623,25 +641,38 @@ describe(
       }
       write(steering);
       const failedBuild = projectCheck(out);
+      const codesOf = (file: string): string[] =>
+        failedBuild.problems[file] ?? [];
 
       expect({
         install: install.status,
         checker: {
           tsrs: project.devDependencies["@tsrs/wasm"],
           typescript: project.devDependencies.typescript,
+          // The parser it reads files with, as the platform's Babel does.
+          parser: project.devDependencies["@babel/parser"],
         },
         accepted,
         failedCheck,
         failedBuild: {
           status: failedBuild.status,
           files: Object.keys(failedBuild.problems).toSorted(),
-          notSteering: Object.values(failedBuild.problems)
-            .flat()
+          notSteering: Object.entries(failedBuild.problems)
+            .filter(([file]) => file !== "app/server/unparsed.ts")
+            .flatMap(([, codes]) => codes)
             .filter((code) => code !== "steering"),
+          shared: {
+            unparsed: codesOf("app/server/unparsed.ts"),
+            reference: codesOf("app/server/reference.ts"),
+          },
         },
       }).toStrictEqual({
         install: 0,
-        checker: { tsrs: platformChecker, typescript: repoTypescript },
+        checker: {
+          tsrs: platformChecker,
+          typescript: repoTypescript,
+          parser: platformParser,
+        },
         accepted: { status: 0, problems: {} },
         failedCheck: {
           status: 1,
@@ -659,6 +690,7 @@ describe(
           status: 1,
           files: Object.keys(steering).toSorted(),
           notSteering: [],
+          shared: { unparsed: ["compile"], reference: ["steering"] },
         },
       });
     });

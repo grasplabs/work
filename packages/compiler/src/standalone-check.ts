@@ -51,8 +51,13 @@ import {
 } from "@tsrs/wasm/core";
 import type { Diagnostic, FileStat, HostFileSystem } from "@tsrs/wasm/core";
 
-import { ambientOf, directivesIn, referenceError } from "./steering.ts";
-import type { DirectiveSite, ModuleDeclaration } from "./steering.ts";
+import {
+  ambientOf,
+  directivesIn,
+  parserPlugins,
+  referenceError,
+} from "./steering.ts";
+import type { ModuleDeclaration } from "./steering.ts";
 
 /** A problem in an App file, or in a check's options. */
 interface Problem {
@@ -67,8 +72,13 @@ interface Problem {
 interface Kind {
   /** Whether it reports `file` (relative to its tsconfig's directory). */
   readonly reports: (file: string) => boolean;
-  /** Whether nothing in `file` may steer the check. */
+  /**
+   * Whether no comment in `file` may steer the check: no triple-slash
+   * directive beyond a reference path, no suppression.
+   */
   readonly steered: (file: string) => boolean;
+  /** Whether `file` may declare ambient modules or globals: the host's own code. */
+  readonly declares: (file: string) => boolean;
   /** Whether `file`'s own type errors aren't yet the platform's. */
   readonly lenient: (file: string) => boolean;
 }
@@ -86,15 +96,21 @@ const workflow = (file: string): boolean => file.startsWith("workflows/");
  * workflows'; and the host's generated modules are its own.
  */
 const kinds: Readonly<Record<string, Kind>> = {
-  screens: { reports: every, steered: none, lenient: none },
+  screens: { reports: every, steered: none, declares: none, lenient: none },
   server: {
     reports: every,
     steered: (file) => !generated(file),
+    declares: generated,
     lenient: (file) => file.startsWith("server/migrations/"),
   },
-  workflows: { reports: workflow, steered: workflow, lenient: none },
-  compute: { reports: every, steered: every, lenient: none },
-  generated: { reports: every, steered: none, lenient: none },
+  workflows: {
+    reports: workflow,
+    steered: workflow,
+    declares: none,
+    lenient: none,
+  },
+  compute: { reports: every, steered: every, declares: none, lenient: none },
+  generated: { reports: every, steered: none, declares: every, lenient: none },
 };
 
 /** `value`'s own `key`, when `value` is an object (parsed JSON). */
@@ -396,17 +412,15 @@ interface Parsed {
 }
 
 /**
- * `text` parsed as the platform's compile parses `file` (compile.ts),
- * or the parser's refusal of it, which the platform's build reports.
+ * `text` parsed as the platform's compile parses `file`, with the same
+ * parser options (steering.ts `parserPlugins`), or the parser's refusal
+ * of it, which the platform's build reports.
  */
 const parsedOf = (file: string, text: string): Parsed | Problem => {
   try {
     const { comments, program } = parse(text, {
       sourceType: "module",
-      plugins: [
-        ["typescript", { dts: file.endsWith(".d.ts") }],
-        ...(file.endsWith(".tsx") ? (["jsx"] as const) : []),
-      ],
+      plugins: parserPlugins(file),
     });
     return { comments: comments ?? [], program };
   } catch (error) {
@@ -451,42 +465,40 @@ const ambientDeclarations = (
   return found;
 };
 
+/** The comments in a parsed file TypeScript obeys as directives to its check. */
+const directiveProblems = (file: string, { comments }: Parsed): Problem[] =>
+  directivesIn(comments).map(({ directive, line, column }) => ({
+    file,
+    line,
+    column,
+    code: "steering",
+    message: `${directive} is never in this code: its type check is the platform's, as it is.`,
+  }));
+
 /**
- * What in a parsed file would steer the check rather than be checked by
- * it: a comment TypeScript obeys as a directive, and an ambient module
- * or global declaration (steering.ts, as the platform reads them).
+ * The ambient module and global declarations in a parsed file, which
+ * would declare, or shadow, a module by name, or give every file globals
+ * (steering.ts `ambientOf`, as the platform reads them).
  */
-const steeringIn = (file: string, { comments, program }: Parsed): Problem[] => [
-  ...directivesIn(comments).map(
-    ({ directive, line, column }: DirectiveSite): Problem => ({
-      file,
-      line,
-      column,
-      code: "steering",
-      message: `${directive} is never in this code: its type check is the platform's, as it is.`,
-    })
-  ),
-  ...ambientDeclarations(program).flatMap(
-    ({ line, column, ...declaration }) => {
-      const ambient = ambientOf(declaration);
-      if (ambient === undefined) {
-        return [];
-      }
-      return [
-        {
-          file,
-          line,
-          column,
-          code: "steering",
-          message:
-            "module" in ambient
-              ? `declare module ${JSON.stringify(ambient.module)} is never in this code: it would declare, or shadow, a module the SDK doesn't give it.`
-              : "declare global is never in this code: it would declare globals its isolate doesn't have, for every file.",
-        },
-      ];
+const ambientProblems = (file: string, { program }: Parsed): Problem[] =>
+  ambientDeclarations(program).flatMap(({ line, column, ...declaration }) => {
+    const ambient = ambientOf(declaration);
+    if (ambient === undefined) {
+      return [];
     }
-  ),
-];
+    return [
+      {
+        file,
+        line,
+        column,
+        code: "steering",
+        message:
+          "module" in ambient
+            ? `declare module ${JSON.stringify(ambient.module)} is never in App code: it would declare, or shadow, a module the platform doesn't give it.`
+            : "declare global is never in App code: it would declare globals its runtime doesn't have, for every file.",
+      },
+    ];
+  });
 
 /**
  * What `inCheck`'s triple-slash directives, wherever in the file, reach
@@ -546,7 +558,9 @@ const configProblem = (config: string): Problem[] => [
  * can't read, or code that steers the check, which so never reaches it
  * (a `/// <reference lib="dom" />` in one file can't give every other
  * file the DOM here either); and the triple-slash directives it refuses
- * beside the check's own errors.
+ * beside the check's own errors. Each only for the files the kind
+ * reports: a file two kinds read (server code, which a workflow's check
+ * reads for its types) is refused once, by its own kind.
  */
 const readFiles = (
   texts: ReadonlyMap<string, string>,
@@ -557,13 +571,19 @@ const readFiles = (
   const refused: Problem[] = [];
   const references: Problem[] = [];
   for (const [file, text] of texts) {
+    if (!kind.reports(file)) {
+      continue;
+    }
     const parsed = parsedOf(shown(file), text);
     if (!("program" in parsed)) {
       refused.push(parsed);
       continue;
     }
     if (kind.steered(file)) {
-      refused.push(...steeringIn(shown(file), parsed));
+      refused.push(...directiveProblems(shown(file), parsed));
+    }
+    if (!kind.declares(file)) {
+      refused.push(...ambientProblems(shown(file), parsed));
     }
     references.push(...referencesIn(shown(file), file, parsed, files));
   }

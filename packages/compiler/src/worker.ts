@@ -221,6 +221,17 @@ const messageIn = (path: string, error: unknown): string =>
 const refreshHeader = (path: string): string =>
   `import{register as __graspRefreshRegister,signature as ${refreshNames.signature}}from${JSON.stringify(kitModuleName(previewRefresh))};const ${refreshNames.register}=(type,id)=>__graspRefreshRegister(type,${JSON.stringify(`${path} `)}+id);`;
 
+/** Where a directive is in `file`, as a diagnostic points at it. */
+const directiveAt = (
+  file: string,
+  { line, column }: DirectiveSite
+): Location => {
+  if (line === undefined) {
+    return { file };
+  }
+  return column === undefined ? { file, line } : { file, line, column };
+};
+
 /**
  * What a screen's or a declaration's triple-slash directives reach beyond
  * the App's files (steering.ts `referenceError`), each refused where it is.
@@ -230,17 +241,11 @@ const referenceErrors = (
   directives: readonly DirectiveSite[],
   files: ReadonlySet<string>
 ): Diagnostic[] =>
-  directives.flatMap(({ directive, line }) => {
-    const message = referenceError(directive, path, files);
+  directives.flatMap((site) => {
+    const message = referenceError(site.directive, path, files);
     return message === undefined
       ? []
-      : [
-          problem(
-            "imports",
-            message,
-            line === undefined ? { file: path } : { file: path, line }
-          ),
-        ];
+      : [problem("imports", message, directiveAt(path, site))];
   });
 
 /**
@@ -809,11 +814,11 @@ const compileCodeFile = (
   // a suppression switches the check off.
   const steering =
     kind.typeChecked === true
-      ? directives.map(({ directive, line }) =>
+      ? directives.map((site) =>
           problem(
             "imports",
-            `${directive} is never in ${kind.name.toLowerCase()} code: its type check is the platform's, as it is, for all of them.`,
-            line === undefined ? { file: path } : { file: path, line }
+            `${site.directive} is never in ${kind.name.toLowerCase()} code: its type check is the platform's, as it is, for all of them.`,
+            directiveAt(path, site)
           )
         )
       : [];
@@ -1058,11 +1063,11 @@ const compileAppCodeFile = (
   // migration's `/// <reference lib="dom" />` would give every operation
   // the DOM), and a suppression switches the check off. Server code holds
   // neither, migrations and tests included.
-  const steering = directives.map(({ directive, line }) =>
+  const steering = directives.map((site) =>
     problem(
       "imports",
-      `${directive} is never in an App's server code: its type check is the platform's, as it is, for the whole App.`,
-      line === undefined ? { file: path } : { file: path, line }
+      `${site.directive} is never in an App's server code: its type check is the platform's, as it is, for the whole App.`,
+      directiveAt(path, site)
     )
   );
   const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
