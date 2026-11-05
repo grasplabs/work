@@ -255,7 +255,7 @@ describe("a run of tsc", () => {
 });
 
 describe("unused names in App code", () => {
-  it("are errors in what the agent writes, but for parameters (a handler's `ctx` it doesn't read), and never in what the host generates", () => {
+  it("are never type errors, so one mid-edit stops no build: the lint reports them", () => {
     const found = typeCheck(
       tsrs,
       kit,
@@ -263,24 +263,16 @@ describe("unused names in App code", () => {
         {
           "components/total.ts": `import type { Given } from "given";
 
-export const total = (ctx: number, row: number): number => {
-  void row;
+export const total = (ctx: number, row: number, spare: number): number => {
   const left = 1;
-  return 2;
+  return row;
 };
 `,
-          "server/_generated/api.ts": "const spare = 1;\nexport {};\n",
         },
         given
       )
-    )
-      .filter(({ rule }) => ["TS6133", "TS6192", "TS6196"].includes(rule))
-      .map(({ file, line, rule }) => ({ file, line, rule }));
+    );
 
-    expect(found).toStrictEqual([
-      // TypeScript 7 says an unused type is unused as a type.
-      { file: "components/total.ts", line: 1, rule: "TS6196" },
-      { file: "components/total.ts", line: 5, rule: "TS6133" },
-    ]);
+    expect(found).toStrictEqual([]);
   });
 });

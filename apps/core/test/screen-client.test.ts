@@ -644,7 +644,7 @@ describe("the session client", { timeout: 120_000 }, () => {
 });
 /** A screen of the Notes App whose component runs `body` first. */
 const screen = (body: string): string => {
-  // Only the hooks `body` uses: an unused import fails the type check.
+  // Only the hooks `body` uses: an unused import is a lint error.
   const hooks = ["useMutation", "useQuery"].filter((hook) =>
     body.includes(hook)
   );

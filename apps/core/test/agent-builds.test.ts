@@ -1705,6 +1705,70 @@ export const titles = action({
     );
   });
 
+  it("builds and previews a draft with an unused import, and proposes it once the lint's finding is fixed", async () => {
+    // An unused name is a lint finding, never a type error: mid-edit, the
+    // draft still builds and its preview still runs.
+    const unused = {
+      ...notesFiles,
+      "server/notes.ts": (notesFiles["server/notes.ts"] ?? "").replace(
+        'import { noteFields } from "../schema.ts";',
+        'import { noteFields } from "../schema.ts";\nimport { internal } from "@server/_generated/internal";'
+      ),
+      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesFiles["screens/notes.tsx"] ?? ""}`,
+    };
+    const { chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        const written = await env.build.write(app.id, ${JSON.stringify(unused)});
+        const called = await env.build.call(app.id, "notes.echo", { word: "hi" });
+        const refused = await env.build.propose(app.id, "Notes");
+        const fixed = await env.build.write(app.id, ${JSON.stringify(notesFiles)});
+        const proposed = await env.build.propose(app.id, "Notes");
+        const statuses = ({ check }) => ({ passed: check.passed, screens: check.screens.status, server: check.server.status, lint: check.lint.status });
+        return {
+          written: { errors: written.errors, diagnostics: written.diagnostics.map(({ file, rule, severity }) => ({ file, rule, severity })) },
+          called,
+          refused: { version: refused.version, ...statuses(refused) },
+          fixed: fixed.errors,
+          proposed: proposed.version,
+        };
+      };`),
+      says("Proposed once it was clean."),
+    ]);
+    await grant();
+
+    await chat.ask("Build a notes App");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toStrictEqual({
+      written: {
+        errors: 2,
+        diagnostics: [
+          {
+            file: "screens/notes.tsx",
+            rule: "no-unused-vars",
+            severity: "error",
+          },
+          {
+            file: "server/notes.ts",
+            rule: "no-unused-vars",
+            severity: "error",
+          },
+        ],
+      },
+      called: { ok: true, answer: "hi" },
+      refused: {
+        version: null,
+        passed: false,
+        screens: "ok",
+        server: "ok",
+        lint: "failed",
+      },
+      fixed: 0,
+      proposed: 1,
+    });
+  });
+
   it("writes no workflow into an App, whatever the path, the company it keeps or the blueprint it comes from, and changes none a builder wrote but to delete it", async () => {
     // The attack: code the agent writes under workflows/ would run as the
     // App's own workflow, its calls read from the code rather than from a

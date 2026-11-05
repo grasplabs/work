@@ -80,6 +80,23 @@ describe("building on save", { timeout: 60_000 }, () => {
     });
   });
 
+  it("builds a screen with an unused import: an unused name is the lint's, never the build's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const unused = {
+      "screens/desk.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
+${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
+    };
+
+    const { builds } = await builder.api.apps.files.commit(
+      app,
+      unused,
+      "Unused"
+    );
+
+    expect(builds.screens).toStrictEqual({ status: "ok", diagnostics: [] });
+  });
+
   it("tells whoever saved what doesn't build and where, and commits all the same", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);

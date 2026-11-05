@@ -1370,8 +1370,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      // And the other file's name, unused in its own module.
-      files: ["server/extra-name.ts", "server/extra.ts"],
+      files: ["server/extra.ts"],
     });
   });
 
@@ -1501,6 +1500,18 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
           '/// <summary>A comment, not a directive.</summary>\n// Do not use @ts-ignore here: a comment that mentions it.\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
         )
       )
+    ).resolves.toStrictEqual({ code: "ok", files: [] });
+  });
+
+  it("seals server code and tests with unused names: the lint reports them, before a version is proposed", async () => {
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          'import { v } from "@grasp-os/sdk";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
+        ),
+        "tests/helper.ts":
+          'import { v } from "@grasp-os/sdk";\n\nexport const helper = 1;\n',
+      })
     ).resolves.toStrictEqual({ code: "ok", files: [] });
   });
 });

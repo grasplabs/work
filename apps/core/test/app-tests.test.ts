@@ -206,7 +206,7 @@ export default appTest({
 /**
  * A suite of one test, which runs `body` with an owner at hand: the
  * owner and the references only where it names them, as an unused name
- * fails the type check.
+ * is a lint error.
  */
 const suiteOf = (
   body: string,

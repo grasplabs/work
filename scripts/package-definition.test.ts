@@ -515,6 +515,18 @@ const graspRulesOf = (files: Record<string, string>): string[] =>
     )
     .toSorted();
 
+/** A component with unused names: an import, a local, a trailing parameter. */
+const unusedNames = `import { Badge } from "@grasp-os/ui/components/badge";
+
+const row = { id: 1 };
+export type Row = typeof row;
+
+export const total = (ctx: number, count: number, spare: number): number => {
+  const left = 1;
+  return count;
+};
+`;
+
 /** A built-in blueprint's App files, by path. */
 const blueprintFiles = (name: string): Record<string, string> => {
   const dir = path.join(ROOT, "apps/core/blueprints", name, "files");
@@ -1662,6 +1674,9 @@ test("counts", () => {
   expect([1].length).toEqual(1);
 });
 `,
+        // Unused names: an import, a local and a parameter after the last
+        // one used, but not one before it, nor a name a type reads.
+        "components/unused.ts": unusedNames,
       };
       const write = (file: string, source: string): void => {
         mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
@@ -1672,6 +1687,25 @@ test("counts", () => {
       }
       const projectFound = run(out, "lint", "--format=json");
       for (const file of Object.keys(found)) {
+        rmSync(path.join(out, "app", file));
+      }
+      // Unused names are the lint's, never the typecheck's, as Grasp's
+      // builds pass them: in screens and components, and in server code.
+      const unusedFiles = {
+        "components/unused.ts": unusedNames,
+        "server/unused.ts": `import { v } from "@grasp-os/sdk";
+
+export const later = (): number => {
+  const spare = 1;
+  return 2;
+};
+`,
+      };
+      for (const [file, source] of Object.entries(unusedFiles)) {
+        write(`app/${file}`, source);
+      }
+      const unusedChecked = run(out, "typecheck");
+      for (const file of Object.keys(unusedFiles)) {
         rmSync(path.join(out, "app", file));
       }
       // And the design system's lint, as Grasp's screen build runs it
@@ -1717,6 +1751,9 @@ export const Off = () => (
         "app/components/findings.ts warning sonarjs/no-identical-expressions",
         "app/components/spanning.ts error no-debugger",
         "app/components/spanning.ts error no-inline-comments",
+        "app/components/unused.ts error no-unused-vars",
+        "app/components/unused.ts error no-unused-vars",
+        "app/components/unused.ts error no-unused-vars",
       ];
       expect({
         install: install.status,
@@ -1737,6 +1774,8 @@ export const Off = () => (
         design: { status: design.status, rules: rulesOf(design.stdout) },
         cases,
         unformatted: unformatted.status,
+        unused:
+          unusedChecked.status === 0 ? "typechecks" : unusedChecked.output,
       }).toStrictEqual({
         install: 0,
         fresh: { typecheck: "ok", lint: "ok", format: "ok", build: "ok" },
@@ -1756,6 +1795,7 @@ export const Off = () => (
         },
         cases: { design: designFindings, grasp: [], project: [] },
         unformatted: 1,
+        unused: "typechecks",
       });
     });
 

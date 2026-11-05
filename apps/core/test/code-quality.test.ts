@@ -231,6 +231,55 @@ describe("linting App code", { timeout: 60_000 }, () => {
     });
   });
 
+  it("reports unused names as oxlint does, and a write keeps them, its fix not being safe", async () => {
+    // An unused import, a local and a parameter after the last one used.
+    // Not a parameter before one used (a handler's `ctx`), one starting
+    // with `_`, nor a name a type reads, which is used (as TypeScript and
+    // oxlint read it).
+    const source = `import { Badge } from "@grasp-os/ui/components/badge";
+
+const row = { id: 1 };
+export type Row = typeof row;
+
+export const total = (ctx: number, count: number, spare: number): number => {
+  const left = 1;
+  return count;
+};
+
+export const one = (_ignored: number): number => 1;
+`;
+
+    const tidied = await ultracite().tidy({ "components/total.ts": source });
+    const linted = await ultracite().lint({ "components/total.ts": source });
+
+    expect({
+      kept: tidied["components/total.ts"] === source,
+      found: findings(linted),
+    }).toStrictEqual({
+      kept: true,
+      found: [
+        {
+          file: "components/total.ts",
+          line: 1,
+          column: 10,
+          rule: "no-unused-vars",
+        },
+        {
+          file: "components/total.ts",
+          line: 6,
+          column: 51,
+          rule: "no-unused-vars",
+        },
+        {
+          file: "components/total.ts",
+          line: 7,
+          column: 9,
+          rule: "no-unused-vars",
+        },
+      ],
+    });
+  });
+
   it("says nothing of code that doesn't parse: the build says why", async () => {
     await expect(
       ultracite().lint({

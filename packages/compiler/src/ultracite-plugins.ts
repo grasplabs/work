@@ -27,6 +27,42 @@ const pluginOf = (
   rules: Object.assign({}, ...rules) as ESLint.Plugin["rules"],
 });
 
+const typescriptUnusedVars: unknown = typescriptPlugin.rules["no-unused-vars"];
+// SAFETY: typescript-eslint's rules are ESLint rule modules (`pluginOf`).
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const unusedVarsRule = typescriptUnusedVars as Rule.RuleModule;
+
+/**
+ * typescript-eslint's `no-unused-vars`, reading a name as oxlint's does:
+ * one a type query reads (`type Row = typeof row`) is used, as TypeScript
+ * counts it too. typescript-eslint reports it as used only as a type
+ * (`usedOnlyAsType`) and has no option to turn that off, so those reports
+ * are dropped. On the repo's code that is the rule's only difference from
+ * oxlint's, but for a variable only ever added to, which oxlint misses
+ * and TypeScript doesn't.
+ */
+const unusedVars: Rule.RuleModule = {
+  ...unusedVarsRule,
+  create: (context) => {
+    // The context is frozen: one of its own `report`, the rest the context's.
+    // SAFETY: `Object.create` of the context is the context, but `report`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const reporting = Object.create(context, {
+      report: {
+        value: (descriptor: Rule.ReportDescriptor) => {
+          if (
+            !("messageId" in descriptor) ||
+            descriptor.messageId !== "usedOnlyAsType"
+          ) {
+            context.report(descriptor);
+          }
+        },
+      },
+    }) as Rule.RuleContext;
+    return unusedVarsRule.create(reporting);
+  },
+};
+
 export const ultracitePlugins: Readonly<Record<string, ESLint.Plugin>> = {
   import: pluginOf(importX.rules),
   jsdoc: pluginOf(jsdocRules),
@@ -34,7 +70,9 @@ export const ultracitePlugins: Readonly<Record<string, ESLint.Plugin>> = {
   promise: pluginOf(promise.rules),
   react: pluginOf(reactPlugin.rules, reactHooks.rules),
   sonarjs: pluginOf(sonarjs.rules),
-  typescript: pluginOf(typescriptPlugin.rules),
+  typescript: pluginOf(typescriptPlugin.rules, {
+    "no-unused-vars": unusedVars,
+  }),
   unicorn: pluginOf(unicorn.rules),
 };
 

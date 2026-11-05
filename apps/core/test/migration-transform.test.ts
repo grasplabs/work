@@ -916,7 +916,7 @@ const sealedSalaries = async () =>
               fromSchema,
               toSchema,
               fixtures: salaryFixtures,
-              // Only the handler that shares it: an unused one fails the check.
+              // Only the handler that shares it: an unused one is a lint error.
               prelude: handler.includes("previous") ? salaryPrelude : "",
               input: name.endsWith("refines-amount")
                 ? refinedInput

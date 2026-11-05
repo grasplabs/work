@@ -53,7 +53,7 @@ const filesWith = (
     title = "v.string()",
   }: { withNotes?: boolean; title?: string } = {}
 ): Record<string, string> => ({
-  // Only what the schema uses: an unused import fails the check.
+  // Only what the schema uses: an unused import is a lint error.
   "schema.ts": `import { defineSchema${withNotes ? ", defineTable, v" : ""} } from "@grasp-os/sdk";
 
 export default defineSchema(${withNotes ? `{ notes: defineTable({ title: ${title} }) }` : "{}"});
