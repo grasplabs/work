@@ -1,6 +1,10 @@
 import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/screen-runtime";
-import { fallbackRevision } from "@grasp-os/shared/chat";
-import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
+import { shownAt } from "@grasp-os/shared/chat";
+import type {
+  PreviewAt,
+  PreviewRefresh,
+  PreviewUpdate,
+} from "@grasp-os/shared/chat";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
 
@@ -40,14 +44,20 @@ export type PreviewHealth = "working" | "fixing";
 
 /** What the page does for a preview's updates. */
 export interface PreviewUpdatesHost {
-  /** Asks core for the previewed screen of the draft at `revision`. */
-  fetch: (revision: number) => Promise<PreviewUpdate>;
+  /**
+   * Asks core for the previewed screen of the draft at `revision`, the
+   * frame showing the App's `appVersion`, if it shows one.
+   */
+  fetch: (
+    revision: number,
+    appVersion: number | undefined
+  ) => Promise<PreviewUpdate>;
   /** Says whether a problem of the preview is being fixed. */
   health: (health: PreviewHealth) => void;
   /** Starts the frame afresh: an update can't come in through Refresh. */
   reset: () => void;
-  /** The frame shows `revision` now: what its calls name. */
-  moved: (revision: number) => void;
+  /** The frame shows the build `at` names now: what its calls name. */
+  moved: (at: PreviewAt) => void;
   /** The frame shows the App's `appVersion` now, or the draft's own changes. */
   shows: (appVersion: number | undefined) => void;
 }
@@ -94,11 +104,6 @@ export class PreviewUpdates {
   /** The kit modules the frame loaded: all an update may import. */
   readonly #kit: ReadonlySet<string>;
   #toFrame: FrameReceiver | undefined;
-  /**
-   * Whether the frame shows the App's latest version in place of the
-   * draft, which didn't build: until a write of the draft shows.
-   */
-  #fallback: boolean;
   /** The revision the frame shows. */
   #shown: number;
   /** The newest revision the chat named. */
@@ -107,8 +112,8 @@ export class PreviewUpdates {
   #asked: number;
   #asking = false;
   #closed = false;
-  /** The revision the frame is trying now, while it is handed one. */
-  #trying: number | undefined;
+  /** The build the frame is trying now, while it is handed one. */
+  #trying: PreviewAt | undefined;
   /** Whether the frame reported a problem while trying the update it is handed. */
   #troubled = false;
   /** Whether the App's version may have changed under the revision shown (`again`). */
@@ -131,7 +136,6 @@ export class PreviewUpdates {
     fallback = false
   ) {
     this.#app = app;
-    this.#fallback = fallback;
     this.#health = fallback ? "fixing" : "working";
     this.#applied = opened;
     this.#host = host;
@@ -168,10 +172,11 @@ export class PreviewUpdates {
   }
 
   /**
-   * The App has another version now (app-versions.ts): a frame showing
-   * the App's latest version, the draft changing nothing, takes it at the
-   * same revision. One showing the draft's own changes keeps them: its
-   * draft is over the version it began from.
+   * The App has another version now (app-versions.ts): a frame showing a
+   * version of the App asks core whether it is still the one to show, and
+   * starts afresh on another (`PreviewUpdate`'s `restart`). One showing
+   * the draft's own changes keeps them: its draft is over the version it
+   * began from.
    */
   again(): void {
     if (this.#applied.appVersion !== undefined) {
@@ -191,22 +196,18 @@ export class PreviewUpdates {
   }
 
   /**
-   * The revision of the screen code the frame runs now: the one it is
-   * trying while it is handed an update (its first render and mount
-   * effects run then, and its failure is reported before the frame
+   * The build of the screen code the frame runs now (`PreviewAt`): the
+   * one it is trying while it is handed an update (its first render and
+   * mount effects run then, and its failure is reported before the frame
    * answers and the page swaps back), or else the one it shows. What the
-   * frame calls and reports names it, and core files a problem, or a
-   * screen seen, only under the draft's own revision: an update that
-   * failed fails that revision's check, and an earlier screen's never
-   * does.
+   * frame calls and reports names it, so core runs each call on exactly
+   * that build, a version of the App on that version's own code, and
+   * files a problem, or a screen seen, only under the draft's own
+   * revision: an update that failed fails that revision's check, and an
+   * earlier screen's never does.
    */
-  runningAt(): number {
-    if (this.#trying !== undefined) {
-      return this.#trying;
-    }
-    // The App's latest version, shown in place of a draft that didn't
-    // build, runs that version's own code (core's `fallbackRevision`).
-    return this.#fallback ? fallbackRevision : this.#shown;
+  runningAt(): PreviewAt {
+    return this.#trying ?? shownAt(this.#applied);
   }
 
   /** Stops following: the frame is gone. */
@@ -237,10 +238,7 @@ export class PreviewUpdates {
         this.#again = false;
         this.#asked = Math.max(this.#wanted, this.#asked);
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
-        const update = await this.#ask(
-          again ? this.#shown : this.#asked,
-          again
-        );
+        const update = await this.#ask(again ? this.#shown : this.#asked);
         if (update === undefined) {
           continue;
         }
@@ -255,18 +253,15 @@ export class PreviewUpdates {
   }
 
   /**
-   * Core's answer for the draft at `revision`, the newest the chat named,
+   * Core's answer for the draft at `revision`, the newest the chat named
+   * (or the one shown, asked again), for a frame showing what it shows,
    * or undefined when there is none to hand. Core builds each revision
-   * once, for every preview that asks for it. `again`: the revision shown,
-   * asked for the App's version it is of now.
+   * once, for every preview that asks for it.
    */
-  async #ask(
-    revision: number,
-    again: boolean
-  ): Promise<PreviewRefresh | undefined> {
+  async #ask(revision: number): Promise<PreviewRefresh | undefined> {
     let answered: PreviewUpdate;
     try {
-      answered = await this.#host.fetch(revision);
+      answered = await this.#host.fetch(revision, this.#applied.appVersion);
     } catch (error) {
       // Its code doesn't build: the frame keeps what it shows.
       if (screenErrors.codeOf(error) === "screen.build_failed") {
@@ -276,30 +271,24 @@ export class PreviewUpdates {
       // asked for at the chat's next revision, which it says.
       return undefined;
     }
-    // Only the App the frame was opened for, and only a revision past
-    // the one it shows.
-    const { refresh } = answered;
-    if (answered.app !== this.#app) {
+    // Only the App the frame was opened for.
+    if (answered.app !== this.#app || "unchanged" in answered) {
       return undefined;
     }
-    // Asked again, another version of the App at the revision it shows:
-    // a frame takes only a revision past its own (@grasp-os/sdk's
-    // preview-updates.ts), so it starts afresh on that version, as for a
-    // new version of an App.
-    if (
-      again &&
-      refresh.revision === this.#shown &&
-      refresh.appVersion !== this.#applied.appVersion
-    ) {
+    // Another version of the App is the one to show: the frame starts
+    // afresh on it, as a published App's page does on a new version.
+    if ("restart" in answered) {
       this.#reset();
       return undefined;
     }
+    // Only a revision past the one it shows.
+    const { refresh } = answered;
     if (refresh.revision <= this.#shown) {
       return undefined;
     }
     // What core had when it built: one the chat named since is asked for.
-    this.#asked = answered.refresh.revision;
-    return answered.refresh;
+    this.#asked = refresh.revision;
+    return refresh;
   }
 
   /**
@@ -311,7 +300,7 @@ export class PreviewUpdates {
       this.#reset();
       return false;
     }
-    this.#trying = update.revision;
+    this.#trying = shownAt(update);
     this.#troubled = false;
     let answer = await this.#load(update);
     this.#trying = undefined;
@@ -333,11 +322,10 @@ export class PreviewUpdates {
       return !this.#closed;
     }
     this.#applied = update;
-    this.#fallback = false;
     this.#host.shows(update.appVersion);
     if (update.revision !== this.#shown) {
       this.#shown = update.revision;
-      this.#host.moved(update.revision);
+      this.#host.moved(shownAt(update));
     }
     // Working once an update shows without a problem of its own: one it
     // reported as it came in keeps the problem being fixed.

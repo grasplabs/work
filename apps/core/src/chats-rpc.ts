@@ -4,7 +4,7 @@ import type { AppFiles } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatTitleSchema,
-  fallbackRevision,
+  previewAtSchema,
   readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
@@ -19,6 +19,7 @@ import type {
   ChatsApi,
   ChatSummary,
   ChatUpdate,
+  PreviewAt,
   PreviewBundle,
   PreviewRefresh,
   PreviewUpdate,
@@ -140,28 +141,32 @@ const previewAnswerOf = (text: string): PreviewAnswer =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   JSON.parse(text) as PreviewAnswer;
 
-/** What a preview's live queries are keyed by: its chat and revision. */
-const previewKey = (chatId: ChatId, revision: number): LeasedBuild => ({
-  artifact: `preview:${chatId}`,
-  version: revision,
-});
+/**
+ * What a preview's live queries are keyed by: its chat and the build the
+ * frame shows (`PreviewAt`), the draft's revision or a version of the App.
+ */
+const previewKey = (chatId: ChatId, at: PreviewAt): LeasedBuild =>
+  typeof at === "number"
+    ? { artifact: `preview:${chatId}`, version: at }
+    : { artifact: `preview-version:${chatId}`, version: at.appVersion };
 
-/** The chat and revision `previewKey` made `key` of. */
+/** The chat and build `previewKey` made `key` of. */
 const previewOfKey = (
   key: LeasedBuild | undefined
-): { chatId: ChatId; revision: number } => {
+): { chatId: ChatId; at: PreviewAt } => {
   const [kind, chat] = (key?.artifact ?? "").split(":");
   const parsed = chatIdSchema.safeParse(chat);
-  const at = key?.version;
+  const named = previewAtSchema.safeParse(
+    kind === "preview-version" ? { appVersion: key?.version } : key?.version
+  );
   if (
-    kind !== "preview" ||
+    (kind !== "preview" && kind !== "preview-version") ||
     !parsed.success ||
-    at === undefined ||
-    !Number.isInteger(at)
+    !named.success
   ) {
     throw appErrors.create("app.preview_outdated");
   }
-  return { chatId: parsed.data, revision: at };
+  return { chatId: parsed.data, at: named.data };
 };
 
 /** Whether `by` builds App `app` now. */
@@ -205,11 +210,11 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
   // building the App: a read under way as the draft's server code moved
   // on pushes nothing, and its subscription ends.
   access: async (by, app, key) => {
-    const { chatId, revision } = previewOfKey(key);
+    const { chatId, at } = previewOfKey(key);
     const served = await workspace(
       env,
       personalWorkspaceId(by.userId)
-    ).previewServes(chatId, app, revision);
+    ).previewServes(chatId, app, at);
     return served && (await buildsNow(env, by, app)) ? "open" : "role";
   },
   // The teams they are in now with them, which a table's row rules read
@@ -226,13 +231,13 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
     check.forget?.();
   },
   evaluate: async (by, app, key, request, deadline, chargePages) => {
-    const { chatId, revision } = previewOfKey(key);
+    const { chatId, at } = previewOfKey(key);
     const answered = previewAnswerOf(
       await workspace(env, personalWorkspaceId(by.userId)).previewFunction(
         chatId,
         by.userId,
         app,
-        revision,
+        at,
         request,
         {
           kind: "query",
@@ -279,9 +284,10 @@ const refreshOf = (
 
 /**
  * What a preview builds (`ChatsRpc.#previewed`): its files, the
- * references their screens import, the revision its calls name, and the
- * App's version it `shows`, when it shows one rather than the draft's
- * changes.
+ * references their screens import, the draft's revision it is at
+ * (`readOnlyRevision` for a version of the draft), and the App's version
+ * it `shows`, when it shows one rather than the draft's changes: what its
+ * frame's calls then name (`PreviewAt`).
  */
 interface Previewed {
   files: Map<string, string>;
@@ -725,47 +731,35 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * sealed when the draft's
    * server code is as it was (sealed-previews.ts), and its build skips the
    * type check and lint, so a write reaches the screen at once; the
-   * agent's check of the draft has them. A draft that changes nothing is
-   * built from the App's latest version as read now, so a version
-   * committed since comes in at the same revision.
+   * agent's check of the draft has them. `appVersion` is the App's
+   * version the frame shows, if it shows one: a frame is handed only a
+   * build of the same screen it can swap in, and otherwise told whether
+   * what it shows is still what to show (`PreviewUpdate`).
    */
   async previewUpdate(
     chatId: string,
     app: string,
     screen: string,
-    revision: number
+    revision: number,
+    appVersion?: number
   ): Promise<PreviewUpdate> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
-      if (!Number.isSafeInteger(revision)) {
+      if (
+        !Number.isSafeInteger(revision) ||
+        (appVersion !== undefined &&
+          !previewAtSchema.safeParse({ appVersion }).success)
+      ) {
         throw screenErrors.create("screen.invalid");
       }
-      const update = async (): Promise<PreviewUpdate> => {
-        const {
-          files,
-          references,
-          revision: built,
-          shows,
-        } = await this.#previewed(by, chatId, id, {});
-        const screenBuild = await this.#previewBuild(
-          files,
-          references,
-          id,
-          screen
-        );
-        // Under the preview's own scope, where its open frame loads them
-        // (screen-frame.ts): the kit's are those it loaded already. The
-        // App's latest version, when the draft changes nothing, is staged
-        // there too, as it is what this chat's preview of the App shows.
-        const { scope } = await previewFrame(chatId, id, screenBuild.artifact);
-        await stageModules(this.#env, appModules(screenBuild.code, scope));
-        return { app: id, refresh: refreshOf(built, screenBuild, shows) };
-      };
+      const update = async (): Promise<PreviewUpdate> =>
+        await this.#updateFor(by, chatId, id, screen, appVersion);
       const updated = await this.#chatsOf(by.userId).previewBuild(
         chatIdOf(chatId),
         by.userId,
         id,
-        `update:${screen}`,
+        // The answer depends on the version the frame shows too.
+        `update:${screen}:${appVersion ?? ""}`,
         revision,
         update
       );
@@ -779,13 +773,90 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * What an open frame of `chatId`'s preview of App `id` showing screen
+   * `screen` takes now (`PreviewUpdate`), the frame showing the App's
+   * `appVersion` or, without it, the draft's own changes:
+   *
+   * - The draft changes nothing: the App's latest version is the one to
+   *   show. A frame on it is `unchanged`; one on another version, or one
+   *   whose screen that version doesn't have, opens afresh on it
+   *   (`restart`); one on the draft's changes swaps it in.
+   * - The draft's changes: their build of the screen, swapped in. One
+   *   that doesn't build fails as the build does, so the frame keeps what
+   *   it shows and says it is being fixed, unless the frame shows the
+   *   App's version in place of the draft and a newer one came since: it
+   *   opens afresh on that one, as `#loadPreview` would.
+   */
+  async #updateFor(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    screen: string,
+    appVersion: number | undefined
+  ): Promise<PreviewUpdate> {
+    const now = await this.#previewed(by, chatId, id, {});
+    if (now.shows !== undefined) {
+      if (appVersion === now.shows) {
+        return { app: id, unchanged: true };
+      }
+      if (appVersion !== undefined || !screensIn(now.files).includes(screen)) {
+        return { app: id, restart: true };
+      }
+      return { app: id, refresh: await this.#staged(chatId, id, now, screen) };
+    }
+    try {
+      return { app: id, refresh: await this.#staged(chatId, id, now, screen) };
+    } catch (error) {
+      const unbuilt =
+        buildFailed(error) || !screensIn(now.files).includes(screen);
+      if (appVersion === undefined || !unbuilt) {
+        throw error;
+      }
+      let latest: number | undefined;
+      try {
+        ({ shows: latest } = await this.#previewed(by, chatId, id, {
+          fallback: true,
+        }));
+      } catch {
+        throw error;
+      }
+      if (latest === undefined || latest === appVersion) {
+        throw error;
+      }
+      return { app: id, restart: true };
+    }
+  }
+
+  /**
+   * Screen `screen` of `previewed`, built and its modules staged under
+   * the preview's own scope, where its open frame loads them
+   * (screen-frame.ts): the kit's are those it loaded already.
+   */
+  async #staged(
+    chatId: string,
+    id: AppId,
+    previewed: Previewed,
+    screen: string
+  ): Promise<PreviewRefresh> {
+    const built = await this.#previewBuild(
+      previewed.files,
+      previewed.references,
+      id,
+      screen
+    );
+    const { scope } = await previewFrame(chatId, id, built.artifact);
+    await stageModules(this.#env, appModules(built.code, scope));
+    return refreshOf(previewed.revision, built, previewed.shows);
+  }
+
+  /**
    * What `chatId`'s preview of App `id` builds: the files of its draft
    * now, of its draft's `version`, or (`fallback`) of the App's latest
-   * version in place of the draft, the references their screens import,
-   * read over the same version, and the revision its calls name. A
-   * version of the draft is read-only (`readOnlyRevision`); the fallback's
-   * calls name `fallbackRevision`. The draft now that changes nothing, and
-   * the fallback, `shows` the App's latest version, read anew.
+   * version in place of the draft, and the references their screens
+   * import, read over the same build. A version of the draft is read-only
+   * (`readOnlyRevision`). The draft now that changes nothing, and the
+   * fallback, `shows` the App's latest version, read anew: what their
+   * frame's calls name.
    */
   async #previewed(
     by: Identity,
@@ -806,24 +877,20 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         revision: readOnlyRevision,
       };
     }
-    const draft = await chats.previewDraft(chat, by.userId, id, {
-      fresh: true,
-      ...(fallback ? { revision: fallbackRevision } : {}),
-    });
+    const draft = await chats.previewDraft(chat, by.userId, id, { fallback });
+    const shows =
+      draft.base !== null && Object.keys(draft.changes).length === 0
+        ? draft.base
+        : undefined;
+    // Its references, of the very build its files are of.
+    const at: PreviewAt =
+      shows === undefined ? draft.revision : { appVersion: shows };
     return {
       files: await draftFiles(this.#env, id, draft),
       references: async () =>
-        await chats.previewReferences(
-          chat,
-          by.userId,
-          id,
-          draft.revision,
-          draft.base
-        ),
+        await chats.previewReferences(chat, by.userId, id, at),
       revision: draft.revision,
-      ...(draft.base !== null && Object.keys(draft.changes).length === 0
-        ? { shows: draft.base }
-        : {}),
+      ...(shows === undefined ? {} : { shows }),
     };
   }
 
@@ -831,11 +898,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * The bundle of `chatId`'s preview of App `id`, built from its draft
    * now, or from its draft's `version` (`#previewed`). The draft now with
    * changes that leave it no screen that builds opens on the App's latest
-   * version instead, as a draft that changes nothing would show it, on
-   * that version's own server code (`fallbackRevision`), said to be a
-   * `fallback`: its frame takes the draft's next write that builds, as any
-   * frame does. So nothing is shown in place of the App while a version of
-   * it builds.
+   * version instead, as a draft that changes nothing would show it, its
+   * calls on that version's own server code, said to be a `fallback`: its
+   * frame takes the draft's next write that builds, as any frame does. So
+   * nothing is shown in place of the App while a version of it builds.
    */
   async #loadPreview(
     by: Identity,
@@ -860,14 +926,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       try {
         shown = await this.#previewed(by, chatId, id, { fallback: true });
-        // The screen asked for, when the App's latest version has it.
-        built = await this.#screenOf(
-          shown,
-          id,
-          screen !== undefined && screensIn(shown.files).includes(screen)
-            ? screen
-            : undefined
-        );
+        built = await this.#screenOf(shown, id, screen);
       } catch {
         // No version of the App that builds: the draft's own failure.
         throw error;
@@ -887,8 +946,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       app: id,
       name,
-      // What its calls name: the fallback's own revision while it shows one.
-      revision: shown.revision,
+      revision: now.revision,
       screens: screensIn(shown.files),
       screen: built.screen,
       artifact,
@@ -905,23 +963,28 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * Screen `screen` of what a preview builds (`#previewed`), its first
-   * when `screen` is left out or it has no such: `screen.not_found` when
-   * it has none.
+   * when `screen` is left out, or when a version of the App shown has no
+   * such, as a published App's page opens on a new version:
+   * `screen.not_found` when it has none.
    */
   async #screenOf(
     previewed: Previewed,
     id: AppId,
     screen: string | undefined
   ): Promise<BuiltScreen> {
-    const [first] = screensIn(previewed.files);
+    const screens = screensIn(previewed.files);
+    const [first] = screens;
     if (first === undefined) {
       throw screenErrors.create("screen.not_found");
     }
+    const named =
+      screen !== undefined &&
+      (previewed.shows === undefined || screens.includes(screen));
     return await this.#previewBuild(
       previewed.files,
       previewed.references,
       id,
-      screen ?? first
+      named ? screen : first
     );
   }
 
@@ -963,7 +1026,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async previewFunction(
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string
   ): Promise<FunctionAnswer> {
     return await withPerson(this.#check, async (by) => {
@@ -982,7 +1045,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           chatIdOf(chatId),
           by.userId,
           id,
-          revision,
+          at,
           request,
           { chargeWindow: windowCharger(this.#env, by, id) }
         )
@@ -995,12 +1058,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * Follows a public query of the draft of spec 8's layout in its
    * preview, as a screen's `watchQuery` does (query-subscriptions.ts),
    * read on the preview's store as the person, while they build the App
-   * and the draft is at `revision`.
+   * and the build `at` names still serves.
    */
   async previewWatchQuery(
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ): Promise<Subscription> {
@@ -1010,7 +1073,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (
         typeof request !== "string" ||
         request.length > functionRequestMaxBytes ||
-        typeof revision !== "number" ||
+        !previewAtSchema.safeParse(at).success ||
         !isStub(onSnapshot)
       ) {
         throw screenErrors.create("screen.invalid");
@@ -1018,17 +1081,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // A window counts as the pages it reads (query-windows.ts).
       await admitWindow(this.#env, by, id, request);
       const chat = chatIdOf(chatId);
-      // The chat is theirs, with a draft of the App that a screen at
-      // `revision` still reaches.
+      // The chat is theirs, with a preview of the App that the build `at`
+      // names still reaches.
       const chats = this.#chatsOf(by.userId);
       await chats.previewDraft(chat, by.userId, id);
-      if (!(await chats.previewServes(chat, id, revision))) {
+      if (!(await chats.previewServes(chat, id, at))) {
         throw appErrors.create("app.preview_outdated");
       }
       return this.#previewQueries.subscribe(
         by,
         id,
-        previewKey(chat, revision),
+        previewKey(chat, at),
         request,
         onSnapshot
       );
@@ -1039,14 +1102,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * Starts (`stream`) or follows again (`attach`) a streaming action of the
    * draft of spec 8's layout in its preview, as a screen's `streamFunction`
    * does (sealed-previews.ts), relayed to `onFrame` only while the person
-   * still builds the App and the draft is still at `revision`
+   * still builds the App and the build `at` names still serves
    * (preview-stream-relay.ts). Each start and attach counts as one of the
    * person's preview requests.
    */
   async previewStream(
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     what: "stream" | "attach",
     request: string,
     onFrame: (frame: unknown) => Promise<unknown>
@@ -1058,7 +1121,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         (what !== "stream" && what !== "attach") ||
         typeof request !== "string" ||
         request.length > functionRequestMaxBytes ||
-        typeof revision !== "number" ||
+        !previewAtSchema.safeParse(at).success ||
         !isStub(onFrame)
       ) {
         throw screenErrors.create("screen.invalid");
@@ -1082,7 +1145,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           chat,
           by.userId,
           id,
-          revision,
+          at,
           request,
           what === "attach"
         );
@@ -1093,13 +1156,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       relayed.stop = relayPreviewStream(frames, {
         deliver: toPage,
         // The session still theirs, the App still theirs to build, and the
-        // draft still served at the stream's revision.
+        // build the stream runs on still served.
         stillOpen: async () => {
           const now = await this.#check();
           if (now.userId !== by.userId) {
             throw authErrors.create("auth.unauthenticated");
           }
-          if (!(await chats.previewServes(chat, id, revision))) {
+          if (!(await chats.previewServes(chat, id, at))) {
             throw appErrors.create("app.preview_outdated");
           }
           if (!(await buildsNow(this.#env, now, id))) {
@@ -1107,13 +1170,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           }
         },
         cancel: async () =>
-          await chats.previewCancelStream(
-            chat,
-            by.userId,
-            id,
-            revision,
-            request
-          ),
+          await chats.previewCancelStream(chat, by.userId, id, at, request),
         requestId: crypto.randomUUID(),
       }).stop;
       return new Subscription(async () => {
@@ -1130,7 +1187,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async previewCancelStream(
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string
   ): Promise<{ requested: boolean }> {
     return await withPerson(this.#check, async (by) => {
@@ -1147,7 +1204,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           chatIdOf(chatId),
           by.userId,
           id,
-          revision,
+          at,
           request
         ),
       };
@@ -1161,13 +1218,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async previewReport(
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     screen: string,
     problem: ScreenProblem
   ): Promise<void> {
     await withPerson(this.#check, async (by) => {
       const { id } = await appFor(this.#env, by, app, "builder");
-      const at = screenErrors.parse("screen.invalid", screenNameSchema, screen);
+      const shownOn = screenErrors.parse(
+        "screen.invalid",
+        screenNameSchema,
+        screen
+      );
       const reported = screenErrors.parse(
         "screen.invalid",
         screenProblemSchema,
@@ -1177,8 +1238,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         chatIdOf(chatId),
         by.userId,
         id,
-        revision,
         at,
+        shownOn,
         reported
       );
     });

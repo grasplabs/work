@@ -23,7 +23,7 @@ const builtAt = (revision: number, entry: string): PreviewUpdate => ({
 const outcomeOf = async (ask: Promise<PreviewBuilt>): Promise<unknown> => {
   try {
     const built = await ask;
-    return built.refresh?.entry;
+    return "refresh" in built ? built.refresh?.entry : undefined;
   } catch (error) {
     return typeof error === "object" && error !== null && "code" in error
       ? error.code

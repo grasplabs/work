@@ -17,6 +17,7 @@ import {
   outcome,
   previewStores,
   requestFor,
+  refreshed,
 } from "./previews.ts";
 import { loadFrame, servedFrom } from "./screen-frames.ts";
 import type { LoadedFrame } from "./screen-frames.ts";
@@ -63,7 +64,7 @@ const builtAt = (
 
 /** The screen's module of what a build answered, an update. */
 const entryBuilt = (built: PreviewBundle | PreviewUpdate): string =>
-  built.refresh?.entry ?? "";
+  "refresh" in built ? (built.refresh?.entry ?? "") : "";
 
 /** What the test reads of a staged frame's manifest. */
 const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
@@ -129,10 +130,10 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     console.info(
       `preview update after a screen write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
     );
-    const { refresh } = updated;
+    const refresh = refreshed(updated);
     const before = Object.keys(opened.refresh?.modules ?? {});
     const entry = await servedFrom(frame, refresh.entry);
-    const secondEntry = await servedFrom(frame, second.refresh.entry);
+    const secondEntry = await servedFrom(frame, refreshed(second).entry);
     expect({
       app: updated.app,
       revision: refresh.revision,
@@ -150,7 +151,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       ),
       opened: opened.refresh?.revision,
       second: {
-        revision: second.refresh.revision,
+        revision: refreshed(second).revision,
         says: secondEntry.code.includes('"Again "'),
       },
     }).toStrictEqual({

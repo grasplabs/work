@@ -8,7 +8,7 @@ import { frameAccess, frameKey, stageFrame } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { deskDraft, deskFiles } from "./preview-drafts.ts";
-import { chatsOf, chatWithDraft } from "./previews.ts";
+import { chatsOf, chatWithDraft, refreshed } from "./previews.ts";
 import {
   frameDocument,
   loadFrame,
@@ -412,7 +412,7 @@ describe(
         },
         removed,
         moved: movedServed,
-        sameModule: updated.refresh.entry === modulePartsOf(address).hash,
+        sameModule: refreshed(updated).entry === modulePartsOf(address).hash,
         healed: { status: healed.status, code: await healed.text() },
       }).toStrictEqual({
         atOpen: {
@@ -447,7 +447,7 @@ describe(
         "desk",
         next
       );
-      const hash = updated.refresh.entry;
+      const hash = refreshed(updated).entry;
       // What the page does on the frame's `reset`: opens it again.
       const reopened = await framed(
         await builder.api.chats.preview(chatId, app, "desk")

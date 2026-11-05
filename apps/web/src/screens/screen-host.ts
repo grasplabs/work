@@ -2,7 +2,8 @@ import { fileChannel, linkChannel } from "@grasp-os/sdk/host";
 import type { FileChannel, LinkChannel } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
-import type { PreviewBundle } from "@grasp-os/shared/chat";
+import { shownAt } from "@grasp-os/shared/chat";
+import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
 import { isDraftFault } from "@grasp-os/shared/operations";
@@ -854,8 +855,8 @@ const handedClosed = async (
 export interface PreviewFollow {
   problem: () => void;
   followUpdates: NonNullable<FrameTarget["followUpdates"]>;
-  /** The revision of the screen code the frame runs now (preview-updates.ts). */
-  runningAt: () => number;
+  /** The build of the screen code the frame runs now (preview-updates.ts). */
+  runningAt: () => PreviewAt;
 }
 
 /** Whether `answer`, a preview call's, failed through the draft's own fault. */
@@ -953,17 +954,20 @@ export const previewTarget = (
   chatId: string,
   bundle: PreviewBundle,
   follow?: PreviewFollow
-): FrameTarget & { moved: (revision: number) => void } => {
+): FrameTarget & { moved: (at: PreviewAt) => void } => {
   const { app, screen } = bundle;
-  let { revision } = bundle;
+  // What its calls name: what its refresh shows, or the revision of a
+  // version of the draft opened read-only.
+  let shows: PreviewAt =
+    bundle.refresh === undefined ? bundle.revision : shownAt(bundle.refresh);
   const watches = new Set<PreviewWatch>();
   /**
-   * The revision of the screen code running now, read as each call or
-   * report arrives: while the frame tries an update, its first render and
-   * mount effects run that update's code, and what they call or report is
-   * that revision's, a failure too; otherwise the revision it shows.
+   * The build of the screen code running now, read as each call or report
+   * arrives: while the frame tries an update, its first render and mount
+   * effects run that update's code, and what they call or report is that
+   * build's, a failure too; otherwise the build it shows.
    */
-  const runningAt = (): number => follow?.runningAt() ?? revision;
+  const runningAt = (): PreviewAt => follow?.runningAt() ?? shows;
   /** Ends `watch` for good: the frame hears its query is no longer followed. */
   const endWatch = (watch: PreviewWatch): void => {
     if (!watch.ended) {
@@ -1022,7 +1026,7 @@ export const previewTarget = (
         await chats.previewWatchQuery(
           chatId,
           app,
-          revision,
+          shows,
           watch.request,
           forCore(relay)
         )
@@ -1030,7 +1034,7 @@ export const previewTarget = (
   };
   return {
     moved: (next) => {
-      revision = next;
+      shows = next;
       for (const watch of watches) {
         const before = watch.subscription;
         watch.subscription = subscribe(watch);
@@ -1755,13 +1759,13 @@ export const runPreview = (
         if (opened === undefined || revisions === undefined) {
           return { target: previewTarget(link, chatId, bundle) };
         }
-        const moves: { to?: (revision: number) => void } = {};
+        const moves: { to?: (at: PreviewAt) => void } = {};
         health = bundle.fallback === true ? "fixing" : "working";
         const updates = new PreviewUpdates(
           bundle.app,
           opened,
           {
-            fetch: async (revision) =>
+            fetch: async (revision, appVersion) =>
               await on(
                 link,
                 async ({ chats }) =>
@@ -1769,7 +1773,8 @@ export const runPreview = (
                     chatId,
                     bundle.app,
                     bundle.screen,
-                    revision
+                    revision,
+                    appVersion
                   )
               ),
             health: (next) => {
@@ -1791,9 +1796,10 @@ export const runPreview = (
           bundle.fallback === true
         );
         // The App's version, as the tab's one subscription of it pushes it
-        // (app-versions.ts): another committed comes into a frame showing
-        // the App's latest. Its first push too, which may tell of one
-        // committed while the frame opened: one it has hands nothing.
+        // (app-versions.ts): a frame showing a version of the App opens
+        // afresh on another committed since. Its first push too, which may
+        // tell of one committed while the frame opened: core answers
+        // `unchanged` for the one it shows.
         const stopFollowing = link.followVersion(bundle.app, (push) => {
           if (push.type === "current") {
             updates.again();

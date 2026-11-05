@@ -1,4 +1,4 @@
-import { readOnlyRevision } from "@grasp-os/shared/chat";
+import { readOnlyRevision, shownAt } from "@grasp-os/shared/chat";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
@@ -236,12 +236,14 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     );
 
     // Proposed, the draft changes nothing: its preview shows the version
-    // it became, at the draft's revision, where its calls run.
+    // it became, at the draft's revision, its calls on that version.
     const version = await chats.proposeDraft(chatId, app, "Two");
     const latest = await chats.preview(chatId, app);
+    const latestAt =
+      latest.refresh === undefined ? latest.revision : shownAt(latest.refresh);
     const latestRequest = await requestFor(
       builder,
-      { chatId, app, revision: latest.revision },
+      { chatId, app, revision: latestAt },
       "notes.titles"
     );
 
@@ -252,13 +254,9 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         revision: latest.revision,
         screens: latest.screens,
         appVersion: latest.refresh?.appVersion,
+        at: latestAt,
         titles: outcome(
-          await chats.previewFunction(
-            chatId,
-            app,
-            latest.revision,
-            latestRequest
-          )
+          await chats.previewFunction(chatId, app, latestAt, latestRequest)
         ),
       },
       // The draft's own revision, and a read-only one, run nothing.
@@ -282,6 +280,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         revision: revision + 1,
         screens: ["desk"],
         appVersion: 2,
+        at: { appVersion: 2 },
         titles: [],
       },
       calls: ["app.preview_outdated", "app.preview_outdated"],

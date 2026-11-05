@@ -1,3 +1,8 @@
+import type {
+  PreviewAt,
+  PreviewRefresh,
+  PreviewUpdate,
+} from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -81,7 +86,11 @@ const answerSchema = z.object({
  */
 export const requestFor = async (
   person: Person,
-  { chatId, app, revision }: { chatId: ChatId; app: AppId; revision: number },
+  {
+    chatId,
+    app,
+    revision,
+  }: { chatId: ChatId; app: AppId; revision: PreviewAt },
   path: string,
   input: unknown = {}
 ): Promise<string> => {
@@ -120,6 +129,14 @@ export const requestFor = async (
 export const outcome = (answer: unknown): unknown => {
   const { result } = answerSchema.parse(answer);
   return result.ok ? result.value : result.error.code;
+};
+
+/** The build `update` hands the open frame: any other answer fails the test. */
+export const refreshed = (update: PreviewUpdate): PreviewRefresh => {
+  if (!("refresh" in update)) {
+    throw new Error(`The update handed no build: ${JSON.stringify(update)}`);
+  }
+  return update.refresh;
 };
 
 /** What the chat's object answered as text: its value, or its error's code. */

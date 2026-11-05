@@ -1587,6 +1587,10 @@ export class SealedPreviews {
     running: Running,
     release: Release
   ): Promise<OpenStore> {
+    // Never one a drop is discarding: a preview that swaps between two
+    // builds at one revision (two frames on two versions of the App, both
+    // at core's revision for a version) would find the store the swap
+    // discards, and its call would fail as discarded.
     const kept = this.#db
       .select({ storeId: previewStores.storeId })
       .from(previewStores)
@@ -1597,7 +1601,8 @@ export class SealedPreviews {
           eq(previewStores.revision, running.revision)
         )
       )
-      .get();
+      .all()
+      .find(({ storeId }) => !this.#discarding.has(storeId));
     // Recorded with nothing awaited since the check that the preview still
     // runs, so a drop after this finds it, and discards it.
     if (this.#running.get(nameOf(chatId, app)) !== running) {
