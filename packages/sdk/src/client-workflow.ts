@@ -1,5 +1,6 @@
 import { canonicalJson } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import { appErrorDetailsOf } from "./app-error.ts";
 import { clientInternals } from "./client-core.ts";
@@ -169,8 +170,7 @@ const isEventOf = (
     event.workflow !== workflow.contractId ||
     event.workflowFingerprint !== workflow.fingerprint ||
     typeof event.type !== "string" ||
-    event.type.length === 0 ||
-    event.type.length > workflowReferenceLimits.eventTypeLength ||
+    !isEventType(event.type) ||
     typeof event.fingerprint !== "string" ||
     !fingerprintPattern.test(event.fingerprint)
   ) {

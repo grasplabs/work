@@ -1,3 +1,4 @@
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
@@ -933,9 +934,33 @@ describe("workflow references", () => {
           events: {
             ...summarize.events,
             noteEdited: {
-              type: "t".repeat(workflowReferenceLimits.eventTypeLength + 1),
+              type: "t".repeat(sealedBuildLimits.eventTypeLength + 1),
               data: v.null().descriptor,
             },
+          },
+        },
+      ],
+    ],
+    [
+      "an event type with a control character inside",
+      [
+        {
+          ...summarize,
+          events: {
+            ...summarize.events,
+            noteEdited: { type: "note\tedited", data: v.null().descriptor },
+          },
+        },
+      ],
+    ],
+    [
+      "an event type with a space at its end",
+      [
+        {
+          ...summarize,
+          events: {
+            ...summarize.events,
+            noteEdited: { type: "note.edited ", data: v.null().descriptor },
           },
         },
       ],

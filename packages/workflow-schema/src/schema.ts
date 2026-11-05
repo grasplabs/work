@@ -1,7 +1,10 @@
 import type { Schema } from "@cfworker/json-schema";
 import { blockedProperties } from "@grasp-os/sdk/expression-check";
 import { decisionLimits } from "@grasp-os/shared/decisions";
-import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import {
+  eventTypePattern,
+  sealedBuildLimits,
+} from "@grasp-os/shared/sealed-builds";
 
 import {
   aliasPattern,
@@ -13,6 +16,7 @@ import {
   paramNamePattern,
   recipientPattern,
   stepIdPattern,
+  waitDescription,
   workflowSchemaUrl,
 } from "./format.ts";
 
@@ -119,8 +123,47 @@ const stepKinds = {
     ),
   },
   wait: {
-    ...stepOf("wait", { for: ref("duration"), until: ref("expression") }, []),
-    oneOf: [{ required: ["for"] }, { required: ["until"] }],
+    description: waitDescription,
+    ...stepOf(
+      "wait",
+      {
+        for: ref("duration"),
+        until: ref("expression"),
+        event: {
+          type: "object",
+          required: ["from", "type"],
+          properties: {
+            from: ref("alias"),
+            type: {
+              anyOf: [
+                ref("eventType"),
+                {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: sealedBuildLimits.eventTypes,
+                  uniqueItems: true,
+                  items: ref("eventType"),
+                },
+              ],
+            },
+          },
+          additionalProperties: false,
+        },
+        timeout: ref("duration"),
+      },
+      []
+    ),
+    oneOf: [
+      { required: ["for"] },
+      { required: ["until"] },
+      { required: ["event"] },
+    ],
+    // An event wait always ends: its timeout is required, and only it
+    // takes one.
+    if: { required: ["event"] },
+    // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
+    then: { required: ["timeout"] },
+    else: { properties: { timeout: false } },
   },
   if: stepOf(
     "if",
@@ -249,6 +292,13 @@ export const workflowSchema: Schema = {
       Object.entries(stepKinds).map(([type, schema]) => [`${type}Step`, schema])
     ),
     alias: { type: "string", pattern: aliasPattern },
+    // A type a run's inbox takes; whether the binding's contract admits
+    // it is publication's to check.
+    eventType: {
+      type: "string",
+      pattern: eventTypePattern,
+      maxLength: sealedBuildLimits.eventTypeLength,
+    },
     duration: { type: "string", pattern: durationPattern },
     expression: {
       type: "object",

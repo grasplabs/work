@@ -1,6 +1,7 @@
 /* oxlint-disable unicorn/no-thenable -- `then` is Open Workflow's flow directive, not a promise */
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -710,6 +711,46 @@ describe("tasks and calls", () => {
       ]),
       {
         code: "binding.contract_mismatch",
+        pointer: "/do/0/announce/emit/event/with/type",
+        taskId: "announce",
+      },
+    ],
+    [
+      // Its length in code points, as a contract counts it: the longest
+      // reaches the contract's check, which this binding's doesn't admit.
+      "an event type of the most emoji, which the contract doesn't admit",
+      probe([
+        {
+          announce: {
+            emit: {
+              event: {
+                with: {
+                  type: "\u{1F600}".repeat(sealedBuildLimits.eventTypeLength),
+                },
+              },
+            },
+            metadata: { grasp: { binding: "jobEvents" } },
+          },
+        },
+      ]),
+      {
+        code: "binding.contract_mismatch",
+        pointer: "/do/0/announce/emit/event/with/type",
+        taskId: "announce",
+      },
+    ],
+    [
+      "an event type with a space at its end",
+      probe([
+        {
+          announce: {
+            emit: { event: { with: { type: "grasp.job.completed " } } },
+            metadata: { grasp: { binding: "jobEvents" } },
+          },
+        },
+      ]),
+      {
+        code: "profile.invalid_value",
         pointer: "/do/0/announce/emit/event/with/type",
         taskId: "announce",
       },

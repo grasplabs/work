@@ -73,6 +73,7 @@ export type ProblemCode =
   | "workflow.reserved_id"
   | "workflow.invalid_name"
   | "workflow.invalid_alias"
+  | "workflow.invalid_event_type"
   | "workflow.invalid_duration"
   | "workflow.invalid_contract"
   | "workflow.invalid_currency"
@@ -80,6 +81,7 @@ export type ProblemCode =
   | "workflow.wait_kind"
   | "workflow.invalid"
   | "workflow.duplicate_id"
+  | "workflow.duplicate"
   | "workflow.too_many_steps"
   | "workflow.lists_too_deep"
   | "workflow.unknown_binding"
@@ -142,6 +144,18 @@ const lastOf = (pointer: string): string =>
 /** The pointer of what holds `pointer`. */
 const parentOf = (pointer: string): string =>
   pointer.slice(0, pointer.lastIndexOf("/"));
+
+/**
+ * An event wait's filter's `from` or `type` (or one of its types), as a
+ * step in any list of steps has it: never a property of that name
+ * elsewhere, such as a call's arguments.
+ */
+const eventFilterAt =
+  /^\/steps\/\d+(?:\/(?:then|else|try|do|catch\/do)\/\d+)*\/event\/(?<part>from|type)(?:\/\d+)?$/u;
+
+/** Which part of an event wait's filter `pointer` is, if it is one. */
+const eventFilterPart = (pointer: string): string | undefined =>
+  eventFilterAt.exec(pointer)?.groups?.part;
 
 const isExpression = (value: unknown): value is { $expr: string } =>
   typeof value === "object" &&
@@ -220,6 +234,7 @@ const boundRemedies: Readonly<Record<string, string>> = {
   maxLength: "Shorten it to the length the message gives.",
   minLength: "Give it some text.",
   maxItems: "Keep it to the number of items the message gives.",
+  minItems: "Give at least the number of items the message gives.",
   maxProperties: "Keep it to the number of entries the message gives.",
   minimum: "Give a number in the range the message gives.",
   maximum: "Give a number in the range the message gives.",
@@ -263,11 +278,20 @@ const patternProblem = ({
         "Start with a lower-case letter, then letters and digits only, e.g. `apiKey`.",
     };
   }
-  if (parent === "/bindings" || last === "binding") {
+  const filterPart = eventFilterPart(pointer);
+  if (parent === "/bindings" || last === "binding" || filterPart === "from") {
     return {
       code: "workflow.invalid_alias",
       message: "Not a binding's alias.",
       remedy: "Start with a letter, then letters, digits and `_` only.",
+    };
+  }
+  if (filterPart === "type") {
+    return {
+      code: "workflow.invalid_event_type",
+      message: "Not an event type.",
+      remedy:
+        "Name a type the binding's contract admits, on one line, with no space before or after it, e.g. `invoice.approved`.",
     };
   }
   if (durationProperties.has(last)) {
@@ -343,8 +367,16 @@ const schemaProblem = (error: SchemaError): Problem => {
   if (keyword === "oneOf") {
     return as({
       code: "workflow.wait_kind",
-      message: "A wait waits for a time span or until a deadline.",
-      remedy: "Give it either `for` or `until`, not both.",
+      message:
+        "A wait waits for a time span, until a deadline, or for an event.",
+      remedy: "Give it one of `for`, `until` and `event`.",
+    });
+  }
+  if (keyword === "uniqueItems" && eventFilterPart(pointer) === "type") {
+    return as({
+      code: "workflow.duplicate",
+      message: "It names the same type twice.",
+      remedy: "Name each type once.",
     });
   }
   if (keyword === "format") {
@@ -665,7 +697,7 @@ const checkDuration = (
   }
 };
 
-/** The binding `alias` names, if it is of one of `kinds`. */
+/** The binding `alias`, at `pointer`, names, if it is of one of `kinds`. */
 const bindingFor = (
   walk: Walk,
   alias: string,
@@ -677,7 +709,7 @@ const bindingFor = (
   if (binding === undefined) {
     problem(
       walk,
-      join(pointer, "binding"),
+      pointer,
       "workflow.unknown_binding",
       `No binding is named \`${alias}\`.`,
       "Declare it under `bindings`, or name one that is."
@@ -687,7 +719,7 @@ const bindingFor = (
   if (!kinds.includes(binding.kind)) {
     problem(
       walk,
-      join(pointer, "binding"),
+      pointer,
       "workflow.binding_kind",
       `\`${alias}\` is a ${binding.kind} binding; this step calls ${kinds.join(" or ")}.`,
       `Name a ${kinds.join(" or ")} binding.`
@@ -731,7 +763,7 @@ const checkDo = (
     walk,
     step.binding,
     ["connector", "operation", "compute", "action"],
-    pointer
+    join(pointer, "binding")
   );
   if (binding?.kind === "connector" && step.operation === undefined) {
     problem(
@@ -772,7 +804,7 @@ const checkAgent = (
   pointer: string,
   place: Place
 ): void => {
-  bindingFor(walk, step.binding, ["model"], pointer);
+  bindingFor(walk, step.binding, ["model"], join(pointer, "binding"));
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(
     walk,
@@ -859,7 +891,7 @@ const checkStep = (
     case "decision": {
       // The schema holds the recipients' and prompt's literals to their
       // shapes; what an expression gives the host holds as it decides.
-      bindingFor(walk, step.binding, ["decision"], pointer);
+      bindingFor(walk, step.binding, ["decision"], join(pointer, "binding"));
       for (const field of ["recipients", "prompt", "input"] as const) {
         checkValue(walk, step[field], join(pointer, field), place, false);
       }
@@ -869,6 +901,16 @@ const checkStep = (
     case "wait": {
       if ("until" in step) {
         checkExpressionAt(walk, step.until, join(pointer, "until"), place);
+      } else if ("event" in step) {
+        // Whether its contract admits each type is publication's to check,
+        // against the catalog, as every binding's contract is.
+        bindingFor(
+          walk,
+          step.event.from,
+          ["event"],
+          join(pointer, "event", "from")
+        );
+        checkDuration(walk, step.timeout, join(pointer, "timeout"));
       } else {
         checkDuration(walk, step.for, join(pointer, "for"));
       }

@@ -1,5 +1,6 @@
 import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 /**
  * What a binding's contract key resolves to. A definition names contracts;
@@ -257,14 +258,14 @@ const readEvents = (
     if (typeof browser !== "boolean") {
       return refuse("an event type that doesn't say whether a screen sends it");
     }
-    if (type.length === 0) {
-      return refuse("an empty event type");
+    if (!isEventType(type)) {
+      return refuse("an event type no run's inbox takes");
     }
     if (browser && [...events.values()].some((known) => known.browser)) {
       // A binding's alias names the one type a screen may send.
       return refuse("more than one event type a screen sends");
     }
-    events.set(text(type, catalogLimits.nameLength), {
+    events.set(type, {
       // Required: an event type is admitted only with its data's contract.
       data: schemaOf(ownData(event, "data"), budget),
       browser,

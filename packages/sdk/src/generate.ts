@@ -1,6 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import type { AppManifest, OperationManifest } from "./app.ts";
 import { preferenceOperations } from "./preference-operations.ts";
@@ -350,12 +351,9 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
       }
     }
     for (const event of Object.values(workflow.events)) {
-      if (
-        event.type.length === 0 ||
-        event.type.length > workflowReferenceLimits.eventTypeLength
-      ) {
+      if (!isEventType(event.type)) {
         throw new TypeError(
-          `An event's type is 1 to ${workflowReferenceLimits.eventTypeLength} characters: ${JSON.stringify(event.type.slice(0, 64))}`
+          `An event's type is 1 to ${sealedBuildLimits.eventTypeLength} characters on one line, with no control character and no space at either end: ${JSON.stringify(event.type.slice(0, 64))}`
         );
       }
     }

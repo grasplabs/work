@@ -37,4 +37,31 @@ export const sealedBuildLimits = {
   callDepth: valueDepth + 2,
   /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
   deadlineMs: 365 * day,
+  /** The types one event wait takes: a filter each. */
+  eventTypes: 16,
+  /**
+   * Characters (code points, as JSON Schema's `maxLength` counts them) of
+   * an event's type, as a run's inbox keeps one.
+   */
+  eventTypeLength: 256,
 } as const;
+
+/**
+ * An event's type, as a pattern JSON Schema and `RegExp` (with the `u`
+ * flag) both read: on one line, with no control character, and neither
+ * blank nor padded. A run's inbox takes no other, so a workflow waiting
+ * for one would only sit out its timeout.
+ */
+export const eventTypePattern =
+  "^(?!\\s)[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?<!\\s)$";
+
+const eventTypeRegExp = new RegExp(eventTypePattern, "u");
+
+/**
+ * Whether `type` is an event's type: the pattern, within the length in
+ * code points, so it agrees with a checker's JSON Schema on every type.
+ */
+export const isEventType = (type: string): boolean =>
+  // oxlint-disable-next-line typescript/no-misused-spread -- code points are what JSON Schema's maxLength counts
+  [...type].length <= sealedBuildLimits.eventTypeLength &&
+  eventTypeRegExp.test(type);

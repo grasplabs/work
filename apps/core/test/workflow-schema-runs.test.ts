@@ -1,20 +1,30 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { appModuleName } from "@grasp-os/compiler";
+import { v } from "@grasp-os/sdk";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
+import { decode } from "@grasp-os/workerflow/codec";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { buildWorkflows } from "../src/screens.ts";
+import {
+  approveWorkflowBinding,
+  revokeWorkflowBinding,
+} from "../src/workflow-bindings.ts";
 import { tasksFileSchema } from "../src/workflow-builds.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { runEngine } from "../src/workflows/engine.ts";
+import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import { countedStep } from "../src/workflows/host.ts";
+import { admitRunEvent } from "../src/workflows/run-events.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
@@ -27,14 +37,18 @@ import {
   decidingEngine,
   decisionsOf,
   decisionWorkflow,
+  descriptorOf,
   engineStep,
+  failedWith,
   hello,
   journalingEngine,
+  newerEngine,
   objectSchema,
   person,
   ranAs,
   retryingEngine,
   reviewRun,
+  sealedRunOf,
   sealedWorkflow,
   standardErrors,
   waitingRun,
@@ -1307,6 +1321,526 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
           status: "approved",
         },
       ],
+    });
+  });
+});
+
+/** The types of `eventWorkflow`'s event contract: a reply, and a bounce. */
+const received = "grasp.reply.received";
+const bounced = "grasp.reply.bounced";
+
+/** Where `eventWorkflow`'s events come from: an App, as its screen sends. */
+const fromApp = "https://grasp.test/apps/replies";
+
+/**
+ * A workflow of `by`'s on input `{ who }`, published and its event
+ * binding `replies` approved by `admin`: after an hour's wait, it listens
+ * through `replies` for a reply or a bounce, each of data `{ from }`.
+ */
+const eventWorkflow = async () => {
+  const admin = await person("admin");
+  const by = await person("builder");
+  const contract = `replies-${unique()}`;
+  const data = descriptorOf(v.object({ from: v.string() }));
+  await publishCatalogContract(env, admin, {
+    key: contract,
+    kind: "event",
+    events: {
+      [received]: { data, browser: false },
+      [bounced]: { data, browser: false },
+    },
+  });
+  const workflow = await createWorkflowResource(env, by, `replies-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { replies: { kind: "event", contract } },
+          },
+        },
+      },
+      input: { schema: objectSchema({ who: { type: "string" } }) },
+      output: { schema: objectSchema({}) },
+      do: [
+        { linger: { wait: "PT1H" } },
+        {
+          reply: {
+            listen: {
+              to: {
+                any: [
+                  { with: { type: received } },
+                  { with: { type: bounced } },
+                ],
+              },
+              read: "envelope",
+            },
+            timeout: { after: { days: 3 } },
+            metadata: { grasp: { binding: "replies" } },
+          },
+        },
+      ],
+    }),
+    basedOn: null,
+  });
+  const approved = await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "replies",
+    target: { kind: "event" },
+    reviewed: { version: 1 },
+  });
+  return { admin, by, workflow, approval: approved };
+};
+
+type Listening = Awaited<ReturnType<typeof eventWorkflow>>;
+
+/** `eventWorkflow`'s event binding, as a document declares it. */
+const replies = {
+  replies: { kind: "event", contract: "grasp.replies@1" },
+};
+
+/** An event wait for a reply or a bounce through `replies`. */
+const replyWait = (change: Record<string, unknown> = {}) => ({
+  id: "reply",
+  type: "wait",
+  event: { from: "replies", type: [received, bounced] },
+  timeout: "3 days",
+  ...change,
+});
+
+/** What a run ends with: how wait `reply` ended, as later steps read it. */
+const replied = {
+  schema: objectOf({
+    timedOut: { type: "boolean" },
+    type: { type: "string" },
+    from: { type: "string" },
+    source: { type: "string" },
+  }),
+  value: {
+    timedOut: { $expr: "steps.reply.output.timedOut" },
+    type: { $expr: 'steps.reply.output.event?.type ?? ""' },
+    from: { $expr: 'steps.reply.output.event?.data.from ?? ""' },
+    source: { $expr: 'steps.reply.output.event?.source ?? ""' },
+  },
+};
+
+/** An App's event of `type` from `from`, sent to run `runId`. */
+const sendTo = async (
+  { workflow }: Listening,
+  runId: string,
+  type: string,
+  from: string
+) =>
+  await admitRunEvent(env, {
+    workflowId: workflow.id,
+    runId,
+    binding: "replies",
+    type,
+    data: { from },
+    key: unique(),
+    source: fromApp,
+    sender: fromApp,
+  });
+
+/** What an engine's event waits were asked: each by its step, with its end. */
+type Asked = { step: string; types: string[]; until: number }[];
+
+/**
+ * An engine whose waits for an event each take the event `sends` sends
+ * the run as it begins, from the run's inbox as the engine keeps it, when
+ * one of the wait's matches names its engine type, as the engine matches
+ * them; and whose waits end as their deadline passes otherwise. What each
+ * wait asked goes in `asked`.
+ */
+const listeningEngine = (
+  runId: string,
+  sends: () => Promise<{ id: string } | undefined>,
+  asked: Asked
+): Engine => {
+  const { step, leaseOf } = newerEngine();
+  return {
+    leaseOf,
+    step: {
+      ...step,
+      waitForMatch: async (name, { match, until }) => {
+        asked.push({ step: name, types: match.map(({ type }) => type), until });
+        const sent = await sends();
+        const kept =
+          sent === undefined
+            ? null
+            : await runEngine(env).eventOf(runId, sent.id);
+        if (kept === null || !match.some(({ type }) => type === kept.type)) {
+          return await deadlinePasses();
+        }
+        return { payload: decode(kept.payload), timestamp: new Date() };
+      },
+    },
+  };
+};
+
+/** What an engine's waits for an event took, by their step. */
+type Taken = Map<string, Awaited<ReturnType<Engine["step"]["waitForMatch"]>>>;
+
+/**
+ * `listening`'s waits, its other steps journaled as `journalingEngine`
+ * journals them (those that ran in `ran`): each wait's event kept in
+ * `taken`, which a replay takes it from, asking the engine nothing.
+ */
+const journaledListening = (
+  listening: Engine,
+  journal: Map<string, Journaled>,
+  taken: Taken,
+  ran: string[] = []
+): Engine => {
+  const journaled = journalingEngine(journal, ran);
+  return {
+    leaseOf: journaled.leaseOf,
+    step: {
+      ...journaled.step,
+      waitForMatch: async (name, options) => {
+        const kept = taken.get(name);
+        if (kept !== undefined) {
+          return kept;
+        }
+        const event = await listening.step.waitForMatch(name, options);
+        taken.set(name, event);
+        return event;
+      },
+    },
+  };
+};
+
+/** The engine types the host keeps `replies`' events of `types` under. */
+const keysOf = async (...types: string[]): Promise<string[]> =>
+  await Promise.all(
+    types.map(async (type) => await eventTypeKey("replies", type))
+  );
+
+/** The steps task `id` has in `run`'s build, its table `seal`ed in. */
+const sealedSteps = (
+  run: HostedSealedRun,
+  seal: (loaded: HostedSealedRun) => HostedSealedRun,
+  id: string
+) => seal(run).build.tasks.find((task) => task.id === id)?.steps;
+
+/** Sends nothing: the wait's deadline passes. */
+const nothingSent = async (): Promise<undefined> => {
+  await Promise.resolve();
+};
+
+// An event wait's generated code on the run host: the first event of its
+// sealed binding and types an App sends the run, as the host minted it; a
+// timeout an outcome, `{ timedOut: true }`, never a failure; a wait in
+// each item of a loop under that item's keys; and a binding revoked since
+// the start, `workflow.event_denied`, failing the run, which no catch takes.
+describe("a grasp-workflow/1 event wait's generated code on the run host", () => {
+  let listening: Listening;
+
+  beforeAll(async () => {
+    listening = await eventWorkflow();
+  });
+
+  afterAll(endLiveResourceRuns);
+
+  it("takes an event of its binding and types an App sends the run, as the host minted it", async () => {
+    const { source, sealed: withTable } = await generated(
+      [replyWait()],
+      replied,
+      replies
+    );
+    const runId = await waitingRun(listening);
+    const asked: Asked = [];
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: listeningEngine(
+        runId,
+        async () => await sendTo(listening, runId, bounced, "ada@acme.test"),
+        asked
+      ),
+    });
+    expect({
+      ran,
+      asked: asked.map(({ step, types }) => ({ step, types })),
+    }).toStrictEqual({
+      ran: {
+        ended: {
+          timedOut: false,
+          type: bounced,
+          from: "ada@acme.test",
+          // The host's, from the sender's authority: never its input.
+          source: fromApp,
+        },
+        tampered: [],
+      },
+      asked: [
+        {
+          step: engineStep("reply", "task"),
+          types: await keysOf(received, bounced),
+        },
+      ],
+    });
+  });
+
+  it("answers `{ timedOut: true }` once its sealed timeout passes, which a later step reads", async () => {
+    const { source, sealed: withTable } = await generated(
+      [
+        replyWait({ timeout: "2 days" }),
+        {
+          id: "chase",
+          type: "wait",
+          if: { $expr: "steps.reply.output.timedOut" },
+          for: "1 hour",
+        },
+      ],
+      replied,
+      replies
+    );
+    const runId = await waitingRun(listening);
+    const asked: Asked = [];
+    const before = Date.now();
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: listeningEngine(runId, nothingSent, asked),
+    });
+    const after = Date.now();
+    const until = asked.map((wait) => wait.until);
+    expect({
+      ran,
+      // Its deadline is its sealed timeout from when it was first reached.
+      sealedTimeout: until.map(
+        (end) => end >= before + 2 * 86_400_000 && end <= after + 2 * 86_400_000
+      ),
+    }).toStrictEqual({
+      ran: {
+        ended: { timedOut: true, type: "", from: "", source: "" },
+        tampered: [],
+      },
+      sealedTimeout: [true],
+    });
+  });
+
+  it("waits in each item of a loop under that item's keys, each taking its own event", async () => {
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "rounds",
+          type: "forEach",
+          items: { $expr: '["one", "two"]' },
+          do: [
+            replyWait({
+              id: "each",
+              event: { from: "replies", type: received },
+            }),
+          ],
+        },
+      ],
+      undefined,
+      replies
+    );
+    const runId = await waitingRun(listening);
+    const asked: Asked = [];
+    const sent: string[] = [];
+    const ran = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: listeningEngine(
+        runId,
+        async () => {
+          const event = await sendTo(
+            listening,
+            runId,
+            received,
+            `round-${sent.length}@acme.test`
+          );
+          sent.push(event.id);
+          return event;
+        },
+        asked
+      ),
+    });
+    expect({
+      ran,
+      asked: asked.map(({ step, types }) => ({ step, types })),
+      sent: new Set(sent).size,
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      asked: [
+        { step: engineStep("each", "task@0"), types: await keysOf(received) },
+        { step: engineStep("each", "task@1"), types: await keysOf(received) },
+      ],
+      sent: 2,
+    });
+  });
+
+  it("skips a wait whose own `if` doesn't hold, at the top level and in an item, and the next item's wait takes its event", async () => {
+    const skipped = await generated(
+      [replyWait({ if: { $expr: 'input.who !== "Ada"' } })],
+      {
+        schema: objectOf({ skipped: { type: "boolean" } }),
+        value: { skipped: { $expr: "steps.reply.output === null" } },
+      },
+      replies
+    );
+    const inItems = await generated(
+      [
+        {
+          id: "rounds",
+          type: "forEach",
+          items: { $expr: '["skip", "take"]' },
+          do: [
+            replyWait({
+              id: "each",
+              if: { $expr: 'item === "take"' },
+              event: { from: "replies", type: received },
+            }),
+          ],
+        },
+      ],
+      undefined,
+      replies
+    );
+    const topRun = await waitingRun(listening);
+    const itemRun = await waitingRun(listening);
+    const asked: Asked = [];
+    const sent: string[] = [];
+    const top = await ranAs(topRun, skipped.source, {
+      sealed: skipped.sealed,
+      engine: listeningEngine(topRun, nothingSent, asked),
+    });
+    const items = await ranAs(itemRun, inItems.source, {
+      sealed: inItems.sealed,
+      engine: listeningEngine(
+        itemRun,
+        async () => {
+          const event = await sendTo(listening, itemRun, received, "ada");
+          sent.push(event.id);
+          return event;
+        },
+        asked
+      ),
+    });
+    const loaded = await sealedRunOf(topRun);
+    expect({
+      top,
+      items,
+      steps: {
+        reply: sealedSteps(loaded, skipped.sealed, "reply"),
+        each: sealedSteps(loaded, inItems.sealed, "each"),
+      },
+      // Only the second item's wait reached the engine, and took its event.
+      asked: asked.map(({ step }) => step),
+      sent: sent.length,
+    }).toStrictEqual({
+      top: { ended: { skipped: true }, tampered: [] },
+      items: { ended: null, tampered: [] },
+      steps: { reply: ["enter", "task"], each: ["enter", "task"] },
+      asked: [engineStep("each", "task@1")],
+      sent: 1,
+    });
+  });
+
+  it("fails the run with `workflow.event_denied` once its binding is revoked, a `try` around it or not", async () => {
+    const revoked = await eventWorkflow();
+    const caught = await generated(
+      [{ id: "guarded", type: "try", try: [replyWait()], catch: {} }],
+      undefined,
+      replies
+    );
+    const bare = await generated([replyWait()], undefined, replies);
+    const caughtRun = await waitingRun(revoked);
+    const bareRun = await waitingRun(revoked);
+    await revokeWorkflowBinding(
+      env,
+      revoked.admin,
+      revoked.workflow.id,
+      revoked.approval.id
+    );
+    const asked: Asked = [];
+    expect({
+      caught: await ranAs(caughtRun, caught.source, {
+        sealed: caught.sealed,
+        engine: listeningEngine(caughtRun, nothingSent, asked),
+      }),
+      bare: await ranAs(bareRun, bare.source, {
+        sealed: bare.sealed,
+        engine: listeningEngine(bareRun, nothingSent, asked),
+      }),
+      // Refused before it waits: the engine is asked for nothing.
+      asked,
+    }).toStrictEqual({
+      // No catch takes it: the host checks the binding again on replay.
+      caught: failedWith("workflow.event_denied"),
+      bare: failedWith("workflow.event_denied"),
+      asked: [],
+    });
+  });
+
+  it("replays a wait that took its event as it ran, and fails the replay with `workflow.event_denied` once its binding is revoked, its `try` notwithstanding", async () => {
+    const revoked = await eventWorkflow();
+    const { source, sealed: withTable } = await generated(
+      [{ id: "guarded", type: "try", try: [replyWait()], catch: {} }],
+      undefined,
+      replies
+    );
+    const runId = await waitingRun(revoked);
+    const journal = new Map<string, Journaled>();
+    const taken: Taken = new Map();
+    const asked: Asked = [];
+    const first = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: journaledListening(
+        listeningEngine(
+          runId,
+          async () => await sendTo(revoked, runId, received, "ada@acme.test"),
+          asked
+        ),
+        journal,
+        taken
+      ),
+    });
+    // Each replay finds the wait's event in the journal: nothing is sent.
+    const replay = async (ran: string[]) =>
+      await ranAs(runId, source, {
+        sealed: withTable,
+        engine: journaledListening(
+          listeningEngine(runId, nothingSent, asked),
+          journal,
+          taken,
+          ran
+        ),
+      });
+    const ranAgain: string[] = [];
+    const replayed = await replay(ranAgain);
+    await revokeWorkflowBinding(
+      env,
+      revoked.admin,
+      revoked.workflow.id,
+      revoked.approval.id
+    );
+    const ranRevoked: string[] = [];
+    const afterRevoking = await replay(ranRevoked);
+    expect({
+      first,
+      replayed,
+      ranAgain,
+      afterRevoking,
+      ranRevoked,
+      // The engine was asked once, by the first run.
+      asked: asked.map(({ step }) => step),
+    }).toStrictEqual({
+      first: { ended: null, tampered: [] },
+      replayed: { ended: null, tampered: [] },
+      ranAgain: [],
+      // The path the run took is gone: its catch is asked, and takes
+      // nothing, so it never takes a path the run never took.
+      afterRevoking: failedWith("workflow.event_denied"),
+      ranRevoked: [engineStep("guarded", "catch")],
+      asked: [engineStep("reply", "task")],
     });
   });
 });

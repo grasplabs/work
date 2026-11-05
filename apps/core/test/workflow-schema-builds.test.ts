@@ -1,3 +1,5 @@
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -5,10 +7,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   checked,
   decision,
+  emojiType,
   everyBinding,
+  eventWait,
   everyOperator,
   everyStep,
   withDecisions,
+  withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildWorkflows } from "../src/screens.ts";
@@ -55,7 +60,38 @@ const fixtures = {
     }),
     bindings: withDecisions().bindings,
   }),
+  // Event waits, one in a loop's items, and steps reading how they ended.
+  eventWaits: () =>
+    withEventWaits(
+      eventWait({ if: { $expr: 'input.who !== "Ada"' } }),
+      {
+        id: "answer",
+        type: "do",
+        binding: "mail",
+        operation: "mail.send",
+        if: { $expr: "!steps.reply.output.timedOut" },
+        arguments: {
+          to: { $expr: "steps.reply.output.event.data.from" },
+          subject: { $expr: "steps.reply.output.event.type" },
+        },
+      },
+      {
+        id: "rounds",
+        type: "forEach",
+        items: { $expr: "input.rounds" },
+        do: [
+          eventWait({
+            id: "each",
+            event: { from: "replies", type: ["grasp.a", "grasp.b"] },
+          }),
+        ],
+      }
+    ),
 };
+
+/** A workflow waiting for an event of `type` through `replies`. */
+const waitingFor = (type: string) =>
+  withEventWaits(eventWait({ event: { from: "replies", type } }));
 
 describe("grasp-workflow/1's generated code", () => {
   it("type-checks against the SDK, for every fixture", async () => {
@@ -105,5 +141,34 @@ describe("grasp-workflow/1's generated code", () => {
       return read.success ? [] : [[name, read.error.issues]];
     });
     expect(refused).toStrictEqual([]);
+  });
+
+  it("holds an event type to one length, in code points, from the check to the sealed table", () => {
+    const longest = emojiType(sealedBuildLimits.eventTypeLength);
+    const tooLong = emojiType(sealedBuildLimits.eventTypeLength + 1);
+    const generation = generateWorkflow(
+      checked(waitingFor(longest)),
+      "generated"
+    );
+    const sealed = JSON.stringify({
+      tasks: generation.tasks,
+      expressions: generation.expressions,
+      workflow: generation.workflow,
+      params: generation.params,
+      limits: generation.limits,
+    });
+    expect({
+      longest: tasksFileSchema.safeParse(JSON.parse(sealed)).success,
+      tooLongChecked: checkWorkflow(waitingFor(tooLong)).ok,
+      // That table with one more emoji in its type: what a checker counting
+      // length otherwise than the host would have let through.
+      tooLongSealed: tasksFileSchema.safeParse(
+        JSON.parse(sealed.replaceAll(longest, tooLong))
+      ).success,
+    }).toStrictEqual({
+      longest: true,
+      tooLongChecked: false,
+      tooLongSealed: false,
+    });
   });
 });

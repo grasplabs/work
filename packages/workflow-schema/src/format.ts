@@ -11,8 +11,8 @@ import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 // (generate.ts). schema.ts defines it; check.ts checks it.
 //
 // A step kind joins the format as its SDK call joins the run host: a new
-// `type` in the union, nothing else changing (decision and forEach came so;
-// fork, race, event waits and child runs come so).
+// `type` in the union, nothing else changing (decision, forEach and event
+// waits came so; fork, race and child runs come so).
 
 /**
  * The format's published JSON Schema, by its versioned URL: every document
@@ -117,6 +117,7 @@ export const bindingKinds = [
   "compute",
   "action",
   "decision",
+  "event",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
@@ -215,12 +216,46 @@ export interface ForEachStep extends StepBase {
   readonly do: readonly Step[];
 }
 
-/** Waits: for a time span, or until a deadline (ms since the epoch). */
-export type WaitStep = StepBase &
-  (
-    | { readonly type: "wait"; readonly for: Duration }
-    | { readonly type: "wait"; readonly until: Expression }
-  );
+/**
+ * The events an event wait takes: those sent to the run through event
+ * binding `from`, of `type` or any of a list of types, each one the
+ * binding's contract admits.
+ */
+export interface EventFilter {
+  readonly from: string;
+  readonly type: string | readonly string[];
+}
+
+/**
+ * Waits: for a time span, until a deadline (ms since the epoch), or for an
+ * event (`EventWaitStep`), at most `timeout`, which an event wait always
+ * names: a run never waits for an event with no end.
+ */
+export type WaitStep =
+  | (StepBase & { readonly type: "wait"; readonly for: Duration })
+  | (StepBase & { readonly type: "wait"; readonly until: Expression })
+  | EventWaitStep;
+
+/**
+ * A wait for an event. Its output is the SDK's `step.listen`'s
+ * (`EventWait`): the first event of its filter sent to the run (once the
+ * run started, or while it waited), as the host minted it, or
+ * `{ timedOut: true }` when none came within its timeout. A timeout is an
+ * outcome a later step reads (`steps.<id>.output.timedOut`), never a
+ * failure; the event's data is `steps.<id>.output.event.data`.
+ *
+ * Any failure of an event wait fails the run, and no `try` catches it:
+ * its binding revoked (`workflow.event_denied`), the run's person no
+ * longer active (`permission.person_inactive`), or a test run's wait
+ * limit (`workflow.candidate_wait_limit`). The host checks the binding
+ * again on every replay, so a catch would let a replay after a revocation
+ * take a path the run never took.
+ */
+export interface EventWaitStep extends StepBase {
+  readonly type: "wait";
+  readonly event: EventFilter;
+  readonly timeout: Duration;
+}
 
 /** Runs `then` when `condition` holds, `else` otherwise. */
 export interface IfStep extends StepBase {
@@ -347,6 +382,10 @@ export const durationMs = (duration: Duration): number => {
  * in all, every item's counted, and the items one list may hold.
  */
 export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${platformLimits.workflowSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${platformLimits.workflowCollectionItems.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
+
+/** What a wait is, to whoever writes one: the schema's description. */
+export const waitDescription =
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,

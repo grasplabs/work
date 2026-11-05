@@ -6,8 +6,10 @@ import { generateWorkflow } from "../src/generate.ts";
 import {
   checked,
   decision,
+  eventWait,
   everyStep,
   withDecisions,
+  withEventWaits,
   withLoops,
 } from "./fixtures.ts";
 
@@ -192,6 +194,13 @@ const betweenSteps = (
   visit(parse(source, asModule).program, 0);
   return { guards, conditions };
 };
+
+/** The sealed listen of an event wait through `replies` for `types`. */
+const listenFor = (...types: string[]) => ({
+  binding: "replies",
+  strategy: "any",
+  filters: types.map((type) => ({ type, attributes: [] })),
+});
 
 describe("generating a workflow", () => {
   it("keeps every string, key and title of the document data", () => {
@@ -537,6 +546,68 @@ describe("generating a workflow", () => {
         prompt: { literal: "Approve this?" },
         input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
         timeoutMs: 2 * 86_400_000,
+      },
+    });
+  });
+
+  it("seals an event wait's binding, types and timeout", () => {
+    const generated = generateWorkflow(
+      checked(
+        withEventWaits(
+          eventWait(),
+          eventWait({
+            id: "either",
+            if: { $expr: "steps.reply.output.timedOut" },
+            event: { from: "replies", type: ["grasp.a", "grasp.b"] },
+            timeout: "52 weeks",
+          }),
+          {
+            id: "items",
+            type: "forEach",
+            items: { $expr: "input.rows" },
+            do: [eventWait({ id: "each" })],
+          }
+        )
+      ),
+      "workflow"
+    );
+    const taskOf = (id: string) => {
+      const task = generated.tasks.find((each) => each.id === id);
+      return (
+        task && {
+          kind: task.kind,
+          steps: task.steps,
+          scope: task.scope,
+          listen: task.listen,
+          timeoutMs: task.timeoutMs,
+        }
+      );
+    };
+    expect({
+      reply: taskOf("reply"),
+      either: taskOf("either"),
+      each: taskOf("each"),
+    }).toStrictEqual({
+      reply: {
+        kind: "listen",
+        steps: ["task"],
+        scope: [],
+        listen: listenFor("grasp.reply.received"),
+        timeoutMs: 3 * 86_400_000,
+      },
+      either: {
+        kind: "listen",
+        steps: ["enter", "task"],
+        scope: [],
+        listen: listenFor("grasp.a", "grasp.b"),
+        timeoutMs: 52 * 7 * 86_400_000,
+      },
+      each: {
+        kind: "listen",
+        steps: ["task"],
+        scope: ["items"],
+        listen: listenFor("grasp.reply.received"),
+        timeoutMs: 3 * 86_400_000,
       },
     });
   });

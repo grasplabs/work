@@ -32,6 +32,7 @@ import {
 } from "@grasp-os/shared/workflow-modules";
 import {
   openWorkflowProtocol,
+  workflowEventTypeSchema,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
@@ -301,7 +302,7 @@ const sealedCallSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("grasp.emit"),
     binding: aliasSchema,
-    type: z.string().min(1).max(256),
+    type: workflowEventTypeSchema,
     subject: templateSchema.optional(),
     dataschema: z
       .string()
@@ -346,7 +347,7 @@ const sealedListenSchema = z.strictObject({
   filters: z
     .array(
       z.strictObject({
-        type: z.string().min(1).max(256),
+        type: workflowEventTypeSchema,
         attributes: z
           .array(
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
@@ -370,7 +371,7 @@ const sealedListenSchema = z.strictObject({
       })
     )
     .min(1)
-    .max(16),
+    .max(sealedBuildLimits.eventTypes),
 });
 
 /** A raise task's error, literal (generate.ts, `RaisedError`). */
