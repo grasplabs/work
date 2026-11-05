@@ -1,4 +1,5 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
+import type { PreviewAt } from "@grasp-os/shared/chat";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import {
   streamIdleCancelMs,
@@ -184,11 +185,11 @@ const endOf = (frame: Frame): string | undefined => {
   return frame.type === "refused" ? `refused:${frame.error.code}` : "closed";
 };
 
-/** Where one preview stream goes: its chat, App and revision. */
+/** Where one preview stream goes: its chat, App and the build it names. */
 interface Seat {
   readonly chatId: ChatId;
   readonly app: AppId;
-  readonly revision: number;
+  readonly revision: PreviewAt;
 }
 
 /** The streaming action `path`'s request with `input`, under `key`. */
@@ -277,6 +278,58 @@ const progressed = async (frames: readonly Frame[]): Promise<void> => {
     },
     { timeout: 30_000, interval: 50 }
   );
+};
+
+/**
+ * A run of `notes.slow` followed in the preview of the App's latest
+ * version, in the App's own chat, which has written no draft: and the
+ * stores the preview ran it on.
+ */
+const streamingLatest = async () => {
+  const builder = await signedInApi(idp, "builder");
+  const app = await notesApp(builder);
+  const chat = await builder.api.chats.forApp(app);
+  const seat: Seat = {
+    chatId: chatIdSchema.parse(chat.id),
+    app,
+    revision: { appVersion: 1 },
+  };
+  const request = await streamRequest(
+    builder,
+    seat,
+    "notes.slow",
+    { title: "latest" },
+    crypto.randomUUID()
+  );
+  const followed = await follow(builder, seat, "stream", request);
+  await progressed(followed.frames);
+  const stores = await runInDurableObject(
+    chatsOf(builder),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ store_id: string }>(
+          "SELECT store_id FROM preview_stores WHERE chat_id = ?",
+          seat.chatId
+        )
+        .toArray()
+        .map(({ store_id: id }) => id)
+  );
+  return { builder, seat, request, followed, stores };
+};
+
+/** Whether core still records any of preview stores `ids`. */
+const recorded = async (ids: readonly string[]): Promise<boolean> => {
+  const found = await Promise.all(
+    ids.map(
+      async (id) =>
+        (await env.DB.prepare(
+          "SELECT 1 AS here FROM preview_fixture_stores WHERE store_id = ?"
+        )
+          .bind(id)
+          .first()) !== null
+    )
+  );
+  return found.includes(true);
 };
 
 describe(
@@ -600,6 +653,63 @@ describe(
         // Far sooner than its 30 seconds of steps.
         soon: Date.now() - changedAt < 10_000,
       }).toStrictEqual({ started: true, stopped: true, soon: true });
+    });
+
+    it("stops the preview of the App's latest version, with no draft written, once its chat is deleted, and discards its store", async () => {
+      const { builder, seat, request, followed, stores } =
+        await streamingLatest();
+      await builder.api.chats.remove(seat.chatId);
+      const deletedAt = Date.now();
+      const end = await followed.ended;
+      expect({
+        end,
+        // Far sooner than its 30 seconds of steps.
+        soon: Date.now() - deletedAt < 10_000,
+        stores: stores.length,
+        attach: await failure(
+          async () => await attachedInObject(builder, seat, request)
+        ),
+        call: await failure(async () => await previewTitles(builder, seat)),
+      }).toStrictEqual({
+        end: "refused:app.preview_outdated",
+        soon: true,
+        stores: 1,
+        attach: "agent.chat_not_found",
+        call: "agent.chat_not_found",
+      });
+      await vi.waitFor(
+        async () => {
+          await expect(recorded(stores)).resolves.toBeFalsy();
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    });
+
+    it("stops the preview of the App's latest version, with no draft written, once its person is erased, and discards its store", async () => {
+      const { builder, seat, request, followed, stores } =
+        await streamingLatest();
+      await chatsOf(builder).erasePerson(builder.userId);
+      const erasedAt = Date.now();
+      const end = await followed.ended;
+      expect({
+        end,
+        soon: Date.now() - erasedAt < 10_000,
+        stores: stores.length,
+        attach: await failure(
+          async () => await attachedInObject(builder, seat, request)
+        ),
+      }).toStrictEqual({
+        end: "refused:app.preview_outdated",
+        soon: true,
+        stores: 1,
+        attach: "agent.chat_not_found",
+      });
+      await vi.waitFor(
+        async () => {
+          await expect(recorded(stores)).resolves.toBeFalsy();
+        },
+        { timeout: 30_000, interval: 100 }
+      );
     });
 
     it("is relayed only while its person builds the App, and is cancelled once they don't", async () => {

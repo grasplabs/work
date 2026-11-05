@@ -3687,13 +3687,7 @@ export class Workspace extends DurableObject<Env> {
       );
       // Nor any workflow start its agent asked its person to confirm.
       await dropHeldStarts(this.env, { chatId: id });
-      // Every App it has a draft of, even one with no changes left: its
-      // preview may still run.
-      const drafted = this.#db
-        .select({ appId: chatDrafts.appId })
-        .from(chatDrafts)
-        .where(eq(chatDrafts.chatId, id))
-        .all();
+      const previewed = this.#previews(id);
       // What the Brain captured of its turns goes before it does: should
       // that fail, the chat stays (brain-capture.ts). After any delivery
       // under way, as for a person's erasure: one that records the chat's
@@ -3745,7 +3739,7 @@ export class Workspace extends DurableObject<Env> {
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
-      for (const { appId } of drafted) {
+      for (const { appId } of previewed) {
         this.#dropPreview(id, appId);
       }
       this.#stopped.delete(id);
@@ -3815,13 +3809,6 @@ export class Workspace extends DurableObject<Env> {
         "person_removed"
       );
     }
-    const drafted = this.#db
-      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
-      .from(chatDrafts)
-      .all();
-    for (const { chatId, appId } of drafted) {
-      this.#dropPreview(chatId, appId);
-    }
     const stores = this.#db
       .select({ storeId: previewStores.storeId })
       .from(previewStores)
@@ -3841,6 +3828,12 @@ export class Workspace extends DurableObject<Env> {
         await discardFixtureStore(this.env, storeIdSchema.parse(storeId));
       }
     }
+    // Then every preview stops, a stream it runs too: after the discards
+    // above, as a drop discards its stores again and forgets core's record
+    // of them, and a discard once the record went is refused.
+    for (const { chatId, appId } of this.#previews()) {
+      this.#dropPreview(chatId, appId);
+    }
     // Every event of what it did is in the log before its outbox goes.
     if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
       throw internalErrors.create("internal.unexpected");
@@ -3855,7 +3848,7 @@ export class Workspace extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
     // a new object, and nothing it held in memory of a chat stays. Its
-    // previews were dropped above (`#dropPreview`, for every draft); the
+    // previews were dropped above (`#dropPreview`, every chat's); the
     // preview updates it waits on hold only tokens, and end on their own.
     migrateOnWake(this.ctx, migrations);
     for (const kept of [
@@ -4524,12 +4517,16 @@ export class Workspace extends DurableObject<Env> {
    * still reaches it: for what follows it outside this object, a live
    * query or a stream (chats-rpc.ts). A version of the App always does,
    * as it runs that version's own code; the draft at a revision while
-   * `SealedPreviews.serves` it.
+   * `SealedPreviews.serves` it. Neither once the chat is gone, or has no
+   * preview of the App.
    */
   previewServes(chatId: unknown, appId: string, at: unknown): boolean {
     const chat = chatIdSchema.safeParse(chatId);
     const named = previewAtSchema.safeParse(at);
-    if (!(chat.success && named.success)) {
+    if (
+      !(chat.success && named.success) ||
+      !this.#previews(chat.data).some((preview) => preview.appId === appId)
+    ) {
       return false;
     }
     return (
@@ -4575,6 +4572,37 @@ export class Workspace extends DurableObject<Env> {
       return undefined;
     }
     return await latestVersion(this.env, app);
+  }
+
+  /**
+   * Every preview chat `chatId` may run, or every chat's: of each App it
+   * has a draft of, even one with no changes left, and of the App whose
+   * chat it is, which it previews with no draft written
+   * (`#previewsInChat`). What a chat's deletion or its person's erasure
+   * stops.
+   */
+  #previews(chatId?: ChatId): { chatId: ChatId; appId: string }[] {
+    const drafted = this.#db
+      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
+      .from(chatDrafts)
+      .where(chatId === undefined ? undefined : eq(chatDrafts.chatId, chatId))
+      .all();
+    const own = this.#db
+      .select({ chatId: chats.id, appId: chats.appId })
+      .from(chats)
+      .where(chatId === undefined ? undefined : eq(chats.id, chatId))
+      .all()
+      .flatMap(({ chatId: id, appId }) =>
+        appId === null ? [] : [{ chatId: id, appId }]
+      );
+    return [
+      ...new Map(
+        [...drafted, ...own].map((preview) => [
+          `${preview.chatId}:${preview.appId}`,
+          preview,
+        ])
+      ).values(),
+    ];
   }
 
   /**
