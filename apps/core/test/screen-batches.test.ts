@@ -1,7 +1,8 @@
-import { appCompilerName } from "@grasp-os/compiler";
+import { appCompilerName, typeCheckerName } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { platformRunner } from "../src/platform-sandbox.ts";
 import { buildScreens } from "../src/screens.ts";
 import { unique } from "./sign-in.ts";
 
@@ -70,13 +71,13 @@ const cpuStop = "Worker exceeded CPU time limit.";
 /**
  * Core's Loader, recording each isolate's name and each compiler call,
  * and ending the calls `fails` picks with the message it gives
- * (`cpuStop`, as the runtime stops one).
+ * (`cpuStop`, as the runtime stops one), once it has looked at the call.
  */
 const recordingLoader = (
   fails: (
     method: string,
     handed: Record<string, string>
-  ) => string | undefined = () => {}
+  ) => string | undefined | Promise<string | undefined> = () => {}
 ) => {
   const names: string[] = [];
   const calls: Call[] = [];
@@ -99,7 +100,7 @@ const recordingLoader = (
               0
             ),
           };
-          const failure = fails(property, handed);
+          const failure = await fails(property, handed);
           if (failure !== undefined) {
             failed += 1;
             calls.push({ ...call, stopped: true, ms: 0 });
@@ -398,7 +399,16 @@ describe("a first screens build of a large App", () => {
       ).catch((error: unknown) => error);
       expect(ended).toBeInstanceOf(Error);
     });
-    const after = recordingLoader();
+    // How long the build's lease still holds as its type check starts.
+    let leaseLeftAtCheck = 0;
+    const after = recordingLoader(async (method) => {
+      if (method === "check") {
+        const row = await env.DB.prepare(
+          "SELECT MAX(lease_expires_at) AS expires FROM build_receipts WHERE key LIKE 'screen-builds/%' AND holder IS NOT NULL"
+        ).first<{ expires: number | null }>();
+        leaseLeftAtCheck = (row?.expires ?? 0) - Date.now();
+      }
+    });
 
     const resumed = await batchesLogged(async () => {
       const built = await buildScreens(
@@ -425,6 +435,11 @@ describe("a first screens build of a large App", () => {
       stopped,
       resumed,
       calls: after.calls.map(({ method }) => method),
+      // The check is a call of its own: the lease is renewed as it starts,
+      // for as long as it may take, so no other request builds it again.
+      leaseHoldsTheCheck:
+        leaseLeftAtCheck >=
+        platformRunner(onCloudflare, whose).callMs("type-checker"),
     }).toStrictEqual({
       batched: true,
       heldToABatch: true,
@@ -436,7 +451,9 @@ describe("a first screens build of a large App", () => {
       stopped: [],
       // Nothing transformed again: the stopped build's batches were kept.
       resumed: [{ batchCalls: 0, batched: 0, compiled: 0, reused: count }],
-      calls: ["buildIncrementally"],
+      // The build's own call, then its one type check, in the checker.
+      calls: ["buildIncrementally", "check"],
+      leaseHoldsTheCheck: true,
     });
   }, 120_000);
 
@@ -523,10 +540,17 @@ describe("a first screens build of a large App", () => {
     );
 
     const sources = [first, changed].flatMap((files) => Object.values(files));
+    // The compiler's isolates, and the type checker's, which every App
+    // shares (its name is the release's alone).
+    const [compilers, checkers] = [
+      names.filter((name) => !name.startsWith(typeCheckerName)),
+      names.filter((name) => name.startsWith(typeCheckerName)),
+    ];
     expect({
-      names: [...new Set(names)].map((name) =>
+      names: [...new Set(compilers)].map((name) =>
         name.startsWith(appCompilerName(whose))
       ),
+      checked: checkers.length > 0,
       code: names.filter((name) =>
         sources.some((source) =>
           source
@@ -534,7 +558,7 @@ describe("a first screens build of a large App", () => {
             .some((line) => line.length > 8 && name.includes(line))
         )
       ),
-    }).toStrictEqual({ names: [true], code: [] });
+    }).toStrictEqual({ names: [true], checked: true, code: [] });
   }, 120_000);
 
   it("builds every App in one compiler isolate on plain workerd", async () => {
@@ -553,7 +577,12 @@ describe("a first screens build of a large App", () => {
     );
 
     // Core's Loader suffixes each name with the entrypoint it silences.
-    const isolates = new Set(names.map((name) => name.split("\u0000")[0]));
+    // The type checker's isolate is every App's anywhere, a release's own.
+    const isolates = new Set(
+      names
+        .map((name) => name.split("\u0000")[0])
+        .filter((name) => name?.startsWith(typeCheckerName) === false)
+    );
     expect({
       built: [first.ok, second.ok],
       isolates: [...isolates],

@@ -1,8 +1,9 @@
-import { startAppCompiler } from "@grasp-os/compiler";
+import { startAppCompiler, startTypeChecker } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import { generatedPaths, symbolicModules } from "@grasp-os/sdk/host";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { callStub } from "../src/sandboxed.ts";
 import { buildScreens } from "../src/screens.ts";
@@ -158,7 +159,7 @@ describe("screen checks", { timeout: 60_000 }, () => {
           column: 44,
           rule: "TS2322",
           severity: "error",
-          message: `Type '"stuck"' is not assignable to type '"open" | "waiting" | "closed"'.`,
+          message: `Type '"stuck"' is not assignable to type '"closed" | "open" | "waiting"'.`,
         },
       ],
     });
@@ -621,25 +622,33 @@ export default function Lookalikes() {
     expect(built).toMatchObject({ ok: true, diagnostics: [] });
   });
 
-  it("checks a typical screen quickly once the isolate is warm", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
-    // The first check parses the kit's declarations; later ones reuse them.
-    await expect(compiler.check("screens", typicalApp)).resolves.toStrictEqual(
+  it("checks a typical screen quickly once the checker's isolate is warm", async () => {
+    const { request } = z
+      .object({ typeCheck: z.object({ request: z.unknown() }) })
+      .parse(
+        await callStub(
+          startAppCompiler(env.LOADER, env.ASSETS, "app-test"),
+          "build",
+          ["screens", typicalApp]
+        )
+      ).typeCheck;
+    const checker = startTypeChecker(env.LOADER, env.ASSETS);
+    await expect(callStub(checker, "check", [request])).resolves.toStrictEqual(
       []
     );
 
     // The fastest of a few runs: a shared runner's pauses (other jobs,
     // garbage collection) only ever add time. A warm check takes about
-    // 50 ms on a laptop, well inside the 1 s the checks may add to a build;
-    // the bound here is looser, 5 s, so that a slow or busy CI runner can't
-    // fail it, while a check gone badly wrong (runaway work) still does.
-    // The test's clock only moves on I/O;
-    // each RPC to the compiler is I/O, so the times are real.
+    // 100 ms on a laptop, well inside the 1 s the checks may add to a
+    // build; the bound here is looser, 5 s, so that a slow or busy CI
+    // runner can't fail it, while a check gone badly wrong (runaway work)
+    // still does. The test's clock only moves on I/O; each RPC to the
+    // checker is I/O, so the times are real.
     const timings: number[] = [];
     for (let run = 0; run < 3; run += 1) {
       const started = performance.now();
       // oxlint-disable-next-line no-await-in-loop -- runs are timed one at a time
-      await compiler.check("screens", typicalApp);
+      await callStub(checker, "check", [request]);
       timings.push(performance.now() - started);
     }
 
@@ -648,25 +657,21 @@ export default function Lookalikes() {
 });
 
 describe("the App compiler's surface", { timeout: 60_000 }, () => {
-  it("never checks clean a screen its build refuses for an import", async () => {
-    const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
+  it("never passes a screen its build refuses for an import, however clean its type check", async () => {
     const leaking = {
       ...typicalApp,
       "screens/leak.tsx":
         'import { createClient } from "@grasp-os/sdk/client";\n\nexport default function Leak() {\n  return <p>{typeof createClient}</p>;\n}\n',
     };
-    const [built, checked] = await Promise.all([
-      compiler.build("screens", leaking),
-      compiler.check("screens", leaking),
-    ]);
+    const built = await buildScreens(env, leaking, "app-test");
     expect({
       built: built.ok,
-      checked: checked
+      errors: (built.ok ? [] : built.diagnostics)
         .filter(({ severity }) => severity === "error")
         .map(({ file, rule }) => ({ file, rule })),
     }).toStrictEqual({
       built: false,
-      checked: [{ file: "screens/leak.tsx", rule: "imports" }],
+      errors: [{ file: "screens/leak.tsx", rule: "imports" }],
     });
   });
 
@@ -676,7 +681,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     const refusals = await Promise.all(
       [
         ["build", "everything"],
-        ["check", "constructor"],
+        ["buildIncrementally", "constructor"],
         ["inspect", "screens"],
         ["inspect", "toString"],
       ].map(
@@ -693,16 +698,16 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     );
     expect(refusals).toStrictEqual([
       "TypeError: build",
-      "TypeError: check",
+      "TypeError: buildIncrementally",
       "TypeError: inspect",
       "TypeError: inspect",
     ]);
   });
 
-  it("answers only its own methods: build, buildIncrementally, transform, check and inspect", async () => {
+  it("answers only its own methods, build, buildIncrementally, transform and inspect: never a type check, which is the checker's", async () => {
     const compiler = startAppCompiler(env.LOADER, env.ASSETS, "app-test");
     const answers = await Promise.all(
-      ["buildWorkflows", "buildAppCode", "checkAppCode", "buildServer"].map(
+      ["check", "buildWorkflows", "checkAppCode", "buildServer"].map(
         async (method) =>
           await callStub(compiler, method, [typicalApp]).then(
             () => "answered",

@@ -35,7 +35,6 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
-import { platformRunner } from "../src/platform-sandbox.ts";
 import { buildAppCode, buildAppTests, buildScreens } from "../src/screens.ts";
 import { claimStore } from "../src/store-owners.ts";
 import { allEvents } from "./audit-events.ts";
@@ -2224,9 +2223,8 @@ describe("screens", { timeout: 120_000 }, () => {
     });
   });
 
-  it("check a screen's declaration naming a module by import() in a namespace as its build does", async () => {
-    // The compiler's check is its build's diagnostics (GRA-676, GRA-683),
-    // so the declaration's import check refuses it before any type check;
+  it("refuse a screen's declaration naming a module by import() in a namespace", async () => {
+    // The declaration's import check refuses it before any type check;
     // the type check's resolution, which holds it as well, is tested on its
     // own (packages/compiler, type-check.test.ts).
     const files = {
@@ -2236,16 +2234,9 @@ describe("screens", { timeout: 120_000 }, () => {
       "probe.d.ts":
         'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
     };
-    const checked = z
-      .array(z.object({ file: z.string().optional(), rule: z.string() }))
-      .parse(
-        await platformRunner(env, "app-test").run("compiler", "check", [
-          "screens",
-          files,
-        ])
-      );
+    const built = await buildScreens(env, files, "app-test");
     expect(
-      checked
+      (built.ok ? [] : built.diagnostics)
         .filter(({ file }) => file === "probe.d.ts")
         .map(({ rule }) => rule)
     ).toStrictEqual(["imports"]);

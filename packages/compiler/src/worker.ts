@@ -45,6 +45,7 @@ import {
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
+import type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
 import {
   compileModule,
   refreshNames,
@@ -60,6 +61,8 @@ import {
   declarationValueImportError,
   importError,
   codeImportError,
+  referenceError,
+  typeFileError,
   rewriteAppCodeImports,
   rewriteCodeImports,
   computeCodeWith,
@@ -75,10 +78,6 @@ import type {
   ModuleImports,
 } from "./imports.ts";
 import {
-  checkKey,
-  checkRecordOf,
-  closureFingerprint,
-  hasGlobalEffects,
   moduleKey,
   moduleRecordOf,
   noIncrements,
@@ -88,7 +87,6 @@ import type {
   BuildMetrics,
   Handed,
   IncrementalBuild,
-  Increments,
   ModuleRecord,
 } from "./increments.ts";
 import {
@@ -120,16 +118,14 @@ import type { Bundle } from "./preview-entry.ts";
 import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { lintServerCode } from "./server-lint.ts";
+import { callbackParameters, readsStandIns } from "./stand-ins.ts";
 import {
   appCodeTarget,
   computeTarget,
-  diagnosticsInOrder,
   screenTarget,
-  typeCheck,
-  typeProgram,
+  typeCheckRequest,
   workflowTarget,
 } from "./type-check.ts";
-import type { FileDiagnostics } from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -230,6 +226,28 @@ const refreshHeader = (path: string): string =>
   `import{register as __graspRefreshRegister,signature as ${refreshNames.signature}}from${JSON.stringify(kitModuleName(previewRefresh))};const ${refreshNames.register}=(type,id)=>__graspRefreshRegister(type,${JSON.stringify(`${path} `)}+id);`;
 
 /**
+ * What a screen's or a declaration's triple-slash directives reach beyond
+ * the App's files (imports.ts `referenceError`), each refused where it is.
+ */
+const referenceErrors = (
+  path: string,
+  directives: readonly DirectiveSite[],
+  files: ReadonlySet<string>
+): Diagnostic[] =>
+  directives.flatMap(({ directive, line }) => {
+    const message = referenceError(directive, path, files);
+    return message === undefined
+      ? []
+      : [
+          problem(
+            "imports",
+            message,
+            line === undefined ? { file: path } : { file: path, line }
+          ),
+        ];
+  });
+
+/**
  * Compiles one App file, with what it imports, or says why it can't be:
  * with `refresh`, for a preview, instrumented for React Fast Refresh. A
  * file the parser refuses is added to `unparsed`, and one whose compiled
@@ -245,11 +263,15 @@ const compileFile = (
   refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
+  const directives: DirectiveSite[] = [];
   let compiled: string;
   try {
-    compiled = compileModule(source, path, [collectImports(imports)], {
-      refresh,
-    });
+    compiled = compileModule(
+      source,
+      path,
+      [collectImports(imports), collectDirectives(directives)],
+      { refresh }
+    );
   } catch (error) {
     if (parseFailed(error)) {
       unparsed.add(path);
@@ -264,7 +286,7 @@ const compileFile = (
       ],
     };
   }
-  const errors: Diagnostic[] = [];
+  const errors = referenceErrors(path, directives, typeFiles);
   const declarations = new Set(
     [...typeFiles].filter((typeFile) => declarationFile.test(typeFile))
   );
@@ -321,8 +343,12 @@ const declarationImportErrors = (
   unparsed: Set<string>
 ): Diagnostic[] => {
   const imports: ImportSite[] = [];
+  const directives: DirectiveSite[] = [];
   try {
-    stripTypes(source, path, [collectImports(imports)]);
+    stripTypes(source, path, [
+      collectImports(imports),
+      collectDirectives(directives),
+    ]);
   } catch (error) {
     if (parseFailed(error)) {
       unparsed.add(path);
@@ -330,19 +356,22 @@ const declarationImportErrors = (
     const message = messageIn(path, error);
     return [problem("compile", message, { file: path, ...locationOf(error) })];
   }
-  return imports.flatMap((site) => {
-    const { line } = site;
-    const message = screenTypeImportError(site, path, typeFiles, kit);
-    return message === undefined
-      ? []
-      : [
-          problem(
-            "imports",
-            message,
-            line === undefined ? { file: path } : { file: path, line }
-          ),
-        ];
-  });
+  return [
+    ...referenceErrors(path, directives, typeFiles),
+    ...imports.flatMap((site) => {
+      const { line } = site;
+      const message = screenTypeImportError(site, path, typeFiles, kit);
+      return message === undefined
+        ? []
+        : [
+            problem(
+              "imports",
+              message,
+              line === undefined ? { file: path } : { file: path, line }
+            ),
+          ];
+    }),
+  ];
 };
 
 /**
@@ -476,71 +505,37 @@ const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
 /**
- * Type-checks the App's screens against the kit's types and lints them
- * against the kit's design system: `buildScreens`' last gates, run beside
- * its compile and import checks. A file's check is reused from `reuse` only while
- * every file it reads is as it was (increments.ts); each file checked now
- * is kept in `fresh`. The lint runs over every file.
+ * The type check of the App's screens against the kit's types, which core
+ * runs in the checker's isolate (checked-build.ts), and their lint
+ * against the kit's design system, which runs here over every file:
+ * `buildScreens`' last gates, beside its compile and import checks.
  */
-const checkScreens = async (
+const screensCheck = (
   files: Record<string, string>,
-  reuse: Handed,
-  fresh: Increments,
-  metrics: BuildMetrics
-): Promise<Diagnostic[]> => {
-  const app = buildFiles(files);
-  const tooMuch = appCodeLimitErrors(app);
-  if (tooMuch.length > 0) {
-    return tooMuch;
+  {
+    found,
+    unparsed,
+    untyped,
+  }: {
+    found: Diagnostic[];
+    unparsed: ReadonlySet<string>;
+    untyped: ReadonlySet<string>;
   }
+): TypeCheckPlan & { after: Diagnostic[] } => {
+  const app = buildFiles(files);
   // The host wrote the references; the design system is the App's to keep.
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  const program = typeProgram(app, kit.types, screensTarget);
-  const { imports } = program;
-  const kept = new Map<string, FileDiagnostics>();
-  const keys = new Map<string, { key: string; closure: string }>();
-  if (imports !== undefined && !hasGlobalEffects(app)) {
-    const declarations = Object.keys(app).filter((path) =>
-      path.endsWith(".d.ts")
-    );
-    await Promise.all(
-      Object.entries(app).map(async ([path, source]) => {
-        const [key, closure] = await Promise.all([
-          checkKey(path, source),
-          closureFingerprint(path, app, imports, declarations),
-        ]);
-        keys.set(path, { key, closure });
-        const record = checkRecordOf(ownRecord(reuse.checks, key), path);
-        if (record?.closure === closure) {
-          kept.set(path, record);
-        }
-      })
-    );
-  }
-  const { global, files: checked } = program.diagnose(
-    new Set(Object.keys(app).filter((path) => !kept.has(path)))
-  );
-  for (const [path, diagnostics] of checked) {
-    const keyed = keys.get(path);
-    if (keyed !== undefined) {
-      fresh.checks[keyed.key] = {
-        path,
-        closure: keyed.closure,
-        ...diagnostics,
-      };
-    }
-  }
-  metrics.checked = checked.size;
-  metrics.checksReused = kept.size;
-  return [
-    ...diagnosticsInOrder(
-      global,
-      program.order.flatMap((path) => checked.get(path) ?? kept.get(path) ?? [])
-    ),
-    ...lint(own, kit),
-  ];
+  return {
+    request: typeCheckRequest(app, screensTarget),
+    found,
+    after: lint(own, kit),
+    unparsed: [...unparsed],
+    untyped: [...untyped],
+    lenient: readsStandIns(app) ? callbackParameters(app) : [],
+    carries: true,
+  };
 };
 
 /**
@@ -572,9 +567,13 @@ const bundle: Bundle = async (options) => {
  * frame's sandbox and policy hold whatever the code does.
  *
  * With `reuse`, what earlier builds kept (increments.ts): a module's
- * transform, and a file's type check, each only where its key says it
- * stands for what this build would make. What it makes now it hands back
- * (`fresh`) for core to keep, with how much it reused (`metrics`).
+ * transform, only where its key says it stands for what this build would
+ * make. What it makes now it hands back (`fresh`) for core to keep, with
+ * how much it reused (`metrics`).
+ *
+ * Its type check is core's to run, in the checker's isolate: the build
+ * says what it checks (`Unchecked`), and core puts the two together
+ * (checked-build.ts `withTypeCheck`).
  */
 export const buildScreensIncrementally = async (
   files: Record<string, string>,
@@ -583,16 +582,14 @@ export const buildScreensIncrementally = async (
     checks = true,
     reuse = noIncrements(),
   }: { preview?: boolean; checks?: boolean; reuse?: Handed } = {}
-): Promise<IncrementalBuild<ScreenBuild>> => {
+): Promise<IncrementalBuild<Unchecked<ScreenBuild>>> => {
   const fresh = noIncrements();
-  const metrics: BuildMetrics = {
-    compiled: 0,
-    reused: 0,
-    checked: 0,
-    checksReused: 0,
-  };
-  const done = (built: ScreenBuild): IncrementalBuild<ScreenBuild> => ({
-    built,
+  const metrics: BuildMetrics = { compiled: 0, reused: 0 };
+  const done = (
+    built: ScreenBuild,
+    typeCheck?: TypeCheckPlan
+  ): IncrementalBuild<Unchecked<ScreenBuild>> => ({
+    built: typeCheck === undefined ? { built } : { built, typeCheck },
     fresh,
     metrics,
   });
@@ -680,14 +677,17 @@ export const buildScreensIncrementally = async (
   // build names everything there is to fix; only what says a compile
   // error again is left out (`together`). A preview's frame skips both
   // (`checks`): its compile errors still fail it.
+  const typeCheck = checks
+    ? screensCheck(files, { found: errors, unparsed, untyped })
+    : undefined;
   const diagnostics = together(
     errors,
-    checks ? await checkScreens(files, reuse, fresh, metrics) : [],
+    typeCheck?.after ?? [],
     unparsed,
     untyped
   );
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
-    return done({ ok: false, diagnostics });
+    return done({ ok: false, diagnostics }, typeCheck);
   }
   const kitModules = kitModulesFor(
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
@@ -699,34 +699,37 @@ export const buildScreensIncrementally = async (
       .map((path) => appModuleName(path))
       .map((entry) => [entry, screenClosure(entry, imports, preview)])
   );
-  return done({
-    ok: true,
-    modules,
-    screens,
-    css,
-    diagnostics,
-    ...(preview
-      ? {
-          entries: await previewEntries(
-            {
-              screens: Object.fromEntries(
-                Object.entries(screens).map(([entry, closure]) => [
-                  entry,
-                  {
-                    closure: closure.modules,
-                    kitModules: closure.modules.flatMap((name) => [
-                      ...(imports.get(name)?.kit ?? []),
-                    ]),
-                  },
-                ])
-              ),
-              modules,
-            },
-            bundle
-          ),
-        }
-      : {}),
-  });
+  return done(
+    {
+      ok: true,
+      modules,
+      screens,
+      css,
+      diagnostics,
+      ...(preview
+        ? {
+            entries: await previewEntries(
+              {
+                screens: Object.fromEntries(
+                  Object.entries(screens).map(([entry, closure]) => [
+                    entry,
+                    {
+                      closure: closure.modules,
+                      kitModules: closure.modules.flatMap((name) => [
+                        ...(imports.get(name)?.kit ?? []),
+                      ]),
+                    },
+                  ])
+                ),
+                modules,
+              },
+              bundle
+            ),
+          }
+        : {}),
+    },
+    typeCheck
+  );
 };
 
 /**
@@ -774,7 +777,7 @@ export const buildScreens = async (
     preview = false,
     checks = true,
   }: { preview?: boolean; checks?: boolean } = {}
-): Promise<ScreenBuild> => {
+): Promise<Unchecked<ScreenBuild>> => {
   const { built } = await buildScreensIncrementally(files, { preview, checks });
   return built;
 };
@@ -784,7 +787,8 @@ const compileCodeFile = (
   kind: CodeKind,
   path: string,
   source: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  typeFiles: ReadonlySet<string>
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
@@ -822,7 +826,8 @@ const compileCodeFile = (
       kind,
       { specifier, typeOnly, ambient },
       path,
-      files
+      files,
+      typeFiles
     );
     return message === undefined
       ? []
@@ -859,16 +864,20 @@ export type WorkflowBuild =
   | { ok: true; modules: Record<string, string> }
   | { ok: false; diagnostics: Diagnostic[] };
 
-/** App code compiled file by file, as modules by flat name. */
+/**
+ * App code compiled file by file, as modules by flat name, its types
+ * naming by path only `typeFiles` (every file the build was given).
+ */
 const compileCode = (
   kind: CodeKind,
-  files: Record<string, string>
+  files: Record<string, string>,
+  typeFiles: ReadonlySet<string> = new Set(Object.keys(files))
 ): WorkflowBuild => {
   const known = new Set(Object.keys(files));
   const modules: Record<string, string> = {};
   const errors: Diagnostic[] = [];
   for (const [path, source] of Object.entries(files)) {
-    const result = compileCodeFile(kind, path, source, known);
+    const result = compileCodeFile(kind, path, source, known, typeFiles);
     if ("code" in result) {
       modules[appModuleName(path)] = result.code;
     } else {
@@ -899,19 +908,15 @@ export type OpenWorkflowBuild =
  */
 export const buildOpenWorkflow = (
   files: Record<string, string>
-): OpenWorkflowBuild => {
+): Unchecked<OpenWorkflowBuild> => {
   const wrong = openWorkflowErrors(files);
   if (wrong.length > 0) {
-    return { ok: false, diagnostics: wrong };
+    return { built: { ok: false, diagnostics: wrong } };
   }
   const built = compileCode(generatedWorkflowCode, files);
-  if (!built.ok) {
-    return built;
-  }
-  const diagnostics = typeCheck(files, kit.types);
-  return diagnostics.some((diagnostic) => isError(diagnostic))
-    ? { ok: false, diagnostics }
-    : built;
+  return built.ok
+    ? { built, typeCheck: { request: typeCheckRequest(files) } }
+    : { built };
 };
 
 /**
@@ -963,24 +968,26 @@ const computePackagesOf = (
  */
 export const buildComputeModules = (
   input: Record<string, string>
-): ComputeModulesBuild => {
+): Unchecked<ComputeModulesBuild> => {
   const { [computePackagesFile]: listed, ...files } = input;
   const named = computePackagesOf(listed);
   if (!named.ok) {
     return {
-      ok: false,
-      diagnostics: [
-        { rule: "limits", severity: "error", message: named.message },
-      ],
+      built: {
+        ok: false,
+        diagnostics: [
+          { rule: "limits", severity: "error", message: named.message },
+        ],
+      },
     };
   }
   const wrong = computeModuleErrors(files);
   if (wrong.length > 0) {
-    return { ok: false, diagnostics: wrong };
+    return { built: { ok: false, diagnostics: wrong } };
   }
   const built = compileCode(computeCodeWith(named.packages), files);
   if (!built.ok) {
-    return built;
+    return { built };
   }
   const declared: Record<string, string> =
     named.packages.length === 0
@@ -990,12 +997,13 @@ export const buildComputeModules = (
             .map((entry) => `declare module ${JSON.stringify(entry)};`)
             .join("\n"),
         };
-  const diagnostics = typeCheck(
-    { ...files, ...declared },
-    kit.types,
-    computeTarget
-  ).filter((diagnostic) => isError(diagnostic));
-  return diagnostics.length > 0 ? { ok: false, diagnostics } : built;
+  return {
+    built,
+    typeCheck: {
+      request: typeCheckRequest({ ...files, ...declared }, computeTarget),
+      errorsOnly: true,
+    },
+  };
 };
 
 /**
@@ -1006,12 +1014,15 @@ export type AppCodeBuild =
   | { ok: true; modules: Record<string, string> }
   | { ok: false; diagnostics: Diagnostic[] };
 
-/** `typeImportError` for App code, as `appCodeImport` answers. */
+/** `typeImportError` and `typeFileError` for App code, as `appCodeImport` answers. */
 const typeImportErrorAsResult = (
   path: string,
-  specifier: string | undefined
+  specifier: string | undefined,
+  typeFiles: ReadonlySet<string>
 ): { module: undefined } | { error: string } => {
-  const error = typeImportError(path, specifier, false);
+  const error =
+    typeImportError(path, specifier, false) ??
+    typeFileError(path, specifier, typeFiles);
   return error === undefined ? { module: undefined } : { error };
 };
 
@@ -1023,7 +1034,9 @@ const compileAppCodeFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
-  unparsed: Set<string>
+  unparsed: Set<string>,
+  /** What its types may name by path: every file the build was given. */
+  typeFiles: ReadonlySet<string> = files
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
@@ -1072,7 +1085,7 @@ const compileAppCodeFile = (
       ];
     }
     const resolved = typeOnly
-      ? typeImportErrorAsResult(path, specifier)
+      ? typeImportErrorAsResult(path, specifier, typeFiles)
       : appCodeImport(path, specifier, files);
     return "error" in resolved
       ? [
@@ -1223,27 +1236,31 @@ const workflowEnvOf = (
  */
 export const buildWorkflows = (
   files: Record<string, string>
-): WorkflowBuild => {
+): Unchecked<WorkflowBuild> => {
   const read = workflowFiles(files);
   // The bindings' declaration is only ever the compiler's own
   // (`workflowEnvOf`), never a file it was given at its path.
   const { [workflowEnvPath]: _given, ...context } = workflowTypeContext(files);
   const tooMuch = appCodeLimitErrors({ ...context, ...read });
   if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
+    return { built: { ok: false, diagnostics: tooMuch } };
   }
   const strays = strayProblems(read, [workflowsFolder], "workflows");
   if (strays.length > 0) {
-    return { ok: false, diagnostics: strays };
+    return { built: { ok: false, diagnostics: strays } };
   }
   // Only workflow code is compiled or checked, whatever else is passed:
   // what isn't is refused above, and kept out should that ever miss it.
   const workflows = Object.fromEntries(
     Object.entries(read).filter(([path]) => workflowsFolder.isFile(path))
   );
-  const built = compileCode(workflowCode, workflows);
+  const built = compileCode(
+    workflowCode,
+    workflows,
+    new Set(Object.keys({ ...context, ...read }))
+  );
   if (!built.ok) {
-    return built;
+    return { built };
   }
   // The App's server code joins the check only as it builds (what server
   // code may import and name, no directive, suppression or ambient
@@ -1255,32 +1272,28 @@ export const buildWorkflows = (
   const serverBuilds = layout && buildAppCode(context).ok;
   const env = workflowEnvOf(files);
   if ("errors" in env) {
-    return { ok: false, diagnostics: env.errors };
+    return { built: { ok: false, diagnostics: env.errors } };
   }
-  const diagnostics = typeCheck(
-    serverBuilds
-      ? { ...context, ...workflows, ...env.files }
-      : { ...workflows, ...env.files },
-    kit.types,
-    workflowTarget
-  ).filter(({ file }) => file === undefined || Object.hasOwn(workflows, file));
-  if (!diagnostics.some((diagnostic) => isError(diagnostic))) {
-    return built;
-  }
+  const checked = serverBuilds
+    ? { ...context, ...workflows, ...env.files }
+    : { ...workflows, ...env.files };
   return {
-    ok: false,
-    diagnostics:
-      layout && !serverBuilds
-        ? [
-            ...diagnostics,
-            {
+    built,
+    typeCheck: {
+      request: typeCheckRequest(checked, workflowTarget),
+      reported: Object.keys(workflows),
+      lenient: readsStandIns(checked) ? callbackParameters(workflows) : [],
+      ...(layout && !serverBuilds
+        ? {
+            failing: {
               rule: "server",
               severity: "warning",
               message:
                 "The App's server code doesn't build, so its types aren't in this check: a workflow that names them (appFunctions<Tree>(env), import type from server/) can't find them until it builds.",
             },
-          ]
-        : diagnostics,
+          }
+        : {}),
+    },
   };
 };
 
@@ -1329,7 +1342,13 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   const errors: Diagnostic[] = [];
   for (const [path, source] of Object.entries(code)) {
     if (appCodeKind(path) === "test") {
-      const result = compileAppCodeFile(path, source, known, new Set());
+      const result = compileAppCodeFile(
+        path,
+        source,
+        known,
+        new Set(),
+        new Set(Object.keys(files))
+      );
       if ("code" in result) {
         modules[appModuleName(path)] = result.code;
       } else {
@@ -1351,10 +1370,12 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
  * a build alone, as the seal's first, symbolic inspection makes it,
  * doesn't, since its generated modules are stand-ins without types.
  */
-export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
+export const checkAppCode = (
+  files: Record<string, string>
+): Unchecked<AppCodeBuild> => {
   const tooMuch = appCodeLimitErrors(appCodeFiles(files));
   if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
+    return { built: { ok: false, diagnostics: tooMuch } };
   }
   // The type check runs whatever the build found, so one check names
   // everything there is to fix (`together`).
@@ -1377,23 +1398,19 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
   // shape it declares (`input`), or as the stored JSON it is handed when
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
-  const diagnostics = [
-    ...typeCheck(
-      { ...appCodeFiles(files), ...tests },
-      kit.types,
-      appCodeTarget
-    ),
-    ...lintServerCode(appCodeFiles(files)),
-  ];
-  if (!built.ok) {
-    return {
-      ok: false,
-      diagnostics: together(built.diagnostics, diagnostics, unparsed),
-    };
-  }
-  return diagnostics.some((diagnostic) => isError(diagnostic))
-    ? { ok: false, diagnostics }
-    : built;
+  const checked = { ...appCodeFiles(files), ...tests };
+  return {
+    built,
+    typeCheck: {
+      request: typeCheckRequest(checked, appCodeTarget),
+      found: built.ok ? [] : built.diagnostics,
+      after: lintServerCode(appCodeFiles(files)),
+      unparsed: [...unparsed],
+      // A draft whose server code doesn't register is checked against the
+      // stand-ins (core's save-builds.ts).
+      lenient: readsStandIns(checked) ? callbackParameters(checked) : [],
+    },
+  };
 };
 
 /**
@@ -1411,7 +1428,7 @@ export type CompileTarget =
   | "open-workflow"
   | "compute";
 
-/** What a build of each target answers. */
+/** What a build of each target answers, once its type check is in (`Unchecked`). */
 export interface TargetBuilds {
   screens: ScreenBuild;
   "preview-screens": ScreenBuild;
@@ -1431,7 +1448,9 @@ export interface TargetBuilds {
 const targetBuilds: {
   readonly [Target in CompileTarget]: (
     files: Record<string, string>
-  ) => TargetBuilds[Target] | Promise<TargetBuilds[Target]>;
+  ) =>
+    | Unchecked<TargetBuilds[Target]>
+    | Promise<Unchecked<TargetBuilds[Target]>>;
 } = {
   screens: async (files) => await buildScreens(files),
   // A chat's draft (spec 19.2.1): every gate of `screens`, instrumented
@@ -1444,7 +1463,7 @@ const targetBuilds: {
   "preview-frame": async (files) =>
     await buildScreens(files, { preview: true, checks: false }),
   app: checkAppCode,
-  "app-tests": buildAppTests,
+  "app-tests": (files) => ({ built: buildAppTests(files) }),
   workflows: buildWorkflows,
   "open-workflow": buildOpenWorkflow,
   compute: buildComputeModules,
@@ -1515,7 +1534,7 @@ const incrementsOf = (value: unknown): Handed => {
       ? Object.fromEntries(Object.entries(found))
       : {};
   };
-  return { modules: records("modules"), checks: records("checks") };
+  return { modules: records("modules") };
 };
 
 /**
@@ -1525,19 +1544,23 @@ const incrementsOf = (value: unknown): Handed => {
  */
 export default class AppCompiler extends WorkerEntrypoint {
   /**
-   * Builds `target` from `files`, with every gate the target has (type
-   * check, lint, import boundaries, limits): its output, or why it fails.
+   * Builds `target` from `files`, with every gate the target has (lint,
+   * import boundaries, limits): its output, or why it fails; and the type
+   * check it waits on, which core runs in the checker's isolate and puts
+   * together with it (checked-build.ts `withTypeCheck`).
    */
   // RPC exposes prototype methods only, so these can't be static.
   async build<Target extends CompileTarget>(
     target: Target,
     files: Record<string, string>
-  ): Promise<TargetBuilds[Target]> {
+  ): Promise<Unchecked<TargetBuilds[Target]>> {
     assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(targetBuilds, target, "build");
     // SAFETY: `known` is `target`, which picks its own builder.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return (await targetBuilds[known](files)) as TargetBuilds[Target];
+    return (await targetBuilds[known](files)) as Unchecked<
+      TargetBuilds[Target]
+    >;
   }
 
   /**
@@ -1551,7 +1574,7 @@ export default class AppCompiler extends WorkerEntrypoint {
     target: IncrementalTarget,
     files: Record<string, string>,
     reuse: unknown
-  ): Promise<IncrementalBuild<ScreenBuild>> {
+  ): Promise<IncrementalBuild<Unchecked<ScreenBuild>>> {
     assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(incrementalTargets, target, "buildIncrementally");
     return await buildScreensIncrementally(files, {
@@ -1577,21 +1600,6 @@ export default class AppCompiler extends WorkerEntrypoint {
       paths,
       incrementalTargets[known].preview
     );
-  }
-
-  /**
-   * What `build(target, files)` says, without its output: every diagnostic
-   * the build gives (a passing screens build carries its lint warnings;
-   * other passing builds carry none). Derived from the build itself, so it
-   * is never clean where the build refuses.
-   */
-  async check(
-    target: CompileTarget,
-    files: Record<string, string>
-  ): Promise<Diagnostic[]> {
-    knownTarget(targetBuilds, target, "check");
-    const built = await this.build(target, files);
-    return "diagnostics" in built ? built.diagnostics : [];
   }
 
   /**

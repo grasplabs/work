@@ -1,5 +1,4 @@
 import {
-  checkRecordOf,
   compilerVersion,
   incrementSchema,
   moduleRecordOf,
@@ -19,8 +18,7 @@ import {
 import type { CacheEnv } from "./build-cache.ts";
 
 // What a screens build keeps of each file for the next (GRA-958): each
-// module's transform and each file's type check (the compiler's
-// increments.ts). They are kept as whole builds are (build-cache.ts): in
+// module's transform (the compiler's increments.ts). They are kept as whole builds are (build-cache.ts): in
 // R2 under a key of their content, each served only as its receipt says
 // its build wrote it, written by one build at a time under the key's
 // lease, quarantined after repeated integrity failures, swept like builds
@@ -30,7 +28,6 @@ import type { CacheEnv } from "./build-cache.ts";
 /** Where each part's records are kept: swept with the builds. */
 export const incrementPrefixes = {
   modules: "screen-modules/",
-  checks: "screen-checks/",
 } as const;
 
 type Part = keyof typeof incrementPrefixes;
@@ -95,29 +92,20 @@ export const readIncrements = async (
   keys: IncrementKeys,
   refreshAfterMs: number
 ): Promise<Increments> => {
-  const found: Increments = { modules: {}, checks: {} };
-  const wanted = [
-    ...Object.entries(keys.modules).map(
-      ([path, key]) => ["modules", path, key] as const
-    ),
-    ...Object.entries(keys.checks).map(
-      ([path, key]) => ["checks", path, key] as const
-    ),
-  ];
-  await mapConcurrently(wanted, concurrency, async ([part, path, key]) => {
-    const value = await readRecord(env, part, key, refreshAfterMs);
-    if (part === "modules") {
-      const record = moduleRecordOf(value, path);
+  const found: Increments = { modules: {} };
+  await mapConcurrently(
+    Object.entries(keys.modules),
+    concurrency,
+    async ([path, key]) => {
+      const record = moduleRecordOf(
+        await readRecord(env, "modules", key, refreshAfterMs),
+        path
+      );
       if (record !== undefined) {
         found.modules[key] = record;
       }
-    } else {
-      const record = checkRecordOf(value, path);
-      if (record !== undefined) {
-        found.checks[key] = record;
-      }
     }
-  });
+  );
   return found;
 };
 
@@ -133,20 +121,12 @@ export const keepIncrements = async (
   fresh: Increments,
   leaseMs: number
 ): Promise<number> => {
-  const toKeep = [
-    ...Object.entries(fresh.modules).flatMap(([key, record]) =>
-      keys.modules[record.path] === key &&
-      moduleRecordOf(record, record.path) !== undefined
-        ? [["modules", key, JSON.stringify(record)] as const]
-        : []
-    ),
-    ...Object.entries(fresh.checks).flatMap(([key, record]) =>
-      keys.checks[record.path] === key &&
-      checkRecordOf(record, record.path) !== undefined
-        ? [["checks", key, JSON.stringify(record)] as const]
-        : []
-    ),
-  ];
+  const toKeep = Object.entries(fresh.modules).flatMap(([key, record]) =>
+    keys.modules[record.path] === key &&
+    moduleRecordOf(record, record.path) !== undefined
+      ? [["modules", key, JSON.stringify(record)] as const]
+      : []
+  );
   const kept = await mapConcurrently(
     toKeep,
     concurrency,

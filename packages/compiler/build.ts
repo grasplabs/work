@@ -44,6 +44,7 @@ import {
   compilerAssets,
   kitModule,
   jqWasmModule,
+  typesModule,
   kitModuleName,
   kitStylesheet,
   previewRefresh,
@@ -56,7 +57,8 @@ import {
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
-import { compilerOptions, libLocation, serverLibs } from "./src/type-check.ts";
+import { compilerOptions, serverLibs } from "./src/type-check.ts";
+import type { KitTypes } from "./src/type-check.ts";
 
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
@@ -656,11 +658,22 @@ const importing = (specifiers: readonly string[]): string =>
  * against (type-check.ts `serverTarget`), which no screen is. Third-party
  * declarations can have errors that don't matter here.
  */
-const kitOptions: ts.CompilerOptions = {
-  ...compilerOptions,
-  skipLibCheck: true,
-  lib: [...(compilerOptions.lib ?? []), ...serverLibs],
-};
+const { paths: _appPaths, ...checkOptions } = compilerOptions;
+const kitOptions: ts.CompilerOptions = ts.convertCompilerOptionsFromJson(
+  {
+    ...checkOptions,
+    skipLibCheck: true,
+    lib: [...compilerOptions.lib, ...serverLibs],
+  },
+  "/"
+).options;
+
+/**
+ * Where TypeScript's own declarations are as the build's checks of the
+ * kit read them (`readByKit`). The check of App code has its own: tsrs
+ * carries TypeScript's libs, so none of these ship with the kit's types.
+ */
+const libLocation = "/node_modules/typescript/lib";
 
 /**
  * The files a type check of the kit's sources reads, by the path the
@@ -731,8 +744,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
  * share, with the packages they reach inlined. A check parses only the
  * chunks the modules it imports reach, never the sources of everything
  * those name: any import of the SDK used to bring all of
- * `@grasp-os/shared` with it, and the parsed sources stay in the isolate
- * for its life (`kitCache` in src/type-check.ts).
+ * `@grasp-os/shared` with it.
  */
 
 /** Whether `file` is one of the platform's own packages' sources. */
@@ -1116,7 +1128,7 @@ const readByKit = (
 const typeChunks = async (
   sources: Readonly<Record<string, string>>,
   specifiers: readonly string[]
-): Promise<Record<string, string>> => {
+): Promise<KitTypes> => {
   const libraries = Object.fromEntries(
     Object.entries(sources).filter(
       ([file]) =>
@@ -1132,9 +1144,33 @@ const typeChunks = async (
       `The kit's type chunks don't type-check: ${error.file?.fileName ?? ""} ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`
     );
   }
-  return Object.fromEntries(
-    Object.entries(files).filter(([file]) => read.has(file))
+  // TypeScript's own libs aren't the kit's: tsrs carries its own.
+  const kept = Object.fromEntries(
+    Object.entries(files).filter(
+      ([file]) => read.has(file) && !file.startsWith(`${libLocation}/`)
+    )
   );
+  // Where each module App code may import resolves, as TypeScript resolves
+  // it from an App file: the check maps exactly these names to these files
+  // (type-check.ts `paths`), and nothing else of the kit.
+  const host: ts.ModuleResolutionHost = {
+    fileExists: (file) => Object.hasOwn(kept, file),
+    readFile: (file) => (Object.hasOwn(kept, file) ? kept[file] : undefined),
+    directoryExists: (directory) =>
+      Object.keys(kept).some((file) =>
+        file.startsWith(`${directory.replace(/\/+$/u, "")}/`)
+      ),
+  };
+  const resolved: Record<string, string> = {};
+  for (const specifier of specifiers) {
+    const found = ts.resolveModuleName(specifier, "/app.ts", kitOptions, host)
+      .resolvedModule?.resolvedFileName;
+    if (found === undefined || !Object.hasOwn(kept, found)) {
+      throw new Error(`The kit's types don't resolve ${specifier}`);
+    }
+    resolved[specifier] = found;
+  }
+  return { files: kept, resolved };
 };
 
 const componentsJsonSchema = z.looseObject({
@@ -1332,6 +1368,43 @@ const buildPackageBuilder = async (): Promise<string> => {
   return chunk.code;
 };
 
+/**
+ * The type checker's module (src/checker.ts), which core runs in an
+ * isolate of its own beside the compiler's, with tsrs's WebAssembly and
+ * the kit's types as modules of their own. It runs without Node.js
+ * compatibility.
+ */
+const buildChecker = async (): Promise<string> => {
+  const config: InlineConfig = {
+    configFile: false,
+    root,
+    logLevel: "warn",
+    mode: "production",
+    resolve: { conditions: ["workerd", "worker", "browser"] },
+    ssr: { noExternal: true, target: "webworker" },
+    define: production,
+    build: {
+      ssr: "src/checker.ts",
+      write: false,
+      minify: true,
+      target: "es2022",
+      rolldownOptions: {
+        external: ["cloudflare:workers", "#types", "./tsrs.wasm"],
+        output: {
+          format: "es",
+          codeSplitting: false,
+          paths: { "#types": typesModule },
+        },
+      },
+    },
+  };
+  const [chunk, ...rest] = chunksOf(await build(config));
+  if (chunk === undefined || rest.length > 0) {
+    throw new Error("The type checker should build to one module");
+  }
+  return chunk.code;
+};
+
 /** Modules with a version that changes with any change to them. */
 const modulesOf = (code: Record<string, string>): KitModules => ({
   version: createHash("sha256")
@@ -1498,16 +1571,19 @@ const buildAppCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     previewModuleImports,
-    types: await typeChunks(typeSources, typed),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),
   };
   const kitJson = JSON.stringify(kit);
+  const typesJson = JSON.stringify(await typeChunks(typeSources, typed));
   // The sources the type chunks are made of, which the agent reads.
   const referenceJson = JSON.stringify(referenceOf(typeSources));
   const compiler = await buildCompiler();
   const packageBuilder = await buildPackageBuilder();
+  const checker = await buildChecker();
+  // The WebAssembly the type checker runs, as the package ships it.
+  const tsrsWasm = readFileSync(require.resolve("@tsrs/wasm/tsrs.wasm"));
   // The WebAssembly the builder's esbuild runs, as the package ships it.
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
@@ -1542,6 +1618,9 @@ const buildAppCompiler = async (
     .update(packageBuilder)
     .update(esbuildWasm)
     .update(jqWasm)
+    .update(checker)
+    .update(typesJson)
+    .update(tsrsWasm)
     .digest("hex")
     .slice(0, 16);
   writeRelease(assets, version, {
@@ -1555,6 +1634,9 @@ const buildAppCompiler = async (
     [compilerAssets.esbuildWasm]: esbuildWasm,
     [compilerAssets.reference]: referenceJson,
     [compilerAssets.jqWasm]: jqWasm,
+    [compilerAssets.checker]: checker,
+    [compilerAssets.types]: typesJson,
+    [compilerAssets.tsrsWasm]: tsrsWasm,
   });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The

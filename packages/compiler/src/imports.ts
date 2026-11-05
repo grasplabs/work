@@ -415,6 +415,80 @@ const resolveTypeFile = (
     .find((candidate) => files.has(candidate));
 };
 
+/** A specifier TypeScript resolves as a path rather than by name: relative, or absolute. */
+const pathSpecifier = /^(?:\.\.?(?:\/|$)|\/)/u;
+
+/**
+ * Why a type import of App code that isn't a screen's names a path that
+ * isn't one of the App's files (`files`, everything the build was given),
+ * or undefined when it names a module or one of them. By name, a type
+ * reaches only the modules its check gives its kind (type-check.ts);
+ * by path, it would reach the kit's files the check holds out of reach.
+ */
+export const typeFileError = (
+  file: string,
+  specifier: string | undefined,
+  files: ReadonlySet<string>
+): string | undefined =>
+  specifier !== undefined &&
+  pathSpecifier.test(specifier) &&
+  (specifier.startsWith("/") ||
+    resolveTypeFile(file, specifier, files) === undefined)
+    ? `"${specifier}" is not one of the App's files: a type names the App's own files by a relative path, and modules by name.`
+    : undefined;
+
+/**
+ * The one triple-slash directive a screen's files may hold, written only
+ * this way: a lowercase `reference` with a lowercase `path` and nothing
+ * else. TypeScript reads a directive's tag and attributes in any case
+ * and order (`<REFERENCE PATH=…>`, `preserve="true" path=…`), so the gate
+ * names what it lets through, and refuses everything else
+ * (`referenceError`), never the other way round.
+ */
+const ownReference =
+  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
+
+/** Where `/// <reference path>` in `file` points: a path from the App's root. */
+const referencedPath = (file: string, reference: string): string => {
+  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
+  for (const part of reference.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return parts.join("/");
+};
+
+/**
+ * Why a screen's or a declaration's triple-slash directive (`directive`,
+ * as `collectDirectives` lists it) isn't allowed, or undefined when it
+ * is: only `/// <reference path="…" />` to another of the App's `files`
+ * (`ownReference`). Every other one is refused, however written: a
+ * reference into the kit, a type package, a lib the page doesn't have,
+ * an AMD directive. The import checks hold every import a file writes;
+ * these are how it would name a module without one. A suppression
+ * (`@ts-expect-error`) is no directive here: a screen may hold one.
+ */
+export const referenceError = (
+  directive: string,
+  file: string,
+  files: ReadonlySet<string>
+): string | undefined => {
+  if (!directive.startsWith("///")) {
+    return undefined;
+  }
+  const groups = ownReference.exec(directive)?.groups;
+  if (groups === undefined) {
+    return `${directive} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`;
+  }
+  const name = groups.double ?? groups.single ?? "";
+  return files.has(referencedPath(file, name))
+    ? undefined
+    : `"${name}" is not one of the App's files: a reference path names only those.`;
+};
+
 /**
  * Why a type-only import in a screen, component or declaration file isn't
  * allowed, or undefined when it is: held to what its values may import,
@@ -799,7 +873,9 @@ export const codeImportError = (
     ambient,
   }: Pick<ImportSite, "specifier" | "typeOnly" | "ambient">,
   file: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  /** What its types may name by path: every file the build was given. */
+  typeFiles: ReadonlySet<string> = files
 ): string | undefined => {
   // An ambient module would declare, or shadow, a module by name in the
   // type check, or `declare global` give every file globals its isolate
@@ -814,7 +890,10 @@ export const codeImportError = (
       : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
   }
   if (typeOnly) {
-    return typeImportError(file, specifier, false);
+    return (
+      typeImportError(file, specifier, false) ??
+      typeFileError(file, specifier, typeFiles)
+    );
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";

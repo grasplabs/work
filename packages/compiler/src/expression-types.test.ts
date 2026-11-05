@@ -10,12 +10,11 @@ import {
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 
-import { checkExpressionTypes } from "./expression-types.ts";
+import { checkExpressionTypes, libLocation } from "./expression-types.ts";
 import type {
   ExpressionScopeTypes,
   TypedExpression,
 } from "./expression-types.ts";
-import { libLocation } from "./type-check.ts";
 
 // TypeScript's own declarations, where the kit has them: the check is
 // pure (in memory), so tested on its own, with nothing of the kit but

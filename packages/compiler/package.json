@@ -8,6 +8,9 @@
     "#kit": {
       "types": "./src/kit-module.d.ts"
     },
+    "#types": {
+      "types": "./src/types-module.d.ts"
+    },
     "#version": {
       "types": "./src/version.d.ts",
       "default": "./dist/version.js"
@@ -25,6 +28,7 @@
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@shadcn/lint": "catalog:",
+    "@tsrs/wasm": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
     "esbuild-wasm": "catalog:",

@@ -143,10 +143,12 @@ const compilerOf = (body: string): WorkerLoaderWorkerCode => ({
   modules: {
     "compiler.js": `import { WorkerEntrypoint } from "cloudflare:workers";
 export default class extends WorkerEntrypoint {
-  async build() { ${body} }
+  async build() {
+    const built = await (async () => { ${body} })();
+    return { built };
+  }
   async buildIncrementally() {
-    const built = await this.build();
-    return { built, fresh: { modules: {}, checks: {} }, metrics: {} };
+    return { built: await this.build(), fresh: { modules: {} }, metrics: {} };
   }
 }`,
   },
@@ -180,6 +182,47 @@ const onCloudflare = (
   loader: WorkerLoader,
   files: ReturnType<typeof countingFiles>["files"]
 ) => ({ ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare", FILES: files });
+
+describe("a type check stopped in the shared checker", () => {
+  it("is checked again in an isolate of its own, and only that answer counts, so another App's memory never fails it", async () => {
+    // The release's shared checker, stopped at its memory, as another
+    // App's check beside this one can leave it.
+    const asked: string[] = [];
+    const loader: WorkerLoader = {
+      get: (name, code) => {
+        if (name?.startsWith("check:") === true) {
+          asked.push("shared");
+          return env.LOADER.get(`stopped-${crypto.randomUUID()}`, () => ({
+            ...isolateBase,
+            mainModule: "checker.js",
+            modules: {
+              "checker.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+export default class extends WorkerEntrypoint {
+  check() { throw new Error("Worker exceeded memory limit."); }
+}`,
+            },
+          }));
+        }
+        return env.LOADER.get(name, code);
+      },
+      load: (code) => {
+        asked.push("own");
+        return env.LOADER.load(code);
+      },
+    };
+    const built = await buildScreens(
+      { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
+      {
+        "screens/desk.tsx": `// ${crypto.randomUUID()}\nexport const wrong: number = "x";\nexport default function Desk() {\n  return <p>desk</p>;\n}\n`,
+      },
+      "app-test"
+    );
+    expect({
+      asked,
+      found: built.ok ? [] : built.diagnostics.map(({ rule }) => rule),
+    }).toStrictEqual({ asked: ["shared", "own"], found: ["TS2322"] });
+  });
+});
 
 describe("a screen the sandbox stops the compiler on", () => {
   it("is kept as failed when the screen stopped it itself, and never compiled again", async () => {

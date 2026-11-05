@@ -33,13 +33,6 @@ export interface Kit {
    */
   previewModuleImports: Record<string, string[]>;
   /**
-   * What the type check reads, by absolute path: TypeScript's libraries,
-   * the platform's own packages as type chunks (one declaration file per
-   * module App code may import, build.ts `typeChunks`) and the libraries
-   * they name with their declarations, as `/node_modules/…`.
-   */
-  types: Record<string, string>;
-  /**
    * The kit as the design-system lint reads it from disk, by path
    * relative to the App: `components.json`, the theme and the kit's
    * component sources.
@@ -90,8 +83,8 @@ export const compilerAssets = {
   esbuildWasm: "esbuild.wasm",
   /**
    * The SDK's and the UI kit's sources, of which the type check's chunks
-   * are made (`Kit.types`), by `referencePath`: what a chat's agent reads
-   * to write App code that checks (`referenceFiles`).
+   * are made (`types`), by `referencePath`: what a chat's agent reads to
+   * write App code that checks (`referenceFiles`).
    */
   reference: "reference.json",
   /**
@@ -99,6 +92,16 @@ export const compilerAssets = {
    * of every workflow isolate (`jqWasmModule`).
    */
   jqWasm: "jq.wasm",
+  /** The type checker's module (src/checker.ts). */
+  checker: "checker.js",
+  /**
+   * What the type check reads of the kit (type-check.ts `KitTypes`): the
+   * type chunks, the libraries they name, and where each module App code
+   * may import resolves among them.
+   */
+  types: "types.json",
+  /** tsrs's WebAssembly, the type checker's (`@tsrs/wasm`). */
+  tsrsWasm: "tsrs.wasm",
 } as const;
 
 /** The packages of the kit's sources the agent's reference holds. */
@@ -140,6 +143,9 @@ export const compilerLock = (assets: string): string =>
 
 /** The name the compiler's isolate has `Kit` under, as a JSON module. */
 export const kitModule = "kit.json";
+
+/** The name the type checker's isolate has `KitTypes` under, as a JSON module. */
+export const typesModule = "types.json";
 
 /**
  * The legacy workflow hooks screens import (string `useWorkflow`, `useRun`),

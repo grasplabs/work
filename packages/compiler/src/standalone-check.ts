@@ -16,7 +16,7 @@
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
  *   global` or `declare module` (imports.ts, `typeChecked`);
  * - no App file references a type package or a lib, or a path that isn't
- *   one of the App's files (type-check.ts `referenceErrors`);
+ *   one of the App's files (imports.ts `referenceError`);
  * - an App file resolves by name only the modules its kind may import
  *   (`TypeTarget.allowed`, which each tsconfig's `grasp.allowed` lists).
  *
@@ -214,7 +214,7 @@ const steeringIn = (file: ts.SourceFile): Problem[] => {
 /**
  * What `file`'s triple-slash directives reach beyond the App's files
  * (`app`): a reference path only to one of them, no type package and no
- * lib (type-check.ts `referenceErrors`).
+ * lib (imports.ts `referenceError`).
  */
 const referencesIn = (
   file: ts.SourceFile,

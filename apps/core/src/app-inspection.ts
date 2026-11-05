@@ -303,6 +303,7 @@ export const filesManifest = async (
 ): Promise<AppManifest> => {
   const sdk = await serverSdkModules(env.ASSETS);
   const code = symbolicCode(files);
+  const runner = platformRunner(env, app);
   // Inspected once, its manifest kept in R2 (in the EU) through the
   // verified cache, as builds are (build-cache.ts): served only as its
   // receipt says core kept it, and inspected once in any isolate, under
@@ -312,8 +313,10 @@ export const filesManifest = async (
   const { text } = await throughKeptCache(
     env,
     await inspectionKey(profile, code, sdk.version),
-    // Held as long as its build, and the inspection after it, may take.
-    platformRunner(env, app).callMs("compiler") +
+    // Held as long as its build (the compiler's call, then the type
+    // checker's), and the inspection after it, may take.
+    runner.callMs("compiler") +
+      runner.callMs("type-checker") +
       sandboxWaitMs +
       sandboxDeadlineMs +
       leaseSlackMs,

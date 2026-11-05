@@ -22,6 +22,7 @@ import {
   screenSources,
   workflowBindingsPath,
   workflowBuildFiles,
+  withTypeCheck,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
@@ -34,6 +35,7 @@ import type {
   Increments,
   OpenWorkflowBuild,
   ScreenBuild,
+  Unchecked,
   WorkflowBuild,
 } from "@grasp-os/compiler";
 import { symbolicModules } from "@grasp-os/sdk/host";
@@ -243,6 +245,49 @@ const isBuildShaped = (value: unknown): boolean =>
       Array.isArray(value.diagnostics)));
 
 /**
+ * The build the compiler answered (`Unchecked`), with its type check put
+ * in: run in the type checker's isolate (the compiler's `checker.ts`),
+ * once the compiler has answered, never inside its call, and put
+ * together with the build as the build would have (`withTypeCheck`). A
+ * build that waits on no check (one that failed before it) is as it came.
+ * The build's lease is renewed as the check starts (`renew`): the check is
+ * a call of its own, on-prem with its own wait for a place.
+ */
+const withItsCheck = async (
+  runner: PlatformRunner,
+  answer: unknown,
+  renew: () => Promise<void>
+): Promise<unknown> => {
+  if (
+    typeof answer !== "object" ||
+    answer === null ||
+    !("built" in answer) ||
+    !isBuildShaped(answer.built)
+  ) {
+    throw new TypeError("The compiler answered something else than a build.");
+  }
+  // SAFETY: shaped as a build, checked above; its plan is the compiler's
+  // own, which core trusts as it trusts the build.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const unchecked = answer as Unchecked<{ ok: boolean }>;
+  if (unchecked.typeCheck === undefined) {
+    return unchecked.built;
+  }
+  await renew();
+  const diagnostics = await runner.run("type-checker", "check", [
+    unchecked.typeCheck.request,
+  ]);
+  if (!Array.isArray(diagnostics)) {
+    throw new TypeError(
+      "The type checker answered something else than diagnostics."
+    );
+  }
+  // SAFETY: the checker's answer, core's own code, checked an array.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return withTypeCheck(unchecked, diagnostics as Diagnostic[]);
+};
+
+/**
  * A build of `files` by the compiler, wherever the runner runs it, and
  * whether to cache it: the compiler's answer, or a failed build when it
  * was stopped at a bound (a type built to recurse, say). A stop the files
@@ -263,10 +308,16 @@ const compiled = async (
   kind: BuildKind,
   files: AppFiles,
   profile: BuildProfile,
+  /** Renews the build's lease, as its type check starts. */
+  renew: () => Promise<void>,
   /** The compiler call, when not the kind's own: what it answers as the build. */
   call: () => Promise<unknown> = async () => {
     const [method, target] = compilerCallOf(kind, profile);
-    return await runner.run("compiler", method, [target, files]);
+    const answer = await runner.run("compiler", method, [target, files]);
+    // Inspection checks no types: its build is as it came.
+    return method === "build"
+      ? await withItsCheck(runner, answer, renew)
+      : answer;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
@@ -469,7 +520,7 @@ const transformInBatches = async (
       await transform(Object.fromEntries(entries.slice(half)));
       return;
     }
-    const fresh: Increments = { modules: {}, checks: {} };
+    const fresh: Increments = { modules: {} };
     for (const [key, value] of Object.entries(
       typeof answer === "object" && answer !== null ? answer : {}
     )) {
@@ -510,7 +561,7 @@ const compiledIncrementally = async (
     profile: BuildProfile;
     checks: boolean;
     leaseMs: number;
-    /** Renews the build's lease: as each batch starts, and before the build's own call. */
+    /** Renews the build's lease: as each batch starts, before the build's own call, and before its check. */
     renew: () => Promise<void>;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
@@ -531,7 +582,6 @@ const compiledIncrementally = async (
   });
   const reuse: Increments = {
     modules: { ...earlier.modules, ...batched.made },
-    checks: earlier.checks,
   };
   if (batched.calls > 0) {
     // A lease's time for the build's own call, after its batches.
@@ -539,19 +589,26 @@ const compiledIncrementally = async (
   }
   const transformed = Date.now();
   let answer: unknown;
-  const result = await compiled(runner, "screen", files, profile, async () => {
-    answer = await runner.run("compiler", "buildIncrementally", [
-      target,
-      files,
-      reuse,
-    ]);
-    if (!incrementalShaped(answer)) {
-      throw new TypeError(
-        "The compiler answered something else than an incremental build."
-      );
+  const result = await compiled(
+    runner,
+    "screen",
+    files,
+    profile,
+    renew,
+    async () => {
+      answer = await runner.run("compiler", "buildIncrementally", [
+        target,
+        files,
+        reuse,
+      ]);
+      if (!incrementalShaped(answer)) {
+        throw new TypeError(
+          "The compiler answered something else than an incremental build."
+        );
+      }
+      return await withItsCheck(runner, answer.built, renew);
     }
-    return answer.built;
-  });
+  );
   const ran = Date.now();
   const kept = incrementalShaped(answer)
     ? await keepIncrements(env, keys, answer.fresh, leaseMs)
@@ -594,6 +651,12 @@ const buildPrefixes = [
   inspectionsPrefix,
   ...Object.values(incrementPrefixes),
   "build-quarantine/",
+  // Each file's type check, which screens builds kept until the check
+  // moved to an isolate of its own (GRA-1562): nothing writes it now, so
+  // the sweep empties it within `buildKeepMs` of the release that stopped
+  // writing it. Remove once every deployment has run that release for 30
+  // days (expand, then contract).
+  "screen-checks/",
 ];
 
 const buildSweepSchema = z.object({
@@ -806,7 +869,11 @@ const cachedBuild = async <Build>(
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const started = Date.now();
-  const leaseMs = runner.callMs("compiler") + leaseSlackMs;
+  // Renewed as each call starts (`renew`): long enough for the longest,
+  // the compiler's or the type checker's.
+  const leaseMs =
+    Math.max(runner.callMs("compiler"), runner.callMs("type-checker")) +
+    leaseSlackMs;
   const { text, outcome } = await sharedThroughCache(
     // One sub-owner's: another App building the same files builds them in
     // its own part of the builder's share, never on this one's (or with
@@ -829,7 +896,7 @@ const cachedBuild = async <Build>(
                   leaseMs,
                   renew,
                 })
-              : await compiled(runner, kind, files, profile);
+              : await compiled(runner, kind, files, profile, renew);
           if (!isBuild(answer.built)) {
             throw new TypeError(
               "The compiler answered something else than a build."

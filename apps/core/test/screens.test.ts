@@ -452,10 +452,12 @@ export declare const more: readonly string[];
   it("builds the same files once and serves them from the cache after", async () => {
     // Files of this test's own, so no earlier build is in the cache.
     const files = screen(`once ${crypto.randomUUID()}`);
-    let started = 0;
+    // The isolates the build asked for, by kind: the compiler's and the
+    // type checker's.
+    const asked: string[] = [];
     const counting: WorkerLoader = {
       get: (name, code) => {
-        started += 1;
+        asked.push(name?.split(":")[0] ?? "(unnamed)");
         return env.LOADER.get(name, code);
       },
       load: (code) => env.LOADER.load(code),
@@ -465,7 +467,10 @@ export declare const more: readonly string[];
       files,
       "app-test"
     );
-    expect({ ok: built.ok, started }).toStrictEqual({ ok: true, started: 1 });
+    expect({ ok: built.ok, asked }).toStrictEqual({
+      ok: true,
+      asked: ["compiler", "check"],
+    });
 
     // A build is its files': whichever App or version they come from, the
     // same files, next to any the build doesn't read, are built already.
@@ -491,6 +496,15 @@ export declare const more: readonly string[];
         "app-test"
       )
     ).rejects.toThrow("Built again");
+  });
+
+  it("sweeps the per-file type checks earlier builds kept, which nothing writes any more", async () => {
+    // Kept by builds before the check moved to its own isolate: never
+    // read again, so the sweep empties them once their time is up.
+    const key = `screen-checks/${crypto.randomUUID()}.json`;
+    await env.FILES.put(key, "{}");
+    await sweptAt(Date.now() + buildKeepMs + 24 * 60 * 60 * 1000);
+    await expect(env.FILES.head(key)).resolves.toBeNull();
   });
 
   it("keeps a cached build while it is used, and builds one the sweep took again, the same", async () => {

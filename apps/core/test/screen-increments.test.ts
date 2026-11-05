@@ -5,10 +5,10 @@ import { keepUnderLease } from "../src/build-cache.ts";
 import { buildScreens } from "../src/screens.ts";
 
 // What a screens build reuses of earlier ones (GRA-958, module-cache.ts
-// and the compiler's increments.ts): each module's transform and each
-// file's type check, kept as whole builds are. From its threat model: a
-// build that reuses what doesn't stand for its files (a stale transform,
-// a check of a file whose imports changed shape), a record no receipt
+// and the compiler's increments.ts): each module's transform, kept as
+// whole builds are; the type check reads every file each build. From its
+// threat model: a build that reuses what doesn't stand for its files (a
+// stale transform, a file whose import changed shape passed), a record no receipt
 // vouches for or one kept under another file's key, a preview's
 // transform served to production, and an incremental build that differs
 // from one from nothing.
@@ -27,7 +27,7 @@ export default function Desk() {
   );
 }
 `,
-  // Each of its own: no other test's transforms or checks stand for them.
+  // Each of its own: no other test's transforms stand for them.
   "components/card.tsx": `// ${tag}
 export function Card({ title }: { title: string }) {
   return <h2 className="text-lg">{title}</h2>;
@@ -54,12 +54,7 @@ const metricsOf = async (build: () => Promise<unknown>) => {
           "event" in logged &&
           logged.event === "build.compile"
       )
-      .map(({ compiled, reused, checked, checksReused }) => ({
-        compiled,
-        reused,
-        checked,
-        checksReused,
-      }));
+      .map(({ compiled, reused }) => ({ compiled, reused }));
   } finally {
     info.mockRestore();
   }
@@ -79,9 +74,7 @@ const forgetAll = async (prefix: string): Promise<void> => {
 
 /** A build of `files` from nothing: no whole build, no part of one kept. */
 const fromNothing = async (files: Record<string, string>) => {
-  await Promise.all(
-    ["screen-builds/", "screen-modules/", "screen-checks/"].map(forgetAll)
-  );
+  await Promise.all(["screen-builds/", "screen-modules/"].map(forgetAll));
   return await buildScreens(env, files, "app-test");
 };
 
@@ -108,7 +101,7 @@ describe("a screens build reusing earlier ones", () => {
     vi.restoreAllMocks();
   });
 
-  it("transforms again only what changed, rechecks what reads it, and builds the same as from nothing", async () => {
+  it("transforms again only what changed, and builds the same as from nothing", async () => {
     const tag = crypto.randomUUID();
     const files = appFiles("New", tag);
     const first = await metricsOf(
@@ -125,15 +118,14 @@ describe("a screens build reusing earlier ones", () => {
     const scratch = await fromNothing(changed);
 
     expect({ first, second, same: built }).toStrictEqual({
-      first: [{ compiled: 3, reused: 0, checked: 3, checksReused: 0 }],
-      // The badge again, and the screen that imports it checked again; the
-      // card reads neither, so its check stands.
-      second: [{ compiled: 1, reused: 2, checked: 2, checksReused: 1 }],
+      first: [{ compiled: 3, reused: 0 }],
+      // The badge again; the screen and the card stand.
+      second: [{ compiled: 1, reused: 2 }],
       same: scratch,
     });
   });
 
-  it("checks a file again when a type it imports changed shape, though its own transform is reused", async () => {
+  it("fails a file whose import changed shape, though its own transform is reused", async () => {
     const files = appFiles();
     await buildScreens(env, files, "app-test");
     const broken = await buildScreens(
@@ -190,7 +182,7 @@ describe("a screens build reusing earlier ones", () => {
       forged: JSON.stringify(built).includes("forged"),
       same: built,
     }).toStrictEqual({
-      metrics: [{ compiled: 2, reused: 1, checked: 0, checksReused: 3 }],
+      metrics: [{ compiled: 2, reused: 1 }],
       forged: false,
       same: await fromNothing(files),
     });
@@ -205,12 +197,12 @@ describe("a screens build reusing earlier ones", () => {
     );
 
     expect(preview).toStrictEqual([
-      // Checks are the same for both; every transform is the preview's own.
-      { compiled: 3, reused: 0, checked: 0, checksReused: 3 },
+      // Every transform is the preview's own.
+      { compiled: 3, reused: 0 },
     ]);
   });
 
-  it("checks every file again when a declaration changes, which every file's types may read, and reuses every transform", async () => {
+  it("reuses every transform when only a declaration changes, which compiles to nothing", async () => {
     const files = {
       ...appFiles(),
       "types.d.ts": `interface Probe { name: string }
@@ -229,8 +221,6 @@ describe("a screens build reusing earlier ones", () => {
         )
     );
 
-    expect(again).toStrictEqual([
-      { compiled: 0, reused: 3, checked: 4, checksReused: 0 },
-    ]);
+    expect(again).toStrictEqual([{ compiled: 0, reused: 3 }]);
   });
 });

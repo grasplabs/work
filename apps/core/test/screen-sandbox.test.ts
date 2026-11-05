@@ -1,11 +1,13 @@
 import {
   appCompilerCode,
+  checkerSettings,
   isolateSettings,
   loadAppCompiler,
   packageBuilderCode,
   packageBuilderSettings,
   startAppCompiler,
   startPackageBuilder,
+  typeCheckerCode,
 } from "@grasp-os/compiler";
 import type { PlatformCode, Diagnostic } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
@@ -210,10 +212,12 @@ const refusalOf = async (
         : String(error)
   );
 
-/** Whether `compiler` checks an empty draft's screens: it ran. */
+/** Whether `compiler` builds an empty draft's screens: it ran. */
 const checked = async (compiler: unknown): Promise<string> => {
-  const answer = await callStub(compiler, "check", ["screens", {}]);
-  return Array.isArray(answer) ? "checked" : JSON.stringify(answer);
+  const answer = await callStub(compiler, "build", ["screens", {}]);
+  return typeof answer === "object" && answer !== null && "built" in answer
+    ? "checked"
+    : JSON.stringify(answer);
 };
 
 describe(
@@ -298,15 +302,16 @@ describe(
       });
     });
 
-    it("hold both isolates to no outbound at all, the one barrier to the network shown to hold", () => {
+    it("hold every isolate to no outbound at all, the one barrier to the network shown to hold", () => {
       // `subRequests: 0` doesn't stop a fetch on workerd (the control below
       // reaches its outbound with it), and the tests' default outbound
       // reaches no host either way, so only this says a refactor kept the
       // compiler and the builder off the network.
       expect([
         isolateSettings.globalOutbound,
+        checkerSettings.globalOutbound,
         packageBuilderSettings.globalOutbound,
-      ]).toStrictEqual([null, null]);
+      ]).toStrictEqual([null, null, null]);
     });
 
     it("would report what an isolate with a binding and an outbound can reach, its limits as the compiler's", async () => {
@@ -336,6 +341,13 @@ describe(
         isolateSettings,
         "inspect",
         ["app", {}],
+      ],
+      [
+        "the type checker's check",
+        typeCheckerCode,
+        checkerSettings,
+        "check",
+        [{ files: {}, options: {} }],
       ],
       [
         "the package builder's inspection",
