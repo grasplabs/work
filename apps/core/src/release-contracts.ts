@@ -97,7 +97,8 @@ const mailbox = v.object({ name: v.string(), address: v.string() });
  * own policy. Null when Email Routing's own ARC set
  * (authentication-results.ts) records none, or none core can trust, and
  * DMARC's also when its verdict isn't of `from` (several From headers or
- * mailboxes, none readable, another domain).
+ * mailboxes, none readable, another domain, or an address with several
+ * `@` or cut to fit).
  */
 const methodResult = v
   .object({
