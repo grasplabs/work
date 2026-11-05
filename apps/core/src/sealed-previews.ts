@@ -1233,9 +1233,17 @@ export class SealedPreviews {
       ? this.#runningAt(chatId, app, draft)
       : this.#runningFor(chatId, app, draft);
     const inputHash = await sha256Hex(canonicalJson(input ?? null));
-    // Server code being sealed runs once it has taken its place.
+    // Server code being sealed runs once it has taken its place. Code that
+    // doesn't seal is the draft's to fix: its stream's result says why,
+    // as a call's answer does.
     if (running !== undefined) {
-      await heard(running.release);
+      try {
+        await running.release;
+      } catch (error) {
+        if (sealFailure(error)) {
+          return resultOf(refusedResult(error));
+        }
+      }
     }
     if (running !== undefined && !this.#current(chatId, app, running)) {
       throw appErrors.create("app.preview_outdated");
@@ -1930,7 +1938,8 @@ export class SealedPreviews {
    * the very code and store the draft runs now; or, while the draft's
    * server code doesn't seal, what the preview runs (its `draft`), the
    * last server code that did, which the draft's screens were built
-   * against meanwhile. A frame keeps the last version of its screen that worked while
+   * against meanwhile; with none, the draft itself, whose calls are then
+   * refused with why it doesn't seal. A frame keeps the last version of its screen that worked while
    * a write of it fails, and calls from there. Undefined, so
    * `app.preview_outdated`, for any other. After this object starts
    * again, only the draft's own revision, as it knows of no earlier one.
@@ -1955,8 +1964,10 @@ export class SealedPreviews {
     const since = kept?.server === server ? kept.since : draft.revision;
     const running = this.#running.get(name);
     const unbuilt = this.#unbuilt.get(name) === server;
+    // With no server code of the preview that sealed, the draft's own:
+    // its call is refused with why it doesn't seal, never as out of date.
     if (revision >= since) {
-      return unbuilt ? running?.draft : draft;
+      return unbuilt && running !== undefined ? running.draft : draft;
     }
     return unbuilt && running !== undefined && revision >= running.since
       ? running.draft

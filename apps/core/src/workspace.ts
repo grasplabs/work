@@ -4901,9 +4901,11 @@ export class Workspace extends DurableObject<Env> {
       ) {
         throw error;
       }
+      const last = this.#sealedPreviews.served(id, app, own, at);
       draft =
-        this.#sealedPreviews.served(id, app, own, at) ??
-        (await this.#latestInPlace(app, error));
+        last === undefined || last === own
+          ? await this.#latestInPlace(app, error)
+          : last;
       inPlace = true;
       sealed = await this.#sealedPreviews.release(id, app, draft);
     }
