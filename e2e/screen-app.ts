@@ -51,7 +51,6 @@ export const platformShaped = query({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { add, list, lookLikeThePlatform, platformShaped } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({

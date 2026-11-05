@@ -56,7 +56,6 @@ export const setStatus = mutation({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { list, setStatus } from "./server/invoices.ts";
 import schema from "./schema.ts";
 
 export default app({

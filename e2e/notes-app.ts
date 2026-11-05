@@ -127,7 +127,6 @@ export const detachFile = mutation({
 `;
 
 const registration = `import { app, permission } from "@grasp-os/sdk";
-import { attachFile, create, detachFile, get, importHalfway, insert, list, remove, update } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export const files = permission.files({

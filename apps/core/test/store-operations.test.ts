@@ -938,10 +938,15 @@ describe("a workflow calling a store's public operation", () => {
         )
       );
     const notesSource = crmFiles()["server/notes.ts"] ?? "";
-    const withNote = (from: string, to: string): Record<string, string> => ({
-      ...crmFiles(),
-      "server/notes.ts": notesSource.replace(from, to),
-    });
+    const withNote = (
+      ...swaps: [from: string, to: string][]
+    ): Record<string, string> => {
+      let source = notesSource;
+      for (const [from, to] of swaps) {
+        source = source.replace(from, to);
+      }
+      return { ...crmFiles(), "server/notes.ts": source };
+    };
     const noteMutation = "export const add = mutation({";
     const noteArgs = `${noteMutation}\n  args: { text: v.string() },`;
     // The same shapes, now a query: one that reads, as a query may.
@@ -955,12 +960,16 @@ describe("a workflow calling a store's public operation", () => {
     const asQuery = await nextVersion(
       crm,
       withNote(
-        noteBlock,
-        `export const add = query({
+        [
+          noteBlock,
+          `export const add = query({
   args: { text: v.string() },
   returns: v.null(),
   handler: async () => null,
-});`
+});`,
+        ],
+        // No mutation is left to import: App code is type-checked as sealed.
+        ["import { mutation, query }", "import { query }"]
       ),
       2
     );
@@ -968,10 +977,10 @@ describe("a workflow calling a store's public operation", () => {
     // A mutation again, taking other arguments.
     const latest = await nextVersion(
       asQuery,
-      withNote(
+      withNote([
         noteArgs,
-        `${noteMutation}\n  args: { text: v.string().max(10) },`
-      ),
+        `${noteMutation}\n  args: { text: v.string().max(10) },`,
+      ]),
       3
     );
     const otherShape = await run();

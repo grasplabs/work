@@ -5,6 +5,7 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
+import { afterEach } from "vite-plus/test";
 
 // What an App screen's kit parts (the data grid, the form fields) are
 // tested against: a real session client, as the platform mounts one, over
@@ -194,6 +195,15 @@ export const settle = async (ms = 0): Promise<void> => {
 };
 
 let root: Root | undefined;
+
+// Unmounted after each test, so nothing a screen left pending (a search's
+// settle timer) runs after the test file's page is gone.
+afterEach(() => {
+  act(() => {
+    root?.unmount();
+  });
+  root = undefined;
+});
 
 /** Renders `screen` in a fresh page, under `client`. */
 export const rendered = async (
