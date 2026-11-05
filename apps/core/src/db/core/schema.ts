@@ -5318,8 +5318,6 @@ export const modelUsage = sqliteTable(
     cost: real().notNull(),
     /** Whether any of it is an estimate, not the provider's count. */
     estimated: integer({ mode: "boolean" }).notNull(),
-    /** The usage as the provider reported it, through pi; null for a voice model's. */
-    reported: text({ mode: "json" }).$type<Json>(),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [

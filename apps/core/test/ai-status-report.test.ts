@@ -86,7 +86,7 @@ const monthBack = (monthsBack: number): string => {
 /** Core's env with its model calls counted in `month`. */
 const inMonth = (month: string): Env => ({
   ...env,
-  MODEL_BUDGET_MONTH: month,
+  SPEND_MONTH: month,
 });
 
 /** A person no other test uses. */

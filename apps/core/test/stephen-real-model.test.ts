@@ -16,8 +16,8 @@ import { testBinding } from "./test-env.ts";
 // CI; only the provider differs, the Brain baseline's real one
 // (brain-real-provider.ts): the provider's own API, with the real key the
 // run was given (`STEPHEN_MODEL_KEY`), the model the run names the one the
-// organization chose, and the run's budget as the ledger's deployment
-// limit, the only cap on what it spends.
+// organization chose. No case starts once the run spent its budget
+// (`budgetMicros`); the provider key's own spend limit is the hard cap.
 // It reports on the run's output as JSON lines, then fails if a hard rule
 // broke (GRA-739): run by hand (stephen-eval.yml) or weekly.
 
@@ -103,6 +103,7 @@ describe("Stephen's eval against a real model", () => {
       providerName: settings.model.slice(0, settings.model.indexOf("/")),
       modelSetup: { model: settings.model },
       build: settings.build,
+      budgetMicros: settings.budgetUsd * micros,
     });
     const spent = await charged();
     console.info(

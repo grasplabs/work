@@ -1884,14 +1884,6 @@ const busyDetails = (
 ): { retryAfterSeconds: number } | undefined =>
   busyDetailsSchema.safeParse(details).data;
 
-/** A used-up budget's wait: until it resets, a month at most. */
-const exhaustedDetailsSchema = z.object({
-  retryAfterSeconds: z
-    .int()
-    .positive()
-    .max(31 * 24 * 60 * 60),
-});
-
 /** Which bound of a resource's a request reached, and when to ask again. */
 const limitDetailsSchema = z.strictObject({
   limit: z.enum(["call", "minute", "day", "open", "cycle", "depth", "calls"]),
@@ -1947,8 +1939,8 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       )
     );
   }
-  // A budget busy with requests under way, a provider's rate: worth trying
-  // again, after the wait the gateway computed, the only detail passed on.
+  // Room held by runs under way, a provider's rate: worth trying again,
+  // after the wait computed, the only detail passed on.
   if (code === "resource.budget_busy" || code === "resource.rate_limited") {
     return hostError(
       operationErrors.create(
@@ -1964,17 +1956,6 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       operationErrors.create(
         code,
         limitDetailsSchema.safeParse(
-          isExpectedError(error) ? error.details : undefined
-        ).data
-      )
-    );
-  }
-  // Used up: when it resets, if it does, the only detail passed on.
-  if (code === "resource.budget_exhausted") {
-    return hostError(
-      operationErrors.create(
-        code,
-        exhaustedDetailsSchema.safeParse(
           isExpectedError(error) ? error.details : undefined
         ).data
       )

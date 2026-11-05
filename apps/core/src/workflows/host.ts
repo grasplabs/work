@@ -1030,10 +1030,10 @@ export const newAiCalls = (): AiCalls => ({
 export const stepLimitOf = (env: Env): number => quotaLimits(env).workflowSteps;
 
 /**
- * The model calls a run's lineage may make, as the quota limits have them
+ * The model calls a run may make, as the quota limits have them
  * (`lineageModelRequests`): the ceiling a run's host holds its model calls
- * to (`maxModelCalls`). Every model request of a run's lineage is held to
- * them again as it is sent (models.ts, `scopesNowOf`).
+ * to (`maxModelCalls`). Each is a host call too, so a lineage's are held
+ * together by its host calls (quotas.ts, `lineageHostCalls`).
  */
 export const modelCallLimitOf = (env: Env): number =>
   quotaLimits(env).lineageModelRequests;

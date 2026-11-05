@@ -6,8 +6,8 @@
  * every request core's model gateway sends through connect; this provider
  * sends each one on, as the gateway built it, to the provider's own API
  * with the real key the run was given, and hands the answer back for the
- * bridge to stream to core. Core's gateway and ledger run as they always
- * do: the rules, the budget, the price and the charge are theirs. Nothing
+ * bridge to stream to core. Core's gateway runs as it always does: the
+ * rules, the price and the record of what each call used are its own. Nothing
  * here is a model client of its own.
  *
  * Chat completions (Mistral's, OpenRouter's) and Anthropic's Messages API;

@@ -86,7 +86,7 @@ const withProvider = (more: ProviderReply[], overrides: Partial<Env> = {}) => {
   const month = newMonth();
   const rulesEnv: Env = {
     ...env,
-    MODEL_BUDGET_MONTH: month,
+    SPEND_MONTH: month,
     ...overrides,
   };
   const { call, agent } = models(rulesEnv);
@@ -224,7 +224,7 @@ describe("model spend", { timeout: 60_000 }, () => {
   it("count a call on Grasp's own key as Grasp's, apart from the organization's spend and the person's", async () => {
     const { call, month } = withProvider([pricedAnswer]);
     const trigger = newPerson();
-    const rulesEnv: Env = { ...env, MODEL_BUDGET_MONTH: month };
+    const rulesEnv: Env = { ...env, SPEND_MONTH: month };
 
     await expect(outcome(call(hello({ trigger })))).resolves.toBe("ok");
     await plan(platformOpenAiKey, [
@@ -279,7 +279,7 @@ describe("model spend", { timeout: 60_000 }, () => {
         { ...pricedAnswer, text: '{"line": "Hi."}' },
         ...times(2, pricedAnswer),
       ],
-      { MODEL_BUDGET_MONTH: undefined }
+      { SPEND_MONTH: undefined }
     );
     const month = new Date().toISOString().slice(0, "yyyy-mm".length);
     const ada = { type: "person", userId: builder.userId } as const;
@@ -523,6 +523,43 @@ describe("model spend", { timeout: 60_000 }, () => {
     await expect(
       usageRows(month, { personId: userOf(ada) })
     ).resolves.toHaveLength(1);
+  });
+
+  it("keep a response's event and usage once when every batch commits but its answer is lost", async () => {
+    const database: D1Database = env.DB;
+    const { call, month } = withProvider([pricedAnswer], {
+      // Each batch is written, then its answer lost on the way back.
+      DB: new Proxy(database, {
+        get: (target, name): unknown => {
+          if (name !== "batch") {
+            return Reflect.get(target, name, target);
+          }
+          return async (statements: D1PreparedStatement[]) => {
+            await target.batch(statements);
+            throw new Error("Network connection lost.");
+          };
+        },
+      }),
+    });
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(JSON.stringify(args));
+    });
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    // Past every try of the batch, then drained into the log.
+    await vi.waitFor(() => {
+      expect(
+        errors.some((line) => line.includes("model.usage_unrecorded"))
+      ).toBeTruthy();
+    });
+    const events = await eventsOf(ada.trigger);
+    const rows = await usageRows(month, { personId: userOf(ada) });
+    expect({
+      events: events.filter(({ action }) => action === "model.call").length,
+      rows: rows.length,
+    }).toStrictEqual({ events: 1, rows: 1 });
   });
 
   it("charge a Claude Sonnet 4.5 prompt past 200K tokens at Anthropic's long-context prices, as its audit event counts it", async () => {

@@ -487,8 +487,8 @@ export const runOfStepKey = (key: string): string | undefined => {
  * server that took nothing (it turned the call away, or its native
  * connector said nothing was done); a call with the same idempotency key
  * still running, whose answer a retry gets; a model call that failed, or
- * that the model budget turned away only while other calls under way hold
- * it, or that its provider's rate limit turned away (nothing was sent, or nothing billed); something unplanned in the platform, where
+ * that its provider's rate limit turned away (nothing was answered, so
+ * nothing billed); something unplanned in the platform, where
  * connect's idempotency keys keep a retried side effect to once; and a
  * model's answer that didn't fit, which the SDK asks for again. Any other
  * failure stops the run: a refusal, a tool's own error (it may have

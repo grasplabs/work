@@ -46,6 +46,7 @@ import { z } from "zod";
 import { turnSource } from "../src/brain-capture.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
+import { usageRecorded } from "../src/model-usage.ts";
 import { model, setObjectEnv, transcript } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
@@ -523,29 +524,17 @@ export const brainBudgetMonth = "2400-01";
 
 /** Has `stub`'s calls counted in the run's month. */
 const pointAt = async (stub: Workspace["stub"]) => {
-  await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
+  await setObjectEnv(stub, { SPEND_MONTH: brainBudgetMonth });
 };
-
-/** How long the usage recorded must hold still before it is read. */
-const usageSettleMs = 15;
 
 /**
  * What the run's model calls cost, in micros, once the gateway's records
  * of them, written in the background after each answer
- * (src/model-usage.ts), have settled: two reads alike in a row.
+ * (src/model-usage.ts, `usageRecorded`), are written.
  */
 export const charged = async (): Promise<number> => {
-  let last = await spentMicros(brainBudgetMonth);
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- until it holds still
-    await scheduler.wait(usageSettleMs);
-    // oxlint-disable-next-line no-await-in-loop -- until it holds still
-    const now = await spentMicros(brainBudgetMonth);
-    if (now === last) {
-      return now;
-    }
-    last = now;
-  }
+  await usageRecorded();
+  return await spentMicros(brainBudgetMonth);
 };
 
 /** Loads the corpus as it stands at `t0`, as its people would write it. */

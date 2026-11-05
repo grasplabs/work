@@ -63,7 +63,7 @@ const newMonth = (): string => {
 /** Core's env with model spend counted in a month of its own. */
 const withRules = () => {
   const month = newMonth();
-  const rulesEnv: Env = { ...env, MODEL_BUDGET_MONTH: month };
+  const rulesEnv: Env = { ...env, SPEND_MONTH: month };
   return { rulesEnv, month };
 };
 

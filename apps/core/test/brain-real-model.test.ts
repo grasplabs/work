@@ -28,7 +28,7 @@ import { testBinding } from "./test-env.ts";
 // only the provider differs (brain-real-provider.ts): the provider's own
 // API, with the real key the run was given (`BRAIN_MODEL_KEY`), the model
 // the run names (`BRAIN_MODEL`) the one the organization chose, and the
-// run's budget as the ledger's deployment limit.
+// run's budget checked against what it spent; the provider key's own spend limit is the hard cap.
 // The estimate first runs the dev split against the stub, priced as that
 // model, to project what a run costs. Each reports on the run's output as
 // JSON lines.

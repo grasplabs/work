@@ -526,6 +526,48 @@ export const appendAuditEvent = async (
 };
 
 /**
+ * The statement that stores `event` in core's outbox, once by its ID: an
+ * event stored again (a write tried again, though its answer was lost) is
+ * left as it is.
+ */
+export const outboxedEvent = (db: DrizzleD1Database, event: AuditEvent) =>
+  db
+    .insert(auditOutbox)
+    .values({
+      id: event.id,
+      event: JSON.stringify(event),
+      createdAt: new Date(),
+    })
+    .onConflictDoNothing();
+
+/**
+ * `keepAuditEvent` for an event made already: stored once by its ID, so
+ * the outbox and the log (which keeps an event ID once) hold it once
+ * however often it is kept. Never throws.
+ */
+export const keepEvent = async (
+  env: OutboxEnv,
+  db: AuditedDatabase,
+  event: AuditEvent
+): Promise<void> => {
+  try {
+    await outboxedEvent(db, event);
+  } catch (outboxError) {
+    log.error("audit.outbox.store_failed", errorFields(outboxError));
+    try {
+      await auditLog(env).append([event]);
+    } catch (appendError) {
+      log.error("audit.lost", {
+        ...errorFields(appendError),
+        entry: JSON.stringify(event),
+      });
+    }
+    return;
+  }
+  drainSoon(env, db);
+};
+
+/**
  * Stores the event for a change that has already happened outside a batch
  * of ours, so the event can't join it, and drains it: in `db`'s outbox
  * (drained in the background, as `auditedBatch` does); if
@@ -538,21 +580,17 @@ export const keepAuditEvent = async (
   db: AuditedDatabase,
   entry: AuditEntry
 ): Promise<void> => {
+  let event: AuditEvent;
   try {
-    await outboxed(db, entry);
-  } catch (outboxError) {
-    log.error("audit.outbox.store_failed", errorFields(outboxError));
-    try {
-      await appendAuditEvent(env, entry);
-    } catch (appendError) {
-      log.error("audit.lost", {
-        ...errorFields(appendError),
-        entry: canonicalJson(entry),
-      });
-    }
+    event = createAuditEvent(entry, "core");
+  } catch (error) {
+    log.error("audit.lost", {
+      ...errorFields(error),
+      entry: canonicalJson(entry),
+    });
     return;
   }
-  drainSoon(env, db);
+  await keepEvent(env, db, event);
 };
 
 /**

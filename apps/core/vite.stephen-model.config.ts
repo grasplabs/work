@@ -9,7 +9,7 @@ import { coreProject } from "./vite.config.ts";
 // is `STEPHEN_MODEL`, as the gateway names it, such as
 // `anthropic/claude-sonnet-5` or `mistral/mistral-large-latest` (the
 // latter while unset), the one the run's organization chooses, reached
-// through core's model gateway, ledger and connect, then from the test's
+// through core's model gateway and connect, then from the test's
 // isolate to the provider's own API with the real key `STEPHEN_MODEL_KEY`
 // (test/brain-real-provider.ts): Anthropic's, Mistral's or OpenRouter's.
 // Never commit the key; give it in the shell. The judge asks the same
@@ -20,9 +20,8 @@ import { coreProject } from "./vite.config.ts";
 //     vp -C apps/core test -c vite.stephen-model.config.ts
 //
 // `STEPHEN_MODEL_CASES` takes case IDs, comma-separated, to run only
-// those (`R1,X2`). The budget is the ledger's deployment limit for the
-// run, and the only cap on it here: core refuses any request that could
-// take the spend past it. The report and every model exchange go to the
+// those (`R1,X2`). No case starts once the run spent its budget, as core
+// recorded it; the provider key's own spend limit is the hard cap. The report and every model exchange go to the
 // output as JSON lines (`STEPHEN_MODEL_REPORT`, `STEPHEN_MODEL_EXCHANGES`);
 // keep them outside the repository.
 

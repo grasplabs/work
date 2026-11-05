@@ -742,7 +742,7 @@ type Provider = Awaited<ReturnType<typeof providerOf>>;
 
 /** Has `stub`'s calls counted in the run's month. */
 const pointAt = async (stub: ReturnType<typeof workspace>) => {
-  await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
+  await setObjectEnv(stub, { SPEND_MONTH: brainBudgetMonth });
 };
 
 const callDetail = z
@@ -1006,6 +1006,12 @@ export interface StephenRunOptions {
   build?: StephenReport["identity"]["build"];
   /** Whether a judge rates each case. */
   judge?: boolean;
+  /**
+   * What the run may spend, in micros: no case starts once its calls cost
+   * this much (`charged`). A case under way finishes, so a run may go a
+   * case past it; the provider key's own spend limit is the hard cap.
+   */
+  budgetMicros?: number;
 }
 
 const testModelSetup: BrainModelSetup = { model };
@@ -1036,6 +1042,7 @@ export const runStephenEval = async (
     modelSetup = testModelSetup,
     build,
     judge = true,
+    budgetMicros,
   }: StephenRunOptions = {}
 ): Promise<StephenReport> => {
   const provider = await providerOf(respond, modelSetup);
@@ -1051,6 +1058,13 @@ export const runStephenEval = async (
   ];
   const scores: StephenScore[] = [];
   for (const { item, breaker } of planned) {
+    if (
+      budgetMicros !== undefined &&
+      // oxlint-disable-next-line no-await-in-loop -- checked before each case
+      (await charged()) >= budgetMicros
+    ) {
+      break;
+    }
     // oxlint-disable-next-line no-await-in-loop -- one case at a time: the provider answers the case under way
     const { seen, context, latencyMs, costMicros } = await observeCase(
       company,

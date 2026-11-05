@@ -422,8 +422,8 @@ export const runBrainRecallComparison = async (
     identity,
   }: BrainRecallOptions
 ): Promise<BrainRecallReport> => {
-  const before = { month: env.MODEL_BUDGET_MONTH };
-  env.MODEL_BUDGET_MONTH = brainBudgetMonth;
+  const before = { month: env.SPEND_MONTH };
+  env.SPEND_MONTH = brainBudgetMonth;
   try {
     const random = seededRandom(seed);
     const { policy, queried, omitted } = await policyOf(company);
@@ -510,6 +510,6 @@ export const runBrainRecallComparison = async (
       budgets: recallBudgets,
     };
   } finally {
-    env.MODEL_BUDGET_MONTH = before.month;
+    env.SPEND_MONTH = before.month;
   }
 };

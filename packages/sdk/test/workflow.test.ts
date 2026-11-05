@@ -448,11 +448,6 @@ describe("step.do", () => {
       retryable: true,
       requestId: "request-1",
     }));
-    const bindingSpent = failingWith(() =>
-      Object.assign(new Error("Binding spent"), {
-        code: "resource.budget_exhausted",
-      })
-    );
     // As a tool reports bad input: trying again changes nothing.
     const refused = failingWith(() =>
       Object.assign(new Error("Refused"), { code: "connect.action_failed" })
@@ -468,7 +463,6 @@ describe("step.do", () => {
       limited: await outcomeOf(limited),
       bindingHeld: await outcomeOf(bindingHeld),
       answerHeld: await outcomeOf(answerHeld),
-      bindingSpent: await outcomeOf(bindingSpent),
       refused: await outcomeOf(refused),
       thrown: await outcomeOf(thrown),
     }).toStrictEqual({
@@ -476,7 +470,6 @@ describe("step.do", () => {
       limited: 3,
       bindingHeld: 3,
       answerHeld: 3,
-      bindingSpent: "Binding spent",
       refused: "Refused",
       thrown: "No such customer",
     });

@@ -16,6 +16,9 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { ofRemovedDatabase } from "./removed-databases.ts";
+import type { BranchView } from "./removed-databases.ts";
+
 const git = (...args: string[]): string =>
   execFileSync("git", args, { encoding: "utf-8" });
 
@@ -55,25 +58,32 @@ const base = git("merge-base", "origin/main", "HEAD").trim();
 const changedHere = (file: string): boolean =>
   git("diff", "--name-only", base, "--", file).trim() !== "";
 
-/**
- * Whether `line` deletes a migration of a database the branch removes
- * whole, its journal too (a Durable Object class deleted with its storage):
- * nothing applies its migrations again.
- */
-const ofRemovedDatabase = (line: string): boolean => {
-  const [status, file = ""] = line.split("\t");
-  if (status !== "D") {
-    return false;
-  }
-  const journal = `${file.slice(0, file.lastIndexOf("/"))}/meta/_journal.json`;
-  try {
-    execFileSync("git", ["cat-file", "-e", `HEAD:${journal}`], {
-      stdio: "ignore",
-    });
-    return false;
-  } catch {
-    return true;
-  }
+/** What HEAD and the branch's diff say of a database removed whole. */
+const branchView: BranchView = {
+  deleted: new Set(
+    git("diff", "--name-only", "--find-renames", "--diff-filter=D", base)
+      .split("\n")
+      .filter(Boolean)
+  ),
+  hasTree: (dir) => git("ls-tree", "HEAD", "--", dir).trim() !== "",
+  configNames: (text) => {
+    try {
+      git(
+        "grep",
+        "-q",
+        "-F",
+        text,
+        "HEAD",
+        "--",
+        "*wrangler.jsonc",
+        "*package.json"
+      );
+      return true;
+    } catch {
+      // `git grep` exits 1 when nothing matches.
+      return false;
+    }
+  },
 };
 
 // A migration moved unchanged with its app (a rename at 100% similarity)
@@ -90,7 +100,10 @@ const changed = git(
   .split("\n")
   .filter(
     (line) =>
-      line !== "" && !line.startsWith("R100\t") && !ofRemovedDatabase(line)
+      line !== "" &&
+      !line.startsWith("R100\t") &&
+      // A migration of a database the branch removes whole.
+      !(line.startsWith("D\t") && ofRemovedDatabase(line.slice(2), branchView))
   );
 for (const line of changed) {
   errors.push(

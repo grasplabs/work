@@ -88,14 +88,14 @@ const hearing = async <T>(
   run: () => Promise<T>,
   { month }: { month?: string } = {}
 ): Promise<T> => {
-  const before = env.MODEL_BUDGET_MONTH;
+  const before = env.SPEND_MONTH;
   if (month !== undefined) {
-    env.MODEL_BUDGET_MONTH = month;
+    env.SPEND_MONTH = month;
   }
   try {
     return await run();
   } finally {
-    env.MODEL_BUDGET_MONTH = before;
+    env.SPEND_MONTH = before;
   }
 };
 

@@ -79,17 +79,17 @@ const relaying = async <T>(
   run: () => Promise<T>,
   { month }: { month?: string } = {}
 ): Promise<{ upstream: Upstream; result: T }> => {
-  const before = env.MODEL_BUDGET_MONTH;
+  const before = env.SPEND_MONTH;
   const { length: known } = await realtimeSockets();
   if (month !== undefined) {
-    env.MODEL_BUDGET_MONTH = month;
+    env.SPEND_MONTH = month;
   }
   try {
     const result = await run();
     const sockets = await realtimeSockets();
     return { upstream: { opened: sockets.slice(known) }, result };
   } finally {
-    env.MODEL_BUDGET_MONTH = before;
+    env.SPEND_MONTH = before;
   }
 };
 

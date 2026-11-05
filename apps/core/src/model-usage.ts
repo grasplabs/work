@@ -1,30 +1,35 @@
 import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
-import type { Json } from "@grasp-os/shared/json";
+import type { AuditEntry, AuditEvent } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, keepAuditEvent } from "./audit-outbox.ts";
-import { auditOutbox, modelUsage, providerHealth } from "./db/core/schema.ts";
+import { auditedBatch, keepEvent, outboxedEvent } from "./audit-outbox.ts";
+import { modelUsage, providerHealth } from "./db/core/schema.ts";
 import { retriedBatch } from "./db/d1.ts";
 import { spendKeysOf, spendMonth } from "./model-spend.ts";
 import type { SpendInput } from "./model-spend.ts";
 
 // What the model gateway (models.ts) records after each response, the way
 // the usual gateways meter spend: once the provider answered, from the
-// usage it reported, never as a reservation before the request. One D1
-// batch holds the response's `model.call` audit event, its usage row
-// (model-spend.ts reads them) and its provider's health, so the three are
-// kept or lost together. The batch runs in the background (`waitUntil`):
-// the answer never waits on it, and nothing in it can fail or refuse a
-// call. A batch D1 failed for a moment is tried again (`retriedBatch`; it
-// inserts by ID, so a try that committed is not counted twice); one that
-// still fails is logged as `model.usage_unrecorded`, and its audit event
-// kept on its own (`keepAuditEvent`), which falls back to the log itself.
+// usage it reported, never as a reservation before the request.
+//
+// - The response's `model.call` audit event is stored first, one outbox
+//   row, awaited as every audited action in core is (`keepEvent`, which
+//   falls back to the log itself): it outlives the isolate.
+// - Its usage row (model-spend.ts reads them) and its provider's health
+//   follow in one D1 batch, in the background (`waitUntil`): the answer
+//   never waits on them, and nothing in them can fail or refuse a call.
+//   The batch stores the event again, so usage is kept with its event.
+// - Every write is by a stable ID (the event's, the provider request's),
+//   so a batch D1 failed for a moment is tried again (`retriedBatch`)
+//   without counting anything twice, even a try that committed though its
+//   answer was lost. One that still fails is logged as
+//   `model.usage_unrecorded`: an overview may miss a row; the provider's
+//   invoice is the bill.
 
 /** What one response used, as its usage row keeps it. */
 export interface UsageRecord {
@@ -43,8 +48,6 @@ export interface UsageRecord {
   cost: number;
   /** Whether any of it is an estimate, not the provider's count. */
   estimated: boolean;
-  /** The usage as the provider reported it, through pi. */
-  reported?: Json;
 }
 
 /**
@@ -123,23 +126,18 @@ const healthNoted = (
     });
 };
 
-/** The batch that records `record`, its audit event once by its ID. */
+/** The batch that records `record`'s usage and health, its event again by its ID. */
 const recordOnce = async (
   env: Env,
   db: DrizzleD1Database & { $client: D1Database },
-  { spend, usage, health }: ResponseRecord,
-  event: ReturnType<typeof createAuditEvent>
+  { spend, usage, health }: Omit<ResponseRecord, "entry">,
+  event: AuditEvent
 ): Promise<void> => {
   const now = Date.now();
   await auditedBatch(env, db, [
-    db
-      .insert(auditOutbox)
-      .values({
-        id: event.id,
-        event: JSON.stringify(event),
-        createdAt: new Date(now),
-      })
-      .onConflictDoNothing(),
+    // Already stored (`recordResponse`): here so usage and its event are
+    // kept together, once by the event's ID.
+    outboxedEvent(db, event),
     ...(usage === undefined
       ? []
       : [
@@ -149,7 +147,6 @@ const recordOnce = async (
               ...usage,
               ...spendKeysOf(spend),
               feature: usage.feature ?? null,
-              reported: usage.reported ?? null,
               period: spendMonth(env),
               createdAt: new Date(now),
             })
@@ -159,17 +156,23 @@ const recordOnce = async (
   ]);
 };
 
-/**
- * Records one response (`ResponseRecord`). Never throws: a failure is
- * logged, and the audit event kept on its own.
- */
-export const recordResponse = async (
+/** The usage records under way in the background in this isolate. */
+const underWay = new Set<Promise<void>>();
+
+/** `usage` once written, then no longer under way (it never throws). */
+const forgotten = async (usage: Promise<void>): Promise<void> => {
+  await usage;
+  underWay.delete(usage);
+};
+
+/** Records `record`'s usage and health once its event is stored. Never throws. */
+const recordUsage = async (
   env: Env,
-  record: ResponseRecord
+  record: Omit<ResponseRecord, "entry">,
+  event: AuditEvent
 ): Promise<void> => {
   const db = drizzle(env.DB);
   try {
-    const event = createAuditEvent(record.entry, "core");
     await retriedBatch(async () => {
       await recordOnce(env, db, record, event);
     });
@@ -178,13 +181,45 @@ export const recordResponse = async (
       ...errorFields(error),
       model: record.usage?.model,
     });
-    await keepAuditEvent(env, db, record.entry);
   }
 };
 
-/** {@link recordResponse} in the background: the answer never waits on it. */
-export const recordAfterResponse = (env: Env, record: ResponseRecord): void => {
-  waitUntil(recordResponse(env, record));
+/**
+ * Records one response (`ResponseRecord`): its audit event first, awaited,
+ * as every audited action in core is, so it outlives the isolate; then its
+ * usage and its provider's health, in the background unless `awaited`,
+ * so the answer never waits on them. Never throws: a failure is logged.
+ */
+export const recordResponse = async (
+  env: Env,
+  { entry, ...record }: ResponseRecord,
+  { awaited = false }: { awaited?: boolean } = {}
+): Promise<void> => {
+  let event: AuditEvent;
+  try {
+    event = createAuditEvent(entry, "core");
+  } catch (error) {
+    // Never expected: the gateway refuses a call whose event can't fit.
+    log.error("audit.lost", errorFields(error));
+    return;
+  }
+  await keepEvent(env, drizzle(env.DB), event);
+  const usage = recordUsage(env, record, event);
+  if (awaited) {
+    await usage;
+    return;
+  }
+  underWay.add(usage);
+  waitUntil(forgotten(usage));
+};
+
+/**
+ * Settles once every usage record this isolate began in the background
+ * is written (or failed): for a reader that must see what it just spent,
+ * such as a test measuring what a trial cost.
+ */
+export const usageRecorded = async (): Promise<void> => {
+  await Promise.all(underWay);
 };
 
 /** How each provider's requests fared last, by whose key. */

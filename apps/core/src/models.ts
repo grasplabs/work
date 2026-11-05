@@ -87,7 +87,7 @@ import type {
   TransportFailure,
   TransportRoute,
 } from "./model-transport.ts";
-import { recordAfterResponse, recordResponse } from "./model-usage.ts";
+import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
 import {
   charactersOf,
@@ -1443,40 +1443,21 @@ const healthOf = (
     : undefined;
 };
 
-/** The provider's usage as reported, its counts only, for its usage row. */
-const reportedOf = ({
-  input,
-  output,
-  cacheRead,
-  cacheWrite,
-  cacheWrite1h,
-  reasoning,
-  totalTokens,
-}: Usage) => ({
-  input,
-  output,
-  cacheRead,
-  cacheWrite,
-  totalTokens,
-  ...(cacheWrite1h === undefined ? {} : { cacheWrite1h }),
-  ...(reasoning === undefined ? {} : { reasoning }),
-});
-
 /**
  * Records one request, however it ended, after it: its audit event, with
  * what it used as the provider counted it, or an estimate where it has no
- * full count (`usedBy`); its usage, once a request was answered; and its
- * provider's health (model-usage.ts). In the background, and never
- * throws: the answer never waits on it, nor fails for it.
+ * full count (`usedBy`), stored before it returns; its usage, once a
+ * request was answered, and its provider's health, in the background
+ * (model-usage.ts). Never throws: nothing of it fails the call.
  */
-const record = (
+const record = async (
   env: Env,
   route: Route,
   sent: Sent,
   attempt: number,
   outcome: Outcome,
   failure?: Failure
-): void => {
+): Promise<void> => {
   const { call, way } = route;
   const { answering, logId, status } = sent;
   const used = usedBy(route, sent);
@@ -1494,10 +1475,9 @@ const record = (
           cacheWriteTokens: used.cacheWriteTokens,
           cost: used.cost,
           estimated: used.estimated,
-          reported: reportedOf(sent.answer.usage),
         };
   const health = healthOf(route, sent, outcome, failure?.stopped);
-  recordAfterResponse(env, {
+  await recordResponse(env, {
     entry: auditEntry(route, {
       ...used,
       logId,
@@ -1960,7 +1940,8 @@ const sendFallingBack = async (
     }
     const failure = failureOf(sent, stopped);
     log.warn("model.failed", failureFields(request.call.model, sent, failure));
-    record(env, request, sent, attempt, "failed", failure);
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await record(env, request, sent, attempt, "failed", failure);
     // oxlint-disable-next-line no-await-in-loop -- in order
     await auditFallback(env, request, next, sent.failure);
     Object.assign(request, next);
@@ -2001,7 +1982,8 @@ const answerCall = async <Output>(
     if (hasFailed(answer)) {
       const failure = failureOf(sent, limit.stopped());
       log.warn("model.failed", failureFields(call.model, sent, failure));
-      record(env, request, sent, attempt, "failed", failure);
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await record(env, request, sent, attempt, "failed", failure);
       // Turned away by the provider's rate limit, retries and all: it
       // took nothing on, and asking again after the wait may get through.
       // Not one cut off meanwhile, by its deadline or its caller: that is
@@ -2025,7 +2007,14 @@ const answerCall = async <Output>(
       throw modelErrors.create("model.failed");
     }
     if (schema === undefined) {
-      record(env, request, sent, attempt, truncated ? "truncated" : "answered");
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await record(
+        env,
+        request,
+        sent,
+        attempt,
+        truncated ? "truncated" : "answered"
+      );
       // SAFETY: without a schema `Output` can't be inferred, so it is its
       // default, `undefined`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -2034,7 +2023,8 @@ const answerCall = async <Output>(
     // An answer cut short is judged like any other: JSON that stops short
     // doesn't parse, so the model is asked again.
     const result = parseOutput(text, schema);
-    record(
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await record(
       env,
       request,
       sent,
@@ -2204,8 +2194,9 @@ export const contextWindowOf = (model: string): number | undefined =>
 
 /**
  * Streams one admitted request to `out`, event by event, and records it
- * as its last event goes out (`record`, in the background: the loop never
- * waits on it). A failure reaches the loop in our own words.
+ * before its last event: the loop sees an answer only once its audit event
+ * is stored (`record`; its usage follows in the background). A failure
+ * reaches the loop in our own words.
  */
 const relayEvents = async (
   env: Env,
@@ -2222,7 +2213,7 @@ const relayEvents = async (
       const stopped = limit.stopped();
       const failure = failureOf(sent, stopped);
       log.warn("model.failed", failureFields(route.call.model, sent, failure));
-      record(
+      await record(
         env,
         route,
         sent,
@@ -2256,14 +2247,14 @@ const relayEvents = async (
     }
     if (event.type === "done") {
       const sent: Sent = { answer: event.message, ...response };
-      out.push({ ...event, message: chargedAnswer(route, sent) });
-      record(
+      await record(
         env,
         route,
         sent,
         1,
         event.reason === "length" ? "truncated" : "answered"
       );
+      out.push({ ...event, message: chargedAnswer(route, sent) });
       return undefined;
     }
     ({ partial } = event);
@@ -2278,7 +2269,7 @@ const relayEvents = async (
     usage: partial?.usage ?? noUsage,
   };
   const sent: Sent = { answer, ...response };
-  record(env, route, sent, 1, "failed");
+  await record(env, route, sent, 1, "failed");
   out.push({
     type: "error",
     reason: "error",
@@ -2781,7 +2772,7 @@ const recordSpeech = async (
   }
   const characters = answering === undefined ? 0 : route.characters;
   const cost = speechCostOf(ref, characters);
-  recordAfterResponse(env, {
+  await recordResponse(env, {
     entry: speechEntry(call, ref, {
       characters,
       region: route.platform.region,
@@ -2990,31 +2981,35 @@ const listenThrough = async (
       const seconds = chargedSeconds(heard, call.seconds);
       const cost = hearingCostOf(ref, seconds);
       // Once the listening ended: no answer waits on it.
-      await recordResponse(env, {
-        entry: listeningEntry(call, ref, {
-          seconds,
-          region: target.platform.region,
-          cost,
-          outcome,
-        }),
-        spend: call,
-        // A transcription model's input is the seconds it hears.
-        usage: {
-          id,
-          model: call.model,
-          credential: way.credential,
-          feature: "transcription",
-          inputTokens: seconds,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          cost,
-          estimated: false,
+      await recordResponse(
+        env,
+        {
+          entry: listeningEntry(call, ref, {
+            seconds,
+            region: target.platform.region,
+            cost,
+            outcome,
+          }),
+          spend: call,
+          // A transcription model's input is the seconds it hears.
+          usage: {
+            id,
+            model: call.model,
+            credential: way.credential,
+            feature: "transcription",
+            inputTokens: seconds,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            cost,
+            estimated: false,
+          },
+          ...(outcome === "answered"
+            ? { health: { provider: way.provider, credential: way.credential } }
+            : {}),
         },
-        ...(outcome === "answered"
-          ? { health: { provider: way.provider, credential: way.credential } }
-          : {}),
-      });
+        { awaited: true }
+      );
     },
   };
 };

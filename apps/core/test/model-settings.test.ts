@@ -60,7 +60,7 @@ const roleIn = (settings: ModelsNow) => ({
 
 /** Core's env, counting in its own month. */
 const envWith = () => {
-  const coreEnv: Env = { ...env, MODEL_BUDGET_MONTH: newMonth() };
+  const coreEnv: Env = { ...env, SPEND_MONTH: newMonth() };
   return coreEnv;
 };
 
@@ -85,7 +85,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     const coreEnv = envWith();
     await expect(settingsIn(coreEnv)).resolves.toStrictEqual({
       models: [mistral],
-      month: coreEnv.MODEL_BUDGET_MONTH,
+      month: coreEnv.SPEND_MONTH,
       // No App has a model binding here (resource-bindings.test.ts lists them).
       bindings: { listed: [], more: false },
     });
@@ -164,7 +164,7 @@ describe("model settings", { timeout: 60_000 }, () => {
 
   it("show admins this month's spend: the total, and the workflows that spent most with their runs, and nobody else", async () => {
     // The month it is: workflow runs are counted in it.
-    const coreEnv: Env = { ...env, MODEL_BUDGET_MONTH: undefined };
+    const coreEnv: Env = { ...env, SPEND_MONTH: undefined };
     const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
     const [admin, builder] = await Promise.all([
       signedInPerson("admin"),

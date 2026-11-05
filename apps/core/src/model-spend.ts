@@ -88,15 +88,14 @@ const monthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 
 /**
  * The UTC month spend counts in now, such as `2026-09`; tests set it
- * with `MODEL_BUDGET_MONTH`.
+ * with `SPEND_MONTH`.
  */
 export const spendMonth = (
-  env: Pick<Env, "MODEL_BUDGET_MONTH">,
+  env: Pick<Env, "SPEND_MONTH">,
   now = new Date()
 ): string =>
-  env.MODEL_BUDGET_MONTH !== undefined &&
-  monthPattern.test(env.MODEL_BUDGET_MONTH)
-    ? env.MODEL_BUDGET_MONTH
+  env.SPEND_MONTH !== undefined && monthPattern.test(env.SPEND_MONTH)
+    ? env.SPEND_MONTH
     : now.toISOString().slice(0, "yyyy-mm".length);
 
 /** What a usage row is counted by: whom, which workflow, run and binding. */

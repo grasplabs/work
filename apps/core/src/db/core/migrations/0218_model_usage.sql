@@ -17,7 +17,6 @@ CREATE TABLE `model_usage` (
 	`cache_write_tokens` integer NOT NULL,
 	`cost` real NOT NULL,
 	`estimated` integer NOT NULL,
-	`reported` text,
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint

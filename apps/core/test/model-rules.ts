@@ -55,7 +55,7 @@ export const withRules = async (
   );
   const rulesEnv: Env = {
     ...env,
-    MODEL_BUDGET_MONTH: month,
+    SPEND_MONTH: month,
   };
   const { call, agent } = models(rulesEnv);
   return { fake, call, agent };

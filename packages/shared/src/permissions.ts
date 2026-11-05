@@ -287,9 +287,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Entra app (connect's providers.ts).
   "MICROSOFT_DOCUMENTS_CLIENT_ID",
   "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
-  // The month model spend counts in, which tests set (core's
-  // src/model-spend.ts).
-  "MODEL_BUDGET_MONTH",
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
@@ -307,6 +304,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // src/channels.ts).
   "SLACK_BOT_TOKEN",
   "SLACK_SIGNING_SECRET",
+  // The month model spend counts in, which tests set (core's
+  // src/model-spend.ts).
+  "SPEND_MONTH",
   // The platform's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
   "STATISTICS_READ_LIMITS",
