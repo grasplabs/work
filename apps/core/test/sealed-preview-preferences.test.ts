@@ -133,7 +133,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     // A new revision starts on a new, empty store.
     const next = await write(
       {
-        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+        "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "",
       },
       revision
     );

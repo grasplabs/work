@@ -83,7 +83,7 @@ describe("the board page", { timeout: 90_000 }, () => {
       ),
       level: codeOf(await take(admin, app, { maturity: 6 })),
     }).toStrictEqual({
-      take: "data.access_denied",
+      take: "board.builders_only",
       read: 0,
       write: "data.write_denied",
       writable: false,

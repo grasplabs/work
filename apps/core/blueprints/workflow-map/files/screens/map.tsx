@@ -1,9 +1,8 @@
 import type { Id } from "@grasp-os/sdk";
 import { useClient, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { api } from "@server/_generated/api";
 import { useEffect, useRef, useState } from "react";
-
-import { api } from "#grasp";
 
 import { WorkflowEditor } from "../components/editor";
 import { WorkflowList } from "../components/overview";

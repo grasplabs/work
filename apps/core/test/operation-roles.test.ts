@@ -1,5 +1,9 @@
 import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, manifestText } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -68,18 +72,20 @@ const auditStaff = mutation({
   },
 });
 
-const teamApp = app({
-  name: "Team",
-  schema,
-  access: {
-    tables: {
-      shared: { read: "appMembers", write: "appMembers" },
-      staff: { read: "appBuilders", write: "appBuilders" },
+const teamApp = registerFunctions(
+  app({
+    name: "Team",
+    schema,
+    access: {
+      tables: {
+        shared: { read: "appMembers", write: "appMembers" },
+        staff: { read: "appBuilders", write: "appBuilders" },
+      },
     },
-  },
-  operations: { addShared, addStaff, countShared, countStaff, auditStaff },
-  screens: [],
-});
+    screens: [],
+  }),
+  { team: { addShared, addStaff, countShared, countStaff, auditStaff } }
+);
 
 const { manifest } = inspectApp(teamApp);
 
@@ -169,7 +175,7 @@ const call = async (
       runId: null,
       authorize: async () => await operationRoles(env, by, appId),
     },
-    { path, kind },
+    { path: `team.${path}`, kind },
     kind === "mutation" && path.startsWith("add") ? { title: "a" } : {}
   );
 

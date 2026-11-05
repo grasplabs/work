@@ -38,8 +38,6 @@ export default app({
   name: "Boards",
   schema,
   access: { tables: { marks: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
-  internalOperations: {},
   screens: [
     { name: "board", path: "/", source: "screens/board.tsx" },
     { name: "list", path: "/list", source: "screens/list.tsx" },

@@ -8,7 +8,12 @@ import {
   v,
 } from "@grasp-os/sdk";
 import type { WorkflowEventReference } from "@grasp-os/sdk";
-import { eventFingerprint, inspectApp, manifestText } from "@grasp-os/sdk/host";
+import {
+  eventFingerprint,
+  inspectApp,
+  manifestText,
+  registerFunctions,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -82,7 +87,7 @@ const jobData = v.object({ jobId: v.string() });
 const jobEvent = { type: completed, data: jobData.descriptor };
 
 /**
- * The reference `#grasp` generates for the `review` workflow's
+ * The reference `@server/_generated/api` generates for the `review` workflow's
  * `jobEvents`, as server code lists it.
  */
 // SAFETY: the generated reference's fields, its data's type from the
@@ -151,14 +156,16 @@ const unlisted = mutation({
   handler: () => "unreached",
 });
 
-const jobsApp = registerApp({
-  name: "Jobs",
-  schema,
-  access: { tables: { jobs: { read: "appMembers", write: "appMembers" } } },
-  operations: { jobs: { markDone, markThenFail, rawNotify, unlisted } },
-  screens: [],
-  permissions: { workflows: [review] },
-});
+const jobsApp = registerFunctions(
+  registerApp({
+    name: "Jobs",
+    schema,
+    access: { tables: { jobs: { read: "appMembers", write: "appMembers" } } },
+    screens: [],
+    permissions: { workflows: [review] },
+  }),
+  { jobs: { markDone, markThenFail, rawNotify, unlisted } }
+);
 
 const { manifest } = inspectApp(jobsApp);
 

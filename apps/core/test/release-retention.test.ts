@@ -48,8 +48,8 @@ const files = (label: string): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 export const label = query({
   args: {},
   returns: v.string(),
@@ -72,13 +72,11 @@ export const touchTwice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { label, touch, touchTwice } from "./operations/notes.ts";
 import schema from "./schema.ts";
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { label, touch, touchTwice } },
   screens: [],
 });
 `,
@@ -158,8 +156,8 @@ describe("retention", { timeout: 120_000 }, () => {
     // Its own bytes are gone; the bytes the current version shares with it
     // stay, and the current version loads whole.
     expect([
-      await stored(first, "modules/app~operations~notes.js"),
-      await stored(first, ".grasp/server.ts"),
+      await stored(first, "modules/app~server~notes.js"),
+      await stored(first, "server/_generated/server.ts"),
     ]).toStrictEqual([false, true]);
     await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
   });
@@ -333,10 +331,12 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     const start = new Date();
     const { app, second } = await twoVersions(start);
     const entry = second.manifest.artifacts.find(
-      ({ path }) => path === ".grasp/server.ts"
+      ({ path }) => path === "server/_generated/server.ts"
     );
     await deleteUnreservedArtifacts(env, [entry?.sha256 ?? ""]);
-    await expect(stored(second, ".grasp/server.ts")).resolves.toBeTruthy();
+    await expect(
+      stored(second, "server/_generated/server.ts")
+    ).resolves.toBeTruthy();
     await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
   });
 
@@ -379,7 +379,9 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     expect(mark?.owner).toBe(owner);
     await finishDeletion(env, sha256, owner ?? "");
     const release = await sealing;
-    await expect(stored(release, ".grasp/server.ts")).resolves.toBeTruthy();
+    await expect(
+      stored(release, "server/_generated/server.ts")
+    ).resolves.toBeTruthy();
     await expect(loadedHash(fixture.app, 1)).resolves.toBe(
       release.manifestHash
     );
@@ -433,7 +435,9 @@ describe("shared bytes", { timeout: 120_000 }, () => {
       .bind(sha256, fixture.app)
       .first<{ reserved: number }>();
     expect([finished, reserved?.reserved]).toStrictEqual([true, 1]);
-    await expect(stored(release, ".grasp/server.ts")).resolves.toBeTruthy();
+    await expect(
+      stored(release, "server/_generated/server.ts")
+    ).resolves.toBeTruthy();
   });
 
   it("a seal named and lost the reservation of keep it from sealing", async () => {
@@ -483,7 +487,9 @@ describe("shared bytes", { timeout: 120_000 }, () => {
       .bind(sha256)
       .all();
     expect(marks.results).toStrictEqual([]);
-    await expect(stored(release, ".grasp/server.ts")).resolves.toBeTruthy();
+    await expect(
+      stored(release, "server/_generated/server.ts")
+    ).resolves.toBeTruthy();
   });
 
   it("a sealed release lost the reservations of are reserved again by sealing it again", async () => {
@@ -738,7 +744,7 @@ describe("revocation", { timeout: 120_000 }, () => {
       error: { code: "version.revoked" },
     });
     await expect(
-      stored(second, "modules/app~operations~notes.js")
+      stored(second, "modules/app~server~notes.js")
     ).resolves.toBeTruthy();
   });
 
@@ -787,7 +793,7 @@ describe("revocation", { timeout: 120_000 }, () => {
       .first<{ hash: string }>();
     expect(row?.hash).toBe(first.manifestHash);
     await expect(
-      stored(first, "modules/app~operations~notes.js")
+      stored(first, "modules/app~server~notes.js")
     ).resolves.toBeTruthy();
   });
 

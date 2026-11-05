@@ -478,7 +478,7 @@ export declare const more: readonly string[];
     await expect(
       buildScreens(
         { ...env, LOADER: noBuilds },
-        { ...files, "operations/notes.ts": "export {};\n" },
+        { ...files, "server/notes.ts": "export {};\n" },
         "app-test"
       )
     ).resolves.toStrictEqual(built);

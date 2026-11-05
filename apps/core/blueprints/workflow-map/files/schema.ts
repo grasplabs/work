@@ -104,13 +104,10 @@ export default defineSchema({
   workflows: defineTable(workflowFields)
     .index("by_title", ["title"])
     // An order no save changes: another App reads every workflow a page
-    // at a time in it (operations/figures.ts), so none moves between pages.
+    // at a time in it (server/figures.ts), so none moves between pages.
     .index("by_created", ["_createdAt"]),
   workflowVersions: defineTable({
     ...workflowFields,
     workflow: v.id("workflows"),
   }).index("by_workflow", ["workflow", "version"]),
-  // Holds nothing: only the App's builders may read it, which is how the
-  // screen asks whether someone may change the map (operations/access.ts).
-  builders: defineTable({ none: v.null() }),
 });

@@ -1,6 +1,6 @@
 // What the intake's screen shows of its store, and the checks it makes
 // before it sends a draft: the same bounds as the schema's (schema.ts),
-// which the App's functions check again (operations/drafts.ts).
+// which the App's functions check again (server/drafts.ts).
 
 import type { Id } from "@grasp-os/sdk";
 
@@ -66,7 +66,7 @@ export const originLabels = {
 } as const;
 export type Origin = keyof typeof originLabels;
 
-/** A stakeholder chat, as the intake lists it (operations/chats.ts). */
+/** A stakeholder chat, as the intake lists it (server/chats.ts). */
 export interface GuestChat {
   id: string;
   name: string;

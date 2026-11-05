@@ -26,8 +26,8 @@ export default defineSchema({
   deep: defineTable({ value: level${String(fieldDepth - 1)} }),
 });
 `,
-  "operations/deep.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/deep.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 const nested = (): unknown => {
   let value: unknown = "leaf";
@@ -59,15 +59,12 @@ export const read = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { put, read } from "./operations/deep.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Deep",
   schema,
   access: { tables: { deep: { read: "owner", write: "owner" } } },
-  operations: { deep: { put, read } },
-  internalOperations: {},
   screens: [],
 });
 `,

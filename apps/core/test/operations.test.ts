@@ -8,7 +8,11 @@ import {
   paginationResultValidator,
 } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
-import { inspectApp, manifestText } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -338,11 +342,18 @@ const secret = internalQuery({
   handler: () => "internal",
 });
 
-const notesApp = app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {
+const notesApp = registerFunctions(
+  app({
+    name: "Notes",
+    schema,
+    access: { tables: { notes: { read: "owner", write: "owner" } } },
+    operationAccess: {
+      "notes.insertOnly": { tables: { notes: { insert: true } } },
+      "notes.peek": { tables: { notes: { insert: true } } },
+    },
+    screens: [],
+  }),
+  {
     notes: {
       list,
       get,
@@ -363,15 +374,10 @@ const notesApp = app({
       readTimes,
       floatingBadWrite,
       assertMany,
+      secret,
     },
-  },
-  internalOperations: { secret },
-  operationAccess: {
-    "notes.insertOnly": { tables: { notes: { insert: true } } },
-    "notes.peek": { tables: { notes: { insert: true } } },
-  },
-  screens: [],
-});
+  }
+);
 
 const { manifest } = inspectApp(notesApp);
 
@@ -915,7 +921,7 @@ describe("paths", () => {
     const fixture = await notes();
     const { owner } = fixture;
     expect({
-      internal: codeOf(await call(fixture, owner, "query", "secret", {})),
+      internal: codeOf(await call(fixture, owner, "query", "notes.secret", {})),
       unknown: codeOf(await call(fixture, owner, "query", "notes.missing", {})),
       kind: codeOf(
         await call(fixture, owner, "mutation", "notes.get", { id: "x" })

@@ -92,7 +92,7 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
@@ -100,14 +100,13 @@ export const followUp = permission.workflow("followUp", {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./operations/requests.ts";
+import { followUp } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
   screens: [],
   permissions: { workflows: [followUp] },
 });
@@ -311,7 +310,7 @@ const refusal = async (work: () => Promise<unknown>): Promise<string> => {
 const suiteOf = (
   body: string
 ): string => `import { workflowTest } from "@grasp-os/sdk/testing";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 export default workflowTest({
   fixtures: "desk",
@@ -555,7 +554,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       {
         "tests/greet.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
 import type { WorkflowTestRun } from "@grasp-os/sdk/testing";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 let kept: WorkflowTestRun | undefined;
 

@@ -14,7 +14,7 @@ export default defineSchema({});
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+import { query } from "@server/_generated/server";
 
 export const secret = query({ args: {}, returns: v.string(), handler: () => "fictional-marker-7f3a" });
 
@@ -31,15 +31,13 @@ export const html = query({
 const registration = (
   screens: readonly string[]
 ): string => `import { app } from "@grasp-os/sdk";
-import { html, secret } from "./operations/attacks.ts";
+import { html, secret } from "./server/attacks.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Attacks",
   schema,
   access: { tables: {} },
-  operations: { attacks: { secret, html } },
-  internalOperations: {},
   screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx" }`).join(", ")}],
 });
 `;
@@ -52,7 +50,7 @@ const leavingScreen = (
   attacker: string
 ): string => `import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Leaving() {
   const secret = useQuery(api.attacks.secret, {});
@@ -405,7 +403,7 @@ export default function Turn() {
  */
 const injectingScreen = `import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect, useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 // The build's design lint refuses these by name (grasp/no-style-escapes);
 // spelled so it can't read them, as code evading it would, so this
@@ -571,7 +569,7 @@ export const attackAppFiles = ({
   };
   return {
     "schema.ts": schema,
-    "operations/attacks.ts": operations,
+    "server/attacks.ts": operations,
     "app.ts": registration(Object.keys(screens)),
     ...Object.fromEntries(
       Object.entries(screens).map(([name, code]) => [
@@ -585,7 +583,7 @@ export const attackAppFiles = ({
 /** The attacking App with only its injecting screen. */
 export const injectingAppFiles = (): Record<string, string> => ({
   "schema.ts": schema,
-  "operations/attacks.ts": operations,
+  "server/attacks.ts": operations,
   "app.ts": registration(["injecting"]),
   "screens/injecting.tsx": injectingScreen,
 });

@@ -449,7 +449,7 @@ export const screenTypeImportError = (
   if (specifier === screenReferences.specifier) {
     return files.has(screenReferences.path)
       ? undefined
-      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, operations/), which this App doesn't have yet.`;
+      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, server/), which this App doesn't have yet.`;
   }
   return specifier === "lucide-react" || kit.imports.includes(specifier)
     ? undefined
@@ -514,7 +514,7 @@ export const importError = (
   if (specifier === screenReferences.specifier) {
     return files.has(screenReferences.path)
       ? undefined
-      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, operations/), which this App doesn't have yet.`;
+      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, server/), which this App doesn't have yet.`;
   }
   if (specifier === "lucide-react") {
     return iconError(names, kit);

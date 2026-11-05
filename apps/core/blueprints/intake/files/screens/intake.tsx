@@ -15,9 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+import { api, workflows } from "@server/_generated/api";
 import { useEffect, useRef, useState } from "react";
-
-import { api, workflows } from "#grasp";
 
 import { DraftEditor } from "../components/draft-editor";
 import type { EditorResult } from "../components/draft-editor";
@@ -76,7 +75,7 @@ const IntakeHeader = ({
   </div>
 );
 
-/** What the intake shows the person (operations/chats.ts `overview`). */
+/** What the intake shows the person (server/chats.ts `overview`). */
 interface Overview {
   /** Whether they may review drafts: intake is the App's builders'. */
   writable: boolean;

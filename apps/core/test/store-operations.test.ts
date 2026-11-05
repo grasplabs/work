@@ -67,9 +67,9 @@ export default defineSchema({
   secrets: defineTable({ text: v.string() }),
 });
 `,
-  "operations/crm.ts": `// Revision ${revision}.
+  "server/contacts.ts": `// Revision ${revision}.
 import { v } from "@grasp-os/sdk";
-import { action, internalQuery, mutation, query } from "#grasp/server";
+import { action, internalQuery, mutation, query } from "@server/_generated/server";
 
 export const list = query({
   args: {},
@@ -97,8 +97,11 @@ export const ping = action({
   returns: v.null(),
   handler: async () => null,
 });
+`,
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
-export const note = mutation({
+export const add = mutation({
   args: { text: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -112,6 +115,9 @@ export const mine = query({
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map(({ text }) => text),
 });
+`,
+  "server/secrets.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const keep = mutation({
   args: { text: v.string() },
@@ -122,14 +128,13 @@ export const keep = mutation({
   },
 });
 
-export const secrets = query({
+export const list = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("secrets").take(100)).map(({ text }) => text),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, count, keep, list, mine, note, ping, secrets } from "./operations/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -142,12 +147,6 @@ export default app({
       secrets: { read: "appBuilders", write: "appBuilders" },
     },
   },
-  operations: {
-    contacts: { list, add, ping },
-    notes: { add: note, mine },
-    secrets: { keep, list: secrets },
-  },
-  internalOperations: { contacts: { count } },
   screens: [],
 });
 `,
@@ -158,18 +157,16 @@ const tablelessFiles: Record<string, string> = {
   "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 export default defineSchema({});
 `,
-  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { hello } from "./operations/hello.ts";
 import schema from "./schema.ts";
 export default app({
   name: "CRM",
   schema,
   access: {},
-  operations: { hello: { hello } },
   screens: [],
 });
 `,
@@ -193,8 +190,6 @@ export default app({
   name: "Desk",
   schema,
   access: { tables: { marks: { read: "owner", write: "owner" } } },
-  operations: {},
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -782,7 +777,12 @@ describe("a workflow calling a store's public operation", () => {
       env,
       crm.owner,
       crm.app,
-      { ...tablelessFiles, "operations/crm.ts": null },
+      {
+        ...tablelessFiles,
+        "server/contacts.ts": null,
+        "server/notes.ts": null,
+        "server/secrets.ts": null,
+      },
       "No tables"
     );
     await seal(crm, 2);
@@ -937,12 +937,12 @@ describe("a workflow calling a store's public operation", () => {
           }
         )
       );
-    const crmSource = crmFiles()["operations/crm.ts"] ?? "";
+    const notesSource = crmFiles()["server/notes.ts"] ?? "";
     const withNote = (from: string, to: string): Record<string, string> => ({
       ...crmFiles(),
-      "operations/crm.ts": crmSource.replace(from, to),
+      "server/notes.ts": notesSource.replace(from, to),
     });
-    const noteMutation = "export const note = mutation({";
+    const noteMutation = "export const add = mutation({";
     const noteArgs = `${noteMutation}\n  args: { text: v.string() },`;
     // The same shapes, now a query: one that reads, as a query may.
     const noteBlock = `${noteArgs}
@@ -956,7 +956,7 @@ describe("a workflow calling a store's public operation", () => {
       crm,
       withNote(
         noteBlock,
-        `export const note = query({
+        `export const add = query({
   args: { text: v.string() },
   returns: v.null(),
   handler: async () => null,
@@ -1278,8 +1278,8 @@ export default defineSchema({
   }),
 });
 `,
-  "operations/leads.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/leads.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
   args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
@@ -1297,15 +1297,12 @@ export const list = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, list } from "./operations/leads.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Leads",
   schema,
   access: { tables: { leads: { read: "appMembers", write: "appMembers" } } },
-  operations: { leads: { add, list } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -1317,8 +1314,8 @@ const leadsDeskFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.app("crm", {
   functions: {
@@ -1355,15 +1352,13 @@ export const add = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, crm, list } from "./operations/desk.ts";
+import { crm } from "./server/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: { desk: { add, list } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [crm] },
 });
@@ -1509,8 +1504,8 @@ export default defineSchema({
   memos: defineTable({ text: v.string() }).access({ read: [rows.role("user")] }),
 });
 `,
-  "operations/crm.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/crm.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const addPlan = mutation({
   args: { text: v.string() },
@@ -1546,8 +1541,9 @@ export const memos = query({
 export const forBuilders = query({
   args: {},
   returns: v.boolean(),
-  handler: (ctx) => {
-    if (ctx.caller.kind !== "person" || ctx.caller.appRole !== "builder") {
+  handler: async (ctx) => {
+    const user = await ctx.auth.getUser();
+    if (!user.roles.includes("builder")) {
       throw new AppError("crm.builders_only", "Only the CRM's builders run this.");
     }
     return true;
@@ -1555,7 +1551,6 @@ export const forBuilders = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { addMemo, addPlan, forBuilders, memos, plans } from "./operations/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -1567,8 +1562,6 @@ export default app({
       memos: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { crm: { addMemo, addPlan, forBuilders, memos, plans } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -1580,8 +1573,8 @@ const rolesDeskFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.app("crm", {
   functions: {
@@ -1647,15 +1640,13 @@ export const forBuilders = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { addMemo, addPlan, crm, forBuilders, memos, plans } from "./operations/desk.ts";
+import { crm } from "./server/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: { desk: { addMemo, addPlan, forBuilders, memos, plans } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [crm] },
 });

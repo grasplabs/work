@@ -43,8 +43,8 @@ const helloFiles = (greeting = "hello"): Record<string, string> => ({
 
 export default defineSchema({});
 `,
-  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const hello = query({
   args: {},
@@ -53,15 +53,12 @@ export const hello = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { hello } from "./operations/hello.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Hello",
   schema,
   access: { tables: {} },
-  operations: { hello: { hello } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -289,7 +286,7 @@ describe(
           principals: { reader: { role: "user" } },
         }),
         "tests/hello.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default appTest({
   fixtures: "people",
@@ -984,8 +981,8 @@ export default appTest({
       await activateVersion(env, owner, app, 1);
       // A defect of its code: a type error.
       const broken = await committed(owner, app, {
-        "operations/hello.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+        "server/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const hello = query({
   args: {},

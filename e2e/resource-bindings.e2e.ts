@@ -19,8 +19,8 @@ const writerFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const ai = permission.ai({ maxOutputTokens: 200 });
 
@@ -32,15 +32,13 @@ export const draft = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { ai, draft } from "./operations/desk.ts";
+import { ai } from "./server/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { desk: { draft } },
-  internalOperations: {},
   screens: [],
   permissions: { ai },
 });

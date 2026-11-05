@@ -46,7 +46,7 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
  */
 const files: Record<string, string> = {
   ...notesFiles,
-  "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}
+  "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}
 export const seed = mutation({
   args: {
     prefix: v.string(),
@@ -89,15 +89,6 @@ export const touchOldest = mutation({
   },
 });
 `,
-  "app.ts": (notesFiles["app.ts"] ?? "")
-    .replace(
-      'import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";',
-      'import { big, create, echo, get, list, listTen, remove, seed, stamp, touchOldest, update } from "./operations/notes.ts";'
-    )
-    .replace(
-      "operations: { notes: { list, get, create, update, remove, echo, stamp, big } }",
-      "operations: { notes: { list, listTen, get, create, update, remove, echo, stamp, big, seed, touchOldest } }"
-    ),
 };
 
 /**

@@ -649,7 +649,7 @@ describe("the session client", { timeout: 120_000 }, () => {
 /** A screen of the Notes App whose component runs `body` first. */
 const screen = (body: string): string =>
   `import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Notes() {
 ${body}
@@ -714,8 +714,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
   it("inspects the same server code once, however often a save brings it", async () => {
     const builder = await personApi("builder");
     // Server code of its own, so no other test inspected it already.
-    const operations = `${files["operations/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
-    const own = { ...files, "operations/notes.ts": operations };
+    const operations = `${files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
+    const own = { ...files, "server/notes.ts": operations };
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await published(id);
@@ -732,7 +732,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
       id,
       {
         ...own,
-        "operations/notes.ts": operations.replace(
+        "server/notes.ts": operations.replace(
           '.default("hello")',
           '.default("hi")'
         ),
@@ -763,8 +763,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
     }
     const closure = build.screens["app~screens~notes.js"];
     expect(closure?.modules).toStrictEqual([
-      "app~.grasp~references.js",
       "app~screens~notes.js",
+      "app~server~_generated~api.js",
     ]);
     expect(closure?.kitModules).toContain("@grasp-os~sdk~react.js");
   });
@@ -813,7 +813,7 @@ export default function Notes() {
 import type { ReturnOf } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 
@@ -886,8 +886,8 @@ export default defineSchema({
   people: defineTable({ name: v.string() }),
 });
 `,
-      "operations/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { doc, mutation, query } from "#grasp/server";
+      "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+import { doc, mutation, query } from "@server/_generated/server";
 import { taskFields } from "../schema.ts";
 
 export const list = query({
@@ -924,7 +924,6 @@ export const rename = mutation({
 });
 `,
       "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { create, list, people, person, rename } from "./operations/tasks.ts";
 import schema from "./schema.ts";
 
 export const briefs = permission.files({ operations: ["upload", "read"] });
@@ -935,8 +934,6 @@ export default app({
   name: "Tasks",
   schema,
   access: { tables: { tasks: { read: "appMembers", write: "appMembers" }, people: { read: "appMembers", write: "appBuilders" } } },
-  operations: { tasks: { list, people, person, create, rename } },
-  internalOperations: {},
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
   permissions: { files: briefs, links: site },
 });
@@ -946,7 +943,7 @@ export default app({
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import { RichText } from "@grasp-os/ui/components/rich-text";
 import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
-import { api, permissions } from "#grasp";
+import { api, permissions } from "@server/_generated/api";
 
 export default function Tasks() {
   const rename = useMutation(api.tasks.rename);

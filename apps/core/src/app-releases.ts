@@ -14,7 +14,6 @@ import {
   manifestVersion,
   readAppManifest,
   schemaHash,
-  serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
 import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
@@ -71,6 +70,7 @@ import {
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { hostModules } from "./host-modules.ts";
 import {
   evidenceFits,
   migrationEvidence,
@@ -1312,7 +1312,7 @@ const inspectForSeal = async (
     {
       ...files,
       ...symbolicModules(),
-      [generatedPaths.server]: serverModuleSource,
+      ...hostModules,
     },
     key.app,
     { profile }
@@ -1388,7 +1388,7 @@ const builtScreens = async (
   }
   const withReferences = await withReferencesText(
     { ...files },
-    async () => await Promise.resolve(generated[generatedPaths.references])
+    async () => await Promise.resolve(generated[generatedPaths.api])
   );
   const codeOf = await versionScreens(
     env,

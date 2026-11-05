@@ -65,7 +65,7 @@ const appFiles = (): Record<string, string> => ({
 
 export default defineSchema({ requests: defineTable({ who: v.string() }) });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
@@ -73,15 +73,13 @@ export const followUp = permission.workflow("followUp", {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./operations/requests.ts";
+import { followUp } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
-  internalOperations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [followUp] },
 });
@@ -89,7 +87,7 @@ export default app({
   "screens/desk.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 const yesNo = (value: boolean): string => (value ? "yes" : "no");
 

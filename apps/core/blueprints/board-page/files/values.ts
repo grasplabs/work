@@ -5,7 +5,7 @@ import {
 } from "@grasp-os/sdk";
 
 // What the board page reads of the workflow map: the map's `figures.list`
-// (blueprints/workflow-map/files/operations/figures.ts), exactly as the
+// (blueprints/workflow-map/files/server/figures.ts), exactly as the
 // map declares it, so an admin binds the page's `map` resource only to an
 // App that serves it.
 

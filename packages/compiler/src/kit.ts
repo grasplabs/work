@@ -150,12 +150,12 @@ export const screenHooks = "@grasp-os/sdk/screen";
 
 /**
  * The React SDK screens use (spec 10.1, 10.7.1): the platform's session
- * client and the App's queries, mutations and actions through `#grasp`.
+ * client and the App's queries, mutations and actions through `@server/_generated/api`.
  */
 export const screenSdk = "@grasp-os/sdk/react";
 
 /**
- * The SDK's root module: its types, which the generated `#grasp`
+ * The SDK's root module: its types, which the generated `@server/_generated/api`
  * references import (`OperationReference`, `Id`, …), and its native
  * values (`v`), which a screen's local form validates with (spec 10.2.4).
  * Nothing else of it: the rest is server code (`screenRootNames`).
@@ -167,13 +167,14 @@ export const screenRootNames: ReadonlySet<string> = new Set(["v"]);
 
 /**
  * The references the host generates for an App's server code, which its
- * screens import as `#grasp` (spec 8): `api`, `screens` and the browser
- * resources, data only. A build has them when the host put them among
- * its files (core does for a version of spec 8's layout).
+ * screens import as `@server/_generated/api` (spec 8), as Convex's pages
+ * import theirs: `api`, `screens` and the browser resources, data only.
+ * A build has them when the host put them among its files (core does for
+ * a version of spec 8's layout).
  */
 export const screenReferences = {
-  specifier: "#grasp",
-  path: ".grasp/references.ts",
+  specifier: "@server/_generated/api",
+  path: "server/_generated/api.ts",
 } as const;
 
 /**

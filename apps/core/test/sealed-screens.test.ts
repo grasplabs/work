@@ -46,8 +46,6 @@ export default app({
   name: "Sealed screens",
   schema,
   access: { tables: {} },
-  operations: {},
-  internalOperations: {},
   screens: [],
 });
 `,

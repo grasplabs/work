@@ -2,21 +2,18 @@ import {
   appCodeFiles,
   appModuleName,
   kitModuleName,
+  serverEntryPath,
   serverSdkModules,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import {
-  generatedPaths,
-  readAppManifest,
-  serverModuleSource,
-  symbolicModules,
-} from "@grasp-os/sdk/host";
+import { readAppManifest, symbolicModules } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 
 import { keySchema, readVerified } from "./build-cache.ts";
+import { hostModules } from "./host-modules.ts";
 import { platformRunner } from "./platform-sandbox.ts";
 import {
   callSandboxed,
@@ -65,7 +62,7 @@ const inspectModule = "grasp-inspect.js";
  */
 const inspectMain = `import { WorkerEntrypoint } from "cloudflare:workers";
 import { manifestOfApp } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
-import registered from ${JSON.stringify(appModuleName("app.ts"))};
+import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 
 export class Inspect extends WorkerEntrypoint {
   manifest() {
@@ -254,7 +251,7 @@ const symbolicCode = (
 ): Record<string, string> => ({
   ...appCodeFiles(files),
   ...symbolicModules(),
-  [generatedPaths.server]: serverModuleSource,
+  ...hostModules,
 });
 
 /**

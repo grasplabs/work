@@ -32,7 +32,7 @@ describe("the modules the host generates for a build", () => {
   it("are taken up to their own bound, on top of an App at its limits", () => {
     const own = Object.fromEntries(
       Array.from({ length: appLimits.files }, (_unused, index) => [
-        `operations/file-${index}.ts`,
+        `server/file-${index}.ts`,
         "x".repeat(appLimits.totalLength / appLimits.files),
       ])
     );
@@ -61,7 +61,7 @@ describe("the modules the host generates for a build", () => {
   it("never lend the App's own files room past the App's limits", () => {
     const own = Object.fromEntries(
       Array.from({ length: appLimits.files + 1 }, (_unused, index) => [
-        `operations/file-${index}.ts`,
+        `server/file-${index}.ts`,
         "",
       ])
     );

@@ -15,8 +15,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -125,15 +125,12 @@ export const probe = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, hold, keepAfter, late, poison, probe, titles, useKept } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Isolation",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, hold, useKept, keepAfter, late, poison, probe } },
-  internalOperations: {},
   screens: [],
 });
 `,

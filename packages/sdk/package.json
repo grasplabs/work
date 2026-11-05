@@ -7,11 +7,6 @@
   "sideEffects": [
     "./src/preview-refresh.ts"
   ],
-  "imports": {
-    "#grasp": "./test/notes/.grasp/references.ts",
-    "#grasp/server": "./test/notes/.grasp/server.ts",
-    "#grasp/server-references": "./test/notes/.grasp/server-references.ts"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./host": "./src/host.ts",

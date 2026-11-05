@@ -47,7 +47,7 @@ const appFiles: Record<string, string> = {
 
 /** Spec 28.2's first example, word for word, but for the package's scope. */
 const specExample = `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default appTest({
   fixtures: "notes",
@@ -77,7 +77,7 @@ export default appTest({
 const suiteOf = (
   tests: Record<string, string>
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 const page = { pagination: { pageSize: 50 } };
 

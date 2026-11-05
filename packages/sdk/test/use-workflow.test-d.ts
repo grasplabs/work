@@ -17,7 +17,7 @@ import type {
 } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
 import type { AppErrorPayload, PendingControl } from "../src/react.ts";
-import { api, workflows } from "./notes/.grasp/references.ts";
+import { api, workflows } from "./notes/server/_generated/api.ts";
 
 declare const noteId: Id<"notes">;
 declare const taskId: Id<"tasks">;

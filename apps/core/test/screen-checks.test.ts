@@ -494,19 +494,18 @@ export default function When({ open }: { open: boolean }) {
   });
 
   it("checks a screen against the stand-ins for its server's references with every kind of call, reporting only its own untyped parameters", async () => {
-    // While the server code doesn't register, `#grasp` is a stand-in
+    // While the server code doesn't register, `@server/_generated/api` is a stand-in
     // (symbolicModules): a query, a mutation, a stream and a paged query
     // through it type-check, and callbacks over what they answer take
     // their type from it. A helper's untyped parameter is still reported.
     const built = await buildScreens(
       env,
       app({
-        [generatedPaths.references]:
-          symbolicModules()[generatedPaths.references] ?? "",
+        [generatedPaths.api]: symbolicModules()[generatedPaths.api] ?? "",
         "screens/writer.tsx": `import { useMutation, usePaginatedQuery, useQuery, useStream } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 const shout = (text) => String(text).toUpperCase();
 

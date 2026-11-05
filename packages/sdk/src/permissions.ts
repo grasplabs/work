@@ -399,7 +399,7 @@ export interface WorkflowPermission<
    * The descriptor of the output a completed run gives. With the input, it
    * is the contract the App's screens rely on: they get a reference to it
    * pinned to that contract's fingerprint (`workflows.<alias>` in
-   * `#grasp`), and name it in what they ask of the host. The App's own
+   * `@server/_generated/api`), and name it in what they ask of the host. The App's own
    * starts are checked against the bound version's input as they are
    * admitted, not against this contract.
    */

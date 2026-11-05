@@ -10,11 +10,12 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 // the sealed release it runs, and refuses one that doesn't match exactly,
 // however it was made.
 //
-// The generated modules hold them: `#grasp` the public `api`, the
-// browser resources, the screens and the preferences (two function
-// references, preference-operations.ts); `#grasp/server-
-// references` the `internal` tree, for the App's own server code. Their
-// types come from the descriptors, through the phantom members below,
+// The generated modules hold them: `@server/_generated/api` the public
+// `api`, the browser resources, the screens and the preferences (two
+// function references, preference-operations.ts);
+// `@server/_generated/internal` the `internal` tree, for the App's own
+// server code. Their types come from the descriptors, through the phantom
+// members below,
 // which exist in types only: they are keyed by symbols that are declared,
 // never created, so no reference carries them at run time, JSON never
 // holds them and an editor never offers them.

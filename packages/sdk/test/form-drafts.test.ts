@@ -14,7 +14,7 @@ import { isPlainObject } from "../src/value-descriptor.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import { descriptorOf } from "../src/value-schema.ts";
 import { v } from "../src/values.ts";
-import { api } from "./notes/.grasp/references.ts";
+import { api } from "./notes/server/_generated/api.ts";
 
 // A record form's unsaved draft (GRA-254) against the ways it gets lost:
 // the editor unmounting, a stale save refused, a newer record arriving, a

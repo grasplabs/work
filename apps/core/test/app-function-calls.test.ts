@@ -74,8 +74,8 @@ const crmFiles = (
 
 export default defineSchema({ notes: defineTable({ text: v.string() }) });
 `,
-  "operations/crm.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action, internalQuery, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action, internalQuery, mutation, query } from "@server/_generated/server";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string() }),
@@ -145,15 +145,13 @@ export const shout = action({
 export const hidden = internalQuery({ args: {}, returns: v.number(), handler: () => 1 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, followUp, hidden, kick, kickLater, later, mine, shout } from "./operations/crm.ts";
+import { followUp } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "CRM",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { add, mine, shout, kick, kickLater, later } },
-  internalOperations: { notes: { hidden } },
   screens: [],
   permissions: { workflows: [followUp] },
 });
@@ -179,8 +177,8 @@ const deskFiles = (extra = ""): Record<string, string> => ({
 
 export default defineSchema({});
 `,
-  "operations/desk.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const crm = permission.app("crm", {
   functions: {
@@ -238,15 +236,13 @@ export const later = action({
 });
 ${extra}`,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, crm, kick, kickLater, later, mine, shout } from "./operations/desk.ts";
+import { crm } from "./server/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: { desk: { add, mine, shout, kick, kickLater, later } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [crm] },
 });
@@ -259,8 +255,8 @@ const relayFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/relay.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/relay.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const next = permission.app("next", {
   functions: { "relay.go": { kind: "action", args: {}, returns: v.string() } },
@@ -281,15 +277,13 @@ export const go = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { go, next } from "./operations/relay.ts";
+import { next } from "./server/relay.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Relay",
   schema,
   access: { tables: {} },
-  operations: { relay: { go } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [next] },
 });
@@ -306,8 +300,8 @@ const fanFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/fan.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/fan.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const next = permission.app("next", {
   functions: {
@@ -341,15 +335,13 @@ export const go = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { go, next } from "./operations/fan.ts";
+import { next } from "./server/fan.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Fan",
   schema,
   access: { tables: {} },
-  operations: { fan: { go } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [next] },
 });
@@ -362,8 +354,8 @@ const inviterFiles: Record<string, string> = {
 
 export default defineSchema({});
 `,
-  "operations/inviter.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/inviter.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const guests = permission.guests({ operations: ["invite"] });
 
@@ -382,15 +374,13 @@ export const invite = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { guests, invite } from "./operations/inviter.ts";
+import { guests } from "./server/inviter.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Inviter",
   schema,
   access: { tables: {} },
-  operations: { inviter: { invite } },
-  internalOperations: {},
   screens: [],
   permissions: { guests },
 });
@@ -406,8 +396,8 @@ const askerFiles = (fn: string): Record<string, string> => ({
 
 export default defineSchema({});
 `,
-  "operations/asker.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/asker.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const next = permission.app("next", {
   functions: { "${fn}": { kind: "action", args: {}, returns: v.string() } },
@@ -427,15 +417,13 @@ export const go = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { go, next } from "./operations/asker.ts";
+import { next } from "./server/asker.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Asker",
   schema,
   access: { tables: {} },
-  operations: { asker: { go } },
-  internalOperations: {},
   screens: [],
   permissions: { apps: [next] },
 });
@@ -839,7 +827,7 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
     const prying = await sealedApp(
       {
         ...deskFiles(),
-        "operations/desk.ts": (deskFiles()["operations/desk.ts"] ?? "").replace(
+        "server/desk.ts": (deskFiles()["server/desk.ts"] ?? "").replace(
           '"notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },',
           '"notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },\n    "notes.hidden": { kind: "query", args: {}, returns: v.number() },'
         ),

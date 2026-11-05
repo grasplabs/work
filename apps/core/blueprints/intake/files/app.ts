@@ -1,27 +1,14 @@
 import { app, permission, v } from "@grasp-os/sdk";
 
-import { guests, invite, notes, overview, revoke } from "./operations/chats.ts";
-import {
-  create,
-  discard,
-  get,
-  keep,
-  list,
-  propose,
-  reviewer,
-  save,
-  saved,
-  source,
-  statementsOf,
-} from "./operations/drafts.ts";
 import schema, { notesMax, statementTags } from "./schema.ts";
+import { guests } from "./server/chats.ts";
 
 // The intake: drafts of what people say about their work, reviewed and
 // saved as sources and their statements, in the App's own store
 // (schema.ts). Intake is its builders' (an admin is one on every App):
 // the store refuses anyone else every read and write of it, so a member
 // who opens the App sees that it isn't theirs, and its actions, which
-// check the same (operations/chats.ts), invite and read no one's chats
+// check the same (server/chats.ts), invite and read no one's chats
 // for them.
 //
 // Notes are read by `extract`, an independent workflow each copy of the
@@ -73,23 +60,6 @@ export default app({
   access: {
     tables: { drafts: builders, sources: builders, statements: builders },
   },
-  operations: {
-    drafts: {
-      reviewer,
-      list,
-      get,
-      saved,
-      source,
-      statementsOf,
-      create,
-      propose,
-      keep,
-      discard,
-      save,
-    },
-    chats: { overview, invite, revoke, notes },
-  },
-  internalOperations: {},
   screens: [{ name: "intake", path: "/", source: "screens/intake.tsx" }],
   permissions: { workflows: [extract], guests },
 });

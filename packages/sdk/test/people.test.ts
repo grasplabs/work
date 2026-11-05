@@ -12,7 +12,7 @@ import {
 import type { PeopleDirectory } from "../src/people.ts";
 import { GraspProvider, usePeople } from "../src/react.ts";
 
-// The reads a screen makes through `useCaller` and `usePeople` name their
+// The reads a screen makes through `useUser` and `usePeople` name their
 // contract by a fingerprint fixed in the SDK, which core compares with the
 // one its own SDK makes: they must be the contracts' own. And the
 // directory a screen holds is one per client, so an effect that depends on

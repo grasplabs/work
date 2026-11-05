@@ -9,7 +9,7 @@ export const tallyScreen = (
   button: string
 ): string => `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Tally() {
   const count = useQuery(api.tally.count, {});
@@ -28,7 +28,7 @@ export default function Tally() {
 /**
  * A tally of spec 8's layout: a table, a query and a mutation, and a
  * screen on the React SDK that reads the count live through the host's
- * references (`#grasp`). `label` says whose count it is: the App's, or
+ * references (`@server/_generated/api`). `label` says whose count it is: the App's, or
  * the draft's preview.
  */
 export const tallyFiles = (label: string): Record<string, string> => ({
@@ -38,8 +38,8 @@ export default defineSchema({
   tally: defineTable({ added: v.boolean() }),
 });
 `,
-  "operations/tally.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/tally.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const count = query({
   args: {},
@@ -57,15 +57,12 @@ export const add = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, count } from "./operations/tally.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Tally",
   schema,
   access: { tables: { tally: { read: "appMembers", write: "appMembers" } } },
-  operations: { tally: { add, count } },
-  internalOperations: {},
   screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
 });
 `,

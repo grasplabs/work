@@ -65,7 +65,7 @@ const kinds: Readonly<Record<string, Kind>> = {
   server: {
     reports: every,
     steered: (file) => !generated(file),
-    lenient: (file) => file.startsWith("migrations/"),
+    lenient: (file) => file.startsWith("server/migrations/"),
   },
   workflows: { reports: workflow, steered: workflow, lenient: none },
   compute: { reports: every, steered: every, lenient: none },

@@ -10,9 +10,8 @@ import {
 } from "@grasp-os/ui/components/card";
 import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { api } from "@server/_generated/api";
 import { useState } from "react";
-
-import { api } from "#grasp";
 
 import { LinkForm } from "./link-form";
 import { ParametersEditor } from "./parameters";

@@ -408,8 +408,8 @@ const relayFiles = (
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/mail.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
@@ -432,15 +432,13 @@ export const relay = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { mail, relay } from "./operations/mail.ts";
+import { mail } from "./server/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Relay",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { relay } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [mail] },
 });

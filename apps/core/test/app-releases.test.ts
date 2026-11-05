@@ -69,9 +69,9 @@ export default defineSchema({
   notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { internal } from "#grasp/server-references";
-import { action, doc, internalQuery, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { internal } from "@server/_generated/internal";
+import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../schema.ts";
 
 export const get = query({
@@ -103,15 +103,12 @@ export const tally = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { count, create, get, tally } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: ${JSON.stringify(label)},
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { get, create, tally } },
-  internalOperations: { notes: { count } },
   screens: [],
 });
 `,
@@ -187,7 +184,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     for (let index = 0; index < padding; index += 1) {
       const head = `export const pad${index} = ${index};\n//`;
       const share = Math.ceil(left / (padding - index));
-      files[`operations/pad${index}.ts`] =
+      files[`server/pad${index}.ts`] =
         `${head}${"x".repeat(share - head.length - 1)}\n`;
       left -= share;
     }
@@ -222,14 +219,14 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     expect(release.manifest.artifacts.map(({ path }) => path)).toStrictEqual(
       expect.arrayContaining([
         ".grasp/contracts.json",
-        ".grasp/references.ts",
-        ".grasp/server-references.ts",
-        ".grasp/server.ts",
+        "server/_generated/api.ts",
+        "server/_generated/internal.ts",
+        "server/_generated/server.ts",
         ".grasp/verification.json",
         "modules/app~app.js",
-        "modules/app~operations~notes.js",
+        "modules/app~server~notes.js",
         "modules/app~schema.js",
-        "modules/app~.grasp~server.js",
+        "modules/app~server~_generated~server.js",
       ])
     );
     expect(Object.keys(release.fingerprints).toSorted()).toStrictEqual([
@@ -244,7 +241,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     const references = await env.FILES.get(
-      artifactKey(artifactAt(release, ".grasp/references.ts").sha256)
+      artifactKey(artifactAt(release, "server/_generated/api.ts").sha256)
     );
     const text = (await references?.text()) ?? "";
     expect(text).toContain(`"resourceId": "${fixture.app}"`);
@@ -345,18 +342,16 @@ const tablelessFiles = (): Record<string, string> => ({
   "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 export default defineSchema({});
 `,
-  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { hello } from "./operations/hello.ts";
 import schema from "./schema.ts";
 export default app({
   name: "Hello",
   schema,
   access: {},
-  operations: { hello: { hello } },
   screens: [],
 });
 `,
@@ -525,7 +520,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     // App source loses a leading mark when built, so storage adds one.
-    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    const entry = artifactAt(release, "modules/app~server~notes.js");
     const stored = await env.FILES.get(artifactKey(entry.sha256));
     const code = (await stored?.text()) ?? "";
     const bytes = new Uint8Array([
@@ -546,14 +541,14 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
       },
     });
     const loaded = await loadRelease(env, fixture.app, 1);
-    expect(loaded.modules["app~operations~notes.js"]).toBe(`\uFEFF${code}`);
+    expect(loaded.modules["app~server~notes.js"]).toBe(`\uFEFF${code}`);
   });
 
   it("is refused when one of its artifacts' bytes no longer match their hash", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     // The same number of bytes, one of them changed: only the hash tells.
-    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    const entry = artifactAt(release, "modules/app~server~notes.js");
     const stored = await env.FILES.get(artifactKey(entry.sha256));
     const code = (await stored?.text()) ?? "";
     const forged = code.replace("notes", "motes");
@@ -645,7 +640,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
   it("is refused when two of its artifacts share a path, every hash rewritten", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
-    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    const entry = artifactAt(release, "modules/app~server~notes.js");
     await rewrite(fixture.app, release, {
       last: (manifest) => {
         const artifacts: readonly Json[] = Array.isArray(manifest.artifacts)
@@ -1273,7 +1268,7 @@ const refusedSeal = async (
 /** An operation file added to the notes, holding `source`. */
 const withOperation = (source: string): Record<string, string> => ({
   ...notesFiles(),
-  "operations/extra.ts": source,
+  "server/extra.ts": source,
 });
 
 describe("server code a seal type-checks", { timeout: 120_000 }, () => {
@@ -1288,7 +1283,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a type error",
-      'import { v } from "@grasp-os/sdk";\nimport { query } from "#grasp/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
+      'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
     ],
     [
       "a path into the kit's packages, for its types",
@@ -1361,7 +1356,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
   ])("refuses %s", async (_case, source) => {
     await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["operations/extra.ts"],
+      files: ["server/extra.ts"],
     });
   });
 
@@ -1371,11 +1366,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     await expect(
       refusedSeal({
         ...withOperation("export const greeting = (): string => shared;\n"),
-        "operations/extra-name.ts": 'const shared = "Hi";\n',
+        "server/extra-name.ts": 'const shared = "Hi";\n',
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["operations/extra.ts"],
+      files: ["server/extra.ts"],
     });
   });
 
@@ -1405,7 +1400,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["operations/extra.ts"],
+      files: ["server/extra.ts"],
     });
   });
 
@@ -1415,8 +1410,8 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     // refuses one, as the host does (`operation.mode_mismatch`).
     const streamed = {
       ...notesFiles(),
-      "operations/streams.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+      "server/streams.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
 
@@ -1430,19 +1425,10 @@ export const progress = action({
   },
 });
 `,
-      "app.ts": (notesFiles()["app.ts"] ?? "")
-        .replace(
-          'import schema from "./schema.ts";',
-          'import { once, progress } from "./operations/streams.ts";\nimport schema from "./schema.ts";'
-        )
-        .replace(
-          "operations: { notes: { get, create, tally } },",
-          "operations: { notes: { get, create, tally }, streams: { once, progress } },"
-        ),
     };
     const running = (reference: string): Record<string, string> => ({
       ...streamed,
-      "tests/helper.ts": `import type { api } from "#grasp";
+      "tests/helper.ts": `import type { api } from "@server/_generated/api";
 import type { TestPrincipal } from "@grasp-os/sdk/testing";
 
 export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
@@ -1470,7 +1456,7 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
       refusedSeal({
         ...notesFiles(),
         "tests/helper.ts":
-          'import type { api } from "#grasp";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
+          'import type { api } from "@server/_generated/api";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
       })
     ).resolves.toStrictEqual({ code: "ok", files: [] });
   });
@@ -1481,12 +1467,12 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
         ...withOperation(
           "export const title = (): string => document.title;\n"
         ),
-        "migrations/0001-globals.ts":
+        "server/migrations/0001-globals.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["migrations/0001-globals.ts"],
+      files: ["server/migrations/0001-globals.ts"],
     });
   });
 
@@ -1498,12 +1484,12 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
         ...withOperation(
           "export const title = (): string => document.title;\n"
         ),
-        "migrations/0001-dom.ts":
+        "server/migrations/0001-dom.ts":
           '/// <reference lib="dom" />\nexport const migration = 1;\n',
       })
     ).resolves.toStrictEqual({
       code: "version.build_failed",
-      files: ["migrations/0001-dom.ts"],
+      files: ["server/migrations/0001-dom.ts"],
     });
   });
 
@@ -1533,6 +1519,29 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
         "app.ts": `${notesFiles()["app.ts"]}\nawait fetch("https://example.com");\n`,
       })
     ).resolves.toBe("version.inspection_failed");
+  });
+
+  it("can't name a server module after an object's prototype", async () => {
+    // Its modules are keyed by path in the generated entry: `__proto__`
+    // is refused as a path, never taken for the map's prototype.
+    const fixture = await appWith({
+      ...notesFiles(),
+      "server/__proto__.ts":
+        'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
+    });
+    const refused: unknown = await seal(fixture).then(
+      () => {},
+      (error: unknown) => error
+    );
+    const { code, details } = z
+      .object({ code: z.string(), details: z.object({ message: z.string() }) })
+      .parse(refused);
+    expect({
+      code,
+      byPath: details.message.includes(
+        "server/__proto__.ts doesn't make a function path"
+      ),
+    }).toStrictEqual({ code: "version.inspection_failed", byPath: true });
   });
 
   it("must register an App", async () => {
@@ -1572,27 +1581,27 @@ JSON.stringify = (value, ...rest) => {
     [
       "a schema that imports an operation",
       {
-        "schema.ts": `import "./operations/notes.ts";\n${notesFiles()["schema.ts"]}`,
+        "schema.ts": `import "./server/notes.ts";\n${notesFiles()["schema.ts"]}`,
       },
     ],
     [
       "server code that imports the Workers runtime",
       {
-        "operations/extra.ts":
+        "server/extra.ts":
           'import { env } from "cloudflare:workers";\nexport const leak = env;\n',
       },
     ],
     [
       "server code that imports a platform-only SDK module",
       {
-        "operations/extra.ts":
+        "server/extra.ts":
           'import { inspectApp } from "@grasp-os/sdk/host";\nexport const peek = inspectApp;\n',
       },
     ],
     [
       "server code that imports a module by a computed name",
       {
-        "operations/extra.ts":
+        "server/extra.ts":
           'const name = "cloudflare:" + "workers";\nexport const load = () => import(name);\n',
       },
     ],
@@ -1681,7 +1690,7 @@ JSON.stringify = (value, ...rest) => {
     // Files no other seal builds: any build of them is this seal's.
     const second = await appWith({
       ...withTable(notesFiles(), "beta"),
-      "operations/marker.ts": `export const marker = ${JSON.stringify(crypto.randomUUID())};\n`,
+      "server/marker.ts": `export const marker = ${JSON.stringify(crypto.randomUUID())};\n`,
     });
     const before = await builds();
     await expect(
@@ -1725,7 +1734,7 @@ JSON.stringify = (value, ...rest) => {
       env,
       fixture.owner,
       fixture.app,
-      { ...tablelessFiles(), "operations/notes.ts": null },
+      { ...tablelessFiles(), "server/notes.ts": null },
       "Two"
     );
     await seal(fixture, 2);
@@ -1822,9 +1831,9 @@ JSON.stringify = (value, ...rest) => {
     const files = notesFiles();
     const fixture = await appWith({
       ...files,
-      "operations/extra.ts": `import { v } from "@grasp-os/sdk";
-import { api, preferences } from "#grasp";
-import { action, query } from "#grasp/server";
+      "server/extra.ts": `import { v } from "@grasp-os/sdk";
+import { api, preferences } from "@server/_generated/api";
+import { action, query } from "@server/_generated/server";
 
 export const defaults = query({
   args: {},
@@ -1842,11 +1851,11 @@ export const reach = action({
       "app.ts": (files["app.ts"] ?? "")
         .replace(
           'import schema from "./schema.ts";',
-          'import schema from "./schema.ts";\nimport { defaults, reach } from "./operations/extra.ts";\nimport { v } from "@grasp-os/sdk";'
+          'import schema from "./schema.ts";\nimport { v } from "@grasp-os/sdk";'
         )
         .replace(
-          "operations: { notes: { get, create, tally } },",
-          "operations: { notes: { get, create, tally }, extra: { defaults, reach } },\n  preferences: v.object({ compact: v.boolean().default(false) }),"
+          "  screens: [],",
+          "  preferences: v.object({ compact: v.boolean().default(false) }),\n  screens: [],"
         ),
     });
     const release = await seal(fixture);
@@ -1887,13 +1896,13 @@ export const reach = action({
 
   it("can't keep anything but server code under operations/: each is refused by name", async () => {
     const strays = [
-      "operations/notes.json",
-      "operations/view.tsx",
-      "operations/types.d.ts",
+      "server/notes.json",
+      "server/view.tsx",
+      "server/types.d.ts",
       // Never saved (a save refuses each), never server code.
-      "operations/.hidden/notes.ts",
-      "operations/../app.ts",
-      "operations//x.ts",
+      "server/.hidden/notes.ts",
+      "server/../app.ts",
+      "server//x.ts",
     ];
     const built = await buildAppCode(
       env,
@@ -1917,15 +1926,15 @@ export const reach = action({
     }).toStrictEqual({ ok: false, refused: new Set(strays) });
   });
 
-  it("can't keep anything but one file per migration under migrations/: each is refused by name", async () => {
+  it("can't keep anything but one file per migration under server/migrations/: each is refused by name", async () => {
     const strays = [
-      "migrations/lib/helper.ts",
-      "migrations/v1.0/derive.ts",
-      "migrations/notes.md",
-      "migrations/types.d.ts",
+      "server/migrations/lib/helper.ts",
+      "server/migrations/v1.0/derive.ts",
+      "server/migrations/notes.md",
+      "server/migrations/types.d.ts",
       // Never saved (a save refuses each), never a migration.
-      "migrations/.hidden.ts",
-      "migrations/../app.ts",
+      "server/migrations/.hidden.ts",
+      "server/migrations/../app.ts",
     ];
     const built = await buildAppCode(
       env,
@@ -1955,22 +1964,22 @@ export const reach = action({
       env,
       {
         ...notesFiles(),
-        "operations/v1.0/extra.ts": "export const one = 1;\n",
-        "operations/notes.ts/extra.ts": "export const two = 2;\n",
+        "server/v1.0/extra.ts": "export const one = 1;\n",
+        "server/notes.ts/extra.ts": "export const two = 2;\n",
       },
       "app-test"
     );
     expect(
       built.ok
         ? Object.keys(built.modules).filter((name) =>
-            name.startsWith("app~operations~")
+            name.startsWith("app~server~")
           )
         : built.diagnostics
     ).toStrictEqual(
       expect.arrayContaining([
-        "app~operations~notes.js",
-        "app~operations~v1.0~extra.js",
-        "app~operations~notes.ts~extra.js",
+        "app~server~notes.js",
+        "app~server~v1.0~extra.js",
+        "app~server~notes.ts~extra.js",
       ])
     );
   });
@@ -1987,7 +1996,7 @@ export const reach = action({
             id,
             {
               ...notesFiles(),
-              ".grasp/references.ts": "export const api = {};\n",
+              "server/_generated/api.ts": "export const api = {};\n",
             },
             "Forged references"
           )
@@ -2097,7 +2106,7 @@ const targets = {
   },
   "an operation": {
     types: codeTypes,
-    file: "operations/extra.ts",
+    file: "server/extra.ts",
     wrap: (lines: string) => `${lines}\nexport const extra = 1;\n`,
     build: async (files: Record<string, string>) =>
       await buildAppCode(env, files, "app-test"),
@@ -2111,7 +2120,7 @@ const targets = {
   },
   "a migration": {
     types: codeTypes,
-    file: "migrations/0001-extra.ts",
+    file: "server/migrations/0001-extra.ts",
     wrap: (lines: string) => `${lines}\nexport const migration = 1;\n`,
     build: async (files: Record<string, string>) =>
       await buildAppCode(env, files, "app-test"),
@@ -2376,9 +2385,9 @@ describe("screens", { timeout: 120_000 }, () => {
     "never name the App's server code for its types in %s",
     async (_case, file) => {
       const typeLines = [
-        'import type { query } from "#grasp/server";',
-        'import type { internal } from "#grasp/server-references";',
-        'export type { create } from "../operations/notes.ts";',
+        'import type { query } from "@server/_generated/server";',
+        'import type { internal } from "@server/_generated/internal";',
+        'export type { create } from "../server/notes.ts";',
         'export type Schema = typeof import("../schema.ts");',
       ];
       const screen = "export default function Notes() {\n  return null;\n}\n";
@@ -2415,21 +2424,24 @@ describe("screens", { timeout: 120_000 }, () => {
   );
 
   it.each([
-    ["the server constructors", 'import { query } from "#grasp/server";'],
+    [
+      "the server constructors",
+      'import { query } from "@server/_generated/server";',
+    ],
     [
       "the internal references",
-      'import { internal } from "#grasp/server-references";',
+      'import { internal } from "@server/_generated/internal";',
     ],
     ["the schema", 'import schema from "../schema.ts";'],
     ["the registration", 'import notes from "../app";'],
-    ["an operation", 'import { create } from "../operations/notes.ts";'],
+    ["an operation", 'import { create } from "../server/notes.ts";'],
     [
       "an operation in a dotted folder",
-      'import { create } from "../operations/v1.0/notes.ts";',
+      'import { create } from "../server/v1.0/notes.ts";',
     ],
     [
       "a migration in a dotted folder",
-      'import derive from "../migrations/v1.0/derive.ts";',
+      'import derive from "../server/migrations/v1.0/derive.ts";',
     ],
     ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
   ])(

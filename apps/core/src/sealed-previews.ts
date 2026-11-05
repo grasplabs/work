@@ -561,7 +561,7 @@ const runsServerOf = (running: Running, draft: Draft): boolean =>
   running.revision === draft.revision || running.server === serverOf(draft);
 
 /**
- * The `#grasp` references the screens of `files`, an App as `version` of
+ * The `@server/_generated/api` references the screens of `files`, an App as `version` of
  * `app` (a kept version of a chat's draft, or a version of the App),
  * import: generated from its draft release, sealed as the preview's is
  * (`sealDraftRelease`) and loaded back through the same checks, every
@@ -587,11 +587,11 @@ export const readOnlyReferences = async (
     resourceId: app,
     resourceVersion: version,
   });
-  return generated[generatedPaths.references] ?? null;
+  return generated[generatedPaths.api] ?? null;
 };
 
 /**
- * The `#grasp` references the screens of `draft`, a kept version of a
+ * The `@server/_generated/api` references the screens of `draft`, a kept version of a
  * chat's draft of `app`, import (`readOnlyReferences`), as the version it
  * would become.
  */

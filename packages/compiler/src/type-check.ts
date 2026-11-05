@@ -284,7 +284,7 @@ const followsAnyCallee = (
 
 /**
  * Whether an App file's import of `name` may resolve where it did: to
- * one of the App's files by a relative path or by the `#grasp` mapping,
+ * one of the App's files by a relative path or by the `@server/_generated/api` mapping,
  * or by name to one of the modules `allowed` lists. Whatever the syntax
  * that names it (an ambient module's import, a re-export, a pragma), an
  * App file reaches nothing else of the kit: not its packages' own files

@@ -13,8 +13,8 @@ import { v } from "../src/index.ts";
 import { useStream } from "../src/react.ts";
 import type { GraspError } from "../src/react.ts";
 import { serverModule } from "../src/server.ts";
-import { api } from "./notes/.grasp/references.ts";
 import schema from "./notes/schema.ts";
+import { api } from "./notes/server/_generated/api.ts";
 
 declare const client: GraspClient;
 

@@ -33,8 +33,6 @@ export default app({
   name: "Counter",
   schema,
   access: { tables: {} },
-  operations: {},
-  internalOperations: {},
   screens: [],
 });
 `,

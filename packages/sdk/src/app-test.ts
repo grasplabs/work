@@ -19,7 +19,7 @@ import type {
 //
 // `appTest` describes a suite and runs nothing itself. Core's trusted test
 // runner loads an App's `tests/*.test.ts` in a sandboxed isolate, with the
-// App's release and its generated `#grasp` references, and runs each suite
+// App's release and its generated `@server/_generated/api` references, and runs each suite
 // with `runAppSuite` over a host it passes in: every call a test principal
 // makes crosses back into core, which runs it through the real operation
 // host on a fixture store of the test's own, as it runs a screen's call.
@@ -41,7 +41,7 @@ export const maxAppTestName = 200;
  */
 export const appTestTimeoutMs = 30_000;
 
-/** A public function of the App, as `#grasp` generates its reference. */
+/** A public function of the App, as `@server/_generated/api` generates its reference. */
 export type PublicReference<Kind extends ReferenceKind> = Callable<
   Kind,
   "public"
@@ -121,7 +121,7 @@ export interface TestPrincipal {
   ) => Promise<LiveQuery<ReturnOf<Reference>>>;
   /**
    * Starts a run of one of the workflows the App binds (`workflows` from
-   * `#grasp`), as a screen's `useWorkflow` starts one: the same version,
+   * `@server/_generated/api`), as a screen's `useWorkflow` starts one: the same version,
    * run on the real engine, with nothing of the organization's around it.
    * A model call answers what the fixture gives its binding
    * (`workflows.<alias>.models.<binding>`): no model is ever asked. A store
@@ -356,7 +356,7 @@ const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
  *
  * ```ts
  * import { appTest } from "@grasp-os/sdk/testing";
- * import { api } from "#grasp";
+ * import { api } from "@server/_generated/api";
  *
  * export default appTest({
  *   fixtures: "notes",
@@ -385,7 +385,7 @@ export const appTest = (definition: AppTestDefinition): AppTestSuite => {
  *
  * ```ts
  * import { workflowTest } from "@grasp-os/sdk/testing";
- * import { workflows } from "#grasp";
+ * import { workflows } from "@server/_generated/api";
  *
  * export default workflowTest({
  *   fixtures: "notes",
@@ -537,7 +537,7 @@ const requestFor = (
 ): string => {
   if (!isRecord(reference) || reference.kind !== kind) {
     throw new TestAssertionError(
-      `expected a reference to one of the App's ${kind === "query" ? "queries" : `${kind}s`}, from #grasp`
+      `expected a reference to one of the App's ${kind === "query" ? "queries" : `${kind}s`}, from @server/_generated/api`
     );
   }
   const { resourceId, resourceVersion, contractId, fingerprint } = reference;
@@ -895,7 +895,7 @@ const startKey = (): string =>
 const startRequestFor = (reference: unknown, input: unknown): string => {
   if (!isRecord(reference) || reference.kind !== "workflow") {
     throw new TestAssertionError(
-      "expected a reference to one of the App's workflows, from #grasp"
+      "expected a reference to one of the App's workflows, from @server/_generated/api"
     );
   }
   const { resourceId, resourceVersion, contractId, fingerprint } = reference;

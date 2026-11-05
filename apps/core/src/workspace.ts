@@ -4620,7 +4620,7 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The `#grasp` references the screens of `personId`'s own chat's draft
+   * The `@server/_generated/api` references the screens of `personId`'s own chat's draft
    * of App `appId` at `revision` import: generated from its draft
    * release, sealed now if it isn't yet; null when it generates none.
    * Throws as the seal does for a draft that doesn't build or inspect.
@@ -4645,7 +4645,7 @@ export class Workspace extends DurableObject<Env> {
       resourceId: app,
       resourceVersion: version,
     });
-    return generated[generatedPaths.references] ?? null;
+    return generated[generatedPaths.api] ?? null;
   }
 
   /**

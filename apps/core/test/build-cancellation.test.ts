@@ -281,7 +281,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
           "app.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
           "schema.ts": "export default {};\n",
           "screens/desk.tsx":
-            'import { references } from "#grasp";\nexport default () => String(references);\n',
+            'import { references } from "@server/_generated/api";\nexport default () => String(references);\n',
         },
         { signal: giveUp.signal }
       );

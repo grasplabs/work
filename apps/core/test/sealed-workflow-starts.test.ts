@@ -52,8 +52,8 @@ export default defineSchema({
   requests: defineTable({ who: v.string() }),
 });
 `,
-  "operations/requests.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action, mutation } from "#grasp/server";
+  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action, mutation } from "@server/_generated/server";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
@@ -83,14 +83,13 @@ export const kickOff = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp, kickOff, submit } from "./operations/requests.ts";
+import { followUp } from "./server/requests.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Requests",
   schema,
   access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: { requests: { submit, kickOff } },
   screens: [],
   permissions: { workflows: [followUp] },
 });

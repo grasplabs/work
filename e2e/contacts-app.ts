@@ -11,8 +11,8 @@ export default defineSchema({
   contacts: defineTable({ name: v.string().max(200) }),
 });
 `,
-  "operations/contacts.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/contacts.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const list = query({
   args: {},
@@ -28,15 +28,12 @@ export const add = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, list } from "./operations/contacts.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Contacts",
   schema,
   access: { tables: { contacts: { read: "appMembers", write: "appMembers" } } },
-  operations: { contacts: { add, list } },
-  internalOperations: {},
   screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
 });
 `,
@@ -44,7 +41,7 @@ export default app({
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Contacts() {
   const names = useQuery(api.contacts.list, {});

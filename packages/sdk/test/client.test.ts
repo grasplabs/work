@@ -8,7 +8,7 @@ import { GraspError } from "../src/client-error.ts";
 import type { FileRef } from "../src/client-files.ts";
 import type { Id } from "../src/index.ts";
 import { GraspProvider, useFile } from "../src/react.ts";
-import { api } from "./notes/.grasp/references.ts";
+import { api } from "./notes/server/_generated/api.ts";
 
 // The session client against the network and the page it reaches through:
 // what it does with what comes back, where core's own route isn't what

@@ -714,7 +714,7 @@ const teamSecrets = async () => {
         "secrets: defineTable({ text: v.string() }),",
         'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: [rows.team("team")] }),'
       ),
-    "operations/notes.ts": (secretFiles["operations/notes.ts"] ?? "").replace(
+    "server/notes.ts": (secretFiles["server/notes.ts"] ?? "").replace(
       "export const tell = mutation({\n  args: { text: v.string() },",
       "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
     ),

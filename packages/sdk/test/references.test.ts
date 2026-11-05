@@ -8,6 +8,7 @@ import {
   inspectApp,
   readAppManifest,
   readSealedWorkflows,
+  registerFunctions,
   symbolicModules,
   workflowFingerprint,
 } from "../src/host.ts";
@@ -15,6 +16,7 @@ import type {
   AppManifest,
   BoundWorkflow,
   WorkflowBindingExtras,
+  ServerModules,
 } from "../src/host.ts";
 import type { AnyOperationReference } from "../src/index.ts";
 import { app, permission, v } from "../src/index.ts";
@@ -27,28 +29,32 @@ import { schemaOf } from "../src/value-schema.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
+import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
+import { archiveNotes, summarizeNote } from "./notes/app.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
-import referencesText from "./notes/.grasp/references.ts?raw";
+import referencesText from "./notes/server/_generated/api.ts?raw";
 import {
   api,
   preferences,
   permissions,
   screens,
   workflows,
-} from "./notes/.grasp/references.ts";
+} from "./notes/server/_generated/api.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
-import serverReferencesText from "./notes/.grasp/server-references.ts?raw";
-import { internal } from "./notes/.grasp/server-references.ts";
+import dataModelText from "./notes/server/_generated/dataModel.ts?raw";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
-import serverText from "./notes/.grasp/server.ts?raw";
-import notes, { archiveNotes, summarizeNote } from "./notes/app.ts";
+import serverReferencesText from "./notes/server/_generated/internal.ts?raw";
+import { internal } from "./notes/server/_generated/internal.ts";
+// oxlint-disable-next-line import/default -- a ?raw import is the file's text
+import serverText from "./notes/server/_generated/server.ts?raw";
 
 // References and generated modules (spec 7.3, 8, 32.1), and reading an
 // App's manifest back as the host does: pure logic, so unit tests. The
 // Notes fixture (test/notes) is an App as the product lays it out, and
-// its `.grasp/` is what the host generates for it: the first test fails
-// whenever the generator or the fixture changes without the other.
+// its `server/_generated/` and `.grasp/` are what the host generates for
+// it: the first test fails whenever the generator or the fixture changes
+// without the other.
 // Sealing and running through the real sandbox are core's tests.
 
 const identity = {
@@ -122,9 +128,10 @@ describe("generated modules", () => {
       notesWorkflows
     );
     expect(files).toStrictEqual({
-      ".grasp/server.ts": serverText,
-      ".grasp/server-references.ts": serverReferencesText,
-      ".grasp/references.ts": referencesText,
+      "server/_generated/server.ts": serverText,
+      "server/_generated/dataModel.ts": dataModelText,
+      "server/_generated/internal.ts": serverReferencesText,
+      "server/_generated/api.ts": referencesText,
       ".grasp/contracts.json": contractsText,
     });
   });
@@ -234,7 +241,7 @@ describe("generated modules", () => {
       "schema.ts",
       "@grasp-os/sdk/server",
       "serverModule",
-      "operations/",
+      "server/",
       "internal",
     ]) {
       expect(referencesText).not.toContain(forbidden);
@@ -334,7 +341,7 @@ describe("generated modules", () => {
       })
     );
     const files = await generateModules(manifest, identity);
-    expect(files[".grasp/references.ts"]).not.toContain("preferences");
+    expect(files["server/_generated/api.ts"]).not.toContain("preferences");
   });
 
   test("export no workflows for an App that declares none", async () => {
@@ -342,7 +349,7 @@ describe("generated modules", () => {
       { ...notesManifest(), workflows: {} },
       identity
     );
-    expect(files[".grasp/references.ts"]).toContain(
+    expect(files["server/_generated/api.ts"]).toContain(
       "export const workflows: Readonly<Record<never, never>> = frozen({});"
     );
   });
@@ -409,7 +416,7 @@ describe("workflow references", () => {
       sealed: readSealedWorkflows(sealedWorkflows)
         .filter(({ alias }) => alias === summarize.alias)
         .map((workflow) => workflow.pinned),
-      inReferences: (files[".grasp/references.ts"] ?? "").includes(
+      inReferences: (files["server/_generated/api.ts"] ?? "").includes(
         "workflow-1"
       ),
     }).toStrictEqual({ sealed: [pinned], inReferences: false });
@@ -581,7 +588,7 @@ describe("workflow references", () => {
     const files = await generatedWith([
       { alias: "archiveNotes", events: {}, listens: {}, decisions: {} },
     ]);
-    const text = files[".grasp/references.ts"] ?? "";
+    const text = files["server/_generated/api.ts"] ?? "";
     expect(text).toContain("workflows.archiveNotes.queries.history");
     expect(text).not.toContain("workflows.archiveNotes.queries.decision");
   });
@@ -606,7 +613,7 @@ describe("workflow references", () => {
       },
     });
     const files = await generatedWith([many]);
-    expect(files[".grasp/references.ts"]).toContain(
+    expect(files["server/_generated/api.ts"]).toContain(
       `WorkflowDecisionDetail<"decision${workflowReferenceLimits.decisions - 1}"`
     );
     await expect(
@@ -821,14 +828,14 @@ describe("workflow references", () => {
         listens: {},
       },
     ]);
-    expect(files[".grasp/references.ts"]).toContain(
+    expect(files["server/_generated/api.ts"]).toContain(
       `event${workflowReferenceLimits.events - 1}`
     );
   });
 
   test("are made for every workflow the App declares, with the contract it declares, whatever the host resolved of it", async () => {
     const files = await generatedWith([]);
-    const references = files[".grasp/references.ts"] ?? "";
+    const references = files["server/_generated/api.ts"] ?? "";
     // Pinned to what the App declares: the same contract, and fingerprint.
     expect(references).toContain(await workflowFingerprint(summarizeNote));
     expect(references).toContain(await workflowFingerprint(archiveNotes));
@@ -972,8 +979,8 @@ describe("symbolic references", () => {
   test("resolve against the registration by path, and never survive into generated modules", () => {
     const modules = symbolicModules();
     expect(Object.keys(modules).toSorted()).toStrictEqual([
-      ".grasp/references.ts",
-      ".grasp/server-references.ts",
+      "server/_generated/api.ts",
+      "server/_generated/internal.ts",
     ]);
     expect(Object.values(modules).join("\n")).toContain("new Proxy");
     expect([referencesText, serverReferencesText].join("\n")).not.toContain(
@@ -1018,17 +1025,30 @@ const loosePermission = permission as Record<
   (config: unknown) => unknown
 >;
 
-/** A small App, with `changes` to its registration. */
-const small = (changes: Record<string, unknown> = {}) =>
-  looseApp({
-    name: "Small",
-    schema,
-    access: { tables: { notes: { read: "appMembers" } } },
-    operations: { notes: { list, send } },
-    internalOperations: { notes: { secret } },
-    screens: [],
-    ...changes,
-  });
+/** The small App's server modules: `server/notes.ts`. */
+const smallModules: ServerModules = { notes: { list, send, secret } };
+
+/**
+ * A small App, with `changes` to its registration, and its functions from
+ * `modules` (its server modules, `smallModules` unless given).
+ */
+const small = (
+  changes: Record<string, unknown> = {},
+  modules: ServerModules = smallModules
+) =>
+  registerFunctions(
+    // SAFETY: `looseApp` answers what `app` does; `registerFunctions`
+    // refuses anything else at run time.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    looseApp({
+      name: "Small",
+      schema,
+      access: { tables: { notes: { read: "appMembers" } } },
+      screens: [],
+      ...changes,
+    }) as ReturnType<typeof app>,
+    modules
+  );
 
 describe("references in uses", () => {
   test("name a registered function by its path, matching its visibility and kind", () => {
@@ -1043,7 +1063,7 @@ describe("references in uses", () => {
       handler: () => 1,
     });
     const { manifest } = inspectApp(
-      small({ operations: { notes: { list, send, tally } } })
+      small({}, { notes: { list, send, tally, secret } })
     );
     expect(manifest.operations["notes.tally"]?.uses).toStrictEqual([
       { type: "function", path: "notes.secret", kind: "query" },
@@ -1074,7 +1094,7 @@ describe("references in uses", () => {
       handler: () => 1,
     });
     expect(
-      refusal(() => small({ operations: { notes: { list, send, tally } } }))
+      refusal(() => small({}, { notes: { list, send, tally, secret } }))
     ).toContain(message);
   });
 
@@ -1087,7 +1107,7 @@ describe("references in uses", () => {
       handler: () => null,
     });
     expect(
-      refusal(() => small({ operations: { notes: { list, send, change } } }))
+      refusal(() => small({}, { notes: { list, send, change, secret } }))
     ).toContain("it may run the App's queries, never `notes.send`, a action");
   });
 
@@ -1117,11 +1137,11 @@ describe("reserved segments", () => {
     "no function registers at a segment named %s, at any depth",
     (name) => {
       expect(
-        refusal(() => small({ operations: { notes: { list, [name]: send } } }))
+        refusal(() => small({}, { notes: { list, [name]: send } }))
       ).toContain("is a name a reference itself answers");
-      expect(
-        refusal(() => small({ operations: { [name]: { list } } }))
-      ).toContain("is a name a reference itself answers");
+      expect(refusal(() => small({}, { [name]: { list } }))).toContain(
+        "is a name a reference itself answers"
+      );
     }
   );
 });
@@ -1188,7 +1208,7 @@ describe("screens and preferences", () => {
     ],
     [
       "a source outside screens/",
-      [{ name: "a", path: "/", source: "operations/a.tsx" }],
+      [{ name: "a", path: "/", source: "server/a.tsx" }],
       "`screens/<file>.tsx`",
     ],
     [
@@ -1253,34 +1273,20 @@ describe("screens and preferences", () => {
   });
 
   test.each([
-    ["public", "preferences", { operations: { preferences: { list } } }],
-    [
-      "internal",
-      "preferences",
-      { internalOperations: { preferences: { secret } } },
-    ],
-    [
-      "public",
-      "workflows",
-      { operations: { workflows: { review: { queries: { runs: list } } } } },
-    ],
-    [
-      "internal",
-      "workflows",
-      { internalOperations: { workflows: { secret } } },
-    ],
+    ["public", "preferences", { preferences: { list } }],
+    ["internal", "preferences", { preferences: { secret } }],
+    ["public", "workflows", { "workflows/review/queries": { runs: list } }],
+    ["internal", "workflows", { workflows: { secret } }],
   ])(
     "no %s function registers under the %s segment",
-    (_case, _segment, changes) => {
-      expect(refusal(() => small(changes))).toContain(
-        "that path is the platform's"
-      );
+    (_case, _segment, modules) => {
+      expect(refusal(() => small({}, modules))).toContain("is the platform's");
     }
   );
 
   test("a nested workflows segment is the App's own", () => {
     expect(() =>
-      small({ operations: { notes: { list }, admin: { workflows: { send } } } })
+      small({}, { notes: { list }, "admin/workflows": { send } })
     ).not.toThrow();
   });
 });
@@ -1680,9 +1686,9 @@ describe("reading a manifest back", () => {
       "a path that clashes with another",
       (data: unknown) => {
         const get = at(data, ["operations", "notes.get"]);
-        setAt(data, ["operations", "notes"], {
+        setAt(data, ["operations", "notes.get.more"], {
           ...(typeof get === "object" ? get : {}),
-          path: "notes",
+          path: "notes.get.more",
         });
       },
       "clashes with another registered path",

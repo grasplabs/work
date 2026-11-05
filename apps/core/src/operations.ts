@@ -351,7 +351,7 @@ export interface Invocation {
   readonly draftFailure?: (message: string) => void;
   /**
    * Who the call is for, and what of the organization's people it may
-   * read (app-people.ts): App code's `ctx.caller` and `ctx.people`, read
+   * read (app-people.ts): App code's `ctx.auth.getUser()` and `ctx.people`, read
    * through the channel. Resolved by core with the rest of the
    * invocation, never from App code. Without it, App code is told nothing
    * of either, and a function fails as it starts.
@@ -2972,7 +2972,7 @@ const runHandler = async (
         ? {}
         : {
             people: async (read: unknown, readArgs: unknown) => {
-              if (read !== "caller") {
+              if (read !== "user") {
                 await admit(run.invocation);
               }
               return await answerPeople(people, read, readArgs);

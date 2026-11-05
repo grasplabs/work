@@ -80,7 +80,7 @@ export const componentsFolder: CodeFolder = {
 /**
  * The files a build reads: screens, components and declarations, and the
  * references the host generated for the App's server code, which screens
- * import as `#grasp`.
+ * import as `@server/_generated/api`.
  */
 export const buildFiles = (
   files: Record<string, string>
@@ -246,7 +246,7 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
 
 /**
  * What a build takes of the modules the host generates for an App
- * (`.grasp/`), apart from the App's own files, so an App at its limits
+ * (`server/_generated/`, `.grasp/`), apart from the App's own files, so an App at its limits
  * still builds. The host writes them, never the App: each is derived from
  * the App's manifest, which the host has already read and bounded
  * (`appManifestMaxBytes`, whatever the size of the App's source), and
@@ -260,8 +260,19 @@ const generatedLimits = {
   totalLength: 8 * appManifestMaxBytes,
 } as const;
 
-/** Whether `path` is where the host puts a module it generates. */
-const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
+/** Where the generated modules App code imports are, as Convex has them. */
+export const generatedServerFolder = "server/_generated/";
+
+/** Where the host's own generated files are, which App code never imports. */
+export const hostGeneratedFolder = ".grasp/";
+
+/**
+ * Whether `path` is one the host generates (`server/_generated/`,
+ * `.grasp/`): never an App's own file, so an App's files never hold one.
+ */
+export const isGeneratedPath = (path: string): boolean =>
+  path.startsWith(generatedServerFolder) ||
+  path.startsWith(hostGeneratedFolder);
 
 /**
  * Why a build of an App's server code (`appCodeFiles`) or screens
@@ -274,7 +285,7 @@ export const appCodeLimitErrors = (
   const own: Record<string, string> = {};
   const generated: [string, string][] = [];
   for (const [path, source] of Object.entries(files)) {
-    if (isGenerated(path)) {
+    if (isGeneratedPath(path)) {
       generated.push([path, source]);
     } else {
       own[path] = source;

@@ -7,7 +7,12 @@ import {
   permission,
   v,
 } from "@grasp-os/sdk";
-import { inspectApp, manifestText, schemaHash } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  manifestText,
+  registerFunctions,
+  schemaHash,
+} from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -254,11 +259,17 @@ const plainMutation = mutation({
   handler: () => "plain",
 });
 
-const startsApp = registerApp({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {
+const startsApp = registerFunctions(
+  registerApp({
+    name: "Requests",
+    schema,
+    access: {
+      tables: { requests: { read: "appMembers", write: "appMembers" } },
+    },
+    screens: [],
+    permissions: { workflows: [followUp] },
+  }),
+  {
     requests: {
       list,
       submit,
@@ -272,10 +283,8 @@ const startsApp = registerApp({
       plainAction,
       plainMutation,
     },
-  },
-  screens: [],
-  permissions: { workflows: [followUp] },
-});
+  }
+);
 
 const { manifest } = inspectApp(startsApp);
 

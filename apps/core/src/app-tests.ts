@@ -96,7 +96,7 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 // - Test code reaches what it shouldn't: it runs in a Loader isolate with
 //   no env and no network, as App code does, holding only the host below.
 //   The compiler holds it to the SDK's root and testing modules, its own
-//   files, the schema and the public `#grasp` references (app-code.ts):
+//   files, the schema and the public `@server/_generated/api` references (app-code.ts):
 //   never the App's handlers, so a test can't run a function except
 //   through the host.
 // - A test's calls skip what a real call goes through: each is resolved

@@ -44,8 +44,8 @@ const billingFiles = (): Record<string, string> => ({
 
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
 `,
-  "operations/billing.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+  "server/billing.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
 export const billing = permission.connection("billing", {
   contract: "http.request@1",
@@ -95,15 +95,13 @@ export const stray = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { billing, create, open, stray } from "./operations/billing.ts";
+import { billing } from "./server/billing.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoices",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { billing: { open, create, stray } },
-  internalOperations: {},
   screens: [],
   permissions: { connections: [billing] },
 });

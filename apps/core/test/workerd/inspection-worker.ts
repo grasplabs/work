@@ -1,4 +1,8 @@
-import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
 import {
   app as registerApp,
   defineSchema,
@@ -6,7 +10,7 @@ import {
   migration,
   v,
 } from "@grasp-os/sdk";
-import { inspectApp } from "@grasp-os/sdk/host";
+import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { inspected } from "../../src/app-inspection.ts";
@@ -59,7 +63,7 @@ const inspect = async (env: SandboxedEnv, app: string): Promise<Outcome> => {
   try {
     const text = await inspected(
       env,
-      { [appModuleName("app.ts")]: apps[app] ?? "" },
+      { [appModuleName(serverEntryPath)]: apps[app] ?? "" },
       { [kitModuleName("@grasp-os/sdk/runner")]: runner }
     );
     return { status: "inspected", text };
@@ -104,7 +108,6 @@ const notesManifest = (() => {
     name: "Notes",
     schema: defineSchema({ notes: defineTable(fields) }),
     access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operations: {},
     screens: [],
     migrations: [
       migration({
@@ -121,13 +124,13 @@ const notesManifest = (() => {
       }),
     ],
   });
-  return inspectApp(registered).manifest;
+  return inspectApp(registerFunctions(registered, {})).manifest;
 })();
 
 /** A release of Notes whose `app.ts` is `source`, as `transformBatch` reads it. */
 const releaseOf = (source: string): TransformRelease => ({
   app: notesManifest,
-  modules: { [appModuleName("app.ts")]: source },
+  modules: { [appModuleName(serverEntryPath)]: source },
   sdk: { [kitModuleName("@grasp-os/sdk/runner")]: migrationRunner },
 });
 

@@ -9,9 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { api } from "@server/_generated/api";
 import { useRef, useState } from "react";
-
-import { api } from "#grasp";
 
 import { whilePending } from "./pending";
 import { settle } from "./store";

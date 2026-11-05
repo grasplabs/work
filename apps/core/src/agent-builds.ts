@@ -1408,19 +1408,23 @@ const buildDeclaration = `/**
  *   \`optionLabel\`, and optionally \`lookup={{ query: api.people.get, args: (id) => ({ id }) }}\`,
  *   a query of one record that names the value it starts with, shown as
  *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, the App's
- *   files permission declaring \`upload\`, \`permissions.files\` from \`#grasp\`; the form doesn't submit while it
+ *   files permission declaring \`upload\`, \`permissions.files\` from \`@server/_generated/api\`; the form doesn't submit while it
  *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
  *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
  *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; given
- *   \`links={permissions.links}\` (the App's links permission, from \`#grasp\`), its
+ *   \`links={permissions.links}\` (the App's links permission, from \`@server/_generated/api\`), its
  *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
  *   \`FormError\` and \`SubmitButton\`.
  * - The grid's and the fields' own words follow the page's language
  *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
  *   otherwise.
  * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
- * its public functions (\`query\`, \`mutation\`, \`action\`) in
- * operations files, \`operations/<group>.ts\`. An App holds no workflows,
+ * its functions (\`query\`, \`mutation\`, \`action\` and their
+ * \`internal\` forms) exported from files under \`server/\`, Convex's way:
+ * the file's path is the API (\`server/tasks.ts\`'s \`list\` is
+ * \`api.tasks.list\`), and nothing lists them. They import their builders
+ * from \`@server/_generated/server\`; screens call them through
+ * \`@server/_generated/api\`. An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, declare it in app.ts
@@ -1455,20 +1459,22 @@ const buildDeclaration = `/**
  * (\`data.write_denied\`). Give the App's test fixture's principals the
  * teams team rules read: \`{ "role": "user", "teams": ["sales"] }\`.
  *
- * Every server function's \`ctx.caller\` is who calls, from Grasp's
- * sign-in, with no permission:
- * \`{ kind: "person", id, name, email, orgRole, appRole, teams: { id, name }[] }\`
- * (\`email\` null for someone who never signed in) or, for a visitor the
- * App was shared with, \`{ kind: "visitor", id, email }\`, whose \`id\`
- * changes each session: key a visitor's records by \`email\`. Decide who
- * may see or do what with it, on the server (\`ctx.caller.id\` for "my
- * requests", "assigned to me"). Reading other members needs the App to
+ * Every server function's \`await ctx.auth.getUser()\` is who calls, from
+ * Grasp's sign-in, with no permission: \`{ id, name, email, roles }\`
+ * (\`email\` null for someone who never signed in; \`roles\` their roles
+ * in the App, \`["builder", "user"]\` for a builder, \`["user"]\` for
+ * anyone else with a role, \`[]\` for a visitor the App was shared with,
+ * whose \`id\` changes each session: key a visitor's records by
+ * \`email\`). Decide who may see or do what with it, on the server
+ * (\`user.id\` for "my requests", "assigned to me",
+ * \`user.roles.includes("builder")\` for what only builders do; never a
+ * read of a table only builders may read). Reading other members needs the App to
  * declare it, \`app({ ..., permissions: { people: true } })\`, which its reviewer sees;
  * only then \`ctx.people\` reads them: \`find(ids)\`,
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
  * person \`{ id, name, email, teams }\`; a visitor is refused it. Screens
- * get the same from \`@grasp-os/sdk/react\`: \`useCaller()\` (undefined
+ * get the same from \`@grasp-os/sdk/react\`: \`useUser()\` (undefined
  * while loading; for showing, never deciding) and \`usePeople()\` (the same
  * three reads). The top-level \`people\` path is the platform's: no
  * function registers there.
@@ -1607,7 +1613,7 @@ build: {
     review: {
       current: number | null;
       files: { path: string; change: "added" | "modified" | "removed" }[];
-      /** How the server code (app.ts, schema.ts, values.ts, operations/, migrations/) changed: it acts for whoever uses the App. */
+      /** How the server code (app.ts, schema.ts, values.ts, server/) changed: it acts for whoever uses the App. */
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */

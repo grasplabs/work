@@ -52,7 +52,7 @@ const routedFiles = (): Record<string, string> => ({
   ],`
     ),
   "screens/note.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
-import type { screens } from "#grasp";
+import type { screens } from "@server/_generated/api";
 
 export default function Note({ input }: ScreenProps<typeof screens.note>) {
   return <p>{input.id} on {input.tab}</p>;

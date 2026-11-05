@@ -1,11 +1,11 @@
 /**
  * The React SDK of an App's screens (spec 10.1, 10.7.1): the platform's
  * session client in a component, and the App's queries, mutations and
- * actions through the references the host generated for it (`#grasp`).
+ * actions through the references the host generated for it (`@server/_generated/api`).
  *
  * ```tsx
  * import { useMutation, useQuery } from "@grasp-os/sdk/react";
- * import { api } from "#grasp";
+ * import { api } from "@server/_generated/api";
  *
  * export default function Notes() {
  *   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
@@ -85,7 +85,7 @@ import type {
   SchemaFormOptions,
 } from "./form.ts";
 import { peopleDirectory, peopleReferences } from "./people.ts";
-import type { Caller, PeopleDirectory } from "./people.ts";
+import type { PeopleDirectory, User } from "./people.ts";
 import type {
   AnyWorkflowReference,
   ArgsOf,
@@ -140,14 +140,12 @@ export type {
 } from "./client-files.ts";
 export type { OpenLinkOptions } from "./client-links.ts";
 export type {
-  Caller,
   PageOptions,
   PeopleDirectory,
   PeoplePage,
   Person,
-  PersonCaller,
   TeamRef,
-  VisitorCaller,
+  User,
 } from "./people.ts";
 export type { UploadView } from "./upload-transfer.ts";
 export type {
@@ -352,16 +350,15 @@ export const useMutation = <Reference extends MutationReference>(
 export const useNavigate = (): Navigate => useClient().navigate;
 
 /**
- * Who is using the screen: a member of the organization (`kind:
- * "person"`, with their roles and teams), or a visitor the App was shared
- * with (`kind: "visitor"`, whose `id` is their session's: key a visitor by
- * `email`); `undefined` while it loads. Core answers it
- * from who is signed in, never from the screen: show it, but decide what
- * someone may do in the App's server functions, with `ctx.caller`, which
- * no screen can change.
+ * Who is using the screen (`User`): their ID, name, address and roles in
+ * the App (`builder`, `user`; none for a visitor the App was shared with,
+ * whose `id` is their session's: key a visitor by `email`); `undefined`
+ * while it loads. Core answers it from who is signed in, never from the
+ * screen: show it, but decide what someone may do in the App's server
+ * functions, with `ctx.auth.getUser()`, which no screen can change.
  */
-export const useCaller = (): Caller | undefined =>
-  useQuery(peopleReferences.caller, {});
+export const useUser = (): User | undefined =>
+  useQuery(peopleReferences.user, {});
 
 /** Each client's directory (`usePeople`). */
 const directories = new WeakMap<GraspClient, PeopleDirectory>();

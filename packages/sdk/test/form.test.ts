@@ -12,7 +12,7 @@ import { bindForm } from "../src/form.ts";
 import type { FormApiOf, FormBinding, FormOptionsInput } from "../src/form.ts";
 import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
-import { api, workflows } from "./notes/.grasp/references.ts";
+import { api, workflows } from "./notes/server/_generated/api.ts";
 
 // A form's submission state through the real session client, against the
 // network it reaches the host through: an outcome it can't tell, given up

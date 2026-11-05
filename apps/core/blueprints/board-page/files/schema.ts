@@ -85,7 +85,4 @@ export default defineSchema({
     narrative: v.string().max(narrativeMax),
   }).index("by_created", ["_createdAt"]),
   figures: defineTable(figureFields).index("by_take", ["take", "at"]),
-  // Holds nothing: only the App's builders may read it, which is how the
-  // page asks whether someone may take a snapshot (operations/access.ts).
-  builders: defineTable({ none: v.null() }),
 });

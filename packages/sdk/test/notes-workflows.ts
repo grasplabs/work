@@ -4,7 +4,7 @@ import { descriptorOf } from "../src/value-schema.ts";
 
 // What the host resolves of the workflows the Notes fixture declares
 // (test/notes/app.ts), against the approved records of its bindings: what
-// `.grasp/references.ts` is generated with beside the App's manifest.
+// `server/_generated/api.ts` is generated with beside the App's manifest.
 // `summarizeNote` listens for two events in two tasks and asks two
 // decisions of different values; `archiveNotes` listens for a
 // confirmation and asks one decision with no value.

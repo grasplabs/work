@@ -1,6 +1,5 @@
 import { v } from "@grasp-os/sdk";
-
-import { mutation } from "#grasp/server";
+import { mutation } from "@server/_generated/server";
 
 /** Greets `name`, and says how many greetings this App has given. */
 export const hello = mutation({

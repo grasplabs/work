@@ -59,7 +59,7 @@ import { detailsRemoved } from "./workflows/retention.ts";
 // A workflow reference's ordinary queries, as an App's screens read them
 // (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
 // `.decisions` and `.decision`, whose arguments and answers the SDK
-// declares (workflow-queries.ts) and generates into `#grasp`. They aren't
+// declares (workflow-queries.ts) and generates into `@server/_generated/api`. They aren't
 // the App's functions: core serves them itself, from the independent
 // workflow the App's binding of `<alias>` names now. Threat model (also on
 // GRA-673), and how each is closed:

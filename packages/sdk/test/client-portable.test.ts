@@ -10,7 +10,7 @@ import { GraspError } from "../src/client-error.ts";
 import { PortableLive } from "../src/client-live.ts";
 import type { PortableToken } from "../src/client-portable.ts";
 import type { Id } from "../src/index.ts";
-import { api } from "./notes/.grasp/references.ts";
+import { api } from "./notes/server/_generated/api.ts";
 
 // A portable host's client (`new GraspClient({ url, getToken })`) against
 // the network it reaches core through: where its token goes, and what it

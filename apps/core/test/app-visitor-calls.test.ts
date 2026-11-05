@@ -55,8 +55,8 @@ export default defineSchema({
   secrets: defineTable({ text: v.string() }),
 });
 `,
-  "operations/portal.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action, mutation, query } from "#grasp/server";
+  "server/portal.ts": `import { permission, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
 
 export const followUp = permission.workflow("followUp", {
   input: v.object({ who: v.string() }),
@@ -109,7 +109,7 @@ export const kick = mutation({
 export const who = query({
   args: {},
   returns: v.string(),
-  handler: (ctx) => JSON.stringify(ctx.caller),
+  handler: async (ctx) => JSON.stringify(await ctx.auth.getUser()),
 });
 
 /** A search of the organization's people, or the code it was refused with. */
@@ -132,7 +132,7 @@ export const shout = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, followUp, keep, kick, look, mine, secrets, who, shout } from "./operations/portal.ts";
+import { followUp } from "./server/portal.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -144,8 +144,6 @@ export default app({
       secrets: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { portal: { add, mine, keep, secrets, look, who, kick, shout } },
-  internalOperations: {},
   screens: [],
   permissions: { workflows: [followUp] },
 });
@@ -183,7 +181,7 @@ export const ${name} = query({
   const list = manyNames.join(", ");
   return {
     ...files,
-    "operations/portal.ts": `${files["operations/portal.ts"] ?? ""}${queries}`,
+    "server/portal.ts": `${files["server/portal.ts"] ?? ""}${queries}`,
     "app.ts": (files["app.ts"] ?? "")
       .replace("shout } from", `shout, ${list} } from`)
       .replace("kick, shout }", `kick, shout, ${list} }`),
@@ -299,7 +297,7 @@ const call = async (
 };
 
 /**
- * What a visitor's screen reads through `useCaller` or `usePeople`
+ * What a visitor's screen reads through `useUser` or `usePeople`
  * (`reference`) answers: its value, or the code it was refused with.
  */
 const read = async (
@@ -339,7 +337,12 @@ const visitorCallerOf = (answer: unknown): unknown => {
     return parsed;
   }
   const caller = z
-    .object({ kind: z.string(), id: z.string(), email: z.string() })
+    .strictObject({
+      id: z.string(),
+      name: z.string(),
+      email: z.string(),
+      roles: z.array(z.string()),
+    })
     .parse(parsed);
   return { ...caller, id: caller.id.replace(/:.*$/u, ":") };
 };
@@ -458,7 +461,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       server = await call(app, version, ana, "portal.who");
       looked = await call(app, version, ana, "portal.look");
       screen = {
-        caller: await read(ana, peopleReferences.caller, {}),
+        caller: await read(ana, peopleReferences.user, {}),
         search: await read(ana, peopleReferences.search, { query: "a" }),
       };
     });
@@ -476,11 +479,21 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         .filter(({ action }) => action === "app.visitor_refused")
         .map(({ detail }) => detail),
     }).toStrictEqual({
-      server: { kind: "visitor", id: "visitor:", email: `ana@${domain}` },
+      server: {
+        id: "visitor:",
+        name: `ana@${domain}`,
+        email: `ana@${domain}`,
+        roles: [],
+      },
       looked: "visitor.not_granted",
       sameVisitor: true,
       screen: {
-        caller: { kind: "visitor", id: "visitor:", email: `ana@${domain}` },
+        caller: {
+          id: "visitor:",
+          name: `ana@${domain}`,
+          email: `ana@${domain}`,
+          roles: [],
+        },
         search: "visitor.not_granted",
       },
       refused: [

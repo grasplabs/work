@@ -32,6 +32,8 @@ import {
   isAppTestSuite,
   maxAppTestSuites,
   serverCodeFolders,
+  serverEntryPath,
+  serverEntrySource,
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
@@ -117,6 +119,7 @@ import { previewEntries } from "./preview-entry.ts";
 import type { Bundle } from "./preview-entry.ts";
 import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
+import { lintServerCode } from "./server-lint.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -1110,8 +1113,8 @@ const buildAppCodeNoting = (
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  // Nothing under operations/ or migrations/ is passed over: what isn't
-  // server code is refused, by name.
+  // Nothing under server/ is passed over: what isn't server code is
+  // refused, by name.
   const strays = strayProblems(code, serverCodeFolders, "server");
   if (strays.length > 0) {
     return { ok: false, diagnostics: strays };
@@ -1127,6 +1130,10 @@ const buildAppCodeNoting = (
       ],
     };
   }
+  // The entry the host runs the App from, made from its file list: its
+  // registration with every server module's functions. Built as the
+  // host's own code, never type-checked as the App's.
+  code[serverEntryPath] = serverEntrySource(Object.keys(code));
   const known = new Set(Object.keys(code));
   const modules: Record<string, string> = {};
   const errors: Diagnostic[] = [];
@@ -1270,7 +1277,7 @@ export const buildWorkflows = (
               rule: "server",
               severity: "warning",
               message:
-                "The App's server code doesn't build, so its types aren't in this check: a workflow that names them (appFunctions<Tree>(env), import type from operations/) can't find them until it builds.",
+                "The App's server code doesn't build, so its types aren't in this check: a workflow that names them (appFunctions<Tree>(env), import type from server/) can't find them until it builds.",
             },
           ]
         : diagnostics,
@@ -1280,7 +1287,7 @@ export const buildWorkflows = (
 /**
  * Builds an App's tests (`tests/**`), each held to what a test may import
  * (app-code.ts): only the test files become modules. The schema and
- * values they import, and the `#grasp` references, are the release's own
+ * values they import, and the `@server/_generated/api` references, are the release's own
  * modules, which core loads with them. Types are stripped, not checked.
  */
 export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
@@ -1313,6 +1320,10 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
       ],
     };
   }
+  // The entry the host runs the App from, made from its file list: its
+  // registration with every server module's functions. Built as the
+  // host's own code, never type-checked as the App's.
+  code[serverEntryPath] = serverEntrySource(Object.keys(code));
   const known = new Set(Object.keys(code));
   const modules: Record<string, string> = {};
   const errors: Diagnostic[] = [];
@@ -1349,7 +1360,7 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
   // everything there is to fix (`together`).
   const unparsed = new Set<string>();
   const built = buildAppCodeNoting(files, unparsed);
-  // Its tests, checked in the same program: their `#grasp` is the
+  // Its tests, checked in the same program: their `@server/_generated/api` is the
   // references generated for this very release, which exist only here.
   // Only tests that build (`buildAppTests`: what a test may import and
   // name, no directive, suppression or ambient module) join it, so none
@@ -1366,11 +1377,14 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
   // shape it declares (`input`), or as the stored JSON it is handed when
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
-  const diagnostics = typeCheck(
-    { ...appCodeFiles(files), ...tests },
-    kit.types,
-    appCodeTarget
-  );
+  const diagnostics = [
+    ...typeCheck(
+      { ...appCodeFiles(files), ...tests },
+      kit.types,
+      appCodeTarget
+    ),
+    ...lintServerCode(appCodeFiles(files)),
+  ];
   if (!built.ok) {
     return {
       ok: false,

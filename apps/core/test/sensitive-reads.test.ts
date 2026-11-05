@@ -56,8 +56,8 @@ export default defineSchema({
   }),
 });
 `,
-  "operations/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const pay = mutation({
   args: { person: v.string(), amount: v.number() },
@@ -192,7 +192,6 @@ export const byPerson = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { bundle, bundles, byPerson, find, highest, leak, lookup, note, notes, pay, probe, salaries, stuff } from "./operations/pay.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -204,8 +203,6 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { pay: { bundle, bundles, byPerson, find, highest, leak, lookup, note, notes, pay, probe, salaries, stuff } },
-  internalOperations: {},
   screens: [],
 });
 `,

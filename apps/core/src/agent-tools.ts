@@ -218,7 +218,7 @@ const readAppParameter = Type.Optional(
 
 /** What the tools that read say of Grasp's reference, where to start. */
 const referenceStart =
-  "Start with @grasp-os/sdk/src/app.ts (what app() takes), and a complete App: blueprints/board-page/app.ts, schema.ts, operations/ and screens/.";
+  "Start with @grasp-os/sdk/src/app.ts (what app() takes), and a complete App: blueprints/board-page/app.ts, schema.ts, server/ and screens/.";
 
 /** What `writeFile` and `editFile` say of what they answer with (`env.build.write`). */
 const answersWithDiagnostics =

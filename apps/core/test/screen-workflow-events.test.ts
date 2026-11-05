@@ -67,7 +67,7 @@ export default defineSchema({
   invoices: defineTable({ amount: v.number() }),
 });
 `,
-  "operations/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
 export const review = permission.workflow("review", {
   input: v.object({ jobId: v.string() }),
@@ -75,14 +75,13 @@ export const review = permission.workflow("review", {
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { review } from "./operations/invoices.ts";
+import { review } from "./server/invoices.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoices",
   schema,
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [review] },
 });
@@ -189,7 +188,7 @@ const rolesOf = (by: Identity) => ({
   },
 });
 
-/** The reference to `alias` as `#grasp` generates it from `release`. */
+/** The reference to `alias` as `@server/_generated/api` generates it from `release`. */
 const workflowReference = async (release: Release, alias: string) => {
   const declared = declaredWorkflows(release.app, release.workflows).find(
     (workflow) => workflow.alias === alias

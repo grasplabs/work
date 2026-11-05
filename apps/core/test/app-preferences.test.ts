@@ -64,7 +64,6 @@ export default app({
   name: "Desk",
   schema,
   access: { tables: ${withNotes ? '{ notes: { read: "owner", write: "owner" } }' : "{}"} },
-  operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   ${preferences === "" ? "" : `preferences: ${preferences},`}
 });
@@ -112,7 +111,7 @@ const share = async ({ app, owner }: Sealed, by: Identity): Promise<void> => {
   });
 };
 
-/** The reference to `name` of `release`'s preferences, as `#grasp` has it. */
+/** The reference to `name` of `release`'s preferences, as `@server/_generated/api` has it. */
 const referenceTo = async (release: Release, name: PreferenceOperationName) => {
   if (release.app.preferences === null) {
     throw new Error("The App declares no preferences");

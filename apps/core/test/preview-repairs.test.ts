@@ -59,8 +59,8 @@ export default defineSchema({
   invoices: defineTable({ number: v.string().min(1).max(20) }),
 });
 `,
-  "operations/desk.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "#grasp/server";
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
 
 export const total = query({
   args: {},
@@ -76,15 +76,12 @@ export const total = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { total } from "./operations/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoice desk",
   schema,
   access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  operations: { desk: { total } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -99,7 +96,7 @@ const talkingDesk = (): Record<string, string> => {
   const fixed = desk(true);
   return {
     ...fixed,
-    "operations/desk.ts": `${fixed["operations/desk.ts"] ?? ""}
+    "server/desk.ts": `${fixed["server/desk.ts"] ?? ""}
 export const chatty = query({
   args: { note: v.string() },
   returns: v.string(),
@@ -123,9 +120,6 @@ export const shouting = query({
   },
 });
 `,
-    "app.ts": (fixed["app.ts"] ?? "")
-      .replace("import { total }", "import { chatty, shouting, total }")
-      .replace("desk: { total }", "desk: { chatty, shouting, total }"),
   };
 };
 
@@ -227,8 +221,8 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -243,15 +237,12 @@ export const titles = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Invoice desk",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -260,7 +251,7 @@ export default app({
 /** The notes draft, with a query whose code throws the attack. */
 const spec8Broken: Record<string, string> = {
   ...spec8Notes,
-  "operations/notes.ts": `${spec8Notes["operations/notes.ts"] ?? ""}
+  "server/notes.ts": `${spec8Notes["server/notes.ts"] ?? ""}
 export const broken = query({
   args: {},
   returns: v.number(),

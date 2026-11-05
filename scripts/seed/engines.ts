@@ -134,7 +134,7 @@ export const decisionResponse = JSON.stringify(
  */
 const suite = (tests: Record<string, string>): string =>
   `import { workflowTest } from "@grasp-os/sdk/testing";
-import { workflows } from "#grasp";
+import { workflows } from "@server/_generated/api";
 
 export default workflowTest({
   fixtures: "desk",

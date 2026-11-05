@@ -26,7 +26,7 @@ export default defineSchema({
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+import { mutation, query } from "@server/_generated/server";
 
 export const remember = mutation({
   args: { recipients: v.string().max(16_000) },
@@ -44,21 +44,19 @@ export const recipients = query({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { recipients, remember } from "./operations/asks.ts";
+import { recipients, remember } from "./server/asks.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Approvals",
   schema,
   access: { tables: { asks: { read: "appMembers", write: "appMembers" } } },
-  operations: { asks: { remember, recipients } },
-  internalOperations: {},
   screens: [{ name: "asks", path: "/", source: "screens/asks.tsx" }],
 });
 `;
 
 const screen = `import { useQuery } from "@grasp-os/sdk/react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default function Asks() {
   const recipients = useQuery(api.asks.recipients, {});
@@ -141,7 +139,7 @@ const askedFor = async (builder: Person, decider: Person, page: Page) => {
       app,
       {
         "schema.ts": schema,
-        "operations/asks.ts": operations,
+        "server/asks.ts": operations,
         "app.ts": registration,
         "screens/asks.tsx": screen,
         "workflows/approval.ts": approval,

@@ -6,7 +6,8 @@
  *
  * - `node build-heap.ts files <blueprints> <out.json>` writes each
  *   blueprint's files with the modules the host generates for it
- *   (`.grasp/`), as core's save does (apps/core/src/draft-references.ts).
+ *   (`server/_generated/`), as core's save does
+ *   (apps/core/src/draft-references.ts).
  *   It loads the SDK and the App's code, so it runs without the cap.
  * - `node --max-heap-size=<MB> build-heap.ts build <release> <files.json>`
  *   builds each blueprint's screens, its preview and its server code in
@@ -23,6 +24,7 @@ import { getHeapStatistics } from "node:v8";
 
 import { z } from "zod";
 
+import { isServerModule } from "./src/app-code.ts";
 import { compilerAssets, kitModule } from "./src/kit.ts";
 import type { CompileTarget } from "./src/worker.ts";
 
@@ -35,20 +37,28 @@ const identity = {
 /** A module's namespace, as far as its default export. */
 const defaultExport = z.looseObject({ default: z.unknown() });
 
+/** A module's namespace, every export. */
+const moduleSchema = z.record(z.string(), z.unknown());
+
 const blueprintsSchema = z.record(z.string(), z.record(z.string(), z.string()));
 
 /**
  * Each blueprint's files, by path relative to the App, and the modules
- * the host generates for it, by `files/app.ts`'s registration. Its
- * server code imports `#grasp/server`, which resolves to the
- * blueprint's `server-types.ts`, as its tsconfig maps it.
+ * the host generates for it, by `files/app.ts`'s registration with the
+ * functions its server modules export (`registerFunctions`, as the host's
+ * entry registers them). Its server code imports
+ * `@server/_generated/server`, which resolves to the blueprint's
+ * `server-types.ts`, as its tsconfig maps it.
  */
 const blueprintFiles = async (
   blueprints: string
 ): Promise<z.infer<typeof blueprintsSchema>> => {
   registerHooks({
     resolve: (specifier, context, next) => {
-      if (specifier !== "#grasp/server" || context.parentURL === undefined) {
+      if (
+        specifier !== "@server/_generated/server" ||
+        context.parentURL === undefined
+      ) {
         return next(specifier, context);
       }
       const parent = new URL(context.parentURL).pathname;
@@ -59,7 +69,8 @@ const blueprintFiles = async (
       );
     },
   });
-  const { generateModules, inspectApp } = await import("@grasp-os/sdk/host");
+  const { generateModules, inspectApp, registerFunctions } =
+    await import("@grasp-os/sdk/host");
   const all: z.infer<typeof blueprintsSchema> = {};
   const names = readdirSync(blueprints).filter((name) =>
     existsSync(path.join(blueprints, name, "files/app.ts"))
@@ -70,7 +81,6 @@ const blueprintFiles = async (
     const app: unknown = await import(
       pathToFileURL(path.join(dir, "app.ts")).href
     );
-    const registered: unknown = defaultExport.parse(app).default;
     const files: Record<string, string> = {};
     for (const file of readdirSync(dir, {
       recursive: true,
@@ -80,10 +90,28 @@ const blueprintFiles = async (
         files[file] = readFileSync(path.join(dir, file), "utf-8");
       }
     }
+    const modules: Record<string, Record<string, unknown>> = {};
+    for (const file of Object.keys(files).filter(isServerModule).toSorted()) {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const namespace: unknown = await import(
+        pathToFileURL(path.join(dir, file)).href
+      );
+      modules[file.slice("server/".length, -".ts".length)] =
+        moduleSchema.parse(namespace);
+    }
+    // SAFETY: the App's default export; `registerFunctions` refuses
+    // anything `app` didn't register.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const registered = defaultExport.parse(app).default as Parameters<
+      typeof registerFunctions
+    >[0];
     all[name] = {
       ...files,
       // oxlint-disable-next-line no-await-in-loop -- as above
-      ...(await generateModules(inspectApp(registered).manifest, identity)),
+      ...(await generateModules(
+        inspectApp(registerFunctions(registered, modules)).manifest,
+        identity
+      )),
     };
   }
   return all;

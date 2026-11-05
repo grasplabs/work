@@ -27,8 +27,8 @@ const approvalFiles: Record<string, string> = {
 
 export default defineSchema({ asks: defineTable({ body: v.string() }) });
 `,
-  "operations/approvals.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+  "server/approvals.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 const recipient = v.object({ userId: v.string(), name: v.string(), email: v.string(), link: v.string() });
 
@@ -49,15 +49,12 @@ export const asks = query({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 
-import { asks, remember } from "./operations/approvals.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Approvals",
   schema,
   access: { tables: { asks: { read: "appMembers", write: "appMembers" } } },
-  operations: { approvals: { remember, asks } },
-  internalOperations: {},
   screens: [],
 });
 `,

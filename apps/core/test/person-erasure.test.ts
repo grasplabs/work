@@ -460,7 +460,6 @@ export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: {},
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   preferences: v.object({ theme: v.enum(["light", "dark"]).default("light") }),
 });

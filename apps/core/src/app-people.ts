@@ -6,11 +6,11 @@ import {
   schemaFromDescriptor,
 } from "@grasp-os/sdk/host";
 import type {
-  Caller,
   PeopleOperationName,
   PeoplePage,
   Person,
   TeamRef,
+  User,
 } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -18,7 +18,6 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { roleSchema } from "@grasp-os/shared/roles";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -27,21 +26,20 @@ import { drizzle } from "drizzle-orm/d1";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { currentMembership, notRemoved, organizationId } from "./auth/auth.ts";
 import { realEmail } from "./auth/directory-members.ts";
-import { teamsOf } from "./auth/identity.ts";
 import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what App
-// code reads as `ctx.caller` and `ctx.people`, and a screen as
-// `useCaller()` and `usePeople()` (the SDK's people.ts). Core answers both
+// code reads as `ctx.auth.getUser()` and `ctx.people`, and a screen as
+// `useUser()` and `usePeople()` (the SDK's people.ts). Core answers both
 // itself. Threat model, and how each is closed:
 //
-// - A screen or App code makes up who calls: the caller is read here from
+// - A screen or App code makes up who calls: the user is read here from
 //   core's own record of the call (the member's verified session, the
 //   person a run acts for, the visitor's session), never from a request;
 //   no read takes a person to be. A screen that shows another name fools
-//   only itself: the App's server code decides with `ctx.caller`, which
-//   no screen reaches.
+//   only itself: the App's server code decides with
+//   `ctx.auth.getUser()`, which no screen reaches.
 // - Any App, or an agent through one, harvests the organization: only an
 //   App that declares it reads the directory (`permissions: { people: true }`,
 //   which its versions' review shows); any other read is refused
@@ -76,7 +74,7 @@ import { inList } from "./db/d1.ts";
 /** Who calls and what they may read, as core resolved it for one call. */
 export interface PeopleAccess {
   /** Who calls, read once and kept for the call. */
-  readonly caller: () => Promise<Caller>;
+  readonly user: () => Promise<User>;
   /**
    * Reads the directory for the caller: absent where they may not, whose
    * reads `refuse` refuses.
@@ -86,7 +84,7 @@ export interface PeopleAccess {
   readonly refuse?: (name: PeopleOperationName) => Promise<never>;
 }
 
-type DirectoryRead = Exclude<PeopleOperationName, "caller">;
+type DirectoryRead = Exclude<PeopleOperationName, "user">;
 
 type Directory = (
   name: DirectoryRead,
@@ -132,8 +130,8 @@ export const answerPeople = async (
     throw operationErrors.create("operation.not_found");
   }
   const checked = checkedArgs(name, args);
-  if (name === "caller") {
-    return await access.caller();
+  if (name === "user") {
+    return await access.user();
   }
   if (access.directory === undefined) {
     if (access.refuse !== undefined) {
@@ -360,8 +358,6 @@ export interface MemberReader {
   readonly userId: string;
   /** Their roles in the App, as the call's gate read them last. */
   readonly roles: () => Promise<WriterRoles>;
-  /** Their teams, when the call has them already (their session's). */
-  readonly teams?: readonly TeamRef[];
   /** Whether the App declares it reads the organization's people. */
   readonly declared: boolean;
   /** Who the audit log names as reading: the App's server or screen, or an agent. */
@@ -369,37 +365,36 @@ export interface MemberReader {
   readonly requestId: string;
 }
 
+/** A member's roles in an App (`appRoles`): a builder is a user too. */
+const rolesOf = (builder: boolean): User["roles"] =>
+  builder ? ["builder", "user"] : ["user"];
+
 /**
- * Who `userId` is, as a member calling the App: one read of their name,
- * address and role, with the teams and App roles the call already has.
- * Refused once they are no member.
+ * Who `userId` is, as a member calling the App: one read of their name
+ * and address, with the App roles the call already has. Refused once
+ * they are no member.
  */
-const personCaller = async (
+const personUser = async (
   env: Env,
-  { userId, roles, teams: known }: MemberReader
-): Promise<Caller> => {
-  const [row, memberTeams, appRoles] = await Promise.all([
+  { userId, roles }: MemberReader
+): Promise<User> => {
+  const [row, appRoles] = await Promise.all([
     drizzle(env.DB)
-      .select({ name: users.name, email: users.email, role: members.role })
+      .select({ name: users.name, email: users.email })
       .from(users)
       .innerJoin(members, eq(members.userId, users.id))
       .where(currentMembership(userId))
       .get(),
-    known ?? teamsOf(env.DB, userId),
     roles(),
   ]);
-  const orgRole = roleSchema.safeParse(row?.role);
-  if (row === undefined || !orgRole.success) {
+  if (row === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
-    kind: "person",
     id: userId,
     name: row.name,
     email: realEmail(row.email),
-    orgRole: orgRole.data,
-    appRole: appRoles.appBuilder ? "builder" : "user",
-    teams: memberTeams.map(({ id, name }) => ({ id, name })),
+    roles: rolesOf(appRoles.appBuilder),
   };
 };
 
@@ -418,7 +413,7 @@ const once = <Answer>(read: () => Promise<Answer>): (() => Promise<Answer>) => {
  * that doesn't is refused each read, recorded as `app.people.refused`.
  */
 export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
-  const caller = once(async () => await personCaller(env, reader));
+  const user = once(async () => await personUser(env, reader));
   const audit = async (action: string, detail: Record<string, Json>) => {
     await keepAuditEvent(env, drizzle(env.DB), {
       actor: reader.actor,
@@ -430,7 +425,7 @@ export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
   };
   if (!reader.declared) {
     return {
-      caller,
+      user,
       refuse: async (name) => {
         await audit("app.people.refused", { read: name, reason: "undeclared" });
         throw permissionErrors.create("permission.denied");
@@ -438,10 +433,10 @@ export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
     };
   }
   return {
-    caller,
+    user,
     directory: async (name, args) => {
       // A member, with a role in the App, as the call found them.
-      await caller();
+      await user();
       const answer = await directoryReads[name](env, args);
       await audit("app.people.read", { read: name, count: countOf(answer) });
       return answer;
@@ -462,8 +457,8 @@ export const visitorPeople = ({
   readonly email: string;
   readonly refuse: (name: PeopleOperationName) => Promise<never>;
 }): PeopleAccess => ({
-  caller: async () =>
-    await Promise.resolve({ kind: "visitor", id: principal, email }),
+  user: async () =>
+    await Promise.resolve({ id: principal, name: email, email, roles: [] }),
   refuse,
 });
 
@@ -478,15 +473,12 @@ export const fixturePeople = (
   role: "user" | "builder",
   declared: boolean
 ): PeopleAccess => ({
-  caller: async () =>
+  user: async () =>
     await Promise.resolve({
-      kind: "person",
       id: principal,
       name: principal,
       email: null,
-      orgRole: role,
-      appRole: role,
-      teams: [],
+      roles: rolesOf(role === "builder"),
     }),
   ...(declared
     ? {

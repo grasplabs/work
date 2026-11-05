@@ -11,8 +11,8 @@ import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
 import { useForm } from "../src/react.ts";
 import type { GraspForm, RecordForm, TextFieldName } from "../src/react.ts";
-import { api } from "./notes/.grasp/references.ts";
-import { internal } from "./notes/.grasp/server-references.ts";
+import { api } from "./notes/server/_generated/api.ts";
+import { internal } from "./notes/server/_generated/internal.ts";
 
 /** A note as `notes.get` answers it. */
 interface Note {

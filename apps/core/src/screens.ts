@@ -5,8 +5,8 @@ import {
   appModuleName,
   buildFiles,
   compilerVersion,
-  generatedFolder,
   isAppLayout,
+  isGeneratedPath,
   kitModuleName,
   kitModules,
   kitPreviewModules,
@@ -36,11 +36,7 @@ import type {
   ScreenBuild,
   WorkflowBuild,
 } from "@grasp-os/compiler";
-import {
-  generatedPaths,
-  serverModuleSource,
-  symbolicModules,
-} from "@grasp-os/sdk/host";
+import { symbolicModules } from "@grasp-os/sdk/host";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -65,6 +61,7 @@ import {
   usedNow,
 } from "./build-cache.ts";
 import type { Built, CacheEnv } from "./build-cache.ts";
+import { hostModules } from "./host-modules.ts";
 import {
   incrementPrefixes,
   keepIncrements,
@@ -969,14 +966,14 @@ export const buildAppTests = async (
 const workflowInputs = (files: AppFiles): AppFiles => {
   const selected = Object.fromEntries(
     Object.entries(workflowBuildFiles(files)).filter(
-      ([path]) => !path.startsWith(generatedFolder)
+      ([path]) => !isGeneratedPath(path)
     )
   );
   return isAppLayout(selected)
     ? {
         ...selected,
         ...symbolicModules(),
-        [generatedPaths.server]: serverModuleSource,
+        ...hostModules,
       }
     : selected;
 };

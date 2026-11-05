@@ -8,7 +8,7 @@ import { expectTypeOf } from "vite-plus/test";
 import type { Id } from "../src/index.ts";
 import { appTest } from "../src/testing.ts";
 import type { LiveQuery, TestPrincipal } from "../src/testing.ts";
-import { api } from "./notes/.grasp/references.ts";
+import { api } from "./notes/server/_generated/api.ts";
 
 appTest({
   fixtures: "notes",

@@ -38,7 +38,6 @@ const declared = [
 const linkedFiles = (origins: readonly string[] | null = declared) => ({
   ...notesFiles,
   "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 ${origins === null ? "" : `export const help = permission.links({ origins: ${JSON.stringify(origins)} });\n`}
@@ -48,8 +47,6 @@ export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, get, create, update, remove, echo, stamp, big } },
-  internalOperations: {},
   screens: [],
   permissions: { ${origins === null ? "" : "links: help, "}files: attachments },
 });

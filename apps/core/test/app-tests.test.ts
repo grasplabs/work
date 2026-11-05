@@ -44,8 +44,8 @@ export default defineSchema({
   mottos: defineTable({ text: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, permission, v } from "@grasp-os/sdk";
-import { action, internalQuery, mutation, query } from "#grasp/server";
+  "server/notes.ts": `import { AppError, permission, v } from "@grasp-os/sdk";
+import { action, internalQuery, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -98,7 +98,7 @@ export const count = internalQuery({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { count, create, find, help, searchHelp, setMotto, titles } from "./operations/notes.ts";
+import { help } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -110,8 +110,6 @@ export default app({
       mottos: { read: "appMembers", write: "appBuilders" },
     },
   },
-  operations: { notes: { create, titles, find, setMotto, searchHelp } },
-  internalOperations: { notes: { count } },
   screens: [],
   permissions: { brain: help },
 });
@@ -126,7 +124,7 @@ export default app({
 };
 
 const passingSuite = `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default appTest({
   fixtures: "notes",
@@ -181,7 +179,7 @@ export default appTest({
 `;
 
 const failingSuite = `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default appTest({
   fixtures: "notes",
@@ -215,7 +213,7 @@ const suiteOf = (
   body: string,
   before = ""
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 ${before}
 export default appTest({
   fixtures: "notes",
@@ -341,8 +339,8 @@ export default defineSchema({
   }),
 });
 `,
-      "operations/deals.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "#grasp/server";
+      "server/deals.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
   args: { title: v.string(), team: v.string() },
@@ -358,15 +356,12 @@ export const titles = query({
 });
 `,
       "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, titles } from "./operations/deals.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Deals",
   schema,
   access: { tables: { deals: { read: "appMembers", write: "appMembers" } } },
-  operations: { deals: { add, titles } },
-  internalOperations: {},
   screens: [],
 });
 `,
@@ -377,7 +372,7 @@ export default app({
         },
       }),
       "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export default appTest({
   fixtures: "deals",
@@ -426,7 +421,7 @@ export default appTest({
     const built = await appWith({
       ...appFiles,
       "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { titles } from "../operations/notes.ts";
+import { titles } from "../server/notes.ts";
 
 export default appTest({ fixtures: "notes", tests: { "runs a handler": async () => { await titles.handler(); } } });
 `,
@@ -435,7 +430,7 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
       expect.stringMatching(
-        /^tests\/sneaky\.test\.ts:2: "\.\.\/operations\/notes\.ts" can't be imported here\./u
+        /^tests\/sneaky\.test\.ts:2: "\.\.\/server\/notes\.ts" can't be imported here\./u
       ),
     ]);
   });
@@ -490,7 +485,7 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
       ),
       // Each test within its 3 s, both together past the suite's 4 s.
       "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 export default appTest({
   fixtures: "notes",
   tests: {

@@ -193,8 +193,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Its agent writes a draft: the App stands on the right, and the chat
     // moves to its left.
     await writeDraft(builder.userId, chat.id, app.id, version, {
-      "operations/tally.ts":
-        tallyFiles("in the preview")["operations/tally.ts"] ?? "",
+      "server/tally.ts": tallyFiles("in the preview")["server/tally.ts"] ?? "",
     });
     // A read of it that fails says so beside the chat, and is tried again
     // from there.

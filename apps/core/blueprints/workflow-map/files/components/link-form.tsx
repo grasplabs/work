@@ -8,9 +8,8 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Input } from "@grasp-os/ui/components/input";
+import { api } from "@server/_generated/api";
 import { useState } from "react";
-
-import { api } from "#grasp";
 
 import { recordOf, settle } from "./store";
 import type { Outcome, Workflow } from "./store";

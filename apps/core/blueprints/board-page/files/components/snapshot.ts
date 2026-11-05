@@ -1,5 +1,5 @@
 // The board page's snapshots as its screen reads them from the App's
-// store (operations/snapshots.ts), and what each refusal means to the
+// store (server/snapshots.ts), and what each refusal means to the
 // person using it.
 
 import type { Id } from "@grasp-os/sdk";
@@ -120,6 +120,7 @@ export const refusal = (code: string): string => {
     case "data.reads_changed": {
       return "Someone saved this snapshot since you opened it. Open it again to see their changes.";
     }
+    case "board.builders_only":
     case "data.access_denied":
     case "data.write_denied": {
       return "Only the App's builders take snapshots and write them.";

@@ -30,7 +30,7 @@ export const appFiles: Record<string, string> = {
 export const suiteOf = (
   body: string
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export const page = { pagination: { pageSize: 50 } };
 

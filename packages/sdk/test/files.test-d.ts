@@ -16,7 +16,7 @@ import type {
   GraspError,
   UploadView,
 } from "../src/react.ts";
-import { permissions } from "./notes/.grasp/references.ts";
+import { permissions } from "./notes/server/_generated/api.ts";
 
 declare const client: GraspClient;
 declare const picked: File;

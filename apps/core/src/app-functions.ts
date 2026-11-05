@@ -351,7 +351,6 @@ export const invocationFor = async (
       app,
       userId: by.userId,
       roles: async () => admitted ?? (await authorize()),
-      ...(by.teams === undefined ? {} : { teams: by.teams }),
       declared: release.app.people === true,
       actor: delegateActorOf(authority),
       requestId,
@@ -1124,7 +1123,6 @@ const answeredPeople = async (
         app,
         userId: by.userId,
         roles: async () => await operationRoles(env, by, app),
-        teams: by.teams,
         declared: release.app.people === true,
         // An agent's read is the agent's, for its person; any other is the
         // App's screen's.

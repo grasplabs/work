@@ -418,7 +418,7 @@ About 600 mails a week come into the shared inbox.
   },
   opsWeek: {
     collection: "operations",
-    path: "operations/our-week.md",
+    path: "server/our-week.md",
     text: `# Our week in operations
 
 ## Renewal letters

@@ -11,7 +11,7 @@ import { withReferencesFrom } from "./draft-references.ts";
 import { versionScreens } from "./screens.ts";
 import type { VersionScreens } from "./screens.ts";
 
-// The `#grasp` references a version's screens import (draft-references.ts
+// The `@server/_generated/api` references a version's screens import (draft-references.ts
 // says what they are). A version's screens get the very bytes its release
 // seals (`sealRelease` generates them from the same manifest, identity and
 // bound workflows), sealed or not yet: a sealed version's manifest and
@@ -23,7 +23,7 @@ import type { VersionScreens } from "./screens.ts";
 
 /**
  * `files` (version `version` of `app`), with the references its screens
- * import as `#grasp` when it is of spec 8's layout and its screens name
+ * import as `@server/_generated/api` when it is of spec 8's layout and its screens name
  * them. An App whose server code doesn't inspect gets none, and a screen
  * that imports them is told so by the build.
  */

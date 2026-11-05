@@ -1,6 +1,5 @@
 import { AppError, v } from "@grasp-os/sdk";
-
-import { doc, mutation, query } from "#grasp/server";
+import { doc, mutation, query } from "@server/_generated/server";
 
 import {
   draftFields,

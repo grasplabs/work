@@ -2,7 +2,7 @@
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
  * operations and registration, and a screen on the React SDK
  * (`@grasp-os/sdk/react`) that reaches them only through the references
- * the host generates (`#grasp`).
+ * the host generates (`@server/_generated/api`).
  */
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -19,8 +19,8 @@ export default defineSchema({
 `;
 
 const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { action, doc, internalMutation, mutation, query } from "#grasp/server";
-import { internal } from "#grasp/server-references";
+import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
+import { internal } from "@server/_generated/internal";
 import { noteFields } from "../schema.ts";
 
 export const list = query({
@@ -127,7 +127,7 @@ export const detachFile = mutation({
 `;
 
 const registration = `import { app, permission } from "@grasp-os/sdk";
-import { attachFile, create, detachFile, get, importHalfway, insert, list, remove, update } from "./operations/notes.ts";
+import { attachFile, create, detachFile, get, importHalfway, insert, list, remove, update } from "./server/notes.ts";
 import schema from "./schema.ts";
 
 export const files = permission.files({
@@ -138,8 +138,6 @@ export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, get, create, update, remove, importHalfway, attachFile, detachFile } },
-  internalOperations: { notes: { insert } },
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   permissions: { files },
 });
@@ -151,7 +149,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
 import { useState } from "react";
-import { api, permissions } from "#grasp";
+import { api, permissions } from "@server/_generated/api";
 import type { Note } from "./note-editor.tsx";
 
 /** One attached file: its preview, name and size, to download or remove. */
@@ -264,7 +262,7 @@ export function Attachments({ note }: { note: Note }) {
 
 const createNote = `import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 /** A new note: the operation's input is the form, its contract the check. */
 export function CreateNote() {
@@ -299,7 +297,7 @@ import {
 import { Button } from "@grasp-os/ui/components/button";
 import { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 
@@ -359,7 +357,7 @@ const screen = `import { useMutation, usePaginatedQuery, useQuery } from "@grasp
 import type { Id } from "@grasp-os/sdk";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 import { Attachments } from "../components/attachments.tsx";
 import { CreateNote } from "../components/create-note.tsx";
 import { ImportNote } from "../components/import-note.tsx";
@@ -436,7 +434,7 @@ export default function Notes() {
 const importNote = `import { GraspError, useAction } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { api } from "#grasp";
+import { api } from "@server/_generated/api";
 
 /** Imports a note through an action that fails after saving it. */
 export function ImportNote() {
@@ -464,7 +462,7 @@ export function ImportNote() {
 /** The Notes App's files. */
 export const notesAppFiles = (): Record<string, string> => ({
   "schema.ts": schema,
-  "operations/notes.ts": operations,
+  "server/notes.ts": operations,
   "app.ts": registration,
   "components/import-note.tsx": importNote,
   "components/create-note.tsx": createNote,
@@ -476,7 +474,7 @@ export const notesAppFiles = (): Record<string, string> => ({
 const unaskedScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
-import { permissions } from "#grasp";
+import { permissions } from "@server/_generated/api";
 
 /** A file nobody may read: what is downloaded matters less than whether. */
 const someFile = { id: "00000000-0000-4000-8000-000000000000" };
@@ -520,7 +518,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
 import { useState } from "react";
-import { permissions } from "#grasp";
+import { permissions } from "@server/_generated/api";
 
 /** One file, or none while hidden. */
 function Shown({
@@ -646,7 +644,7 @@ export default app({`
 const linksScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
-import { permissions } from "#grasp";
+import { permissions } from "@server/_generated/api";
 
 /**
  * A screen that opens its help site on a click, opens it a while after
@@ -717,7 +715,7 @@ export const navigationFiles = (): Record<string, string> => ({
     ),
   "screens/home.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 export default function Start() {
   const navigate = useNavigate();
@@ -735,7 +733,7 @@ import { useForm, useNavigate } from "@grasp-os/sdk/react";
 import type { ScreenProps } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Form, TextField } from "@grasp-os/ui/form";
-import { api, screens } from "#grasp";
+import { api, screens } from "@server/_generated/api";
 
 export default function Note({ input }: ScreenProps<typeof screens.note>) {
   const navigate = useNavigate();
@@ -781,7 +779,7 @@ export const surfaceFiles = (): Record<string, string> => {
 `
     ),
     "screens/prefs.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
-import type { screens } from "#grasp";
+import type { screens } from "@server/_generated/api";
 
 export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
   return (
@@ -793,8 +791,8 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
 `,
     "screens/home.tsx": (files["screens/home.tsx"] ?? "")
       .replace(
-        'import { screens } from "#grasp";',
-        'import { screens } from "#grasp";\nimport { useState } from "react";'
+        'import { screens } from "@server/_generated/api";',
+        'import { screens } from "@server/_generated/api";\nimport { useState } from "react";'
       )
       .replace(
         "  const navigate = useNavigate();",
@@ -841,7 +839,7 @@ export const hoppingFiles = (): Record<string, string> => ({
     ),
   "screens/takeoff.tsx": `import { useEffect } from "react";
 import { useNavigate } from "@grasp-os/sdk/react";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 export default function Takeoff() {
   const navigate = useNavigate();
@@ -853,7 +851,7 @@ export default function Takeoff() {
 `,
   "screens/launch.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 export default function Launch() {
   const navigate = useNavigate();
@@ -870,7 +868,7 @@ export default function Launch() {
   "screens/hop.tsx": `import { useEffect } from "react";
 import { useNavigate } from "@grasp-os/sdk/react";
 import type { ScreenProps } from "@grasp-os/sdk/react";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
   const navigate = useNavigate();
@@ -886,7 +884,7 @@ export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
   "screens/focus-hop.tsx": `import { useEffect, useRef } from "react";
 import { useNavigate } from "@grasp-os/sdk/react";
 import type { ScreenProps } from "@grasp-os/sdk/react";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 export default function FocusHop({ input }: ScreenProps<typeof screens.focusHop>) {
   const navigate = useNavigate();
@@ -913,7 +911,7 @@ export default function FocusHop({ input }: ScreenProps<typeof screens.focusHop>
 import { useNavigate } from "@grasp-os/sdk/react";
 import type { ScreenProps } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "#grasp";
+import { screens } from "@server/_generated/api";
 
 const forge = () => {
   const post = MessagePort.prototype.postMessage;
