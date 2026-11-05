@@ -1,3 +1,4 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { packageLimitsOf } from "@grasp-os/shared/packages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env, exports } from "cloudflare:workers";
@@ -8,6 +9,7 @@ import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
 import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { draftLintBuild } from "../../src/save-builds.ts";
 import { buildScreens } from "../../src/screens.ts";
 import { probeModule } from "../isolate-probe.ts";
 
@@ -427,6 +429,46 @@ const probing = (program: string) => ({
         : await env.ASSETS.fetch(...args),
     connect: env.ASSETS.connect.bind(env.ASSETS),
   },
+});
+
+describe("Ultracite's lint on-prem", () => {
+  it("fails a draft's lint as one that couldn't run, never as the file's, when the sandbox stops it at its deadline", async () => {
+    // A lint that never ends, as one the shared machine starved would: its
+    // deadline is the load's, not the file's (`PlatformBoundError.own`).
+    const spinning = `import { WorkerEntrypoint } from "cloudflare:workers";
+export default class extends WorkerEntrypoint {
+  lint() {
+    for (;;) {}
+  }
+}
+`;
+    const stopped = {
+      ...onPrem,
+      SANDBOX_DEADLINE_MS: "1500",
+      ASSETS: {
+        fetch: async (...args: Parameters<Fetcher["fetch"]>) =>
+          new Request(...args).url.endsWith("/ultracite.js")
+            ? new Response(spinning, {
+                headers: { "content-type": "text/javascript" },
+              })
+            : await env.ASSETS.fetch(...args),
+        connect: env.ASSETS.connect.bind(env.ASSETS),
+      },
+    };
+
+    const linted = await draftLintBuild(stopped, {
+      app: appIdSchema.parse(crypto.randomUUID()),
+      version: 0,
+      files: {
+        "components/same.ts": `export const same = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
+      },
+    });
+
+    expect({
+      status: linted.status,
+      diagnostics: linted.diagnostics,
+    }).toStrictEqual({ status: "error", diagnostics: [] });
+  }, 60_000);
 });
 
 describe("the platform's programs on the sandbox host", () => {

@@ -25,6 +25,12 @@ git init --quiet "$work/oxc"
 cd "$work/oxc"
 git fetch --quiet --depth 1 https://github.com/oxc-project/oxc.git "$commit"
 git checkout --quiet FETCH_HEAD
+# oxc's own code, changed only where patches/ says why (each to go
+# upstream): the native stack a wasm call runs on is V8's, far smaller
+# than native oxlint's 8 MiB, and no flag of the module's can grow it.
+for patch in "$here"/patches/*.patch; do
+  git apply "$patch"
+done
 mkdir -p napi/grasp_oxc_wasm
 cp -R "$here/Cargo.toml" "$here/src" napi/grasp_oxc_wasm/
 rustup target add wasm32-wasip1

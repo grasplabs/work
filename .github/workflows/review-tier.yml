@@ -34,8 +34,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Node.js, node_modules and oxc.wasm, with this job's read-only token.
+      # Node.js and node_modules: it never builds the compiler, so no oxc.wasm.
       - uses: ./.github/actions/setup
+        with:
+          oxc-wasm: false
       - name: Label the pull request
         # pipefail: a failed listing fails the step, never labels a PR Low.
         shell: bash

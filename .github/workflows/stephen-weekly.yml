@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
           ref: main
-      # Node.js, node_modules and oxc.wasm, with this job's read-only token.
+      # Node.js, node_modules and oxc.wasm (.github/actions/setup).
       - uses: ./.github/actions/setup
       # The model's provider key and the eval's settings, from the staging
       # 1Password Environment; a setting left out takes its default, and

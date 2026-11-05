@@ -50,13 +50,19 @@ export interface Ultracite {
  */
 const tidiedCharacters = 8_000_000;
 
-/** What a file oxc.wasm couldn't lint says: an error, so a draft never passes unlinted. */
+/**
+ * What a file oxc.wasm couldn't lint says: an error, so a draft never
+ * passes unlinted. Past what its stack and memory hold: an expression
+ * nested hundreds deep, or a component with hundreds of conditional
+ * branches (the React Compiler's analysis recurses on each), which native
+ * oxlint, with a far larger stack, still reads.
+ */
 const unlintable = (file: string): Diagnostic => ({
   file,
   rule: "lint",
   severity: "error",
   message:
-    "Ultracite's lint couldn't read this file: it nests too deeply or is too large. Flatten what nests deepest, or split the file.",
+    "Ultracite's lint ran out of room on this file: split this screen into components, or the file into smaller ones, and flatten anything nested hundreds deep.",
 });
 
 const diagnosticOf = (
