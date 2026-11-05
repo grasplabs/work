@@ -45,6 +45,7 @@ import {
 } from "./compile.ts";
 import { isError, together } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
+import { startOxcParser } from "./eslint-parser.ts";
 import {
   collectDirectives,
   collectImports,
@@ -94,6 +95,7 @@ import {
 } from "./kit.ts";
 import { lint } from "./lint.ts";
 import { addressModules } from "./module-addresses.ts";
+import oxcParserWasm from "./oxc-parser.wasm";
 import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { lintServerCode } from "./server-lint.ts";
@@ -646,7 +648,11 @@ export const buildScreensIncrementally = async (
   // The type check and the lint run whatever the compile found, so one
   // build names everything there is to fix; only what says a compile
   // error again is left out (`together`). A preview's frame skips both
-  // (`checks`): its compile errors still fail it.
+  // (`checks`): its compile errors still fail it, and it never starts the
+  // lint's parser.
+  if (checks) {
+    await startOxcParser(oxcParserWasm);
+  }
   const typeCheck = checks
     ? screensCheck(files, { found: errors, unparsed, untyped })
     : undefined;
@@ -1207,9 +1213,9 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
  * a build alone, as the seal's first, symbolic inspection makes it,
  * doesn't, since its generated modules are stand-ins without types.
  */
-export const checkAppCode = (
+export const checkAppCode = async (
   files: Record<string, string>
-): Unchecked<AppCodeBuild> => {
+): Promise<Unchecked<AppCodeBuild>> => {
   const tooMuch = appCodeLimitErrors(appCodeFiles(files));
   if (tooMuch.length > 0) {
     return { built: { ok: false, diagnostics: tooMuch } };
@@ -1236,6 +1242,8 @@ export const checkAppCode = (
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
   const checked = { ...appCodeFiles(files), ...tests };
+  // Its lint's parser (`lintServerCode`).
+  await startOxcParser(oxcParserWasm);
   return {
     built,
     typeCheck: {

@@ -255,12 +255,12 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: ["compiler.js", "kit.json"],
+        together: ["compiler.js", "kit.json", "oxc-parser.wasm"],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: ["compiler.js", "kit.json"],
+        anewRead: ["compiler.js", "kit.json", "oxc-parser.wasm"],
       });
     });
 
@@ -307,7 +307,13 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "components/one.ts": [] }],
-        files: ["compiler.js", "kit.json", "oxc.wasm", "ultracite.js"],
+        files: [
+          "compiler.js",
+          "kit.json",
+          "oxc-parser.wasm",
+          "oxc.wasm",
+          "ultracite.js",
+        ],
         overlap: false,
       });
     });
