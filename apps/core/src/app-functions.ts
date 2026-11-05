@@ -1845,7 +1845,7 @@ export const invokeAppAction = async (
  * and kind. The run is pinned to its version (`caller.run`), so nothing
  * more is read.
  */
-const runReferenceSchema = z.object({
+const runReferenceSchema = z.strictObject({
   name: z.string().min(1).max(256),
   kind: z.enum(["query", "mutation", "action"]),
 });

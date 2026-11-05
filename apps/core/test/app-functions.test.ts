@@ -1,4 +1,9 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -9,8 +14,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
-import type { FunctionAnswer } from "../src/app-functions.ts";
+import {
+  callAppFunction,
+  callRunFunction,
+  callScreenFunction,
+} from "../src/app-functions.ts";
+import type { FunctionAnswer, RunCaller } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import {
@@ -813,6 +822,69 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       },
       afterRevoked: "ok",
       oldBuild: "revoked",
+    });
+  });
+});
+
+// A workflow run's step names a function of its own App as a page does:
+// its name and kind, nothing more. The run is pinned to its version, so a
+// version or contract beside the name is refused, never quietly dropped.
+describe("a workflow run's call of its own App", { timeout: 120_000 }, () => {
+  it("is refused with anything beside the function's name and kind, while the name and kind alone answer", async () => {
+    const notes = await sealedNotes();
+    const runId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'noter', 1, ?, 'running', ?, NULL)"
+    )
+      .bind(runId, notes.app, notes.owner.userId, Date.now())
+      .run();
+    const caller: RunCaller = {
+      run: {
+        app: appIdSchema.parse(notes.app),
+        workflow: workflowIdSchema.parse("noter"),
+        runId: runIdSchema.parse(runId),
+        version: 1,
+        shareSubject: notes.owner.userId,
+        authority: {
+          subject: { type: "app", appId: appIdSchema.parse(notes.app) },
+          onBehalfOf: notes.owner.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+      },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 30_000,
+      stillCurrent: async () => {
+        await Promise.resolve();
+      },
+      requireHolds: () => {
+        // The step's attempt holds its lease throughout.
+      },
+      held: () => {
+        throw new Error("Nothing is held here");
+      },
+    };
+    const codeOfRun = async (reference: unknown): Promise<string> => {
+      const answered = await callRunFunction(
+        env,
+        caller,
+        reference,
+        {},
+        `step:${crypto.randomUUID()}`
+      );
+      return answered.ok ? "ok" : answered.error.code;
+    };
+    const named = { name: "notes.bump", kind: "query" };
+    expect({
+      version: await codeOfRun({ ...named, resourceVersion: 1 }),
+      app: await codeOfRun({ ...named, resourceId: "another-app" }),
+      contract: await codeOfRun({ ...named, fingerprint: "0".repeat(64) }),
+      named: await codeOfRun(named),
+    }).toStrictEqual({
+      version: "contract.invalid_request",
+      app: "contract.invalid_request",
+      contract: "contract.invalid_request",
+      named: "ok",
     });
   });
 });
