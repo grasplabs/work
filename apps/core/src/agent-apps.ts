@@ -311,13 +311,12 @@ apps: {
    * At most 132 KiB, sent in full within 5 seconds. Calls made at once may run one at a time, in
    * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`operation.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,
    * \`write\` otherwise), granted by an admin. Answers the result as data:
-   * \`{ result: { ok: true, value } | { ok: false, error }, fingerprint, manifestHash }\`.
+   * \`{ result: { ok: true, value } | { ok: false, error }, manifestHash }\`.
    */
   call(app: string, request: ReadableStream<Uint8Array>): Promise<{
     result:
       | { ok: true; value: unknown }
       | { ok: false; error: { code: string; message: string; category: string; retryable: boolean; requestId: string; details?: unknown } };
-    fingerprint: string | null;
     manifestHash: string | null;
   }>;
   /** An App's versions, newest first, at most 100 before \`before\`. Only for Apps the person builds. */

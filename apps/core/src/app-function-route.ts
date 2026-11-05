@@ -433,7 +433,6 @@ const withheld = (
 interface KeyedAnswer {
   readonly result: unknown;
   readonly provenance: null;
-  readonly fingerprint: string | null;
   readonly manifestHash: null;
 }
 
@@ -493,7 +492,6 @@ const keyedAnswer = async (
   const answer: KeyedAnswer = {
     result: frame.result,
     provenance: null,
-    fingerprint: null,
     manifestHash: null,
   };
   // Checked again before the answer is handed over, as a stream's relay
@@ -584,7 +582,6 @@ const boundedCall = async (
           ),
         },
         provenance: null,
-        fingerprint: null,
         manifestHash: null,
       } satisfies FunctionAnswer);
     }

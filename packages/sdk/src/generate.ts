@@ -563,7 +563,7 @@ const dataOf = (value: unknown, depth: number): string => {
  * that answers the call, and checks the call with the function's own
  * validator.
  */
-export const referenceOf = (operation: OperationManifest) => {
+const referenceOf = (operation: OperationManifest) => {
   if (operation.kind !== "query") {
     return { name: operation.path, kind: operation.kind, args: operation.args };
   }

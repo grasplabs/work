@@ -162,11 +162,7 @@ type PeopleReference<Name extends PeopleOperationName> = OperationReference<
 const referenceTo = <Name extends PeopleOperationName>(
   read: Name
 ): PeopleReference<Name> =>
-  Object.freeze({
-    name: peopleOperations[read].path,
-    kind: "query",
-    visibility: "public",
-  });
+  Object.freeze({ name: peopleOperations[read].path });
 
 /**
  * The references a screen reads through (`useUser`, `usePeople`). They

@@ -25,7 +25,7 @@ describe("the people reads' references", () => {
       Object.fromEntries(
         Object.entries(peopleOperations).map(([read, operation]) => [
           read,
-          { name: operation.path, kind: "query", visibility: "public" },
+          { name: operation.path },
         ])
       )
     );

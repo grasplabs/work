@@ -1,6 +1,6 @@
 import type { OperationReference, ReferenceKind } from "@grasp-os/sdk";
 import { GraspError } from "@grasp-os/sdk/client";
-import { GraspClient, referenceOf } from "@grasp-os/sdk/host";
+import { GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport, StreamLink } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -29,6 +29,7 @@ import type { Release } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { referenceTo } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
@@ -210,32 +211,17 @@ const singleTo = <Args, Return, Kind extends ReferenceKind>(
   path: string,
   _kind: Kind
 ): OperationReference<Args, Return, Kind> =>
-  // SAFETY: each call below names the kind the release declares.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  referenceOf(operationAt(release, path)) as OperationReference<
-    Args,
-    Return,
-    Kind
-  >;
+  referenceTo<Args, Return, Kind>(release, path);
 
 /** A reference to a streaming action of `release`. */
 const streamTo = <Args, Return, Progress>(
   release: Release,
   path: string
 ): OperationReference<Args, Return, "action", "public", Progress> => {
-  const operation = operationAt(release, path);
-  if (operation.stream === null) {
+  if (operationAt(release, path).stream === null) {
     throw new Error(`${path} doesn't stream`);
   }
-  // SAFETY: a streaming action, as its `Progress` says.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return referenceOf(operation) as OperationReference<
-    Args,
-    Return,
-    "action",
-    "public",
-    Progress
-  >;
+  return referenceTo<Args, Return, "action", Progress>(release, path);
 };
 
 /** The App's `api`, typed as its screens get it. */

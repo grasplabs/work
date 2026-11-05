@@ -1,11 +1,6 @@
-import type {
-  FilesReference,
-  Id,
-  OperationReference,
-  ReferenceKind,
-} from "@grasp-os/sdk";
+import type { FilesReference, Id } from "@grasp-os/sdk";
 import { GraspError } from "@grasp-os/sdk/client";
-import { fileChannel, GraspClient, referenceOf } from "@grasp-os/sdk/host";
+import { fileChannel, GraspClient } from "@grasp-os/sdk/host";
 import type { FileChannel, FileTransport } from "@grasp-os/sdk/host";
 import {
   appFilesPath,
@@ -26,6 +21,7 @@ import { StoreHost } from "../src/store-host.ts";
 import { published as publishedApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
+import { referenceTo } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
@@ -204,20 +200,6 @@ interface Note {
   title: string;
   attachments: { id: string }[];
 }
-
-/** The reference to `path` of `release`, typed as `@server/_generated/api` types it. */
-const referenceTo = <Args, Return, Kind extends ReferenceKind>(
-  release: Release,
-  path: string
-): OperationReference<Args, Return, Kind> => {
-  const operation = release.app.operations[path];
-  if (operation === undefined) {
-    throw new Error(`The release has no ${path}`);
-  }
-  // SAFETY: each call below names the kind the release declares.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return referenceOf(operation) as OperationReference<Args, Return, Kind>;
-};
 
 interface FileArgs {
   id: Id<"notes">;

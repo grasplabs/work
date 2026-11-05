@@ -164,7 +164,6 @@ export {
   generatedPaths,
   generateModules,
   readSealedWorkflows,
-  referenceOf,
   dataModelSource,
   serverModuleSource,
   symbolicModules,

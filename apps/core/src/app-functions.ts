@@ -713,7 +713,7 @@ export const publicOperationOf = (
 };
 
 /** The fingerprint of the contract of `release`'s function at `path`, if it has one. */
-export const fingerprintOf = (release: Release, path: string): string | null =>
+const fingerprintOf = (release: Release, path: string): string | null =>
   release.fingerprints[path] ?? null;
 
 /** What a call answers (spec 32.6). */
@@ -726,8 +726,6 @@ export interface FunctionAnswer {
    * the resources its connector named. Null when no function ran.
    */
   readonly provenance: InvocationProvenance | null;
-  /** The fingerprint of the contract that ran, when one did. */
-  readonly fingerprint: string | null;
   /** The release that ran, when one did. */
   readonly manifestHash: string | null;
 }
@@ -967,7 +965,6 @@ const answeredWorkflowQuery = async (
     return {
       result,
       provenance: null,
-      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1026,7 +1023,6 @@ const answeredPreferences = async (
     return {
       result,
       provenance: null,
-      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1104,7 +1100,6 @@ const answeredPeople = async (
     return {
       result: { ok: true, value },
       provenance: null,
-      fingerprint: null,
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1194,7 +1189,6 @@ const callFunction = async (
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
     provenance: null,
-    fingerprint: null,
     manifestHash: null,
   });
   let call: FunctionRequest;
@@ -1329,7 +1323,6 @@ const callFunction = async (
     return {
       result,
       provenance: sources.snapshot(),
-      fingerprint: fingerprintOf(release, path),
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1445,7 +1438,6 @@ export const callVisitorFunction = async (
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
     provenance: null,
-    fingerprint: null,
     manifestHash: null,
   });
   try {
@@ -1467,7 +1459,6 @@ export const callVisitorFunction = async (
           value: await answerPeople(visitorPeopleOf(caller), read, call.input),
         },
         provenance: null,
-        fingerprint: null,
         manifestHash: null,
       };
     }
@@ -1504,7 +1495,6 @@ export const callVisitorFunction = async (
     return {
       result,
       provenance: null,
-      fingerprint: fingerprintOf(release, path),
       manifestHash: release.manifestHash,
     };
   } catch (error) {
@@ -1567,14 +1557,12 @@ const workflowCommandAnswer = async (
     return {
       result: { ok: true, value },
       provenance: null,
-      fingerprint: read.workflow.fingerprint,
       manifestHash,
     };
   } catch (error) {
     return {
       result: { ok: false, error: refusalOf(error, requestId) },
       provenance: null,
-      fingerprint: null,
       manifestHash: null,
     };
   }
@@ -1608,7 +1596,6 @@ const workflowWatchRead = async (
       answer: {
         result: { ok: true, value },
         provenance: null,
-        fingerprint: read.workflow.fingerprint,
         manifestHash,
       },
       reads: undefined,
@@ -1619,7 +1606,6 @@ const workflowWatchRead = async (
       answer: {
         result: { ok: false, error: refusalOf(error, requestId) },
         provenance: null,
-        fingerprint: null,
         manifestHash: null,
       },
       reads: undefined,

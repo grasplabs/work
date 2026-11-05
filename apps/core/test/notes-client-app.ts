@@ -1,5 +1,4 @@
 import type { Id, OperationReference, ReferenceKind } from "@grasp-os/sdk";
-import { referenceOf } from "@grasp-os/sdk/host";
 
 import type { Release } from "../src/app-releases.ts";
 
@@ -176,20 +175,33 @@ export type Page =
   | { items: Note[]; hasMore: false; nextCursor: null }
   | { items: Note[]; hasMore: true; nextCursor: string };
 
-/** The reference to `path` of `release`, typed as the App's `@server/_generated/api` types it. */
-export const referenceTo = <Args, Return, Kind extends ReferenceKind>(
+/**
+ * The reference to `path` of `release`, as the App's
+ * `@server/_generated/api` holds it: a query's name; a mutation's or an
+ * action's name, kind and arguments. Typed by hand, as that module types
+ * it.
+ */
+export const referenceTo = <
+  Args,
+  Return,
+  Kind extends ReferenceKind,
+  Progress = never,
+>(
   release: Release,
   path: string
-): OperationReference<Args, Return, Kind> => {
+): OperationReference<Args, Return, Kind, "public", Progress> => {
   const operation = release.app.operations[path];
   if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  // The same data the host generates into `@server/_generated/api` (sdk
-  // generate.ts), typed by hand as it would be.
-  // SAFETY: each call below names the kind the release declares.
+  const data =
+    operation.kind === "query"
+      ? { name: path }
+      : { name: path, kind: operation.kind, args: operation.args };
+  // SAFETY: each caller names the kind, arguments, return and progress the
+  // release declares.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return referenceOf(operation) as OperationReference<Args, Return, Kind>;
+  return data as OperationReference<Args, Return, Kind, "public", Progress>;
 };
 
 /** The App's `api`, as its screens import it from `@server/_generated/api`. */

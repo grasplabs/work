@@ -41,7 +41,6 @@ import type { Live } from "./action-invocation.ts";
 import { operationRoles } from "./app-access.ts";
 import {
   publicOperationOf,
-  fingerprintOf,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -729,7 +728,6 @@ export class SealedPreviews {
       answer: {
         result: { ok: false, error: refusalOf(error, requestId) },
         provenance: null,
-        fingerprint: null,
         manifestHash: null,
       },
       reads,
@@ -825,7 +823,6 @@ export class SealedPreviews {
         answer: {
           result,
           provenance: null,
-          fingerprint: fingerprintOf(release, path),
           manifestHash: release.manifestHash,
         },
         reads,
@@ -916,7 +913,6 @@ export class SealedPreviews {
       answer: {
         result: { ok: true, value },
         provenance: null,
-        fingerprint: null,
         manifestHash: release.manifestHash,
       },
       reads: undefined,
@@ -1000,7 +996,6 @@ export class SealedPreviews {
       answer: {
         result,
         provenance: null,
-        fingerprint: null,
         manifestHash: release.manifestHash,
       },
       reads,
