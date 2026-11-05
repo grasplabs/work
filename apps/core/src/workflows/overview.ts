@@ -28,11 +28,14 @@ import {
   workflowResourceRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { answerableBy, stillOpen } from "../decisions/decisions.ts";
+import {
+  answerableBy,
+  resourceDecisionPending,
+  stillOpen,
+} from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
 import type { RunRow } from "./resource-runs.ts";
 import {
-  hasOpenDecision,
   listOf,
   orderedRuns,
   runView,
@@ -48,11 +51,13 @@ import { goesOn, queuedRun, shownStatus, unended } from "./runs.ts";
 // pages list them: every run for a builder, their own for a user
 // (run-view.ts).
 //
-// A run waits when it hasn't ended and one of its decisions is still
-// open, as answering decides it (`stillOpen`): open, and not past its
-// deadline. It goes on once someone answers it, on the decision's own
-// page. A run that waits otherwise (a sleep, a decision past its deadline
-// that it hasn't timed out yet) goes on by itself, and counts as running.
+// A run waits when one of its decisions still takes answers, as
+// answering decides it (`resourceDecisionPending`): open, not past its
+// deadline, and its run going on, no cancel of it admitted. It goes on
+// once someone answers it, on the decision's own page. A run that waits
+// otherwise (a sleep, a decision past its deadline that it hasn't timed
+// out yet) goes on by itself, and counts as running; so does one whose
+// cancel was admitted, until the engine stops it.
 //
 // A run that goes on without a decision to wait for, while a step of it
 // waits for a share of the model requests in flight (model-waits.ts),
@@ -114,11 +119,11 @@ const latestRuns = async (
   const rows = await db.all(sql`
     SELECT latest.id, latest.workflow_resource_id AS workflow, latest.status,
       latest.created_at AS createdAt,
-      (latest.ended_at IS NULL AND EXISTS (
+      EXISTS (
         SELECT 1 FROM ${workflowDecisions}
         WHERE ${workflowDecisions.resourceRunId} = latest.id
-          AND ${stillOpen(workflowDecisions, now)}
-      )) AS waits
+          AND ${resourceDecisionPending(now)}
+      ) AS waits
     FROM json_each(${wanted}) AS wanted
     INNER JOIN ${runs} AS latest ON latest.id = (
       SELECT id FROM ${runs}
@@ -213,13 +218,7 @@ const waitingBy = async (
       workflowResourceRuns,
       eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
     )
-    .where(
-      and(
-        stillOpen(workflowDecisions, now),
-        sql`${workflowResourceRuns.endedAt} IS NULL`,
-        seen
-      )
-    )
+    .where(and(resourceDecisionPending(now), seen))
     .groupBy(workflowResourceRuns.workflowResourceId);
   return new Map(rows.map(({ workflow, count }) => [workflow, count]));
 };
@@ -320,10 +319,10 @@ const waitingRuns = async (
     )
     .where(
       and(
-        stillOpen(workflowDecisions, now),
-        sql`${workflowResourceRuns.endedAt} IS NULL`,
+        resourceDecisionPending(now),
         seen,
-        // Its latest open decision alone, so each run comes once.
+        // Its latest open decision alone, so each run comes once: of the
+        // same run, so pending as it is once it is open.
         notExists(
           db
             .select({ one: sql`1` })
@@ -436,7 +435,7 @@ const waitingIds = async (
     .where(
       and(
         sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`,
-        stillOpen(workflowDecisions, now)
+        resourceDecisionPending(now)
       )
     );
   return new Set(rows.flatMap(({ id }) => (id === null ? [] : [id])));
@@ -480,8 +479,7 @@ export const listAllRuns = async (
         db,
         scope,
         now,
-        (run) =>
-          sql`${run.status} IN ${listOf(unended)} AND NOT ${hasOpenDecision(now)}`,
+        (run) => sql`${run.status} IN ${listOf(unended)} AND NOT ${waits(now)}`,
         "newest"
       ),
     done: async () =>
@@ -533,7 +531,9 @@ export const listAllRuns = async (
         createdAt: row.createdAt.toISOString(),
         endedAt: row.endedAt?.toISOString() ?? null,
       };
-      const answered = answering.get(row.id);
+      // Only a run that waits links its decision: one whose cancel was
+      // admitted takes no answer, whatever the decision's row says.
+      const answered = waiting.has(row.id) ? answering.get(row.id) : undefined;
       const withDecision =
         answered === undefined ? listed : { ...listed, decision: answered };
       return waiting.has(row.id)

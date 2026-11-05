@@ -16,7 +16,7 @@ import { z } from "zod";
 
 import type { Member } from "../auth/identity.ts";
 import { workflowDecisions } from "../db/core/schema.ts";
-import { stillOpen } from "../decisions/decisions.ts";
+import { resourceDecisionPending } from "../decisions/decisions.ts";
 import { runView, visibleToMember } from "./run-view.ts";
 
 // The runs a person can list, started over the last days, and the people
@@ -65,12 +65,13 @@ const dayNumber = (run: Runs): SQL<number> =>
 
 /**
  * How a decision of a run stands at `now`: answered, timed out, open (one
- * someone can still answer, of a run that hasn't ended), or none of these:
- * past its deadline or of a run that ended, which nobody answers.
+ * someone can still answer, `resourceDecisionPending`), or none of these:
+ * past its deadline, or of a run that ended or whose cancel was admitted,
+ * which nobody answers.
  */
 const decisionBucketOf = (run: Runs, now: Date): SQL<string> => sql<string>`CASE
   WHEN ${workflowDecisions.status} <> 'open' THEN ${workflowDecisions.status}
-  WHEN ${stillOpen(workflowDecisions, now)} AND ${run.unended} THEN 'open'
+  WHEN ${resourceDecisionPending(now)} THEN 'open'
   ELSE 'closed'
 END`;
 

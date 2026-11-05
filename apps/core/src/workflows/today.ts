@@ -28,7 +28,10 @@ import {
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { answerableByNow, stillOpen } from "../decisions/decisions.ts";
+import {
+  answerableByNow,
+  resourceDecisionPending,
+} from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
 
@@ -100,7 +103,7 @@ const waitsOn = (db: DrizzleD1Database, by: Member, now: Date) =>
       .where(
         and(
           eq(workflowDecisions.resourceRunId, workflowResourceRuns.id),
-          stillOpen(workflowDecisions, now),
+          resourceDecisionPending(now),
           answerableByNow(db, by.userId)
         )
       )
@@ -134,7 +137,7 @@ const runsOf = async (
             deciders: workflowDecisions.deciders,
             description: workflowDecisions.description,
             openedAt: workflowDecisions.openedAt,
-            open: sql<number>`${stillOpen(workflowDecisions, now)}`,
+            open: sql<number>`${resourceDecisionPending(now)}`,
             mine: sql<number>`${answerableByNow(db, by.userId)}`,
           })
           .from(workflowDecisions)

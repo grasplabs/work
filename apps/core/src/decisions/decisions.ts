@@ -675,7 +675,11 @@ export const answerableByNow = (db: DrizzleD1Database, userId: string): SQL =>
 /**
  * That the decision of each row of an independent run goes on and still
  * takes answers at `now`, as a condition on `workflow_decisions`: open,
- * before its deadline, its run going on (`resourceRunGoesOn`).
+ * before its deadline, its run going on (`resourceRunGoesOn`). The one
+ * rule for whether a run waits for an answer, wherever it is shown
+ * (workflows/run-view.ts, overview.ts, today.ts, activity.ts): a run
+ * whose cancel was admitted takes no answer, so waits for none, and shows
+ * as running until the engine stops it.
  */
 export const resourceDecisionPending = (now: Date): SQL =>
   and(

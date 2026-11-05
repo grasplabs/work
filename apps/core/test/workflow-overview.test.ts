@@ -55,6 +55,37 @@ const seedDecision = async (
 };
 
 /**
+ * A cancel of the run `run` by `principal`, through an App's screen, in
+ * `state`: admitted until the engine stops the run, or superseded when the
+ * run went on to end otherwise first.
+ */
+const seedCancel = async (
+  run: string,
+  principal: string,
+  state: "admitted" | "superseded"
+): Promise<void> => {
+  const app = crypto.randomUUID();
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
+    ).bind(app, principal, now),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, 'cancel', ?, ?, ?, 1)"
+    ).bind(
+      crypto.randomUUID(),
+      run,
+      app,
+      principal,
+      "0".repeat(32),
+      state,
+      now,
+      now
+    ),
+  ]);
+};
+
+/**
  * The independent workflows `person` sees summed up, each with its owner's
  * ID for its owner.
  */
@@ -159,40 +190,62 @@ describe("the Workflows page", buildTime, () => {
     });
   });
 
-  it("counts and lists a run waiting for a decision once, however many it waits for, and none that ended or whose decision is past its deadline", async () => {
+  it("counts and lists a run waiting for a decision once, however many it waits for, and none that ended, whose decision is past its deadline, or whose cancel was admitted", async () => {
     const owner = await personApi("builder");
     const workflow = await owner.api.workflowResources.create(
       `intake-${unique()}`
     );
     const now = Date.now();
-    const seeded = async (status: "running" | "completed") =>
+    const seeded = async (status: "running" | "completed", createdAt: number) =>
       await seedResourceRun({
         workflow: workflow.id,
         principal: owner.userId,
         status,
-        createdAt: now - minute,
+        createdAt,
       });
-    const [waiting, ended, lapsed] = await Promise.all([
-      seeded("running"),
-      seeded("completed"),
-      seeded("running"),
-    ]);
+    const [waiting, ended, lapsed, cancelling, uncancelled] = await Promise.all(
+      [
+        seeded("running", now - minute),
+        seeded("completed", now - minute),
+        seeded("running", now - minute),
+        // The latest run: cancelled, the engine yet to stop it.
+        seeded("running", now),
+        // A cancel superseded: the run went on, and still waits.
+        seeded("running", now - 2 * minute),
+      ]
+    );
     await Promise.all([
       seedDecision(waiting, "review", now + day),
       seedDecision(waiting, "sign", now + day),
       seedDecision(ended, "review", now + day),
       seedDecision(lapsed, "review", now - minute),
+      seedDecision(cancelling, "review", now + day),
+      seedDecision(uncancelled, "review", now + day),
     ]);
-    const [[summary], listed] = await Promise.all([
+    await Promise.all([
+      seedCancel(cancelling, owner.userId, "admitted"),
+      seedCancel(uncancelled, owner.userId, "superseded"),
+    ]);
+    const [[summary], listed, all] = await Promise.all([
       independent(owner),
       owner.api.workflows.runs({ status: "waiting" }),
+      owner.api.workflows.runs(),
     ]);
+    // A cancelled run shows as running until the engine stops it, as
+    // answering its decision is refused (decisions.ts).
     expect({
       waiting: summary?.waiting,
+      latest: summary?.lastRun?.status,
       listed: listed.runs.map(({ id, status }) => ({ id, status })),
+      cancelling: all.runs.find(({ id }) => id === cancelling)?.status,
     }).toStrictEqual({
-      waiting: 1,
-      listed: [{ id: waiting, status: "waiting" }],
+      waiting: 2,
+      latest: "running",
+      listed: [
+        { id: waiting, status: "waiting" },
+        { id: uncancelled, status: "waiting" },
+      ],
+      cancelling: "running",
     });
   });
 

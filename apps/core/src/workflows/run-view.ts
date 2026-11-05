@@ -5,7 +5,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Member } from "../auth/identity.ts";
 import { workflowDecisions, workflowResourceRuns } from "../db/core/schema.ts";
-import { stillOpen } from "../decisions/decisions.ts";
+import { resourceDecisionPending } from "../decisions/decisions.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
 import type { RunRow } from "./resource-runs.ts";
 
@@ -93,20 +93,17 @@ const columnsOf: RunColumns = {
 };
 
 /**
- * That a run has a decision someone can still answer at `now`
- * (`stillOpen`). One past its deadline that the run hasn't timed out yet
- * doesn't count: nobody can answer it, and the run goes on by itself once
- * it times it out.
+ * That a run waits at `now` for a decision someone can still answer
+ * (`resourceDecisionPending`). One past its deadline that the run hasn't
+ * timed out yet doesn't count: nobody can answer it, and the run goes on
+ * by itself once it times it out. Nor does one of a run that ended, or
+ * whose cancel was admitted.
  */
-export const hasOpenDecision = (now: Date): SQL => sql`EXISTS (
+export const waits = (now: Date): SQL => sql`EXISTS (
   SELECT 1 FROM ${workflowDecisions}
   WHERE ${workflowDecisions.resourceRunId} = ${workflowResourceRuns.id}
-    AND ${stillOpen(workflowDecisions, now)}
+    AND ${resourceDecisionPending(now)}
 )`;
-
-/** That a run waits at `now`: it hasn't ended, and a decision of its is open. */
-export const waits = (now: Date): SQL =>
-  sql`(${workflowResourceRuns.endedAt} IS NULL AND ${hasOpenDecision(now)})`;
 
 /** That a run asked a person for a decision, at any time. */
 const asked = (): SQL => sql`EXISTS (
