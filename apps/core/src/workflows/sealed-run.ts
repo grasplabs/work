@@ -23,6 +23,7 @@ import {
 } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -165,8 +166,13 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   literal of the sealed template must be the call's exactly; an object
 //   must have exactly the template's keys, and an array exactly its
 //   length (`matched`). An expression's hole (`slot`) takes any JSON
-//   within a step's size: the host fills in no slot, so a placeholder
-//   there is data. Every refusal fails the run.
+//   within a step's size and the evaluator's depth: the host fills in no
+//   slot, so a placeholder there is data. Every refusal fails the run.
+//   Arguments a correct build sends, its slots filled, may still nest
+//   past what a call takes (`requireArgumentsDepth`): the run's data put them
+//   there, which no save can check, so that is the step's own failure
+//   (`workflow.arguments_too_deep`), which a catch may take, not
+//   tampering.
 // - A sensitive value reaching the isolate, or leaving where it mustn't.
 //   The isolate gets only the parameters that aren't sensitive
 //   (`sealedRunStart`). Where the build seals a sensitive parameter as a
@@ -1059,11 +1065,64 @@ const isRecord = (
   typeof value === "object" && value !== null && !isList(value);
 
 /**
+ * How deep a sealed literal nests: none for a scalar, one past its
+ * deepest item for a list or an object. A literal is the build's, within
+ * a definition's data depth, so the recursion is bounded.
+ */
+const nestingOf = (value: Json): number => {
+  if (typeof value !== "object" || value === null) {
+    return 0;
+  }
+  let deepest = 0;
+  for (const item of isList(value) ? value : Object.values(value)) {
+    if (item !== undefined) {
+      deepest = Math.max(deepest, nestingOf(item));
+    }
+  }
+  return 1 + deepest;
+};
+
+/**
+ * Throws `workflow.arguments_too_deep` for sealed arguments `sent` nested
+ * past a call's depth (`boundedJson`'s, `sealedBuildLimits.callDepth`;
+ * within its size already, so depth is all it can refuse): matched, so only
+ * their slots, the run's data, can nest them so deep.
+ */
+const requireArgumentsDepth = (sent: Json): void => {
+  if (boundedJson(sent) === undefined) {
+    throw workflowResourceErrors.create("workflow.arguments_too_deep");
+  }
+};
+
+/**
+ * The deepest arguments a correct build sends by `template`: each literal
+ * as deep as it is, each slot an evaluation's result, at most the
+ * evaluator's depth, and each sensitive parameter its placeholder. Deeper
+ * is tampering, refused before anything walks it.
+ */
+const deepestSent = (template: SealedTemplate): number => {
+  if ("literal" in template) {
+    return nestingOf(template.literal);
+  }
+  if ("slot" in template) {
+    return evaluatorLimits.maxJsonDepth;
+  }
+  if ("param" in template) {
+    return 1;
+  }
+  const items =
+    "array" in template
+      ? template.array
+      : template.object.map(([, item]) => item);
+  return 1 + Math.max(0, ...items.map(deepestSent));
+};
+
+/**
  * `sent`, the arguments the isolate sent, matched against `template` at
  * `path`: each literal exactly, an object's keys exactly, an array's
- * length exactly, a slot any JSON (the host fills in no slot, so what
- * looks like a placeholder there is data), and a sensitive
- * parameter's place only that parameter's placeholder, its value put in
+ * length exactly, a slot any JSON within the evaluator's depth (the host
+ * fills in no slot, so what looks like a placeholder there is data), and
+ * a sensitive parameter's place only that parameter's placeholder, its value put in
  * by `fill` (none where no sensitive parameter may be) and kept in
  * `sensitive`. Throws `tampering` for anything else.
  */
@@ -1081,6 +1140,10 @@ const matched = (
     return template.literal;
   }
   if ("slot" in template) {
+    // An evaluation's result, never deeper than the evaluator answers.
+    if (boundedJson(sent, evaluatorLimits.maxJsonDepth) === undefined) {
+      throw tampering(`${path} nests deeper than an expression's result may.`);
+    }
     return sent;
   }
   if ("param" in template) {
@@ -2434,10 +2497,12 @@ class SealedRun implements SealedRunKind {
       }
       this.#called.add(attempt);
       const sent = sentCallSchema.safeParse(call);
-      const args = sent.success ? boundedJson(sent.data[1]) : undefined;
+      const args = sent.success
+        ? boundedJson(sent.data[1], deepestSent(template.arguments))
+        : undefined;
       if (!sent.success || args === undefined) {
         return await refuse(
-          "A call sends its operation and JSON arguments within a step's size."
+          "A call sends its operation and JSON arguments within a step's size and the depth its build allows."
         );
       }
       if (binding !== template.call.binding) {
@@ -2479,6 +2544,7 @@ class SealedRun implements SealedRunKind {
           "connection"
         );
       }
+      requireArgumentsDepth(args.value);
       // Before its audit: a call refused as tried leaves no evidence of one
       // that went out.
       if (triedOnceCalls.has(template.call.name)) {

@@ -113,6 +113,7 @@ const neverCaught: ReadonlySet<string> = new Set([
 const invalidData: ReadonlySet<string> = new Set([
   "workflow.task_data_invalid",
   "workflow.call_invalid",
+  "workflow.arguments_too_deep",
   "workflow.output_invalid",
 ]);
 

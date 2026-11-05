@@ -2,6 +2,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
@@ -48,6 +49,7 @@ import {
   engineStep,
   failedWith,
   greet,
+  objectSchema,
   greeting,
   hello,
   journalingEngine,
@@ -559,6 +561,10 @@ return { before, after: await late };
 const taskStep = (id: string, record: string, options = ""): string =>
   `await step.do(${JSON.stringify(id)}, { key: "task", description: "Its task"${options} }, async () => (${record}))`;
 
+/** `levels` lists around a text, as a module's expression. */
+const nestedIn = (levels: number): string =>
+  `Array.from({ length: ${levels} }).reduce((inner) => [inner], "x")`;
+
 /** Try `id`'s catch step, deciding by `takes`. */
 const catchStep = (id: string, takes: string): string =>
   `await step.caught(${JSON.stringify(id)}, { key: "catch", description: "Its catch" }, ${takes})`;
@@ -832,6 +838,106 @@ try {
         },
         tampered: [],
       },
+    });
+  });
+
+  it("fails a call its run's data nests past 34 levels as its step's own failure, which a catch takes, and refuses a forged deep literal or slot", async () => {
+    // Its `rows` slot is three levels into the arguments, so an
+    // evaluation's result there, at most 32 deep, may nest them 35 levels
+    // deep; its `who` slot is two levels in.
+    // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
+    const whoInput = "${ $workflow.input.who }";
+    const deep = await sealedWorkflow([
+      {
+        careful: {
+          try: [
+            {
+              ask: {
+                call: "grasp.model",
+                with: {
+                  binding: "summary",
+                  instructions: "Sum up.",
+                  input: { who: whoInput, rows: [whoInput] },
+                  outputSchema: objectSchema({ line: { type: "string" } }),
+                },
+              },
+            },
+          ],
+          catch: { errors: { with: { type: `${standardErrors}validation` } } },
+        },
+      },
+    ]);
+    const { maxJsonDepth } = evaluatorLimits;
+    /** `ask`'s step, sending `instructions`, `who` and a row `levels` deep. */
+    const ask = ({
+      instructions = '"Sum up."',
+      who = "input.who",
+      levels = 1,
+    }: {
+      instructions?: string;
+      who?: string;
+      levels?: number;
+    }) =>
+      taskStep(
+        "ask",
+        `(async () => ({ output: await env.summary.call("grasp.model", { instructions: ${instructions}, input: { who: ${who}, rows: [${nestedIn(levels)}] } }) }))()`
+      );
+    const tooDeepRun = await waitingRun(deep);
+    const tooDeep = await ranAs(
+      tooDeepRun,
+      moduleOf(`
+try {
+  return ${ask({ levels: maxJsonDepth })};
+} catch (thrown) {
+  return { code: thrown.code, caught: (${catchStep("careful", "async () => true")}) ?? null };
+}`)
+    );
+    // Each as deep as the `rows` slot may nest the arguments, so only
+    // matching them against the sealed template tells them from the run's
+    // data: a literal the build didn't seal, and a slot holding more than
+    // an evaluation can answer.
+    const forgedLiteral = await ranAs(
+      await waitingRun(deep),
+      moduleOf(`return ${ask({ instructions: nestedIn(maxJsonDepth + 2) })};`)
+    );
+    const forgedSlot = await ranAs(
+      await waitingRun(deep),
+      moduleOf(`return ${ask({ who: nestedIn(maxJsonDepth + 1) })};`)
+    );
+    const forgedDeeper = await ranAs(
+      await waitingRun(deep),
+      moduleOf(`return ${ask({ instructions: nestedIn(40) })};`)
+    );
+    expect({
+      tooDeep,
+      checked: await checkedCalls(tooDeepRun),
+      forgedLiteral,
+      forgedSlot,
+      forgedDeeper,
+    }).toStrictEqual({
+      tooDeep: {
+        ended: {
+          code: "workflow.arguments_too_deep",
+          caught: {
+            type: `${standardErrors}validation`,
+            status: 400,
+            instance: anyText,
+            title:
+              "This step's arguments are nested deeper than 34 levels, so its call wasn't made.",
+          },
+        },
+        tampered: [],
+      },
+      checked: [],
+      forgedLiteral: refusedAs(
+        "arguments.instructions isn't the value the build sealed."
+      ),
+      forgedSlot: refusedAs(
+        "arguments.input.who nests deeper than an expression's result may."
+      ),
+      forgedDeeper: refusedAs(
+        "A call sends its operation and JSON arguments within a step's size and the depth its build allows."
+      ),
     });
   });
 
