@@ -509,6 +509,19 @@ describe("checking a workflow", () => {
           }),
         ])
       ),
+      // A text, but longer than a parameter's declaration holds.
+      longDefault: codesAt({
+        ...everyStep(),
+        params: {
+          ...everyStep().params,
+          intro: {
+            kind: "text",
+            label: "Intro",
+            default: "x".repeat(4097),
+            sensitive: false,
+          },
+        },
+      }),
       // Within the source's length, but longer as the code it lowers to.
       lowered: codesAt(
         withSteps((steps) => [
@@ -524,6 +537,7 @@ describe("checking a workflow", () => {
         [`/steps/0/arguments/to/${"k".repeat(1024)}/${"k".repeat(1024)}/$expr`]:
           "workflow.pointer_too_long",
       },
+      longDefault: { "/params/intro/default": "workflow.invalid_default" },
       lowered: { "/steps/5/until/$expr": "workflow.expression_too_long" },
     });
   });

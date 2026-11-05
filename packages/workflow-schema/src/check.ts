@@ -15,6 +15,7 @@ import type {
 import { currencySchema, paramValueSchemas } from "@grasp-os/sdk/params";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
+import { paramDeclarationSchema } from "@grasp-os/shared/workflows";
 
 import {
   durationMs,
@@ -930,9 +931,15 @@ const checkParams = (
 ): void => {
   for (const [name, param] of Object.entries(params)) {
     const at = join("/params", name);
+    // Its kind's value, and within the bounds the SDK holds a declaration
+    // to as the generated module loads: past them, the document would
+    // generate a workflow that can't load.
     if (
       !isSensitive(param) &&
-      !paramValueSchemas[param.kind].safeParse(param.default).success
+      !(
+        paramValueSchemas[param.kind].safeParse(param.default).success &&
+        paramDeclarationSchema.shape.default.safeParse(param.default).success
+      )
     ) {
       problem(
         walk,
