@@ -60,6 +60,26 @@ describe("tidying App code", { timeout: 60_000 }, () => {
     expect(tidied["components/settle.ts"]).toContain("a == b");
   });
 
+  it("makes no fix of a rule an inline config comment turns on, as the agent might write it", async () => {
+    // Each comment turns on a rule whose ESLint fix oxlint doesn't count
+    // as safe: `catch` before `then` would handle what the first handler
+    // throws too; `Number.isNaN` answers otherwise for a string.
+    const source = [
+      '/* eslint "promise/prefer-catch": "error", "unicorn/prefer-number-properties": "error" */',
+      "export const settled = async (promise: Promise<number>) =>",
+      "  await promise.then(",
+      "    (value) => ({ value }),",
+      "    (error: unknown) => ({ error })",
+      "  );",
+      "export const invalid = (text: string) => isNaN(text as never);",
+      "",
+    ].join("\n");
+
+    const tidied = await ultracite().tidy({ "components/inline.ts": source });
+
+    expect(tidied).toStrictEqual({ "components/inline.ts": source });
+  });
+
   it("leaves what an oxlint disable comment turns off as it is, and keeps the comment as written", async () => {
     const source = [
       "// oxlint-disable-next-line no-var -- kept as written",

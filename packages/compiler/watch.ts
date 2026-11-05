@@ -38,8 +38,10 @@ const watched: Watched[] = [
   { dir: path.join(packages, "shared/src") },
   // The workflow SDK's evaluator and its jq.wasm, bundled into its modules.
   { dir: path.join(packages, "workflow-expressions/src") },
+  // src/ultracite-calibration.ts among them.
   { dir: path.join(root, "src") },
-  { dir: root, only: ["build.ts"] },
+  // Ultracite's rules are worked out as the compiler is built.
+  { dir: root, only: ["build.ts", "ultracite-rules.ts"] },
 ];
 
 /** How long after a watch fails it is started again. */

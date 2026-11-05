@@ -188,14 +188,43 @@ const restored = (
   return text;
 };
 
+/** Whether a write makes `message`'s fix: only a rule of `fixable`'s. */
+const fixes = ({ ruleId }: Linter.LintMessage): boolean =>
+  ruleId !== null && fixable.has(ruleId);
+
+/**
+ * `text` (`path` in the App) with `fixes`' fixes made, as many rounds as
+ * ESLint makes them. Filtered by rule, not only by `fixConfig`: an inline
+ * config comment (`/* eslint rule: "error" *\/`) turns on a rule beyond
+ * it, whose fix may not be safe. `verifyAndFix` takes a function as its
+ * `fix` (its `ESLint` class passes one for `fixTypes`), which its types
+ * don't name, so it is called by `Reflect` and its answer read as found.
+ */
+const fixedText = (path: string, text: string): string => {
+  const verifyAndFix: unknown = Reflect.get(linter, "verifyAndFix");
+  if (typeof verifyAndFix !== "function") {
+    return text;
+  }
+  const report: unknown = Reflect.apply(verifyAndFix, linter, [
+    text,
+    fixConfig,
+    { filename: filenameOf(path), fix: fixes },
+  ]);
+  return typeof report === "object" &&
+    report !== null &&
+    "output" in report &&
+    typeof report.output === "string"
+    ? report.output
+    : text;
+};
+
 /**
  * `source` with every fix oxlint counts as safe made, then formatted.
  * Code that doesn't parse is left as it is: the build says why.
  */
 const tidyOne = async (path: string, source: string): Promise<string> => {
   const { text, written } = asEslint(path, source);
-  const { output } = linter.verifyAndFix(text, fixConfig, filenameOf(path));
-  const fixed = restored(path, output, written) ?? source;
+  const fixed = restored(path, fixedText(path, text), written) ?? source;
   try {
     return await format(fixed, {
       ...prettierConfig,
