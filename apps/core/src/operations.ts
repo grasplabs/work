@@ -642,6 +642,28 @@ const encoder = new TextEncoder();
 const bytesOf = (value: Json): number =>
   encoder.encode(JSON.stringify(value)).byteLength;
 
+/**
+ * Argument issues as a refusal's details carry them to the caller: each
+ * one's message and its path as keys and indexes, never a value, the shape
+ * the SDK's own refusals have, so a form shows each beside its field.
+ */
+const argumentIssues = (
+  issues: readonly {
+    readonly path?: readonly unknown[];
+    readonly message: string;
+  }[]
+): { message: string; path: (string | number)[] }[] =>
+  issues.map(({ path = [], message }) => ({
+    message,
+    path: path.map((segment) => {
+      const key =
+        typeof segment === "object" && segment !== null && "key" in segment
+          ? segment.key
+          : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
 /** Issues as an error's details say them: `path: message`, never a value. */
 const issuesOf = (
   issues: readonly {
@@ -762,14 +784,14 @@ const admittedArgs = (
   }
   if (read === undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: ["The arguments aren't JSON"],
+      issues: argumentIssues([{ message: "The arguments aren't JSON" }]),
     });
   }
   const schema = compiled.args.get(operation.path);
   const result = schema?.["~standard"].validate(read.json);
   if (result === undefined || result.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: issuesOf(result?.issues ?? []),
+      issues: argumentIssues(result?.issues ?? []),
     });
   }
   const normalized = jsonOf(result.value);
@@ -2144,7 +2166,7 @@ const workflowStart = (
   }
   if (checked.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
-      issues: issuesOf(checked.issues),
+      issues: argumentIssues(checked.issues),
     });
   }
   const input = jsonOf(checked.value);

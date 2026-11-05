@@ -417,6 +417,21 @@ describe("a form's issues", () => {
     expect(binding.status().fieldIssues).toStrictEqual({});
   });
 
+  it("keeps the refusal's reason when it names no field it can show", async () => {
+    const { client } = host(() => ({
+      failed: "contract.invalid_args",
+      category: "contract",
+    }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "A" },
+    });
+    await settle(binding.submit());
+    expect(binding.status()).toMatchObject({
+      fieldIssues: {},
+      failure: { code: "contract.invalid_args", category: "contract" },
+    });
+  });
+
   it("names an array item's field as TanStack does, so the issue shows beside it", async () => {
     const { client } = host(() => ({ value: null }));
     const { binding } = formOf(client, anything, {

@@ -1520,10 +1520,16 @@ export class FormBinding {
       const issues = detailIssues(error.details);
       const errors = errorsOf(issues, (field) => this.#editable(field));
       Object.assign(fieldIssues, errors?.fields ?? {});
-      failure =
-        errors?.form === undefined
-          ? undefined
-          : { ...failureOf(error), message: errors.form };
+      // Shown beside its fields when every issue names one; otherwise the
+      // rest, or the refusal itself when it names no issue at all, so a
+      // refused submit always says why.
+      if (errors === undefined) {
+        failure = failureOf(error);
+      } else if (errors.form === undefined) {
+        failure = undefined;
+      } else {
+        failure = { ...failureOf(error), message: errors.form };
+      }
     }
     this.#set({
       phase: "idle",

@@ -617,7 +617,10 @@ describe("the session client", { timeout: 120_000 }, () => {
     ).resolves.toMatchObject({
       code: "contract.invalid_args",
       category: "contract",
-      details: { issues: [expect.stringContaining("title")] },
+      // Each issue by its path, so a form shows it beside the field.
+      details: {
+        issues: [{ path: ["title"], message: "The value is too short." }],
+      },
     });
     await expect(
       failureOf(
