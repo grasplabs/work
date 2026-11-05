@@ -10,46 +10,55 @@ import { compilerAssets } from "./src/kit.ts";
 // Every built-in blueprint's screens, its preview and its server code,
 // built one after another in one release's compiler, as a shared isolate
 // builds them (build-heap.ts), under Node, whose V8 is workerd's, in a
-// heap of `heapMb`, each then type-checked by the release's checker, as
-// core runs it, in an isolate of its own. The type chunks took what all of
-// them need from 289–320 MB to 193–208 MB; the check in tsrs's isolate
-// took the compiler's to 66–105 MB, inside the 128 MB an isolate gets.
+// heap of `heapMb`; then each type-checked in the release's checker alone,
+// as its own isolate checks them. The type chunks took what the compiler
+// needs from 289–320 MB to 193–208 MB, and moving the check to its own
+// isolate took it to 66–105 MB. The checker's memory is mostly tsrs's
+// WebAssembly memory, which `--max-heap-size` doesn't cap: it is counted
+// here beside the heap.
 
 const harness = path.join(import.meta.dirname, "build-heap.ts");
 const blueprints = path.join(import.meta.dirname, "../../apps/core/blueprints");
 
-/** The heap the builds must fit in, in MB: a Cloudflare isolate's. */
+/** The heap the compiler's builds must fit in, in MB: a Cloudflare isolate's. */
 const heapMb = 128;
 
-const builtSchema = z.object({
-  blueprint: z.string(),
-  target: z.string(),
-  ok: z.boolean(),
-});
+/**
+ * What a check may take, heap and WebAssembly together, in MB: above the
+ * 128 MB past which Cloudflare replaces an isolate after its call (the
+ * checker keeps nothing, so a replaced one costs a start), well below the
+ * about 256 MB at which it ends one mid-call. Measured 136–162 MB on the
+ * blueprints, tsrs's 80 MiB shadow stack included.
+ */
+const checkMb = 192;
 
 let release = "";
 let files = "";
+let answers = "";
 
-/** Each build of every blueprint with the release's compiler, in `heapMb`. */
-const buildAll = (): z.infer<typeof builtSchema>[] =>
-  execFileSync(
-    process.execPath,
-    [
-      "--expose-gc",
-      `--max-heap-size=${heapMb}`,
-      harness,
-      "build",
-      release,
-      files,
-    ],
-    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
-  )
+/** The JSON lines a run of the harness prints, each parsed as `schema`. */
+const linesOf = <T>(output: string, schema: z.ZodType<T>): T[] =>
+  output
     .trim()
     .split("\n")
-    .map((line) => builtSchema.parse(JSON.parse(line)));
+    .map((line) => schema.parse(JSON.parse(line)));
 
-// The release is built once, then run in a Node process of its own.
-describe("a release's compiler", { timeout: 300_000 }, () => {
+/** A run of the harness, in a Node process of its own, its heap capped at `heapMb`. */
+const harnessRun = (args: string[]): string =>
+  execFileSync(
+    process.execPath,
+    ["--expose-gc", `--max-heap-size=${heapMb}`, harness, ...args],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
+  );
+
+const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
+  ["board-page", "intake", "workflow-map"].flatMap((blueprint) =>
+    ["screens", "preview-screens", "app"].map((target) =>
+      each(blueprint, target)
+    )
+  );
+
+describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
   beforeAll(() => {
     const dir = scratch();
     const assets = path.join(dir, "assets");
@@ -60,6 +69,7 @@ describe("a release's compiler", { timeout: 300_000 }, () => {
       compilerAssets.directory(versionIn(versionModule))
     );
     files = path.join(dir, "blueprints.json");
+    answers = path.join(dir, "answers.json");
     execFileSync(process.execPath, [harness, "files", blueprints, files], {
       stdio: "pipe",
     });
@@ -67,15 +77,33 @@ describe("a release's compiler", { timeout: 300_000 }, () => {
 
   afterAll(removeScratch);
 
-  it(`builds every blueprint's screens, preview and server code in ${heapMb} MB`, () => {
-    expect(buildAll()).toStrictEqual(
-      ["board-page", "intake", "workflow-map"].flatMap((blueprint) =>
-        ["screens", "preview-screens", "app"].map((target) => ({
-          blueprint,
-          target,
-          ok: true,
-        }))
-      )
+  it(`builds every blueprint's screens, preview and server code in ${heapMb} MB, then checks each in ${checkMb} MB of heap and WebAssembly`, () => {
+    const built = linesOf(
+      harnessRun(["build", release, files, answers]),
+      z.object({ blueprint: z.string(), target: z.string(), ok: z.boolean() })
     );
+    const checked = linesOf(
+      harnessRun(["check", release, answers]),
+      z.object({
+        blueprint: z.string(),
+        target: z.string(),
+        ok: z.boolean(),
+        totalMb: z.number(),
+      })
+    ).map(({ blueprint, target, ok, totalMb }) => ({
+      blueprint,
+      target,
+      ok,
+      within: totalMb <= checkMb,
+    }));
+    expect({ built, checked }).toStrictEqual({
+      built: every((blueprint, target) => ({ blueprint, target, ok: true })),
+      checked: every((blueprint, target) => ({
+        blueprint,
+        target,
+        ok: true,
+        within: true,
+      })),
+    });
   });
 });

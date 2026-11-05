@@ -5,6 +5,7 @@ import {
   appCompilerCode,
   startPackageBuilder,
   startAppCompiler,
+  loadTypeChecker,
   startTypeChecker,
   typeCheckerCode,
 } from "@grasp-os/compiler";
@@ -341,11 +342,11 @@ const loaderCall = async (
  * isolate of the build's own (`loadAppCompiler`), whose stop is the
  * build's alone, and only that is answered: a build is never kept as
  * failed for what another did. The type checker runs in its one isolate
- * of the release (`startTypeChecker`), shared too: a stop there is tried
- * once more, by then in the isolate that replaced the stopped one, which
- * keeps nothing of it. The builder runs in a fresh isolate per
- * runner, so nothing one App's packages leave in memory is there for the
- * next, and its stops are its own already.
+ * of the release (`startTypeChecker`), shared by every App: a stop there
+ * is tried once more in a fresh, unnamed isolate of the check's own
+ * (`loadTypeChecker`), and only that is answered. The builder runs in a
+ * fresh isolate per runner, so nothing one App's packages leave in
+ * memory is there for the next, and its stops are its own already.
  */
 const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   let builder: ReturnType<typeof startPackageBuilder> | undefined;
@@ -382,19 +383,21 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
         return await compile(method, args, options?.once === true);
       }
       if (program === "type-checker") {
-        const check = async (): Promise<unknown> =>
-          await loaderCall(
+        try {
+          return await loaderCall(
             startTypeChecker(quietLoader(env.LOADER), env.ASSETS),
             method,
             args
           );
-        try {
-          return await check();
         } catch (error) {
           if (!(error instanceof PlatformBoundError)) {
             throw error;
           }
-          return await check();
+          return await loaderCall(
+            await loadTypeChecker(quietLoader(env.LOADER), env.ASSETS),
+            method,
+            args
+          );
         }
       }
       builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);

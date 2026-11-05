@@ -324,6 +324,42 @@ describe(
       ]);
     });
 
+    it("refuses every triple-slash directive in a screen's files but a reference path to one of the App's, however it is written", async () => {
+      // TypeScript reads a directive's tag and attributes in any case and
+      // order, so a gate that matched one spelling let the others reach
+      // the kit the check hides, or a lib the page doesn't have.
+      const kitFile = "../.kit/node_modules/@grasp-os/sdk/src/server.d.ts";
+      const directives: Record<string, string> = {
+        "components/d-upper.tsx": `/// <REFERENCE path="${kitFile}" />\nexport const a = 1;\n`,
+        "components/d-upper-path.tsx": `/// <reference PATH="${kitFile}" />\nexport const b = 1;\n`,
+        "components/d-reordered.tsx": `/// <reference preserve="true" path="${kitFile}" />\nexport const c = 1;\n`,
+        "components/d-lib.tsx":
+          '/// <reference lib="webworker" />\nexport const d = 1;\n',
+        "components/d-types.tsx":
+          '/// <reference types="node" />\nexport const e = 1;\n',
+        "components/d-amd.tsx":
+          '/// <amd-dependency path="x" />\nexport const f = 1;\n',
+        "d-declared.d.ts": `/// <Reference Path="${kitFile}" />\nexport type G = 1;\n`,
+        // The one directive a screen's files may hold.
+        "components/d-own.tsx":
+          '/// <reference path="./d-own-types.d.ts" />\nexport const h: Own = 1;\n',
+        "components/d-own-types.d.ts": "type Own = 1;\n",
+      };
+      const { app, files } = await blueprintApp("intake");
+      const built = await buildScreens(env, { ...files, ...directives }, app);
+      expect(
+        importRefusals(built).filter((line) => /d-/u.test(line))
+      ).toStrictEqual([
+        "components/d-amd.tsx:1",
+        "components/d-lib.tsx:1",
+        "components/d-reordered.tsx:1",
+        "components/d-types.tsx:1",
+        "components/d-upper-path.tsx:1",
+        "components/d-upper.tsx:1",
+        "d-declared.d.ts:1",
+      ]);
+    });
+
     it("gives server code's mistakes, and refuses its paths into the kit before the check", async () => {
       const { app, files } = await blueprintApp("intake");
       const { found, said: was } = parity(

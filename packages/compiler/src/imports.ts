@@ -437,9 +437,16 @@ export const typeFileError = (
     ? `"${specifier}" is not one of the App's files: a type names the App's own files by a relative path, and modules by name.`
     : undefined;
 
-/** A triple-slash reference TypeScript obeys, as it reads one: its kind and what it names. */
-const referenceDirective =
-  /^\/\/\/\s*<reference\s+(?<kind>path|types|lib)\s*=\s*(?<quote>["'])(?<name>.*?)\k<quote>/u;
+/**
+ * The one triple-slash directive a screen's files may hold, written only
+ * this way: a lowercase `reference` with a lowercase `path` and nothing
+ * else. TypeScript reads a directive's tag and attributes in any case
+ * and order (`<REFERENCE PATH=…>`, `preserve="true" path=…`), so the gate
+ * names what it lets through, and refuses everything else
+ * (`referenceError`), never the other way round.
+ */
+const ownReference =
+  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
 
 /** Where `/// <reference path>` in `file` points: a path from the App's root. */
 const referencedPath = (file: string, reference: string): string => {
@@ -456,36 +463,30 @@ const referencedPath = (file: string, reference: string): string => {
 
 /**
  * Why a screen's or a declaration's triple-slash directive (`directive`,
- * as `collectDirectives` lists it) reaches beyond the App's `files`, or
- * undefined when it doesn't: a `/// <reference path>` names only another
- * App file, never the kit's, and no `/// <reference types>` or
- * `/// <reference lib>` at all. The import checks hold every import a file
- * writes; these are how it would name a module without one.
+ * as `collectDirectives` lists it) isn't allowed, or undefined when it
+ * is: only `/// <reference path="…" />` to another of the App's `files`
+ * (`ownReference`). Every other one is refused, however written: a
+ * reference into the kit, a type package, a lib the page doesn't have,
+ * an AMD directive. The import checks hold every import a file writes;
+ * these are how it would name a module without one. A suppression
+ * (`@ts-expect-error`) is no directive here: a screen may hold one.
  */
 export const referenceError = (
   directive: string,
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  const groups = referenceDirective.exec(directive)?.groups;
-  const name = groups?.name ?? "";
-  switch (groups?.kind ?? "") {
-    case "path": {
-      return files.has(referencedPath(file, name))
-        ? undefined
-        : `"${name}" is not one of the App's files: a reference path names only those.`;
-    }
-    case "types": {
-      return `"${name}": App files reference no type packages; import what the kit has instead.`;
-    }
-    // Its lib is its target's: a `/// <reference lib>` would add one.
-    case "lib": {
-      return `"${name}": App files reference no libs; their target's lib is the one they run with.`;
-    }
-    default: {
-      return undefined;
-    }
+  if (!directive.startsWith("///")) {
+    return undefined;
   }
+  const groups = ownReference.exec(directive)?.groups;
+  if (groups === undefined) {
+    return `${directive} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`;
+  }
+  const name = groups.double ?? groups.single ?? "";
+  return files.has(referencedPath(file, name))
+    ? undefined
+    : `"${name}" is not one of the App's files: a reference path names only those.`;
 };
 
 /**

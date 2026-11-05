@@ -500,6 +500,18 @@ export const startTypeChecker = (
     .getEntrypoint<TypeChecker>();
 
 /**
+ * The type checker in a fresh, unnamed isolate of its own, for one check
+ * stopped in the shared one (`startTypeChecker`): what a stop there says
+ * is that check's alone, never another App's beside it. Only ever after
+ * a stop, as an unnamed isolate is a new Dynamic Worker each time.
+ */
+export const loadTypeChecker = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<TypeChecker>> =>
+  loader.load(await typeCheckerWorker(assets)).getEntrypoint<TypeChecker>();
+
+/**
  * The type checker's code, for the on-prem sandbox host, as
  * `appCompilerCode` gives the compiler's.
  */

@@ -636,6 +636,12 @@ const buildPrefixes = [
   inspectionsPrefix,
   ...Object.values(incrementPrefixes),
   "build-quarantine/",
+  // Each file's type check, which screens builds kept until the check
+  // moved to an isolate of its own (GRA-1562): nothing writes it now, so
+  // the sweep empties it within `buildKeepMs` of the release that stopped
+  // writing it. Remove once every deployment has run that release for 30
+  // days (expand, then contract).
+  "screen-checks/",
 ];
 
 const buildSweepSchema = z.object({

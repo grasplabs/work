@@ -234,6 +234,77 @@ const lineAndColumn = (
   };
 };
 
+/** One run of tsc as `typeCheck` reads it: its exit, its JSON reply, and what it said on stderr. */
+export interface TscRun {
+  readonly exitCode: number;
+  readonly reply: Uint8Array;
+  readonly stderr: string;
+}
+
+/**
+ * What a run of tsc says of the App's `files`, the kit's files under
+ * `root` left out. A run that crashed (a type that recurses past the
+ * stack), ended otherwise than tsc ends, or failed without one error to
+ * say why is a refused check, never a pass.
+ */
+export const diagnosticsOfRun = (
+  { exitCode, reply, stderr }: TscRun,
+  { files, root }: { files: Readonly<Record<string, string>>; root: string }
+): Diagnostic[] => {
+  const said = stderr.trim().split("\n")[0] ?? "";
+  const because = said === "" ? "" : `: ${said}`;
+  if (exitCode === EXIT_CRASHED) {
+    return stopped(
+      `The type check stopped before it finished${because}. Simplify the App's types (a type that recurses without end overflows the type checker).`
+    );
+  }
+  let all: TscDiagnostic[];
+  try {
+    all = parseReply(reply);
+  } catch {
+    return stopped(`The type check's answer couldn't be read${because}.`);
+  }
+  // 0: no errors; 1 and 2: errors (with and without output). Anything
+  // else (an invalid project), or a failure that names no error, checked
+  // nothing.
+  if (
+    exitCode > 2 ||
+    (exitCode !== 0 && !all.some(({ category }) => category === 1))
+  ) {
+    return stopped(
+      `The type check couldn't run (tsc exited with ${exitCode})${because}.`
+    );
+  }
+  const own = new Set(Object.keys(files).map((path) => `/${path}`));
+  return all.flatMap((diagnostic): Diagnostic[] => {
+    const severity = severities[diagnostic.category];
+    const { fileName } = diagnostic;
+    if (severity === undefined || fileName?.startsWith(root) === true) {
+      return [];
+    }
+    const result: Diagnostic = {
+      rule: `TS${diagnostic.code}`,
+      severity,
+      // A module of the kit by where it was before the check hid it.
+      message: flattened(diagnostic).replaceAll(root, kitRoot),
+    };
+    // Anything but an App file (the tsconfig the check wrote) is the
+    // program's own, about the App as a whole.
+    if (fileName === undefined || !own.has(fileName)) {
+      return [result];
+    }
+    const file = fileName.slice(1);
+    const at =
+      diagnostic.startPosition === undefined
+        ? lineAndColumn(files[file] ?? "", diagnostic.pos)
+        : {
+            line: diagnostic.startPosition.line + 1,
+            column: diagnostic.startPosition.character + 1,
+          };
+    return [{ ...result, file, ...at }];
+  });
+};
+
 /**
  * Type-checks the App files of `request` (paths relative to the App, e.g.
  * `screens/desk.tsx`) against `kit`, with tsrs's `module`, and the App's
@@ -300,42 +371,8 @@ export const typeCheck = (
       },
     }
   );
-  // 0: no errors; 1 and 2: errors (with and without output). Anything
-  // else (an invalid project, a crash) checked nothing.
-  if (exitCode > 2) {
-    const said = errors.join("").trim().split("\n")[0] ?? "";
-    return stopped(
-      exitCode === EXIT_CRASHED
-        ? `The type check stopped before it finished${said === "" ? "" : `: ${said}`}. Simplify the App's types (a type that recurses without end overflows the type checker).`
-        : `The type check couldn't run (tsc exited with ${exitCode})${said === "" ? "" : `: ${said}`}.`
-    );
-  }
-  const own = new Set(app.map((path) => `/${path}`));
-  return parseReply(reply).flatMap((diagnostic): Diagnostic[] => {
-    const severity = severities[diagnostic.category];
-    const { fileName } = diagnostic;
-    if (severity === undefined || fileName?.startsWith(root) === true) {
-      return [];
-    }
-    const result: Diagnostic = {
-      rule: `TS${diagnostic.code}`,
-      severity,
-      // A module of the kit by where it was before the check hid it.
-      message: flattened(diagnostic).replaceAll(root, kitRoot),
-    };
-    // Anything but an App file (the tsconfig the check wrote) is the
-    // program's own, about the App as a whole.
-    if (fileName === undefined || !own.has(fileName)) {
-      return [result];
-    }
-    const file = fileName.slice(1);
-    const at =
-      diagnostic.startPosition === undefined
-        ? lineAndColumn(files[file] ?? "", diagnostic.pos)
-        : {
-            line: diagnostic.startPosition.line + 1,
-            column: diagnostic.startPosition.character + 1,
-          };
-    return [{ ...result, file, ...at }];
-  });
+  return diagnosticsOfRun(
+    { exitCode, reply, stderr: errors.join("") },
+    { files, root }
+  );
 };

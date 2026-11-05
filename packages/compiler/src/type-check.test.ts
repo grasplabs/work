@@ -3,7 +3,12 @@ import { createRequire } from "node:module";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { screenTarget, typeCheck, typeCheckRequest } from "./type-check.ts";
+import {
+  diagnosticsOfRun,
+  screenTarget,
+  typeCheck,
+  typeCheckRequest,
+} from "./type-check.ts";
 import type { KitTypes, TypeTarget } from "./type-check.ts";
 
 // The type check on its own: tsrs's WebAssembly, run in memory over a kit
@@ -197,5 +202,54 @@ describe("what a check counts", () => {
       ["check error"],
       ["check error"],
     ]);
+  });
+});
+
+/** What reading a run of `exitCode` that replied `diagnostics` says, as `rule severity`. */
+const read = (exitCode: number, diagnostics?: unknown[]): string[] =>
+  diagnosticsOfRun(
+    {
+      exitCode,
+      reply:
+        diagnostics === undefined
+          ? new Uint8Array()
+          : new TextEncoder().encode(JSON.stringify(diagnostics)),
+      stderr: "",
+    },
+    { files: { "a.ts": "" }, root: "/.kit/node_modules/" }
+  ).map(({ rule, severity }) => `${rule} ${severity}`);
+
+describe("a run of tsc", () => {
+  const kitError = {
+    fileName: "/.kit/node_modules/hidden/index.d.ts",
+    pos: 0,
+    end: 1,
+    code: 2304,
+    category: 1,
+    text: "Cannot find name 'Missing'.",
+  };
+
+  it("passes only a clean exit, or a failure some error explains, the kit's included", () => {
+    expect({
+      clean: read(0),
+      failedEmpty: read(1),
+      failedWarned: read(2, [{ ...kitError, category: 0 }]),
+      failedOnTheKit: read(2, [kitError]),
+      crashed: read(5),
+      invalidProject: read(3, [kitError]),
+      unreadable: diagnosticsOfRun(
+        { exitCode: 0, reply: new TextEncoder().encode("{"), stderr: "" },
+        { files: {}, root: "/.kit/node_modules/" }
+      ).map(({ rule, severity }) => `${rule} ${severity}`),
+    }).toStrictEqual({
+      clean: [],
+      failedEmpty: ["check error"],
+      failedWarned: ["check error"],
+      // The kit's own error is never the App's; the failure has its cause.
+      failedOnTheKit: [],
+      crashed: ["check error"],
+      invalidProject: ["check error"],
+      unreadable: ["check error"],
+    });
   });
 });
