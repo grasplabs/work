@@ -151,6 +151,13 @@ const keepUntil = (claims: TokenClaims, now: number): number =>
 /** A token as the client read it: what it sends, and whose it is. */
 export interface PortableToken {
   readonly text: string;
+  /**
+   * Whose it is: the person in the App it is good for. Calls name
+   * functions by name alone, so what the client holds (results, keys left
+   * unknown, drafts) is one App's: a token for another App, even the same
+   * person's, is a switch the client clears everything for, as for
+   * someone else.
+   */
   readonly principal: string;
   /** The App it is good for, as it says (core checks it): where calls go. */
   readonly app: string;
@@ -284,7 +291,7 @@ export class PortableTransport {
       }
       const token = {
         text,
-        principal: claims.sub,
+        principal: JSON.stringify([claims.app, claims.sub]),
         app: claims.app,
         expiresAt: claims.expiresAt,
       };

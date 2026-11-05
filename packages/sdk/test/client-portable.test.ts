@@ -22,14 +22,14 @@ const origin = "https://acme.grasp.example";
 const app = "app_0000000000000000000000notes";
 
 /**
- * A token of `sub`'s, as core's are shaped; the client reads only `sub`,
- * and `exp` (in seconds) when given. Without one it is asked for again
- * on every call.
+ * A token of `sub`'s for `of`, as core's are shaped; the client reads
+ * only `sub`, `app`, and `exp` (in seconds) when given. Without one it is
+ * asked for again on every call.
  */
-const tokenOf = (sub: string, exp?: number): string =>
+const tokenOf = (sub: string, exp?: number, of = app): string =>
   [
     "e30",
-    JSON.stringify({ sub, app, ...(exp === undefined ? {} : { exp }) }),
+    JSON.stringify({ sub, app: of, ...(exp === undefined ? {} : { exp }) }),
     "c2ln",
   ]
     .map((part, index) =>
@@ -487,6 +487,47 @@ describe("a portable host's client", () => {
       // Ann's, then nothing, then Bo's: never Ann's once Bo's token came.
       shown: [{ title: "Ann's" }, undefined, { title: "Bo's" }],
       sentForBo: ["notes.get"],
+    });
+    stop();
+  });
+
+  it("clears what it read in one App before anything is sent to another, though the person is the same", async () => {
+    const other = "app_0000000000000000000000other";
+    let token = tokenOf("ann");
+    const seen = network(
+      async ({ url }) =>
+        await Promise.resolve({
+          title: url.endsWith(app) ? "In Notes" : "In the other App",
+        })
+    );
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const shown: unknown[] = [];
+    const stop = internals.subscribe(entry, () => {
+      shown.push(entry.snapshot.value);
+    });
+    await until(() => entry.snapshot.value !== undefined);
+
+    token = tokenOf("ann", undefined, other);
+    const raced = await failureOf(
+      client.query(api.notes.list, { pagination: {} })
+    );
+    await until(() => shown.at(-1) !== undefined);
+    expect({
+      raced: raced.code,
+      shown,
+      sentToOther: seen
+        .filter(({ url }) => url.endsWith(other))
+        .map(({ body }) => contractIdPattern.exec(body)?.groups?.contractId),
+    }).toStrictEqual({
+      raced: "auth.principal_changed",
+      // Notes', then nothing, then the other App's: never Notes' after.
+      shown: [{ title: "In Notes" }, undefined, { title: "In the other App" }],
+      sentToOther: ["notes.get"],
     });
     stop();
   });
