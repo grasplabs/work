@@ -105,7 +105,7 @@ import {
 //
 // Anyone with a role in the App (app-access.ts) uses its screens: opens
 // them, calls its functions, reports problems, and starts, follows and
-// answers its workflow runs (workflows/screen-runs.ts). Only its builders
+// answers its workflow runs (workflows/screen-decisions.ts). Only its builders
 // read its error log.
 //
 // A screen's build needs nobody's approval: it reaches only its App's

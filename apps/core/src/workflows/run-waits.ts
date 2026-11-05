@@ -730,7 +730,7 @@ export interface WaitViewer {
   readonly staff?: boolean;
   /**
    * Whether the run's restricted mode is the App's: only then is a
-   * decision of it the App's screen's to answer (screen-runs.ts,
+   * decision of it the App's screen's to answer (screen-decisions.ts,
    * `appDecision`).
    */
   readonly sameRestriction: boolean;

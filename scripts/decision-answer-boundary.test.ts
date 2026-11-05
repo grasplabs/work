@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 // Agents never answer a person's decision (GRA-624, threat model T7): the
 // decision service's answer and confirmation are reached only through a
 // person's session, `decisions` (decisions/rpc.ts) and the screens'
-// bridge (workflows/screen-runs.ts). Agents act through an `Authority`,
+// bridge (workflows/screen-decisions.ts). Agents act through an `Authority`,
 // never a session; a new import of these functions anywhere else in core
 // could hand one a way in. This guard fails on any such import, a
 // re-export, or a namespace or dynamic import of the module that would
@@ -14,8 +14,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 const core = path.join(import.meta.dirname, "../apps/core/src");
 
-/** Where the decision service's answer and confirmation may be imported. */
-const allowed = new Set(["decisions/rpc.ts", "workflows/screen-runs.ts"]);
+/**
+ * Where the decision service's answer and confirmation may be imported:
+ * the person's session, and the screens' bridge, which answers for the
+ * person with the screen open (`appFor`) and is called from
+ * screens-rpc.ts alone.
+ */
+const allowed = new Set(["decisions/rpc.ts", "workflows/screen-decisions.ts"]);
 
 /** The functions that record or confirm a person's answer. */
 const guarded = ["answerDecision", "confirmDecision"];

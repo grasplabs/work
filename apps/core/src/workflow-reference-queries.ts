@@ -1033,7 +1033,7 @@ const decisionsPage = async (
         },
         // Listed only while the caller may answer it and it takes answers.
         // Answerable only where the run's restricted mode is the App's
-        // (workflows/screen-runs.ts, `appDecision`).
+        // (workflows/screen-decisions.ts, `appDecision`).
         wait: decisionWaitOf(row, named, row.restricted === appRestricted),
       });
     }
@@ -1095,7 +1095,7 @@ const decisionDetail = async (
     return null;
   }
   // Answerable only where the run's restricted mode is the App's
-  // (workflows/screen-runs.ts, `appDecision`).
+  // (workflows/screen-decisions.ts, `appDecision`).
   const canRespond = row.restricted === appRestricted;
   return {
     key: named.key,
