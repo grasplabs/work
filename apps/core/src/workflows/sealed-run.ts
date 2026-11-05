@@ -1786,8 +1786,9 @@ class SealedRun implements SealedRunKind {
     // Past what its workflow's state takes in all, it fails, a test run's
     // too. A run that writes is counted by its write, with what the state
     // holds as it lands (workflow-state.ts); one that never writes counts
-    // what its snapshot holds besides, so a draft's test fails where its
-    // runs would.
+    // what its snapshot holds besides, so a draft's test fails a step
+    // whose state passes the cap with its snapshot (not with what its own
+    // earlier steps kept, which it never wrote).
     const { calling } = this.run;
     const writes = calling.candidate === undefined && calling.fixture !== true;
     const merged = {
