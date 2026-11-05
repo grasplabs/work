@@ -75,7 +75,11 @@ export const echo = action({
   handler: async (_ctx, args) => args.word,
 });
 
-const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
+const pause = async (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<undefined>();
+  setTimeout(resolve, ms);
+  await promise;
+};
 
 // Saves a note, and answers a token no second run would answer again.
 export const stamp = action({
@@ -96,7 +100,9 @@ export const stamp = action({
     if (args.untilRevoked) {
       try {
         for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- one read after the other
           await ctx.runQuery(get, { id });
+          // oxlint-disable-next-line no-await-in-loop -- half a second apart
           await pause(500);
         }
       } catch (error) {
@@ -134,6 +140,9 @@ import { api } from "@server/_generated/api";
 export default function Notes() {
   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
   const create = useMutation(api.notes.create);
+  const handleAdd = async () => {
+    await create({ title: "New note" });
+  };
   if (notes === undefined) {
     return <p role="status">Loading notes…</p>;
   }
@@ -144,7 +153,7 @@ export default function Notes() {
           <li key={note._id}>{note.title}</li>
         ))}
       </ul>
-      <Button onClick={() => void create({ title: "New note" })}>Add</Button>
+      <Button onClick={handleAdd}>Add</Button>
     </main>
   );
 }

@@ -7,6 +7,7 @@
     "src",
     "build.ts",
     "build-lock.ts",
+    "ultracite-rules.ts",
     "build-harness.ts",
     "build-heap.ts",
     "build-*.test.ts",

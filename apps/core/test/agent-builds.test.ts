@@ -588,7 +588,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       diagnostics: [
         {
           file: "app.ts",
-          line: 3,
+          line: 5,
           rule: "server",
           severity: "error",
           says: true,
@@ -925,14 +925,56 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("saves what it writes fixed and formatted, as Ultracite would, and reports what is left by file", async () => {
+    // Formatted as Prettier formats it, a `var` that never changes is a
+    // `const` and a body that only returns is the arrow's: each fixes
+    // itself. A loose `==` doesn't: oxlint's fix of it may change what the
+    // code does, so it is reported, at its line.
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: {
+          "components/total.ts":
+            "var rate = 2\nexport const total = (n: number) => { return n*rate }\nexport const same = (a: number, b: number) => a == b\n",
+        },
+      }),
+      toolStep("readFile", { app, path: "components/total.ts" }),
+      says("Written."),
+    ]);
+
+    await chat.ask("Add a total");
+
+    const [written, read] = await toolResults(chat.stub, chat.chat.id);
+    const { diagnostics } = z
+      .object({
+        diagnostics: z.array(
+          z.object({
+            file: z.string().nullable(),
+            line: z.number().nullable(),
+            rule: z.string(),
+          })
+        ),
+      })
+      .parse(returned(written?.text));
+    expect({
+      written: diagnostics
+        .filter(({ file }) => file === "components/total.ts")
+        .map(({ line, rule }) => ({ line, rule })),
+      read: read?.text,
+    }).toStrictEqual({
+      written: [{ line: 3, rule: "eqeqeq" }],
+      read: "Returned:\nconst rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n",
+    });
+  });
+
   it("searches a draft's files in a folder or all of them, ignoring case, up to a hundred lines and how many more", async () => {
     const many = Array.from({ length: 105 }, () => "an alpha line").join("\n");
     const { chat } = await setUp((app) => [
       toolStep("writeFile", {
         app,
         files: {
-          "screens/a.tsx": "Alpha\nbeta\nalphabet",
-          "screens/b.tsx": "ALPHA",
+          "screens/a.md": "Alpha\nbeta\nalphabet",
+          "screens/b.md": "ALPHA",
           "screensaver.md": "alpha",
           "server/x.ts": "alpha",
           "many.md": many,
@@ -940,7 +982,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }),
       toolStep("searchFiles", { app, text: "aLpHa", path: "screens" }),
       toolStep("searchFiles", { app, text: "an alpha" }),
-      toolStep("readFile", { app, path: "screens/a.tsx" }),
+      toolStep("readFile", { app, path: "screens/a.md" }),
       toolStep("readFile", { app, path: "many.md", fromLine: 104 }),
       says("Found."),
     ]);
@@ -964,9 +1006,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       // Not `screensaver.md`, which only starts like the folder.
       inFolder: {
         matches: [
-          "screens/a.tsx:1:Alpha",
-          "screens/a.tsx:3:alphabet",
-          "screens/b.tsx:1:ALPHA",
+          "screens/a.md:1:Alpha",
+          "screens/a.md:3:alphabet",
+          "screens/b.md:1:ALPHA",
         ],
       },
       capped: [100, 5, "many.md:1:an alpha line"],
@@ -1606,17 +1648,20 @@ export const titles = action({
   args: {},
   returns: v.array(v.string()),
   uses: [internal.notes.listAll],
-  handler: async (ctx) => (await ctx.runQuery(internal.notes.listAll, {})).map(note => note.title),
+  handler: async (ctx) => {
+    const notes = await ctx.runQuery(internal.notes.listAll, {});
+    return notes.map((note) => note.title);
+  },
 });
 `;
     const wrongCall = operations.replace(
-      "(await ctx.runQuery(internal.notes.listAll, {})).map(note => note.title)",
-      "await ctx.runQuery(internal.notes.missing, {})"
+      "const notes = await ctx.runQuery(internal.notes.listAll, {});\n    return notes.map((note) => note.title);",
+      "return await ctx.runQuery(internal.notes.missing, {});"
     );
     const sound = { ...notesFiles, "server/notes.ts": operations };
     const mistyped = operations.replace(
-      "import { AppError,",
-      'const total: number = "seven";\nvoid total;\nimport { AppError,'
+      'import { noteFields } from "../schema.ts";',
+      'import { noteFields } from "../schema.ts";\n\nexport const total: number = "seven";'
     );
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {

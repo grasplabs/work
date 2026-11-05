@@ -916,7 +916,8 @@ const sealedSalaries = async () =>
               fromSchema,
               toSchema,
               fixtures: salaryFixtures,
-              prelude: salaryPrelude,
+              // Only the handler that shares it: an unused one fails the check.
+              prelude: handler.includes("previous") ? salaryPrelude : "",
               input: name.endsWith("refines-amount")
                 ? refinedInput
                 : "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",

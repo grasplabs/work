@@ -1,5 +1,6 @@
 import {
   loadAppCompiler,
+  loadUltracite,
   packageBuilderCode,
   platformCodeReadMs,
   appCompilerCode,
@@ -7,7 +8,9 @@ import {
   startAppCompiler,
   loadTypeChecker,
   startTypeChecker,
+  startUltracite,
   typeCheckerCode,
+  ultraciteCode,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -28,8 +31,8 @@ import {
   sessionHost,
 } from "./sandboxed.ts";
 
-// The release's platform code (the App compiler, the package builder,
-// the file extractor), which reads hostile input (an App's source; npm
+// The release's platform code (the App compiler, Ultracite's lint, the
+// package builder, the file extractor), which reads hostile input (an App's source; npm
 // tarballs; uploads) without running it, run where it is bounded: on
 // Cloudflare in a Dynamic Worker of core's own, whose CPU and memory the
 // runtime bounds; on-prem in a session on the sandbox host
@@ -264,18 +267,24 @@ export const runPlatformCode = async (
 };
 
 /** The platform programs a runner runs, by name. */
-export type PlatformProgram = "compiler" | "type-checker" | "package-builder";
+export type PlatformProgram =
+  | "compiler"
+  | "type-checker"
+  | "ultracite"
+  | "package-builder";
 
 /**
  * The wall-clock time a call of each program may take on the sandbox host,
  * loading it included: past its CPU time (`compilerTaskCpuMs`, 60 s, for
- * both), which bounds the work. The compiler's is past the build wait too
- * (screens.ts), so a late build still lands in the cache; the builder's
- * takes in the reads of its tarballs and the writes of its artifact.
+ * each), which bounds the work. The compiler's, the type checker's and
+ * Ultracite's are past the build wait too (screens.ts), so a late build
+ * still lands in the cache; the builder's takes in the reads of its
+ * tarballs and the writes of its artifact.
  */
 const programWallMs: Record<PlatformProgram, number> = {
   compiler: 75_000,
   "type-checker": 75_000,
+  ultracite: 75_000,
   "package-builder": 90_000,
 };
 
@@ -329,6 +338,30 @@ const loaderCall = async (
   await boundedInCore(async () => await callStub(entrypoint, method, args));
 
 /**
+ * A program that runs warm in a named isolate (`startAppCompiler`), and
+ * how it starts in a fresh one of a call's own. `whose` names the isolate
+ * of one App's calls, for a program that keeps one per App.
+ */
+interface WarmProgram {
+  readonly start: (
+    loader: WorkerLoader,
+    assets: Fetcher,
+    whose?: string
+  ) => unknown;
+  readonly load: (loader: WorkerLoader, assets: Fetcher) => Promise<unknown>;
+}
+
+/** The programs that run warm in core's own Loader, by name. */
+const warmPrograms: Record<
+  Exclude<PlatformProgram, "package-builder">,
+  WarmProgram
+> = {
+  compiler: { start: startAppCompiler, load: loadAppCompiler },
+  "type-checker": { start: startTypeChecker, load: loadTypeChecker },
+  ultracite: { start: startUltracite, load: loadUltracite },
+};
+
+/**
  * The runner in core's own Loader. On Cloudflare the compiler runs warm in
  * an isolate named for `whose` builds (`startAppCompiler`), so no other
  * App's builds share its limits; the App's own builds do, and one heavy
@@ -338,26 +371,27 @@ const loaderCall = async (
  * unloads no named isolate while the process runs and enforces no limits
  * of an isolate's: one per App there is a compiler of over 100 MB kept
  * for every App ever built, until the process runs out of heap, so every
- * App's builds share one. A stop in the warm isolate is tried once more in a fresh
- * isolate of the build's own (`loadAppCompiler`), whose stop is the
- * build's alone, and only that is answered: a build is never kept as
- * failed for what another did. The type checker runs in its one isolate
- * of the release (`startTypeChecker`), shared by every App: a stop there
- * is tried once more in a fresh, unnamed isolate of the check's own
- * (`loadTypeChecker`), and only that is answered. The builder runs in a
- * fresh isolate per runner, so nothing one App's packages leave in
- * memory is there for the next, and its stops are its own already.
+ * App's builds share one. The type checker and Ultracite's lint each run
+ * warm in one isolate per release that every App's calls share
+ * (`startTypeChecker`, `startUltracite`). A stop in a warm isolate is
+ * tried once more in a fresh isolate of the call's own (`loadAppCompiler`,
+ * `loadTypeChecker`), whose stop is the call's alone, and only that is
+ * answered: a build is never kept as failed for what another did. The
+ * builder runs in a fresh isolate per runner, so nothing one App's
+ * packages leave in memory is there for the next, and its stops are its
+ * own already.
  */
 const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   let builder: ReturnType<typeof startPackageBuilder> | undefined;
-  const compile = async (
+  const shared = async (
+    { start, load }: WarmProgram,
     method: string,
     args: readonly unknown[],
     once: boolean
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startAppCompiler(
+        start(
           quietLoader(env.LOADER),
           env.ASSETS,
           env.RUNTIME_PROFILE === "cloudflare" ? whose : undefined
@@ -370,7 +404,7 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
         throw error;
       }
       return await loaderCall(
-        await loadAppCompiler(quietLoader(env.LOADER), env.ASSETS),
+        await load(quietLoader(env.LOADER), env.ASSETS),
         method,
         args
       );
@@ -379,41 +413,28 @@ const inCore = (env: PlatformEnv, whose: string): PlatformRunner => {
   return {
     inCore: true,
     run: async (program, method, args, options) => {
-      if (program === "compiler") {
-        return await compile(method, args, options?.once === true);
-      }
-      if (program === "type-checker") {
-        try {
-          return await loaderCall(
-            startTypeChecker(quietLoader(env.LOADER), env.ASSETS),
-            method,
-            args
-          );
-        } catch (error) {
-          if (!(error instanceof PlatformBoundError)) {
-            throw error;
-          }
-          return await loaderCall(
-            await loadTypeChecker(quietLoader(env.LOADER), env.ASSETS),
-            method,
-            args
-          );
-        }
+      if (program !== "package-builder") {
+        return await shared(
+          warmPrograms[program],
+          method,
+          args,
+          options?.once === true
+        );
       }
       builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);
       return await loaderCall(await builder, method, args);
     },
     // No wall-clock bound in core: the runtime bounds each call's CPU.
-    // Two calls at most (a compile tried again). The compiler's is bound
-    // by its CPU time alone, as it computes and waits on nothing; the
-    // builder's as long as one may take on the sandbox host, as it waits
-    // on reads of its tarballs.
+    // Two calls at most (a call tried again). The compiler's, the type
+    // checker's and Ultracite's are bound by their CPU time alone, as they
+    // compute and wait on nothing; the builder's as long as one may take
+    // on the sandbox host, as it waits on reads of its tarballs.
     callMs: (program) =>
       2 *
       (platformCodeReadMs +
-        (program === "compiler"
-          ? platformLimits.compilerTaskCpuMs
-          : sessionCallMs(programWallMs[program]))),
+        (program === "package-builder"
+          ? sessionCallMs(programWallMs[program])
+          : platformLimits.compilerTaskCpuMs)),
   };
 };
 
@@ -424,6 +445,7 @@ const programCode: Record<
 > = {
   compiler: appCompilerCode,
   "type-checker": typeCheckerCode,
+  ultracite: ultraciteCode,
   "package-builder": packageBuilderCode,
 };
 

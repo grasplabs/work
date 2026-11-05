@@ -126,6 +126,7 @@ export const releaseFiles = [
   compilerAssets.workflowSdkModules,
   compilerAssets.serverSdkModules,
   compilerAssets.packageBuilder,
+  compilerAssets.ultracite,
   compilerAssets.esbuildWasm,
   compilerAssets.reference,
   compilerAssets.jqWasm,

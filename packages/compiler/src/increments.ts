@@ -1,5 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 
+import type { Diagnostic } from "./diagnostic.ts";
 import {
   buildFiles,
   componentsFolder,
@@ -133,6 +134,20 @@ export const screenSources = (
   };
 };
 
+/**
+ * The key Ultracite's lint of `path` (`source`) is kept under (`lint`,
+ * ultracite.ts): its result reads that file alone, and the compiler's
+ * version, which every cache key holds, stands for the rules.
+ */
+export const lintKey = async (path: string, source: string): Promise<string> =>
+  await keyOf(["lint", path, source]);
+
+/** Ultracite's lint of one file, as core keeps it. */
+export interface LintRecord {
+  path: string;
+  diagnostics: Diagnostic[];
+}
+
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((each) => typeof each === "string");
 
@@ -160,6 +175,34 @@ export const moduleRecordOf = (
         kit: value.kit,
         candidates: value.candidates,
       }
+    : undefined;
+
+const isDiagnostics = (value: unknown): value is Diagnostic[] =>
+  Array.isArray(value) &&
+  value.every(
+    (each: unknown) =>
+      typeof each === "object" &&
+      each !== null &&
+      "rule" in each &&
+      typeof each.rule === "string" &&
+      "message" in each &&
+      typeof each.message === "string" &&
+      "severity" in each &&
+      (each.severity === "error" || each.severity === "warning")
+  );
+
+/** `value` as a lint record of `path`'s, if it is one. */
+export const lintRecordOf = (
+  value: unknown,
+  path: string
+): LintRecord | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "path" in value &&
+  value.path === path &&
+  "diagnostics" in value &&
+  isDiagnostics(value.diagnostics)
+    ? { path, diagnostics: value.diagnostics }
     : undefined;
 
 /** The keys of what a screens build of `files` may reuse: each module's transform, by its path. */

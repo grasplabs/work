@@ -1,5 +1,9 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { appErrors, commitMessageSchema } from "@grasp-os/shared/apps";
+import {
+  appErrors,
+  commitMessageSchema,
+  fileChangesSchema,
+} from "@grasp-os/shared/apps";
 import type {
   App,
   BuildDiagnostic,
@@ -47,9 +51,14 @@ import { requireResourceRole } from "./permission-resources.ts";
 import { appBindingKinds, requestPermission } from "./permissions.ts";
 import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
+import { platformRunner } from "./platform-sandbox.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
-import { buildOnSave, draftServerBuild } from "./save-builds.ts";
+import {
+  buildOnSave,
+  draftLintBuild,
+  draftServerBuild,
+} from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
 import { workflowTestFailures } from "./workflows/code.ts";
@@ -360,6 +369,12 @@ export interface DraftCheck {
    */
   server: SavedBuild;
   workflows: SavedBuild;
+  /**
+   * What Ultracite's rules (the repo's own bar) say of its TypeScript
+   * (`draftLintBuild`): what fixes itself was fixed as it was written
+   * (`write`), so what is left is the agent's to fix.
+   */
+  lint: SavedBuild;
   tests: {
     /** `not_run` while the workflows don't build. */
     status: "passed" | "failed" | "none" | "not_run";
@@ -491,7 +506,10 @@ const previewOf = async (
 };
 
 /** A draft's builds: its screens, its server code and its workflows. */
-export type DraftBuilds = Pick<DraftCheck, "screens" | "server" | "workflows">;
+export type DraftBuilds = Pick<
+  DraftCheck,
+  "screens" | "server" | "workflows" | "lint"
+>;
 
 /**
  * Builds a draft's `files` as a save does (`buildOnSave`: screens and
@@ -521,15 +539,16 @@ const draftBuilds = async (
     });
     return await inspecting;
   };
-  const [saved, server] = await Promise.all([
+  const [saved, server, lint] = await Promise.all([
     buildOnSave(
       env,
       { app, version, files, bindings: await appBindingKinds(env, app) },
       { profile: "preview", signal, inspection }
     ),
     draftServerBuild(env, { app, version, files }, signal, inspection),
+    draftLintBuild(env, { app, version, files }, signal),
   ]);
-  return { screens: saved.screens, server, workflows: saved.workflows };
+  return { screens: saved.screens, server, workflows: saved.workflows, lint };
 };
 
 /** Where a diagnostic is, to sort by: its file (the App's own last), line and column. */
@@ -547,7 +566,12 @@ const writtenDiagnostics = (
 ): Pick<DraftWrite, "errors" | "warnings" | "diagnostics" | "leftOut"> => {
   const seen = new Set<string>();
   const all: BuildDiagnostic[] = [];
-  for (const build of [builds.screens, builds.server, builds.workflows]) {
+  for (const build of [
+    builds.screens,
+    builds.server,
+    builds.workflows,
+    builds.lint,
+  ]) {
     for (const diagnostic of build.diagnostics) {
       const key = JSON.stringify([
         diagnostic.file,
@@ -564,7 +588,14 @@ const writtenDiagnostics = (
   }
   const errors = all.filter(({ severity }) => severity === "error");
   const warnings = all.filter(({ severity }) => severity === "warning");
-  const kept = [...errors, ...warnings]
+  // Where some are cut off, what breaks the App (compile, types, the
+  // design system, the React Compiler) before its style (`lint`), so a
+  // style finding never hides a type error.
+  const kept = [
+    ...errors.filter(({ category }) => category !== "code"),
+    ...errors.filter(({ category }) => category === "code"),
+    ...warnings,
+  ]
     .slice(0, maxReported)
     .toSorted((a, b) => placeOf(a).localeCompare(placeOf(b)));
   return {
@@ -603,8 +634,9 @@ export const checkFiles = async (
   const tests = await testsOf(env, app, base, files, builds.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
-    tests.status !== "failed";
+    [builds.screens, builds.server, builds.workflows, builds.lint].every(
+      buildPassed
+    ) && tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     // A warning (React's development warnings, say) shows, never fails.
@@ -612,6 +644,7 @@ export const checkFiles = async (
     screens: reported(builds.screens),
     server: reported(builds.server),
     workflows: reported(builds.workflows),
+    lint: reported(builds.lint),
     tests,
     preview,
   };
@@ -628,6 +661,45 @@ export interface SubmittedJob {
   status: "running";
   revision: number;
 }
+
+/** What Ultracite's `tidy` answers: the files it was handed, by path. */
+const tidiedSchema = z.record(z.string(), z.string());
+
+/**
+ * `changes` (new content by path, or null to delete a file), each file as
+ * Ultracite's lint tidies it (`tidy`: what oxlint fixes safely fixed, then
+ * formatted): so the agent never spends a turn on formatting, nor on what
+ * a rule fixes itself. Before they are applied (`applyChanges`), so the
+ * App's limits hold for what is saved. A write is never refused for it:
+ * where the lint can't run now, what was written is saved as it is.
+ */
+const tidied = async (
+  env: Env,
+  app: AppId,
+  changes: unknown
+): Promise<Record<string, string | null>> => {
+  const written = appErrors.parse("app.invalid", fileChangesSchema, changes);
+  const contents = Object.fromEntries(
+    Object.entries(written).flatMap(([path, content]) =>
+      content === null ? [] : [[path, content]]
+    )
+  );
+  let tidy: Record<string, string>;
+  try {
+    tidy = tidiedSchema.parse(
+      await platformRunner(env, app).run("ultracite", "tidy", [contents])
+    );
+  } catch (error) {
+    log.warn("build.tidy_failed", errorFields(error));
+    return written;
+  }
+  return Object.fromEntries(
+    Object.entries(written).map(([path, content]) => [
+      path,
+      content === null ? null : (tidy[path] ?? content),
+    ])
+  );
+};
 
 /** The draft revision a `write` must be over, when it names one. */
 const overSchema = z
@@ -1006,9 +1078,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           base: draft.base,
           changes: {},
         });
-        // Changed in place (\`applyChanges\`): the draft as it is written.
+        // Changed in place (\`applyChanges\`): the draft as it is written,
+        // its TypeScript fixed and formatted first (\`tidied\`).
         const files = await draftFiles(this.env, id, draft);
-        const written = applyChanges(this.env, files, changes);
+        const written = applyChanges(
+          this.env,
+          files,
+          await tidied(this.env, id, changes)
+        );
         refuseAppWorkflows(
           written.flatMap(([path, content]) => (content === null ? [] : [path]))
         );
@@ -1053,7 +1130,12 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           Object.fromEntries(files)
         );
         const notChecked: DraftWrite["notChecked"] = {};
-        for (const kind of ["screens", "server", "workflows"] as const) {
+        for (const kind of [
+          "screens",
+          "server",
+          "workflows",
+          "lint",
+        ] as const) {
           const { status, error } = builds[kind];
           // Couldn't run, or checked on stand-ins (`standIn`): both say why.
           if (status === "error" || error !== undefined) {
@@ -1534,10 +1616,12 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
+   * TypeScript is saved fixed and formatted (Prettier, and what Ultracite's
+   * rules fix themselves): read the file again before editing it by text.
    * Answers with what fails in the whole draft now, its screens, server code
    * and workflows checked at once (compile, types, lint, React Compiler),
-   * sorted by file, each once: fix the errors and write again; proposing
-   * needs none. A build that couldn't run now, or screens checked without
+   * and its TypeScript held to Ultracite's rules (\`lint\`), sorted by
+   * file, each once: fix the errors and write again; proposing needs none. A build that couldn't run now, or screens checked without
    * the server code's references while it doesn't register, is in
    * \`notChecked\`: proposing refuses it until a write checks it.
    */
@@ -1549,7 +1633,7 @@ build: {
     diagnostics: Build["diagnostics"];
     /** Diagnostics past the first 50. */
     leftOut: number;
-    notChecked: { screens?: string; server?: string; workflows?: string };
+    notChecked: { screens?: string; server?: string; workflows?: string; lint?: string };
   }>;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
@@ -1599,6 +1683,8 @@ build: {
       screens: Build;
       server: Build;
       workflows: Build;
+      /** Ultracite's rules, over the draft's TypeScript. */
+      lint: Build;
       tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
       preview: {
         problems: { source: "screen" | "server"; at: string; kind: string; message: string; stack?: string }[];

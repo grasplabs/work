@@ -433,6 +433,7 @@ describe("the platform's programs on the sandbox host", () => {
   it.each([
     ["App compiler", "compiler", "/compiler.js"],
     ["type checker", "type-checker", "/checker.js"],
+    ["Ultracite's lint", "ultracite", "/ultracite.js"],
     ["package builder", "package-builder", "/package-builder.js"],
   ] as const)(
     "run the %s with no bindings and no network",

@@ -30,7 +30,7 @@ export const appFiles: Record<string, string> = {
 export const suiteOf = (
   body: string
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
+import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 
 export const page = { pagination: { pageSize: 50 } };
 
@@ -38,7 +38,7 @@ export default appTest({
   fixtures: "notes",
   tests: {
     "runs": async (t) => {
-      const owner = await t.as("note-owner");
+${body.includes("owner") ? '      const owner = await t.as("note-owner");' : ""}
       ${body}
     },
   },

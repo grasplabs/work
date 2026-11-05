@@ -43,6 +43,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.workflowSdkModules,
         compilerAssets.serverSdkModules,
         compilerAssets.packageBuilder,
+        compilerAssets.ultracite,
         compilerAssets.esbuildWasm,
         compilerAssets.reference,
         compilerAssets.jqWasm,

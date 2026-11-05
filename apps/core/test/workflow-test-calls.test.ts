@@ -309,13 +309,13 @@ const leftOf = async (app: string) => {
 const suiteOf = (
   body: string
 ): string => `import { workflowTest } from "@grasp-os/sdk/testing";
-import { api, workflows } from "@server/_generated/api";
+import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 
 export default workflowTest({
   fixtures: "desk",
   tests: {
     "runs": async (t) => {
-      const owner = await t.as("desk-user");
+${body.includes("owner") ? '      const owner = await t.as("desk-user");' : ""}
       ${body}
     },
   },

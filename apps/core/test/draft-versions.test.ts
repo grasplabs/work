@@ -52,7 +52,10 @@ import { query } from "@server/_generated/server";
 export const titles = query({
   args: {},
   returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(100);
+    return notes.map((note) => note.title);
+  },
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";

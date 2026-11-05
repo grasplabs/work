@@ -1,9 +1,15 @@
 import {
   compilerVersion,
   incrementSchema,
+  lintKey,
+  lintRecordOf,
   moduleRecordOf,
 } from "@grasp-os/compiler";
-import type { Increments, screenIncrementKeys } from "@grasp-os/compiler";
+import type {
+  Diagnostic,
+  Increments,
+  screenIncrementKeys,
+} from "@grasp-os/compiler";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
 
@@ -18,7 +24,9 @@ import {
 import type { CacheEnv } from "./build-cache.ts";
 
 // What a screens build keeps of each file for the next (GRA-958): each
-// module's transform (the compiler's increments.ts). They are kept as whole builds are (build-cache.ts): in
+// module's transform (the compiler's increments.ts); and each file's
+// Ultracite lint, which a draft's lint build keeps (save-builds.ts). They
+// are kept as whole builds are (build-cache.ts): in
 // R2 under a key of their content, each served only as its receipt says
 // its build wrote it, written by one build at a time under the key's
 // lease, quarantined after repeated integrity failures, swept like builds
@@ -28,6 +36,7 @@ import type { CacheEnv } from "./build-cache.ts";
 /** Where each part's records are kept: swept with the builds. */
 export const incrementPrefixes = {
   modules: "screen-modules/",
+  lints: "lint-results/",
 } as const;
 
 type Part = keyof typeof incrementPrefixes;
@@ -141,4 +150,65 @@ export const keepIncrements = async (
     }
   );
   return kept.filter(Boolean).length;
+};
+
+/**
+ * What earlier lints found in each of `files` (by path), for those whose
+ * result is kept under the key of their content (`lintKey`): the rest are
+ * linted again.
+ */
+export const readLints = async (
+  env: CacheEnv,
+  files: Readonly<Record<string, string>>,
+  refreshAfterMs: number
+): Promise<Record<string, Diagnostic[]>> => {
+  const found: Record<string, Diagnostic[]> = {};
+  await mapConcurrently(
+    Object.entries(files),
+    concurrency,
+    async ([path, source]) => {
+      const key = await lintKey(path, source);
+      const record = lintRecordOf(
+        await readRecord(env, "lints", key, refreshAfterMs),
+        path
+      );
+      if (record !== undefined) {
+        found[path] = record.diagnostics;
+      }
+    }
+  );
+  return found;
+};
+
+/**
+ * Keeps what Ultracite's lint found in each of `files` (`linted`, by
+ * path), under the key of its content, held for `leaseMs`. Never throws:
+ * a result not kept is linted again next time.
+ */
+export const keepLints = async (
+  env: CacheEnv,
+  files: Readonly<Record<string, string>>,
+  linted: Readonly<Record<string, Diagnostic[]>>,
+  leaseMs: number
+): Promise<void> => {
+  await mapConcurrently(
+    Object.entries(linted),
+    concurrency,
+    async ([path, diagnostics]) => {
+      const source = files[path];
+      if (source === undefined) {
+        return;
+      }
+      try {
+        await keepUnderLease(
+          env,
+          cacheKeyOf("lints", await lintKey(path, source)),
+          JSON.stringify({ path, diagnostics }),
+          leaseMs
+        );
+      } catch (error) {
+        log.warn("build.lint_keep_failed", errorFields(error));
+      }
+    }
+  );
 };

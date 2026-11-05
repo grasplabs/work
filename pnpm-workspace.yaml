@@ -170,6 +170,19 @@ catalog:
   # The kit's carousel.
   embla-carousel-react: 8.6.0
   eslint: 10.11.0
+  # The ESLint equivalents of Ultracite's oxlint presets, which App code is
+  # linted with in an isolate of its own, where oxlint can't run; and
+  # Prettier, which formats what the agent writes.
+  "@typescript-eslint/eslint-plugin": 8.70.1
+  eslint-plugin-import-x: 4.17.1
+  eslint-plugin-jsdoc: 65.4.2
+  eslint-plugin-jsx-a11y: 6.10.2
+  eslint-plugin-promise: 7.3.0
+  eslint-plugin-react: 7.37.5
+  eslint-plugin-react-hooks: 7.1.1
+  eslint-plugin-sonarjs: 4.2.2
+  eslint-plugin-unicorn: 79.0.0
+  prettier: 3.9.10
   # A DOM for the web app's component tests that click and type.
   happy-dom: 21.0.4
   # The kit's one-time-code input.
@@ -247,6 +260,10 @@ peerDependencyRules:
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
+    # Ultracite's ESLint preset runs them on ESLint 10, which their ranges
+    # don't name yet.
+    "eslint-plugin-jsx-a11y>eslint": "10"
+    "eslint-plugin-react>eslint": "10"
 
 # jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
 # the patch drops that import, so a bundle carries only the metered module
