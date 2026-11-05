@@ -154,10 +154,11 @@ export class Run extends WorkerEntrypoint {
       return failed(error);
     }
     // Read as the host reads a value, before it is serialized: JSON alone
-    // would turn NaN or an undefined in an array into a valid null.
+    // would turn NaN or an undefined in an array into a valid null. A
+    // handler that returns nothing answers null, as Convex's do.
     let text;
     try {
-      text = jsonAnswer(value);
+      text = value === undefined ? "null" : jsonAnswer(value);
     } catch {
       return { ok: true, answer: "unreadable" };
     }

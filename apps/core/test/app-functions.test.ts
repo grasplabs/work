@@ -655,6 +655,64 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     }
   );
 
+  it("finds nothing at a name that only imitates a function's, while the name itself answers", async () => {
+    const notes = await sealedNotes();
+    const imitations = [
+      // The prototype of whatever map resolves a name.
+      "__proto__",
+      "constructor",
+      "toString",
+      "hasOwnProperty",
+      "notes.__proto__",
+      "notes.get.__proto__",
+      "notes.constructor",
+      // Empty segments, padding, other separators and another case.
+      "notes..get",
+      ".notes.get",
+      "notes.get.",
+      " notes.get",
+      "notes.get ",
+      "notes/get",
+      "notes:get",
+      "NOTES.get",
+      "notes.GET",
+      // An internal function.
+      "notes.count",
+      // The names the host answers itself: people, preferences, workflows.
+      "people.__proto__",
+      "people.constructor",
+      "preferences.constructor",
+      "preferences.get",
+      "workflows.x.queries.constructor",
+      "workflows.__proto__.queries.runs",
+    ];
+    const codes = new Map<string, string>();
+    for (const name of imitations) {
+      // One at a time: each is its own call, and order doesn't matter.
+      // oxlint-disable-next-line no-await-in-loop
+      const answer = await callAppFunction(
+        env,
+        notes.owner,
+        notes.app,
+        JSON.stringify({ reference: { name, kind: "query" }, input: {} })
+      );
+      codes.set(name, codeOf(answer));
+    }
+    const noteId = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Real" })
+    );
+    codes.set(
+      "notes.get",
+      codeOf(await call(notes, notes.owner, "notes.get", { id: noteId }))
+    );
+    expect(codes).toStrictEqual(
+      new Map([
+        ...imitations.map((name) => [name, "operation.not_found"] as const),
+        ["notes.get", "ok"],
+      ])
+    );
+  });
+
   it("is refused to an internal function as to one that doesn't exist", async () => {
     const notes = await sealedNotes();
     expect(codeOf(await call(notes, notes.owner, "notes.count", {}, {}))).toBe(
@@ -771,6 +829,82 @@ describe("what a function answers", { timeout: 120_000 }, () => {
       "contract.invalid_return",
       "contract.invalid_return",
     ]);
+  });
+});
+
+/**
+ * An App whose functions, one of each kind, declare no `returns`: what
+ * each handler answers is its return, held only to JSON and the output
+ * limit; one that returns nothing answers null.
+ */
+const undeclaredReturnFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+export const greet = query({
+  args: { who: v.string() },
+  handler: (_ctx, args) => \`Hello, \${args.who}\`,
+});
+
+export const create = mutation({
+  args: { title: v.string() },
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const greetTwice = action({
+  args: {},
+  uses: [greet],
+  handler: async (ctx) => ({
+    greetings: [
+      await ctx.runQuery(greet, { who: "one" }),
+      await ctx.runQuery(greet, { who: "two" }),
+    ],
+  }),
+});
+
+export const notJson = query({ args: {}, handler: () => Number.NaN });
+
+export const nothing = mutation({ args: {}, handler: async () => {} });
+
+export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024) });
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Greetings",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  screens: [],
+});
+`,
+};
+
+describe("a function that declares no return", { timeout: 120_000 }, () => {
+  it("answers what its handler returns, of each kind, still held to JSON and the output limit", async () => {
+    const app = await sealedNotes(undeclaredReturnFiles);
+    const id = valueOf(
+      await call(app, app.owner, "notes.create", { title: "Kept" })
+    );
+    expect({
+      query: valueOf(await call(app, app.owner, "notes.greet", { who: "you" })),
+      mutation: typeof id,
+      action: valueOf(await call(app, app.owner, "notes.greetTwice", {})),
+      notJson: codeOf(await call(app, app.owner, "notes.notJson", {})),
+      flood: codeOf(await call(app, app.owner, "notes.flood", {})),
+      nothing: valueOf(await call(app, app.owner, "notes.nothing", {})),
+    }).toStrictEqual({
+      query: "Hello, you",
+      mutation: "string",
+      action: { greetings: ["Hello, one", "Hello, two"] },
+      notJson: "contract.invalid_return",
+      flood: "contract.result_too_large",
+      nothing: null,
+    });
   });
 });
 

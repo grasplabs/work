@@ -575,6 +575,7 @@ type ValueDescriptorLike = OperationManifest["args"];
 interface Compiled {
   readonly hash: Promise<string>;
   readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  /** Each declared return; none for a function that declares none. */
   readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   /** Each streaming action's progress snapshot. */
   readonly streams: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
@@ -608,7 +609,11 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   const streams = new Map<string, ValueSchema<unknown, unknown>>();
   for (const [path, operation] of Object.entries(manifest.operations)) {
     args.set(path, schemaOfDescriptor(operation.args));
-    returns.set(path, schemaOfDescriptor(operation.returns));
+    // A function that declares no `returns` answers what its handler
+    // returns, checked as JSON within the output limit only.
+    if (operation.returns !== null) {
+      returns.set(path, schemaOfDescriptor(operation.returns));
+    }
     if (operation.stream !== null) {
       streams.set(path, schemaOfDescriptor(operation.stream));
     }
@@ -776,9 +781,9 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * the public operation output limit (`operationResultMaxBytes`), valid,
- * and already as the contract normalizes it (no default left out,
- * nothing to trim). The value is App code's: reading it can run
+ * the public operation output limit (`operationResultMaxBytes`) and, where
+ * it declares a return, valid and already as the contract normalizes it
+ * (no default left out, nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
  * (`fromApp`), never an error the caller would take for the host's.
  */
@@ -803,13 +808,15 @@ const checkedReturn = (
     );
   }
   const { json } = read;
-  const result = compiled.returns
-    .get(operation.path)
-    ?.["~standard"].validate(json);
-  if (result === undefined || result.issues !== undefined) {
+  const schema = compiled.returns.get(operation.path);
+  if (schema === undefined) {
+    return json;
+  }
+  const result = schema["~standard"].validate(json);
+  if (result.issues !== undefined) {
     throw hostError(
       operationErrors.create("contract.invalid_return", {
-        issues: issuesOf(result?.issues ?? []),
+        issues: issuesOf(result.issues),
       })
     );
   }
