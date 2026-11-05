@@ -27,11 +27,12 @@ import { receiveEmail } from "./workflows/inbound-email.ts";
 // Routing would, and core takes it with the same `receiveEmail`. Its
 // answer is the message's disposition: 202 taken, 422 bounced for good
 // (with the reason), anything else failed for now, for the sender to try
-// again. A reply to a run's mail reports the results header Email Routing
-// put on top of the message (workflows/authentication-results.ts): a
-// bridge with no Email Routing in front must remove every results header
-// under Email Routing's authserv-id from what it hands over, as RFC 8601
-// 5 asks of a border server, or a sender's own would be reported.
+// again. A reply to a run's mail reports what Email Routing's own ARC set
+// on top of the message says (workflows/authentication-results.ts): a
+// bridge with no Email Routing in front must seal what it hands over with
+// an ARC set of its own, or remove every ARC set under Email Routing's
+// authserv-id, as RFC 8601 5 asks of a border server, or a sender's own
+// would be reported.
 
 /** A request's body, as the byte stream workerd gives it. */
 const bodyOf = (request: Request): ReadableStream<Uint8Array> | null =>

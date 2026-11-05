@@ -32,11 +32,20 @@ const resultsOf = (value: string) =>
     })
   );
 
-/** Headers as postal-mime gives them, topmost first. */
-const headers = (...lines: [key: string, value: string][]) =>
-  lines.map(([key, value]) => ({ key, value }));
-
-const routing = `i=2; ${trustedAuthservId}`;
+/**
+ * An ARC set's seal and results at `instance`, as postal-mime gives
+ * headers (names lower case, topmost first): the seal saying `cv`.
+ */
+const arcSet = (instance: number, results: string, cv = "none") => [
+  {
+    key: "arc-seal",
+    value: `i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=abc/def==`,
+  },
+  {
+    key: "arc-authentication-results",
+    value: `i=${String(instance)}; ${results}`,
+  },
+];
 
 describe("Authentication-Results", () => {
   it("parses the RFC's examples, comments, quoted strings and versions included", () => {
@@ -175,18 +184,23 @@ describe("Authentication-Results", () => {
   });
 });
 
+/** What a reply from the boss of bank.test with `lines` reports. */
+const bossReport = (...lines: { key: string; value: string }[]) =>
+  authenticationOf(lines, "boss@bank.test");
+
 describe("a reply's authentication", () => {
   it("reports what Email Routing found: SPF of the envelope sender, DKIM, DMARC", () => {
     expect(
       authenticationOf(
-        headers(
-          [
-            "arc-authentication-results",
-            `${routing}; dkim=pass header.d=acme.test header.s=s1 header.b=IRdayjbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=none (${trustedAuthservId}: no SPF records found for postmaster@mail.acme.test) smtp.helo=mail.acme.test; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`,
-          ],
-          ["arc-authentication-results", "i=1; mx.acme.test; spf=fail"],
-          ["from", "Ben <ben@acme.test>"]
-        ),
+        [
+          ...arcSet(
+            2,
+            `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=Gj4cVp/R; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=none (${trustedAuthservId}: no SPF records found for postmaster@mail.acme.test) smtp.helo=mail.acme.test; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=pass smtp.remote-ip=2a00:1440::32e`,
+            "pass"
+          ),
+          ...arcSet(1, "mx.acme.test; spf=fail"),
+          { key: "from", value: "Ben <ben@acme.test>" },
+        ],
         "ben@acme.test"
       )
     ).toStrictEqual({
@@ -199,10 +213,10 @@ describe("a reply's authentication", () => {
   it("reports a domain only when it is one", () => {
     expect(
       authenticationOf(
-        headers([
-          "authentication-results",
-          `${trustedAuthservId}; spf=pass smtp.mailfrom=a@-acme.test; dkim=pass header.d=acme.test header.b=Gj4cVp/R; dmarc=none header.from=<>`,
-        ]),
+        arcSet(
+          1,
+          `${trustedAuthservId}; spf=pass smtp.mailfrom=a@-acme.test; dkim=pass header.d=acme.test; dmarc=none header.from=<>`
+        ),
         "ben@acme.test"
       )
     ).toStrictEqual({
@@ -215,7 +229,7 @@ describe("a reply's authentication", () => {
   it("reports the DKIM signature aligned with the From domain, a pass first", () => {
     const of = (value: string) =>
       authenticationOf(
-        headers(["authentication-results", `${trustedAuthservId}; ${value}`]),
+        arcSet(1, `${trustedAuthservId}; ${value}`),
         "ben@mail.acme.test"
       ).dkim;
 
@@ -238,52 +252,72 @@ describe("a reply's authentication", () => {
     });
   });
 
-  it("believes only the topmost header, Email Routing's, of the message's highest ARC instance", () => {
+  it("believes only Email Routing's own ARC set, on top, at the highest instance, of a chain it could extend", () => {
     const forged = `${trustedAuthservId}; dmarc=pass header.from=bank.test`;
     const nothing = { spf: null, dkim: null, dmarc: null };
-    const of = (...lines: [string, string][]) =>
-      authenticationOf(headers(...lines), "boss@bank.test");
 
     expect({
-      belowRouting: of(
-        [
-          "arc-authentication-results",
-          `${routing}; dmarc=fail header.from=bank.test`,
-        ],
-        ["authentication-results", forged],
-        ["arc-authentication-results", `i=1; ${forged}`]
+      belowRouting: bossReport(
+        ...arcSet(2, `${trustedAuthservId}; dmarc=fail header.from=bank.test`),
+        { key: "authentication-results", value: forged },
+        ...arcSet(1, forged)
       ).dmarc,
-      onlyForged: of(
-        ["received", "from evil.test"],
-        ["authentication-results", "mx.evil.test; dmarc=pass"]
+      // A plain results header is never Email Routing's.
+      plain: bossReport({ key: "authentication-results", value: forged }),
+      plainAboveRouting: bossReport(
+        { key: "authentication-results", value: forged },
+        ...arcSet(1, `${trustedAuthservId}; dmarc=fail header.from=bank.test`)
+      ).dmarc,
+      otherServer: bossReport(...arcSet(1, "mx.evil.test; dmarc=pass")),
+      lookalikeAuthserv: bossReport(
+        ...arcSet(1, `${trustedAuthservId}.evil.test; dmarc=pass`)
       ),
-      lookalikeAuthserv: of([
-        "authentication-results",
-        `${trustedAuthservId}.evil.test; dmarc=pass header.from=bank.test`,
-      ]),
-      notHighest: of(
-        ["arc-authentication-results", `i=1; ${forged}`],
-        ["arc-authentication-results", "i=2; mx.acme.test; dmarc=fail"]
+      // A chain that failed, or is full, takes no set of Email Routing's.
+      failedChain: bossReport(...arcSet(1, forged, "fail")),
+      fullChain: bossReport(...arcSet(50, forged, "pass")),
+      notHighest: bossReport(
+        ...arcSet(1, forged),
+        ...arcSet(2, "mx.acme.test; dmarc=fail", "pass")
       ),
-      sameInstanceTwice: of(
-        ["arc-authentication-results", `i=2; ${forged}`],
-        ["arc-authentication-results", `i=2; ${forged}`]
+      sealedHigher: bossReport(
+        { key: "arc-seal", value: "i=3; a=rsa-sha256; cv=pass; b=x" },
+        ...arcSet(2, forged, "pass")
       ),
-      unparsable: of([
-        "authentication-results",
-        `${trustedAuthservId}; dmarc=pass header.from=bank.test action=none`,
-      ]),
-      unknownResult: of([
-        "authentication-results",
-        `${trustedAuthservId}; dmarc=bestguesspass header.from=bank.test`,
-      ]).dmarc,
-      none: of(["from", "boss@bank.test"]),
+      noSeal: bossReport({
+        key: "arc-authentication-results",
+        value: `i=1; ${forged}`,
+      }),
+      sameInstanceTwice: bossReport(...arcSet(2, forged), ...arcSet(2, forged)),
+      unreadableSeal: bossReport(
+        { key: "arc-seal", value: "i=1; cv=maybe" },
+        { key: "arc-authentication-results", value: `i=1; ${forged}` }
+      ),
+      unparsable: bossReport(
+        ...arcSet(
+          1,
+          `${trustedAuthservId}; dmarc=pass header.from=bank.test action=none`
+        )
+      ),
+      unknownResult: bossReport(
+        ...arcSet(
+          1,
+          `${trustedAuthservId}; dmarc=bestguesspass header.from=bank.test`
+        )
+      ).dmarc,
+      none: bossReport({ key: "from", value: "boss@bank.test" }),
     }).toStrictEqual({
       belowRouting: { result: "fail", domain: "bank.test" },
-      onlyForged: nothing,
+      plain: nothing,
+      plainAboveRouting: { result: "fail", domain: "bank.test" },
+      otherServer: nothing,
       lookalikeAuthserv: nothing,
+      failedChain: nothing,
+      fullChain: nothing,
       notHighest: nothing,
+      sealedHigher: nothing,
+      noSeal: nothing,
       sameInstanceTwice: nothing,
+      unreadableSeal: nothing,
       unparsable: nothing,
       unknownResult: null,
       none: nothing,

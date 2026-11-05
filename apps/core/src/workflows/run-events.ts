@@ -135,7 +135,7 @@ export interface AdmittedEvent {
 }
 
 /** The ID the host mints for an event of `delivery`'s run, binding, source and key. */
-const eventIdOf = async (
+export const eventIdOf = async (
   delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">
 ): Promise<string> => {
   const digest = await sha256Hex(

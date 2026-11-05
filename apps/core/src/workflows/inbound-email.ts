@@ -65,7 +65,7 @@ import {
 import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import { heldRunOf } from "./resource-authority.ts";
-import { admitRunEvent, notStartedYet } from "./run-events.ts";
+import { admitRunEvent, eventIdOf, notStartedYet } from "./run-events.ts";
 import { isRunFileText } from "./run-files.ts";
 import {
   inboxAt,
@@ -238,21 +238,22 @@ import type { StartFiles } from "./start-files.ts";
 //   from the inbox, never from the message, so outsiders fill only that
 //   binding's share, never an App screen's. What Email Routing found of
 //   SPF, DKIM and DMARC goes with it (authentication-results.ts: only
-//   its own results, the topmost header, are read), for the workflow to
-//   check; core refuses no reply on it.
+//   its own ARC set, on top, is read), for the workflow to check; core
+//   refuses no reply on it.
 // - A reply the run can't take: one to a run that ended, through a
 //   binding whose approval went, one its contract refuses, past its
 //   inbox's limits, or one that may loop (`loopOf`) is accepted and
 //   dropped, never bounced (a bounce can loop), and audited
-//   (`workflow.email.reply.dropped`) once per run and reason a day, so a
-//   flood of replies can't fill the audit log; every drop is logged with
-//   the message's hash alone. One to a run whose start isn't confirmed
+//   (`workflow.email.reply.dropped`) once per run, inbox and reason a
+//   day, so a flood of replies can't fill the audit log; every drop is
+//   logged with the message's hash alone. One to a run whose start isn't confirmed
 //   yet fails for now, for Email Routing to try again.
 // - The same reply delivered twice: its key is the message's
 //   (`messageKeyOf`), so it is one event, however its bytes differ.
 //   Each reply a run takes is audited with its run and binding
-//   (`workflow.email.reply.received`) once, by its event, a delivery
-//   tried again included, bounded by the run's inbox limits.
+//   (`workflow.email.reply.received`) once a day it is delivered, by its
+//   event, a delivery tried again included, bounded by the run's inbox
+//   limits.
 // - An oversized reply: it bounces past `maxMessageBytes`, as any mail;
 //   its data is fitted to an event's (`fitted`), its attachments listed,
 //   never kept.
@@ -895,11 +896,11 @@ const refusalReasonSchema = z.object({
 
 /**
  * Records that a reply to `inbox`'s run (the message hashing to
- * `message`) was dropped, and why: audited once per run and reason a day
- * (the event's ID is derived from them, and it holds nothing else, so the
- * same event however often that day), and logged each time with the
- * message's hash alone. A reply's sender can drop as many as they like;
- * the audit log takes at most one of each a day.
+ * `message`) was dropped, and why: audited once per run, inbox and reason
+ * a day (the event's ID is derived from them, and it holds nothing else,
+ * so the same event however often that day), and logged each time with
+ * the message's hash alone. A reply's sender can drop as many as they
+ * like; the audit log takes at most one of each a day.
  */
 const replyDropped = async (
   env: Env,
@@ -916,7 +917,9 @@ const replyDropped = async (
   const action = "workflow.email.reply.dropped";
   const event = auditEventSchema.parse({
     id: uuidFromHash(
-      await sha256Hex(`${action}:${inbox.runId}:${reason}:${day}`)
+      await sha256Hex(
+        `${action}:${inbox.runId}:${inbox.binding}:${reason}:${day}`
+      )
     ),
     at: `${day}T00:00:00.000Z`,
     source: "core",
@@ -937,11 +940,11 @@ const replyDropped = async (
 };
 
 /**
- * Records that `inbox`'s run took the reply that is its event `eventId`:
- * once, however often it is delivered (the event's ID is derived from
- * the run's event's, and it holds nothing else that differs), so a
- * delivery tried again after the run took it, its audit lost, records it
- * then. Its time is the day it was recorded.
+ * Records that `inbox`'s run has the reply that is its event `eventId`:
+ * once a day it is delivered, however often (the audit event's ID is
+ * derived from the run's event's and the day, and it holds nothing else
+ * that differs), so a delivery tried again after the run took it, its
+ * audit lost, records it then. Its time is that day.
  */
 const replyReceived = async (
   env: Env,
@@ -951,7 +954,9 @@ const replyReceived = async (
   const day = new Date().toISOString().slice(0, 10);
   const action = "workflow.email.reply.received";
   const event = auditEventSchema.parse({
-    id: uuidFromHash(await sha256Hex(`${action}:${inbox.runId}:${eventId}`)),
+    id: uuidFromHash(
+      await sha256Hex(`${action}:${inbox.runId}:${eventId}:${day}`)
+    ),
     at: `${day}T00:00:00.000Z`,
     source: "core",
     actor: { type: "system" },
@@ -961,6 +966,7 @@ const replyReceived = async (
       workflow: inbox.workflowId,
       binding: inbox.binding,
       event: eventId,
+      day,
     },
   });
   const db = drizzle(env.DB);
@@ -1017,31 +1023,34 @@ const receiveReply = async (
     await replyDropped(env, inbox, "event_invalid", id);
     return;
   }
+  const delivery = {
+    workflowId: inbox.workflowId,
+    runId: inbox.runId,
+    binding: inbox.binding,
+    type: ingress.type,
+    data: fitted({
+      ...messageOf(id, null, message.from, parsed),
+      authentication: authenticationOf(parsed.headers, parsed.from?.address),
+    }),
+    key: await messageKeyOf(parsed, id),
+    // Minted from the inbox, never from the message: its From is data.
+    source: `urn:grasp:run:${inbox.runId}:inbox:${inbox.binding}:email`,
+    sender: `inbox:${inbox.binding}`,
+  };
   let admitted: { id: string };
   try {
-    admitted = await admitRunEvent(env, {
-      workflowId: inbox.workflowId,
-      runId: inbox.runId,
-      binding: inbox.binding,
-      type: ingress.type,
-      data: fitted({
-        ...messageOf(id, null, message.from, parsed),
-        authentication: authenticationOf(parsed.headers, parsed.from?.address),
-      }),
-      key: await messageKeyOf(parsed, id),
-      // Minted from the inbox, never from the message: its From is data.
-      source: `urn:grasp:run:${inbox.runId}:inbox:${inbox.binding}:email`,
-      sender: `inbox:${inbox.binding}`,
-    });
+    admitted = await admitRunEvent(env, delivery);
   } catch (error) {
     const code = workflowResourceErrors.codeOf(error);
     if (code === "workflow.event_conflict") {
       // The same message (its Message-ID) delivered again with other
-      // bytes, or what other servers found of it: the run has it already.
+      // bytes, or what other servers found of it: the run has it already,
+      // as the event its key names.
       log.warn("workflow.email_reply_redelivered", {
         run: inbox.runId,
         message: id,
       });
+      await replyReceived(env, inbox, await eventIdOf(delivery));
       return;
     }
     if (

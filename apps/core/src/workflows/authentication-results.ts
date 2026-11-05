@@ -1,20 +1,26 @@
 // What the receiving server found of a message's SPF, DKIM and DMARC, as
-// its `Authentication-Results` header records it (RFC 8601), or its ARC
-// set's `ARC-Authentication-Results` (RFC 8617): what a reply to a run's
-// mail carries for the workflow to check who sent it (`emailReplyData`,
-// release-contracts.ts). Core checks none of it itself, and refuses no
-// mail on it: it only reports what Email Routing found.
+// its ARC set records it (`ARC-Authentication-Results`, RFC 8617, whose
+// payload is RFC 8601's): what a reply to a run's mail carries for the
+// workflow to check who sent it (`emailReplyData`, release-contracts.ts).
+// Core checks none of it itself, and refuses no mail on it: it only
+// reports what Email Routing found.
 //
-// Anyone can write these headers into a message they send, so only one
-// is read: the topmost of either kind, which is the last server's own,
-// and only when its authserv-id is Email Routing's (`trustedAuthservId`).
-// Email Routing puts its results on top of every message it hands over,
-// its ARC set at the highest instance, so a sender's header claiming its
-// authserv-id sits below it and is never read. A topmost ARC header whose
-// instance isn't the message's highest is a forged one, and nothing is
-// read. A message with no such header on top reports nothing (each method
-// `null`), as does one whose header doesn't parse: a verdict is never
-// guessed from a header read loosely.
+// Anyone can write these headers into a message they send, so only Email
+// Routing's own ARC set is read. Email Routing seals every message it
+// hands over with a set of its own, numbered past every set the message
+// carries, on top of it, its results under its authserv-id
+// (`trustedAuthservId`). So only the topmost ARC results header is read,
+// and only when it is the message's one set at the highest instance (one
+// results header and one seal there, none higher), its seal doesn't say
+// the chain failed, its instance isn't the last there may be (50), and
+// its authserv-id is Email Routing's. A sealer adds no set to a chain
+// that failed or is full (RFC 8617 5.1.1), so those are what a sender
+// would forge to keep Email Routing's set off the top: they report
+// nothing. A plain `Authentication-Results` header is never read: Email
+// Routing records its results in its ARC set, so one claiming its
+// authserv-id is a sender's. Anything else (no such set, a header that
+// doesn't parse) reports nothing, each method `null`: a verdict is never
+// guessed, and nothing a sender writes can turn one into a pass.
 //
 // The parser follows the RFC's grammar strictly where it decides what is
 // reported (RFC 8601 2.2, RFC 8617 4.1.1, with RFC 5322's CFWS and quoted
@@ -27,8 +33,8 @@
 // ever becomes a domain reported once it is one (`domainOf`).
 //
 // The trust above holds only for mail Email Routing received: an ingress
-// without it in front (mail-ingress.ts) must remove every results header
-// under its authserv-id first, as RFC 8601 5 asks of a border server.
+// without it in front (mail-ingress.ts) must seal mail with an ARC set of
+// its own, or remove every ARC set under Email Routing's authserv-id.
 
 /** The authserv-id Email Routing writes its results under. */
 export const trustedAuthservId = "mx.cloudflare.net";
@@ -444,42 +450,79 @@ interface Header {
   readonly value: string;
 }
 
-const resultsKey = "authentication-results";
 const arcResultsKey = "arc-authentication-results";
+const arcSealKey = "arc-seal";
+
+/** The highest instance an ARC set may have (RFC 8617 4.2.1). */
+const maxInstance = 50;
+
+/** An ARC-Seal's tags (RFC 8617 4.1.3, RFC 6376 3.2's tag-list), by name. */
+const sealTags = (value: string): Map<string, string> | undefined => {
+  const tags = new Map<string, string>();
+  for (const spec of value.split(";")) {
+    const trimmed = spec.trim();
+    if (trimmed === "") {
+      continue;
+    }
+    const equals = trimmed.indexOf("=");
+    const name = trimmed.slice(0, Math.max(equals, 0)).trim();
+    if (!/^[A-Za-z]\w*$/u.test(name) || tags.has(name)) {
+      return undefined;
+    }
+    tags.set(name, trimmed.slice(equals + 1).trim());
+  }
+  return tags;
+};
+
+/** An ARC-Seal's instance and chain validation status; none if it isn't one. */
+const parseArcSeal = (
+  value: string
+): { instance: number; cv: string } | undefined => {
+  const tags = sealTags(value);
+  const instance = Number(tags?.get("i") ?? Number.NaN);
+  const cv = tags?.get("cv")?.toLowerCase();
+  return /^\d{1,2}$/u.test(tags?.get("i") ?? "") &&
+    instance >= 1 &&
+    instance <= maxInstance &&
+    (cv === "none" || cv === "pass" || cv === "fail")
+    ? { instance, cv }
+    : undefined;
+};
 
 /**
  * The results Email Routing recorded of a message with `headers`, as the
- * header says: the topmost results header, if it's Email Routing's and,
- * for an ARC one, of the message's highest instance.
+ * header says: its own ARC set's, on top, at the highest instance.
  */
 const trustedResults = (
   headers: readonly Header[]
 ): ResultsHeader | undefined => {
-  const top = headers.find(
-    ({ key }) => key === resultsKey || key === arcResultsKey
-  );
-  if (top === undefined) {
+  const results = headers
+    .filter(({ key }) => key === arcResultsKey)
+    .map(({ value }) => parseArcAuthenticationResults(value));
+  const seals = headers
+    .filter(({ key }) => key === arcSealKey)
+    .map(({ value }) => parseArcSeal(value));
+  const [top] = results;
+  if (
+    top === undefined ||
+    results.includes(undefined) ||
+    seals.includes(undefined)
+  ) {
     return undefined;
   }
-  let results: ResultsHeader | undefined;
-  if (top.key === resultsKey) {
-    results = parseAuthenticationResults(top.value);
-  } else {
-    const arc = parseArcAuthenticationResults(top.value);
-    const instances = headers
-      .filter(({ key }) => key === arcResultsKey)
-      .map(({ value }) => parseArcAuthenticationResults(value)?.instance ?? 0);
-    const highest = instances.filter(
-      (instance) => instance === arc?.instance
-    ).length;
-    results =
-      arc !== undefined &&
-      highest === 1 &&
-      instances.every((instance) => instance <= arc.instance)
-        ? arc
-        : undefined;
-  }
-  return results?.authservId === trustedAuthservId ? results : undefined;
+  const instances = [...results, ...seals].map((each) => each?.instance ?? 0);
+  const highest = Math.max(...instances);
+  const atTop = (each: { instance: number } | undefined) =>
+    each?.instance === highest;
+  const seal = seals.find(atTop);
+  return top.instance === highest &&
+    highest < maxInstance &&
+    results.filter(atTop).length === 1 &&
+    seals.filter(atTop).length === 1 &&
+    seal?.cv !== "fail" &&
+    top.authservId === trustedAuthservId
+    ? top
+    : undefined;
 };
 
 /** The domain of `address` (a domain, or `local@domain`), lower case. */

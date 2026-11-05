@@ -91,10 +91,10 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 
 /**
  * A workflow that waits out its hour (`task:hold`), then waits for a reply
- * to its mail through `replies` and returns the subject of the one it
- * took, its binding approved.
+ * to its mail through each of `aliases` (`replies` unless given) in turn
+ * and returns the subject of the last one it took, each binding approved.
  */
-const replyWorkflow = async () => {
+const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
   const admin = await person("admin");
   for (const contract of releaseContracts) {
     if (contract.key === emailReplyContract) {
@@ -119,9 +119,12 @@ const replyWorkflow = async () => {
           grasp: {
             profile: "grasp-open-workflow/1",
             params: {},
-            bindings: {
-              replies: { kind: "event", contract: emailReplyContract },
-            },
+            bindings: Object.fromEntries(
+              aliases.map((alias) => [
+                alias,
+                { kind: "event", contract: emailReplyContract },
+              ])
+            ),
           },
         },
       },
@@ -129,32 +132,40 @@ const replyWorkflow = async () => {
       output: { schema: objectSchema({ subject: { type: "string" } }) },
       do: [
         { hold: { wait: "PT1H" } },
-        {
-          "await-reply": {
+        ...aliases.map((alias) => ({
+          [`await-${alias}`]: {
             listen: {
               to: { any: [{ with: { type: emailReplyType } }] },
               read: "data",
             },
             timeout: { after: { minutes: 5 } },
-            metadata: { grasp: { binding: "replies" } },
+            metadata: { grasp: { binding: alias } },
           },
-        },
+        })),
         { answer: { set: { subject: "${ .[0].subject }" } } },
       ],
     }),
     basedOn: null,
   });
-  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "replies",
-    target: { kind: "event" },
-    reviewed: { version: 1 },
-  });
-  return { admin, workflow, approval };
+  const approvals: string[] = [];
+  for (const alias of aliases) {
+    // oxlint-disable-next-line no-await-in-loop -- approvals, in turn
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias,
+      target: { kind: "event" },
+      reviewed: { version: 1 },
+    });
+    approvals.push(approval.id);
+  }
+  return { admin, workflow, approvals };
 };
 
 type ReplyWorkflow = Awaited<ReturnType<typeof replyWorkflow>>;
 
-/** A run of the workflow, holding its hour, and its reply address. */
+/**
+ * A run of the workflow, holding its hour: the address of its first
+ * inbox, and every inbox it has.
+ */
 const holdingRun = async ({ admin, workflow }: ReplyWorkflow) => {
   const { runId } = await startWorkflow(
     env,
@@ -171,14 +182,15 @@ const holdingRun = async ({ admin, workflow }: ReplyWorkflow) => {
     },
     { timeout: 30_000, interval: 100 }
   );
-  const { replies: address } = await inboxOf(env, {
+  const inbox = await inboxOf(env, {
     runId,
     calling: { candidate: undefined },
   });
+  const [address] = Object.values(inbox);
   if (address === undefined) {
     throw new Error(`Run ${runId} has no reply address`);
   }
-  return { runId, address };
+  return { runId, address, inbox };
 };
 
 /** How the run ended, once it waited out its hour: what it returned. */
@@ -248,7 +260,16 @@ const dropReasons = async (runId: string) => {
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 /** Email Routing's results of a message from Ben, all passing. */
-const routingPass = `ARC-Authentication-Results: i=1; ${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=IRdayjbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`;
+/** An ARC set's seal and results at `instance`, its seal saying `cv`. */
+const arcSet = (instance: number, results: string, cv = "none"): string[] => [
+  `ARC-Seal: i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=Lx35lY6/t4g==`,
+  `ARC-Authentication-Results: i=${String(instance)}; ${results}`,
+];
+
+const routingPass = arcSet(
+  1,
+  `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=IRda/jbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`
+);
 
 /** A plain reply, as it goes over the wire. */
 const replyMail = ({
@@ -256,7 +277,7 @@ const replyMail = ({
   from = "Ben <ben@acme.test>",
   subject = "Re: Your quote",
   text = "Yes, go ahead.",
-  headers = [routingPass],
+  headers = routingPass,
 }: {
   messageId?: string;
   from?: string;
@@ -330,7 +351,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
     });
   });
 
-  it("keeps a forged From as the claim it is, with Email Routing's verdict, never a sender's own below it", async () => {
+  it("keeps a forged From as the claim it is, with Email Routing's verdict, never a sender's own", async () => {
     const { runId, address } = await holdingRun(shared);
     const forged = `${trustedAuthservId}; dmarc=pass header.from=bank.test`;
 
@@ -339,10 +360,23 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       replyMail({
         from: "Boss <boss@bank.test>",
         headers: [
-          `ARC-Authentication-Results: i=2; ${trustedAuthservId}; dkim=pass header.d=evil.test; dmarc=fail (p=reject) header.from=bank.test; spf=pass smtp.mailfrom=x@evil.test`,
-          `ARC-Authentication-Results: i=1; ${forged}`,
+          ...arcSet(
+            2,
+            `${trustedAuthservId}; dkim=pass header.d=evil.test; dmarc=fail (p=reject) header.from=bank.test; spf=pass smtp.mailfrom=x@evil.test`,
+            "pass"
+          ),
+          ...arcSet(1, forged),
           `Authentication-Results: ${forged}`,
         ],
+      }),
+      { envelopeFrom: "x@evil.test" }
+    );
+    // A chain forged full, so no sealer may add a set on top of its own.
+    await deliver(
+      address,
+      replyMail({
+        from: "Boss <boss@bank.test>",
+        headers: arcSet(50, forged, "pass"),
       }),
       { envelopeFrom: "x@evil.test" }
     );
@@ -363,6 +397,10 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
           dmarc: { result: "fail", domain: "bank.test" },
         },
       },
+      {
+        from: "boss@bank.test",
+        authentication: { spf: null, dkim: null, dmarc: null },
+      },
     ]);
   });
 
@@ -378,7 +416,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         messageId,
         headers: [
           "Received: from relay.acme.test; Mon, 28 Sep 2026 08:00:05 +0000",
-          routingPass,
+          ...routingPass,
         ],
       })
     );
@@ -404,7 +442,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       address,
       replyMail({
         subject: "Out of office",
-        headers: ["Auto-Submitted: auto-replied", routingPass],
+        headers: ["Auto-Submitted: auto-replied", ...routingPass],
       })
     );
     const days = [before, today()];
@@ -425,6 +463,32 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         day: dropped?.day,
       },
       onItsDay: true,
+    });
+  });
+
+  it("audits drops for each of a run's inboxes on their own", async () => {
+    const own = await replyWorkflow(["quotes", "approvals"]);
+    const { runId, inbox } = await holdingRun(own);
+    const autoReply = () =>
+      replyMail({ headers: ["Auto-Submitted: auto-replied", ...routingPass] });
+
+    for (const address of Object.values(inbox)) {
+      // oxlint-disable-next-line no-await-in-loop -- one inbox, then the other
+      await deliver(address, autoReply());
+    }
+    const dropped = await audited("workflow.email.reply.dropped", runId);
+    const { results: rejected } = await env.DB.prepare(
+      "SELECT id FROM audit_outbox_rejected"
+    ).all();
+
+    expect({
+      inboxes: Object.keys(inbox).toSorted(),
+      dropped: dropped.map((detail) => String(detail?.binding)).toSorted(),
+      rejected,
+    }).toStrictEqual({
+      inboxes: ["approvals", "quotes"],
+      dropped: ["approvals", "quotes"],
+      rejected: [],
     });
   });
 
@@ -537,7 +601,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       env,
       own.admin,
       own.workflow.id,
-      own.approval.id
+      own.approvals[0]
     );
 
     const delivery = await deliver(address, replyMail());
