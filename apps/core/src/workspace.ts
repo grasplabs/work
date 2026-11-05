@@ -1618,7 +1618,12 @@ export class Workspace extends DurableObject<Env> {
       outcomeOf: async ({ facts }) =>
         await turnOutcome(this.env, facts, (chatId) => {
           const id = chatIdSchema.safeParse(chatId);
-          return id.success && this.isChatRestricted(id.data) === false;
+          // A chat being deleted has its captures erased (`deleteChat`).
+          return (
+            id.success &&
+            !this.#deleting.has(id.data) &&
+            this.isChatRestricted(id.data) === false
+          );
         }),
     };
   }
@@ -1817,6 +1822,12 @@ export class Workspace extends DurableObject<Env> {
     };
     this.#turns.set(chat.id, live);
     try {
+      // Refused before anything is prepared while the chat's ChatSession
+      // has a turn under way: one this object's restart left there. That
+      // object refuses it again as it claims the turn.
+      if ((await this.#activeTurn(chat.id)) !== undefined) {
+        throw agentErrors.create("agent.busy");
+      }
       await this.#mayTakeTurn(chat.id, personId);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
@@ -2318,16 +2329,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The chat's turn under way, as its ChatSession holds it, or the one
-   * this object is taking: what its build jobs belong to and a stop ends.
+   * The chat's turn under way, as its ChatSession, which owns it, says:
+   * what its build jobs belong to, and what a stop ends.
    */
   async #activeTurn(chatId: ChatId): Promise<string | undefined> {
-    return (
-      this.#turns.get(chatId)?.id ??
-      (await this.#toSession(
-        chatId,
-        async (session) => await session.activeTurn()
-      ))
+    return await this.#toSession(
+      chatId,
+      async (session) => await session.activeTurn()
     );
   }
 
@@ -2738,7 +2746,9 @@ export class Workspace extends DurableObject<Env> {
    */
   async cancel(chatId: unknown, personId: string): Promise<boolean> {
     const { id } = this.#ownChat(chatId, personId);
-    const turnId = await this.#activeTurn(id);
+    // The ChatSession's turn; or the question this object is preparing,
+    // whose stop is kept for it as it is claimed.
+    const turnId = (await this.#activeTurn(id)) ?? this.#turns.get(id)?.id;
     if (turnId === undefined) {
       return false;
     }
@@ -2821,11 +2831,11 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Ends the chat's running build job `id` as `end` says, once: `false`
-   * when it had ended already. While the chat runs, the turn that
-   * submitted it is told how it ended, in a notice it answers, even once
-   * it has answered, never shown as the person's: its ChatSession takes
-   * it only while that turn runs (`ChatSession.notify`), through a restart
-   * of either object too, so no other turn ever is. Nothing of its result
+   * when it had ended already. The turn that submitted it is told how it
+   * ended, in a notice it answers, even once it has answered, never shown
+   * as the person's: its ChatSession, which owns the turn, takes it only
+   * while that turn runs (`ChatSession.notify`), through a restart of
+   * either object too, so no other turn ever is. Nothing of its result
    * goes with it: the agent reads that with `env.build.job`.
    */
   async endBuildJob(
@@ -2839,7 +2849,7 @@ export class Workspace extends DurableObject<Env> {
       return false;
     }
     this.#jobs.end(job.chatId, id, end);
-    if (this.#isRunning(job.chatId) && !this.#deleting.has(job.chatId)) {
+    if (!this.#deleting.has(job.chatId)) {
       const text = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
       try {
         // Once a job, however often it is sent.
@@ -3776,7 +3786,10 @@ export class Workspace extends DurableObject<Env> {
         .where(eq(chatDrafts.chatId, id))
         .all();
       // What the Brain captured of its turns goes before it does: should
-      // that fail, the chat stays (brain-capture.ts).
+      // that fail, the chat stays (brain-capture.ts). After any delivery
+      // under way, as for a person's erasure: one that records the chat's
+      // after this finds it being deleted, and takes it back.
+      await Promise.allSettled(this.#delivering);
       await eraseCaptured(this.env, [id]);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.

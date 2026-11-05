@@ -11,6 +11,7 @@ import {
   createRegistry,
   DEFAULT_COMPACTION_POLICY,
   defineDoc,
+  defineDocFamily,
   Harness,
 } from "@earendil-works/pi-durable";
 import type {
@@ -158,36 +159,37 @@ const syncRetryMs = 15_000;
 /**
  * The chat's turn: the one record of it, under way or the last. Written
  * as the turn is claimed (`#take`), before anything else of it, so a turn
- * this object holds no record of never ran; settled once (`#settle`) with
- * how it ended (`end`, none for one that never submitted its question);
- * its capture delivered once after (`captured`). `answerId` is the
- * Workspace's message it answered with, as the copies say.
+ * this object holds no record of never ran; settled once (`#settle`), its
+ * request then kept without what it read (its memory), which only a turn
+ * under way needs. `answerId` is the Workspace's message it answered
+ * with, as the copies say.
  */
 interface TurnRecord extends JsonObject {
   request: string;
   ended: boolean;
-  end: string;
   answerId: number | null;
-  captured: boolean;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
   kind: "grasp.turn",
   version: 1,
   scope: "session",
-  initial: () => ({
-    request: "",
-    ended: true,
-    end: "",
-    answerId: null,
-    captured: true,
-  }),
+  initial: () => ({ request: "", ended: true, answerId: null }),
   checkpointWhen: () => true,
 });
 
-const turnEndSchema = z.custom<TurnEnd>(
-  (value) => typeof value === "object" && value !== null
-);
+/**
+ * A settled turn's capture for the Brain, owed until it is delivered
+ * (`#deliver`), by its turn's ID: a later turn never takes its place.
+ */
+const CaptureDoc = defineDocFamily<TurnCapture, TurnCapture>({
+  kind: "grasp.capture",
+  version: 1,
+  scope: "session",
+  family: true,
+  initial: (owed) => owed,
+  checkpointWhen: () => true,
+});
 
 /**
  * The turn its person stopped last, by its ID: a stop that came before
@@ -742,29 +744,58 @@ export class ChatHarness {
       await written.wait(context);
     }
     await this.#settle(request.turnId, end);
-    // Everything copied, and told it ended, before the turn returns.
-    await this.#synced();
+    // Everything copied, and told it ended, before the turn returns. Its
+    // answer stands should that fail: the alarm the failed sync arms makes
+    // it good.
+    try {
+      await this.#synced();
+    } catch {
+      // Logged, and tried again, by the sync itself (`#syncSoon`).
+    }
     return end;
   }
 
   /**
    * Settles turn `turnId`'s record, once: ended, with `end` (none for a
-   * turn that never submitted its question), its capture owed for a turn
-   * that settled with an outcome its guard didn't stop. The chat then
-   * takes its next turn; the sync this asks for tells the Workspace and
-   * delivers the capture.
+   * turn that never submitted its question), its request kept without
+   * what it read, and its capture owed (`CaptureDoc`) for a turn that
+   * settled with an outcome its guard didn't stop. Settled by the sync as
+   * one nothing waits on (`unwaited`) only while no `run` takes it. The
+   * chat then takes its next turn; the sync this asks for tells the
+   * Workspace and delivers the capture.
    */
-  async #settle(turnId: string, end?: TurnEnd): Promise<void> {
-    await this.#conversation.commit(async (tx) => {
+  async #settle(
+    turnId: string,
+    end?: TurnEnd,
+    unwaited = false
+  ): Promise<void> {
+    const settled = await this.#conversation.commit(async (tx) => {
       const turn = await tx.doc(TurnDoc);
-      if (turn.ended || requestOf(turn)?.turnId !== turnId) {
-        return;
+      const request = requestOf(turn);
+      if (
+        turn.ended ||
+        request?.turnId !== turnId ||
+        (unwaited && this.#taking?.turnId === turnId)
+      ) {
+        return false;
       }
       turn.ended = true;
-      turn.end = end === undefined ? "" : JSON.stringify(end);
-      turn.captured = end === undefined || end.stopped !== undefined;
+      turn.request = JSON.stringify({ ...request, context: { skills: [] } });
+      if (end !== undefined && end.stopped === undefined) {
+        const owed: TurnCapture = {
+          turnId,
+          outcome: end.outcome,
+          answerId: turn.answerId,
+          model: request.capture.model,
+          audience: request.capture.audience,
+        };
+        await tx.doc(CaptureDoc, turnId, owed);
+      }
+      return true;
     }, context);
-    if (this.#active === turnId) {
+    // A `run` frees its claim however its record stood; the sync only the
+    // turn it settled.
+    if (this.#active === turnId && (settled || !unwaited)) {
       this.#active = undefined;
     }
     this.#syncSoon();
@@ -843,9 +874,7 @@ export class ChatHarness {
       const turn = await tx.doc(TurnDoc);
       turn.request = JSON.stringify(request);
       turn.ended = false;
-      turn.end = "";
       turn.answerId = null;
-      turn.captured = false;
     }, context);
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
@@ -1304,10 +1333,11 @@ export class ChatHarness {
     // What holds of the turn is decided before the copy: a turn settled
     // already, or one nothing waits on whose runs are over, has every
     // entry committed, so the copy below holds its answer before the
-    // Workspace is told it ended. One that settles during this sync is
-    // told by the next, which its settling asks for.
+    // Workspace is told it ended or gets its capture. One that settles
+    // during this sync is told by the next, which its settling asks for.
     const left =
       !before.ended && !this.#running && this.#taking?.turnId !== turnId;
+    const owed = await this.#owed();
     await this.#copy(scope);
     const partial = this.#partial;
     if (partial !== this.#told.partial) {
@@ -1319,50 +1349,78 @@ export class ChatHarness {
     if (left) {
       const settled = await this.#endOfTurn(turnId);
       if (settled !== undefined) {
-        await this.#settle(turnId, settled.end);
+        await this.#settle(turnId, settled.end, true);
         return;
       }
     }
-    // The answer as the copy kept it, of the same turn, still settled.
     const turn = (await this.#harness.snapshot(TurnDoc, context)) ?? before;
-    const settled =
-      before.ended && turn.ended && requestOf(turn)?.turnId === turnId;
-    const running = !settled;
+    const running = !(
+      before.ended &&
+      turn.ended &&
+      requestOf(turn)?.turnId === turnId
+    );
     if (running !== this.#told.running) {
       await callObject(async () => {
         await this.#host(scope).turnRunning(scope.chatId, running);
       });
       this.#told.running = running;
     }
-    if (settled && !turn.captured) {
-      await this.#capture(scope, request, turn);
+    for (const key of owed) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await this.#deliver(scope, key, turn);
     }
   }
 
+  /** The captures settled turns owe, by their turn IDs (`CaptureDoc`). */
+  async #owed(): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor: Cursor | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      const page = await this.#storage.scanDocuments(
+        {
+          scope: { kind: "session" },
+          at: "current",
+          kind: CaptureDoc.definition.kind,
+        },
+        20,
+        cursor,
+        context
+      );
+      for (const { key } of page.items) {
+        if (key !== undefined) {
+          keys.push(key);
+        }
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    return keys;
+  }
+
   /**
-   * Delivers the capture settled turn `turn` owes (`captureTurn`), then
-   * marks it delivered: at least once, kept once by its event ID.
+   * Delivers the capture turn `key` owes (`captureTurn`), naming its
+   * answer as the copies kept it while its record is the chat's, then
+   * retires it: at least once, kept once by its event ID.
    */
-  async #capture(
+  async #deliver(
     scope: TurnRequest["scope"],
-    { turnId, capture }: TurnRequest,
+    key: string,
     turn: Readonly<TurnRecord>
   ): Promise<void> {
-    const end = turnEndSchema.parse(JSON.parse(turn.end));
+    const owed = await this.#harness.snapshot(CaptureDoc, key, context);
+    if (owed === undefined) {
+      return;
+    }
+    const answerId =
+      requestOf(turn)?.turnId === key ? turn.answerId : owed.answerId;
     await callObject(async () => {
       await this.#host(scope).captureTurn(scope.chatId, {
-        turnId,
-        outcome: end.outcome,
-        answerId: turn.answerId,
-        model: capture.model,
-        audience: capture.audience,
+        ...owed,
+        answerId,
       });
     });
     await this.#conversation.commit(async (tx) => {
-      const kept = await tx.doc(TurnDoc);
-      if (requestOf(kept)?.turnId === turnId) {
-        kept.captured = true;
-      }
+      await tx.retireDoc(CaptureDoc, key);
     }, context);
   }
 
@@ -1436,7 +1494,7 @@ export class ChatHarness {
       doc.after = through;
       // The turn's answer, as the Workspace kept it, for its capture.
       const turn = await tx.doc(TurnDoc);
-      if (answerId !== undefined && !turn.captured) {
+      if (answerId !== undefined) {
         turn.answerId = answerId;
       }
     }, context);

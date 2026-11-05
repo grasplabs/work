@@ -7,13 +7,15 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { eraseRunCaptures } from "../src/brain-capture.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
+import { Workspace } from "../src/workspace.ts";
 import { model, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -667,6 +669,119 @@ describe("a chat turn's outcome", () => {
       answer: true,
       intents: [],
       summary: { running: false },
+    });
+  });
+
+  it("goes with its chat when its delivery is under way as the chat is deleted", async () => {
+    const { person, stub, id, ask } = await chatter(says("Floor 3."));
+    // The Brain takes the first batch, the outcome's record, only once the
+    // test says; and the chat's object takes nothing until the test says,
+    // so the deletion stops there, after it erased what the Brain held.
+    // Waited on by flags: workerd won't let one request wait on another's
+    // promise.
+    const brain = { reached: false, released: false, used: false };
+    await objectKnowledge(
+      stub,
+      new Proxy(knowledge, {
+        get: (target, property) => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!brain.used) {
+                brain.used = true;
+                brain.reached = true;
+                while (!brain.released) {
+                  // oxlint-disable-next-line no-await-in-loop -- until the test says
+                  await scheduler.wait(20);
+                }
+              }
+              return await Reflect.apply(value, target, args);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      })
+    );
+    const session = { reached: false, released: false };
+    try {
+      await ask();
+      await vi.waitFor(() => {
+        expect(brain.reached).toBeTruthy();
+      });
+      const held = runInDurableObject(
+        chatSession(env, personalWorkspaceId(person.userId), id),
+        async (_instance, state) => {
+          await state.blockConcurrencyWhile(async () => {
+            session.reached = true;
+            while (!session.released) {
+              // oxlint-disable-next-line no-await-in-loop -- until the test says
+              await scheduler.wait(20);
+            }
+          });
+        }
+      );
+      await vi.waitFor(() => {
+        expect(session.reached).toBeTruthy();
+      });
+      const removed = person.api.chats.remove(id);
+      await scheduler.wait(500);
+      // The outcome lands, the chat being deleted meanwhile.
+      brain.released = true;
+      await scheduler.wait(500);
+      session.released = true;
+      await held;
+      await removed;
+    } finally {
+      brain.released = true;
+      session.released = true;
+      await objectKnowledge(stub, knowledge);
+    }
+    await scheduler.wait(500);
+    await expect(eventsOf(id)).resolves.toStrictEqual([]);
+  });
+
+  it("is captured once its Workspace takes it again, when the next question came before, and the turn answers all the same", async () => {
+    const { id, ask } = await chatter(says("Floor 3."), says("Floor 4."));
+    // The Workspace takes no capture twice, as an outage of its store
+    // would: the chat's object asks it for each again.
+    // oxlint-disable-next-line typescript/unbound-method -- put back as it was, and called with its `this`
+    const kept = Workspace.prototype.captureTurn;
+    let refused = 0;
+    Workspace.prototype.captureTurn = function captureTurn(
+      this: Workspace,
+      ...args: Parameters<Workspace["captureTurn"]>
+    ): void {
+      if (refused < 2) {
+        refused += 1;
+        throw new Error("Capture store out of reach");
+      }
+      kept.apply(this, args);
+    };
+    const outcomeOfAsk = async () =>
+      await ask().then(
+        ({ outcome }) => outcome,
+        (error: unknown) =>
+          z.object({ message: z.string() }).parse(error).message
+      );
+    const first = await outcomeOfAsk();
+    const second = await outcomeOfAsk();
+    const executions = await vi.waitFor(
+      async () => {
+        const all = await executionsOf(id);
+        expect(all).toHaveLength(2);
+        return all;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    // The Workspace as it was, for the tests after.
+    Workspace.prototype.captureTurn = kept;
+    expect({ first, second, executions }).toStrictEqual({
+      first: "answered",
+      second: "answered",
+      executions: ["completed", "completed"],
     });
   });
 

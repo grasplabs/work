@@ -273,7 +273,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     expect(versions).toHaveLength(1);
   });
 
-  it("takes a job from a turn its Workspace's restart left running, and ends it when the person stops that turn", async () => {
+  it("takes a job from a turn its Workspace's restart left running, refuses another question meanwhile, and ends the job when the person stops that turn", async () => {
     const building = pausedReply(
       { ...codeStep(submitProposal), text: "Building." },
       1
@@ -302,9 +302,18 @@ describe("build jobs", { timeout: 180_000 }, () => {
       building.release();
       job = await submittedJob(woken, chat.chat.id);
       await checking.reached();
-      await expect(
-        woken.cancel(chat.chat.id, chat.personId)
-      ).resolves.toBeTruthy();
+      // Another question, and the person's stop while it would be taken.
+      const asked = await runInDurableObject(woken, async (instance) => {
+        const sent = instance
+          .send(chat.chat.id, chat.personId, { text: "Another?", model })
+          .then(
+            () => "sent",
+            (error: unknown) => agentErrors.codeOf(error) ?? "failed"
+          );
+        const stopped = await instance.cancel(chat.chat.id, chat.personId);
+        return { sent: await sent, stopped };
+      });
+      expect(asked).toStrictEqual({ sent: "agent.busy", stopped: true });
     } finally {
       checking.restore();
       waiting.release();
