@@ -626,10 +626,11 @@ export default function Lookalikes() {
     const { request } = z
       .object({ typeCheck: z.object({ request: z.unknown() }) })
       .parse(
-        await callStub(startAppCompiler(env.LOADER, env.ASSETS, "app-test"), "build", [
-          "screens",
-          typicalApp,
-        ])
+        await callStub(
+          startAppCompiler(env.LOADER, env.ASSETS, "app-test"),
+          "build",
+          ["screens", typicalApp]
+        )
       ).typeCheck;
     const checker = startTypeChecker(env.LOADER, env.ASSETS);
     await expect(callStub(checker, "check", [request])).resolves.toStrictEqual(

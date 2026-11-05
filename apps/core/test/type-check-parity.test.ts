@@ -428,7 +428,9 @@ describe("the type checker's isolate", { timeout: 120_000 }, () => {
       checks: [...new Set(checks.map((name) => name.split("\u0000")[0]))],
       checked: checks.length,
       unnamed: names.includes("(unnamed)"),
-      leaked: names.filter((name) =>
+      // The compiler's isolate is the App's own, by design (`appCompilerName`);
+      // the checker's is every App's, and holds neither.
+      leaked: checks.filter((name) =>
         [...marks, ...apps].some((secret) => name.includes(secret))
       ),
     }).toStrictEqual({

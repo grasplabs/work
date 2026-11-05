@@ -135,7 +135,8 @@ describe("the App compiler on-prem", () => {
       connect: host.connect.bind(host),
     };
     // Three screens of this test's own, each larger than a batch sized to
-    // 10 ms of CPU time: a batch each, then the build.
+    // 10 ms of CPU time: a batch each, then the build, then its one type
+    // check, in a session of its own.
     const tag = crypto.randomUUID();
     const files = Object.fromEntries(
       ["one", "two", "three"].map((name) => [
@@ -158,7 +159,7 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
       "app-test"
     );
 
-    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 4 });
+    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 5 });
   });
 
   it("builds an App's screens on the sandbox host, not in core", async () => {

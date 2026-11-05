@@ -1,4 +1,4 @@
-import { appCompilerName } from "@grasp-os/compiler";
+import { appCompilerName, typeCheckerName } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -436,7 +436,8 @@ describe("a first screens build of a large App", () => {
       stopped: [],
       // Nothing transformed again: the stopped build's batches were kept.
       resumed: [{ batchCalls: 0, batched: 0, compiled: 0, reused: count }],
-      calls: ["buildIncrementally"],
+      // The build's own call, then its one type check, in the checker.
+      calls: ["buildIncrementally", "check"],
     });
   }, 120_000);
 
@@ -523,10 +524,17 @@ describe("a first screens build of a large App", () => {
     );
 
     const sources = [first, changed].flatMap((files) => Object.values(files));
+    // The compiler's isolates, and the type checker's, which every App
+    // shares (its name is the release's alone).
+    const [compilers, checkers] = [
+      names.filter((name) => !name.startsWith(typeCheckerName)),
+      names.filter((name) => name.startsWith(typeCheckerName)),
+    ];
     expect({
-      names: [...new Set(names)].map((name) =>
+      names: [...new Set(compilers)].map((name) =>
         name.startsWith(appCompilerName(whose))
       ),
+      checked: checkers.length > 0,
       code: names.filter((name) =>
         sources.some((source) =>
           source
@@ -534,7 +542,7 @@ describe("a first screens build of a large App", () => {
             .some((line) => line.length > 8 && name.includes(line))
         )
       ),
-    }).toStrictEqual({ names: [true], code: [] });
+    }).toStrictEqual({ names: [true], checked: true, code: [] });
   }, 120_000);
 
   it("builds every App in one compiler isolate on plain workerd", async () => {
