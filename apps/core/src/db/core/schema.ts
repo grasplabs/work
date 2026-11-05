@@ -4066,13 +4066,14 @@ export const workflowStartReceipts = sqliteTable(
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
-     * What the workflow kept between its runs as the start was admitted
-     * (canonical JSON, workflow-state.ts), read once and frozen, which
-     * every activation of its run reads (`$state`); null for a start that
-     * admits no run, and once retention removed its details. Last, as the
-     * admitting statement writes every column in order.
+     * What the workflow kept between its runs as the start was admitted,
+     * read once and frozen: the hash of its snapshot
+     * (`workflowStateSnapshots`), which every activation of its run reads
+     * (`$state`); null for a start that admits no run, and once retention
+     * removed its details. Last, as the admitting statement writes every
+     * column in order.
      */
-    state: text(),
+    stateHash: text("state_hash"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -4090,6 +4091,10 @@ export const workflowStartReceipts = sqliteTable(
     index("workflow_start_receipts_due_idx")
       .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
+    // The receipts that still hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_start_receipts_state_idx")
+      .on(table.stateHash)
+      .where(sql`${table.stateHash} IS NOT NULL`),
   ]
 );
 
@@ -4681,6 +4686,19 @@ export const workflowStateWrites = sqliteTable(
 );
 
 /**
+ * What workflows kept between their runs as runs started
+ * (src/workflows/state-snapshots.ts): each snapshot once, by the SHA-256
+ * of its canonical JSON, which the starts' receipts and test runs that
+ * froze it name. Removed once none does (workflows/retention.ts). Names
+ * no person: the company's, as the state it copies.
+ */
+export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
+  hash: text().primaryKey(),
+  body: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * The draft of each independent workflow's next definition, as its
  * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
  * `revision` counting them from 1. An edit names the revision it read and
@@ -4858,11 +4876,11 @@ export const workflowCandidateRuns = sqliteTable(
     input: text().notNull(),
     params: text().notNull(),
     /**
-     * What its workflow kept between its runs as it started (canonical
-     * JSON, workflow-state.ts), frozen for every activation. A test run
-     * writes none back.
+     * What its workflow kept between its runs as it started: the hash of
+     * its snapshot (`workflowStateSnapshots`), frozen for every
+     * activation. A test run writes none back.
      */
-    state: text(),
+    stateHash: text("state_hash"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
@@ -4891,6 +4909,8 @@ export const workflowCandidateRuns = sqliteTable(
     uniqueIndex("workflow_candidate_runs_reservation_idx").on(
       table.reservation
     ),
+    // The test runs that hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_candidate_runs_state_idx").on(table.stateHash),
   ]
 );
 

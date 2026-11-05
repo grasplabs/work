@@ -110,6 +110,7 @@ import type {
   SealedRunKind,
   SentCalls,
 } from "./sealed-run.ts";
+import { snapshotOf } from "./state-snapshots.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -306,7 +307,7 @@ export const receiptOf = async (env: Env, id: string) =>
       manifestHash: workflowStartReceipts.manifestHash,
       input: workflowStartReceipts.input,
       params: workflowStartReceipts.params,
-      state: workflowStartReceipts.state,
+      stateHash: workflowStartReceipts.stateHash,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
     })
@@ -838,9 +839,13 @@ const loadedRun = async (
     receipt?.manifestHash !== pin.manifest ||
     receipt.input === null ||
     receipt.params === null ||
-    receipt.state === null
+    receipt.stateHash === null
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
+  }
+  const state = await snapshotOf(env, receipt.stateHash);
+  if (state === undefined) {
+    throw new Error(`Run ${runId}'s snapshot isn't stored`);
   }
   // The expressions run only under the evaluator the version was published
   // with: the platform ships one, so a deploy that changed it fails runs of
@@ -893,7 +898,7 @@ const loadedRun = async (
       principal: row.principalId,
       input: z.json().parse(JSON.parse(receipt.input)),
       params: jsonObjectSchema.parse(JSON.parse(receipt.params)),
-      state: jsonObjectSchema.parse(JSON.parse(receipt.state)),
+      state,
       createdAt: row.createdAt.getTime(),
       rootRunId: row.rootRunId ?? runId,
       depth: row.depth,

@@ -317,16 +317,16 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (restricted.ts): its skip is audited (`workflow.state.withheld`).
 // - State changing under a run. A run reads its workflow's state once,
 //   as its start is decided (a write or reset landing between that and
-//   its admission is the next start's to read), frozen with its start's receipt (a draft's
-//   test run with its row), and every activation hands the isolate that
-//   same snapshot (`sealedRunStart`), whatever other runs write since. A
-//   run an App's test started reads none: nothing of the organization's.
-//   The snapshot is whatever the workflow's runs kept, of every version:
-//   generated code holds each value it reads to its own build's
-//   descriptor, as it does any data.
-//   A reset, or the workflow's deletion, leaves those copies with the runs
-//   that already started, until retention (a receipt's details) or the
-//   sweep of test runs removes them.
+//   its admission is the next start's to read), frozen as a snapshot its
+//   start's receipt names (a draft's test run's row; state-snapshots.ts),
+//   and every activation hands the isolate that same snapshot
+//   (`sealedRunStart`), whatever other runs write since. A run an App's
+//   test started reads none: nothing of the organization's. The snapshot
+//   is whatever the workflow's runs kept, of every version: generated
+//   code holds each value it reads to its own build's descriptor, as it
+//   does any data. A reset, or the workflow's deletion, leaves the
+//   snapshots of runs that already started until retention (a receipt's
+//   details) or the sweep of test runs releases them.
 // - An attempt longer than sealed. Each is held to its task's timeout and
 //   its tries' retry attempt durations, and its engine retries are the
 //   host's own (`limitsOf`), whatever its code declares.

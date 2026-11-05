@@ -1493,7 +1493,7 @@ describe("a draft's test run and what its workflow keeps between runs", () => {
     });
     const end = endOf(await ended(ada, workflow.id, runId));
     const frozen = await env.DB.prepare(
-      "SELECT state FROM workflow_candidate_runs WHERE id = ?"
+      "SELECT snapshot.body AS state FROM workflow_candidate_runs AS run JOIN workflow_state_snapshots AS snapshot ON snapshot.hash = run.state_hash WHERE run.id = ?"
     )
       .bind(runId)
       .first<{ state: string }>();

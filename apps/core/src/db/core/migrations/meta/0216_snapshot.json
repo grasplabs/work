@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5aea750d-4d06-4c86-a44b-82d504a06c00",
+  "id": "7d3e7538-478e-40a0-a633-7eac8cad561e",
   "prevId": "bc7717ce-0212-4ca3-a0e4-d51839f92d00",
   "tables": {
     "access_revocations": {
@@ -10365,8 +10365,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "state": {
-          "name": "state",
+        "state_hash": {
+          "name": "state_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -10447,6 +10447,13 @@
             "reservation"
           ],
           "isUnique": true
+        },
+        "workflow_candidate_runs_state_idx": {
+          "name": "workflow_candidate_runs_state_idx",
+          "columns": [
+            "state_hash"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -13572,8 +13579,8 @@
           "autoincrement": false,
           "default": false
         },
-        "state": {
-          "name": "state",
+        "state_hash": {
+          "name": "state_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -13607,6 +13614,14 @@
           ],
           "isUnique": false,
           "where": "\"workflow_start_receipts\".\"details_removed_at\" IS NULL"
+        },
+        "workflow_start_receipts_state_idx": {
+          "name": "workflow_start_receipts_state_idx",
+          "columns": [
+            "state_hash"
+          ],
+          "isUnique": false,
+          "where": "\"workflow_start_receipts\".\"state_hash\" IS NOT NULL"
         }
       },
       "foreignKeys": {
@@ -13692,6 +13707,37 @@
           "name": "workflow_state_workflow_resource_id_key_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_state_snapshots": {
+      "name": "workflow_state_snapshots",
+      "columns": {
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

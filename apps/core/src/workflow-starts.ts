@@ -69,6 +69,8 @@ import { runEvidenceMaxRows } from "./workflows/run-evidence.ts";
 import { startFilesDropped } from "./workflows/run-files.ts";
 import { handFiles } from "./workflows/start-files.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
+import { snapshotFrom, snapshotStored } from "./workflows/state-snapshots.ts";
+import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -226,17 +228,19 @@ export interface ParentRun {
 }
 
 /**
- * What workflow `id` keeps between its runs (`workflowStateOf`), read once
- * as a start that admits a run (`buildHash`) is decided and frozen with
- * it, for its run alone: a write landing after this is the next start's to
- * read. Null for a start that admits no run.
+ * What workflow `id` keeps between its runs, read once as a start that
+ * admits a run (`buildHash`) is decided and frozen with it, for its run
+ * alone: a write landing after this is the next start's to read. Null for
+ * a start that admits no run.
  */
 const frozenState = async (
   env: Env,
   id: string,
   buildHash: string | null
-): Promise<string | null> =>
-  buildHash === null ? null : canonicalJson(await workflowStateOf(env, id));
+): Promise<StateSnapshot | null> =>
+  buildHash === null
+    ? null
+    : await snapshotFrom(await workflowStateOf(env, id));
 
 /**
  * A new start the host decided on: what it freezes, and what admitting it
@@ -262,11 +266,11 @@ export interface StartAuthorization {
   /** The bindings it froze (canonical JSON). */
   bindings: string;
   /**
-   * What the workflow kept between its runs as it was decided (canonical
-   * JSON, `workflowStateOf`), which its run reads in every activation;
-   * null for a start that admits no run.
+   * What the workflow kept between its runs as it was decided
+   * (workflows/state-snapshots.ts), which its run reads in every
+   * activation; null for a start that admits no run.
    */
-  state: string | null;
+  state: StateSnapshot | null;
   /**
    * Whether it starts in restricted mode (`restrictedStart`): its run is
    * restricted for good.
@@ -1472,6 +1476,17 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
           AND live.principal_id = ${authorization.principal}
           AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
 
+/** The hash of the snapshot `authorization` froze, if any. */
+const stateHashOf = ({ state }: StartAuthorization): string | null =>
+  state?.hash ?? null;
+
+/** The statement storing the snapshot `authorization` froze, if any. */
+const snapshotFor = (
+  db: DrizzleD1Database,
+  { state }: StartAuthorization,
+  at: Date
+) => (state === null ? [] : [snapshotStored(db, state, at)]);
+
 /**
  * The statements that claim the account a run `authorization` admits is
  * charged to, for a run a trigger starts in another run's lineage (an
@@ -1555,7 +1570,7 @@ export const admitWorkflowStart = async (
     createdAt.getTime(),
     null,
     authorization.restricted ? 1 : 0,
-    authorization.state,
+    stateHashOf(authorization),
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,
@@ -1587,6 +1602,8 @@ export const admitWorkflowStart = async (
           packaged: sql<number>`(${authorization.packages})`.as("packaged"),
         })
         .from(sql`(SELECT 1)`),
+      // Its run's snapshot, before the receipt that names it.
+      ...snapshotFor(db, authorization, createdAt),
       db
         .insert(workflowStartReceipts)
         .select(

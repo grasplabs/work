@@ -37,6 +37,7 @@ import {
 } from "../db/core/schema.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 import { runFilesRemoved } from "./run-files.ts";
+import { orphanedSnapshotsRemoved } from "./state-snapshots.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
 // message, a chat's transcript, a record) and keeps it: as its input, in
@@ -533,7 +534,12 @@ const startDetailsRemoved = async (
       ),
     db
       .update(receipts)
-      .set({ input: null, params: null, state: null, detailsRemovedAt: now })
+      .set({
+        input: null,
+        params: null,
+        stateHash: null,
+        detailsRemovedAt: now,
+      })
       // Another sweep may have marked some meanwhile: marked once.
       .where(and(inArray(receipts.id, due), isNull(receipts.detailsRemovedAt))),
   ]);
@@ -606,6 +612,8 @@ export const sweepWorkflowStartDetails = async (
     after = page.at(-1);
   }
   await paramValuesRemoved(db, before, now);
+  // The snapshots no start or test run names any more.
+  await orphanedSnapshotsRemoved(db);
 };
 
 /** A run to sweep, as the sweep reads it. */
