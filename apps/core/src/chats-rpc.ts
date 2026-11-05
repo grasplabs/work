@@ -5,6 +5,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatTitleSchema,
   previewAtSchema,
+  previewShownSchema,
   readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
@@ -22,6 +23,7 @@ import type {
   PreviewAt,
   PreviewBundle,
   PreviewRefresh,
+  PreviewShown,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -731,35 +733,34 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * sealed when the draft's
    * server code is as it was (sealed-previews.ts), and its build skips the
    * type check and lint, so a write reaches the screen at once; the
-   * agent's check of the draft has them. `appVersion` is the App's
-   * version the frame shows, if it shows one: a frame is handed only a
-   * build of the same screen it can swap in, and otherwise told whether
+   * agent's check of the draft has them. `shown` is what the frame shows:
+   * it is handed only a build it can swap in, and otherwise told whether
    * what it shows is still what to show (`PreviewUpdate`).
    */
   async previewUpdate(
     chatId: string,
     app: string,
-    screen: string,
     revision: number,
-    appVersion?: number
+    shown: PreviewShown
   ): Promise<PreviewUpdate> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
-      if (
-        !Number.isSafeInteger(revision) ||
-        (appVersion !== undefined &&
-          !previewAtSchema.safeParse({ appVersion }).success)
-      ) {
+      if (!Number.isSafeInteger(revision)) {
         throw screenErrors.create("screen.invalid");
       }
+      const frame = screenErrors.parse(
+        "screen.invalid",
+        previewShownSchema,
+        shown
+      );
       const update = async (): Promise<PreviewUpdate> =>
-        await this.#updateFor(by, chatId, id, screen, appVersion);
+        await this.#updateFor(by, chatId, id, frame);
       const updated = await this.#chatsOf(by.userId).previewBuild(
         chatIdOf(chatId),
         by.userId,
         id,
-        // The answer depends on the version the frame shows too.
-        `update:${screen}:${appVersion ?? ""}`,
+        // The answer depends on all the frame shows.
+        `update:${canonicalJson(frame)}`,
         revision,
         update
       );
@@ -773,43 +774,52 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
-   * What an open frame of `chatId`'s preview of App `id` showing screen
-   * `screen` takes now (`PreviewUpdate`), the frame showing the App's
-   * `appVersion` or, without it, the draft's own changes:
+   * What an open frame of `chatId`'s preview of App `id` takes now
+   * (`PreviewUpdate`), the frame showing `shown`. The screen to show is
+   * the one it was opened for (or, when none was named, the one it shows)
+   * when the build to show has it, its first otherwise; the build to show
+   * is the draft's changes, or the App's latest version while the draft
+   * changes nothing:
    *
-   * - The draft changes nothing: the App's latest version is the one to
-   *   show. A frame on it is `unchanged`; one on another version, or one
-   *   whose screen that version doesn't have, opens afresh on it
-   *   (`restart`); one on the draft's changes swaps it in.
-   * - The draft's changes: their build of the screen, swapped in. One
-   *   that doesn't build fails as the build does, so the frame keeps what
-   *   it shows and says it is being fixed, unless the frame shows the
-   *   App's version in place of the draft and a newer one came since: it
-   *   opens afresh on that one, as `#loadPreview` would.
+   * - The App's latest version: `unchanged` for a frame showing that
+   *   screen of it; a build to swap in for a frame on the draft's changes
+   *   of that screen; for any other, `restart`.
+   * - The draft's changes: their build of the screen, swapped into a frame
+   *   on that screen, and `restart` for one on another. One that doesn't
+   *   build fails as the build does, so the frame keeps what it shows and
+   *   says it is being fixed, unless the frame shows the App's version in
+   *   place of the draft and a newer one came since: it opens afresh on
+   *   that one, as `#loadPreview` would.
    */
   async #updateFor(
     by: Identity,
     chatId: string,
     id: AppId,
-    screen: string,
-    appVersion: number | undefined
+    shown: PreviewShown
   ): Promise<PreviewUpdate> {
     const now = await this.#previewed(by, chatId, id, {});
+    const screens = screensIn(now.files);
+    const wanted = shown.asked ?? shown.screen;
+    const screen = screens.includes(wanted) ? wanted : screens[0];
+    const sameScreen = screen === shown.screen;
     if (now.shows !== undefined) {
-      if (appVersion === now.shows) {
+      if (shown.appVersion === now.shows && sameScreen) {
         return { app: id, unchanged: true };
       }
-      if (appVersion !== undefined || !screensIn(now.files).includes(screen)) {
+      if (shown.appVersion !== undefined || !sameScreen) {
         return { app: id, restart: true };
       }
       return { app: id, refresh: await this.#staged(chatId, id, now, screen) };
     }
+    let refresh: PreviewRefresh;
     try {
-      return { app: id, refresh: await this.#staged(chatId, id, now, screen) };
+      if (screen === undefined) {
+        throw screenErrors.create("screen.not_found");
+      }
+      refresh = await this.#staged(chatId, id, now, screen);
     } catch (error) {
-      const unbuilt =
-        buildFailed(error) || !screensIn(now.files).includes(screen);
-      if (appVersion === undefined || !unbuilt) {
+      const unbuilt = buildFailed(error) || screen === undefined;
+      if (shown.appVersion === undefined || !unbuilt) {
         throw error;
       }
       let latest: number | undefined;
@@ -820,11 +830,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       } catch {
         throw error;
       }
-      if (latest === undefined || latest === appVersion) {
+      if (latest === undefined || latest === shown.appVersion) {
         throw error;
       }
       return { app: id, restart: true };
     }
+    return sameScreen ? { app: id, refresh } : { app: id, restart: true };
   }
 
   /**
@@ -963,9 +974,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * Screen `screen` of what a preview builds (`#previewed`), its first
-   * when `screen` is left out, or when a version of the App shown has no
-   * such, as a published App's page opens on a new version:
-   * `screen.not_found` when it has none.
+   * when `screen` is left out or it has no such, as a published App's
+   * page opens on a new version: `screen.not_found` when it has none.
    */
   async #screenOf(
     previewed: Previewed,
@@ -977,14 +987,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     if (first === undefined) {
       throw screenErrors.create("screen.not_found");
     }
-    const named =
-      screen !== undefined &&
-      (previewed.shows === undefined || screens.includes(screen));
     return await this.#previewBuild(
       previewed.files,
       previewed.references,
       id,
-      named ? screen : first
+      screen !== undefined && screens.includes(screen) ? screen : first
     );
   }
 

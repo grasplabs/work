@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppFiles } from "./apps.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
+import { screenNameSchema } from "./screens.ts";
 import type {
   QuerySnapshotPush,
   SubscriptionApi,
@@ -318,11 +319,30 @@ export interface PreviewRefresh {
 }
 
 /**
- * What `ChatsApi.previewUpdate` answers an open frame: a build to swap in
- * (`refresh`); that the build it shows is still the one to show
- * (`unchanged`); or that it shows another version of the App than the
- * one to show now (`restart`), which it opens afresh on, as a published
- * App's page does on a new version: on its screen when that version has
+ * What an open frame of a chat's preview shows as it asks for an update
+ * (`ChatsApi.previewUpdate`): the screen it shows; the screen it was
+ * opened for, when one was named, which it shows again once a build has
+ * it (a frame shown the App's version of another screen in place of a
+ * draft's screen that didn't build, or a version without it); and the
+ * App's version it shows, when it shows one rather than the draft's
+ * changes.
+ */
+export const previewShownSchema = z.strictObject({
+  screen: screenNameSchema,
+  asked: screenNameSchema.optional(),
+  appVersion: z.int().positive().optional(),
+});
+
+/** What an open frame of a chat's preview shows (`previewShownSchema`). */
+export type PreviewShown = z.infer<typeof previewShownSchema>;
+
+/**
+ * What `ChatsApi.previewUpdate` answers an open frame: a build of the
+ * screen it shows to swap in (`refresh`); that the build it shows is
+ * still the one to show (`unchanged`); or that the one to show is one it
+ * can't swap in, another version of the App or another screen
+ * (`restart`), which it opens afresh on, as a published App's page does
+ * on a new version: on the screen it was opened for when that build has
  * it, its first otherwise.
  */
 export type PreviewUpdate =
@@ -1015,22 +1035,20 @@ export interface ChatsApi {
     version?: number
   ) => Promise<PreviewBundle>;
   /**
-   * Screen `screen` of the chat's draft of `app` at `revision`, the
-   * newest the preview knows of, built and its modules staged for the
-   * open preview to import and swap in with React Fast Refresh
-   * (`PreviewRefresh`): one build per revision, shared by every preview
-   * that asks for it, and `app.preview_outdated` once the draft moved past
-   * `revision`. No frame is staged and nothing sealed, and the build's
-   * type check and lint don't hold it up. For the person while they build
-   * the App. `appVersion` is the App's version the frame shows, when it
-   * shows one rather than the draft's changes (`PreviewUpdate`).
+   * What an open frame of the chat's preview of `app`, showing `shown`,
+   * takes at `revision`, the newest the preview knows of
+   * (`PreviewUpdate`): a build of the draft is built and its modules
+   * staged for the frame to import and swap in with React Fast Refresh,
+   * one build per revision, shared by every preview that asks for it, and
+   * `app.preview_outdated` once the draft moved past `revision`. No frame
+   * is staged and nothing sealed, and the build's type check and lint
+   * don't hold it up. For the person while they build the App.
    */
   previewUpdate: (
     chatId: string,
     app: string,
-    screen: string,
     revision: number,
-    appVersion?: number
+    shown: PreviewShown
   ) => Promise<PreviewUpdate>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a

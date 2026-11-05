@@ -118,14 +118,18 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await chats.previewUpdate(chatId, app, "desk", next);
+    const updated = await chats.previewUpdate(chatId, app, next, {
+      screen: "desk",
+    });
     const updateMs = performance.now() - started;
     const again = await write(
       { "screens/desk.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await chats.previewUpdate(chatId, app, "desk", again);
+    const second = await chats.previewUpdate(chatId, app, again, {
+      screen: "desk",
+    });
     const secondMs = performance.now() - secondStarted;
     console.info(
       `preview update after a screen write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
@@ -177,19 +181,25 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     expect({
       // An App this chat neither changes nor is the chat of.
       otherApp: await codeOf(
-        builder.api.chats.previewUpdate(chatId, other.id, "desk", revision)
+        builder.api.chats.previewUpdate(chatId, other.id, revision, {
+          screen: "desk",
+        })
       ),
       colleague: await codeOf(
-        colleague.api.chats.previewUpdate(chatId, app, "desk", revision)
+        colleague.api.chats.previewUpdate(chatId, app, revision, {
+          screen: "desk",
+        })
       ),
-      // A screen the draft hasn't.
+      // A screen the draft hasn't: the frame opens afresh, on its first.
       noScreen: await codeOf(
-        builder.api.chats.previewUpdate(chatId, app, "nowhere", revision)
+        builder.api.chats.previewUpdate(chatId, app, revision, {
+          screen: "nowhere",
+        })
       ),
     }).toStrictEqual({
       otherApp: "app.not_in_chat",
       colleague: "app.not_found",
-      noScreen: "screen.not_found",
+      noScreen: { app, restart: true },
     });
   });
 
@@ -212,7 +222,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       { "screens/desk.tsx": deskSaying("Changed") },
       revision
     );
-    await chats.previewUpdate(chatId, app, "desk", next);
+    await chats.previewUpdate(chatId, app, next, { screen: "desk" });
     const kept = await call(next, "notes.titles");
     const sealedAfter = await sealedAt(builder, chatId);
     const storesAfter = await previewStores(builder, chatId, app);

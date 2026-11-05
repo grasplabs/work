@@ -158,7 +158,10 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const [draft] = await chats.drafts(chatId);
     // The frame opened before the write takes it, at the draft's revision.
     const update = refreshed(
-      await chats.previewUpdate(chatId, app, "desk", 1, 1)
+      await chats.previewUpdate(chatId, app, 1, {
+        screen: "desk",
+        appVersion: 1,
+      })
     );
     // As the frame imports it: under the token it opened with.
     const served = await servedFrom(frame, update.entry);
@@ -245,7 +248,9 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       callsAt: callsAt(broken),
       titles: await titlesAt(builder, chatId, app, callsAt(broken)),
       // Asked for the draft's screen, it still doesn't build.
-      update: await answer(chats.previewUpdate(chatId, app, "desk", 1, 1)),
+      update: await answer(
+        chats.previewUpdate(chatId, app, 1, { screen: "desk", appVersion: 1 })
+      ),
     };
     // The draft's own screen never ran: the agent's check saw nothing.
     const reports = await chatsOf(builder).previewReports(chatId, app, 1, 0);
@@ -257,7 +262,10 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       1
     );
     const refresh = refreshed(
-      await chats.previewUpdate(chatId, app, "desk", 2, 1)
+      await chats.previewUpdate(chatId, app, 2, {
+        screen: "desk",
+        appVersion: 1,
+      })
     );
     const fixed = await servedFrom(frame, refresh.entry);
 
@@ -406,13 +414,12 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
      * and what it opens on afresh.
      */
     const updated = async () => {
-      const answered = await chats.previewUpdate(
-        chatId,
-        app,
-        "desk",
-        opened.revision,
-        opened.refresh?.appVersion
-      );
+      const answered = await chats.previewUpdate(chatId, app, opened.revision, {
+        screen: "desk",
+        ...(opened.refresh?.appVersion === undefined
+          ? {}
+          : { appVersion: opened.refresh.appVersion }),
+      });
       const reopened = await chats.preview(chatId, app, "desk");
       // As its frame imports it: under the token it opened with.
       const served = await servedFrom(
@@ -507,13 +514,10 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const { chats } = builder.api;
     const chatId = await appChat(builder, app);
     const opened = await chats.preview(chatId, app, "desk");
-    const same = await chats.previewUpdate(
-      chatId,
-      app,
-      "desk",
-      opened.revision,
-      1
-    );
+    const same = await chats.previewUpdate(chatId, app, opened.revision, {
+      screen: "desk",
+      appVersion: 1,
+    });
     // Version 2 names the page `board`.
     await builder.api.apps.files.commit(
       app,
@@ -523,13 +527,10 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       },
       "Board"
     );
-    const moved = await chats.previewUpdate(
-      chatId,
-      app,
-      "desk",
-      opened.revision,
-      1
-    );
+    const moved = await chats.previewUpdate(chatId, app, opened.revision, {
+      screen: "desk",
+      appVersion: 1,
+    });
     const reopened = await chats.preview(chatId, app, "desk");
 
     expect({
@@ -567,20 +568,20 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     // The App's version it shows is still the latest: the draft's own
     // failure, which the frame shows as being fixed.
     const still = await answer(
-      chats.previewUpdate(chatId, app, "desk", broken.revision, 1)
+      chats.previewUpdate(chatId, app, broken.revision, {
+        screen: "desk",
+        appVersion: 1,
+      })
     );
     await builder.api.apps.files.commit(
       app,
       { "server/notes.ts": titlesSaying("from version 2") },
       "Second"
     );
-    const moved = await chats.previewUpdate(
-      chatId,
-      app,
-      "desk",
-      broken.revision,
-      1
-    );
+    const moved = await chats.previewUpdate(chatId, app, broken.revision, {
+      screen: "desk",
+      appVersion: 1,
+    });
     const reopened = await chats.preview(chatId, app);
 
     expect({
@@ -623,7 +624,68 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     });
   });
 
-  it("says which of its paths a draft deletes, and previews no screen it deleted", async () => {
+  it("brings back the screen a frame was opened for once the draft's build of it builds, after showing the App's version of another in its place", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const { chats } = builder.api;
+    const chatId = await appChat(builder, app);
+    // The draft replaces `desk` with a `board` that doesn't build.
+    await writeDraft(
+      builder,
+      chatId,
+      app,
+      {
+        "screens/desk.tsx": null,
+        "screens/board.tsx": "export default function Board( {",
+      },
+      0
+    );
+    const opened = await chats.preview(chatId, app, "board");
+    // What the frame says it shows as it asks: `desk`, opened for `board`.
+    const shown = {
+      screen: opened.screen,
+      asked: "board",
+      ...(opened.refresh?.appVersion === undefined
+        ? {}
+        : { appVersion: opened.refresh.appVersion }),
+    };
+    const still = await answer(chats.previewUpdate(chatId, app, 1, shown));
+    await writeDraft(
+      builder,
+      chatId,
+      app,
+      { "screens/board.tsx": notesFiles("board")["screens/desk.tsx"] ?? "" },
+      1
+    );
+    const fixed = await chats.previewUpdate(chatId, app, 2, shown);
+    const reopened = await chats.preview(chatId, app, "board");
+    // Opened for a screen the draft has no longer: its first.
+    const elsewhere = await chats.preview(chatId, app, "nowhere");
+
+    expect({
+      opened: {
+        fallback: opened.fallback,
+        screen: opened.screen,
+        callsAt: callsAt(opened),
+      },
+      still,
+      fixed,
+      reopened: {
+        fallback: reopened.fallback,
+        screen: reopened.screen,
+        callsAt: callsAt(reopened),
+      },
+      elsewhere: elsewhere.screen,
+    }).toStrictEqual({
+      opened: { fallback: true, screen: "desk", callsAt: { appVersion: 1 } },
+      still: "screen.build_failed",
+      fixed: { app, restart: true },
+      reopened: { fallback: undefined, screen: "board", callsAt: 2 },
+      elsewhere: "board",
+    });
+  });
+
+  it("says which of its paths a draft deletes, and previews no screen it deleted, its first in place of one asked for", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder, "Invoice desk", released);
     const { chatId } = await chatWithDraft(builder, app, {
@@ -634,17 +696,18 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
 
     const [draft] = await chats.drafts(chatId);
     const first = await chats.preview(chatId, app);
+    const gone = await chats.preview(chatId, app, "desk");
 
     expect({
       changed: draft?.changed,
       deleted: draft?.deleted,
       first: { screen: first.screen, screens: first.screens },
-      gone: await answer(chats.preview(chatId, app, "desk")),
+      gone: gone.screen,
     }).toStrictEqual({
       changed: ["screens/desk.tsx", "screens/list.tsx"],
       deleted: ["screens/desk.tsx"],
       first: { screen: "list", screens: ["list"] },
-      gone: "screen.not_found",
+      gone: "list",
     });
   });
 });

@@ -1765,17 +1765,17 @@ export const runPreview = (
           bundle.app,
           opened,
           {
+            // What the frame shows, with the screen it was opened for,
+            // which core shows again once a build has it.
             fetch: async (revision, appVersion) =>
               await on(
                 link,
                 async ({ chats }) =>
-                  await chats.previewUpdate(
-                    chatId,
-                    bundle.app,
-                    bundle.screen,
-                    revision,
-                    appVersion
-                  )
+                  await chats.previewUpdate(chatId, bundle.app, revision, {
+                    screen: bundle.screen,
+                    ...(screen === undefined ? {} : { asked: screen }),
+                    ...(appVersion === undefined ? {} : { appVersion }),
+                  })
               ),
             health: (next) => {
               health = next;

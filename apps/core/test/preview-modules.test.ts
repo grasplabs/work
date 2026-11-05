@@ -400,8 +400,8 @@ describe(
       const updated = await builder.api.chats.previewUpdate(
         chatId,
         app,
-        "desk",
-        revision
+        revision,
+        { screen: "desk" }
       );
       const healed = await routed(pathOf(address));
       expect({
@@ -441,12 +441,9 @@ describe(
         { "screens/desk.tsx": deskFiles("Later")["screens/desk.tsx"] ?? "" },
         revision
       );
-      const updated = await builder.api.chats.previewUpdate(
-        chatId,
-        app,
-        "desk",
-        next
-      );
+      const updated = await builder.api.chats.previewUpdate(chatId, app, next, {
+        screen: "desk",
+      });
       const hash = refreshed(updated).entry;
       // What the page does on the frame's `reset`: opens it again.
       const reopened = await framed(
