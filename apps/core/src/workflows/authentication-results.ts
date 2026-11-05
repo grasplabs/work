@@ -14,7 +14,8 @@
 // is full at instance 50 (RFC 8617 5.1, 4.2.1), so those are what a sender
 // would forge to keep Email Routing's set off the top, and they report
 // nothing; so does a top seal saying anything but `cv=none` or `cv=pass`,
-// and any ARC header whose instance doesn't read. A plain
+// and any ARC header whose instance doesn't read or whose name is written
+// with a space before its colon. A plain
 // Authentication-Results header is never read: Email Routing records its
 // results only in its ARC set, so one under its authserv-id is a sender's.
 // This holds only for mail Email Routing received: an ingress without it in
@@ -360,13 +361,23 @@ interface Header {
  * when an ARC header doesn't read.
  */
 const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
-  // A name is compared trimmed: postal-mime keeps the space of RFC 5322
-  // 4.5's obsolete `ARC-Seal :`, which a sealer may read as an ARC-Seal.
   const values = (name: string) =>
-    headers.filter(({ key }) => key.trim() === name).map(({ value }) => value);
+    headers
+      .filter(({ key }) => {
+        // postal-mime keeps the space of RFC 5322 4.5's obsolete
+        // `ARC-Seal :`, which a sealer may or may not read as an ARC-Seal:
+        // either reading could hide a set from one of us, so nothing counts.
+        if (key !== name && key.trim() === name) {
+          throw unparsable(`A spaced ${name}`);
+        }
+        return key === name;
+      })
+      .map(({ value }) => value);
   const resultsHeaders = values("arc-authentication-results");
+  // Of the others' results only their instance is read: they needn't be
+  // the grammar's past it (Microsoft 365 writes `action=none`).
   const resultsInstances = resultsHeaders.map((value) =>
-    arcInstance(new Reader(value))
+    arcInstance(new Reader(value.slice(0, value.indexOf(";") + 1)))
   );
   const seals = values("arc-seal").map(arcTagsOf);
   const sealInstances = seals.map(({ instance }) => instance);
@@ -389,7 +400,10 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
     onceAtHighest(resultsInstances) &&
     onceAtHighest(sealInstances) &&
     onceAtHighest(signatureInstances) &&
-    (topCv === "none" || topCv === "pass");
+    (topCv === "none" || topCv === "pass") &&
+    // A failed seal anywhere fails the chain (RFC 8617 5.2), so Email
+    // Routing's own would say so: one that doesn't isn't its.
+    seals.every(({ cv }) => cv !== "fail");
   if (!topSetTrusted) {
     return [];
   }
@@ -402,12 +416,14 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
  * it is RFC 6376 3.5's `domain-name`: two or more Keywords by dots.
  */
 const domainOf = (address: string | undefined): string | null => {
-  const domain = address?.slice(address.lastIndexOf("@") + 1).toLowerCase();
+  // Checked before it is lower-cased: some non-ASCII letters lower-case
+  // to ASCII ones (U+212A KELVIN SIGN to `k`).
+  const domain = address?.slice(address.lastIndexOf("@") + 1);
   const labels = domain?.split(".") ?? [];
   return domain !== undefined &&
     labels.length > 1 &&
     labels.every((label) => keywordPattern.test(label))
-    ? domain
+    ? domain.toLowerCase()
     : null;
 };
 

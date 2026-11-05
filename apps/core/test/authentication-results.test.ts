@@ -278,12 +278,15 @@ describe("a reply's authentication", () => {
       oneLabel: routing('spf=pass smtp.mailfrom="acme"').spf,
       trailingDot: routing("dkim=pass header.d=acme.test.").dkim,
       identity: routing("dkim=pass header.i=ben@Mail.Acme.Test").dkim,
+      // U+212A KELVIN SIGN lower-cases to an ASCII `k`.
+      kelvin: routing("dmarc=none header.from=\u212Araken.com").dmarc,
     }).toStrictEqual({
       hyphen: { result: "pass", domain: null },
       nullSender: { result: "none", domain: null },
       oneLabel: { result: "pass", domain: null },
       trailingDot: { result: "pass", domain: null },
       identity: { result: "pass", domain: "mail.acme.test" },
+      kelvin: { result: "none", domain: null },
     });
   });
 
@@ -341,11 +344,25 @@ describe("a reply's authentication", () => {
       // (RFC 8617 5.1): what is on top is the sender's.
       failedChain: bossReport(...arcSet(1, forged, "fail")),
       fullChain: bossReport(...arcSet(50, forged, "pass")),
-      // A seal Email Routing reads as an ARC-Seal (RFC 5322 4.5's obsolete
-      // `name :`) whose key postal-mime keeps with its space.
+      // RFC 5322 4.5's obsolete `name :`, its space kept by postal-mime:
+      // a seal Email Routing may read, hiding the set it would add...
       spacedSeal: bossReport(
         { key: "arc-seal ", value: "i=50; a=rsa-sha256; cv=pass; b=x" },
         ...arcSet(1, forged)
+      ),
+      // ...or a set it may not read, above a chain it stops at.
+      spacedSet: bossReport(
+        ...arcSet(2, forged, "pass").map(({ key, value }) => ({
+          key: `${key} `,
+          value,
+        })),
+        ...arcSet(1, `${trustedAuthservId}; dmarc=fail`, "fail")
+      ),
+      // A failed seal below the top fails the chain, so Email Routing's
+      // own seal on top would say so too.
+      failedBelow: bossReport(
+        ...arcSet(2, forged, "pass"),
+        ...arcSet(1, "mx.acme.test; dmarc=fail", "fail")
       ),
       notHighest: bossReport(
         ...arcSet(1, forged),
@@ -376,6 +393,10 @@ describe("a reply's authentication", () => {
         key: "arc-authentication-results",
         value: "i=51; mx.evil.test; none",
       }),
+      lowerUnreadable: bossReport(
+        ...arcSet(2, `${trustedAuthservId}; dmarc=pass header.from=bank.test`),
+        ...arcSet(1, "mx.other.test; dkim=pass (never closed")
+      ).dmarc,
       unparsable: bossReport(
         ...arcSet(
           1,
@@ -392,6 +413,8 @@ describe("a reply's authentication", () => {
       failedChain: nothing,
       fullChain: nothing,
       spacedSeal: nothing,
+      spacedSet: nothing,
+      failedBelow: nothing,
       notHighest: nothing,
       sealedHigher: nothing,
       noSeal: nothing,
@@ -400,6 +423,7 @@ describe("a reply's authentication", () => {
       sameInstanceTwice: nothing,
       unreadableSeal: nothing,
       unreadableInstance: nothing,
+      lowerUnreadable: { result: "pass", domain: "bank.test" },
       unparsable: nothing,
       none: nothing,
     });
