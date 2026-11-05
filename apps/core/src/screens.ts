@@ -250,10 +250,13 @@ const isBuildShaped = (value: unknown): boolean =>
  * once the compiler has answered, never inside its call, and put
  * together with the build as the build would have (`withTypeCheck`). A
  * build that waits on no check (one that failed before it) is as it came.
+ * The build's lease is renewed as the check starts (`renew`): the check is
+ * a call of its own, on-prem with its own wait for a place.
  */
 const withItsCheck = async (
   runner: PlatformRunner,
-  answer: unknown
+  answer: unknown,
+  renew: () => Promise<void>
 ): Promise<unknown> => {
   if (
     typeof answer !== "object" ||
@@ -270,6 +273,7 @@ const withItsCheck = async (
   if (unchecked.typeCheck === undefined) {
     return unchecked.built;
   }
+  await renew();
   const diagnostics = await runner.run("type-checker", "check", [
     unchecked.typeCheck.request,
   ]);
@@ -304,12 +308,16 @@ const compiled = async (
   kind: BuildKind,
   files: AppFiles,
   profile: BuildProfile,
+  /** Renews the build's lease, as its type check starts. */
+  renew: () => Promise<void>,
   /** The compiler call, when not the kind's own: what it answers as the build. */
   call: () => Promise<unknown> = async () => {
     const [method, target] = compilerCallOf(kind, profile);
     const answer = await runner.run("compiler", method, [target, files]);
     // Inspection checks no types: its build is as it came.
-    return method === "build" ? await withItsCheck(runner, answer) : answer;
+    return method === "build"
+      ? await withItsCheck(runner, answer, renew)
+      : answer;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
@@ -553,7 +561,7 @@ const compiledIncrementally = async (
     profile: BuildProfile;
     checks: boolean;
     leaseMs: number;
-    /** Renews the build's lease: as each batch starts, and before the build's own call. */
+    /** Renews the build's lease: as each batch starts, before the build's own call, and before its check. */
     renew: () => Promise<void>;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
@@ -581,19 +589,26 @@ const compiledIncrementally = async (
   }
   const transformed = Date.now();
   let answer: unknown;
-  const result = await compiled(runner, "screen", files, profile, async () => {
-    answer = await runner.run("compiler", "buildIncrementally", [
-      target,
-      files,
-      reuse,
-    ]);
-    if (!incrementalShaped(answer)) {
-      throw new TypeError(
-        "The compiler answered something else than an incremental build."
-      );
+  const result = await compiled(
+    runner,
+    "screen",
+    files,
+    profile,
+    renew,
+    async () => {
+      answer = await runner.run("compiler", "buildIncrementally", [
+        target,
+        files,
+        reuse,
+      ]);
+      if (!incrementalShaped(answer)) {
+        throw new TypeError(
+          "The compiler answered something else than an incremental build."
+        );
+      }
+      return await withItsCheck(runner, answer.built, renew);
     }
-    return await withItsCheck(runner, answer.built);
-  });
+  );
   const ran = Date.now();
   const kept = incrementalShaped(answer)
     ? await keepIncrements(env, keys, answer.fresh, leaseMs)
@@ -854,7 +869,11 @@ const cachedBuild = async <Build>(
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const started = Date.now();
-  const leaseMs = runner.callMs("compiler") + leaseSlackMs;
+  // Renewed as each call starts (`renew`): long enough for the longest,
+  // the compiler's or the type checker's.
+  const leaseMs =
+    Math.max(runner.callMs("compiler"), runner.callMs("type-checker")) +
+    leaseSlackMs;
   const { text, outcome } = await sharedThroughCache(
     // One sub-owner's: another App building the same files builds them in
     // its own part of the builder's share, never on this one's (or with
@@ -877,7 +896,7 @@ const cachedBuild = async <Build>(
                   leaseMs,
                   renew,
                 })
-              : await compiled(runner, kind, files, profile);
+              : await compiled(runner, kind, files, profile, renew);
           if (!isBuild(answer.built)) {
             throw new TypeError(
               "The compiler answered something else than a build."
