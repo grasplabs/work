@@ -26,6 +26,29 @@ export const decidersSchema = z
     'a person ("person:<user ID>"), a role ("role:admin") or a team ("team:<team ID>")'
   );
 
+/**
+ * What one workflow's decision may ask, as every generator bounds what it
+ * seals and the run host takes it.
+ */
+export const decisionLimits = {
+  /** The people, teams and roles one decision asks. */
+  recipients: 16,
+  /** Its prompt, which people are shown uncut, in characters. */
+  promptLength: 500,
+} as const;
+
+/**
+ * A decision's prompt: text, not blank, at most
+ * `decisionLimits.promptLength` characters. A character is a code point,
+ * as JSON Schema's `maxLength` counts one (and zod's `max`), so a prompt a
+ * workflow's checker takes is one the host asks: an emoji is one, not the
+ * two UTF-16 units JavaScript's `length` counts.
+ */
+export const decisionPromptSchema = z
+  .string()
+  .regex(/\S/u)
+  .max(decisionLimits.promptLength);
+
 /** Why a decision call was refused. */
 export const decisionErrors = defineErrorFamily({
   "decision.invalid": "That isn't a valid answer to a decision.",

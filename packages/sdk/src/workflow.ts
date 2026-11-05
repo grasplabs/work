@@ -115,6 +115,9 @@ export const callMethod: (
 export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
   optionalGuard;
 export type { ParamKind, ParamValue } from "./params.ts";
+// The value each kind of parameter holds: generated code parses the
+// recipients a decision records as `person` values, as `from` takes one.
+export { paramValueSchemas } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
 export type { Json } from "@grasp-os/shared/json";
@@ -288,13 +291,6 @@ export const number = param("number");
 export const text = param("text");
 /** A person or group, e.g. who reviews; required by `step.decision`. */
 export const person = param("person");
-/**
- * Who a decision asks, as `step.decision`'s `from` takes it: a person
- * (`person:<user ID>`), a role (`role:admin`) or a team (`team:<team
- * ID>`). Generated code parses the recipients it records with it, so a
- * bare user ID fails where it is written, not at the run host.
- */
-export const decider = paramValueSchemas.person;
 /** A schedule, as five cron fields; what a schedule trigger runs on. */
 export const schedule = param("schedule");
 /** A template, e.g. for an email. */

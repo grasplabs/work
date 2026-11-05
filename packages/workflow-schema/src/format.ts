@@ -1,5 +1,7 @@
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
+
 // grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
 // `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
 // other's results explicitly (`steps.extract.output`), and everything a
@@ -11,7 +13,6 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 // A step kind joins the format as its SDK call joins the run host: a new
 // `type` in the union, nothing else changing (decision and forEach came so;
 // fork, race, event waits and child runs come so).
-import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 
 /**
  * The format's published JSON Schema, by its versioned URL: every document
@@ -182,14 +183,15 @@ export interface DecisionStep extends StepBase {
   /**
    * Who is asked, 1 to 16 of `person:<user ID>`, `team:<team ID>` and
    * `role:<role>`: a list, any item of which may be an expression, or an
-   * expression for the whole list. The first decides (the SDK's `from`).
+   * expression for the whole list. The first is the SDK's `from`; any of
+   * them may answer.
    */
   readonly recipients: Value;
   /** What they are asked, at most 500 characters. */
   readonly prompt: Value;
   /** What they decide on, as the binding's contract takes it. */
   readonly input: Value;
-  /** How long it waits for an answer: a year if not given. */
+  /** How long it waits for an answer: until the run's own deadline if not given. */
   readonly timeout?: Duration;
 }
 
@@ -198,7 +200,7 @@ export interface DecisionStep extends StepBase {
  * in scope in its steps and in `while`. Its own output is `null`; a step
  * inside it is read only by the steps after it in the same item.
  *
- * What bounds a loop is the run's step ceiling (`loopBounds`): every step
+ * What bounds a loop is the run's step ceiling (`forEachDescription`): every step
  * of every item counts toward it, so a loop of many items, or of items
  * of many steps, can reach it well before its last item. A run that does
  * fails with `workflow.too_many_steps`, which says to split the work over
@@ -314,10 +316,6 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
-  /** A decision's prompt, which the decision service shows uncut. */
-  promptLength: 500,
-  /** The people, teams and roles one decision asks. */
-  recipients: 16,
   params: 64,
   bindings: 64,
 } as const;
@@ -344,25 +342,17 @@ export const durationMs = (duration: Duration): number => {
 };
 
 /**
- * What bounds a `forEach`, from the platform's limits: the steps one run
- * takes in all, every item's counted, and the items one list may hold.
+ * What a `forEach` is, to whoever writes one: the schema's description,
+ * with what bounds it from the platform's limits: the steps one run takes
+ * in all, every item's counted, and the items one list may hold.
  */
-export const loopBounds = {
-  runSteps: platformLimits.workflowSteps,
-  items: platformLimits.workflowCollectionItems,
-} as const;
-
-/** What a `forEach` is, to whoever writes one: the schema's description. */
-export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${loopBounds.runSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${loopBounds.items.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
+export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${platformLimits.workflowSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${platformLimits.workflowCollectionItems.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,
  * as the platform's deciders are (`@grasp-os/shared/decisions`).
  */
 export const recipientPattern = decidersPattern.source;
-
-/** How long a decision waits when its step names no timeout. */
-export const decisionTimeout = "365 days";
 
 /**
  * What a step ID may be: lower-case words joined by dashes, and none of

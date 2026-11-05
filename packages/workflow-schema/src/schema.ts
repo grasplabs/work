@@ -1,5 +1,6 @@
 import type { Schema } from "@cfworker/json-schema";
 import { blockedProperties } from "@grasp-os/sdk/expression-check";
+import { decisionLimits } from "@grasp-os/shared/decisions";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import {
@@ -78,7 +79,7 @@ const stepKinds = {
           {
             type: "array",
             minItems: 1,
-            maxItems: formatLimits.recipients,
+            maxItems: decisionLimits.recipients,
             items: {
               anyOf: [
                 ref("expression"),
@@ -93,9 +94,10 @@ const stepKinds = {
           ref("expression"),
           {
             type: "string",
-            // Not blank: the host asks no empty question.
+            // As the host takes one (`decisionPromptSchema`): not blank,
+            // and `maxLength` counts code points, as it does.
             pattern: "\\S",
-            maxLength: formatLimits.promptLength,
+            maxLength: decisionLimits.promptLength,
           },
         ],
       },

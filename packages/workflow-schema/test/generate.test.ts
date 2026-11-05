@@ -1,4 +1,5 @@
 import { parse } from "@babel/parser";
+import type { ParserOptions } from "@babel/parser";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow } from "../src/generate.ts";
@@ -15,6 +16,12 @@ import {
 // separators, `__proto__`), no ID becomes a name, the module imports only
 // the workflow SDK and has no loop, and the sealed table holds every call
 // as the document has it.
+
+/** How a generated module is parsed: TypeScript, as a module. */
+const asModule = {
+  sourceType: "module",
+  plugins: ["typescript"],
+} satisfies ParserOptions;
 
 /** Every identifier and every call's callee name in `source`, a module. */
 const namesIn = (source: string): Set<string> => {
@@ -43,7 +50,7 @@ const namesIn = (source: string): Set<string> => {
       }
     }
   };
-  visit(parse(source, { sourceType: "module" }).program);
+  visit(parse(source, asModule).program);
   return names;
 };
 
@@ -67,7 +74,7 @@ const nodeTypesIn = (source: string): Set<string> => {
       visit(value);
     }
   };
-  visit(parse(source, { sourceType: "module" }).program);
+  visit(parse(source, asModule).program);
   return types;
 };
 
@@ -141,7 +148,8 @@ const isNode = (value: unknown): value is Node =>
  * Where `source`, a generated module, evaluates anything between its
  * steps: every call of an expression's guards (`$read`, `$call`, `$opt`)
  * in no function but the workflow's own, and the test of each `if`
- * statement there, as written. A step's function is the second function down.
+ * statement there, as written. A step's function is the second function
+ * down, as is a try's condition, which only a step's function calls.
  */
 const betweenSteps = (
   source: string
@@ -181,7 +189,7 @@ const betweenSteps = (
       }
     }
   };
-  visit(parse(source, { sourceType: "module" }).program, 0);
+  visit(parse(source, asModule).program, 0);
   return { guards, conditions };
 };
 
@@ -213,8 +221,7 @@ describe("generating a workflow", () => {
     expect({
       pwned: names.has("pwned"),
       // The only comment is the fixed header.
-      comments: parse(generated.source, { sourceType: "module" }).comments
-        ?.length,
+      comments: parse(generated.source, asModule).comments?.length,
       sealed: generated.tasks.find(({ id }) => id === "send")?.call,
     }).toStrictEqual({
       pwned: false,
@@ -230,9 +237,9 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("makes no name of an ID, imports only the workflow SDK, and loops only over recorded items", () => {
+  it("makes no name of an ID, imports only the workflow SDK, and loops only as a forEach", () => {
     const generated = generateWorkflow(checked(withLoops()), "workflow");
-    const { body } = parse(generated.source, { sourceType: "module" }).program;
+    const { body } = parse(generated.source, asModule).program;
     const imports = body.flatMap((statement) =>
       statement.type === "ImportDeclaration" ? [statement.source.value] : []
     );
@@ -262,24 +269,14 @@ describe("generating a workflow", () => {
         "DoWhileStatement",
         "ForInStatement",
       ].filter((type) => types.has(type)),
-      // One `for … of` a forEach, over what its enter step recorded.
-      over: [
-        ...generated.source.matchAll(
-          /for \(const \[\w+, \w+\] of (?<over>.+)\) \{$/gmu
-        ),
-      ].map((match) => (match.groups?.over ?? "").replaceAll(/\d+/gu, "")),
     }).toStrictEqual({
       imports: ["@grasp-os/sdk/workflow"],
       ids: [],
       loops: [],
-      over: [
-        "z.array(z.json()).parse(decided.items).entries()",
-        "z.array(z.json()).parse(decided.items).entries()",
-      ],
     });
   });
 
-  it("keys a loop's steps by the items around them, and scopes their tasks", () => {
+  it("seals a loop's tasks with the loops around them", () => {
     const generated = generateWorkflow(checked(withLoops()), "workflow");
     const slotOf = (pointer: string) =>
       generated.expressions.find((expression) => expression.pointer === pointer)
@@ -287,13 +284,6 @@ describe("generating a workflow", () => {
     const tasks = generated.tasks.filter(({ pointer }) =>
       pointer.startsWith("/steps/5")
     );
-    /** The keys `id`'s steps are named with, its loops' indexes as `i`. */
-    const keysOf = (id: string) =>
-      [
-        ...generated.source.matchAll(
-          new RegExp(`\\("${id}", \\{ key: (?<key>[^,]+),`, "gu")
-        ),
-      ].map((match) => (match.groups?.key ?? "").replaceAll(/index\d+/gu, "i"));
     expect({
       tasks: tasks.map(({ id, kind, steps, scope, branches, loop }) => ({
         id,
@@ -303,13 +293,6 @@ describe("generating a workflow", () => {
         branches,
         ...(loop === undefined ? {} : { loop }),
       })),
-      keys: {
-        pages: keysOf("pages"),
-        rows: keysOf("rows"),
-        hold: keysOf("hold"),
-        mail: keysOf("mail"),
-        guard: keysOf("guard"),
-      },
     }).toStrictEqual({
       tasks: [
         {
@@ -361,13 +344,6 @@ describe("generating a workflow", () => {
           branches: [null, null],
         },
       ],
-      keys: {
-        pages: ['"enter"'],
-        rows: ['"enter@" + i', '"item@" + i + "/" + i'],
-        hold: ['"enter@" + i + "/" + i', '"task@" + i + "/" + i'],
-        mail: ['"task@" + i + "/" + i'],
-        guard: ['"catch@" + i + "/" + i'],
-      },
     });
   });
 
@@ -508,7 +484,7 @@ describe("generating a workflow", () => {
     );
   });
 
-  it("seals a decision's whom, what and on what, and asks from its record", () => {
+  it("seals a decision's whom, what, on what, and its timeout where it names one", () => {
     const generated = generateWorkflow(
       checked(
         withDecisions(
@@ -529,21 +505,6 @@ describe("generating a workflow", () => {
         call: approve.call,
       },
       later: generated.tasks.find(({ id }) => id === "later")?.call,
-      // The if decides in the enter step, recorded, its recipients parsed
-      // as deciders; the task step asks from what that step recorded,
-      // never from a fresh evaluation, described by its ID.
-      decidesInEnter:
-        /step\.do\("approve", \{ key: "enter"[^\n]*\? \{ \["recipients"\]: z\.array\(decider\)[^\n]* : \{ skipped: true \}\)\);/u.test(
-          generated.source
-        ),
-      // A blank prompt fails the enter step: the host asks none.
-      promptNotBlank: generated.source.includes(
-        '["prompt"]: z.string().regex(/\\S/u)'
-      ),
-      asksFromRecord:
-        /step\.decision\("approve", \{ key: "task", description: "approve", from: decided\d+\.recipients\[0\], timeout: "365 days"/u.test(
-          generated.source
-        ),
     }).toStrictEqual({
       approve: {
         kind: "call",
@@ -561,7 +522,7 @@ describe("generating a workflow", () => {
           input: {
             object: [["who", { slot: slotOf("/steps/5/input/who") }]],
           },
-          timeoutMs: 365 * 86_400_000,
+          // No timeoutMs: it names none, so the host's applies.
         },
       },
       later: {
@@ -577,9 +538,6 @@ describe("generating a workflow", () => {
         input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
         timeoutMs: 2 * 86_400_000,
       },
-      decidesInEnter: true,
-      promptNotBlank: true,
-      asksFromRecord: true,
     });
   });
 

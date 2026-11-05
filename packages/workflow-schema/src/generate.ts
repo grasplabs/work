@@ -1,12 +1,11 @@
 import { pointerJoin } from "@grasp-os/open-workflow/diagnostics";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import type { CheckedWorkflow } from "./check.ts";
 import {
-  decisionTimeout,
   durationMs,
-  formatLimits,
   isPlain,
   isValueList,
   localContractPattern,
@@ -122,7 +121,8 @@ export type SealedCall =
       readonly recipients: Template;
       readonly prompt: Template;
       readonly input: Template;
-      readonly timeoutMs: number;
+      /** None: until the run's own deadline. */
+      readonly timeoutMs?: number;
     }
   | { readonly name: "grasp.sleepUntil"; readonly timestamp: Template };
 
@@ -219,8 +219,57 @@ const literal = (value: unknown): string => JSON.stringify(value);
 
 const localPattern = new RegExp(localContractPattern, "u");
 
-/** A try around a step, with where it is (its catch's expressions are by it). */
-type PlacedTry = TryStep & { readonly pointer: string };
+/**
+ * A try around a step, with where it is (its catch's expressions are by
+ * it), and the names of the functions its code decides its catch's `when`
+ * and its retry's `when` by, if it has them.
+ */
+type PlacedTry = TryStep & {
+  readonly pointer: string;
+  readonly catches?: string;
+  readonly retries?: string;
+};
+
+/** A try's retry decision for a failure: whether its retry holds. */
+const retriesOf = (around: PlacedTry): string => {
+  if (around.catch.retry === undefined) {
+    return "false";
+  }
+  return around.retries === undefined ? "true" : `${around.retries}(error)`;
+};
+
+/**
+ * The step options' `retry`, deciding by the tries around a step. Each
+ * try's conditions are its own functions, made where the try is written
+ * (`#try`), never their code pasted here: a loop's step inside the try
+ * has an `item` of its own, which the try's conditions don't mean.
+ */
+const retryOf = (
+  tries: readonly PlacedTry[],
+  depth: number
+): string | undefined => {
+  if (!tries.some((around) => around.catch.retry !== undefined)) {
+    return undefined;
+  }
+  const lines = ["async (error) => {"];
+  for (const around of tries) {
+    const { errors } = around.catch;
+    const conditions = [
+      ...(errors?.type === undefined
+        ? []
+        : [`error.type === ${literal(errors.type)}`]),
+      ...(errors?.status === undefined
+        ? []
+        : [`error.status === ${literal(errors.status)}`]),
+      ...(around.catches === undefined ? [] : [`${around.catches}(error)`]),
+    ];
+    lines.push(
+      `${"  ".repeat(depth + 1)}if (${conditions.length === 0 ? "true" : conditions.join(" && ")}) return { by: ${literal(around.id)}, retry: ${retriesOf(around)} };`
+    );
+  }
+  lines.push(`${"  ".repeat(depth + 1)}return null;`, `${"  ".repeat(depth)}}`);
+  return lines.join("\n");
+};
 
 /** A step, with where it is. */
 type Placed<S extends Step = Step> = S & { readonly pointer: string };
@@ -461,53 +510,6 @@ class Generator {
     return binding;
   }
 
-  /** A try's retry decision for a failure: whether its retry holds. */
-  #retries(around: PlacedTry): string {
-    const { retry } = around.catch;
-    if (retry === undefined) {
-      return "false";
-    }
-    if (retry.when === undefined) {
-      return "true";
-    }
-    // Whether it retries is a boolean, as the host reads the choice.
-    const code = this.#workflow.code.get(`${around.pointer}/catch/retry/when`);
-    return code === undefined ? "false" : `Boolean(${code})`;
-  }
-
-  /** The step options' `retry`, deciding by the tries around a step. */
-  #retryOf(tries: readonly PlacedTry[], depth: number): string | undefined {
-    if (!tries.some((around) => around.catch.retry !== undefined)) {
-      return undefined;
-    }
-    const lines = ["async (error) => {"];
-    for (const around of tries) {
-      const { errors, when } = around.catch;
-      const conditions = [
-        ...(errors?.type === undefined
-          ? []
-          : [`error.type === ${literal(errors.type)}`]),
-        ...(errors?.status === undefined
-          ? []
-          : [`error.status === ${literal(errors.status)}`]),
-        ...(when === undefined
-          ? []
-          : [
-              this.#workflow.code.get(`${around.pointer}/catch/when`) ??
-                "false",
-            ]),
-      ];
-      lines.push(
-        `${"  ".repeat(depth + 1)}if (${conditions.length === 0 ? "true" : conditions.join(" && ")}) return { by: ${literal(around.id)}, retry: ${this.#retries(around)} };`
-      );
-    }
-    lines.push(
-      `${"  ".repeat(depth + 1)}return null;`,
-      `${"  ".repeat(depth)}}`
-    );
-    return lines.join("\n");
-  }
-
   #task(task: Omit<SealedTask, "scope" | "branches" | "schemas">): void {
     this.#tasks.push({
       ...task,
@@ -588,7 +590,7 @@ class Generator {
     });
     // Its `if` is decided in its task step, with its call: skipped, the
     // step makes none.
-    const retry = this.#retryOf(tries, depth);
+    const retry = retryOf(tries, depth);
     this.#decided(
       step,
       depth,
@@ -666,7 +668,8 @@ class Generator {
    * written. Its task step then asks from the first recipient, exactly
    * the recorded one, and waits for the answer: `{ timedOut: true }` once
    * its timeout passes. Its description is the step's ID, as every
-   * step's: the host reads neither it nor the timeout, and the format has
+   * step's: the host reads neither it nor the timeout passed here (the
+   * SDK requires one; the host's is the sealed one), and the format has
    * no `ask` and no `remindAfter` (the schema refuses both), since telling
    * people is the host's, so the SDK's `ask` does nothing here.
    */
@@ -686,7 +689,10 @@ class Generator {
     );
     const prompt = this.#value(step.prompt, `${step.pointer}/prompt`, entry);
     const input = this.#value(step.input, `${step.pointer}/input`, entry);
-    const timeout = step.timeout ?? decisionTimeout;
+    // With no timeout, none is sealed: the host waits until the run's own
+    // deadline, as long as the run can wait (`timeoutOf`).
+    const timeoutMs =
+      step.timeout === undefined ? undefined : durationMs(step.timeout);
     this.#task({
       id: step.id,
       kind: "call",
@@ -698,15 +704,18 @@ class Generator {
         recipients: recipients.template,
         prompt: prompt.template,
         input: input.template,
-        timeoutMs: durationMs(timeout),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       },
     });
-    this.#imports.add("decider");
+    this.#imports.add("paramValueSchemas");
+    // The host holds the record to what a decision takes, as it records
+    // it (`#decisionEntered`): how many recipients, the prompt's length,
+    // not blank. Each fails this enter step, as the call's own failure.
+    // The recipients are parsed as `person` values here only so `from`
+    // takes the first of them as it is.
     const record = [
-      `["recipients"]: z.array(decider).nonempty().max(${formatLimits.recipients}).parse(${recipients.code})`,
-      // Not blank, as the host asks it: never trimmed here, the record
-      // is what the host matches.
-      `["prompt"]: z.string().regex(/\\S/u).max(${formatLimits.promptLength}).parse(${prompt.code})`,
+      `["recipients"]: z.array(paramValueSchemas.person).parse(${recipients.code})`,
+      `["prompt"]: z.json().parse(${prompt.code})`,
       `["input"]: z.json().parse(${input.code})`,
     ];
     this.#decided(
@@ -717,7 +726,7 @@ class Generator {
       (inner, entered) => {
         this.#line(
           inner,
-          `steps[${literal(step.id)}] = { output: await step.decision(${literal(step.id)}, ${this.#options(step, "task", [`from: ${entered}.recipients[0]`, `timeout: ${literal(timeout)}`, "ask: async () => {}"])}) };`
+          `steps[${literal(step.id)}] = { output: await step.decision(${literal(step.id)}, ${this.#options(step, "task", [`from: ${entered}.recipients[0]`, `timeout: ${literal(timeoutMs ?? sealedBuildLimits.deadlineMs)}`, "ask: async () => {}"])}) };`
         );
       }
     );
@@ -845,7 +854,7 @@ class Generator {
     });
     // Its deadline may fail to evaluate in its enter step, as a call may
     // fail: a retry around it decides it as any call's.
-    const retry = this.#retryOf(tries, depth);
+    const retry = retryOf(tries, depth);
     this.#decided(
       step,
       depth,
@@ -900,10 +909,14 @@ class Generator {
     );
   }
 
-  /** A try's catch, as sealed: its filter and the slots of its conditions. */
+  /**
+   * A try's catch, as sealed: its filter and the slots of its conditions,
+   * and the code of each condition.
+   */
   #sealedCatch(step: PlacedTry): {
     sealed: SealedCatch;
     when: string | undefined;
+    retryWhen: string | undefined;
   } {
     const entry: ExpressionEntry = {
       taskId: step.id,
@@ -937,11 +950,12 @@ class Generator {
             }),
       },
       when: when?.code,
+      retryWhen: retryWhen?.code,
     };
   }
 
   #try(step: PlacedTry, tries: readonly PlacedTry[], depth: number): void {
-    const { sealed, when } = this.#sealedCatch(step);
+    const { sealed, when, retryWhen } = this.#sealedCatch(step);
     this.#task({
       id: step.id,
       kind: "try",
@@ -951,13 +965,42 @@ class Generator {
       catch: sealed,
     });
     const number = this.#next();
+    // Its conditions as functions made here, where the try is written, so
+    // they read its own `item` wherever a step inside it fails. Each is a
+    // boolean, as the host reads the choice; only a step's callback calls
+    // them, so nothing is evaluated between steps.
+    const placed: PlacedTry = {
+      ...step,
+      ...(when === undefined ? {} : { catches: `catches${number}` }),
+      ...(retryWhen === undefined ? {} : { retries: `retries${number}` }),
+    };
+    if (when !== undefined || retryWhen !== undefined) {
+      this.#imports.add("type CaughtError");
+    }
     const body = (inner: number): void => {
+      if (placed.catches !== undefined) {
+        this.#line(
+          inner,
+          `const ${placed.catches} = (error: CaughtError) => Boolean(${when});`
+        );
+      }
+      if (placed.retries !== undefined) {
+        this.#line(
+          inner,
+          `const ${placed.retries} = (error: CaughtError) => Boolean(${retryWhen});`
+        );
+      }
       this.#line(inner, "try {");
-      this.#list(step.try, `${step.pointer}/try`, [step, ...tries], inner + 1);
+      this.#list(
+        step.try,
+        `${step.pointer}/try`,
+        [placed, ...tries],
+        inner + 1
+      );
       this.#line(inner, `} catch (thrown${number}) {`);
       this.#line(
         inner + 1,
-        `const caught${number} = await step.caught(${literal(step.id)}, ${this.#options(step, "catch")}, async (error) => ${when === undefined ? "true" : `Boolean(${when})`});`
+        `const caught${number} = await step.caught(${literal(step.id)}, ${this.#options(step, "catch")}, async (error) => ${placed.catches === undefined ? "true" : `${placed.catches}(error)`});`
       );
       this.#line(
         inner + 1,

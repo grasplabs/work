@@ -1,6 +1,10 @@
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, runActorOf } from "@grasp-os/shared/audit";
-import { decisionErrors, maxDeciders } from "@grasp-os/shared/decisions";
+import {
+  decisionErrors,
+  decisionLimits,
+  maxDeciders,
+} from "@grasp-os/shared/decisions";
 import type {
   DecisionAnswerInput,
   DecisionConfirmation,
@@ -223,8 +227,15 @@ export const decisionOfEventType = (type: string): string | undefined =>
     ? type.slice(decisionEventPrefix.length)
     : undefined;
 
-/** The longest description of a decision kept; the rest is cut. */
-const maxDescription = 500;
+/**
+ * A decision's description as kept: at most a prompt's length, counted
+ * as a prompt is (`decisionPromptSchema`, in code points), the rest cut,
+ * never a character in half. A workflow's prompt is refused before it is
+ * longer, so only an App's description is ever cut.
+ */
+const descriptionOf = (description: string): string =>
+  // oxlint-disable-next-line typescript/no-misused-spread -- whole code points, as a prompt's length counts them
+  [...description].slice(0, decisionLimits.promptLength).join("");
 
 /** The largest payload an answer carries, in bytes of JSON text. */
 const maxPayloadBytes = 4096;
@@ -387,7 +398,7 @@ export const openDecision = async (
     step: request.step,
     deciders: request.from,
     starterExcluded: request.starterExcluded,
-    description: request.description.slice(0, maxDescription),
+    description: descriptionOf(request.description),
     status: "open",
     openedAt: new Date(now),
     expiresAt: new Date(now + request.timeout),

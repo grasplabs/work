@@ -1,4 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { appModuleName } from "@grasp-os/compiler";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
@@ -6,6 +8,7 @@ import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
+import { buildWorkflows } from "../src/screens.ts";
 import { tasksFileSchema } from "../src/workflow-builds.ts";
 import {
   createWorkflowResource,
@@ -24,19 +27,42 @@ import {
   decidingEngine,
   decisionsOf,
   decisionWorkflow,
+  engineStep,
   hello,
+  journalingEngine,
   objectSchema,
   person,
   ranAs,
   retryingEngine,
   reviewRun,
-  sdkWorkflow,
   sealedWorkflow,
   standardErrors,
   waitingRun,
 } from "./sealed-run-harness.ts";
-import type { Reviewed, Sealed } from "./sealed-run-harness.ts";
+import type {
+  Engine,
+  Journaled,
+  Reviewed,
+  Sealed,
+} from "./sealed-run-harness.ts";
 import { unique } from "./sign-in.ts";
+
+/**
+ * `engine`, its activation evicted as step `name` was to start: nothing
+ * of that step or after it journaled, as a later activation finds it.
+ */
+const evictedBefore = (engine: Engine, name: string): Engine => ({
+  leaseOf: engine.leaseOf,
+  step: {
+    ...engine.step,
+    do: async (step, config, fn) => {
+      if (step === name) {
+        throw new Error("The activation was evicted");
+      }
+      return await engine.step.do(step, config, fn);
+    },
+  },
+});
 
 /**
  * What an engine ran of try `guarded` around step `fail`, by `tries`:
@@ -45,12 +71,15 @@ import { unique } from "./sign-in.ts";
  */
 const guardedRan = (tries: ReadonlyMap<string, number>) => {
   const keys = [...tries.keys()];
+  // In a loop's item, a step's key goes on with the item's indexes.
+  const of = (step: string): string | undefined =>
+    keys.find((key) => key === step || key.startsWith(`${step}%40`));
   return {
     decided: keys.filter((key) => key.endsWith(":decide")).length,
     retried: keys.filter((key) => key.endsWith(":run")).length,
-    failed: tries.get("key:fail:task"),
-    caught: tries.has("key:guarded:catch"),
-    told: tries.has("key:tell:task"),
+    failed: tries.get(of("key:fail:task") ?? ""),
+    caught: of("key:guarded:catch") !== undefined,
+    told: of("key:tell:task") !== undefined,
   };
 };
 
@@ -89,11 +118,16 @@ const objectOf = (properties: Record<string, unknown>) => ({
   additionalProperties: false,
 });
 
+/** Where a build of the generated module keeps it. */
+const generatedPath = "workflows/generated.ts";
+
 /**
  * `steps` and their `output` (its schema and value), generated: the
- * module, and the run with its table.
+ * module, built as a workflow's code is (type-checked against the SDK,
+ * its types stripped, its imports by their flat names), and the run with
+ * its table.
  */
-const generated = (
+const generated = async (
   steps: unknown[],
   output?: { schema: unknown; value: unknown },
   bindings: Record<string, unknown> = declared.bindings
@@ -119,9 +153,20 @@ const generated = (
       limits: generation.limits,
     })
   );
+  const build = await buildWorkflows(
+    env,
+    { [generatedPath]: generation.source },
+    "workflow-schema-runs",
+    {}
+  );
+  const source = build.ok
+    ? build.modules[appModuleName(generatedPath)]
+    : undefined;
+  if (source === undefined) {
+    throw new Error(`Not built: ${JSON.stringify(build)}`);
+  }
   return {
-    // The workflow SDK by the flat name the sealed build has it.
-    source: generation.source.replace('"@grasp-os/sdk/workflow"', sdkWorkflow),
+    source,
     sealed: (run: HostedSealedRun): HostedSealedRun => ({
       ...run,
       build: { ...run.build, ...table },
@@ -143,7 +188,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
 
   it("runs a wait, a connector call, an agent, an if and a try as sealed, refusing nothing", async () => {
     await answeringProvider(() => hello, { models: [allowedModel] });
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [
         { id: "linger", type: "wait", for: "1 hour" },
         {
@@ -240,7 +285,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("runs a loop's items in order, a catch taking an item's raise, and stops where its `while` doesn't hold", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "rows",
         type: "forEach",
@@ -298,8 +343,63 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     });
   });
 
+  it("replays a loop stopped after its first item's call: the same items, that call not made again, nothing refused", async () => {
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "rows",
+          type: "forEach",
+          items: { $expr: "input.rows" },
+          do: [
+            {
+              id: "notify",
+              type: "do",
+              binding: "mail",
+              operation: "mail.send",
+              arguments: { to: { $expr: "item" }, subject: "replayed row" },
+            },
+          ],
+        },
+      ],
+      {
+        schema: { type: "array", items: { type: "string" } },
+        value: { $expr: "input.rows" },
+      }
+    );
+    const runId = await waitingRun(sealed);
+    const rows = (run: HostedSealedRun) =>
+      withTable({ ...run, input: { rows: ["a", "b"] } });
+    const journal = new Map<string, Journaled>();
+    const second = engineStep("notify", "task@1");
+    const first = await ranAs(runId, source, {
+      engine: evictedBefore(journalingEngine(journal, []), second),
+      sealed: rows,
+    });
+    const ranAgain: string[] = [];
+    const replayed = await ranAs(runId, source, {
+      engine: journalingEngine(journal, ranAgain),
+      sealed: rows,
+    });
+    const { sent } = await sealed.mail.did();
+    expect({
+      first: first.tampered,
+      replayed,
+      ranAgain,
+      sent: sent.filter(({ subject }) => subject === "replayed row"),
+    }).toStrictEqual({
+      first: [],
+      replayed: { ended: ["a", "b"], tampered: [] },
+      // Its items and its first item's call are the journal's.
+      ranAgain: [second, engineStep("workflow", "output")],
+      sent: [
+        { to: "a", subject: "replayed row" },
+        { to: "b", subject: "replayed row" },
+      ],
+    });
+  });
+
   it("passes over an item whose steps were all skipped by their `if`, and runs the item after it", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "rows",
         type: "forEach",
@@ -342,7 +442,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("fails the step of an `if` that throws as an item's first, which a catch in the item takes, refusing nothing", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "rows",
         type: "forEach",
@@ -414,7 +514,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("records a list with a missing field as JSON, its item `null`, and runs its items", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "rows",
         type: "forEach",
@@ -449,7 +549,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("ends a loop that reaches the run's step ceiling, saying to split the work", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "rows",
         type: "forEach",
@@ -490,7 +590,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("fails a raise with its sealed error, which its catch takes, and skips a step whose `if` doesn't hold", async () => {
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [
         {
           id: "skipped",
@@ -554,7 +654,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
   });
 
   it("fails the run with a raise no catch takes", async () => {
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "stop",
         type: "raise",
@@ -573,7 +673,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
 
   it("takes a deadline that fails to evaluate inside a retrying try as the expression's failure, not retried", async () => {
     const tries = new Map<string, number>();
-    const { source, sealed: withTable } = generated([
+    const { source, sealed: withTable } = await generated([
       {
         id: "guarded",
         type: "try",
@@ -712,6 +812,62 @@ const localWorkflow = async () => {
   return { by, workflow };
 };
 
+/** A step calling `broken`, which always fails. */
+const fail = { id: "fail", type: "do", binding: "broken", arguments: 1 };
+
+/** Try `guarded` around `inside`: its catch takes, and retries, while these hold. */
+const guarded = (
+  inside: unknown[],
+  when: { catch: string; retry?: string }
+) => ({
+  id: "guarded",
+  type: "try",
+  try: inside,
+  catch: {
+    when: { $expr: when.catch },
+    retry: {
+      attempts: 3,
+      delay: "1 second",
+      backoff: "constant",
+      ...(when.retry === undefined ? {} : { when: { $expr: when.retry } }),
+    },
+    do: [
+      {
+        id: "tell",
+        type: "do",
+        binding: "note",
+        arguments: { to: { $expr: "error.type" } },
+      },
+    ],
+  },
+});
+
+/**
+ * `guarded` in each page of a loop, around a loop over the page's rows:
+ * where the try is written, `item` is the page, which says to retry;
+ * inside the rows, where its step fails, it is a row, which says not to.
+ */
+const inPages = (when: { catch: string; retry?: string }) => [
+  {
+    id: "pages",
+    type: "forEach",
+    items: { $expr: "[{ again: true, rows: [{ again: false }] }]" },
+    do: [
+      guarded(
+        [
+          {
+            id: "rows",
+            type: "forEach",
+            items: { $expr: "item.rows" },
+            do: [fail],
+          },
+        ],
+        when
+      ),
+    ],
+  },
+];
+
 describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
   let owned: Awaited<ReturnType<typeof localWorkflow>>;
 
@@ -722,7 +878,7 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
   afterAll(endLiveResourceRuns);
 
   it("calls a compute and an action binding as sealed, refusing none", async () => {
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [
         { id: "linger", type: "wait", for: "1 hour" },
         {
@@ -776,44 +932,23 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
     });
   });
 
-  it("decides a catch's and a retry's `when` as booleans, retrying while the retry's holds", async () => {
-    const tries = new Map<string, number>();
-    const { source, sealed: withTable } = generated(
-      [
-        {
-          id: "guarded",
-          type: "try",
-          try: [{ id: "fail", type: "do", binding: "broken", arguments: 1 }],
-          catch: {
-            when: { $expr: "error.status >= 400" },
-            retry: {
-              attempts: 3,
-              delay: "1 second",
-              backoff: "constant",
-              // A number: the choice the host reads takes a boolean.
-              when: { $expr: "error.status" },
-            },
-            do: [
-              {
-                id: "tell",
-                type: "do",
-                binding: "note",
-                arguments: { to: { $expr: "error.type" } },
-              },
-            ],
-          },
-        },
-      ],
-      undefined,
-      local
-    );
-    const ran = await ranAs(await waitingRun(owned), source, {
-      engine: retryingEngine(tries),
-      sealed: withTable,
-    });
-    expect({ ran, guarded: guardedRan(tries) }).toStrictEqual({
+  it("decides a catch's and a retry's `when` as booleans where the try is written, retrying while the retry's holds", async () => {
+    const ranWith = async (steps: unknown[]) => {
+      const tries = new Map<string, number>();
+      const { source, sealed: withTable } = await generated(
+        steps,
+        undefined,
+        local
+      );
+      const ran = await ranAs(await waitingRun(owned), source, {
+        engine: retryingEngine(tries),
+        sealed: withTable,
+      });
+      return { ran, guarded: guardedRan(tries) };
+    };
+    // Rounds 2 and 3 of its 3 attempts, each decided, then caught.
+    const retriedThenCaught = {
       ran: { ended: null, tampered: [] },
-      // Rounds 2 and 3 of its 3 attempts, each decided, then caught.
       guarded: {
         decided: 2,
         retried: 2,
@@ -821,12 +956,29 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         caught: true,
         told: true,
       },
+    };
+    expect({
+      // A number: the choice the host reads takes a boolean.
+      booleans: await ranWith([
+        guarded([fail], {
+          catch: "error.status >= 400",
+          retry: "error.status",
+        }),
+      ]),
+      retryReadsThePage: await ranWith(
+        inPages({ catch: "error.status >= 400", retry: "item.again" })
+      ),
+      catchReadsThePage: await ranWith(inPages({ catch: "item.again" })),
+    }).toStrictEqual({
+      booleans: retriedThenCaught,
+      retryReadsThePage: retriedThenCaught,
+      catchReadsThePage: retriedThenCaught,
     });
   });
 
   it("takes a retry `when` that throws as not retrying, the failure recorded and caught", async () => {
     const tries = new Map<string, number>();
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [
         {
           id: "guarded",
@@ -921,7 +1073,7 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
 
   it("asks whom its enter step recorded, never takes the answer of the run's own person, and answers a decider's", async () => {
     const { by, reviewer } = reviewed;
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [review()],
       decided,
       approval
@@ -974,7 +1126,7 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
 
   it("answers `{ timedOut: true }` once its timeout passes, and fails a bare user ID where its enter step records it", async () => {
     const { reviewer } = reviewed;
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [review()],
       decided,
       approval
@@ -1004,9 +1156,109 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
     });
   });
 
+  it("asks a prompt as long as its checker takes one, and with no timeout waits until the run's own deadline", async () => {
+    const { reviewer } = reviewed;
+    // 300 characters, each two UTF-16 units: within the 500 a prompt
+    // takes, as the checker counts them and the host does.
+    const prompt = "😀".repeat(300);
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "review",
+          type: "decision",
+          binding: "approval",
+          recipients: [{ $expr: "input.reviewer" }],
+          prompt,
+          input: { invoice: { $expr: "input.invoice" } },
+        },
+      ],
+      decided,
+      approval
+    );
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const day = 86_400_000;
+    // A run started a day before its age runs out: a day left to wait.
+    const late = (run: HostedSealedRun) =>
+      withTable({
+        ...run,
+        createdAt: Date.now() - platformLimits.workflowAgeMs + day,
+      });
+    const ran = await ranAs(runId, source, {
+      sealed: late,
+      engine: decidingEngine(runId, deadlinePasses),
+    });
+    const [opened] = await decisionsOf(runId);
+    const expiry = await env.DB.prepare(
+      "SELECT expires_at AS expiresAt FROM workflow_decisions WHERE resource_run_id = ?"
+    )
+      .bind(runId)
+      .first<{ expiresAt: number }>();
+    expect({
+      ran,
+      asked: opened?.description,
+      withinADay: (expiry?.expiresAt ?? Infinity) <= Date.now() + day,
+    }).toStrictEqual({
+      ran: {
+        ended: { timedOut: true, approved: false, by: "", comment: "" },
+        tampered: [],
+      },
+      asked: prompt,
+      withinADay: true,
+    });
+  });
+
+  it("replays a decision as it ran: asked once, its answer the journal's", async () => {
+    const { reviewer } = reviewed;
+    const { source, sealed: withTable } = await generated(
+      [review()],
+      decided,
+      approval
+    );
+    const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    const journal = new Map<string, Journaled>();
+    const first = await ranAs(runId, source, {
+      sealed: withTable,
+      engine: decidingEngine(
+        runId,
+        async (decision) => {
+          await answerAs(reviewer, decision, { approved: true });
+        },
+        journalingEngine(journal, [])
+      ),
+    });
+    const ranAgain: string[] = [];
+    const replayed = await ranAs(runId, source, {
+      sealed: withTable,
+      // Nobody answers again: what it answered is the journal's.
+      engine: decidingEngine(
+        runId,
+        deadlinePasses,
+        journalingEngine(journal, ranAgain)
+      ),
+    });
+    const answered = {
+      timedOut: false,
+      approved: true,
+      by: reviewer.userId,
+      comment: "",
+    };
+    const decisions = await decisionsOf(runId);
+    expect({
+      first,
+      replayed,
+      ranAgain,
+      decisions: decisions.map(({ step, status }) => ({ step, status })),
+    }).toStrictEqual({
+      first: { ended: answered, tampered: [] },
+      replayed: { ended: answered, tampered: [] },
+      ranAgain: [],
+      decisions: [{ step: "review:task", status: "approved" }],
+    });
+  });
+
   it("asks a decision in each item of a loop, under that item's keys", async () => {
     const { reviewer } = reviewed;
-    const { source, sealed: withTable } = generated(
+    const { source, sealed: withTable } = await generated(
       [
         {
           id: "batch",
