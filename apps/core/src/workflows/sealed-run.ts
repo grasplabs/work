@@ -36,7 +36,6 @@ import type { LoadedBuild } from "../workflow-builds.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
 import { writeJson } from "./bounded-json.ts";
-import { emitEvent } from "./emitted-events.ts";
 import { eventTypeKey } from "./event-envelopes.ts";
 import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
 import {
@@ -185,7 +184,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   them, placeholders and not values, as a digest: it names things and
 //   never carries their content (@grasp-os/shared/audit).
 // - Authority that changed since the start. Every call is decided again as
-//   it is made (`requireCallAuthority`, in `makeCall` and `emitEvent`): a
+//   it is made (`requireCallAuthority`, in `makeCall`): a
 //   revoked approval, permission or role stops the next call
 //   (`workflow.call_denied`). The person the run acts for must still be an
 //   active member before every step; a run an App's test started acts for
@@ -640,8 +639,7 @@ type BoundCall = Extract<
       | "grasp.operation"
       | "grasp.model"
       | "grasp.compute"
-      | "grasp.action"
-      | "grasp.emit";
+      | "grasp.action";
   }
 >;
 
@@ -655,12 +653,6 @@ interface CallTemplate {
   readonly operation: string;
   readonly arguments: Template;
 }
-
-/** `[key, template]`, or nothing for a part the build didn't seal. */
-const partOf = (
-  key: string,
-  template: Template | undefined
-): [string, Template][] => (template === undefined ? [] : [[key, template]]);
 
 /** The call template of `call`; none for a call the isolate never makes. */
 const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
@@ -682,15 +674,6 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
             ["instructions", call.instructions],
             ["input", call.input],
           ],
-        },
-      };
-    }
-    case "grasp.emit": {
-      return {
-        call,
-        operation: call.name,
-        arguments: {
-          object: [["data", call.data], ...partOf("subject", call.subject)],
         },
       };
     }
@@ -1220,12 +1203,6 @@ const matched = (
 const modelArgumentsSchema = z.strictObject({
   instructions: z.json(),
   input: z.json(),
-});
-
-/** An emit's arguments, as their template matched them. */
-const emitArgumentsSchema = z.strictObject({
-  data: z.json(),
-  subject: z.json().optional(),
 });
 
 /** How a connection binding's stub sends a call: `[operation, arguments, options]`. */
@@ -2705,31 +2682,6 @@ class SealedRun implements SealedRunKind {
           value,
           effect.key
         );
-      }
-      case "grasp.emit": {
-        const { data, subject } = emitArgumentsSchema.parse(value);
-        if (calling.candidate !== undefined) {
-          return null;
-        }
-        await requireResourceRunEvidenceReadable(this.#env, calling);
-        this.#requireHolds(attempt);
-        await emitEvent(
-          this.#env,
-          calling,
-          {
-            taskId: task.id,
-            stepKey: effect.key,
-            binding: call.binding,
-            type: call.type,
-            data,
-            ...(subject === undefined ? {} : { subject }),
-            ...(call.dataschema === undefined
-              ? {}
-              : { dataschema: call.dataschema }),
-          },
-          effect.requireHolds
-        );
-        return null;
       }
       default: {
         return call satisfies never;

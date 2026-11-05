@@ -1,11 +1,10 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   Authority,
   PermissionRequest,
 } from "@grasp-os/shared/permissions";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -467,7 +466,15 @@ describe("a store operation's receipts", () => {
 });
 
 /** A workflow's arguments for an operation that takes a name. */
-const byName = { name: "${ $workflow.input.who }" };
+const byName = { name: { $expr: "input.who" } };
+
+/** A JSON object schema of `properties`, each required, and nothing else. */
+const object = (properties: Record<string, unknown>) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
+});
 
 /**
  * A workflow with one operation binding, `lookup`, of catalog contract
@@ -476,60 +483,22 @@ const byName = { name: "${ $workflow.input.who }" };
 const workflowOf = async (
   owner: Person,
   key: string,
-  args: Record<string, string>,
+  args: Record<string, unknown>,
   before: unknown[] = []
 ) => {
   const workflow = await createWorkflowResource(env, owner, `crm-${unique()}`);
   await publishWorkflowVersion(env, owner, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { lookup: { kind: "operation", contract: key } },
-          },
-        },
-      },
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { who: { type: "string" } },
-            required: ["who"],
-            additionalProperties: false,
-          },
-        },
-      },
+      $schema: workflowSchemaUrl,
+      input: object({ who: { type: "string" } }),
       output: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { status: { type: "string" } },
-            required: ["status"],
-            additionalProperties: false,
-          },
-        },
+        schema: object({ status: { type: "string" } }),
+        value: { status: "done" },
       },
-      do: [
+      bindings: { lookup: { kind: "operation", contract: key } },
+      steps: [
         ...before,
-        {
-          add: {
-            call: "grasp.operation",
-            with: {
-              binding: "lookup",
-              arguments: args,
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
+        { id: "add", type: "do", binding: "lookup", arguments: args },
       ],
     }),
     basedOn: null,
@@ -822,7 +791,7 @@ describe("a workflow calling a store's public operation", () => {
     const crm = await sealedApp(crmFiles(), "CRM");
     const key = await contractOf(admin, crm.release, "notes.add");
     const workflow = await workflowOf(ada, key, {
-      text: "${ $workflow.input.who }",
+      text: { $expr: "input.who" },
     });
     const permissionId = await granted(
       admin,
@@ -894,7 +863,7 @@ describe("a workflow calling a store's public operation", () => {
     const crm = await sealedApp(crmFiles(), "CRM");
     const key = await contractOf(admin, crm.release, "notes.add");
     const workflow = await workflowOf(ada, key, {
-      text: "${ $workflow.input.who }",
+      text: { $expr: "input.who" },
     });
     const permissionId = await granted(
       admin,
@@ -1181,7 +1150,7 @@ describe("a JSON workflow's run calling a store's public operation", () => {
     const key = await contractOf(admin, crm.release, "contacts.add");
     // Waits before its call, so its receipt's run is seen live first.
     const workflow = await workflowOf(ada, key, byName, [
-      { hold: { wait: "PT1S" } },
+      { id: "hold", type: "wait", for: "1 second" },
     ]);
     const permissionId = await granted(
       admin,
@@ -1433,7 +1402,7 @@ describe("a store's public operations and its tables' row rules", () => {
     const key = await contractOf(admin, crm.release, "leads.add");
     const workflow = await workflowOf(ada, key, {
       ...byName,
-      team: "${ $workflow.input.who }",
+      team: { $expr: "input.who" },
     });
     const permissionId = await granted(
       admin,

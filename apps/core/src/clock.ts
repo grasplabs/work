@@ -46,7 +46,6 @@ import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
-import { drainEmittedEvents } from "./workflows/event-delivery.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
   repairResourceStarts,
@@ -165,15 +164,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.connector_events",
     period: "minute",
     run: pumpConnectorEvents,
-  },
-  // Events JSON workflows emitted, delivered to the system triggers that
-  // take them (src/workflows/event-delivery.ts).
-  {
-    name: "workflows.emitted_events",
-    period: "minute",
-    run: async (env) => {
-      await drainEmittedEvents(env);
-    },
   },
   // Apps' events sent to company webhooks, through connect
   // (src/app-webhooks.ts).

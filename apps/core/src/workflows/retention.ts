@@ -14,11 +14,10 @@ import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxedWhere } from "../audit-outbox.ts";
+import { auditedBatch } from "../audit-outbox.ts";
 import { eraseRunCaptures } from "../brain-capture.ts";
 import {
   workflowResourceParams,
-  workflowEmittedEvents,
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
@@ -418,25 +417,6 @@ const startDetailsRemoved = async (
   if (heldOf.length > 0) {
     await env.CONNECT.dropForEndedRuns({ runs: heldOf });
   }
-  // The events of those runs still undelivered, which this closes
-  // undelivered: each audited as it is closed (`expiredEvents`).
-  const expiring =
-    dueRows.length === 0
-      ? []
-      : await db
-          .select({
-            id: workflowEmittedEvents.id,
-            runId: workflowEmittedEvents.runId,
-            type: workflowEmittedEvents.type,
-          })
-          .from(workflowEmittedEvents)
-          .where(
-            and(
-              inArray(workflowEmittedEvents.runId, due),
-              isNull(workflowEmittedEvents.deliveredAt),
-              isNull(workflowEmittedEvents.detailsRemovedAt)
-            )
-          );
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
@@ -474,43 +454,6 @@ const startDetailsRemoved = async (
       .update(workflowDecisions)
       .set({ description: "", payload: null, input: null })
       .where(inArray(workflowDecisions.resourceRunId, due)),
-    // What its `emit` tasks sent goes with its details too: the event's
-    // envelope stays, its subject and data don't (emitted-events.ts). One
-    // still undelivered then is closed undelivered, as expired with its
-    // details, never delivered later without its data: its
-    // `delivered_at` set with `details_removed_at` says which it was.
-    // Each such is audited as it is, never lost without a record: before
-    // the change, while it still is undelivered, so once however many
-    // sweeps race.
-    ...expiring.map((event) =>
-      outboxedWhere(
-        db,
-        {
-          actor: { type: "system" },
-          action: "workflow.event.expired",
-          target: { type: "workflow_run", id: event.runId },
-          detail: { event: event.id, type: event.type, delivered: false },
-        },
-        sql`EXISTS (SELECT 1 FROM ${workflowEmittedEvents}
-          WHERE ${workflowEmittedEvents.id} = ${event.id}
-            AND ${workflowEmittedEvents.deliveredAt} IS NULL
-            AND ${workflowEmittedEvents.detailsRemovedAt} IS NULL)`
-      )
-    ),
-    db
-      .update(workflowEmittedEvents)
-      .set({
-        subject: null,
-        data: null,
-        detailsRemovedAt: now,
-        deliveredAt: sql`COALESCE(${workflowEmittedEvents.deliveredAt}, ${now.getTime()})`,
-      })
-      .where(
-        and(
-          inArray(workflowEmittedEvents.runId, due),
-          isNull(workflowEmittedEvents.detailsRemovedAt)
-        )
-      ),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })

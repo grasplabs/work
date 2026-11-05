@@ -229,13 +229,13 @@ const appOwnedBy = async (owner: Person): Promise<string> => {
   return id;
 };
 
-/** A system trigger `by` creates for version 1 of workflow `id`. */
-const systemTrigger = async (by: Person, id: string) =>
+/** A webhook trigger `by` creates for version 1 of workflow `id`. */
+const webhookTrigger = async (by: Person, id: string) =>
   await createTriggerResource(env, by, {
-    kind: "system",
+    kind: "webhook",
     workflowId: id,
     version: 1,
-    config: { event: { contract: "notes", type: "note.created" } },
+    config: {},
   });
 
 /** Version `version` of App `app`, approved (1), unapproved (0) or from before approvals (null). */
@@ -846,10 +846,10 @@ describe("a trigger starting a workflow", () => {
       role: "builder",
     });
     const trigger = await createTriggerResource(env, bob, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const tries = {
       adminMoves: await outcome(
@@ -917,10 +917,10 @@ describe("a trigger starting a workflow", () => {
       role: "builder",
     });
     const trigger = await createTriggerResource(env, bob, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     await granted(
       bob,
@@ -968,10 +968,10 @@ describe("a trigger starting a workflow", () => {
     ) => {
       const workflow = await workflowOf(ada);
       const trigger = await createTriggerResource(env, ada, {
-        kind: "system",
+        kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: { event: { contract: "notes", type: "note.created" } },
+        config: {},
       });
       await granted(
         ada,
@@ -1106,7 +1106,7 @@ describe("a trigger starting a workflow", () => {
     const many = 36;
     const triggers = await Promise.all(
       Array.from({ length: many }, async () => {
-        const trigger = await systemTrigger(ada, workflow.id);
+        const trigger = await webhookTrigger(ada, workflow.id);
         await granted(
           ada,
           admin,
@@ -1151,22 +1151,22 @@ describe("a trigger starting a workflow", () => {
       id: reader.userId,
       role: "user",
     });
-    const byReader = await outcome(systemTrigger(reader, workflow.id));
+    const byReader = await outcome(webhookTrigger(reader, workflow.id));
     env.TEST_QUOTA_LIMITS = {
       ...configuredLimits,
       triggerResourcesPerPerson: 1,
     };
     let limited: string;
     try {
-      await systemTrigger(ada, workflow.id);
-      limited = await outcome(systemTrigger(ada, workflow.id));
+      await webhookTrigger(ada, workflow.id);
+      limited = await outcome(webhookTrigger(ada, workflow.id));
     } finally {
       env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     // A creation racing the workflow's deletion lands nothing.
     const other = await workflowOf(ada);
     const [created, deleted] = await Promise.all([
-      outcome(systemTrigger(ada, other.id)),
+      outcome(webhookTrigger(ada, other.id)),
       outcome(deleteWorkflowResource(env, ada, other.id)),
     ]);
     const pinning = await env.DB.prepare(
@@ -1196,10 +1196,10 @@ describe("permissions of independent resources", () => {
     const bob = await person("builder");
     const workflow = await workflowOf(ada);
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const subject = { type: "workflow", workflowId: workflow.id } as const;
     const ask = async (by: Person, permission: PermissionRequest) =>
@@ -1394,10 +1394,10 @@ describe("what code and triggers may learn and name", () => {
     });
     const store = await createStore(env, ada);
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: theirs.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));

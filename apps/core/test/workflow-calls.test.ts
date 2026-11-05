@@ -1138,10 +1138,10 @@ describe("model calls", () => {
     // A trigger's start.
     const byTrigger = await greetingWorkflow(ada, admin, { before: [hold] });
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: byTrigger.workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const triggerGrant = await startOf(
       { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -1259,10 +1259,10 @@ describe("model calls", () => {
         basedOn: 1,
       });
       const trigger = await createTriggerResource(env, ada, {
-        kind: "system",
+        kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: { event: { contract: "notes", type: "note.created" } },
+        config: {},
       });
       await granted(ada, admin, {
         subject: {

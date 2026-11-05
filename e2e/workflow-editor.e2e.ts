@@ -265,12 +265,18 @@ test("a builder sees every declared branch of the checked definition, and a test
   const ran = page.getByRole("region", {
     name: "What the run of version 1 did",
   });
+  // Each task's own mark: `route` holds its branches' tasks, and their
+  // marks, inside it.
   for (const task of ["route", "greet-ada", "finished"]) {
     // oxlint-disable-next-line no-await-in-loop -- one task at a time
-    await expect(
-      ran.getByRole("listitem", { name: task }).getByText("Reached")
-    ).toBeVisible();
+    await expect(ran.getByRole("listitem", { name: task })).toHaveAttribute(
+      "data-state",
+      "reached"
+    );
   }
+  await expect(
+    ran.getByRole("listitem", { name: "greet-ada" }).getByText("Reached")
+  ).toBeVisible();
   await expect(
     ran.getByRole("listitem", { name: "greet-other" })
   ).toHaveAttribute("data-state", "none");

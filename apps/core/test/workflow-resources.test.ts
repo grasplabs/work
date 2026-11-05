@@ -1042,10 +1042,10 @@ describe("releasing a deleted workflow's name", () => {
       version: 1,
     });
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     // Neither holds a grant to start it, so neither keeps it from being
     // deleted; both still name it.

@@ -5023,10 +5023,6 @@ msgstr "Europäische Union"
 msgid "Event"
 msgstr "Ereignis"
 
-#: src/workflows/trigger-description.ts
-msgid "Event trigger"
-msgstr "Ereignisauslöser"
-
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 msgstr "Ereignisse, die älter sind, als der Audit-Trail sie aufbewahrt, und ins Archiv verschoben wurden. Suche und Export verwenden die Filter oben."
@@ -14987,10 +14983,6 @@ msgstr "Wenn es anders läuft"
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"
 msgstr "Wenn sein Webhook aufgerufen wird"
-
-#: src/workflows/trigger-description.ts
-msgid "When the event {type} is sent"
-msgstr "Wenn das Ereignis {type} gesendet wird"
 
 #: src/knowledge/new-collection.tsx
 msgid "When to use it"

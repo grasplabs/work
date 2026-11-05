@@ -183,16 +183,15 @@ export type StartInvoker =
   | { type: "app"; authority: Authority; agent?: StartingAgent | null }
   | { type: "agent"; authority: Authority; context?: WorkContext }
   /**
-   * A trigger fired by an event a workflow run caused (an event its `emit`
-   * task sent, workflows/event-delivery.ts) starts its run as that run's
-   * descendant, as App triggers' stamped mail and events do
-   * (inbound-email.ts, connector-events.ts), in `cause`, or it would open
-   * a lineage of its own past the run's limits (GRA-692).
+   * A trigger fired by mail a workflow run sent (a stamped message,
+   * workflows/connector-triggers.ts) starts its run as that run's
+   * descendant, in `cause`, or it would open a lineage of its own past the
+   * run's limits (GRA-692).
    */
   | { type: "trigger"; triggerId: string; cause?: TriggerCause };
 
 /**
- * The run whose event fired a trigger: where its lineage admitted the
+ * The run whose mail fired a trigger: where its lineage admitted the
  * trigger's run already (quotas.ts, `admitInLineage`), and whether it ran
  * restricted, which the trigger's run then does too. The trigger's run
  * joins its lineage, never its life: it isn't the run's child, and goes
@@ -1372,8 +1371,8 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
 
 /**
  * The statements that claim the account a run `authorization` admits is
- * charged to, for a run a trigger starts in another run's lineage (an
- * event or a stamped message of that run, `TriggerCause`): its workflow's
+ * charged to, for a run a trigger starts in another run's lineage (a
+ * stamped message of that run, `TriggerCause`): its workflow's
  * account there, never the lineage's own allowances, which a busy
  * workflow's runs would otherwise use up for the run that caused them and
  * every other workflow triggered there (quotas.ts,

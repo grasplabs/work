@@ -3640,7 +3640,7 @@ export const triggerResources = sqliteTable("trigger_resources", {
   id: text().primaryKey(),
   ownerId: text("owner_id").notNull(),
   kind: text({
-    enum: ["system", "connector", "webhook", "schedule", "email"],
+    enum: ["connector", "webhook", "schedule", "email"],
   }).notNull(),
   currentVersion: integer("current_version").notNull(),
   enabled: integer({ mode: "boolean" }).notNull(),
@@ -3693,12 +3693,11 @@ export const triggerResourceVersions = sqliteTable(
     principalBinding: text("principal_binding").notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * For a system trigger: the catalog event contract and the event type
-     * of it whose emitted events start its workflow
-     * (workflows/event-delivery.ts). Null for any other kind, and for a
-     * system trigger from before they were kept, which then takes none.
+     * Never written or read. Kept, with its index, until GRA-1592 drops
+     * it (expand, then contract).
      */
     eventContract: text("event_contract"),
+    /** A connector trigger's event type. */
     eventType: text("event_type"),
     /**
      * For a schedule trigger: its five-field cron expression, the IANA time
@@ -3726,7 +3725,7 @@ export const triggerResourceVersions = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
-    // The system triggers' versions that take an event of a type.
+    // Dropped with its column (GRA-1592).
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
@@ -4039,11 +4038,11 @@ export const workflowResourceRuns = sqliteTable(
      */
     parentRunId: text("parent_run_id"),
     /**
-     * For a run an emitted event's trigger started
-     * (workflows/event-delivery.ts): its lineage's root and its depth under
-     * it (quotas.ts, `admitInLineage`), pinned with it. Null and 0 for a run
-     * its own start admitted, the root of its own lineage. It joins the
-     * emitting run's lineage, not its life, and is charged to its
+     * For a run a trigger started from a run's stamped mail
+     * (workflows/connector-triggers.ts): its lineage's root and its depth
+     * under it (quotas.ts, `admitInLineage`), pinned with it. Null and 0 for
+     * a run its own start admitted, the root of its own lineage. It joins
+     * the mailing run's lineage, not its life, and is charged to its
      * workflow's account there (`accountRunId`).
      */
     rootRunId: text("root_run_id"),
@@ -4235,18 +4234,8 @@ export const workflowRunFileChunks = sqliteTable(
  * that end never keeps its lease or alarm.
  */
 /**
- * The events runs of independent workflows emitted (`emit` tasks,
- * workflows/emitted-events.ts): the transactional outbox of each, written
- * once, under an ID derived from its run and its task's step, so an
- * attempt run again writes nothing new. Each names its run, its pinned
- * binding and catalog contract, and the envelope the host minted: its
- * source is the emitting run, never what the workflow says. Delivery to
- * what consumes platform events (system triggers,
- * workflows/event-delivery.ts) marks it delivered, or undeliverable with
- * why; until then each waits here. Retention removes an event's
- * subject and data with its run's details (workflows/retention.ts), and
- * closes one still undelivered then (its `delivered_at` the removal's
- * time), so nothing delivers it without its data.
+ * Never written or read: workflows no longer emit events. Kept, with its
+ * indexes and trigger, until GRA-1592 drops it (expand, then contract).
  */
 export const workflowEmittedEvents = sqliteTable(
   "workflow_emitted_events",
