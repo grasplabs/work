@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
+import type { ChatDraft } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -11,7 +12,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -114,6 +115,29 @@ const diffOf = (before: AppFiles, after: AppFiles): FileDiff[] =>
         : [{ path, change: "modified", before: old, after: now }];
     });
 
+const notesAt = (limit: number): string => `export const limit = ${limit};\n`;
+
+/** The chat's draft at each revision, as its agent wrote it. */
+const draftAt: Record<number, AppFiles> = {
+  1: { "app.ts": appV1, "server/notes.ts": notesAt(10) },
+  2: {
+    "app.ts": appV1,
+    "server/notes.ts": notesAt(25),
+    "screens/inbox.tsx": inboxText,
+  },
+};
+
+/** The chat's draft of the App, at `revision`. */
+const chatDraft = (revision: number): ChatDraft => ({
+  app: appId,
+  base: null,
+  changed: Object.keys(draftAt[revision] ?? {}).toSorted(),
+  deleted: [],
+  revision,
+  updatedAt: "2026-11-05T08:00:00.000Z",
+  callId: null,
+});
+
 /** Core's Apps API, as far as the Code tab reads it, on `filesOf`. */
 const appsOn = (filesOf: Versions) => ({
   versions: {
@@ -134,6 +158,45 @@ const appsOn = (filesOf: Versions) => ({
   },
 });
 
+/**
+ * Core's chats API, as far as the Code tab reads it: the draft's files at
+ * the revision it is at now (`revisionNow`), as core reads them.
+ */
+let revisionNow = 1;
+const chats = {
+  draftFiles: async (chatId: string, app: string): Promise<AppFiles> => {
+    await Promise.resolve();
+    if (chatId !== "chat-1" || app !== appId) {
+      throw new Error("Not this chat's draft");
+    }
+    return draftAt[revisionNow] ?? {};
+  },
+};
+
+/** Moves the shown chat's draft on to `revision`, as a write of its agent does. */
+let moveDraft: (revision: number) => void = () => {
+  throw new Error("No chat's draft is shown");
+};
+
+/** The Code view, with the chat's draft at the revision it is at, if `building`. */
+const CodeOf = ({ app, building }: { app: ViewedApp; building: boolean }) => {
+  const [revision, setRevision] = useState(revisionNow);
+  useEffect(() => {
+    moveDraft = (next) => {
+      revisionNow = next;
+      setRevision(next);
+    };
+  }, []);
+  return (
+    <AppCode
+      app={app}
+      building={
+        building ? { chatId: "chat-1", draft: chatDraft(revision) } : undefined
+      }
+    />
+  );
+};
+
 let root: Root | undefined;
 
 const settled = async (): Promise<void> => {
@@ -146,23 +209,32 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The App's Code in its workspace, for one of `role` in it; version `current` runs. */
+/**
+ * The App's Code in its workspace, for one of `role` in it; version
+ * `current` runs. With `building`, beside the chat's draft of it.
+ */
 const shown = async (
   role: ViewedApp["role"],
   current: number | null = 1,
-  versions: Versions = smallVersions
+  versions: Versions = smallVersions,
+  building = false
 ): Promise<void> => {
   const apps = appsOn(versions);
   const core = {
     withSession: async <T,>(
-      action: (session: { apps: typeof apps }) => Promise<T>
-    ): Promise<T> => await action({ apps }),
+      action: (session: {
+        apps: typeof apps;
+        chats: typeof chats;
+      }) => Promise<T>
+    ): Promise<T> => await action({ apps, chats }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/apps/$app/edit",
-    component: () => <AppCode app={builtApp(role, current)} />,
+    component: () => (
+      <CodeOf app={builtApp(role, current)} building={building} />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -207,6 +279,12 @@ const named = (selector: string, name: string) =>
 const fileShown = (): string =>
   document.querySelector("figure pre")?.textContent ?? "";
 
+/** The tree's folders and files, top to bottom. */
+const treeShown = (): string[] =>
+  [...document.querySelectorAll('nav[aria-label="Files"] li > :first-child')]
+    .map((entry) => entry.textContent?.trim() ?? "")
+    .filter((name) => name !== "");
+
 /** Each changed file shown, and its lines as the view prints them. */
 const changesShown = () =>
   [...document.querySelectorAll("section")].map((section) => ({
@@ -226,7 +304,7 @@ describe("An App's Code", () => {
     document.body.replaceChildren();
   });
 
-  it("shows the current version's code, read-only", async () => {
+  it("shows the version up for review, as the preview does, read-only", async () => {
     await shown("builder");
 
     expect({
@@ -234,19 +312,52 @@ describe("An App's Code", () => {
       readOnly: document.body.textContent.includes(
         "Read-only. Changes to the code go through the chat."
       ),
-    }).toStrictEqual({ file: appV1, readOnly: true });
+    }).toStrictEqual({ file: appV2, readOnly: true });
   });
 
-  it("shows the text of the file picked, the draft's too", async () => {
+  it("shows the text of the file picked, the current version's too", async () => {
     await shown("builder");
-    await press(named("button", "schema.ts"));
-    const picked = fileShown();
-    await press(named("button", "Draft (version 2)"));
     await press(named("button", "inbox.tsx"));
+    const picked = fileShown();
+    await press(named("button", "Current (version 1)"));
+    await press(named("button", "old.ts"));
 
-    expect({ picked, draft: fileShown() }).toStrictEqual({
-      picked: schemaText,
-      draft: inboxText,
+    expect({ picked, current: fileShown() }).toStrictEqual({
+      picked: inboxText,
+      current: oldText,
+    });
+  });
+
+  it("shows the chat's draft as its agent writes it, the file picked kept", async () => {
+    revisionNow = 1;
+    await shown("builder", 1, smallVersions, true);
+    await press(named("button", "notes.ts"));
+    const first = { file: fileShown(), tree: treeShown() };
+    await act(async () => {
+      moveDraft(2);
+      await Promise.resolve();
+    });
+    await settled();
+    await settled();
+
+    expect({
+      first,
+      written: { file: fileShown(), tree: treeShown() },
+      readOnly: document.body.textContent.includes(
+        "Read-only. Changes to the code go through the chat."
+      ),
+      versionsOffered: named("button", "Current (version 1)") !== undefined,
+    }).toStrictEqual({
+      first: {
+        file: notesAt(10),
+        tree: ["server", "notes.ts", "app.ts"],
+      },
+      written: {
+        file: notesAt(25),
+        tree: ["screens", "inbox.tsx", "server", "notes.ts", "app.ts"],
+      },
+      readOnly: true,
+      versionsOffered: false,
     });
   });
 

@@ -1,0 +1,104 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { describe, expect, it } from "vite-plus/test";
+
+import { release } from "./apps.ts";
+import { mockIdp } from "./idp.ts";
+import { deskFiles } from "./preview-drafts.ts";
+import { chatWithDraft } from "./previews.ts";
+import { failure } from "./sealed-apps.ts";
+import { signedInApi } from "./sign-in.ts";
+
+// The App's code view reads the files of a chat's draft as the chat's
+// agent reads them (`chats.draftFiles`): its changes over the version it
+// is over, each write as it lands, or the App's latest version while the
+// chat has no draft. The ways it can fail: a write that doesn't show, a
+// deleted file that still does, and someone else reading the draft, by
+// another person's chat or once they no longer build the App.
+
+const idp = mockIdp();
+
+type Person = Awaited<ReturnType<typeof signedInApi>>;
+
+/** Version 1 of the App: its registration, schema and one screen. */
+const released = deskFiles("Released");
+const { "screens/desk.tsx": _screen, ...unscreened } = released;
+
+/** The App's registration, as a builder's second version rewrites it. */
+const renamed = (released["app.ts"] ?? "").replace('"Desk"', '"Desk 2"');
+
+/** A server file the draft adds. */
+const notes = (limit: number): string => `export const limit = ${limit};\n`;
+
+/** An App of `owner`'s, published at version 1 (`released`). */
+const deskOf = async (owner: Person) => {
+  const { id } = await owner.api.apps.create({ name: "Desk" });
+  await release(owner, id, released);
+  return appIdSchema.parse(id);
+};
+
+describe("a chat's draft files, for the App's code view", () => {
+  it("are the draft's as each write lands, and the App's latest version in a chat without one", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await deskOf(builder);
+    const { chatId, revision, write } = await chatWithDraft(builder, app, {
+      "server/notes.ts": notes(10),
+      "screens/desk.tsx": null,
+    });
+    const { chats } = builder.api;
+
+    const first = await chats.draftFiles(chatId, app);
+    await write({ "server/notes.ts": notes(25) }, revision);
+    const second = await chats.draftFiles(chatId, app);
+    const empty = await chats.create("Nothing written");
+    const before = await chats.draftFiles(empty.id, app);
+    await builder.api.apps.files.commit(app, { "app.ts": renamed }, "Rename");
+    const latest = await chats.draftFiles(empty.id, app);
+
+    expect({ first, second, before, latest }).toStrictEqual({
+      first: { ...unscreened, "server/notes.ts": notes(10) },
+      second: { ...unscreened, "server/notes.ts": notes(25) },
+      before: released,
+      latest: { ...released, "app.ts": renamed },
+    });
+  });
+
+  it("are only for the chat's person while they build the App", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const app = await deskOf(owner);
+    const [builder, other, outsider] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    for (const person of [builder, other]) {
+      // oxlint-disable-next-line no-await-in-loop -- one member after the other
+      await owner.api.apps.members.add(app, {
+        type: "person",
+        id: person.userId,
+        role: "builder",
+      });
+    }
+    const { chatId } = await chatWithDraft(builder, app, {
+      "server/notes.ts": notes(10),
+    });
+    const read = async (person: Person): Promise<string> =>
+      await failure(async () => await person.api.chats.draftFiles(chatId, app));
+
+    const own = await read(builder);
+    const another = await read(other);
+    const notMember = await read(outsider);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: builder.userId,
+      role: "user",
+    });
+    const demoted = await read(builder);
+
+    expect({ own, another, notMember, demoted }).toStrictEqual({
+      own: "ok",
+      another: "agent.chat_not_found",
+      notMember: "app.not_found",
+      demoted: "role.forbidden",
+    });
+  });
+});

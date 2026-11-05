@@ -258,6 +258,25 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
       count: await frame.getByRole("status").textContent(),
       sameDocument,
     }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
+
+    // The Code view shows the draft the preview does, before anything is
+    // published: the App's project as the agent wrote it, its last write
+    // too.
+    await page
+      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("link", { name: "Code" })
+      .click();
+    const files = page.getByRole("navigation", { name: "Files" });
+    await expect(files.getByRole("button")).toHaveText([
+      "tally.tsx",
+      "tally.ts",
+      "app.ts",
+      "schema.ts",
+    ]);
+    await expect(files).toContainText("screens");
+    await expect(files).toContainText("server");
+    await files.getByRole("button", { name: "tally.tsx" }).click();
+    await expect(page.locator("figure")).toContainText("Add another");
   } finally {
     core[Symbol.dispose]();
   }

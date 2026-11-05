@@ -1,5 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
+import type { AppFiles } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import { chatTitleSchema, readOnlyRevision } from "@grasp-os/shared/chat";
 import type {
@@ -38,7 +39,7 @@ import type {
   ScreenProblem,
 } from "@grasp-os/shared/screens";
 
-import { proposeChatDraft } from "./agent-builds.ts";
+import { draftOf, proposeChatDraft } from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import {
@@ -543,6 +544,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         by.userId,
         id
       );
+    });
+  }
+
+  /**
+   * Every file of the chat's draft of `app`, read as its agent reads them
+   * (`draftOf`, agent-builds.ts), so the code view shows what the preview
+   * builds: only from the person's own chat, while they build the App.
+   */
+  async draftFiles(chatId: string, app: string): Promise<AppFiles> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const draft = await draftOf(this.#env, scope, id);
+      return Object.fromEntries(await draftFiles(this.#env, id, draft));
     });
   }
 

@@ -70,6 +70,7 @@ import {
   useAppChatId,
 } from "./app-chat.tsx";
 import { AppCode } from "./app-code.tsx";
+import type { ChatBuilding } from "./app-code.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppSettings, Read } from "./app-settings.tsx";
@@ -794,6 +795,7 @@ const MainArea = ({
   identity,
   preview,
   storeChanges,
+  building,
 }: {
   app: ViewedApp;
   view: WorkspaceView;
@@ -801,6 +803,8 @@ const MainArea = ({
   identity: Identity;
   preview: ReactNode;
   storeChanges: StoreChangesRead;
+  /** The chat's draft the preview shows, which the code shows too. */
+  building?: ChatBuilding;
 }) => (
   <div className="flex h-full min-h-0 min-w-0 flex-col">
     <div
@@ -810,7 +814,7 @@ const MainArea = ({
     </div>
     {view === "code" ? (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 md:px-6">
-        <AppCode app={app} />
+        <AppCode app={app} building={building} />
       </div>
     ) : null}
     {view === "data" ? <DataArea app={app.id} /> : null}
@@ -992,6 +996,11 @@ const Building = ({
         main={
           <MainArea
             app={app}
+            building={
+              chatId === undefined || draft === undefined
+                ? undefined
+                : { chatId, draft: draft.draft }
+            }
             identity={identity}
             storeChanges={storeChanges}
             preview={
