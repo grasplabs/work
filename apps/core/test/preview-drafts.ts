@@ -346,9 +346,9 @@ export default app({
   preferences: ${preferencesSource},
 });
 `,
-  "screens/desk.tsx": `export default function Desk() {
-  return <main>${marker}</main>;
-}
+  "screens/desk.tsx": `const Desk = () => <main>${marker}</main>;
+
+export default Desk;
 `,
 });
 
