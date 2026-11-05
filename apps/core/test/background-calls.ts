@@ -27,7 +27,8 @@ const calls = { started: 0, out: 0 };
 /** Marks the runner's import as counted, so it is wrapped once. */
 const counted = Symbol.for("grasp.background-calls");
 
-const runnerOf = (): object | undefined => {
+/** The test pool's module runner, on its global. */
+export const runnerOf = (): object | undefined => {
   const mocker: unknown = Reflect.get(globalThis, "__vitest_mocker__");
   const runner: unknown =
     typeof mocker === "object" && mocker !== null

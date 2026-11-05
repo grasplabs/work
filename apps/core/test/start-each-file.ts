@@ -22,6 +22,7 @@ import {
 } from "./background-calls.ts";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
+import { traceD1Calls } from "./d1-calls.ts";
 import { stopModelProviders } from "./model-provider.ts";
 import { endTest, waitingOnNow } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
@@ -129,6 +130,7 @@ const startEmpty = async (): Promise<void> => {
 };
 
 countBackgroundCalls();
+traceD1Calls();
 await startEmpty();
 // The built-ins' install, once per runtime, then empty storage again.
 if (await installBuiltinsFirst()) {

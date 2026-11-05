@@ -35,6 +35,12 @@ const noteOf = async (ledger: Ledger): Promise<unknown> =>
  */
 const quietMs = 11_000;
 
+/**
+ * How long the importing object below goes on importing, past any reset:
+ * longer than the reset's wakes take.
+ */
+const importingMs = wakeTimeoutMs * 2;
+
 /** How long the busy object below goes on writing after it answered. */
 const busyMs = 500;
 
@@ -102,5 +108,30 @@ describe("the reset between test files", () => {
 
     expect(Date.now() - started).toBeLessThan(wakeTimeoutMs * 2);
     await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
+  });
+
+  it("leaves a module importable that an object it aborted was importing", async () => {
+    // A request that imports a module already loaded, one import after
+    // another, as each new Auth does (auth/auth.ts), until the reset
+    // aborts its object mid-import.
+    const importing = runInDurableObject(
+      namedLedger(crypto.randomUUID()),
+      async () => {
+        const until = Date.now() + importingMs;
+        while (Date.now() < until) {
+          // oxlint-disable-next-line no-await-in-loop
+          await import("@better-auth/sso");
+        }
+      }
+    ).catch(() => "aborted");
+
+    await resetStorage();
+
+    const imported = await Promise.race([
+      import("@better-auth/sso").then(() => "imported"),
+      scheduler.wait(importingMs).then(() => "still importing"),
+    ]);
+    expect(imported).toBe("imported");
+    await importing;
   });
 });

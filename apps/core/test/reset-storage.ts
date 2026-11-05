@@ -22,6 +22,9 @@
 import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
+import { runnerOf } from "./background-calls.ts";
+import { forgetUnanswered } from "./open-sockets.ts";
+
 /**
  * Whether `value` is an instance of the class named `kind`. A service
  * binding answers to any method name, so a binding's methods don't tell.
@@ -120,10 +123,42 @@ const wakeStorage = async (): Promise<void> => {
 };
 
 /**
+ * Forgets what the reset cut off: the module lookups and the requests
+ * and D1 statements of the objects it aborted, which never get an answer.
+ *
+ * Vite's module runner asks Vitest about a module at every import of it,
+ * loaded or not, and has each import of that module meanwhile wait on the
+ * same question (`concurrentModuleNodePromises`), until it is answered.
+ * An object the reset aborts mid-question never gets that answer, and the
+ * question stayed: every later import of the module in the runtime waited
+ * on it forever. The first file's reset comes while the clock's first
+ * run, which the built-ins' first request arms (builtins-first.ts), is
+ * under way; its token key sweep makes an Auth, which imports
+ * `@better-auth/sso` (auth/auth.ts). Cut off there, it held every sign-in
+ * after it in the runtime (CI run 42041457441, shards 1 and 5 of 13, and
+ * #1973's own run). Nothing but an aborted object can still be asking
+ * here: this file's setup waits for the reset, so a lookup forgotten is
+ * at worst asked again.
+ */
+const forgetCutOff = (): void => {
+  const runner = runnerOf();
+  const asking: unknown =
+    runner === undefined
+      ? undefined
+      : Reflect.get(runner, "concurrentModuleNodePromises");
+  if (!(asking instanceof Map)) {
+    throw new Error("Expected the module runner's lookups, by URL");
+  }
+  asking.clear();
+  forgetUnanswered();
+};
+
+/**
  * Empties every Durable Object's storage, and with it every D1 database
  * and R2 bucket, connect's included.
  */
 export const resetStorage = async (): Promise<void> => {
   await wakeStorage();
   await reset();
+  forgetCutOff();
 };
