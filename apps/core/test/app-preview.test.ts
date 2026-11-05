@@ -685,6 +685,48 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     });
   });
 
+  it("starts a frame on the draft's changes afresh on the App's latest version once the draft deletes every screen", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const { chats } = builder.api;
+    const chatId = await appChat(builder, app);
+    await writeDraft(
+      builder,
+      chatId,
+      app,
+      { "screens/desk.tsx": deskSaying("Drafted") },
+      0
+    );
+    // Opened with no page named, on the draft's changes of its first.
+    const opened = await chats.preview(chatId, app);
+    await writeDraft(builder, chatId, app, { "screens/desk.tsx": null }, 1);
+    const updated = await answer(
+      chats.previewUpdate(chatId, app, 2, { screen: opened.screen })
+    );
+    const reopened = await chats.preview(chatId, app);
+    // Reopened there, the frame stays, until a newer version comes.
+    const again = await chats.previewUpdate(chatId, app, 2, {
+      screen: reopened.screen,
+      appVersion: 1,
+    });
+
+    expect({
+      opened: { screen: opened.screen, callsAt: callsAt(opened) },
+      updated,
+      again,
+      reopened: {
+        fallback: reopened.fallback,
+        screen: reopened.screen,
+        callsAt: callsAt(reopened),
+      },
+    }).toStrictEqual({
+      opened: { screen: "desk", callsAt: 1 },
+      updated: { app, restart: true },
+      again: { app, unchanged: true },
+      reopened: { fallback: true, screen: "desk", callsAt: { appVersion: 1 } },
+    });
+  });
+
   it("says which of its paths a draft deletes, and previews no screen it deleted, its first in place of one asked for", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder, "Invoice desk", released);

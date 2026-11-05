@@ -811,26 +811,35 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       return { app: id, refresh: await this.#staged(chatId, id, now, screen) };
     }
+    // Whether a newer version of the App came than the one a frame shows
+    // in place of the draft: what `#loadPreview` would open it on now.
+    const newerShown = async (): Promise<boolean> => {
+      try {
+        const { shows } = await this.#previewed(by, chatId, id, {
+          fallback: true,
+        });
+        return shows !== undefined && shows !== shown.appVersion;
+      } catch {
+        return false;
+      }
+    };
+    // No screen left in the draft: a frame on its changes opens afresh, on
+    // the App's latest version in its place, as `#loadPreview` opens it;
+    // one on the App's version already moves on only to a newer one.
+    if (screen === undefined) {
+      return shown.appVersion === undefined || (await newerShown())
+        ? { app: id, restart: true }
+        : { app: id, unchanged: true };
+    }
     let refresh: PreviewRefresh;
     try {
-      if (screen === undefined) {
-        throw screenErrors.create("screen.not_found");
-      }
       refresh = await this.#staged(chatId, id, now, screen);
     } catch (error) {
-      const unbuilt = buildFailed(error) || screen === undefined;
-      if (shown.appVersion === undefined || !unbuilt) {
-        throw error;
-      }
-      let latest: number | undefined;
-      try {
-        ({ shows: latest } = await this.#previewed(by, chatId, id, {
-          fallback: true,
-        }));
-      } catch {
-        throw error;
-      }
-      if (latest === undefined || latest === shown.appVersion) {
+      if (
+        shown.appVersion === undefined ||
+        !buildFailed(error) ||
+        !(await newerShown())
+      ) {
         throw error;
       }
       return { app: id, restart: true };
