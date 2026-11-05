@@ -166,19 +166,27 @@ const syncRetryMs = 15_000;
  * this object holds no record of never ran; settled once (`#settle`), its
  * request then kept without what it read (its memory), which only a turn
  * under way needs. `answerId` is the Workspace's message it answered
- * with, as the copies say.
+ * with, as the copies say. `captureOwed` while the settled turn's capture
+ * (`CaptureDoc`) waits to be delivered: a copy that comes after the turn
+ * settled names its answer there, in the same commit.
  */
 interface TurnRecord extends JsonObject {
   request: string;
   ended: boolean;
   answerId: number | null;
+  captureOwed: boolean;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
   kind: "grasp.turn",
   version: 1,
   scope: "session",
-  initial: () => ({ request: "", ended: true, answerId: null }),
+  initial: () => ({
+    request: "",
+    ended: true,
+    answerId: null,
+    captureOwed: false,
+  }),
   checkpointWhen: () => true,
 });
 
@@ -821,6 +829,7 @@ export class ChatHarness {
           audience: request.capture.audience,
         };
         await tx.doc(CaptureDoc, turnId, owed);
+        turn.captureOwed = true;
       }
       return true;
     }, context);
@@ -948,6 +957,7 @@ export class ChatHarness {
       turn.request = JSON.stringify(request);
       turn.ended = false;
       turn.answerId = null;
+      turn.captureOwed = false;
     }, context);
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
@@ -1447,7 +1457,7 @@ export class ChatHarness {
     }
     for (const key of owed) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
-      await this.#deliver(scope, key, turn);
+      await this.#deliver(scope, key);
     }
   }
 
@@ -1479,28 +1489,23 @@ export class ChatHarness {
 
   /**
    * Delivers the capture turn `key` owes (`captureTurn`), naming its
-   * answer as the copies kept it while its record is the chat's, then
-   * retires it: at least once, kept once by its event ID.
+   * answer as the copies kept it (`#copy` keeps it there), then retires
+   * it: at least once, kept once by its event ID.
    */
-  async #deliver(
-    scope: TurnRequest["scope"],
-    key: string,
-    turn: Readonly<TurnRecord>
-  ): Promise<void> {
+  async #deliver(scope: TurnRequest["scope"], key: string): Promise<void> {
     const owed = await this.#harness.snapshot(CaptureDoc, key, context);
     if (owed === undefined) {
       return;
     }
-    const answerId =
-      requestOf(turn)?.turnId === key ? turn.answerId : owed.answerId;
     await callObject(async () => {
-      await this.#host(scope).captureTurn(scope.chatId, {
-        ...owed,
-        answerId,
-      });
+      await this.#host(scope).captureTurn(scope.chatId, owed);
     });
     await this.#conversation.commit(async (tx) => {
       await tx.retireDoc(CaptureDoc, key);
+      const turn = await tx.doc(TurnDoc);
+      if (requestOf(turn)?.turnId === key) {
+        turn.captureOwed = false;
+      }
     }, context);
   }
 
@@ -1579,10 +1584,25 @@ export class ChatHarness {
     await this.#conversation.commit(async (tx) => {
       const doc = await tx.doc(CopiedDoc);
       doc.after = through;
-      // The turn's answer, as the Workspace kept it, for its capture.
+      // The turn's answer, as the Workspace kept it, for its capture: in
+      // the capture it owes too once it settled, before the next question
+      // can replace this record.
       const turn = await tx.doc(TurnDoc);
-      if (answerId !== undefined) {
-        turn.answerId = answerId;
+      const request = requestOf(turn);
+      if (answerId === undefined) {
+        return;
+      }
+      turn.answerId = answerId;
+      if (turn.ended && turn.captureOwed && request !== undefined) {
+        // Owed, so there: the seed is never used.
+        const owed = await tx.doc(CaptureDoc, request.turnId, {
+          turnId: request.turnId,
+          outcome: "answered",
+          answerId,
+          model: request.capture.model,
+          audience: request.capture.audience,
+        });
+        owed.answerId = answerId;
       }
     }, context);
     for (const id of seen) {

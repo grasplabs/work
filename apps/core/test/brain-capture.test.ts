@@ -744,7 +744,7 @@ describe("a chat turn's outcome", () => {
   });
 
   it("is captured once its Workspace takes it again, when the next question came before, and the turn answers all the same", async () => {
-    const { id, ask } = await chatter(says("Floor 3."), says("Floor 4."));
+    const { stub, id, ask } = await chatter(says("Floor 3."), says("Floor 4."));
     // The Workspace takes no capture twice, as an outage of its store
     // would: the chat's object asks it for each again.
     // oxlint-disable-next-line typescript/unbound-method -- put back as it was, and called with its `this`
@@ -778,10 +778,31 @@ describe("a chat turn's outcome", () => {
     );
     // The Workspace as it was, for the tests after.
     Workspace.prototype.captureTurn = kept;
-    expect({ first, second, executions }).toStrictEqual({
+    // Each names its own turn's answer, as the chat keeps it: the first
+    // too, delivered once the next question replaced its turn's record.
+    const answers = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ id: number; message: string }>(
+          "SELECT id, message FROM chat_messages WHERE chat_id = ? ORDER BY id",
+          id
+        )
+        .toArray()
+        .filter(({ message }) => message.includes('"role":"assistant"'))
+        .map((row) => String(row.id))
+    );
+    const events = await eventsOf(id);
+    const named = events
+      .map(({ evidenceRefs }) =>
+        evidenceRefs
+          .filter(({ kind }) => kind === "chat_message")
+          .map(({ id: ref }) => ref)
+      )
+      .toSorted((a, b) => Number(a[0]) - Number(b[0]));
+    expect({ first, second, executions, named }).toStrictEqual({
       first: "answered",
       second: "answered",
       executions: ["completed", "completed"],
+      named: answers.map((answer) => [answer]),
     });
   });
 
