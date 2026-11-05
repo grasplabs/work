@@ -601,6 +601,9 @@ describe(
           "export const title = (): string => document.title;\n",
         "app/workflows/lib/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
+        // A package the SDK imports, which a workflow itself may not.
+        "app/workflows/lib/zod.ts":
+          'import { z } from "zod";\n\nexport const name = z.string();\n',
         // A directive below the top of a screen, which TypeScript ignores
         // but the platform refuses wherever it stands.
         "app/screens/late.tsx":
@@ -679,6 +682,7 @@ describe(
           problems: {
             "app/server/document.ts": ["TS2584"],
             "app/workflows/lib/kit.ts": ["TS2307"],
+            "app/workflows/lib/zod.ts": ["TS2307"],
             "app/workflows/lib/window.ts": ["TS2304"],
             "app/screens/late.tsx": ["imports"],
             "app/screens/typo.tsx": ["TS2322"],

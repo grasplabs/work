@@ -328,7 +328,10 @@ const resolvedTrace =
  * Where each of `allowed` resolves among the project's packages, as tsc
  * resolves it from an App file and reports it in its trace: what the
  * check maps them to (`paths`) once the packages are out of the App's
- * reach, as the platform's are (type-check.ts `KitTypes.resolved`).
+ * reach, as the platform's are (type-check.ts `KitTypes.resolved`). Only
+ * `allowed` itself: the trace also holds what those packages import
+ * (`zod`, from the SDK), which they reach by their own lookup and an App
+ * file never does.
  */
 const resolvedNames = (
   tsrs: WebAssembly.Module,
@@ -359,11 +362,13 @@ const resolvedNames = (
     },
     ["--traceResolution"]
   );
+  const names = new Set(allowed);
   const resolved = new Map<string, string>();
   for (const line of stdout.split("\n")) {
     const groups = resolvedTrace.exec(line)?.groups;
     if (
       groups?.name !== undefined &&
+      names.has(groups.name) &&
       groups.file?.startsWith(kitRoot) === true
     ) {
       resolved.set(groups.name, groups.file);
