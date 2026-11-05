@@ -23,13 +23,13 @@ const idp = mockIdp();
 /** A screen whose button is restyled, which @shadcn/lint refuses. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
 
-export default function Desk() {
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button className="rounded-full">Approve</Button>
-    </main>
-  );
-}
+const Desk = () => (
+  <main className="flex flex-col gap-4 p-6">
+    <Button className="rounded-full">Approve</Button>
+  </main>
+);
+
+export default Desk;
 `;
 
 /** The same screen with the button's own variant: what the lint asks for. */
