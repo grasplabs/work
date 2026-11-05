@@ -292,7 +292,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   that the build didn't seal, or kept by a step that didn't succeed. A
 //   task keeps only its sealed `state`'s keys, by its state step alone
 //   (`stateStepOf`: its leave step, else its task step), whose record
-//   must be exactly `{ output, state }` with exactly those keys, each
+//   must be its record with `state` beside, of exactly those keys, each
 //   value held to its template as a call's (`matched`: literals exact, an
 //   expression's value any JSON, never a sensitive parameter) and to the
 //   descriptor of the value its key takes, by the SDK's own validator
@@ -321,6 +321,9 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   test run with its row), and every activation hands the isolate that
 //   same snapshot (`sealedRunStart`), whatever other runs write since. A
 //   run an App's test started reads none: nothing of the organization's.
+//   The snapshot is whatever the workflow's runs kept, of every version:
+//   generated code holds each value it reads to its own build's
+//   descriptor, as it does any data.
 //   A reset, or the workflow's deletion, leaves those copies with the runs
 //   that already started, until retention (a receipt's details) or the
 //   sweep of test runs removes them.
@@ -1085,8 +1088,12 @@ const keepsOf = (
 
 const utf8 = new TextEncoder();
 
-/** What a state step records: its output, and what it keeps by key. */
-const stateRecordSchema = z.strictObject({
+/**
+ * What a state step records: its record as it would be otherwise (its
+ * `output`, and whatever else its step records: its `context`, a switch's
+ * `branch`), with what it keeps by key as `state` beside.
+ */
+const stateRecordSchema = z.looseObject({
   output: z.json(),
   state: z.record(z.string(), z.json()),
 });
@@ -1720,7 +1727,7 @@ class SealedRun implements SealedRunKind {
   /**
    * A state step's record, `value`, of task `task`, which keeps `kept`
    * (`keepsOf`):
-   * `{ output, state }`, `state` with exactly the sealed keys, each value
+   * its record with `state` beside (`stateRecordSchema`), `state` with exactly the sealed keys, each value
    * held to its template as a call's arguments are (`matched`, no
    * sensitive parameter anywhere) and to its sealed descriptor, by the
    * SDK's validator, no marker of core's in any. Anything else is tampering. More than a
@@ -1744,7 +1751,7 @@ class SealedRun implements SealedRunKind {
     ) {
       return await this.#refused(
         attempt,
-        `Task "${task.id}"'s ${stateStepOf(task) ?? "task"} step records { output, state }, its state with exactly the keys the build sealed.`,
+        `Task "${task.id}"'s ${stateStepOf(task) ?? "task"} step records its output with its state beside, of exactly the keys the build sealed.`,
         "state"
       );
     }

@@ -3545,6 +3545,14 @@ describe("a sealed run's state between runs on the run host", () => {
         { ...waiting, steps: ["task", "leave"] },
         true
       ),
+      // A switch's task step records its result; a do's isn't one.
+      switchKeeping: tableOf({ ...finishTask, kind: "switch" }, true),
+      doing: tableOf({ ...finishTask, kind: "do" }, false),
+      doKeeping: tableOf({ ...finishTask, kind: "do" }, true),
+      doLeavingKeeping: tableOf(
+        { ...finishTask, kind: "do", steps: ["task", "leave"] },
+        true
+      ),
       // A sensitive parameter anywhere in a template, and keys past 64.
       nestedParam: tableOf(finishTask, {
         secret: {
@@ -3597,6 +3605,10 @@ describe("a sealed run's state between runs on the run host", () => {
         wait: "sealed",
         waitKeeping: "refused",
         waitLeavingKeeping: "sealed",
+        switchKeeping: "sealed",
+        doing: "sealed",
+        doKeeping: "refused",
+        doLeavingKeeping: "sealed",
         nestedParam: "refused",
         tooManyKeys: "refused",
         sixtyFourKeys: "sealed",
@@ -3643,6 +3655,31 @@ describe("a sealed run's state between runs on the run host", () => {
     });
   });
 
+  it("keeps state beside whatever else its step records, which the run reads back as it was", async () => {
+    const runId = await waitingRun(sealed);
+    const kept = await ranAs(
+      runId,
+      moduleOf(
+        `return ${taskStep("finish", '{ output: { status: "done" }, context: { page: 2 }, state: { count: 1, seen: input.who, kind: "visit" } }')};`
+      ),
+      { keeps: finishKeeps }
+    );
+    expect({
+      kept,
+      state: await workflowStateOf(env, sealed.workflow.id),
+    }).toStrictEqual({
+      kept: {
+        ended: {
+          output: { status: "done" },
+          context: { page: 2 },
+          state: { count: 1, seen: "Ada", kind: "visit" },
+        },
+        tampered: [],
+      },
+      state: { count: 1, seen: "Ada", kind: "visit" },
+    });
+  });
+
   it("refuses state the build didn't seal, and keeps none of it", async () => {
     const refused = async (
       record: string,
@@ -3676,9 +3713,6 @@ describe("a sealed run's state between runs on the run host", () => {
       wrongNested: await refused(
         '{ output: null, state: { count: 1, seen: { who: 7 }, kind: "visit" } }'
       ),
-      extraField: await refused(
-        '{ output: null, state: { count: 1, seen: "Ada", kind: "visit" }, also: 1 }'
-      ),
       sensitive: await refused(
         '{ output: null, state: { secret: sensitiveParam("token") } }',
         {
@@ -3698,7 +3732,6 @@ describe("a sealed run's state between runs on the run host", () => {
       noState: asTampering,
       wrongShape: asTampering,
       wrongNested: asTampering,
-      extraField: asTampering,
       sensitive: asTampering,
       state: {},
     });

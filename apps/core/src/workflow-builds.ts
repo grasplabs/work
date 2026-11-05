@@ -248,7 +248,7 @@ const taskBase = {
    * as state is read by the workflow's every later run; and the
    * descriptor of the value it takes, which the host holds it to. Only a
    * task with a state step keeps any (`stateStepOf`), which records
-   * `{ output, state }` (sealed-run.ts).
+   * its record with `state` beside (sealed-run.ts).
    */
   state: z
     .record(
@@ -581,10 +581,12 @@ const sealedExpressionSchema = z.strictObject({
 
 /**
  * The step of `task` that records what it keeps in its workflow's state
- * (`SealedTask.state`): its leave step, else its own task step where its
- * code records it; none for a raise, whose step fails, a decision task,
- * whose steps record its decision, or a task whose own step is a wait (a
- * sleep, an event wait, a child run's) and that has no leave step.
+ * (`SealedTask.state`): its leave step, else its own task step where that
+ * step records the task's result (a `set`, a `switch`, a call that
+ * doesn't wait); none for a raise, whose step fails, a decision task,
+ * whose steps record its decision, and none but a leave step for any
+ * other (a sleep, an event wait, a child run, a `do`, a `try`, a `fork`
+ * or a loop, whose task step, if any, isn't its result).
  */
 export const stateStepOf = (
   task: Pick<SealedTask, "kind" | "steps"> & {
@@ -597,13 +599,11 @@ export const stateStepOf = (
   if (task.steps.includes("leave")) {
     return "leave";
   }
-  // Its own step waits: for a time, an event, or its child run.
-  const waits =
-    task.kind === "wait" ||
-    task.kind === "listen" ||
-    task.kind === "run" ||
-    task.call?.name === "grasp.sleepUntil";
-  return task.steps.includes("task") && !waits ? "task" : undefined;
+  const recordsResult =
+    task.kind === "set" ||
+    task.kind === "switch" ||
+    (task.kind === "call" && task.call?.name !== "grasp.sleepUntil");
+  return task.steps.includes("task") && recordsResult ? "task" : undefined;
 };
 
 const tasksFileSchema = z.strictObject({
