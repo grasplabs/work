@@ -10,10 +10,12 @@ import { draftLintBuild } from "../src/save-builds.ts";
 
 const ultracite = () => startUltracite(env.LOADER, env.ASSETS);
 
-/** Each of `linted`'s findings: its file, line and rule. */
-const findings = (linted: Record<string, { line?: number; rule: string }[]>) =>
+/** Each of `linted`'s findings: its file, line, column and rule. */
+const findings = (
+  linted: Record<string, { line?: number; column?: number; rule: string }[]>
+) =>
   Object.entries(linted).flatMap(([file, found]) =>
-    found.map(({ line, rule }) => ({ file, line, rule }))
+    found.map(({ line, column, rule }) => ({ file, line, column, rule }))
   );
 
 describe("tidying App code", { timeout: 60_000 }, () => {
@@ -88,6 +90,7 @@ describe("tidying App code", { timeout: 60_000 }, () => {
       "export const one = () => { return kept };",
       "/* oxlint-enable arrow-body-style */",
       "export const two = () => { return kept };",
+      "/* oxlint-disable-line no-empty-function */ export const three = () => { return kept };",
       "",
     ].join("\n");
 
@@ -103,6 +106,7 @@ describe("tidying App code", { timeout: 60_000 }, () => {
         "};",
         "/* oxlint-enable arrow-body-style */",
         "export const two = () => kept;",
+        "/* oxlint-disable-line no-empty-function */ export const three = () => kept;",
         "",
       ].join("\n"),
     });
@@ -168,13 +172,17 @@ describe("linting App code", { timeout: 60_000 }, () => {
       // A disable comment's text in a string is a string.
       'export const text = "// oxlint-disable-next-line eqeqeq";',
       "export const loose = (x: number, y: number) => x == y;",
+      // Read by a longer name, before code on its line: what follows it
+      // is found where it is in the file.
+      "/* oxlint-disable-line no-empty-function */ export const looser = (x: number, y: number) => x == y;",
       "",
     ].join("\n");
 
     const linted = await ultracite().lint({ "components/quiet.ts": source });
 
     expect(findings(linted)).toStrictEqual([
-      { file: "components/quiet.ts", line: 13, rule: "eqeqeq" },
+      { file: "components/quiet.ts", line: 13, column: 50, rule: "eqeqeq" },
+      { file: "components/quiet.ts", line: 14, column: 95, rule: "eqeqeq" },
     ]);
   });
 

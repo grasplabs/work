@@ -134,17 +134,31 @@ const commentsOf = (
 };
 
 /**
+ * A disable comment `asEslint` changed: where it is in the source, and its
+ * length as ESLint reads it. Its length can't be kept: a rule's ID here is
+ * often longer than oxlint's name (`typescript/no-empty-function`), and a
+ * line comment of a range becomes a block one.
+ */
+interface Change {
+  start: number;
+  end: number;
+  length: number;
+}
+
+/**
  * `source` with its disable comments as ESLint reads them
  * (`eslintDirective`), and each one, as written, by its text as ESLint
- * reads it, in order: what puts them back.
+ * reads it, in order: what puts them back. `changes`, in order, map a
+ * place in `text` back to the source (`placeIn`).
  */
 const asEslint = (
   path: string,
   source: string
-): { text: string; written: Map<string, string[]> } => {
+): { text: string; written: Map<string, string[]>; changes: Change[] } => {
   const written = new Map<string, string[]>();
+  const changes: Change[] = [];
   if (!mayDirect.test(source)) {
-    return { text: source, written };
+    return { text: source, written, changes };
   }
   let text = source;
   // From the last, so each one's place holds.
@@ -154,10 +168,75 @@ const asEslint = (
     const comment = read === undefined ? as : commentOf(type, read);
     if (comment !== as) {
       written.set(comment, [as, ...(written.get(comment) ?? [])]);
+      changes.unshift({
+        start: range[0],
+        end: range[1],
+        length: comment.length,
+      });
       text = `${text.slice(0, range[0])}${comment}${text.slice(range[1])}`;
     }
   }
-  return { text, written };
+  return { text, written, changes };
+};
+
+/** What ends a line, as ESLint counts lines. */
+const lineBreak = /\r\n|[\n\r\u2028\u2029]/gu;
+
+/** Where each of `text`'s lines starts. */
+const lineStarts = (text: string): number[] => [
+  0,
+  ...Array.from(
+    text.matchAll(lineBreak),
+    ({ index, 0: end }) => index + end.length
+  ),
+];
+
+/**
+ * Where `at` in the text `asEslint` read by `changes` is in the source: a
+ * name read by a longer one moves what follows it. A place inside a
+ * changed comment is the comment's start.
+ */
+const sourceOffset = (at: number, changes: readonly Change[]): number => {
+  let shift = 0;
+  for (const { start, end, length } of changes) {
+    if (at < start + shift) {
+      break;
+    }
+    if (at < start + shift + length) {
+      return start;
+    }
+    shift += length - (end - start);
+  }
+  return at - shift;
+};
+
+interface Place {
+  line: number;
+  column: number;
+}
+
+/**
+ * Where a place in `text` (a 1-based line and column, as ESLint reports
+ * one) is in `source`, which `asEslint` read as `text` by `changes`.
+ */
+const placeIn = (
+  source: string,
+  text: string,
+  changes: readonly Change[]
+): ((place: Place) => Place) => {
+  if (changes.length === 0) {
+    return ({ line, column }) => ({ line, column });
+  }
+  const textLines = lineStarts(text);
+  const sourceLines = lineStarts(source);
+  return ({ line, column }) => {
+    const offset = sourceOffset(
+      (textLines[line - 1] ?? 0) + column - 1,
+      changes
+    );
+    const index = sourceLines.findLastIndex((start) => start <= offset);
+    return { line: index + 1, column: offset - (sourceLines[index] ?? 0) + 1 };
+  };
 };
 
 /**
@@ -267,19 +346,32 @@ const namesUnknownRule = ({ ruleId, message }: Linter.LintMessage): boolean =>
 
 const diagnosticOf = (
   file: string,
-  { ruleId, line, column, severity, message, suggestions }: Linter.LintMessage
+  place: Place,
+  { ruleId, severity, message, suggestions }: Linter.LintMessage
 ): Diagnostic => {
   const [suggestion] = suggestions ?? [];
   return {
     file,
-    line,
-    column,
+    ...place,
     // As oxlint names it, which a disable comment names too.
     rule: ruleId === null ? "lint" : (ultracite.names[ruleId] ?? ruleId),
     severity: severity === 2 ? "error" : "warning",
     message,
     ...(suggestion === undefined ? {} : { fix: suggestion.desc }),
   };
+};
+
+/**
+ * What the rules say of `source` (`path` in the App), each where it is in
+ * `source`, not in the text ESLint reads (`placeIn`).
+ */
+const lintOne = (path: string, source: string): Diagnostic[] => {
+  const { text, changes } = asEslint(path, source);
+  const place = placeIn(source, text, changes);
+  return linter
+    .verify(text, reportConfig, filenameOf(path))
+    .filter((message) => message.fatal !== true && !namesUnknownRule(message))
+    .map((message) => diagnosticOf(path, place(message), message));
 };
 
 /**
@@ -293,13 +385,5 @@ export const lintCode = (
   Object.fromEntries(
     Object.entries(files)
       .filter(([path]) => isLinted(path))
-      .map(([path, source]) => [
-        path,
-        linter
-          .verify(asEslint(path, source).text, reportConfig, filenameOf(path))
-          .filter(
-            (message) => message.fatal !== true && !namesUnknownRule(message)
-          )
-          .map((message) => diagnosticOf(path, message)),
-      ])
+      .map(([path, source]) => [path, lintOne(path, source)])
   );
