@@ -97,12 +97,14 @@ const checkEventType = (
     return;
   }
   const typePointer = pointerJoin(pointer, "type");
+  // `literalText` bounds UTF-16 units, at most two to a code point: past
+  // that no type is one, and `isEventType` holds the code-point limit.
   const type = literalText(
     checker,
     attributes.type,
     typePointer,
     site,
-    sealedBuildLimits.eventTypeLength
+    2 * sealedBuildLimits.eventTypeLength
   );
   if (type !== undefined && !isEventType(type)) {
     checker.report.error(
