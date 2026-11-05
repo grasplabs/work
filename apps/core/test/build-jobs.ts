@@ -20,13 +20,13 @@ export const appName = "Invoice desk";
 /** A screen the lint lets through. */
 export const desk = `import { Button } from "@grasp-os/ui/components/button";
 
-export default function Desk() {
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button variant="outline">Approve</Button>
-    </main>
-  );
-}
+const Desk = () => (
+  <main className="flex flex-col gap-4 p-6">
+    <Button variant="outline">Approve</Button>
+  </main>
+);
+
+export default Desk;
 `;
 
 /** The screen with its button restyled, which @shadcn/lint refuses. */
