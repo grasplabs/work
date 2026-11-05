@@ -69,9 +69,8 @@ export const generatedTarget: TypeTarget = {
 
 /**
  * What the App's own code is held to beyond `compilerOptions`: no unused
- * locals or imports, as TypeScript itself checks them. Ultracite's
- * `no-unused-vars` disagrees with oxlint's on the repo's code
- * (ultracite-rules.ts), so TypeScript's own check stands in. Not
+ * locals or imports, as TypeScript itself checks them, beside Ultracite's
+ * `no-unused-vars`. Not
  * `noUnusedParameters`: it flags every unused parameter, where oxlint
  * flags only those after the last one used, so it would hold App code to
  * more than the repo's own and refuse the SDK's own handler shape,

@@ -304,7 +304,7 @@ describe(
     });
 
     it("read the compiler's code and Ultracite's lint's one after the other, never together, when both start cold at once", async () => {
-      // Together they would hold about 80 MB of core's 128 at once
+      // Together they would hold about 60 MB of core's 128 at once
       // (index.ts, `platformCodeTurns`). Each file's read, from its fetch
       // to its answer, a little slowed so reads that could overlap do.
       const reads: { file: string; from: number; to: number }[] = [];
@@ -334,8 +334,9 @@ describe(
         ultracite.lint({ "components/one.ts": "export const one = 1;\n" }),
       ]);
 
-      const lint = reads.filter(({ file }) => file === "ultracite.js");
-      const compilerReads = reads.filter(({ file }) => file !== "ultracite.js");
+      const lintFiles = new Set(["ultracite.js", "oxc.wasm"]);
+      const lint = reads.filter(({ file }) => lintFiles.has(file));
+      const compilerReads = reads.filter(({ file }) => !lintFiles.has(file));
       const overlap = lint.some((one) =>
         compilerReads.some(({ from, to }) => one.from < to && from < one.to)
       );
@@ -345,7 +346,13 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "components/one.ts": [] }],
-        files: ["compiler.js", "esbuild.wasm", "kit.json", "ultracite.js"],
+        files: [
+          "compiler.js",
+          "esbuild.wasm",
+          "kit.json",
+          "oxc.wasm",
+          "ultracite.js",
+        ],
         overlap: false,
       });
     });

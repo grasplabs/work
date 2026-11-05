@@ -1627,7 +1627,7 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
-   * TypeScript is saved fixed and formatted (Prettier, and what Ultracite's
+   * TypeScript is saved fixed and formatted (oxfmt, and what Ultracite's
    * rules fix themselves): read the file again before editing it by text.
    * Answers with what fails in the whole draft now, its screens, server code
    * and workflows checked at once (compile, types, lint, React Compiler),

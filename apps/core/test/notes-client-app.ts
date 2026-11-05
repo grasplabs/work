@@ -72,7 +72,7 @@ export const remove = mutation({
 export const echo = action({
   args: { word: v.string().default("hello") },
   returns: v.string(),
-  handler: async (_ctx, args) => args.word,
+  handler: (_ctx, args) => args.word,
 });
 
 const pause = async (ms: number): Promise<void> => {
@@ -120,7 +120,7 @@ export const stamp = action({
 export const big = action({
   args: {},
   returns: v.string(),
-  handler: async () => "x".repeat(262_084),
+  handler: () => "x".repeat(262_084),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -137,14 +137,14 @@ export default app({
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
-export default function Notes() {
+const Notes = () => {
   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
   const create = useMutation(api.notes.create);
   const handleAdd = async () => {
     await create({ title: "New note" });
   };
   if (notes === undefined) {
-    return <p role="status">Loading notes…</p>;
+    return <output>Loading notes…</output>;
   }
   return (
     <main className="flex flex-col gap-3 p-6">
@@ -156,7 +156,9 @@ export default function Notes() {
       <Button onClick={handleAdd}>Add</Button>
     </main>
   );
-}
+};
+
+export default Notes;
 `,
 };
 

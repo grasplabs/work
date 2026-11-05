@@ -25,7 +25,7 @@ export const codeExtensions = ["ts", "tsx"] as const;
 export const declarationExtension = ".d.ts";
 
 /**
- * What Ultracite lints and Prettier formats of an App's files (ultracite.ts):
+ * What Ultracite lints and formats of an App's files (ultracite.ts):
  * its TypeScript, but its declarations.
  */
 export const isLintedCode = (path: string): boolean =>
