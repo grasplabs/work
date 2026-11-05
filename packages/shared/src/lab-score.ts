@@ -276,16 +276,25 @@ export const standingOf = (
   };
 };
 
+/** How far runs of one Stephen differ by themselves, out of 10: the score, and each part. */
+export interface ScoreNoise {
+  score: number;
+  parts?: Partial<Record<ScorePart["id"], number>>;
+}
+
 /**
  * Whether a change may be kept, on the score: it raised the average by more
  * than `noise` (out of 10), and lowered no part by more than that part's own
  * noise, so one part is never traded for another. Parts without a noise of
- * their own take `noise`.
+ * their own take `noise`. With `mustRise: false` it only has to hold: no
+ * lower than the noise, as on the hidden set, which confirms a gain the
+ * open set found.
  */
 export const keepsChange = (
   before: Standing,
   after: Standing,
-  noise: { score: number; parts?: Partial<Record<ScorePart["id"], number>> }
+  noise: ScoreNoise,
+  { mustRise = true }: { mustRise?: boolean } = {}
 ): { keep: boolean; why: string } => {
   if (before.score === null || after.score === null) {
     return {
@@ -316,6 +325,14 @@ export const keepsChange = (
       keep: false,
       why: `A limit doesn't hold: ${broken.map((limit) => limit.label).join(", ")}.`,
     };
+  }
+  if (!mustRise) {
+    return gain < -noise.score
+      ? {
+          keep: false,
+          why: `The score fell by ${(-gain).toFixed(1)}, more than the noise (${noise.score.toFixed(1)}).`,
+        }
+      : { keep: true, why: `The score held (${gain.toFixed(1)}).` };
   }
   if (gain <= noise.score) {
     return {

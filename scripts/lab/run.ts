@@ -34,6 +34,13 @@
  *   compare <run> <run>      two runs side by side, with the noise and a
  *                            verdict for each number
  *   results                  every run kept
+ *   climb                    Stephen climbs on his own until the goal is
+ *                            reached on the hidden set or he is stuck: one
+ *                            change a round where he is weakest, kept only
+ *                            when it holds (climb.ts). --target 9
+ *                            --floor 8.5 --rounds 30, --open-key 01
+ *                            --hidden-key 03 for whole interviews, --seed 1
+ *                            for their people. Needs LAB_HIDDEN.
  *   standing                 the Stephen Score of this checkout's Stephen,
  *                            from the runs kept of him: six parts out of
  *                            10, the average, the lowest against the
@@ -64,8 +71,10 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import { firstGoal } from "@grasp-os/shared/lab-score";
 import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
 
+import { defaultClimb, startClimb } from "./climb.ts";
 import { linksOf, openCore, spentLine } from "./core.ts";
 import { hiddenKeyIds, isHidden, keyOf, openKeys } from "./keys/index.ts";
 import { problemsIn } from "./keys/types.ts";
@@ -109,6 +118,11 @@ const { positionals, values } = parseArgs({
     answers: { type: "string" },
     count: { type: "string" },
     from: { type: "string" },
+    target: { type: "string" },
+    floor: { type: "string" },
+    rounds: { type: "string" },
+    "open-key": { type: "string" },
+    "hidden-key": { type: "string" },
   },
 });
 
@@ -298,6 +312,24 @@ const commands: Readonly<Record<string, () => Promise<void> | void>> = {
   },
   standing: async () => {
     await showStanding(roundArgs());
+  },
+  climb: async () => {
+    const outcome = await startClimb({
+      goal: {
+        target: Number(values.target ?? firstGoal.target),
+        floor: Number(values.floor ?? firstGoal.floor),
+      },
+      rounds: countOf(values.rounds, defaultClimb.rounds),
+      keys: {
+        open: values["open-key"] ?? "01",
+        hidden: values["hidden-key"] ?? "03",
+      },
+      seed: countOf(values.seed, 1),
+      log,
+    });
+    if (outcome.why === "failed") {
+      process.exitCode = 1;
+    }
   },
   mine: async () => {
     await mine(roundArgs());

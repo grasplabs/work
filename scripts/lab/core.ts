@@ -34,6 +34,7 @@ import {
   labInterviewSchema,
   labJsonSchema,
   labLinksSchema,
+  labMarksSchema,
   labPath,
   labViaSchema,
 } from "@grasp-os/shared/lab";
@@ -161,6 +162,10 @@ const labCall = async (
   }
   return await response.json();
 };
+
+/** The marks of the interviewers' texts the running core speaks now. */
+export const servedMarks = async (core: Core): Promise<string[]> =>
+  labMarksSchema.parse(await labCall(core.session, { action: "marks" })).marks;
 
 /** Everyone's interview link, by roster ID. */
 export const linksOf = async (core: Core): Promise<Map<string, string>> => {

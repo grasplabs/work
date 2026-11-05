@@ -10,6 +10,7 @@ import {
   labContextSchema,
   labDrawingsSchema,
   labLinksSchema,
+  labMarksSchema,
   labPath,
   labViaSchema,
 } from "@grasp-os/shared/lab";
@@ -21,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
+import { everyLabMark } from "../src/onboarding/lab-marks.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -198,6 +200,7 @@ const ordersDrawn = (karin: string): ProviderReply => ({
 describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
   it.each([
     ["how it reaches its models", { action: "via" }],
+    ["the marks of the texts it speaks", { action: "marks" }],
     // What a practice person said is the lab's to read on a local stack:
     // on a client's core, staff read no word of an interview (GRA-329).
     ["what someone said", { action: "interview", person: "anyone" }],
@@ -216,6 +219,16 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       ]);
     }
   );
+
+  it("says the marks of the texts it speaks now, every interviewer, kind and language, in the order the lab keeps them", async () => {
+    const session = await staffSession();
+    const response = await fromLab({ action: "marks" }, { session });
+
+    expect(response.status).toBe(200);
+    expect(labMarksSchema.parse(await response.json()).marks).toStrictEqual(
+      everyLabMark()
+    );
+  });
 
   it("answers Grasp's staff only, on a local stack too", async () => {
     const member = await signedInWithRole(idp, "admin");

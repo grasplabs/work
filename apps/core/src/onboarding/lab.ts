@@ -7,10 +7,16 @@ import type {
   LabDrawings,
   LabInterview,
   LabLinks,
+  LabMarks,
   LabRequest,
   LabVia,
 } from "@grasp-os/shared/lab";
 import { modelErrors } from "@grasp-os/shared/models";
+import {
+  interviewKinds,
+  interviewLocales,
+  interviewers,
+} from "@grasp-os/shared/onboarding";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
@@ -22,6 +28,7 @@ import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { turnStream } from "./interview.ts";
+import { interviewerText } from "./interviewer-text.ts";
 import { onboardingStore } from "./store.ts";
 
 // The Stephen Lab's way into a local core, `POST /api/lab` (GRA-337): the
@@ -64,6 +71,20 @@ const viaOf = async (env: Env): Promise<LabVia> => {
     careful: modelForRole(settings, "careful"),
   };
 };
+
+/** The marks of every text this core speaks now, in the order of lab-marks.ts. */
+const marksOf = async (): Promise<LabMarks> => ({
+  marks: await Promise.all(
+    interviewers.flatMap((interviewer) =>
+      interviewKinds.flatMap((kind) =>
+        interviewLocales.map(async (locale) => {
+          const text = await interviewerText(interviewer, kind, locale);
+          return text.mark;
+        })
+      )
+    )
+  ),
+});
 
 /** A gateway refusal, as the lab reads it: busy is worth a retry, the rest isn't. */
 const refusalResponse = (error: unknown, requestId: string): Response => {
@@ -259,6 +280,9 @@ export const labResponse = async (
   }
   if (asked.action === "via") {
     return Response.json(await viaOf(env));
+  }
+  if (asked.action === "marks") {
+    return Response.json(await marksOf());
   }
   if (asked.action === "turn") {
     return await turn(env, asked, requestId, ctx);

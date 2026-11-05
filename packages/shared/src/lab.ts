@@ -63,6 +63,13 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   /** How the models are reached: the model of each role. */
   z.strictObject({ action: z.literal("via") }),
   /**
+   * The marks of the interviewers' texts core speaks now, every
+   * interviewer, kind and language in that order: after Stephen's text
+   * changed, the lab waits until the running core says the new ones
+   * before it measures him.
+   */
+  z.strictObject({ action: z.literal("marks") }),
+  /**
    * One of Stephen's turns on fixed input, with who it is with given: the
    * same turn a link gets, as the same events.
    */
@@ -89,6 +96,12 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   }),
 ]);
 export type LabRequest = z.output<typeof labRequestSchema>;
+
+/** The marks of the texts a local core speaks now. */
+export const labMarksSchema = z.strictObject({
+  marks: z.array(z.string()),
+});
+export type LabMarks = z.output<typeof labMarksSchema>;
 
 /** How a local core reaches its models: the model each role goes to. */
 export const labViaSchema = z.strictObject({

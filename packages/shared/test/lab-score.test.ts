@@ -170,4 +170,17 @@ describe("whether a change may be kept", () => {
       ).keep
     ).toBeFalsy();
   });
+
+  it("on the hidden set, keeps a change that held without rising, and undoes one that fell", () => {
+    const before = standingOf(runsAt(0.9));
+
+    expect(
+      keepsChange(before, standingOf(runsAt(0.9)), noise, { mustRise: false })
+        .keep
+    ).toBeTruthy();
+    expect(
+      keepsChange(before, standingOf(runsAt(0.85)), noise, { mustRise: false })
+        .keep
+    ).toBeFalsy();
+  });
 });
