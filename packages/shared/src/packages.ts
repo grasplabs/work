@@ -734,6 +734,17 @@ export const isPackageArtifactPath = (pathname: string): boolean =>
   pathname === packageArtifactPath ||
   pathname.startsWith(`${packageArtifactPath}/`);
 
+/**
+ * Where a browser artifact's files are served for the next few hours:
+ * each file at `${directory}${path}${query}`.
+ */
+export interface PackageArtifactAddress {
+  /** A path on this deployment ending in `/`. */
+  directory: string;
+  /** What each file is asked with: its token, which is never in a path. */
+  query: string;
+}
+
 /** A built target, as core keeps it: the artifact, by its hash. */
 export interface PackageBuild {
   hash: string;
@@ -742,9 +753,8 @@ export interface PackageBuild {
   approval: string;
   stats: PackageBuildStats | null;
   /**
-   * For the browser target, where its files are served for the next few
-   * hours: a path on this deployment ending in `/`, each file at its own
-   * path under it. Null for the other targets, which never leave core.
+   * For the browser target, where its files are served. Null for the other
+   * targets, which never leave core.
    */
-  address: string | null;
+  address: PackageArtifactAddress | null;
 }

@@ -26,6 +26,7 @@ import type {
   ArtifactPin,
   GraspLock,
   PackageArtifact,
+  PackageArtifactAddress,
   PackageBuild,
   PackageLimits,
   PackageTarball,
@@ -758,7 +759,7 @@ const addressOf = async (
     target: PackageArtifact["target"];
   },
   hash: string
-): Promise<string | null> => {
+): Promise<PackageArtifactAddress | null> => {
   // Only an App's browser build is served; a workflow builds only
   // `computation`, whose artifact never leaves core.
   if (target !== "browser" || subject.type !== "app") {

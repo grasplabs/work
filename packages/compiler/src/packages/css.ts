@@ -340,6 +340,14 @@ class Tokenizer {
     return { type: "delim", value: String.fromCodePoint(code) };
   }
 
+  /** The next token, with where it starts and ends among the code points. */
+  spanned(): { token: CssToken; start: number; end: number } | undefined {
+    this.#comments();
+    const start = this.#at;
+    const token = this.next();
+    return token === undefined ? undefined : { token, start, end: this.#at };
+  }
+
   /** §4.3.1: the next token, or undefined at the end. */
   // oxlint-disable-next-line complexity -- one branch per kind of token, as §4.3.1 lists them
   next(): CssToken | undefined {
@@ -680,4 +688,68 @@ export const cssTokens = (css: string): CssToken[] => {
     tokens.push(token);
   }
   return tokens;
+};
+
+/** The text of `codes` from `start` to `end`, a part at a time. */
+const textOf = (
+  codes: readonly number[],
+  start: number,
+  end: number
+): string => {
+  const part = 8192;
+  let text = "";
+  for (let from = start; from < end; from += part) {
+    text += String.fromCodePoint(
+      ...codes.slice(from, Math.min(from + part, end))
+    );
+  }
+  return text;
+};
+
+/**
+ * A URL of the artifact's own, as esbuild writes one it bundled: a path
+ * relative to the stylesheet, with no scheme, no leading `/`, and nothing
+ * that would need escaping in CSS or a query.
+ */
+const ownFile = /^(?![a-z][\w+.-]*:)(?!\/)[\w./-]+$/iu;
+
+/**
+ * `css` with each URL of the artifact's own that it fetches from a
+ * position esbuild bundles (`url()`, an `@import`) carrying `query`, as
+ * core serves it (core's packages/serve.ts): relative to the stylesheet,
+ * a URL keeps its path but drops the stylesheet's query, and the token in
+ * it is what lets it in. Read with the tokenizer above, so text that
+ * merely looks like a URL is left as it is. A stylesheet that fetches
+ * none is its text exactly; one that does is otherwise as CSS reads it
+ * (§3.3: newlines and NULs normalized).
+ */
+export const cssWithQuery = (css: string, query: string): string => {
+  const codes = preprocess(css);
+  const reading: Reading = { found: [], open: [], prelude: undefined };
+  const tokenizer = new Tokenizer(css);
+  let text = "";
+  let at = 0;
+  for (
+    let next = tokenizer.spanned();
+    next !== undefined;
+    next = tokenizer.spanned()
+  ) {
+    const { token, start, end } = next;
+    const before = reading.found.length;
+    read(reading, token);
+    const fetched = reading.found.at(-1);
+    if (
+      reading.found.length > before &&
+      fetched?.bundled === true &&
+      !fetched.computed &&
+      (token.type === "url" || token.type === "string") &&
+      ownFile.test(fetched.url)
+    ) {
+      const addressed = `${fetched.url}${query}`;
+      text += textOf(codes, at, start);
+      text += token.type === "url" ? `url(${addressed})` : `"${addressed}"`;
+      at = end;
+    }
+  }
+  return at === 0 ? css : text + textOf(codes, at, codes.length);
 };

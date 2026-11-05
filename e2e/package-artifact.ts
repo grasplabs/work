@@ -36,7 +36,11 @@ import {
   targetConditions,
   targetConfigHash,
 } from "@grasp-os/shared/packages";
-import type { GraspLock, PackageArtifact } from "@grasp-os/shared/packages";
+import type {
+  GraspLock,
+  PackageArtifact,
+  PackageArtifactAddress,
+} from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 import { execute, quoted, whileBusy } from "./connections-seed.ts";
@@ -201,8 +205,8 @@ export interface SeededArtifact {
   approval: string;
   compiler: string;
   hash: string;
-  /** Where its files are served: a path ending in `/`. */
-  address: string;
+  /** Where its files are served. */
+  address: PackageArtifactAddress;
 }
 
 /**

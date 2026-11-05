@@ -27,8 +27,8 @@
   // (@grasp-os/shared/log), never headers or bodies (threat model R17).
   // Query strings stay out of logs and traces: the OAuth callback's carries
   // the code and state (threat model R17, CN3).
-  // A screen module's token rides in its address's query for this reason,
-  // never in its path, which traces keep whole (screen-frame.ts).
+  // Screen modules' and package artifacts' tokens ride in the query for
+  // this reason, never in a path, which traces keep whole (screen-frame.ts).
   "observability": {
     "enabled": true,
     "redact_query_string": true,

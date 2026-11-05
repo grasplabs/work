@@ -143,18 +143,13 @@ const frameAccessMs = 10 * minute;
  * A windowed token (`windowedAccess`) holds until the end of the next
  * window, so every frame in one window names a file at the same address,
  * which the browser caches, and one open for a while can still load one
- * late: between one window and two. A package artifact's windows are six
- * hours.
+ * late: between one window and two. A chat's preview's module tokens hold
+ * at most an hour, whose frame the page opens again with a fresh token
+ * when one expires (@grasp-os/sdk's preview-runtime.ts); a published
+ * build's, and a package artifact's, at most six, which a person keeps
+ * open through a stretch of a working day.
  */
-const accessWindowMs = 6 * hour;
-
-/**
- * A module token's windows: at most an hour for a chat's preview, whose
- * frame the page opens again with a fresh token when one expires
- * (@grasp-os/sdk's preview-runtime.ts), and at most six for a published
- * build's, which a person keeps open through a working day's stretch.
- */
-const moduleAccessWindowMs = { preview: 30 * minute, published: 3 * hour };
+const accessWindowsMs = { preview: 30 * minute, published: 3 * hour };
 
 const encoder = new TextEncoder();
 
@@ -209,7 +204,7 @@ export const updatingFrameAccess = async (
  */
 export const windowedAccessEnd = (
   now: number,
-  windowMs = accessWindowMs
+  windowMs = accessWindowsMs.published
 ): number => (Math.floor(now / windowMs) + 2) * windowMs;
 
 /**
@@ -222,7 +217,7 @@ export const windowedAccess = async (
   env: Env,
   subject: string,
   now: number,
-  windowMs = accessWindowMs
+  windowMs = accessWindowsMs.published
 ): Promise<string> =>
   await accessToken(env, subject, windowedAccessEnd(now, windowMs));
 
@@ -252,7 +247,7 @@ export const previewFrame = async (
 /**
  * A token for the modules of `scope`, in their address's query: for a
  * frame of a chat's preview (`preview`) or of a published build, which
- * hold for different lengths (`moduleAccessWindowMs`).
+ * hold for different lengths (`accessWindowsMs`).
  */
 const moduleAccess = async (
   env: Env,
@@ -263,15 +258,18 @@ const moduleAccess = async (
     env,
     `modules:${scope}`,
     now,
-    preview ? moduleAccessWindowMs.preview : moduleAccessWindowMs.published
+    preview ? accessWindowsMs.preview : accessWindowsMs.published
   );
 
-/** The query parameter a module's address carries its token in. */
-const moduleTokenParameter = "token";
+/**
+ * The query parameter an address carries its token in, a screen module's
+ * or a package artifact's file's: never its path (see above).
+ */
+export const accessTokenParameter = "token";
 
-/** The query of a module's address with `token`. */
-const moduleQuery = (token: string): string =>
-  `?${new URLSearchParams({ [moduleTokenParameter]: token }).toString()}`;
+/** The query of an address with `token`. */
+export const accessQuery = (token: string): string =>
+  `?${new URLSearchParams({ [accessTokenParameter]: token }).toString()}`;
 
 /** What a token looks like. */
 export const accessTokenPattern =
@@ -821,7 +819,7 @@ export const screenModuleResponse = async (
       ? refused(404)
       : null;
   }
-  const token = url.searchParams.get(moduleTokenParameter);
+  const token = url.searchParams.get(accessTokenParameter);
   if (!(await hasFrameAccess(env, `modules:${scope}`, token))) {
     return refused(403);
   }
@@ -854,7 +852,7 @@ export const screenModuleResponse = async (
     return refused(404, [], "no-store");
   }
   const served =
-    scope === kitScope ? bytes : withQuery(bytes, moduleQuery(token ?? ""));
+    scope === kitScope ? bytes : withQuery(bytes, accessQuery(token ?? ""));
   return new Response(served, {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
@@ -1354,8 +1352,8 @@ export const screenFrameResponse = async (
   const manifest = parsed.data;
   const origin = signInConfig(env)?.origin ?? url.origin;
   const access = { now: Date.now(), preview: manifest.preview };
-  const kitQuery = moduleQuery(await moduleAccess(env, kitScope, access));
-  const appQuery = moduleQuery(await moduleAccess(env, manifest.scope, access));
+  const kitQuery = accessQuery(await moduleAccess(env, kitScope, access));
+  const appQuery = accessQuery(await moduleAccess(env, manifest.scope, access));
   const appIntegrity = await servedIntegrity(env, manifest, appQuery);
   if (appIntegrity === null || !(await allStaged(env, manifest))) {
     // A module the sweep took from under it, or one not as core staged

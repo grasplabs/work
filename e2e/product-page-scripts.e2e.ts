@@ -38,7 +38,10 @@ test.beforeAll(async () => {
   attacker = await serveAttacker();
   ({ builder } = peopleIn("productPageScripts"));
   const seeded = await seedHostileArtifact(builder, attacker.url);
-  artifactAddress = new URL(`${seeded.address}${hostileName}.js`, origin).href;
+  artifactAddress = new URL(
+    `${seeded.address.directory}${hostileName}.js${seeded.address.query}`,
+    origin
+  ).href;
   const { core, api } = apiOf(builder);
   try {
     ({ id: app } = await api.apps.create({ name: "Plain screen" }));

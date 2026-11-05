@@ -1,3 +1,4 @@
+import { cssWithQuery } from "@grasp-os/compiler/css";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
@@ -10,7 +11,11 @@ import { ZodError } from "zod";
 
 import { policyGeneration } from "../dependencies/policy.ts";
 import { admissionOf } from "../dependencies/requests.ts";
-import { accessTokenPattern, hasFrameAccess } from "../screen-frame.ts";
+import {
+  accessQuery,
+  accessTokenParameter,
+  hasFrameAccess,
+} from "../screen-frame.ts";
 import { artifactSubject } from "./address.ts";
 import type { ArtifactRef } from "./address.ts";
 import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
@@ -48,52 +53,27 @@ import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
 //   `nosniff`: script is never read as a stylesheet, an image never as a
 //   page. A recorded type outside those isn't served.
 // - Reading an artifact by its hashes alone (from an audit entry, say).
-//   Each address carries a token core made for exactly that App, graph and
-//   artifact, which expires (address.ts). It is a path segment, not a
-//   query, so a file's relative imports and `url()`s keep it. The cost:
-//   core's own request log leaves it out (`withoutArtifactToken`), and
-//   every answer says `Referrer-Policy: no-referrer` so it never travels
-//   as a Referer, but Cloudflare's traces of core and the router redact
-//   only query strings, so they keep the whole path, token included. We
-//   accept that: a token holds for at most about 12 hours, it opens only
-//   bytes built from public npm code, and admission and the lock are
-//   checked again on every request, so it never serves anything no longer
-//   approved.
+//   Each file is asked with a token core made for exactly that App, graph
+//   and artifact, which holds at most six hours (address.ts). It is in the
+//   query, never the path: Workers redact the query from the router's and
+//   core's traces and core's request log keeps paths only, while a path
+//   would sit in the router's traces in Grasp's account (screen-frame.ts
+//   says why a session can't carry it instead). Every answer says
+//   `Referrer-Policy: no-referrer`, so it never travels as a Referer
+//   either. A relative URL drops the query, so a stylesheet is served with
+//   each URL of the artifact's own it fetches carrying the query it was
+//   asked with (`cssWithQuery`, read with the build's own CSS tokenizer);
+//   an entry's module imports nothing relative (the build doesn't split
+//   code), so it is served as built.
 // - Code for Workers sent to a browser. Only the browser target is
 //   served: a pin of the lock's for the browser target is the guard, as an
 //   artifact's hash covers its target, so no other target's artifact is
 //   ever pinned as the browser's.
 
 const artifactPattern = new RegExp(
-  `^${packageArtifactPath}/(?<app>[\\w-]{1,128})/(?<graphHash>[0-9a-f]{64})/(?<hash>[0-9a-f]{64})/(?<token>[^/]{1,96})/(?<file>.{1,1024})$`,
+  `^${packageArtifactPath}/(?<app>[\\w-]{1,128})/(?<graphHash>[0-9a-f]{64})/(?<hash>[0-9a-f]{64})/(?<file>.{1,1024})$`,
   "u"
 );
-
-/**
- * An artifact path up to its token, the token, and what follows: the
- * segments `artifactPattern` reads, exactly, so the segment left out is
- * the one it takes as the token.
- */
-const tokenSegment = new RegExp(
-  `^(?<base>${packageArtifactPath}/[\\w-]{1,128}/[0-9a-f]{64}/[0-9a-f]{64}/)[^/]{1,96}(?<rest>/.*)?$`,
-  "u"
-);
-
-/**
- * `pathname` as the request log keeps it: an artifact's token left out.
- * A path on the artifact path that isn't shaped as an address (an empty
- * segment, one too many) is logged without anything after the artifact
- * path, since a token could be in any of its segments.
- */
-export const withoutArtifactToken = (pathname: string): string => {
-  if (!isPackageArtifactPath(pathname)) {
-    return pathname;
-  }
-  const groups = tokenSegment.exec(pathname)?.groups;
-  return groups?.base === undefined
-    ? `${packageArtifactPath}/-`
-    : `${groups.base}-${groups.rest ?? ""}`;
-};
 
 /**
  * The exact type each kind of file an artifact holds is served with: the
@@ -194,10 +174,9 @@ const decoded = (path: string): string | undefined => {
   }
 };
 
-/** What an artifact path names: the artifact, its token and one file. */
+/** What an artifact path names: the artifact and one file. */
 interface Addressed {
   ref: ArtifactRef;
-  token: string;
   file: string;
 }
 
@@ -209,16 +188,30 @@ const addressed = (pathname: string): Addressed | undefined => {
     !app.success ||
     groups?.graphHash === undefined ||
     groups.hash === undefined ||
-    groups.token === undefined ||
     file === undefined
   ) {
     return undefined;
   }
   return {
     ref: { app: app.data, graphHash: groups.graphHash, hash: groups.hash },
-    token: groups.token,
     file,
   };
+};
+
+/** Reads a stylesheet's bytes as they are, a byte order mark included. */
+const stylesheetDecoder = new TextDecoder("utf-8", {
+  fatal: false,
+  ignoreBOM: true,
+});
+
+/**
+ * A stylesheet's `bytes` as served under `query` (`cssWithQuery`): the
+ * bytes as built when it fetches nothing of the artifact's own.
+ */
+const stylesheet = (bytes: Uint8Array, query: string): Uint8Array | string => {
+  const text = stylesheetDecoder.decode(bytes);
+  const served = cssWithQuery(text, query);
+  return served === text ? bytes : served;
 };
 
 /**
@@ -228,7 +221,8 @@ const addressed = (pathname: string): Addressed | undefined => {
 const keptResponse = async (
   env: Env,
   hash: string,
-  file: string
+  file: string,
+  query: string
 ): Promise<Response> => {
   const description = await keptDescription(env, hash);
   const entry =
@@ -253,7 +247,8 @@ const keptResponse = async (
     await forgetArtifact(env, hash);
     return refused(404);
   }
-  return new Response(bytes, {
+  const served = entry.type === "text/css" ? stylesheet(bytes, query) : bytes;
+  return new Response(served, {
     headers: {
       "content-type": type,
       // Every load asks again, so an approval taken back holds at once.
@@ -271,7 +266,7 @@ export const packageArtifactResponse = async (
   env: Env,
   request: Request
 ): Promise<Response | null> => {
-  const { pathname } = new URL(request.url);
+  const { pathname, searchParams } = new URL(request.url);
   if (!isPackageArtifactPath(pathname)) {
     return null;
   }
@@ -282,11 +277,9 @@ export const packageArtifactResponse = async (
   if (asked === undefined) {
     return refused(404);
   }
-  const { ref, token } = asked;
-  if (
-    !accessTokenPattern.test(token) ||
-    !(await hasFrameAccess(env, artifactSubject(ref), token))
-  ) {
+  const { ref } = asked;
+  const token = searchParams.get(accessTokenParameter);
+  if (!(await hasFrameAccess(env, artifactSubject(ref), token))) {
     return refused(403);
   }
   if (!(await admitted(env, ref))) {
@@ -295,5 +288,10 @@ export const packageArtifactResponse = async (
   if (!(await pinned(env, ref))) {
     return refused(404);
   }
-  return await keptResponse(env, ref.hash, asked.file);
+  return await keptResponse(
+    env,
+    ref.hash,
+    asked.file,
+    accessQuery(token ?? "")
+  );
 };

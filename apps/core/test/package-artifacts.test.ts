@@ -4,6 +4,7 @@ import { graspLockSchema, lockGraph } from "@grasp-os/shared/packages";
 import type {
   DependencyIntent,
   GraspLock,
+  PackageArtifactAddress,
   PackageBuild,
 } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
@@ -23,8 +24,10 @@ import { auditedDuring, coreOrigin, routed, signedInApi } from "./sign-in.ts";
 // another type; a file of a graph no longer approved, of an artifact the
 // lock no longer pins, or bytes other than the ones built; an artifact
 // read by its hashes alone; code for Workers sent to a browser; a lock
-// resolved against another React; and the files reached by any other
-// path. The packages are real builds, from
+// resolved against another React; the files reached by any other path;
+// and the token read where a URL is logged (the router's and core's
+// traces, core's request log, a Referer), so it rides in the query alone,
+// which Workers redact, never the path. The packages are real builds, from
 // connect's strict fake of the npm registry; what the browser then does
 // under the policy is e2e/package-artifacts.e2e.ts.
 
@@ -154,6 +157,21 @@ const loggedDuring = async (
   }
 };
 
+/** Where file `path` of an artifact at `address` is asked for, under `query`. */
+const fileAt = (
+  { directory, query }: PackageArtifactAddress,
+  path: string,
+  asked = query
+): string => `${directory}${path}${asked}`;
+
+/** The token of an address's query. */
+const tokenOf = ({ query }: PackageArtifactAddress): string =>
+  new URLSearchParams(query).get("token") ?? "";
+
+/** A query with `token`. */
+const withToken = (token: string): string =>
+  `?${new URLSearchParams({ token }).toString()}`;
+
 /** The status core answers `path` with. */
 const statusOf = async (path: string): Promise<number> => {
   const response = await routed(path);
@@ -169,7 +187,7 @@ const eventsNamed = (logged: unknown[], event: string): unknown[] =>
       Reflect.get(fields, "event") === event
   );
 
-const sha256 = async (bytes: ArrayBuffer): Promise<string> =>
+const sha256 = async (bytes: BufferSource): Promise<string> =>
   toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 
 /** A file's bytes as core keeps them. */
@@ -193,7 +211,14 @@ describe("serving an App's built packages", () => {
 
     const files = await Promise.all(
       Object.entries(built.artifact.files).map(async ([path, file]) => {
-        const response = await routed(`${address}${path}`);
+        const response = await routed(fileAt(address, path));
+        const bytes = await response.arrayBuffer();
+        // A stylesheet's URLs of its own carry the address's query.
+        const asBuilt = path.endsWith(".css")
+          ? new TextEncoder().encode(
+              new TextDecoder().decode(bytes).replaceAll(address.query, "")
+            )
+          : bytes;
         return {
           path,
           status: response.status,
@@ -202,7 +227,7 @@ describe("serving an App's built packages", () => {
           sniffing: response.headers.get("x-content-type-options"),
           referrer: response.headers.get("referrer-policy"),
           cache: response.headers.get("cache-control"),
-          matches: (await sha256(await response.arrayBuffer())) === file.sha256,
+          matches: (await sha256(asBuilt)) === file.sha256,
         };
       })
     );
@@ -221,7 +246,7 @@ describe("serving an App's built packages", () => {
         type: typeOf[path.slice(path.lastIndexOf(".") + 1)],
         policy: artifactPolicy,
         sniffing: "nosniff",
-        // Its address carries a token: never sent on as a Referer.
+        // Its query carries a token: never sent on as a Referer.
         referrer: "no-referrer",
         cache: "no-store",
         matches: true,
@@ -237,27 +262,30 @@ describe("serving an App's built packages", () => {
     const { built, address, name } = await servedBuild();
     const module = `${name}.js`;
     const code = await keptBytes(built.hash, module);
-    const [base, token] = [
-      address.slice(0, address.lastIndexOf("/", address.length - 2) + 1),
-      address.split("/").at(-2) ?? "",
-    ];
+    const token = tokenOf(address);
     const otherToken = `${Date.now() + 60_000}.${"A".repeat(43)}`;
     const answers = await Promise.all([
-      routed(`${address}${module}`),
-      routed(`${base}${otherToken}/${module}`),
+      routed(fileAt(address, module)),
+      routed(fileAt(address, module, withToken(otherToken))),
       routed(
-        `${base}${String(Date.now() - 1)}.${token.split(".")[1]}/${module}`
+        fileAt(
+          address,
+          module,
+          withToken(`${String(Date.now() - 1)}.${token.split(".")[1]}`)
+        )
       ),
-      routed(`${base}${module}`),
-      routed(`${address}missing.js`),
-      routed(`${address}..%2F..%2F${module}`),
-      routed(`${address}%E0%A4%A`),
+      routed(fileAt(address, module, "")),
+      // The token in the path, as it once was.
+      routed(`${address.directory}${token}/${module}`),
+      routed(fileAt(address, "missing.js")),
+      routed(fileAt(address, `..%2F..%2F${module}`)),
+      routed(fileAt(address, "%E0%A4%A")),
       routed("/package-artifacts"),
       routed("/package-artifacts/"),
-      routed(`${address}${module}`, { method: "POST", body: "x" }),
+      routed(fileAt(address, module), { method: "POST", body: "x" }),
       // Without the router's secret: refused before any route.
       worker.fetch(
-        new Request(`${coreOrigin}${address}${module}`),
+        new Request(`${coreOrigin}${fileAt(address, module)}`),
         env,
         createExecutionContext()
       ),
@@ -287,21 +315,37 @@ describe("serving an App's built packages", () => {
     const one = await servedBuild();
     const two = await servedBuild();
     const module = `${two.name}.js`;
-    const twoToken = two.address.split("/").at(-2) ?? "";
-    const oneBase = one.address.slice(
-      0,
-      one.address.lastIndexOf("/", one.address.length - 2) + 1
-    );
-    const twoBase = two.address.slice(
-      0,
-      two.address.lastIndexOf("/", two.address.length - 2) + 1
-    );
     // Two's token on one's artifact, and two's artifact under one's App.
-    const borrowed = await routed(`${oneBase}${twoToken}/${one.name}.js`);
+    const borrowed = await routed(
+      fileAt(one.address, `${one.name}.js`, two.address.query)
+    );
     const moved = await routed(
-      `${twoBase.replace(two.app, one.app)}${twoToken}/${module}`
+      fileAt(
+        {
+          ...two.address,
+          directory: two.address.directory.replace(two.app, one.app),
+        },
+        module
+      )
     );
     expect([borrowed.status, moved.status]).toStrictEqual([403, 403]);
+  });
+
+  it("holds a token at most six hours", async () => {
+    const { app, graphHash, built, name } = await servedBuild();
+    const ref = { app, graphHash, hash: built.hash };
+    const hour = 60 * 60 * 1000;
+    const minted = async (ago: number): Promise<number> =>
+      await statusOf(
+        fileAt(
+          await packageArtifactAddress(env, ref, Date.now() - ago),
+          `${name}.js`
+        )
+      );
+    expect({
+      threeHours: await minted(3 * hour - 60_000),
+      sixHours: await minted(6 * hour + 60_000),
+    }).toStrictEqual({ threeHours: 200, sixHours: 403 });
   });
 
   it("serves nothing once the graph is no longer approved, and logs each refusal without filling the audit trail", async () => {
@@ -328,7 +372,7 @@ describe("serving an App's built packages", () => {
         const responses = await Promise.all(
           Array.from(
             { length: 5 },
-            async () => await routed(`${address}${name}.js`)
+            async () => await routed(fileAt(address, `${name}.js`))
           )
         );
         statuses = responses.map(({ status }) => status);
@@ -354,7 +398,7 @@ describe("serving an App's built packages", () => {
 
   it("serves a browser build the lock pins, by either release whose pins it keeps, and nothing it no longer pins", async () => {
     const served = await servedBuild();
-    const file = `${served.address}${served.name}.js`;
+    const file = fileAt(served.address, `${served.name}.js`);
     // A resolve that sets other entries for the browser leaves the pin of
     // the entries built as it was.
     await served.builder.api.dependencies.resolve(
@@ -389,7 +433,7 @@ describe("serving an App's built packages", () => {
 
   it("keeps serving a build whose address is out while newer graphs take the App's room, and refuses one more graph until it expires", async () => {
     const served = await servedBuild();
-    const file = `${served.address}${served.name}.js`;
+    const file = fileAt(served.address, `${served.name}.js`);
     const admin = await personApi("admin");
     await admin.api.dependencies.grantApprover({
       type: "person",
@@ -471,9 +515,9 @@ describe("serving an App's built packages", () => {
       `fetch("https://attacker.test/swapped");`
     );
 
-    const response = await seen(await routed(`${address}${name}.js`));
+    const response = await seen(await routed(fileAt(address, `${name}.js`)));
     const again = await buildOf(served);
-    const healed = await seen(await routed(`${address}${name}.js`));
+    const healed = await seen(await routed(fileAt(address, `${name}.js`)));
     expect({
       status: response.status,
       attacker: response.body.includes("attacker"),
@@ -503,7 +547,7 @@ describe("serving an App's built packages", () => {
         served.graphHash
       )
       .run();
-    const response = await routed(`${served.address}${served.name}.js`);
+    const response = await routed(fileAt(served.address, `${served.name}.js`));
     expect(response.status).toBe(404);
   });
 
@@ -538,7 +582,7 @@ describe("serving an App's built packages", () => {
     const warned = await loggedDuring("warn", async () => {
       errors = await loggedDuring("error", async () => {
         ({ code } = await failure(buildOf(old)));
-        ({ status } = await routed(`${address}${served.name}.js`));
+        ({ status } = await routed(fileAt(address, `${served.name}.js`)));
       });
     });
 
@@ -570,9 +614,13 @@ describe("serving an App's built packages", () => {
       hash: serverBuild.hash,
     });
 
-    const response = await routed(`${address}${name}.js`);
+    const response = await routed(fileAt(address, `${name}.js`));
     // The same App and graph, whose browser build is served.
-    const browser = await routed(`${browserBuild.address ?? ""}${name}.js`);
+    const browser = await routed(
+      browserBuild.address === null
+        ? "/"
+        : fileAt(browserBuild.address, `${name}.js`)
+    );
     expect({
       address: serverBuild.address,
       status: response.status,
@@ -583,7 +631,7 @@ describe("serving an App's built packages", () => {
   it("serves no file to the product page's own request for it", async () => {
     const { address, name } = await servedBuild();
     const asked = async (site?: string) => {
-      const response = await routed(`${address}${name}.js`, {
+      const response = await routed(fileAt(address, `${name}.js`), {
         headers: site === undefined ? {} : { "sec-fetch-site": site },
       });
       return [response.status, response.headers.get("vary")];
@@ -624,32 +672,42 @@ describe("serving an App's built packages", () => {
   });
 });
 
-// The request log keeps no token: an address read from it reads nothing.
+// No path core or the router logs holds the token: an address read from
+// a log reads nothing.
 describe("logging an artifact's request", () => {
-  it("leaves the token out of the path it logs, however the path is written", async () => {
-    const { address, name } = await servedBuild();
-    const token = address.split("/").at(-2) ?? "";
-    const rest = address.slice("/package-artifacts".length);
+  it("carries the token in the query alone, in no path logged, and on each URL of its own a stylesheet fetches", async () => {
+    const { address, built, name } = await servedBuild();
+    const token = tokenOf(address);
+    const stylesheet =
+      Object.keys(built.artifact.files).find((path) => path.endsWith(".css")) ??
+      "";
     const info = vi.spyOn(console, "info").mockReturnValue();
     let lines: string[] = [];
+    let css = "";
     try {
-      for (const path of [
-        `${address}${name}.js`,
-        // An empty segment, and one too many, before the token; and an
-        // empty segment where the token goes, the token after it.
-        `/package-artifacts/${rest}${name}.js`,
-        `/package-artifacts/extra${rest}${name}.js`,
-        `${address.replace(`/${token}/`, `//${token}/`)}${name}.js`,
-      ]) {
-        // oxlint-disable-next-line no-await-in-loop -- one log line each
-        await routed(path);
-      }
+      await routed(fileAt(address, `${name}.js`));
+      const served = await routed(fileAt(address, stylesheet));
+      css = await served.text();
       lines = info.mock.calls.map((call) => JSON.stringify(call));
     } finally {
       info.mockRestore();
     }
     const logged = lines.filter((line) => line.includes("/package-artifacts"));
-    expect(logged).toHaveLength(4);
-    expect(logged.filter((line) => line.includes(token))).toStrictEqual([]);
+    const urls = [...css.matchAll(/url\((?<url>[^)]*)\)/gu)].map(
+      ({ groups }) => groups?.url ?? ""
+    );
+    expect({
+      inDirectory: address.directory.includes(token),
+      logged: logged.length,
+      loggedWithToken: logged.filter((line) => line.includes(token)),
+      urls: urls.length > 0,
+      urlsWithoutToken: urls.filter((url) => !url.includes(address.query)),
+    }).toStrictEqual({
+      inDirectory: false,
+      logged: 2,
+      loggedWithToken: [],
+      urls: true,
+      urlsWithoutToken: [],
+    });
   });
 });

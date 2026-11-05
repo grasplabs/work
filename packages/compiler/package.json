@@ -21,7 +21,8 @@
     }
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./css": "./src/packages/css.ts"
   },
   "scripts": {
     "build": "node build.ts"

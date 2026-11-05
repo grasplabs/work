@@ -1,3 +1,4 @@
+import type { PackageArtifactAddress } from "@grasp-os/shared/packages";
 import { expect } from "@playwright/test";
 import { z } from "zod";
 
@@ -58,11 +59,12 @@ test.beforeEach(() => {
  */
 const widgetScreen = (
   receiver: string,
-  address: string
+  { directory, query }: PackageArtifactAddress
 ): string => `import { useEffect, useState } from "react";
 
 const attacker = "${receiver}";
-const artifact = "${address}";
+const artifact = "${directory}";
+const query = "${query}";
 // The build's design lint refuses these by name (grasp/no-style-escapes);
 // spelled so it can't read them, as code evading it would, so this
 // checks that the frame still holds.
@@ -80,7 +82,7 @@ const probe = async (): Promise<Record<string, string>> => {
   script.type = "module";
   let scriptOutcome: Promise<string>;
   try {
-    script.src = \`\${artifact}${hostileName}.js\`;
+    script.src = \`\${artifact}${hostileName}.js\${query}\`;
     scriptOutcome = loaded(script);
     headOf().append(script);
   } catch {
@@ -91,13 +93,13 @@ const probe = async (): Promise<Record<string, string>> => {
   let worker = "started";
   try {
     const Make = (globalThis as unknown as Record<string, typeof Worker>)[["Wor", "ker"].join("")];
-    new Make(\`\${artifact}${hostileName}.js\`);
+    new Make(\`\${artifact}${hostileName}.js\${query}\`);
   } catch (error) {
     worker = \`refused: \${error instanceof Error ? error.name : "?"}\`;
   }
 
   const image = new Image();
-  image.src = \`\${artifact}assets/hostile.svg\`;
+  image.src = \`\${artifact}assets/hostile.svg\${query}\`;
   const svgOutcome = loaded(image);
 
   const styleOf = (element: HTMLElement): CSSStyleDeclaration =>
@@ -156,7 +158,10 @@ test("a package's code started as a worker can't start another, import scripts o
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  const workerUrl = new URL(`${seeded.address}${hostileName}.js`, origin).href;
+  const workerUrl = new URL(
+    `${seeded.address.directory}${hostileName}.js${seeded.address.query}`,
+    origin
+  ).href;
   // No page of the deployment can start it any more: the product page's
   // policy allows no worker, and core refuses its same-origin requests for
   // the file (product-page-scripts.e2e.ts). This stands in for a page of
@@ -171,14 +176,18 @@ test("a package's code started as a worker can't start another, import scripts o
       body: "<!doctype html><title>Worker host</title>",
     });
   });
-  await page.route(workerUrl, async (route) => {
-    const headers = Object.fromEntries(
-      Object.entries(await route.request().allHeaders()).filter(
-        ([name]) => !name.startsWith("sec-fetch-")
-      )
-    );
-    await route.fulfill({ response: await route.fetch({ headers }) });
-  });
+  // Matched exactly: a string route is a glob, which reads `?` as a wildcard.
+  await page.route(
+    (url) => url.href === workerUrl,
+    async (route) => {
+      const headers = Object.fromEntries(
+        Object.entries(await route.request().allHeaders()).filter(
+          ([name]) => !name.startsWith("sec-fetch-")
+        )
+      );
+      await route.fulfill({ response: await route.fetch({ headers }) });
+    }
+  );
   await page.goto("/worker-host");
   // Everything the worker posts, and any error starting it, kept on the
   // page as it comes.
@@ -245,7 +254,25 @@ test("a package's SVG opened on its own runs no script and loads nothing from el
       blocked.push(request.url());
     }
   });
-  await page.goto(`${seeded.address}assets/hostile.svg`);
+  // The SVG names its stylesheet relative to itself, which keeps the path
+  // and drops the query: the request goes without the address's token,
+  // and core refuses it. The policy must hold all the same should one
+  // load, so the browser's request is handed on with the token, as the
+  // stylesheet would be asked for with one.
+  const stylesheet = new URL(
+    `${seeded.address.directory}${hostileName}.css`,
+    origin
+  ).href;
+  const withoutToken = await page.request.get(stylesheet);
+  await page.route(
+    (url) => url.href === stylesheet,
+    async (route) => {
+      await route.continue({ url: `${stylesheet}${seeded.address.query}` });
+    }
+  );
+  await page.goto(
+    `${seeded.address.directory}assets/hostile.svg${seeded.address.query}`
+  );
   await page.waitForLoadState("load");
 
   // Its script and its `onload` never ran, and its inline style was never
@@ -271,6 +298,7 @@ test("a package's SVG opened on its own runs no script and loads nothing from el
     ]);
   expect(remote(requested)).toStrictEqual(remote(blocked));
   expect(attacker.hits).toStrictEqual([]);
+  expect(withoutToken.status()).toBe(403);
 });
 
 test("a screen can't load a package's code, or bring in what the code would fetch", async ({
