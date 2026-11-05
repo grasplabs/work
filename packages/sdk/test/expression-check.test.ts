@@ -86,11 +86,6 @@ describe("what a workflow expression may be", () => {
       code: '($read(input, "a"))',
       reads: [{ root: "input", path: ["a"] }],
       literalDepth: 0,
-      forTypes: {
-        code: " $value(input.a) ",
-        added: [1, 2, 3, 4, 5, 6, 7, 15],
-        reads: [{ at: 8, name: "a", property: 7 }],
-      },
     });
   });
 
@@ -467,53 +462,6 @@ describe("a chain in parentheses", () => {
       verdict("(input.list?.map)((x) => x)"),
       verdict("(input.list.join)(', ')"),
     ]).toStrictEqual(["expression.syntax", "expression.syntax"]);
-  });
-});
-
-/** The form an expression is type-checked in. */
-const typed = (source: string): string => {
-  const checked = checkExpression(source);
-  if (!checked.ok) {
-    throw new Error(`${source} is refused: ${checked.errors[0]?.code}`);
-  }
-  return checked.forTypes.code;
-};
-
-describe("what TypeScript type-checks", () => {
-  it("is the source with every comparison in parentheses, read as JavaScript reads it", () => {
-    expect(typed("[input.a < input.b, input.c > (input.d)]")).toBe(
-      "[($value(input.a) < $value(input.b)), ($value(input.c) > ($value(input.d)))]"
-    );
-    expect(typed("!input.a ? -input.b : input.c ?? 1")).toBe(
-      "!$value(input.a) ? -$value(input.b) : $value(input.c) ?? 1"
-    );
-  });
-
-  it("wraps every member read but a call's callee and a link inside an optional chain, by whether its name may be a method", () => {
-    expect([
-      typed("input.list.map((item) => item.total).at(0)"),
-      typed("input.a?.b.c"),
-      typed("input.list?.join"),
-      typed("input['map']"),
-    ]).toStrictEqual([
-      "$value(input.list).map((item) => $value(item.total)).at(0)",
-      "$value($value(input.a)?.b.c)",
-      "$method($value(input.list)?.join)",
-      "$method(input['map'])",
-    ]);
-  });
-
-  it("holds no comment, so no `@ts-` directive reaches TypeScript", () => {
-    expect(typed("input.a // @ts-ignore\n+ 1")).toBe(
-      `$value(input.a)${" ".repeat(14)}\n+ 1`
-    );
-  });
-
-  it("blanks a comment unit for unit, so what follows keeps its place", () => {
-    // An emoji is two UTF-16 units, as offsets count them: two spaces.
-    expect(typed("input.a /*😀*/ < input.b")).toBe(
-      `($value(input.a) ${" ".repeat(6)} < $value(input.b))`
-    );
   });
 });
 

@@ -15,13 +15,15 @@
  * App's own files, never the packages they import, and holds them to what
  * the platform does besides the options:
  *
+ * - every App file parses as the platform's compile parses it, with
+ *   Babel, which reads its comments and ambient declarations for the two
+ *   rules below through the platform's own steering.ts;
  * - code whose types are checked (server code, workflows, compute
  *   modules) steers nothing: no triple-slash directive, no suppression
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
- *   global` or `declare module` (imports.ts, `typeChecked`), found by
- *   TypeScript 7's own scanner;
+ *   global` or `declare module` (imports.ts, `typeChecked`);
  * - no App file holds a triple-slash directive but a reference path to
- *   one of the App's files (imports.ts `referenceError`);
+ *   one of the App's files (steering.ts `referenceError`);
  * - an App file resolves by name only the modules its kind may import
  *   (`TypeTarget.allowed`, which each tsconfig's `grasp.allowed` lists).
  *
@@ -39,6 +41,7 @@ import {
 import path from "node:path";
 import { isMainThread, parentPort, Worker } from "node:worker_threads";
 
+import { parse } from "@babel/parser";
 import {
   EXIT_CRASHED,
   makeRequest,
@@ -47,15 +50,9 @@ import {
   runTsc,
 } from "@tsrs/wasm/core";
 import type { Diagnostic, FileStat, HostFileSystem } from "@tsrs/wasm/core";
-import { SyntaxKind } from "typescript/unstable/ast";
-import {
-  createScanner,
-  getLeadingCommentRanges,
-  tokenIsIdentifierOrKeyword,
-} from "typescript/unstable/ast/scanner";
-import type { Scanner } from "typescript/unstable/ast/scanner";
 
-import { directiveIn } from "./steering.ts";
+import { ambientOf, directivesIn, referenceError } from "./steering.ts";
+import type { DirectiveSite, ModuleDeclaration } from "./steering.ts";
 
 /** A problem in an App file, or in a check's options. */
 interface Problem {
@@ -376,207 +373,138 @@ const problemAt = (
   message: string
 ): Problem => ({ file, ...lineAndColumn(text, position), code, message });
 
-/** Keywords after which a `/` starts a regular expression, never a division. */
-const beforeExpression: ReadonlySet<SyntaxKind> = new Set([
-  SyntaxKind.ReturnKeyword,
-  SyntaxKind.TypeOfKeyword,
-  SyntaxKind.InstanceOfKeyword,
-  SyntaxKind.InKeyword,
-  SyntaxKind.OfKeyword,
-  SyntaxKind.NewKeyword,
-  SyntaxKind.DeleteKeyword,
-  SyntaxKind.VoidKeyword,
-  SyntaxKind.ThrowKeyword,
-  SyntaxKind.CaseKeyword,
-  SyntaxKind.DoKeyword,
-  SyntaxKind.ElseKeyword,
-  SyntaxKind.YieldKeyword,
-  SyntaxKind.AwaitKeyword,
-]);
+/** A 1-based line and column. */
+interface Where {
+  readonly line: number | undefined;
+  readonly column: number | undefined;
+}
 
-/** Tokens a value can end on, after which a `/` divides. */
-const endsValue = (token: SyntaxKind): boolean =>
-  (tokenIsIdentifierOrKeyword(token) && !beforeExpression.has(token)) ||
-  token === SyntaxKind.NumericLiteral ||
-  token === SyntaxKind.BigIntLiteral ||
-  token === SyntaxKind.StringLiteral ||
-  token === SyntaxKind.NoSubstitutionTemplateLiteral ||
-  token === SyntaxKind.TemplateTail ||
-  token === SyntaxKind.CloseParenToken ||
-  token === SyntaxKind.CloseBracketToken ||
-  token === SyntaxKind.CloseBraceToken ||
-  token === SyntaxKind.PlusPlusToken ||
-  token === SyntaxKind.MinusMinusToken;
-
-/**
- * `token` as the scanner reads it in its context, which a scanner alone
- * doesn't know: a `/` after what can't end a value starts a regular
- * expression, and the `}` that closes a template's `${` goes on with the
- * template. `braces` follows what each open `{` is.
- */
-const inContext = (
-  scanner: Scanner,
-  token: SyntaxKind,
-  previous: SyntaxKind,
-  braces: ("block" | "template")[]
-): SyntaxKind => {
-  let read = token;
-  if (
-    (token === SyntaxKind.SlashToken ||
-      token === SyntaxKind.SlashEqualsToken) &&
-    !endsValue(previous)
-  ) {
-    read = scanner.reScanSlashToken();
-  } else if (token === SyntaxKind.CloseBraceToken) {
-    read =
-      braces.pop() === "template" ? scanner.reScanTemplateToken(false) : token;
-  }
-  if (read === SyntaxKind.OpenBraceToken) {
-    braces.push("block");
-  } else if (
-    read === SyntaxKind.TemplateHead ||
-    read === SyntaxKind.TemplateMiddle
-  ) {
-    braces.push("template");
-  }
-  return read;
+/** Where Babel puts a node or an error (`loc`, 0-based column), 1-based. */
+const whereOf = (position: unknown): Where => {
+  const line = fieldOf(position, "line");
+  const column = fieldOf(position, "column");
+  return {
+    line: typeof line === "number" ? line : undefined,
+    column: typeof column === "number" ? column + 1 : undefined,
+  };
 };
 
-/** Tokens that are no part of the code: whitespace and comments. */
-const trivia: ReadonlySet<SyntaxKind> = new Set([
-  SyntaxKind.WhitespaceTrivia,
-  SyntaxKind.NewLineTrivia,
-  SyntaxKind.SingleLineCommentTrivia,
-  SyntaxKind.MultiLineCommentTrivia,
-]);
+/** An App file as Babel parses it: its comments and syntax tree. */
+interface Parsed {
+  readonly comments: Parameters<typeof directivesIn>[0];
+  readonly program: unknown;
+}
 
 /**
- * Why the scanner's `token`, after the two tokens `before` it, steers
- * the check, or undefined when it doesn't: a comment TypeScript obeys as
- * a directive (steering.ts, as the platform reads them), an ambient
- * module's name (`module "x"`), or `declare global`.
+ * `text` parsed as the platform's compile parses `file` (compile.ts),
+ * or the parser's refusal of it, which the platform's build reports.
  */
-const steeringSaid = (
-  scanner: Scanner,
-  token: SyntaxKind,
-  [beforePrevious, previous]: readonly SyntaxKind[]
-): string | undefined => {
-  if (
-    token === SyntaxKind.SingleLineCommentTrivia ||
-    token === SyntaxKind.MultiLineCommentTrivia
-  ) {
-    const line = token === SyntaxKind.SingleLineCommentTrivia;
-    const directive = directiveIn(
-      line ? "line" : "block",
-      scanner.getTokenText().slice(2, line ? undefined : -2)
-    );
-    return directive === undefined
-      ? undefined
-      : `${directive} is never in this code: its type check is the platform's, as it is.`;
+const parsedOf = (file: string, text: string): Parsed | Problem => {
+  try {
+    const { comments, program } = parse(text, {
+      sourceType: "module",
+      plugins: [
+        ["typescript", { dts: file.endsWith(".d.ts") }],
+        ...(file.endsWith(".tsx") ? (["jsx"] as const) : []),
+      ],
+    });
+    return { comments: comments ?? [], program };
+  } catch (error) {
+    return {
+      file,
+      ...whereOf(fieldOf(error, "loc")),
+      code: "compile",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
-  if (
-    token === SyntaxKind.StringLiteral &&
-    previous === SyntaxKind.ModuleKeyword &&
-    beforePrevious !== SyntaxKind.DotToken &&
-    beforePrevious !== SyntaxKind.QuestionDotToken
-  ) {
-    return `declare module ${scanner.getTokenText()} is never in this code: it would declare, or shadow, a module the SDK doesn't give it.`;
-  }
-  if (
-    token === SyntaxKind.GlobalKeyword &&
-    previous === SyntaxKind.DeclareKeyword
-  ) {
-    return "declare global is never in this code: it would declare globals its isolate doesn't have, for every file.";
-  }
-  return undefined;
 };
 
-/**
- * What in `text` (a `.ts` file: no JSX) would steer the check rather than
- * be checked by it, found by TypeScript 7's scanner as it tokenizes the
- * file: a comment TypeScript obeys as a directive (steering.ts, as the
- * platform reads them), and an ambient module or global declaration.
- */
-const steeringIn = (file: string, text: string): Problem[] => {
-  const found: Problem[] = [];
-  const scanner = createScanner(false, undefined, text);
-  // What each open `{` is: a block's, or a template's `${`.
-  const braces: ("block" | "template")[] = [];
-  // The last two tokens that aren't trivia.
-  const before: SyntaxKind[] = [SyntaxKind.Unknown, SyntaxKind.Unknown];
-  for (
-    let scanned = scanner.scan();
-    scanned !== SyntaxKind.EndOfFile;
-    scanned = scanner.scan()
-  ) {
-    const token = inContext(
-      scanner,
-      scanned,
-      before[1] ?? SyntaxKind.Unknown,
-      braces
-    );
-    const at = scanner.getTokenStart();
-    const said = steeringSaid(scanner, token, before);
-    if (said !== undefined) {
-      found.push(problemAt(file, text, at, "steering", said));
+/** Every `declare module` or `declare global` in a syntax tree, with its line. */
+const ambientDeclarations = (
+  program: unknown
+): (ModuleDeclaration & Where)[] => {
+  const found: (ModuleDeclaration & Where)[] = [];
+  const pending: unknown[] = [program];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (typeof node !== "object" || node === null) {
+      continue;
     }
-    if (!trivia.has(token)) {
-      before.shift();
-      before.push(token);
+    if (fieldOf(node, "type") === "TSModuleDeclaration") {
+      const id = fieldOf(node, "id");
+      const type = fieldOf(id, "type");
+      const value = fieldOf(id, "value");
+      const name = fieldOf(id, "name");
+      found.push({
+        id: {
+          type: typeof type === "string" ? type : "",
+          value,
+          name: typeof name === "string" ? name : undefined,
+        },
+        global: fieldOf(node, "global") === true,
+        ...whereOf(fieldOf(fieldOf(node, "loc"), "start")),
+      });
     }
+    const children: unknown[] = Object.values(node);
+    pending.push(...children);
   }
   return found;
 };
 
 /**
- * The one triple-slash directive an App file may hold: a lowercase
- * `/// <reference path="…" />` (imports.ts `ownReference`).
+ * What in a parsed file would steer the check rather than be checked by
+ * it: a comment TypeScript obeys as a directive, and an ambient module
+ * or global declaration (steering.ts, as the platform reads them).
  */
-const ownReference =
-  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
+const steeringIn = (file: string, { comments, program }: Parsed): Problem[] => [
+  ...directivesIn(comments).map(
+    ({ directive, line, column }: DirectiveSite): Problem => ({
+      file,
+      line,
+      column,
+      code: "steering",
+      message: `${directive} is never in this code: its type check is the platform's, as it is.`,
+    })
+  ),
+  ...ambientDeclarations(program).flatMap(
+    ({ line, column, ...declaration }) => {
+      const ambient = ambientOf(declaration);
+      if (ambient === undefined) {
+        return [];
+      }
+      return [
+        {
+          file,
+          line,
+          column,
+          code: "steering",
+          message:
+            "module" in ambient
+              ? `declare module ${JSON.stringify(ambient.module)} is never in this code: it would declare, or shadow, a module the SDK doesn't give it.`
+              : "declare global is never in this code: it would declare globals its isolate doesn't have, for every file.",
+        },
+      ];
+    }
+  ),
+];
 
 /**
- * What `file`'s triple-slash directives, which TypeScript reads at its
- * top, reach beyond the App's files (`app`, by their path in the check):
- * only a reference path to one of them, nothing else (imports.ts
+ * What `inCheck`'s triple-slash directives, wherever in the file, reach
+ * beyond the App's files (`app`, by their path from the App's root): only
+ * a reference path to one of them, nothing else (steering.ts
  * `referenceError`).
  */
 const referencesIn = (
   file: string,
   inCheck: string,
-  text: string,
-  app: ReadonlyMap<string, string>
+  { comments }: Parsed,
+  app: ReadonlySet<string>
 ): Problem[] =>
-  (getLeadingCommentRanges(text, 0) ?? []).flatMap(({ pos, end }) => {
-    const comment = text.slice(pos, end);
-    if (!comment.startsWith("///")) {
-      return [];
-    }
-    const groups = ownReference.exec(comment)?.groups;
-    if (groups === undefined) {
-      return [
-        problemAt(
-          file,
-          text,
-          pos,
-          "imports",
-          `${comment.trim()} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`
-        ),
-      ];
-    }
-    const name = groups.double ?? groups.single ?? "";
-    const named = path.posix.resolve(path.posix.dirname(inCheck), name);
-    return app.has(named)
+  directivesIn(comments).flatMap(({ directive, line, column }) => {
+    const message = referenceError(directive, inCheck, app);
+    return message === undefined
       ? []
-      : [
-          problemAt(
-            file,
-            text,
-            pos,
-            "imports",
-            `"${name}" is not one of the App's files: a reference path names only those.`
-          ),
-        ];
+      : [{ file, line, column, code: "imports", message }];
   });
 
 /** A diagnostic's message and its chain, as TypeScript flattens them, one level of indent each. */
@@ -612,6 +540,36 @@ const configProblem = (config: string): Problem[] => [
   },
 ];
 
+/**
+ * What the platform's build refuses in a kind's files (`texts`, by their
+ * path from the App's root) before any type check: a file its parser
+ * can't read, or code that steers the check, which so never reaches it
+ * (a `/// <reference lib="dom" />` in one file can't give every other
+ * file the DOM here either); and the triple-slash directives it refuses
+ * beside the check's own errors.
+ */
+const readFiles = (
+  texts: ReadonlyMap<string, string>,
+  kind: Kind,
+  shown: (file: string) => string
+): { refused: Problem[]; references: Problem[] } => {
+  const files = new Set(texts.keys());
+  const refused: Problem[] = [];
+  const references: Problem[] = [];
+  for (const [file, text] of texts) {
+    const parsed = parsedOf(shown(file), text);
+    if (!("program" in parsed)) {
+      refused.push(parsed);
+      continue;
+    }
+    if (kind.steered(file)) {
+      refused.push(...steeringIn(shown(file), parsed));
+    }
+    references.push(...referencesIn(shown(file), file, parsed, files));
+  }
+  return { refused, references };
+};
+
 /** Checks one kind of code by its tsconfig, `config` from the root. */
 const checkKind = (tsrs: WebAssembly.Module, config: string): Problem[] => {
   const configPath = path.resolve(root, config);
@@ -640,19 +598,11 @@ const checkKind = (tsrs: WebAssembly.Module, config: string): Problem[] => {
   const texts = new Map(
     files.map((file) => [file, readFileSync(path.join(dir, file), "utf-8")])
   );
-  // Code that steers the check never reaches it on the platform: its build
-  // refuses it first, so a `/// <reference lib="dom" />` in one file can't
-  // give every other file the DOM here either.
-  const steering = files
-    .filter((file) => kind.steered(file) && !file.endsWith(".tsx"))
-    .flatMap((file) => steeringIn(shown(file), texts.get(file) ?? ""));
-  if (steering.length > 0) {
-    return steering;
+  const { refused, references } = readFiles(texts, kind, shown);
+  if (refused.length > 0) {
+    return refused;
   }
   const app = new Map(files.map((file) => [`/${file}`, path.join(dir, file)]));
-  const references = files.flatMap((file) =>
-    referencesIn(shown(file), `/${file}`, texts.get(file) ?? "", app)
-  );
   const kit = allowed === undefined ? kitRoot : hiddenKitRoot;
   const paths: Record<string, unknown> = {};
   if (allowed !== undefined) {

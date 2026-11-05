@@ -553,7 +553,25 @@ describe(
       const project = packageJsonSchema.parse(
         JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
       );
+      // What the platform accepts, read as its parser reads it: a regular
+      // expression holding `//` after a `)`, and a `///` comment of prose.
+      const valid: Record<string, string> = {
+        "app/workflows/lib/pattern.ts":
+          "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
+        "app/screens/prose.tsx":
+          "/// The notes screen.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
+      };
+      const write = (files: Record<string, string>): void => {
+        for (const [file, source] of Object.entries(files)) {
+          mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
+          writeFileSync(path.join(out, file), source);
+        }
+      };
+      write(valid);
       const accepted = projectCheck(out);
+      for (const file of Object.keys(valid)) {
+        rmSync(path.join(out, file));
+      }
 
       // What the platform's check refuses, each in a file of its own: a
       // type error in a screen and in a compute module; a workflow and
@@ -574,11 +592,19 @@ describe(
           "export const title = (): string => document.title;\n",
         "app/workflows/lib/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
+        // A directive below the top of a screen, which TypeScript ignores
+        // but the platform refuses wherever it stands.
+        "app/screens/late.tsx":
+          'export const late = 1;\n/// <reference types="node" />\n',
       };
       // And what its build refuses before any check: every way a file
       // could steer the check, in a workflow, server code and a compute
       // module alike.
       const steering: Record<string, string> = {
+        // A suppression after a division by a non-null value, never a
+        // regular expression.
+        "app/workflows/lib/non-null.ts":
+          "const x: number | undefined = 1;\nexport const y = x! / 2; // @ts-ignore\nexport const b: string = 1;\n",
         "app/server/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
         "workflows/greet/1.0.0/code/dom.ts":
@@ -589,12 +615,6 @@ describe(
             source,
           ])
         ),
-      };
-      const write = (files: Record<string, string>): void => {
-        for (const [file, source] of Object.entries(files)) {
-          mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
-          writeFileSync(path.join(out, file), source);
-        }
       };
       write(mistyped);
       const failedCheck = projectCheck(out);
@@ -629,6 +649,7 @@ describe(
             "app/server/document.ts": ["TS2584"],
             "app/workflows/lib/kit.ts": ["TS2307"],
             "app/workflows/lib/window.ts": ["TS2304"],
+            "app/screens/late.tsx": ["imports"],
             "app/screens/typo.tsx": ["TS2322"],
             "app/workflows/lib/typed.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],

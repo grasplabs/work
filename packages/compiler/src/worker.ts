@@ -61,7 +61,6 @@ import {
   declarationValueImportError,
   importError,
   codeImportError,
-  referenceError,
   typeFileError,
   rewriteAppCodeImports,
   rewriteCodeImports,
@@ -71,12 +70,7 @@ import {
   screenTypeImportError,
   workflowCode,
 } from "./imports.ts";
-import type {
-  CodeKind,
-  DirectiveSite,
-  ImportSite,
-  ModuleImports,
-} from "./imports.ts";
+import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
   moduleKey,
   moduleRecordOf,
@@ -119,6 +113,8 @@ import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { lintServerCode } from "./server-lint.ts";
 import { callbackParameters, readsStandIns } from "./stand-ins.ts";
+import { referenceError } from "./steering.ts";
+import type { DirectiveSite } from "./steering.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -227,7 +223,7 @@ const refreshHeader = (path: string): string =>
 
 /**
  * What a screen's or a declaration's triple-slash directives reach beyond
- * the App's files (imports.ts `referenceError`), each refused where it is.
+ * the App's files (steering.ts `referenceError`), each refused where it is.
  */
 const referenceErrors = (
   path: string,

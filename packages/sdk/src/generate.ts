@@ -863,8 +863,7 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
     recordType(decisions),
     recordType(queries),
   ];
-  // No trailing comma in a type-argument list: TypeScript 6 refused one,
-  // and the generated text is read the same by every TypeScript.
+  // No trailing comma: TypeScript refuses one in a type-argument list.
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part}`).join(",\n")}\n${indent(1)}>`;
 };
 

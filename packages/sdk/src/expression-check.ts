@@ -2,28 +2,12 @@ import { parseExpression } from "@babel/parser";
 import type { Node } from "@babel/types";
 import { messageOf } from "@grasp-os/shared/errors";
 
-import {
-  literalKey,
-  lowerExpression,
-  typeForm,
-} from "./expression-lowering.ts";
-import type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
+import { literalKey, lowerExpression } from "./expression-lowering.ts";
+import type { ExpressionRead } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
-export {
-  readAt,
-  runtimeNames,
-  sourcePosition,
-  typeReadNames,
-} from "./expression-lowering.ts";
-export type {
-  ExpressionRead,
-  TypeForm,
-  TypeRead,
-} from "./expression-lowering.ts";
-// The methods an expression can call, for the type check's refusal of a
-// method read without a call (`checkExpressionTypes`).
-export { allowedMethods } from "./expression-runtime.ts";
+export { runtimeNames } from "./expression-lowering.ts";
+export type { ExpressionRead } from "./expression-lowering.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -144,7 +128,6 @@ export type CheckedExpression =
        * deep what it writes is at least, whatever it reads.
        */
       literalDepth: number;
-      forTypes: TypeForm;
     }
   | { ok: false; errors: ExpressionError[] };
 
@@ -362,8 +345,8 @@ class Checker {
       case "OptionalMemberExpression": {
         this.visit(node.object, scope);
         // A field named like a method (`at`, `map`) is data, and `$read`
-        // reads it. A method read without a call has a function type,
-        // which the type check refuses (`checkExpressionTypes`).
+        // reads it. A method read without a call is no own data field,
+        // so `$read` never gives the function.
         this.key(node.property, node.computed);
         break;
       }
@@ -542,9 +525,6 @@ export interface CheckOptions {
  * Checks a workflow expression against the subset: every problem found,
  * each with its code, position and fix, or the source to generate from.
  * Throws when a root in `options` is not one `checkRoots` takes.
- * Syntax alone can't tell a method read without a call from a data
- * field of that name, so production must also run the compiler's
- * `checkExpressionTypes`, which refuses it by its type.
  */
 export const checkExpression = (
   source: string,
@@ -568,6 +548,5 @@ export const checkExpression = (
     ok: true,
     source,
     ...lowerExpression(parsed, roots),
-    forTypes: typeForm(parsed, source, parsed.comments ?? []),
   };
 };

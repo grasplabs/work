@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { tsc } from "@tsrs/wasm";
-import { afterAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { compilerOptions } from "./type-check.ts";
 
@@ -20,7 +20,7 @@ const references = path.resolve(
   "../../sdk/test/notes/server/_generated/api.ts"
 );
 
-const scratch = mkdtempSync(path.join(tmpdir(), "grasp-references-"));
+let scratch = "";
 
 /** The errors tsrs reports in `file`, as `TS<code>: <message>`. */
 const errorsIn = async (file: string): Promise<string[]> => {
@@ -51,6 +51,10 @@ const errorsIn = async (file: string): Promise<string[]> => {
 // busy runner, so the time other type-check tests have
 // (apps/core/test/workflow-type-check.test.ts).
 describe("the generated references", { timeout: 120_000 }, () => {
+  beforeAll(() => {
+    scratch = mkdtempSync(path.join(tmpdir(), "grasp-references-"));
+  });
+
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true });
   });

@@ -1,18 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types", "node"],
-    // A definition project's check (src/standalone-check.ts) scans with
-    // TypeScript 7's scanner, the project's own TypeScript: the repo's,
-    // where this package's is TypeScript 6, for its lint's parser.
-    "paths": {
-      "typescript/unstable/ast": [
-        "../../node_modules/typescript/dist/ast/index.d.ts"
-      ],
-      "typescript/unstable/ast/scanner": [
-        "../../node_modules/typescript/dist/ast/scanner.d.ts"
-      ]
-    }
+    "types": ["@cloudflare/workers-types", "node"]
   },
   "include": [
     "src",

@@ -110,13 +110,14 @@ const vendored = [
 /** The catalog packages every project depends on itself. */
 const projectDependencies = ["react", "react-dom"] as const;
 /**
- * Its own development tools, each pinned as the catalog pins it: the
- * checker the platform type-checks App code with (`@tsrs/wasm`, the
- * compiler's), which its check runs (`grasp/check.ts`), and the
- * TypeScript an editor reads it with, the repo's, whose scanner that
- * check reads comments with.
+ * Its own development tools, each pinned as the catalog pins it: what its
+ * check (`grasp/check.ts`) runs as the platform does, the checker App code
+ * is type-checked with (`@tsrs/wasm`, the compiler's) and the parser that
+ * reads its comments and ambient declarations (`@babel/parser`); and the
+ * TypeScript an editor reads it with, the repo's.
  */
 const projectDevDependencies = [
+  "@babel/parser",
   "@tsrs/wasm",
   "typescript",
   "@types/react",
@@ -244,27 +245,13 @@ const newPlan = (): Plan => {
 const jsonText = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
-/**
- * The exact versions `pnpm-workspace.yaml`'s catalog pins, by name: its
- * default `catalog:`, or with `named`, that catalog under `catalogs:`.
- */
-export const readCatalog = (
-  text: string,
-  named?: string
-): Map<string, string> => {
+/** The exact versions `pnpm-workspace.yaml`'s default catalog pins, by name. */
+export const readCatalog = (text: string): Map<string, string> => {
   const catalog = new Map<string, string>();
-  // The default catalog's entries are indented once; a named catalog's
-  // once more, under its name.
   let inCatalog = false;
-  let inCatalogs = false;
   for (const line of text.split("\n")) {
     if (/^\S/u.test(line)) {
-      inCatalog = named === undefined && line.trim() === "catalog:";
-      inCatalogs = named !== undefined && line.trim() === "catalogs:";
-      continue;
-    }
-    if (inCatalogs && /^ {2}\S/u.test(line)) {
-      inCatalog = line.trim() === `${named}:`;
+      inCatalog = line.trim() === "catalog:";
       continue;
     }
     const entry =
