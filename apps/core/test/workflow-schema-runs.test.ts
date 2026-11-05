@@ -571,7 +571,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     });
   });
 
-  it("decides a deadline that fails to evaluate inside a retrying try by its policy", async () => {
+  it("takes a deadline that fails to evaluate inside a retrying try as the expression's failure, not retried", async () => {
     const tries = new Map<string, number>();
     const { source, sealed: withTable } = generated([
       {
@@ -602,10 +602,11 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       retried: keys.filter((key) => key.endsWith(":run")).length,
       caught: tries.has("key:guarded:catch"),
     }).toStrictEqual({
-      // Its second attempt, decided by the code, then the catch's.
+      // An expression's failure (`expression.failed`) isn't one trying
+      // again may fix: no round is offered, and the catch takes it.
       ran: { ended: null, tampered: [] },
-      decided: 1,
-      retried: 1,
+      decided: 0,
+      retried: 0,
       caught: true,
     });
   });
