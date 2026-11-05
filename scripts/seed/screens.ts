@@ -64,7 +64,7 @@ const ${componentOf(alias)} = ({ runId }: { runId: string }) => {
   )
   .join("\n")}
 
-export default function Screen() {
+const Screen = () => {
   const [problem, setProblem] = useState("");
 ${workflows
   .map(
@@ -110,7 +110,9 @@ ${workflows
   .join("\n")}
     </main>
   );
-}
+};
+
+export default Screen;
 `;
 
 /** The screen of each domain that has one: its file's name, title and intro. */
