@@ -162,7 +162,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses a screen's workflow requests: a preview starts, controls and follows no run", async () => {
+  it("refuses a screen's workflow requests as a preview's side effect: it starts, controls and follows no run", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const workflow = {
       resourceId: app,
@@ -211,8 +211,8 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       started,
       watched: pushed.map(({ result }) => outcome({ result })),
     }).toStrictEqual({
-      started: "contract.invalid_request",
-      watched: ["contract.invalid_request"],
+      started: "app.preview_side_effect",
+      watched: ["app.preview_side_effect"],
     });
   });
 

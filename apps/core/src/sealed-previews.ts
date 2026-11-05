@@ -74,6 +74,7 @@ import type { Invocation } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
+import { isWorkflowRequest } from "./screen-workflows.ts";
 import { appCodeAndTestFiles } from "./screens.ts";
 import { schemaRefusal } from "./store-backfill.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
@@ -105,6 +106,11 @@ import type { Draft } from "./workspace.ts";
 // - A workflow reference's queries read runs through the App's binding of
 //   the workflow; a preview binds no resource, so they are refused
 //   (`resource.unavailable`) before anything is read, whatever the alias.
+// - A screen's `useWorkflow` starts, controls or follows a real run: its
+//   requests (screen-workflows.ts) are refused whole as the preview's side
+//   effect (`app.preview_side_effect`), before the draft is loaded. That
+//   is no fault of the draft's, so its check doesn't fail for it, as it
+//   would for a contract error.
 // - The draft reaches outside systems: no resource is bound for its
 //   invocations (no connection, Knowledge, model or other App), so every
 //   resource request is refused by the operation host
@@ -464,13 +470,17 @@ const receiptBytes = 16 * 1024;
 
 /**
  * The call `request` asks of a preview, as `options` take it: refused as
- * `contract.invalid_request` when it isn't of the kind asked for, or reads
- * a window but isn't a screen's query.
+ * the preview's side effect when it is a screen's request of a workflow,
+ * and as `contract.invalid_request` when it isn't of the kind asked for,
+ * or reads a window but isn't a screen's query.
  */
 const previewRequestOf = (
   request: unknown,
   options: PreviewCallOptions
 ): FunctionRequest => {
+  if (isWorkflowRequest(request)) {
+    throw appErrors.create("app.preview_side_effect");
+  }
   const call = readFunctionRequest(request);
   if (options.kind !== undefined && call.reference.kind !== options.kind) {
     throw operationErrors.create("contract.invalid_request");
