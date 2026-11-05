@@ -30,6 +30,10 @@ import { mockIdp } from "./idp.ts";
 
 const idp = mockIdp();
 
+/** How often `part` occurs in `text`. */
+const count = (text: string, part: string): number =>
+  text.split(part).length - 1;
+
 const repeats = 2;
 
 /** The tasks that take access away between their earlier turns and their question. */
@@ -252,7 +256,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     );
   });
 
-  it("ends a turn evicted mid-answer as failed, never as answered from the part it streamed, and answers when asked again", async () => {
+  it("fails the ask a restart cut off mid-answer, goes on with its turn to the whole answer, never the part it streamed, and answers when asked again", async () => {
     const { durability, durabilityGate } = await run();
     const crashes = durability.filter(({ kind }) => kind === "crash");
     expect({
@@ -271,6 +275,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
           ledger,
         }) => ({
           arm,
+          // The ask the restart cut off fails: its asker is gone.
           failed: first.failed,
           completed: first.completed,
           answer: answers[0],
@@ -278,13 +283,19 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
           // and the chat showed them to its person, before the restart.
           streamed,
           shown,
-          // The chat tells the person, and the next turn, that it was cut
-          // short; nothing it streamed is kept, in the chat or in what the
-          // retry sends the model.
-          told: afterRestart.startsWith("I was interrupted before I finished"),
+          // The chat's own object goes on with the turn as it wakes: asked
+          // for again, the whole answer, as asking again gives.
+          resumed: afterRestart === answers[1],
+          // What it streamed is kept only as the start of a whole answer,
+          // never on its own, in the chat or in what the retry sends the
+          // model.
           kept: [
-            chatAfterRestart.includes(streamed),
-            retrySent.includes(streamed),
+            count(chatAfterRestart, streamed) ===
+              count(
+                chatAfterRestart,
+                JSON.stringify(afterRestart).slice(1, -1)
+              ),
+            count(retrySent, streamed) === count(retrySent, afterRestart),
           ],
           retried: [retry.failed, retry.completed],
           // The cut answer's request is held for reconciliation, which
@@ -317,8 +328,8 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         answer: "",
         streamed: "ANSWER: 37",
         shown: "ANSWER: 37",
-        told: true,
-        kept: [false, false],
+        resumed: true,
+        kept: [true, true],
         retried: [false, true],
         ledger: {
           held: true,

@@ -39,7 +39,7 @@ import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { z } from "zod";
 
 import { apisFor } from "./agent-apis.ts";
-import { isMessage } from "./agent-messages.ts";
+import { isMessage, showThinkingName } from "./agent-messages.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
@@ -152,6 +152,10 @@ const gateway = "grasp";
  * the input, so the turn's last input is found by it (`#lastInputOf`).
  */
 const noticeRequestPrefix = (turnId: string): string => `notice:${turnId}:`;
+
+/** What a turn that only showed its thinking is asked, once, before it ends. */
+const wordsPlease =
+  "You showed your thinking in the brain, but wrote no answer. Now write your answer to the person in words.";
 
 /** How soon the object wakes to sync again after a sync failed. */
 const syncRetryMs = 15_000;
@@ -321,6 +325,19 @@ const liveSchema = z.object({
  * again keeps one, and copied as every other entry is.
  */
 const stoppedKind = "grasp.stopped";
+
+/**
+ * The kinds of entry that follow a response in a turn: another response
+ * (pi asking again for one a restart cut short), a call's result, a
+ * stopped turn's end, or an input.
+ */
+const turnKinds: ReadonlySet<string> = new Set([
+  "pi.assistant",
+  "pi.tool-result",
+  stoppedKind,
+  questionKind,
+  noticeKind,
+]);
 
 /** How the chat ends a turn stopped before the model said anything: core's own. */
 const cancelledMessage = (): AssistantMessage => ({
@@ -724,7 +741,21 @@ export class ChatHarness {
     if (stopped?.turnId === request.turnId) {
       await this.#conversation.abort(context);
     }
-    const { settled, newest } = await this.#ended(request.turnId, submission);
+    let { settled, newest } = await this.#ended(request.turnId, submission);
+    if (await this.#wantsWords(newest)) {
+      // Once a turn, by its request ID, however often it is asked.
+      await this.#conversation.submit(
+        {
+          type: "input",
+          content: wordsPlease,
+          requestId: `${noticeRequestPrefix(request.turnId)}words`,
+          whenBusy: "steer",
+          entry: { kind: noticeKind },
+        },
+        context
+      );
+      ({ settled, newest } = await this.#ended(request.turnId, submission));
+    }
     const end = await this.#endOf(settled);
     if (end.stopped === "history_revoked") {
       await this.#rebaseIfNeeded(request);
@@ -828,6 +859,48 @@ export class ChatHarness {
     const last = await this.#lastInputOf(turnId);
     const settled = await (last ?? asked).wait(context);
     return newest === undefined ? { settled } : { settled, newest };
+  }
+
+  /**
+   * Whether the turn ended with `newest`, a response of no words, after it
+   * showed its thinking in the brain: it is asked once for its answer
+   * (`wordsPlease`), as a turn ends with what the person reads.
+   */
+  async #wantsWords(newest: EntryRecord | undefined): Promise<boolean> {
+    const [last] = newest?.model ?? [];
+    if (
+      newest?.kind !== "pi.assistant" ||
+      last?.role !== "assistant" ||
+      last.stopReason !== "stop" ||
+      textOf(last).trim() !== ""
+    ) {
+      return false;
+    }
+    let cursor: Cursor | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- newest first, back to the question
+      const page = await this.#conversation.entries(
+        { order: "descending" },
+        50,
+        cursor,
+        context
+      );
+      for (const entry of page.items) {
+        if (entry.kind === questionKind) {
+          return false;
+        }
+        const [message] = entry.model ?? [];
+        if (
+          message?.role === "toolResult" &&
+          message.toolName === showThinkingName &&
+          !message.isError
+        ) {
+          return true;
+        }
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    return false;
   }
 
   /**
@@ -1449,9 +1522,7 @@ export class ChatHarness {
   async #copy(scope: TurnRequest["scope"]): Promise<void> {
     const copied = await this.#harness.snapshot(CopiedDoc, context);
     const after = copied?.after ?? null;
-    const shown: TurnMessage[] = [];
-    const seen: EntryId[] = [];
-    let last: EntryId | undefined;
+    const entries: EntryRecord[] = [];
     let cursor;
     do {
       // oxlint-disable-next-line no-await-in-loop -- page after page
@@ -1464,20 +1535,29 @@ export class ChatHarness {
         cursor,
         context
       );
-      for (const entry of page.items) {
-        if (entry.id !== after) {
-          last = entry.id;
-          seen.push(entry.id);
-          const thinkingMs = this.#thought.get(entry.id);
-          for (const message of shownOf(entry)) {
-            shown.push(
-              thinkingMs === undefined ? message : { ...message, thinkingMs }
-            );
-          }
-        }
-      }
+      entries.push(...page.items.filter(({ id }) => id !== after));
       cursor = page.next;
     } while (cursor !== undefined);
+    const shown: TurnMessage[] = [];
+    const seen: EntryId[] = [];
+    let last: EntryId | undefined;
+    for (const [index, entry] of entries.entries()) {
+      const cut = this.#cutAttempt(entry, entries.slice(index + 1));
+      // Copied only once it is known whether pi went on after it.
+      if (cut === undefined) {
+        break;
+      }
+      last = entry.id;
+      seen.push(entry.id);
+      if (!cut) {
+        const thinkingMs = this.#thought.get(entry.id);
+        for (const message of shownOf(entry)) {
+          shown.push(
+            thinkingMs === undefined ? message : { ...message, thinkingMs }
+          );
+        }
+      }
+    }
     if (last === undefined) {
       return;
     }
@@ -1501,5 +1581,32 @@ export class ChatHarness {
     for (const id of seen) {
       this.#thought.delete(id);
     }
+  }
+
+  /**
+   * Whether `entry` is a response a restart cut short that pi then asked
+   * for again: kept by pi as aborted, outside the model's context, and
+   * never shown, as the person gets the whole answer from the attempt
+   * after it. One a stop cut short ends its run, and is shown. Unknown
+   * (`undefined`) while it is the newest response and pi still runs.
+   * `later` are the entries committed after it.
+   */
+  #cutAttempt(
+    entry: EntryRecord,
+    later: readonly EntryRecord[]
+  ): boolean | undefined {
+    const [message] = entry.model ?? [];
+    if (
+      entry.kind !== "pi.assistant" ||
+      message?.role !== "assistant" ||
+      message.stopReason !== "aborted"
+    ) {
+      return false;
+    }
+    const next = later.find(({ kind }) => turnKinds.has(kind));
+    if (next === undefined) {
+      return this.#running ? undefined : false;
+    }
+    return next.kind === "pi.assistant";
   }
 }

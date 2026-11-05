@@ -320,12 +320,17 @@ describe("show_thinking in a chat", slow, () => {
         shown,
         first: told.split("\n")[0],
       })),
-      askedForWords: kept.some(
-        (message) =>
-          message.role === "system" &&
-          typeof message.content === "string" &&
-          message.content.startsWith("You showed your thinking")
-      ),
+      // Asked as the model's input, never shown as the person's.
+      askedForWords: [
+        JSON.stringify(chats.provider.requests.at(-1)?.body).includes(
+          "You showed your thinking in the brain, but wrote no answer."
+        ),
+        kept.some(
+          (message) =>
+            message.role === "user" &&
+            JSON.stringify(message.content).includes("You showed your thinking")
+        ),
+      ],
       answer:
         answer?.role === "assistant"
           ? answer.content.flatMap((part) =>
@@ -345,7 +350,7 @@ describe("show_thinking in a chat", slow, () => {
         { shown: true, first: "Shown in the brain." },
         { shown: true, first: "Shown in the brain." },
       ],
-      askedForWords: true,
+      askedForWords: [true, false],
       answer: ["Only Ops says tickets come in through Zendesk."],
       steps: [
         {
@@ -367,43 +372,6 @@ describe("show_thinking in a chat", slow, () => {
           move: "together",
         },
       ],
-    });
-  });
-
-  it("keeps the turn's last rounds for the answer, however many steps the model would show", async () => {
-    const ids = await teamInTheBrain();
-    const reading = thinks({
-      step: "Reading the teams.",
-      shape: "same-pain",
-      move: "teams",
-      notes: ["Ops"],
-    });
-    const { chats } = await askedWithBrain(
-      ids,
-      ...Array.from({ length: 19 }, () => reading),
-      says("Ops is the only team I can see.")
-    );
-    const { chat, ask } = await chats.newChat();
-    await ask("Who hurts?");
-
-    const kept = await transcript(chats.stub, chat.id);
-    const told = toldOf(kept);
-    const answer = kept.findLast((message) => message.role === "assistant");
-    expect({
-      lastTold: told.at(-1),
-      answered:
-        answer?.role === "assistant" &&
-        answer.content.some(
-          (part) =>
-            part.type === "text" &&
-            part.text === "Ops is the only team I can see."
-        ),
-    }).toStrictEqual({
-      lastTold: {
-        shown: false,
-        told: "Not shown: the rounds left are for your answer. Write it now, in words.",
-      },
-      answered: true,
     });
   });
 
