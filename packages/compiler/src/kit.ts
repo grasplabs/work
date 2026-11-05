@@ -9,8 +9,6 @@
  * map them to `data:` URLs with an import map, and they resolve as they are
  * between modules loaded into a Worker.
  */
-import type { Linter } from "eslint/universal";
-
 export interface Kit {
   /** The specifiers App code may import, e.g. `@grasp-os/ui/components/button`. */
   imports: string[];
@@ -32,14 +30,6 @@ export interface Kit {
    * builds and React Fast Refresh. Its own chunks, so its own graph.
    */
   previewModuleImports: Record<string, string[]>;
-  /**
-   * The kit as the design-system lint reads it from disk, by path
-   * relative to the App: `components.json`, the theme and the kit's
-   * component sources.
-   */
-  lintProject: Record<string, string>;
-  /** The design-system lint's rules (@shadcn/lint's), as the repo lints with them. */
-  lintRules: Linter.RulesRecord;
 }
 
 /** The kit's modules, shared by every App of a release. */
@@ -83,7 +73,7 @@ export const compilerAssets = {
   ultracite: "ultracite.js",
   /**
    * oxlint's, oxfmt's and oxc's parser's WebAssembly (oxc-wasm/), which
-   * Ultracite's isolate lints with and the compiler's design lint parses with.
+   * Ultracite's isolate lints with, and parses its ESLint lints with.
    */
   oxcWasm: "oxc.wasm",
   /** esbuild's WebAssembly, which the package builder runs. */

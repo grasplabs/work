@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
-import { buildOnSave } from "../src/save-builds.ts";
+import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
 import { buildScreens, screenCode } from "../src/screens.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
@@ -370,13 +370,6 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
       },
     ],
     [
-      "design-system",
-      {
-        "screens/desk.tsx":
-          'export default function Desk() {\n  return <p className="bg-red-500">desk</p>;\n}\n',
-      },
-    ],
-    [
       "structure",
       {
         "components/note.tsx":
@@ -403,4 +396,25 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
       ).toContain(category);
     }
   );
+
+  it("names the design system's findings by their category in the lint, apart from the code's", async () => {
+    const linted = await draftLintBuild(env, {
+      app: appIdSchema.parse(crypto.randomUUID()),
+      version: 1,
+      files: {
+        "screens/desk.tsx":
+          'export default function Desk() {\n  debugger;\n  return <p className="bg-red-500">desk</p>;\n}\n',
+      },
+    });
+
+    expect(
+      linted.diagnostics
+        .filter(
+          ({ rule }) =>
+            rule === "shadcn/no-raw-colors" || rule === "no-debugger"
+        )
+        .map(({ rule, category }) => `${rule} ${category}`)
+        .toSorted()
+    ).toStrictEqual(["no-debugger code", "shadcn/no-raw-colors design-system"]);
+  });
 });

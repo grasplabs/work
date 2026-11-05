@@ -1,45 +1,111 @@
 /**
- * The parser of the compiler's ESLint lints (lint.ts, server-lint.ts), and
- * the one @shadcn/lint reads the kit's components with: oxc's, on oxc.wasm
- * (oxc-wasm/src/lib.rs `parse`, the WebAssembly Ultracite's lint runs on),
- * with typescript-eslint's own scope analysis and visitor keys. That is
- * typescript-eslint's parser less TypeScript: oxc answers TS-ESTree, the
- * tree typescript-eslint converts TypeScript's to, and ESLint's tokens
- * (oxc_estree_tokens, which oxc checks against typescript-eslint's), and
- * TypeScript 7 has no JavaScript API to run typescript-eslint's on.
+ * The parser of the lint isolate's ESLint lints (lint.ts, server-lint.ts),
+ * and the one @shadcn/lint reads the kit's components with: oxc's, on the
+ * oxc.wasm instance Ultracite's lint runs on (oxc-wasm/src/lib.rs
+ * `parse`), with typescript-eslint's own scope analysis and visitor keys.
+ * That is typescript-eslint's parser less TypeScript: oxc answers
+ * TS-ESTree, the tree typescript-eslint converts TypeScript's to, and
+ * ESLint's tokens (oxc_estree_tokens, which oxc checks against
+ * typescript-eslint's), and TypeScript 7 has no JavaScript API to run
+ * typescript-eslint's on.
  *
- * What it adds is what ESLint reads that oxc's ESTree leaves out: each
- * node's, comment's and token's line and column (`loc`), from its offsets,
- * as oxlint's own JavaScript plugins work them out.
+ * What it adds is what ESLint reads that oxc's JSON leaves out: each
+ * node's, comment's and token's `range` and line and column (`loc`), from
+ * its offsets, as oxlint's own JavaScript plugins work them out, and the
+ * values of regular expression and BigInt literals.
  */
 import { analyze } from "@typescript-eslint/scope-manager";
 import { visitorKeys } from "@typescript-eslint/visitor-keys";
 import type { AST, Linter, Scope, SourceCode } from "eslint";
 import { z } from "zod";
 
-import { oxcParserOf } from "./oxc.ts";
+/** oxc.wasm's `parse` (oxc.ts `Oxc.parse`): JSON of what it parsed. */
+type Parse = (path: string, source: string) => string;
 
-let parse: ((path: string, source: string) => string) | undefined;
+let parse: Parse | undefined;
 
 /**
- * Starts the parser on oxc.wasm's `module`, once per isolate: an instance
- * made on the first parse and kept (oxc.ts).
+ * Starts the parser on oxc.wasm's `parse`, once per isolate: the lint's
+ * own instance (ultracite-worker.ts), so the isolate holds one.
  */
-export const startOxcParser = (module: WebAssembly.Module): void => {
-  parse ??= oxcParserOf(module);
+export const startOxcParser = (oxcParse: Parse): void => {
+  parse ??= oxcParse;
 };
 
-const spanSchema = z.looseObject({ start: z.number(), end: z.number() });
+/**
+ * What a file oxc.wasm couldn't parse says: past what its stack and
+ * memory hold, nested hundreds deep or too large (oxc-wasm/src/lib.rs).
+ */
+export const unparsableMessage =
+  "This file is too large or nested too deep for the lint to read: split this file into smaller ones, and flatten anything nested hundreds deep.";
 
-/** What oxc.wasm's `parse` answers. */
+/** A file `parse` couldn't take: it trapped, in a fresh instance too, or ran out of stack. */
+class UnparsableFileError extends Error {
+  constructor() {
+    super(unparsableMessage);
+    this.name = "UnparsableFileError";
+  }
+}
+
+/**
+ * Whether `error` is the stack or oxc.wasm's memory running out: a trap
+ * (`unreachable`, as an allocation that fails aborts) or V8's stack.
+ */
+const ranOut = (error: unknown): boolean =>
+  error instanceof RangeError ||
+  error instanceof WebAssembly.RuntimeError ||
+  error instanceof UnparsableFileError;
+
+/**
+ * Whether ESLint's `message` says its file couldn't be read at all
+ * (`UnparsableFileError`), rather than that it doesn't parse.
+ */
+export const isUnparsable = (message: Linter.LintMessage): boolean =>
+  message.fatal === true &&
+  message.message === `Parsing error: ${unparsableMessage}`;
+
+/**
+ * `lint()`, or `unparsable()` should it run out of stack: ESLint walks a
+ * tree as deep as it goes, which may be past where oxc.wasm stopped.
+ */
+export const orUnparsable = <T>(lint: () => T, unparsable: () => T): T => {
+  try {
+    return lint();
+  } catch (error) {
+    if (ranOut(error)) {
+      return unparsable();
+    }
+    throw error;
+  }
+};
+
+/** A node's, a comment's or a token's offsets, which oxc gives them all. */
+interface Span {
+  start: number;
+  end: number;
+}
+
+const isSpan = (value: unknown): value is Span =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof Reflect.get(value, "start") === "number" &&
+  typeof Reflect.get(value, "end") === "number";
+
+/**
+ * What oxc.wasm's `parse` answers. Each token is checked for its offsets
+ * alone and kept as it is, not copied: a file has about as many as it
+ * has words.
+ */
 const parsedSchema = z.union([
   z.strictObject({
-    program: z.custom<object>(
+    node: z.custom<object>(
       (value) =>
         typeof value === "object" &&
         value !== null &&
         Reflect.get(value, "type") === "Program"
     ),
+    /** Where each regular expression and BigInt literal is (`fixed`). */
+    fixes: z.array(z.array(z.union([z.string(), z.number()]))),
     comments: z.array(
       z.strictObject({
         type: z.enum(["Line", "Block"]),
@@ -48,7 +114,7 @@ const parsedSchema = z.union([
         end: z.number(),
       })
     ),
-    tokens: z.array(spanSchema),
+    tokens: z.array(z.custom<Span>(isSpan)),
   }),
   z.strictObject({
     error: z.strictObject({ message: z.string(), start: z.number() }),
@@ -57,20 +123,85 @@ const parsedSchema = z.union([
 
 type Parsed = z.infer<typeof parsedSchema>;
 
-/** `source` (`path`, which picks the language) parsed by oxc. */
+/**
+ * Gives each literal `fixes` names its `value`, a `RegExp` or a `bigint`,
+ * which JSON can't hold, as oxc-parser's own JavaScript does
+ * (`jsonParseAst`): `null` stays for a pattern this engine can't compile.
+ */
+const fixed = (program: object, fixes: (string | number)[][]): void => {
+  for (const fix of fixes) {
+    let node: unknown = program;
+    for (const key of fix) {
+      node =
+        typeof node === "object" && node !== null
+          ? Reflect.get(node, key)
+          : undefined;
+    }
+    if (typeof node !== "object" || node === null) {
+      continue;
+    }
+    const bigint: unknown = Reflect.get(node, "bigint");
+    const regex: unknown = Reflect.get(node, "regex");
+    if (typeof bigint === "string") {
+      Reflect.set(node, "value", BigInt(bigint));
+    } else if (typeof regex === "object" && regex !== null) {
+      try {
+        Reflect.set(
+          node,
+          "value",
+          new RegExp(
+            String(Reflect.get(regex, "pattern")),
+            String(Reflect.get(regex, "flags"))
+          )
+        );
+      } catch {
+        // Flags or syntax this engine doesn't have: `null`, as oxc-parser leaves it.
+      }
+    }
+  }
+};
+
+/**
+ * `source` (`path`, which picks the language) parsed by oxc. Throws
+ * `UnparsableFileError` should oxc.wasm run out of stack or memory on it.
+ */
 const parsed = (path: string, source: string): Parsed => {
   if (parse === undefined) {
     throw new Error("oxc's parser hasn't started (startOxcParser)");
   }
-  return parsedSchema.parse(JSON.parse(parse(path, source)));
+  let text: string;
+  try {
+    text = parse(path, source);
+  } catch (error) {
+    if (ranOut(error)) {
+      throw new UnparsableFileError();
+    }
+    throw error;
+  }
+  const found = parsedSchema.parse(JSON.parse(text));
+  if ("node" in found) {
+    fixed(found.node, found.fixes);
+  }
+  return found;
 };
 
-/** The comments of `source` (`path`), with where each is; none if it doesn't parse. */
+/**
+ * The comments of `source` (`path`), with where each is; none if it
+ * doesn't parse, or can't be read (the lint's parse says so).
+ */
 export const commentsOf = (
   path: string,
   source: string
 ): { range: [number, number]; type: "Line" | "Block"; value: string }[] => {
-  const found = parsed(path, source);
+  let found: Parsed;
+  try {
+    found = parsed(path, source);
+  } catch (error) {
+    if (error instanceof UnparsableFileError) {
+      return [];
+    }
+    throw error;
+  }
   return "error" in found
     ? []
     : found.comments.map(({ type, value, start, end }) => ({
@@ -95,7 +226,7 @@ export const parseSync = (
         program: { type: "Program", body: [] },
         errors: [{ severity: "Error", message: found.error.message }],
       }
-    : { program: found.program, errors: [] };
+    : { program: found.node, errors: [] };
 };
 
 /** What ends a line, as ESLint counts lines. */
@@ -132,37 +263,26 @@ const positionsIn = (text: string): ((offset: number) => Position) => {
   };
 };
 
-const isRange = (value: unknown): value is [number, number] =>
-  Array.isArray(value) &&
-  typeof value[0] === "number" &&
-  typeof value[1] === "number";
+/** A node, a comment or a token as ESLint reads it: its offsets as `range`, and its `loc`, set on it. */
+const placed = (span: Span, at: (offset: number) => Position): void => {
+  Object.assign(span, {
+    range: [span.start, span.end],
+    loc: { start: at(span.start), end: at(span.end) },
+  });
+};
 
-/** Gives every node under `value` its `loc` from its `range`. */
+/** Gives every node under `value` its `range` and `loc`, from its offsets. */
 const locate = (value: unknown, at: (offset: number) => Position): void => {
   if (typeof value !== "object" || value === null) {
     return;
   }
-  const range: unknown = Reflect.get(value, "range");
-  if (isRange(range) && typeof Reflect.get(value, "type") === "string") {
-    Reflect.set(value, "loc", { start: at(range[0]), end: at(range[1]) });
+  if (isSpan(value) && typeof Reflect.get(value, "type") === "string") {
+    placed(value, at);
   }
   for (const child of Object.values(value)) {
     locate(child, at);
   }
 };
-
-/** A comment or a token as ESLint reads it: its offsets as `range`, and its `loc`. */
-const placed = <Span extends { start: number; end: number }>(
-  span: Span,
-  at: (offset: number) => Position
-): Span & {
-  range: [number, number];
-  loc: { start: Position; end: Position };
-} => ({
-  ...span,
-  range: [span.start, span.end],
-  loc: { start: at(span.start), end: at(span.end) },
-});
 
 /** A parse error as ESLint reports one: where it is, 1-based. */
 const syntaxError = (
@@ -199,17 +319,28 @@ export const parser: Linter.Parser = {
     if ("error" in found) {
       throw syntaxError(found.error.message, found.error.start, at);
     }
-    const { program, comments, tokens } = found;
-    locate(program, at);
-    Object.assign(program, {
-      sourceType,
-      comments: comments.map((comment) => placed(comment, at)),
-      tokens: tokens.map((token) => placed(token, at)),
-    });
+    const { node: program, comments, tokens } = found;
     // SAFETY: oxc answers TS-ESTree (its README: any deviation is a bug),
     // the tree typescript-eslint's scope analysis reads.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const tree = program as Parameters<typeof analyze>[0];
+    // Both walk the whole tree, as deep as oxc.wasm parsed it.
+    const scopeManager = orUnparsable(
+      () => {
+        locate(program, at);
+        for (const comment of comments) {
+          placed(comment, at);
+        }
+        for (const token of tokens) {
+          placed(token, at);
+        }
+        Object.assign(program, { sourceType, comments, tokens });
+        return analyze(tree, { sourceType });
+      },
+      () => {
+        throw new UnparsableFileError();
+      }
+    );
     return {
       // SAFETY: the same tree, which ESLint reads as ESTree: TS-ESTree is
       // ESTree with TypeScript's nodes added.
@@ -218,7 +349,7 @@ export const parser: Linter.Parser = {
       // SAFETY: typescript-eslint's scope analysis, which ESLint reads as
       // its own, as typescript-eslint's parser hands it over.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      scopeManager: analyze(tree, { sourceType }) as Scope.ScopeManager,
+      scopeManager: scopeManager as Scope.ScopeManager,
       visitorKeys: keys,
     };
   },

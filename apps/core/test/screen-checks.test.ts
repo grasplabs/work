@@ -1,4 +1,8 @@
-import { startAppCompiler, startTypeChecker } from "@grasp-os/compiler";
+import {
+  startAppCompiler,
+  startTypeChecker,
+  startUltracite,
+} from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import { generatedPaths, symbolicModules } from "@grasp-os/sdk/host";
 import { env } from "cloudflare:workers";
@@ -131,6 +135,31 @@ const withLine = (from: string, to: string): Record<string, string> => {
   return { "screens/tickets.tsx": screen.replace(from, to) };
 };
 
+/** What the design system's rules are named by: @shadcn/lint's and Grasp's own. */
+const designRule = /^(?:shadcn|grasp)\//u;
+
+/**
+ * What the design system's lint finds in `files`, in the lint's isolate
+ * (Ultracite's `lint`), with `beside` on disk, and whether it passes.
+ */
+const designLint = async (
+  files: Record<string, string>,
+  beside?: Record<string, string>
+): Promise<{ ok: boolean; diagnostics: Diagnostic[] }> => {
+  const linted = await startUltracite(env.LOADER, env.ASSETS).lint(
+    files,
+    beside
+  );
+  const diagnostics = Object.keys(linted)
+    .toSorted()
+    .flatMap((path) => linted[path] ?? [])
+    .filter(({ rule }) => designRule.test(rule));
+  return {
+    ok: diagnostics.every(({ severity }) => severity !== "error"),
+    diagnostics,
+  };
+};
+
 // Every build starts an isolate with the compiler in it.
 describe("screen checks", { timeout: 60_000 }, () => {
   it("passes a clean screen, with the App's server types", async () => {
@@ -247,236 +276,7 @@ export default function Server() {
     expect(built.diagnostics[0]?.rule).toBe("compile");
   });
 
-  it("fails a restyled component, naming its variants and sizes", async () => {
-    const built = await buildScreens(
-      env,
-      app(
-        withLine(
-          `<Button size="sm">`,
-          `<Button size="sm" className="rounded-full px-8">`
-        )
-      ),
-      "app-test"
-    );
-
-    expect(built.ok).toBeFalsy();
-    expect(
-      built.diagnostics.map((diagnostic) => summary(diagnostic))
-    ).toStrictEqual([
-      expect.stringContaining(
-        'screens/tickets.tsx:44:41 shadcn/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Use a variant: default, outline, secondary, ghost, destructive, link, hint, ask, highlight.'
-      ),
-      expect.stringContaining(
-        'screens/tickets.tsx:44:41 shadcn/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing. Use a size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline)'
-      ),
-    ]);
-  });
-
-  it("knows the kit's own classes and reads disable comments as oxlint does, as an exported App's lint does", async () => {
-    const built = await buildScreens(env, app(designCases), "app-test");
-
-    expect({
-      ok: built.ok,
-      found: built.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
-      // Only the class Tailwind doesn't know: the theme's `ease-house`,
-      // tw-animate-css's `animate-in` and `fade-in` and the kit's own
-      // `type-display` are classes the kit has.
-      unknown: built.diagnostics.map(({ message }) =>
-        message.slice(0, message.indexOf(" is not"))
-      ),
-    }).toStrictEqual({
-      ok: false,
-      found: designFindings,
-      unknown: ['"foo-bar"'],
-    });
-  });
-
-  it("fails a raw colour, naming the theme token to use", async () => {
-    const built = await buildScreens(
-      env,
-      app(
-        withLine(
-          `<main className="flex flex-col gap-4 p-6">`,
-          `<main className="flex flex-col gap-4 bg-red-500 p-6">`
-        )
-      ),
-      "app-test"
-    );
-
-    expect(built.ok).toBeFalsy();
-    expect(
-      built.diagnostics.map((diagnostic) => summary(diagnostic))
-    ).toStrictEqual([
-      expect.stringContaining(
-        'screens/tickets.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: '
-      ),
-    ]);
-    // The theme's nearest red: the warmth of the brain's dots (the
-    // brand's error red is further off).
-    expect(built.diagnostics[0]?.message).toContain("bg-brain-heat");
-    expect(built.diagnostics[0]?.fix).toBe('Replace with "bg-brain-heat".');
-  });
-
-  it("fails every other way a screen styles itself outside the kit, or loads from outside, saying what to do", async () => {
-    const built = await buildScreens(
-      env,
-      app({
-        "screens/escapes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
-import { useEffect, useRef } from "react";
-
-export default function Escapes() {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (box.current) {
-      box.current.style.color = "red";
-      box.current.style.setProperty("--x", "1");
-      box.current.setAttribute("style", "color: red");
-    }
-    const sheet = document.createElement("style");
-    document.head.append(sheet);
-    document.adoptedStyleSheets = [new CSSStyleSheet()];
-    const elements = { button: document.createElement("button") };
-    elements.button.style.color = "red";
-  }, []);
-  return (
-    <div ref={box}>
-      <link rel="stylesheet" href="https://cdn.example/theme.css" />
-      <img alt="" src="https://cdn.example/logo.png" />
-      <img alt="" srcSet="data:image/png;base64,AAAA 1x,https://cdn.example/logo@2x.png 2x" />
-      <img alt="" srcSet="/local.png (foo(bar),https://cdn.example/image.png 2x" />
-      <div className="!p-2 gap-2" />
-      <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
-      <div className={cn("gap-2", [{ "p-4!": true }])} />
-      <div className={\`md:!flex \${["gap", "2"].join("-")}\`} />
-    </div>
-  );
-}
-`,
-      }),
-      "app-test"
-    );
-
-    expect(built.ok).toBeFalsy();
-    expect(
-      built.diagnostics
-        .filter(({ file }) => file === "screens/escapes.tsx")
-        .map(({ line, rule }) => `${line} ${rule}`)
-    ).toStrictEqual([
-      "8 grasp/no-style-escapes",
-      "9 grasp/no-style-escapes",
-      "10 grasp/no-style-escapes",
-      "12 grasp/no-style-escapes",
-      "13 grasp/no-style-escapes",
-      "14 grasp/no-style-escapes",
-      "14 grasp/no-style-escapes",
-      "16 grasp/no-style-escapes",
-      "20 grasp/no-remote-resources",
-      "21 grasp/no-remote-resources",
-      "22 grasp/no-remote-resources",
-      "23 grasp/no-remote-resources",
-      "24 grasp/no-important",
-      "25 grasp/no-style-escapes",
-      "26 grasp/no-important",
-      "27 grasp/no-important",
-    ]);
-    // Each says what to do instead.
-    expect(
-      built.diagnostics.every(({ message }) =>
-        /kit|lucide-react|data: or blob:/u.test(message)
-      )
-    ).toBeTruthy();
-  });
-
-  it("fails a screen that names WebRTC or makes a nested document, saying what to do", async () => {
-    const built = await buildScreens(
-      env,
-      app({
-        "screens/peers.tsx": `import { useEffect, useRef } from "react";
-
-export default function Peers() {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const connection = new RTCPeerConnection();
-    const legacy = window.webkitRTCPeerConnection;
-    const channel: RTCDataChannel | undefined = undefined;
-    const quoted = globalThis["RTCIceTransport"];
-    const nested = document.createElement("iframe");
-    const realm = nested.contentWindow;
-    void [connection, legacy, channel, quoted, realm, box];
-  }, []);
-  return (
-    <div ref={box}>
-      <iframe title="nested" />
-    </div>
-  );
-}
-`,
-      }),
-      "app-test"
-    );
-
-    expect(built.ok).toBeFalsy();
-    expect(
-      built.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-peer-connections")
-        .map(({ line, rule }) => `${line} ${rule}`)
-    ).toStrictEqual([
-      "6 grasp/no-peer-connections",
-      "7 grasp/no-peer-connections",
-      "8 grasp/no-peer-connections",
-      "9 grasp/no-peer-connections",
-      "10 grasp/no-peer-connections",
-      "11 grasp/no-peer-connections",
-      "16 grasp/no-peer-connections",
-    ]);
-    // Each says what to do instead.
-    expect(
-      built.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-peer-connections")
-        .every(({ message }) => message.includes("through its App's functions"))
-    ).toBeTruthy();
-  });
-
-  it("fails a plain form, which never submits in a screen's frame, naming the kit's form", async () => {
-    const built = await buildScreens(
-      env,
-      app({
-        "screens/ask.tsx": `export default function Ask() {
-  return (
-    <form onSubmit={(event) => event.preventDefault()}>
-      <button type="submit">Ask</button>
-    </form>
-  );
-}
-`,
-      }),
-      "app-test"
-    );
-
-    expect({
-      ok: built.ok,
-      forms: built.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-bare-forms")
-        .map(({ file, line, column, fix }) => ({
-          file,
-          line,
-          column,
-          kit: fix?.includes("@grasp-os/ui/form"),
-        })),
-    }).toStrictEqual({
-      ok: false,
-      forms: [
-        {
-          file: "screens/ask.tsx",
-          line: 3,
-          column: 5,
-          kit: true,
-        },
-      ],
-    });
-  });
-
-  it("fails a compile error, a type error and a restyle in one build, none hiding another", async () => {
+  it("fails a compile error and a type error in one build, none hiding another, and leaves a restyle to the lint", async () => {
     const built = await buildScreens(
       env,
       app({
@@ -517,7 +317,6 @@ export default function When({ open }: { open: boolean }) {
         "screens/tickets.tsx TS2322",
         "screens/when.tsx TS1345",
         "screens/when.tsx compile",
-        "screens/when.tsx shadcn/no-restyle",
       ],
     });
   });
@@ -572,9 +371,333 @@ export default function Writer() {
     ).toStrictEqual(["screens/writer.tsx:6 TS7006"]);
   });
 
+  it("checks a typical screen quickly once the checker's isolate is warm", async () => {
+    const { request } = z
+      .object({ typeCheck: z.object({ request: z.unknown() }) })
+      .parse(
+        await callStub(
+          startAppCompiler(env.LOADER, env.ASSETS, "app-test"),
+          "build",
+          ["screens", typicalApp]
+        )
+      ).typeCheck;
+    const checker = startTypeChecker(env.LOADER, env.ASSETS);
+    await expect(callStub(checker, "check", [request])).resolves.toStrictEqual(
+      []
+    );
+
+    // The fastest of a few runs: a shared runner's pauses (other jobs,
+    // garbage collection) only ever add time. A warm check takes about
+    // 100 ms on a laptop, well inside the 1 s the checks may add to a
+    // build; the bound here is looser, 5 s, so that a slow or busy CI
+    // runner can't fail it, while a check gone badly wrong (runaway work)
+    // still does. The test's clock only moves on I/O; each RPC to the
+    // checker is I/O, so the times are real.
+    const timings: number[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      const started = performance.now();
+      // oxlint-disable-next-line no-await-in-loop -- runs are timed one at a time
+      await callStub(checker, "check", [request]);
+      timings.push(performance.now() - started);
+    }
+
+    expect(Math.min(...timings)).toBeLessThan(5000);
+  });
+});
+
+// The design system's lint (packages/compiler/src/lint.ts), part of the
+// lint's isolate's: what it finds blocks a proposal, never a build or a
+// preview (agent-builds.test.ts, draft-proposals.test.ts).
+describe("the design system's lint", { timeout: 60_000 }, () => {
+  it("passes the build and the preview of a screen it fails", async () => {
+    const files = app(
+      withLine(
+        `<Button size="sm">`,
+        `<Button size="sm" className="rounded-full">`
+      )
+    );
+
+    const [built, previewed, linted] = await Promise.all([
+      buildScreens(env, files, "app-test"),
+      buildScreens(env, files, "app-test", { profile: "preview" }),
+      designLint(files),
+    ]);
+
+    expect({
+      built: built.ok,
+      previewed: previewed.ok,
+      linted: linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
+    }).toStrictEqual({
+      built: true,
+      previewed: true,
+      linted: ["screens/tickets.tsx shadcn/no-restyle"],
+    });
+  });
+
+  it("names a restyle in a screen that neither compiles nor type-checks", async () => {
+    const linted = await designLint({
+      "screens/when.tsx": `import { useState } from "react";
+import { Button } from "@grasp-os/ui/components/button";
+
+export default function When({ open }: { open: boolean }) {
+  if (open) {
+    useState(0);
+  }
+  const wrong: number = "one";
+  return <Button className="rounded-full">{wrong}</Button>;
+}
+`,
+    });
+
+    expect(
+      linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`)
+    ).toStrictEqual(["screens/when.tsx shadcn/no-restyle"]);
+  });
+
+  it("reads a component of the App's own that wraps the kit's, from another call's files", async () => {
+    const wrapper = `import { Button } from "@grasp-os/ui/components/button";
+import type { ComponentProps } from "react";
+
+export const Action = (props: ComponentProps<typeof Button>) => <Button {...props} />;
+`;
+    const screen = `import { Action } from "../components/action";
+
+export default function Act() {
+  return <Action className="rounded-full">Go</Action>;
+}
+`;
+
+    const linted = await designLint(
+      { "screens/act.tsx": screen },
+      { "screens/act.tsx": screen, "components/action.tsx": wrapper }
+    );
+
+    expect(
+      linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`)
+    ).toStrictEqual(["screens/act.tsx shadcn/no-restyle"]);
+  });
+
+  it("fails a restyled component, naming its variants and sizes", async () => {
+    const linted = await designLint(
+      app(
+        withLine(
+          `<Button size="sm">`,
+          `<Button size="sm" className="rounded-full px-8">`
+        )
+      )
+    );
+
+    expect(linted.ok).toBeFalsy();
+    expect(
+      linted.diagnostics.map((diagnostic) => summary(diagnostic))
+    ).toStrictEqual([
+      expect.stringContaining(
+        'screens/tickets.tsx:44:41 shadcn/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Use a variant: default, outline, secondary, ghost, destructive, link, hint, ask, highlight.'
+      ),
+      expect.stringContaining(
+        'screens/tickets.tsx:44:41 shadcn/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing. Use a size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline)'
+      ),
+    ]);
+  });
+
+  it("knows the kit's own classes and reads disable comments as oxlint does, as an exported App's lint does", async () => {
+    const linted = await designLint(app(designCases));
+
+    expect({
+      ok: linted.ok,
+      found: linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
+      // Only the class Tailwind doesn't know: the theme's `ease-house`,
+      // tw-animate-css's `animate-in` and `fade-in` and the kit's own
+      // `type-display` are classes the kit has.
+      unknown: linted.diagnostics.map(({ message }) =>
+        message.slice(0, message.indexOf(" is not"))
+      ),
+    }).toStrictEqual({
+      ok: false,
+      found: designFindings,
+      unknown: ['"foo-bar"'],
+    });
+  });
+
+  it("fails a raw colour, naming the theme token to use", async () => {
+    const linted = await designLint(
+      app(
+        withLine(
+          `<main className="flex flex-col gap-4 p-6">`,
+          `<main className="flex flex-col gap-4 bg-red-500 p-6">`
+        )
+      )
+    );
+
+    expect(linted.ok).toBeFalsy();
+    expect(
+      linted.diagnostics.map((diagnostic) => summary(diagnostic))
+    ).toStrictEqual([
+      expect.stringContaining(
+        'screens/tickets.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: '
+      ),
+    ]);
+    // The theme's nearest red: the warmth of the brain's dots (the
+    // brand's error red is further off).
+    expect(linted.diagnostics[0]?.message).toContain("bg-brain-heat");
+    expect(linted.diagnostics[0]?.fix).toBe('Replace with "bg-brain-heat".');
+  });
+
+  it("fails every other way a screen styles itself outside the kit, or loads from outside, saying what to do", async () => {
+    const linted = await designLint(
+      app({
+        "screens/escapes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+import { useEffect, useRef } from "react";
+
+export default function Escapes() {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (box.current) {
+      box.current.style.color = "red";
+      box.current.style.setProperty("--x", "1");
+      box.current.setAttribute("style", "color: red");
+    }
+    const sheet = document.createElement("style");
+    document.head.append(sheet);
+    document.adoptedStyleSheets = [new CSSStyleSheet()];
+    const elements = { button: document.createElement("button") };
+    elements.button.style.color = "red";
+  }, []);
+  return (
+    <div ref={box}>
+      <link rel="stylesheet" href="https://cdn.example/theme.css" />
+      <img alt="" src="https://cdn.example/logo.png" />
+      <img alt="" srcSet="data:image/png;base64,AAAA 1x,https://cdn.example/logo@2x.png 2x" />
+      <img alt="" srcSet="/local.png (foo(bar),https://cdn.example/image.png 2x" />
+      <div className="!p-2 gap-2" />
+      <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
+      <div className={cn("gap-2", [{ "p-4!": true }])} />
+      <div className={\`md:!flex \${["gap", "2"].join("-")}\`} />
+    </div>
+  );
+}
+`,
+      })
+    );
+
+    expect(linted.ok).toBeFalsy();
+    expect(
+      linted.diagnostics
+        .filter(({ file }) => file === "screens/escapes.tsx")
+        .map(({ line, rule }) => `${line} ${rule}`)
+    ).toStrictEqual([
+      "8 grasp/no-style-escapes",
+      "9 grasp/no-style-escapes",
+      "10 grasp/no-style-escapes",
+      "12 grasp/no-style-escapes",
+      "13 grasp/no-style-escapes",
+      "14 grasp/no-style-escapes",
+      "14 grasp/no-style-escapes",
+      "16 grasp/no-style-escapes",
+      "20 grasp/no-remote-resources",
+      "21 grasp/no-remote-resources",
+      "22 grasp/no-remote-resources",
+      "23 grasp/no-remote-resources",
+      "24 grasp/no-important",
+      "25 grasp/no-style-escapes",
+      "26 grasp/no-important",
+      "27 grasp/no-important",
+    ]);
+    // Each says what to do instead.
+    expect(
+      linted.diagnostics.every(({ message }) =>
+        /kit|lucide-react|data: or blob:/u.test(message)
+      )
+    ).toBeTruthy();
+  });
+
+  it("fails a screen that names WebRTC or makes a nested document, saying what to do", async () => {
+    const linted = await designLint(
+      app({
+        "screens/peers.tsx": `import { useEffect, useRef } from "react";
+
+export default function Peers() {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const connection = new RTCPeerConnection();
+    const legacy = window.webkitRTCPeerConnection;
+    const channel: RTCDataChannel | undefined = undefined;
+    const quoted = globalThis["RTCIceTransport"];
+    const nested = document.createElement("iframe");
+    const realm = nested.contentWindow;
+    void [connection, legacy, channel, quoted, realm, box];
+  }, []);
+  return (
+    <div ref={box}>
+      <iframe title="nested" />
+    </div>
+  );
+}
+`,
+      })
+    );
+
+    expect(linted.ok).toBeFalsy();
+    expect(
+      linted.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-peer-connections")
+        .map(({ line, rule }) => `${line} ${rule}`)
+    ).toStrictEqual([
+      "6 grasp/no-peer-connections",
+      "7 grasp/no-peer-connections",
+      "8 grasp/no-peer-connections",
+      "9 grasp/no-peer-connections",
+      "10 grasp/no-peer-connections",
+      "11 grasp/no-peer-connections",
+      "16 grasp/no-peer-connections",
+    ]);
+    // Each says what to do instead.
+    expect(
+      linted.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-peer-connections")
+        .every(({ message }) => message.includes("through its App's functions"))
+    ).toBeTruthy();
+  });
+
+  it("fails a plain form, which never submits in a screen's frame, naming the kit's form", async () => {
+    const linted = await designLint(
+      app({
+        "screens/ask.tsx": `export default function Ask() {
+  return (
+    <form onSubmit={(event) => event.preventDefault()}>
+      <button type="submit">Ask</button>
+    </form>
+  );
+}
+`,
+      })
+    );
+
+    expect({
+      ok: linted.ok,
+      forms: linted.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-bare-forms")
+        .map(({ file, line, column, fix }) => ({
+          file,
+          line,
+          column,
+          kit: fix?.includes("@grasp-os/ui/form"),
+        })),
+    }).toStrictEqual({
+      ok: false,
+      forms: [
+        {
+          file: "screens/ask.tsx",
+          line: 3,
+          column: 5,
+          kit: true,
+        },
+      ],
+    });
+  });
+
   it("passes a screen that names the window's members, or only looks like WebRTC", async () => {
-    const built = await buildScreens(
-      env,
+    const linted = await designLint(
       app({
         "screens/windowed.tsx": `import { useEffect, useState } from "react";
 
@@ -596,16 +719,14 @@ export default function Windowed() {
   );
 }
 `,
-      }),
-      "app-test"
+      })
     );
 
-    expect(built).toMatchObject({ ok: true, diagnostics: [] });
+    expect(linted).toMatchObject({ ok: true, diagnostics: [] });
   });
 
   it("passes a screen whose names only look like an escape", async () => {
-    const built = await buildScreens(
-      env,
+    const linted = await designLint(
       app({
         "screens/lookalikes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
 
@@ -643,44 +764,10 @@ export default function Lookalikes() {
   );
 }
 `,
-      }),
-      "app-test"
+      })
     );
 
-    expect(built).toMatchObject({ ok: true, diagnostics: [] });
-  });
-
-  it("checks a typical screen quickly once the checker's isolate is warm", async () => {
-    const { request } = z
-      .object({ typeCheck: z.object({ request: z.unknown() }) })
-      .parse(
-        await callStub(
-          startAppCompiler(env.LOADER, env.ASSETS, "app-test"),
-          "build",
-          ["screens", typicalApp]
-        )
-      ).typeCheck;
-    const checker = startTypeChecker(env.LOADER, env.ASSETS);
-    await expect(callStub(checker, "check", [request])).resolves.toStrictEqual(
-      []
-    );
-
-    // The fastest of a few runs: a shared runner's pauses (other jobs,
-    // garbage collection) only ever add time. A warm check takes about
-    // 100 ms on a laptop, well inside the 1 s the checks may add to a
-    // build; the bound here is looser, 5 s, so that a slow or busy CI
-    // runner can't fail it, while a check gone badly wrong (runaway work)
-    // still does. The test's clock only moves on I/O; each RPC to the
-    // checker is I/O, so the times are real.
-    const timings: number[] = [];
-    for (let run = 0; run < 3; run += 1) {
-      const started = performance.now();
-      // oxlint-disable-next-line no-await-in-loop -- runs are timed one at a time
-      await callStub(checker, "check", [request]);
-      timings.push(performance.now() - started);
-    }
-
-    expect(Math.min(...timings)).toBeLessThan(5000);
+    expect(linted).toMatchObject({ ok: true, diagnostics: [] });
   });
 });
 

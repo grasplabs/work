@@ -7,9 +7,10 @@
  * strips types and turns JSX into calls, then points imports at flat module
  * names (see kit.ts). There is no bundler: the kit's modules are built once
  * per release and shared by every App, and a build says which of them, and
- * which of the App's own, each screen loads. The App is type-checked and
- * linted against the kit's design system whatever the compile found, so a
- * build names everything there is to fix at once; once it all passes,
+ * which of the App's own, each screen loads. The App is type-checked
+ * whatever the compile found, so a build names everything there is to fix
+ * at once (its lint, the design system's included, is a check of its
+ * own: ultracite.ts); once it all passes,
  * Tailwind compiles the CSS for the classes in the App's sources and in the
  * kit modules it loads.
  */
@@ -43,9 +44,8 @@ import {
   stripTypes,
   transformModule,
 } from "./compile.ts";
-import { isError, together } from "./diagnostic.ts";
+import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { startOxcParser } from "./eslint-parser.ts";
 import {
   collectDirectives,
   collectImports,
@@ -93,12 +93,9 @@ import {
   screenReferences,
   screenRuntime,
 } from "./kit.ts";
-import { lint } from "./lint.ts";
 import { addressModules } from "./module-addresses.ts";
-import oxcWasm from "./oxc.wasm";
 import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
-import { lintServerCode } from "./server-lint.ts";
 import { callbackParameters, readsStandIns } from "./stand-ins.ts";
 import { referenceError } from "./steering.ts";
 import type { DirectiveSite } from "./steering.ts";
@@ -490,9 +487,8 @@ const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
 
 /**
  * The type check of the App's screens against the kit's types, which core
- * runs in the checker's isolate (checked-build.ts), and their lint
- * against the kit's design system, which runs here over every file:
- * `buildScreens`' last gates, beside its compile and import checks.
+ * runs in the checker's isolate (checked-build.ts): `buildScreens`' last
+ * gate, beside its compile and import checks.
  */
 const screensCheck = (
   files: Record<string, string>,
@@ -505,16 +501,11 @@ const screensCheck = (
     unparsed: ReadonlySet<string>;
     untyped: ReadonlySet<string>;
   }
-): TypeCheckPlan & { after: Diagnostic[] } => {
+): TypeCheckPlan => {
   const app = buildFiles(files);
-  // The host wrote the references; the design system is the App's to keep.
-  const own = Object.fromEntries(
-    Object.entries(app).filter(([path]) => path !== screenReferences.path)
-  );
   return {
     request: typeCheckRequest(app, screensTarget),
     found,
-    after: lint(own, kit),
     unparsed: [...unparsed],
     untyped: [...untyped],
     lenient: readsStandIns(app) ? callbackParameters(app) : [],
@@ -532,9 +523,9 @@ const screensCheck = (
  * is the preview kit's. Every gate is the same.
  *
  * Without `checks`, for a preview's frame only (`preview-frame`), the
- * type check and the lint don't run: they hold up nothing the frame
- * needs, and the agent hears them from its own check of the draft
- * (`preview-screens`, which has them). Neither is a boundary: what a
+ * type check doesn't run: it holds up nothing the frame needs, and the
+ * agent hears it from its own check of the draft (`preview-screens`,
+ * which has it). Neither is a boundary: what a
  * file may import is held at its compile, which runs either way, and the
  * frame's sandbox and policy hold whatever the code does.
  *
@@ -645,25 +636,15 @@ export const buildScreensIncrementally = async (
       );
     }
   }
-  // The type check and the lint run whatever the compile found, so one
-  // build names everything there is to fix; only what says a compile
-  // error again is left out (`together`). A preview's frame skips both
-  // (`checks`): its compile errors still fail it, and it never starts the
-  // lint's parser.
-  if (checks) {
-    startOxcParser(oxcWasm);
-  }
+  // The type check runs whatever the compile found, so one build names
+  // everything there is to fix; only what says a compile error again is
+  // left out (`together`). A preview's frame skips it (`checks`): its
+  // compile errors still fail it.
   const typeCheck = checks
     ? screensCheck(files, { found: errors, unparsed, untyped })
     : undefined;
-  const diagnostics = together(
-    errors,
-    typeCheck?.after ?? [],
-    unparsed,
-    untyped
-  );
-  if (diagnostics.some((diagnostic) => isError(diagnostic))) {
-    return done({ ok: false, diagnostics }, typeCheck);
+  if (errors.some((diagnostic) => isError(diagnostic))) {
+    return done({ ok: false, diagnostics: errors }, typeCheck);
   }
   const kitModules = kitModulesFor(
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
@@ -681,7 +662,7 @@ export const buildScreensIncrementally = async (
       ...(await addressModules(modules)),
       screens,
       css,
-      diagnostics,
+      diagnostics: errors,
     },
     typeCheck
   );
@@ -1242,14 +1223,11 @@ export const checkAppCode = (
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
   const checked = { ...appCodeFiles(files), ...tests };
-  // Its lint's parser (`lintServerCode`).
-  startOxcParser(oxcWasm);
   return {
     built,
     typeCheck: {
       request: typeCheckRequest(checked, appCodeTarget),
       found: built.ok ? [] : built.diagnostics,
-      after: lintServerCode(appCodeFiles(files)),
       unparsed: [...unparsed],
       // A draft whose server code doesn't register is checked against the
       // stand-ins (core's save-builds.ts).

@@ -91,6 +91,14 @@ export const componentsFolder: CodeFolder = {
 };
 
 /**
+ * Whether the design system's lint reads `path` (lint.ts): a screen or a
+ * component, not a declaration.
+ */
+export const isDesignLinted = (path: string): boolean =>
+  isLintedCode(path) &&
+  (screenFile.test(path) || componentsFolder.isFile(path));
+
+/**
  * The files a build reads: screens, components and declarations, and the
  * references the host generated for the App's server code, which screens
  * import as `@server/_generated/api`.

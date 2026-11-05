@@ -5,6 +5,9 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {
+    "#design-kit": {
+      "types": "./src/design-kit.d.ts"
+    },
     "#kit": {
       "types": "./src/kit-module.d.ts"
     },

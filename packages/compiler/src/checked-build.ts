@@ -13,8 +13,6 @@ export interface TypeCheckPlan {
   readonly request: TypeCheckRequest;
   /** What the build found before the check (compile and import errors). */
   readonly found?: readonly Diagnostic[];
-  /** What it found besides, said after the check's (the lint). */
-  readonly after?: readonly Diagnostic[];
   /** The files the parser refused, and those whose JSX runtime was refused (`together`). */
   readonly unparsed?: readonly string[];
   readonly untyped?: readonly string[];
@@ -72,7 +70,7 @@ export const withTypeCheck = <Build extends { ok: boolean }>(
   );
   const all = together(
     typeCheck.found ?? [],
-    [...checked, ...(typeCheck.after ?? [])],
+    checked,
     new Set(typeCheck.unparsed),
     new Set(typeCheck.untyped)
   );

@@ -23,6 +23,7 @@ import type PackageBuilder from "./packages/worker.ts";
 import type UltraciteLinter from "./ultracite-worker.ts";
 import type AppCompiler from "./worker.ts";
 
+export { isDesignRule } from "./diagnostic.ts";
 export type { Diagnostic } from "./diagnostic.ts";
 export { withTypeCheck } from "./checked-build.ts";
 export type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
@@ -57,6 +58,7 @@ export {
   appCodeLimitErrors,
   buildFiles,
   computeModuleErrors,
+  isDesignLinted,
   isGeneratedPath,
   isLintedCode,
   limitErrors,
@@ -74,6 +76,7 @@ export {
   screenRuntime,
 } from "./kit.ts";
 export {
+  designContextKey,
   incrementSchema,
   lintKey,
   lintRecordOf,
@@ -339,22 +342,15 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await workerCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kitJson, parserWasm] = await Promise.all([
+    const [source, kitJson] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
-      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
       ...isolateSettings,
       mainModule: "compiler.js",
-      modules: {
-        "compiler.js": source,
-        [kitModule]: { json: kit },
-        // Compiled as the isolate loads; the isolate itself can't. What
-        // the design lint parses with (eslint-parser.ts).
-        [compilerAssets.oxcWasm]: { wasm: parserWasm },
-      },
+      modules: { "compiler.js": source, [kitModule]: { json: kit } },
     };
   });
 
@@ -438,20 +434,15 @@ const platformCodeRead = reader<PlatformCode>(true, platformCodeTurns);
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await platformCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kit, parserWasm] = await Promise.all([
+    const [source, kit] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
-      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
-        [compilerAssets.oxcWasm]: {
-          type: "wasm",
-          bytes: new Uint8Array(parserWasm),
-        },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,

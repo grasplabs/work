@@ -154,12 +154,14 @@ export const keepIncrements = async (
 
 /**
  * What earlier lints found in each of `files` (by path), for those whose
- * result is kept under the key of their content (`lintKey`): the rest are
- * linted again.
+ * result is kept under the key of their content and, for a screen or a
+ * component, of the App's others (`designContext`, `lintKey`): the rest
+ * are linted again.
  */
 export const readLints = async (
   env: CacheEnv,
   files: Readonly<Record<string, string>>,
+  designContext: string,
   refreshAfterMs: number
 ): Promise<Record<string, Diagnostic[]>> => {
   const found: Record<string, Diagnostic[]> = {};
@@ -167,7 +169,7 @@ export const readLints = async (
     Object.entries(files),
     concurrency,
     async ([path, source]) => {
-      const key = await lintKey(path, source);
+      const key = await lintKey(path, source, designContext);
       const record = lintRecordOf(
         await readRecord(env, "lints", key, refreshAfterMs),
         path
@@ -182,12 +184,13 @@ export const readLints = async (
 
 /**
  * Keeps what Ultracite's lint found in each of `files` (`linted`, by
- * path), under the key of its content, held for `leaseMs`. Never throws:
- * a result not kept is linted again next time.
+ * path), under the key `readLints` reads it by, held for `leaseMs`. Never
+ * throws: a result not kept is linted again next time.
  */
 export const keepLints = async (
   env: CacheEnv,
   files: Readonly<Record<string, string>>,
+  designContext: string,
   linted: Readonly<Record<string, Diagnostic[]>>,
   leaseMs: number
 ): Promise<void> => {
@@ -202,7 +205,7 @@ export const keepLints = async (
       try {
         await keepUnderLease(
           env,
-          cacheKeyOf("lints", await lintKey(path, source)),
+          cacheKeyOf("lints", await lintKey(path, source, designContext)),
           JSON.stringify({ path, diagnostics }),
           leaseMs
         );

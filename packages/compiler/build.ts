@@ -70,6 +70,7 @@ import {
   sdkRoot,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
+import type { DesignKit } from "./src/lint.ts";
 import { platformModules } from "./src/packages/platform.ts";
 import { compilerOptions, serverLibs } from "./src/type-check.ts";
 import type { KitTypes } from "./src/type-check.ts";
@@ -1442,7 +1443,7 @@ const moduleLocation = (moduleUrl: string) => ({
 /**
  * The design-system lint (@shadcn/lint) loads oxc-parser, which it reads
  * the kit's components with, by a `require` at runtime, which in the
- * isolate only finds Node's built-ins: this hands it the compiler's own
+ * isolate only finds Node's built-ins: this hands it Ultracite's own
  * oxc parser (src/eslint-parser.ts, on oxc.wasm), started before a lint.
  */
 const shadcnParser: Plugin = {
@@ -1461,6 +1462,21 @@ const shadcnParser: Plugin = {
 ${code.replace(required, "oxcParser")}`;
   },
 };
+
+/**
+ * What the design system's lint reads of the kit (`#design-kit`): its
+ * theme and component sources and @shadcn/lint's rules, worked out here
+ * into a module of Ultracite's bundle, whose lint it is part of.
+ */
+const designKitModule = (designKit: DesignKit): Plugin => ({
+  name: "design-kit",
+  enforce: "pre",
+  resolveId: (id) => (id === "#design-kit" ? "\0design-kit" : null),
+  load: (id) =>
+    id === "\0design-kit"
+      ? `export default ${JSON.stringify(designKit)};`
+      : null,
+});
 
 /**
  * How App code is linted and formatted (`#ultracite-config`), worked out
@@ -1517,9 +1533,9 @@ const resolvedAsNode: Plugin = {
 };
 
 /**
- * What the compiler's and Ultracite's bundles both need: the design
- * system's ESLint checks no rule's options in the isolate, and reads
- * selectors with esquery's CommonJS build (`lintOptionsUnchecked`,
+ * What the compiler's and Ultracite's bundles both need: Ultracite's
+ * ESLint checks no rule's options in the isolate, and reads selectors
+ * with esquery's CommonJS build (`lintOptionsUnchecked`,
  * `resolvedAsNode`). Both are written in ASCII alone: V8 holds a module's
  * source as one byte a character only then, two otherwise, and these are
  * megabytes.
@@ -1552,13 +1568,8 @@ const isolateBuild = (
       target: "es2022",
       rolldownOptions: {
         // oxc's WebAssembly is a module of the isolate: Ultracite's lint's
-        // and the design lint's parser's.
-        external: [
-          "cloudflare:workers",
-          "#kit",
-          "./oxc.wasm",
-          ...nodeBuiltins,
-        ],
+        // and its ESLint lints' parser's.
+        external: ["cloudflare:workers", "#kit", "./oxc.wasm", ...nodeBuiltins],
         output: {
           minify: {
             compress: true,
@@ -1595,20 +1606,22 @@ const oneModule = async (
  */
 const buildCompiler = async (): Promise<string> =>
   await oneModule(
-    isolateBuild("src/worker.ts", compilerAssets.source, [shadcnParser]),
+    isolateBuild("src/worker.ts", compilerAssets.source, []),
     "The compiler"
   );
 
 /**
- * Ultracite's lint and format (src/ultracite-worker.ts), a module of its
- * own that core runs in an isolate of its own, with oxc.wasm: it isn't
- * loaded by an isolate that only builds, nor read by core but to start
- * one that lints.
+ * Ultracite's lint and format (src/ultracite-worker.ts), with the design
+ * system's lint, a module of its own that core runs in an isolate of its
+ * own, with oxc.wasm: it isn't loaded by an isolate that only builds, nor
+ * read by core but to start one that lints.
  */
-const buildUltracite = async (): Promise<string> =>
+const buildUltracite = async (designKit: DesignKit): Promise<string> =>
   await oneModule(
     isolateBuild("src/ultracite-worker.ts", compilerAssets.ultracite, [
       ultraciteConfigModule,
+      designKitModule(designKit),
+      shadcnParser,
     ]),
     "Ultracite's lint"
   );
@@ -1842,6 +1855,8 @@ const buildAppCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     previewModuleImports,
+  };
+  const designKit: DesignKit = {
     lintProject: collectLintProject(
       stylesheets,
       await kitClassRules(stylesheets)
@@ -1854,7 +1869,7 @@ const buildAppCompiler = async (
   // The sources the type chunks are made of, which the agent reads.
   const referenceJson = JSON.stringify(referenceOf(typeSources));
   const compiler = await buildCompiler();
-  const ultracite = await buildUltracite();
+  const ultracite = await buildUltracite(designKit);
   const packageBuilder = await buildPackageBuilder();
   const checker = await buildChecker();
   // The WebAssembly the type checker runs, as the package ships it.
@@ -1863,8 +1878,8 @@ const buildAppCompiler = async (
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
-  // oxlint's, oxfmt's and oxc's parser's, which Ultracite's isolate and the
-  // compiler's run, as pinned.
+  // oxlint's, oxfmt's and oxc's parser's, which Ultracite's isolate runs,
+  // as pinned.
   const oxc = await oxcWasm();
   // jq's, which every workflow isolate loads beside the SDK's modules.
   const jqWasm = readFileSync(jqWasmSource);

@@ -1,12 +1,14 @@
 # oxlint's linter and oxfmt's formatter as one threadless wasm32-wasip1
 # module, for the isolate that lints and formats App code (src/oxc.ts),
-# and oxc's parser with its ESTree tokens, for the compiler's design lint
-# (src/eslint-parser.ts).
+# and oxc's parser with its ESTree tokens, for the lint isolate's ESLint
+# lints (src/eslint-parser.ts).
 # Built inside oxc's own workspace at the commit pin.json names (build.sh),
 # so every dependency is the version that oxlint and oxfmt release ship.
 #
 # Delete this folder once oxc publishes a threadless WebAssembly build of
-# its linter and formatter, as it does for its parser (`oxc-parser/workerd`).
+# its linter and formatter, and its parser's (`oxc-parser/workerd`, today
+# without tokens and asking for 61 MiB of memory at its start) gives
+# ESLint's tokens in 32-bit memory and starts small.
 [package]
 name = "grasp_oxc_wasm"
 version = "0.0.0"

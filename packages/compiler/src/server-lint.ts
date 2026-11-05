@@ -7,15 +7,20 @@
  * what it would have the first time. Convex has the same rule, and
  * baseflare's codegen warns of it too. A warning, never an error: the
  * code may mean it, and the host makes nothing of it either way. Through
- * ESLint's `Linter` and oxc's parser (eslint-parser.ts), as screens are
- * linted (lint.ts).
+ * ESLint's `Linter` and oxc's parser (eslint-parser.ts), in the lint
+ * isolate's lint (ultracite-worker.ts), as screens' design is (lint.ts).
  */
 import type { Rule } from "eslint";
 import { Linter } from "eslint/universal";
 
 import { appCodeKind } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { parser } from "./eslint-parser.ts";
+import {
+  isUnparsable,
+  orUnparsable,
+  parser,
+  unparsableMessage,
+} from "./eslint-parser.ts";
 
 /** The builders whose handlers are mutations. */
 const mutationBuilders: ReadonlySet<string> = new Set([
@@ -176,25 +181,46 @@ const config: Linter.Config[] = [
   },
 ];
 
-/** The warnings of `files`' server code (`appCodeKind`: `server`). */
+/** What a file the parser couldn't read at all says: a warning, as every other. */
+const unparsable = (path: string): Diagnostic[] => [
+  { file: path, rule: "lint", severity: "warning", message: unparsableMessage },
+];
+
+/**
+ * The warnings of `files`' server code (`appCodeKind`: `server`), by
+ * path: every file it lints has an entry, empty when clean. One the
+ * parser couldn't read at all says so, a warning too; one that doesn't
+ * parse says nothing, as the build says where.
+ */
 export const lintServerCode = (
   files: Readonly<Record<string, string>>
-): Diagnostic[] => {
+): Record<string, Diagnostic[]> => {
   const linter = new Linter();
-  return Object.entries(files)
-    .filter(([path]) => appCodeKind(path) === "server")
-    .flatMap(([path, source]) =>
-      linter
-        .verify(source, config, path)
-        // What doesn't parse, the build says where (compile.ts).
-        .filter((message) => message.fatal !== true)
-        .map((message): Diagnostic => ({
-          file: path,
-          line: message.line,
-          column: message.column,
-          rule: message.ruleId ?? "lint",
-          severity: "warning",
-          message: message.message,
-        }))
-    );
+  const linted = (path: string, source: string): Diagnostic[] => {
+    const messages = linter.verify(source, config, path);
+    if (messages.some((message) => isUnparsable(message))) {
+      return unparsable(path);
+    }
+    return messages
+      .filter((message) => message.fatal !== true)
+      .map((message): Diagnostic => ({
+        file: path,
+        line: message.line,
+        column: message.column,
+        rule: message.ruleId ?? "lint",
+        severity: "warning",
+        message: message.message,
+      }));
+  };
+  return Object.fromEntries(
+    Object.entries(files)
+      .filter(([path]) => appCodeKind(path) === "server")
+      .map(([path, source]) => [
+        path,
+        orUnparsable(
+          () => linted(path, source),
+          () => unparsable(path)
+        ),
+      ])
+  );
 };

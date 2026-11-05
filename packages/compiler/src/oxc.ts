@@ -1,9 +1,8 @@
 /**
- * oxlint and oxfmt, and oxc's parser, as oxc.wasm (oxc-wasm/src/lib.rs)
- * runs them: an instance kept for the calls after it (configured once,
- * for the lint), through WASI with no files, environment or preopens
- * (@tybys/wasm-util, the WASI napi-rs loads oxc's own WebAssembly with):
- * nothing they do with App code reads a file.
+ * oxlint, oxfmt and oxc's parser, as oxc.wasm (oxc-wasm/src/lib.rs) runs them: an
+ * instance configured once and kept, through WASI with no files,
+ * environment or preopens (@tybys/wasm-util, the WASI napi-rs loads oxc's
+ * own WebAssembly with): nothing they do with App code reads a file.
  */
 import { WASI } from "@tybys/wasm-util";
 import { z } from "zod";
@@ -49,6 +48,14 @@ export interface Oxc {
    * by oxfmt. Throws if oxc.wasm can't tidy it, even in a fresh instance.
    */
   tidy: (path: string, source: string) => string;
+  /**
+   * `source` (`path`, which picks the language) parsed by oxc's parser:
+   * JSON of TS-ESTree's program, its comments and ESLint's tokens, every
+   * offset in UTF-16 code units, or of why it doesn't parse
+   * (oxc-wasm/src/lib.rs `parse`). Throws if oxc.wasm can't parse it,
+   * even in a fresh instance.
+   */
+  parse: (path: string, source: string) => string;
 }
 
 /**
@@ -59,19 +66,17 @@ export interface Oxc {
  */
 const recycledBytes = 32 * 1024 * 1024;
 
-/** An instance of oxc.wasm. */
-interface Running {
-  wasm: z.infer<typeof exportsSchema>;
-  /** `text` written into its memory, for a call: where, and how long. */
-  put: (text: string) => [number, number];
-  /** The last call's answer, of `length` bytes. */
-  out: (length: number) => string;
+/** An instance of oxc.wasm, configured. */
+interface Instance extends Oxc {
   /** How much memory it holds now. */
   bytes: () => number;
 }
 
-/** oxc.wasm's `module`, instantiated. */
-const instantiated = (module: WebAssembly.Module): Running => {
+/** oxc.wasm's `module`, instantiated and configured. */
+const configured = (
+  module: WebAssembly.Module,
+  { lint, format }: { lint: unknown; format: unknown }
+): Instance => {
   const wasi = new WASI({ version: "preview1" });
   const instance = new WebAssembly.Instance(module, wasi.getImportObject());
   // Synchronous: oxc.wasm uses no Asyncify, so nothing is awaited.
@@ -87,21 +92,6 @@ const instantiated = (module: WebAssembly.Module): Running => {
   };
   const out = (length: number): string =>
     decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.out_ptr(), length));
-  return { wasm, put, out, bytes: () => wasm.memory.buffer.byteLength };
-};
-
-/** An instance of oxc.wasm, configured. */
-interface Instance extends Oxc {
-  /** How much memory it holds now. */
-  bytes: () => number;
-}
-
-/** oxc.wasm's `module`, instantiated and configured. */
-const configured = (
-  module: WebAssembly.Module,
-  { lint, format }: { lint: unknown; format: unknown }
-): Instance => {
-  const { wasm, put, out, bytes } = instantiated(module);
   const refused = wasm.configure(
     ...put(JSON.stringify(lint)),
     ...put(JSON.stringify(format))
@@ -110,18 +100,20 @@ const configured = (
     throw new Error(`oxc.wasm refused its config: ${out(-refused)}`);
   }
   return {
-    bytes,
+    bytes: () => wasm.memory.buffer.byteLength,
     lint: (path, source) =>
       lintedSchema.parse(
         JSON.parse(out(wasm.lint(...put(path), ...put(source))))
       ),
     tidy: (path, source) => out(wasm.tidy(...put(path), ...put(source))),
+    parse: (path, source) => out(wasm.parse(...put(path), ...put(source))),
   };
 };
 
 /**
- * Each call answered in an instance `start` makes, kept for the calls
- * after it.
+ * oxc.wasm's `module`, configured with an `.oxlintrc.json` with no
+ * `extends` (`lint`) and oxfmt's config (`format`): an instance kept for
+ * the calls after it.
  *
  * oxc recurses, and has no option that bounds how deep: a file nested
  * deep enough runs out of V8's stack or the Rust stack, and one large
@@ -132,14 +124,15 @@ const configured = (
  * once more in a fresh one, so a file never fails for what the one before
  * it left, and throws only if it fails there too.
  */
-const kept = <I extends { bytes: () => number }>(
-  start: () => I
-): (<T>(answer: (instance: I) => T) => T) => {
-  let warm: I | undefined;
-  const run = <T>(answer: (instance: I) => T): T => {
-    const fresh = warm === undefined;
-    const instance = warm ?? start();
-    warm = undefined;
+export const oxcOf = (
+  module: WebAssembly.Module,
+  config: { lint: unknown; format: unknown }
+): Oxc => {
+  let kept: Instance | undefined;
+  const run = <T>(answer: (instance: Instance) => T): T => {
+    const fresh = kept === undefined;
+    const instance = kept ?? configured(module, config);
+    kept = undefined;
     let answered: T;
     try {
       answered = answer(instance);
@@ -150,38 +143,13 @@ const kept = <I extends { bytes: () => number }>(
       return run(answer);
     }
     if (instance.bytes() <= recycledBytes) {
-      warm = instance;
+      kept = instance;
     }
     return answered;
   };
-  return run;
-};
-
-/**
- * oxc.wasm's `module`, configured with an `.oxlintrc.json` with no
- * `extends` (`lint`) and oxfmt's config (`format`), in instances `kept`.
- */
-export const oxcOf = (
-  module: WebAssembly.Module,
-  config: { lint: unknown; format: unknown }
-): Oxc => {
-  const run = kept(() => configured(module, config));
   return {
     lint: (path, source) => run((instance) => instance.lint(path, source)),
     tidy: (path, source) => run((instance) => instance.tidy(path, source)),
+    parse: (path, source) => run((instance) => instance.parse(path, source)),
   };
-};
-
-/**
- * oxc's parser on oxc.wasm's `module`, in instances `kept`: `source`
- * (`path`, which picks the language) as JSON of TS-ESTree's program, its
- * comments and ESLint's tokens, every offset in UTF-16 code units, or of
- * why it doesn't parse (oxc-wasm/src/lib.rs `parse`).
- */
-export const oxcParserOf = (
-  module: WebAssembly.Module
-): ((path: string, source: string) => string) => {
-  const run = kept(() => instantiated(module));
-  return (path, source) =>
-    run(({ wasm, put, out }) => out(wasm.parse(...put(path), ...put(source))));
 };
