@@ -9,6 +9,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
 | `apps/connect` | Connector Worker: the connector layer, the only place OAuth tokens live |
 | `apps/web` | Grasp OS frontend: React SPA, served as static files by core |
+| `apps/docs` | SDK docs: how to build with Grasp, for people and the agent; ships with each release |
 | `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
 | `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
@@ -46,7 +47,7 @@ Vite+ docs: `node_modules/vite-plus/docs`.
 
 - **Commits and PR titles** follow [Conventional Commits](https://www.conventionalcommits.org): `feat(core): …`, `fix(connect): …`, `chore(deps): …`. Scope is the app or package name. PRs are squash-merged, so the PR title is the commit on `main` and the release note. A `commit-msg` hook and CI enforce it.
 - **Dependencies**: versions live in the `catalog` in `pnpm-workspace.yaml`, pinned exactly; packages reference them as `catalog:`. New versions wait 3 days (pnpm and Renovate). Only packages listed under `allowBuilds` may run install scripts.
-- **No docs in the repo**: plans, ADRs, design notes and research live outside it. The only Markdown allowed is `README.md`, this file, `.github/` templates and skills; CI enforces it. Put the why in code comments where the decision sits, and in PR descriptions.
+- **No dev docs in the repo**: plans, ADRs, design notes and research live outside it. The Markdown allowed is `README.md`, this file, `.github/` templates, skills, and the SDK docs in `apps/docs`, which ship with each release; CI enforces it. Docs change in the same pull request as the code they describe, and their code examples are type-checked against the SDK in CI. Put the why in code comments where the decision sits, and in PR descriptions.
 - **Secrets**: never commit secrets, client names or client configuration; secretlint checks every commit and CI. Local secrets go in `.dev.vars` (see `.dev.vars.example`). Authenticate Wrangler through the 1Password shell plugin.
 - **Schemas** follow expand, then contract: add first, remove in a later release. Code must work against both the old and the new schema.
 - **No feature flags**: a feature works by default once it merges, in development too. Don't add a flag or a kill switch.

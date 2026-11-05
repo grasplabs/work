@@ -1,6 +1,8 @@
 /**
- * Keeps documentation out of the repo: plans, ADRs and design notes live
- * outside it. Fails on any Markdown file that isn't on the allowlist.
+ * Keeps dev docs out of the repo: plans, ADRs and design notes live
+ * outside it. Fails on any Markdown file that isn't on the allowlist. The
+ * SDK docs are the one body of docs allowed, and only their content
+ * folder: they ship with each release (apps/docs).
  */
 import { execFileSync } from "node:child_process";
 
@@ -12,6 +14,8 @@ const ALLOWED = [
   /^\.github\/[^/]+\.md$/u,
   // Skills are product content the platform loads, not docs.
   /(?:^|\/)skills\//u,
+  // The SDK docs' pages, which every deployment serves at /docs.
+  /^apps\/docs\/content\//u,
 ];
 
 const files = execFileSync(
@@ -28,7 +32,7 @@ const disallowed = files.filter(
 
 if (disallowed.length > 0) {
   console.error(
-    `Documentation is kept out of the repo. Move these elsewhere:\n${disallowed.map((file) => `  ${file}`).join("\n")}`
+    `Dev docs are kept out of the repo. Move these elsewhere:\n${disallowed.map((file) => `  ${file}`).join("\n")}`
   );
   process.exit(1);
 }

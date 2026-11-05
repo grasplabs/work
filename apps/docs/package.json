@@ -1,0 +1,27 @@
+{
+  "name": "@grasp-os/docs",
+  "private": true,
+  "description": "The SDK docs: how to build with Grasp, for people and the agent; ships with each release",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "blume dev",
+    "build": "node build.ts"
+  },
+  "devDependencies": {
+    "@fontsource-variable/geist": "catalog:",
+    "@fontsource-variable/jetbrains-mono": "catalog:",
+    "@fontsource-variable/newsreader": "catalog:",
+    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/ui": "workspace:*",
+    "@types/mdast": "catalog:",
+    "@types/react": "catalog:",
+    "blume": "catalog:",
+    "mdast-util-from-markdown": "catalog:",
+    "parse5": "catalog:",
+    "react": "catalog:",
+    "typedoc": "catalog:",
+    "typedoc-plugin-markdown": "catalog:",
+    "typescript": "catalog:typescript6"
+  }
+}

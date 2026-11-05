@@ -76,6 +76,8 @@ export default defineConfig({
       // it runs (core's screen-frame.ts).
       "/screen-frame": "http://localhost:8787",
       "/screen-modules": "http://localhost:8787",
+      // The SDK docs, which core's build adds to its static files.
+      "/docs": "http://localhost:8787",
     },
   },
 });

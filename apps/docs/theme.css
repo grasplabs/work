@@ -1,0 +1,31 @@
+/*
+ * The docs wear the product's theme: Blume's tokens read the kit's
+ * (@grasp-os/ui), so each value still stands once, in the kit.
+ */
+@import "@grasp-os/ui/styles.css";
+
+:root {
+  --blume-background: var(--background);
+  --blume-foreground: var(--foreground);
+  --blume-muted: var(--muted);
+  --blume-muted-foreground: var(--muted-foreground);
+  --blume-border: var(--border);
+  --blume-accent: var(--primary);
+  --blume-accent-foreground: var(--primary-foreground);
+  --blume-action: var(--primary);
+  --blume-action-foreground: var(--primary-foreground);
+  --blume-code-background: var(--muted);
+  --blume-radius: var(--radius);
+}
+
+/*
+ * Newsreader (Blume's display font) for page titles only, as the product
+ * sets them (PageHeaderTitle); every other heading in Geist.
+ */
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--blume-font-body);
+}

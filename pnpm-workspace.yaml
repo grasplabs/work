@@ -31,6 +31,17 @@ catalog:
   # Type-checks App code in a stateless isolate of its own: tsrs, the Rust
   # port of TypeScript 7's checker, as WebAssembly (packages/compiler).
   "@tsrs/wasm": 0.20.1-ts7.1.0-beta
+  # The SDK docs (apps/docs): the site, its API reference from the SDK's
+  # types and doc comments (TypeDoc, on the typescript6 catalog's
+  # TypeScript, as its JavaScript API needs), and the guides' code blocks,
+  # read with a Markdown parser to type-check them.
+  blume: 2.2.6
+  typedoc: 0.28.20
+  typedoc-plugin-markdown: 4.14.1
+  mdast-util-from-markdown: 2.1.0
+  "@types/mdast": 4.0.4
+  # Reads the built pages for the hashes of their inline code (apps/docs).
+  parse5: 8.1.0
   # Signs the release upload to R2's S3 API (scripts/release).
   aws4fetch: 1.0.20
   secretlint: 13.0.5
