@@ -28,7 +28,8 @@
 // up to CFWS or `;`, since receiving servers write values the grammar
 // doesn't allow unquoted (`header.b=/Gj4+R==`, `smtp.remote-ip=2a00::1`,
 // `smtp.mailfrom=<>`); a value is only reported as a domain once it is one
-// (`domainOf`).
+// (`domainOf`). And one deliberate narrowing: no `;` inside a comment or
+// quoted string (`delimited`).
 
 /** The authserv-id Email Routing writes its results under. */
 export const trustedAuthservId = "mx.cloudflare.net";
@@ -110,16 +111,25 @@ const delimited = (
   let depth = 1;
   let content = "";
   for (let at = start + 1; at < text.length; at += 1) {
-    let char = text.charAt(at);
-    if (char === "\\") {
+    const quotedPair = text.charAt(at) === "\\";
+    if (quotedPair) {
       at += 1;
-      char = text.charAt(at);
-    } else if (char === close) {
+    }
+    const char = text.charAt(at);
+    // Refused, though the grammar allows it: a quote or parenthesis a
+    // sender gets into a value Email Routing writes unescaped could
+    // otherwise hide its real results behind the sender's, up to a quote or
+    // parenthesis the sender gets into a later value. Values written before
+    // DMARC's result (DKIM's) can't hold a `;`, so its first result holds.
+    if (char === ";") {
+      throw unparsable("A ; inside a comment or quoted string");
+    }
+    if (!quotedPair && char === close) {
       depth -= 1;
       if (depth === 0) {
         return { end: at + 1, content };
       }
-    } else if (nests && char === "(") {
+    } else if (!quotedPair && nests && char === "(") {
       depth += 1;
     }
     content += char;

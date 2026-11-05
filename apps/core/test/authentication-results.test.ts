@@ -64,9 +64,10 @@ describe("Authentication-Results grammar (RFC 8601 2.2)", () => {
       spaced: reportOf(
         `(lead) ${trustedAuthservId} (id) 1 (version) ; (a (nested \\) still) comment) dkim (m) / 1 (v) = (r) pass (good) header (p) . (q) d (s) = (t) acme.test (end) ; dmarc=pass reason = "aligned" header.from=acme.test ; spf = pass smtp.mailfrom = "ben"@acme.test (trailing)`
       ),
-      // Folded, as postal-mime unfolds a header: its whitespace kept.
+      // Folded, as postal-mime unfolds a header: its line breaks
+      // dropped, its whitespace kept.
       folded: routing(
-        "dkim=pass\r\n\theader.d=acme.test;\r\n dmarc=pass header.from=acme.test"
+        "dkim=pass\theader.d=acme.test;  \t dmarc=pass header.from=acme.test"
       ),
       // Every name of the grammar is case-insensitive (RFC 5234 2.3).
       cased: reportOf(
@@ -100,30 +101,31 @@ describe("Authentication-Results grammar (RFC 8601 2.2)", () => {
     });
   });
 
-  it("never lets a `;` in a comment or quoted string, or an escaped parenthesis, start a result", () => {
+  it("refuses a `;` inside a comment or quoted string, and keeps an escaped parenthesis inside its comment", () => {
     expect({
       inComment: routing(
         "spf=pass (x; dmarc=pass header.from=bank.test) smtp.mailfrom=x@evil.test"
-      ).dmarc,
-      // `\)` is a quoted pair (RFC 5322 3.2.1): the comment goes on.
-      escapedClose: routing(
-        "spf=pass (x \\); dmarc=pass header.from=bank.test) smtp.mailfrom=x@evil.test"
-      ).dmarc,
+      ),
       inReason: routing(
         'spf=pass reason="x; dmarc=pass header.from=bank.test" smtp.mailfrom=x@evil.test'
-      ).dmarc,
-      inValue: routing(
-        'spf=pass smtp.mailfrom="x;dmarc=pass header.from=bank.test"@evil.test'
       ),
+      inValue: routing('spf=pass smtp.mailfrom="x\\;y"@evil.test'),
+      // A quote a sender opens in a value Email Routing writes before its
+      // DMARC result (a DKIM `d=` may hold one, RFC 6376 3.2), closed by one
+      // written after it, would hide its real result behind a sender's.
+      swallowed: routing(
+        'dkim=fail header.d=a"b header.s=s; dmarc=fail header.from=bank.test; spf=none smtp.helo=x" ;dmarc=pass header.from=bank.test'
+      ),
+      // `\)` is a quoted pair (RFC 5322 3.2.1): the comment goes on.
+      escapedClose: routing(
+        "dkim=pass (x \\) header.d=bank.test) header.d=evil.test"
+      ).dkim,
     }).toStrictEqual({
-      inComment: null,
-      escapedClose: null,
-      inReason: null,
-      inValue: {
-        spf: { result: "pass", domain: "evil.test" },
-        dkim: null,
-        dmarc: null,
-      },
+      inComment: nothing,
+      inReason: nothing,
+      inValue: nothing,
+      swallowed: nothing,
+      escapedClose: { result: "pass", domain: "evil.test" },
     });
   });
 
