@@ -5,8 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "dev": "blume dev",
-    "build": "node build.ts"
+    "dev": "blume dev"
   },
   "devDependencies": {
     "@fontsource-variable/geist": "catalog:",

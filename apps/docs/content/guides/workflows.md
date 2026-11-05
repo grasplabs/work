@@ -11,7 +11,7 @@ An App doesn't contain workflows. It starts them, and follows their runs. This g
 
 ## Declaring the workflows an App starts
 
-An App declares each workflow it starts with `permission.workflow`: an alias, and the input and output it expects. Like every permission, it grants nothing yet: an admin binds the alias to a workflow and approves the App's starts. Until then, every start fails.
+An App declares each workflow it starts with `permission.workflow`: an alias, and the input and output it expects. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
 
 ```ts server/reviews.ts
 import { permission, v } from "@grasp-os/sdk";
@@ -84,13 +84,14 @@ Grasp checks every start's input against the workflow's, so a start the workflow
 ```tsx screens/tasks.tsx
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api, workflows } from "@server/_generated/api";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: true });
   const review = useWorkflow(workflows.review);
   if (tasks === undefined) {
-    return <output>Loading tasks…</output>;
+    return <Spinner className="m-6" />;
   }
   return (
     <main className="flex flex-col gap-3 p-6">
@@ -114,4 +115,6 @@ const Tasks = () => {
 export default Tasks;
 ```
 
-A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`, and ends `completed` with its output, `failed` with its error, or `cancelled`. `pause`, `resume` and `cancel` control it, for whoever may.
+Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its output, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
+
+`pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.

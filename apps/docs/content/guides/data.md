@@ -101,7 +101,7 @@ export const overdue = query({
 });
 ```
 
-The terminals are `take(n)` (at most 100), `first()`, `unique()`, `collect()` (all, at most 100), `count()` and `paginate()`, which pages through a table of any size. Index your reads: a range on an index is as cheap on the thousandth page as on the first, while `filter` checks records one by one.
+The terminals are `take(n)` (at most 100), `first()`, `unique()`, `collect()` (all of them; it fails with `data.result_limit` past 100), `count()` and `paginate()`, which pages through a table of any size. Index your reads: a range on an index is as cheap on the thousandth page as on the first, while `filter` checks records one by one.
 
 A table with a search index can be searched by its words with `ctx.db.search("projects", text)`, best match first.
 

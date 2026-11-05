@@ -3,9 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 
-// The SDK docs each deployment serves at /docs: the site its release
-// carries among the frontend's files (the global setup builds it as
-// core's build does), for people and, as Markdown, for the agent.
+// The SDK docs each deployment serves at /docs, from the release's static
+// files: here a stand-in of the docs' build (fixtures/assets/docs), whose
+// own output the docs' tests check (apps/docs/build.test.ts).
 
 /** A page's inline scripts' text, as a policy hashes them. */
 const inlineScripts = (html: string): string[] =>
@@ -42,8 +42,8 @@ const read = async (path: string) => {
 };
 
 describe("the SDK docs", () => {
-  it("serves its pages", async () => {
-    const page = await read("/docs/guides/pages/");
+  it("serves a page at the address its links name, without a redirect", async () => {
+    const page = await read("/docs/guides/pages");
 
     expect(page.status).toBe(200);
     expect(page.type).toContain("text/html");
@@ -51,44 +51,49 @@ describe("the SDK docs", () => {
   });
 
   it("runs a page's own inline scripts, and no other script but the docs' files", async () => {
-    const response = await routed("/docs/guides/pages/");
+    const response = await routed("/docs/guides/pages");
     const scripts = sourcesOf(response, "script-src");
-    const inline = inlineScripts(await response.text());
-    const hashes = await Promise.all(inline.map(sha256));
+    const hashes = await Promise.all(
+      inlineScripts(await response.text()).map(sha256)
+    );
 
-    expect(inline.length).toBeGreaterThan(0);
+    expect(hashes.length).toBeGreaterThan(0);
     expect(scripts).toStrictEqual(expect.arrayContaining(hashes));
     expect(
       scripts.filter((source) => !source.startsWith("'sha256-"))
     ).toStrictEqual([`${clientOrigin}/docs/_astro/`]);
   });
 
-  it("serves llms.txt, listing every guide", async () => {
-    const index = await read("/docs/llms.txt");
+  it("keeps the docs' policy on a page a browser revalidates", async () => {
+    const page = await routed("/docs/guides/pages");
+    await page.body?.cancel();
+    const etag = page.headers.get("etag") ?? "";
+    const revalidated = await routed("/docs/guides/pages", {
+      headers: { "if-none-match": etag },
+    });
 
-    expect(index.status).toBe(200);
-    expect(index.type).toContain("text/plain");
-    expect(index.text).toContain("(/docs/guides/server-functions)");
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("content-security-policy")).toBe(
+      page.headers.get("content-security-policy")
+    );
   });
 
-  it("serves each page's Markdown, the generated API reference's too", async () => {
-    const guide = await read("/docs/guides/server-functions.md");
-    const reference = await read("/docs/reference/react.md");
+  it("serves llms.txt and each page's Markdown, for the agent", async () => {
+    const index = await read("/docs/llms.txt");
+    const guide = await read("/docs/guides/pages.md");
 
-    expect(guide.status).toBe(200);
+    expect(index.text).toContain("(/docs/guides/pages)");
+    expect(index.type).toContain("text/plain");
+    expect(guide.text).toContain("useQuery");
     expect(guide.type).toContain("text/markdown");
-    expect(guide.text).toContain("export const open = query({");
-    // Generated from the SDK the release was built from.
-    expect(reference.status).toBe(200);
-    expect(reference.text).toContain("useQuery");
   });
 
   it("answers a path the docs don't have with their own 404, never the frontend", async () => {
-    const page = await read("/docs/guides/nothing-here/");
+    const page = await read("/docs/guides/nothing-here");
     const markdown = await read("/docs/guides/nothing-here.md");
 
     expect([page.status, markdown.status]).toStrictEqual([404, 404]);
-    expect(page.text).not.toContain('<div id="root">');
+    expect(page.text).toContain("Page not found");
     expect(markdown.text).not.toContain('<div id="root">');
   });
 });

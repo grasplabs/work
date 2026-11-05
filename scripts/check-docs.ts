@@ -16,6 +16,8 @@ const ALLOWED = [
   /(?:^|\/)skills\//u,
   // The SDK docs' pages, which every deployment serves at /docs.
   /^apps\/docs\/content\//u,
+  // The one page of the stand-in docs core's tests serve, as Markdown.
+  /^apps\/core\/test\/fixtures\/assets\/docs\/guides\/pages\.md$/u,
 ];
 
 const files = execFileSync(

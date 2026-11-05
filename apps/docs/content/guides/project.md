@@ -7,7 +7,7 @@ sidebar:
 
 An App is a folder of TypeScript files. Grasp reads them, checks them and runs them; you never deploy anything yourself.
 
-```
+```text
 app.ts              The App: its name, schema, access and Pages
 schema.ts           Its tables
 server/             Its server functions, one module or more
@@ -85,24 +85,39 @@ A Page is a React component in `screens/`. It calls server functions through `ap
 ```tsx screens/tasks.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderContent,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api } from "@server/_generated/api";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: false });
   const add = useMutation(api.tasks.add);
-  if (tasks === undefined) {
-    return <output>Loading tasks…</output>;
-  }
   return (
-    <main className="flex flex-col gap-3 p-6">
-      <ul>
-        {tasks.map((task) => (
-          <li key={task._id}>{task.title}</li>
-        ))}
-      </ul>
-      <Button onClick={async () => await add({ title: "A new task" })}>
-        Add a task
-      </Button>
+    <main className="flex flex-col gap-6 p-6">
+      <PageHeader>
+        <PageHeaderContent>
+          <PageHeaderTitle>Tasks</PageHeaderTitle>
+        </PageHeaderContent>
+        <PageHeaderActions>
+          <Button onClick={async () => await add({ title: "A new task" })}>
+            Add a task
+          </Button>
+        </PageHeaderActions>
+      </PageHeader>
+      {tasks === undefined ? (
+        <Spinner />
+      ) : (
+        <ul>
+          {tasks.map((task) => (
+            <li key={task._id}>{task.title}</li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 };

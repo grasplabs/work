@@ -114,8 +114,10 @@ export const docsPolicy = (origin: string, inline: InlineHashes): string =>
         : ["'unsafe-hashes'", ...inline.styleAttributes]),
     ].join(" "),
     "worker-src": "'none'",
-    "img-src": "'self' data:",
-    "connect-src": "'self'",
+    "img-src": `${origin}${docsPath}/ data:`,
+    // The docs fetch only their own files (the next page, the search
+    // index), the start page by its address without a `/` too.
+    "connect-src": `${origin}${docsPath} ${origin}${docsPath}/`,
     "object-src": "'none'",
     "base-uri": "'none'",
     "form-action": "'none'",
@@ -315,7 +317,7 @@ export const setSecurityHeaders = (
     headers.set("content-security-policy", "default-src 'none'; sandbox");
     headers.set("cross-origin-resource-policy", "same-origin");
   } else if (url.pathname !== screenFramePath) {
-    // A docs page carries its own, which names its inline code (docs.ts).
+    // The docs' answers carry their own, naming their inline code (docs.ts).
     if (!(isDocsPath(url.pathname) && headers.has("content-security-policy"))) {
       headers.set("content-security-policy", contentSecurityPolicy(origin));
     }

@@ -21,10 +21,9 @@ export default defineConfig({
   // (apps/core/src/docs.ts).
   deployment: { base: "/docs" },
   theme: {
-    // The theme's tokens are the kit's (theme.css); the kit has a dark
-    // theme of its own, under `.dark`, which Blume's toggle doesn't set.
-    mode: "light",
-    toggle: false,
+    // The theme's tokens are the kit's (theme.css), light and dark.
+    mode: "system",
+    toggle: true,
     fonts: {
       display: variableFont(
         "Newsreader Variable",

@@ -30,21 +30,6 @@ const buildAppCompiler = (): void => {
   );
 };
 
-/**
- * Builds the SDK docs into the assets as core's build does, so the tests
- * serve the site a release carries (docs.test.ts).
- */
-const buildDocs = (): void => {
-  execFileSync(
-    process.execPath,
-    [
-      path.join(import.meta.dirname, "../../docs/build.ts"),
-      path.join(testAssets, "docs"),
-    ],
-    { stdio: "inherit" }
-  );
-};
-
 const writeTestAssets = async (): Promise<void> => {
   rmSync(testAssets, { recursive: true, force: true });
   cpSync(path.join(import.meta.dirname, "fixtures/assets"), testAssets, {
@@ -52,7 +37,6 @@ const writeTestAssets = async (): Promise<void> => {
   });
   buildAppCompiler();
   await buildExtractor(testAssets);
-  buildDocs();
 };
 
 const prepare = async (): Promise<void> => {

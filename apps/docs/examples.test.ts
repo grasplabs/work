@@ -39,7 +39,11 @@ import { examplesDir } from "./vite.config.ts";
 
 const content = path.join(import.meta.dirname, "content");
 const basePage = "guides/project.md";
-const languages: ReadonlySet<string> = new Set(["ts", "tsx"]);
+/** The extension of each TypeScript language's files. */
+const typeScript: Readonly<Record<string, string>> = { ts: ".ts", tsx: ".tsx" };
+
+/** The other languages a guide's code may be in, which nothing checks. */
+const otherLanguages: ReadonlySet<string> = new Set(["text", "sh", "json"]);
 
 /** A page's App: its files' text, by path. */
 type Files = Record<string, string>;
@@ -61,21 +65,29 @@ const codeBlocks = (node: Nodes): Code[] => {
   return "children" in node ? node.children.flatMap(codeBlocks) : [];
 };
 
-/** A page's TypeScript blocks, as the files they name. */
-const filesOf = (page: string): Files => {
-  const tree = fromMarkdown(readFileSync(path.join(content, page), "utf-8"));
+/**
+ * The TypeScript blocks of `markdown` (the page `page`), as the files they
+ * name. Every block is tagged with one of `languages`, so none escapes
+ * the check under another name, and a TypeScript block names its file
+ * with the extension its language has.
+ */
+const filesIn = (page: string, markdown: string): Files => {
   const files: Files = {};
-  for (const block of codeBlocks(tree)) {
-    if (block.lang === null || block.lang === undefined) {
-      continue;
-    }
-    if (!languages.has(block.lang)) {
-      continue;
-    }
-    const [file] = (block.meta ?? "").split(/\s+/u);
-    if (file === undefined || file === "") {
+  for (const block of codeBlocks(fromMarkdown(markdown))) {
+    const language = block.lang ?? "";
+    const extension = typeScript[language];
+    if (!(extension !== undefined || otherLanguages.has(language))) {
       throw new Error(
-        `${page}: name the file of each TypeScript block after its language: \`\`\`${block.lang} server/tasks.ts`
+        `${page}: tag each code block with its language, one of ts, tsx, ${[...otherLanguages].join(", ")}; not "${language}".`
+      );
+    }
+    if (extension === undefined) {
+      continue;
+    }
+    const [file = ""] = (block.meta ?? "").split(/\s+/u);
+    if (!file.endsWith(extension)) {
+      throw new Error(
+        `${page}: name the file of each ${language} block after its language, ending in ${extension}: \`\`\`${language} server/tasks${extension}`
       );
     }
     if (file in files) {
@@ -85,6 +97,9 @@ const filesOf = (page: string): Files => {
   }
   return files;
 };
+
+const filesOf = (page: string): Files =>
+  filesIn(page, readFileSync(path.join(content, page), "utf-8"));
 
 const write = (dir: string, files: Files): void => {
   for (const [file, text] of Object.entries(files)) {
@@ -196,5 +211,22 @@ describe("the guides' code", () => {
   it.each(withCode)("type-checks in %s", async (page) => {
     const files = page === basePage ? base : { ...base, ...filesOf(page) };
     await expect(typeErrors(page, files)).resolves.toBe("");
+  });
+
+  it("reads a TypeScript block as the file it names", () => {
+    expect(
+      filesIn("a.md", "```ts schema.ts\nexport {};\n```\n\n```text\nany\n```")
+    ).toStrictEqual({ "schema.ts": "export {};\n" });
+  });
+
+  it.each([
+    ["an untagged block", "```\nexport {};\n```"],
+    ["another name for TypeScript", "```typescript schema.ts\nexport {};\n```"],
+    ["a title instead of a file", '```ts title="schema.ts"\nexport {};\n```'],
+    ["a file without its extension", "```ts schema\nexport {};\n```"],
+    ["a file of another kind", "```ts notes.txt\nexport {};\n```"],
+    ["a .ts file in a tsx block", "```tsx page.ts\nexport {};\n```"],
+  ])("lets no code escape the check: %s", (_, markdown) => {
+    expect(() => filesIn("a.md", markdown)).toThrow("a.md: ");
   });
 });

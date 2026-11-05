@@ -4,7 +4,12 @@
  */
 @import "@grasp-os/ui/styles.css";
 
-:root {
+/*
+ * In both themes: Blume sets dark values of its own under `data-theme`,
+ * where the kit's dark ones apply too (styles.css).
+ */
+:root,
+:root[data-theme="dark"] {
   --blume-background: var(--background);
   --blume-foreground: var(--foreground);
   --blume-muted: var(--muted);

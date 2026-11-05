@@ -12,6 +12,8 @@
  * Usage: node build.ts [<dir>]: with a directory, the site is copied
  * there too; core's build passes `../web/dist/docs`, so the frontend's
  * static files carry it and core serves it at `/docs` (src/docs.ts).
+ * Core's build is the one place the docs are built: they have no `build`
+ * script, so `vp run -r build` builds them once.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -182,11 +184,46 @@ const writeInlineHashes = (): void => {
   );
 };
 
+/**
+ * Removes what Blume writes for hosts other than core and what nothing
+ * links to: other hosts' header and routing files, each page's MDX source
+ * beside its Markdown (the agent reads the `.md`), and the 404 page's
+ * JSON and Markdown twins.
+ */
+const removeUnserved = (): void => {
+  const files = readdirSync(site, { recursive: true, encoding: "utf-8" });
+  const unserved = files.filter(
+    (file) =>
+      file.endsWith(".mdx") ||
+      ["_headers", "vercel.json", "404.json", "404.md"].includes(file)
+  );
+  for (const file of unserved) {
+    rmSync(path.join(site, file));
+  }
+};
+
+/**
+ * `env` without what Vite sets for the code it runs (a test that builds
+ * the docs), which Blume's own Vite would take for its settings:
+ * `BASE_URL` moves the site off /docs.
+ */
+const withoutViteVariables = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+  Object.fromEntries(
+    Object.entries(env).filter(
+      ([name]) => !/^(?:BASE_URL|MODE|DEV|PROD|SSR|VITE.*)$/u.test(name)
+    )
+  );
+
 await buildReference();
+// From a fresh project: Blume keeps the one it generates (`.blume/`) to
+// write only what changed, a speed-up for `blume dev`, never a release.
+rmSync(path.join(root, ".blume"), { force: true, recursive: true });
 execFileSync(path.join(root, "node_modules/.bin/blume"), ["build"], {
   cwd: root,
   stdio: "inherit",
+  env: withoutViteVariables(process.env),
 });
+removeUnserved();
 writeInlineHashes();
 
 const [out] = process.argv.slice(2);

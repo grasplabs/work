@@ -33,10 +33,16 @@ const noInlineCode: InlineHashes = {
   styleAttributes: [],
 };
 
+/** The release's hashes, once read: they change only with it. */
+let releaseHashes: InlineHashes | undefined;
+
 const readInlineHashes = async (
   request: Request,
   env: Env
 ): Promise<InlineHashes> => {
+  if (releaseHashes !== undefined) {
+    return releaseHashes;
+  }
   const file = await env.ASSETS.fetch(new URL(inlineHashesPath, request.url));
   // Without the file, the static files answer the frontend's page.
   const isJson =
@@ -46,7 +52,11 @@ const readInlineHashes = async (
     return noInlineCode;
   }
   const parsed = inlineHashesSchema.safeParse(await file.json());
-  return parsed.success ? parsed.data : noInlineCode;
+  if (!parsed.success) {
+    return noInlineCode;
+  }
+  releaseHashes = parsed.data;
+  return releaseHashes;
 };
 
 const isHtml = (response: Response): boolean =>
@@ -76,22 +86,37 @@ const isFrontendPage = async (
 const notFoundPath = `${docsPath}/404.html`;
 
 /**
- * The docs' file at `request`'s path: a page under the docs' policy, and
- * the docs' own not-found page, 404, for a path they don't have.
+ * The request for the file at `request`'s address. The docs link each
+ * page by its folder without a trailing `/` (`/docs/guides/pages`), whose
+ * file is the folder's `index.html`: asked for by the folder itself, so
+ * the static files answer with it rather than redirect to it.
+ */
+const fileRequest = (request: Request): Request => {
+  const url = new URL(request.url);
+  const name = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+  if (name === "" || name.includes(".")) {
+    return request;
+  }
+  url.pathname = `${url.pathname}/`;
+  return new Request(url, request);
+};
+
+/**
+ * The docs' file at `request`'s path, or their own not-found page, 404,
+ * for a path they don't have; a redirect or a 304 as the static files
+ * answer. Every answer carries the docs' policy: a browser keeps the
+ * policy of a 304 for the page it revalidated.
  */
 export const docsResponse = async (
   request: Request,
   env: Env
 ): Promise<Response> => {
-  let page = await env.ASSETS.fetch(request);
+  let page = await env.ASSETS.fetch(fileRequest(request));
   let { status } = page;
   if (await isFrontendPage(page, request, env)) {
     await page.body?.cancel();
     page = await env.ASSETS.fetch(new URL(notFoundPath, request.url));
     status = 404;
-  }
-  if (!(page.ok && isHtml(page))) {
-    return page;
   }
   const headers = new Headers(page.headers);
   headers.set(
@@ -101,7 +126,9 @@ export const docsResponse = async (
       await readInlineHashes(request, env)
     )
   );
-  // A release replaces every page: checked again on each load.
-  headers.set("cache-control", "no-cache");
+  if (isHtml(page)) {
+    // A release replaces every page: checked again on each load.
+    headers.set("cache-control", "no-cache");
+  }
   return new Response(page.body, { status, headers });
 };

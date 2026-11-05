@@ -44,6 +44,13 @@ A route's parameters are the Page's `input`, typed by its schema.
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import type { ScreenProps } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderContent,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { api } from "@server/_generated/api";
 import type { screens } from "@server/_generated/api";
 
@@ -51,22 +58,28 @@ const Task = ({ input }: ScreenProps<typeof screens.task>) => {
   const task = useQuery(api.details.get, { id: input.id });
   const complete = useMutation(api.tasks.complete);
   if (task === undefined) {
-    return <output>Loading…</output>;
+    return <Skeleton className="m-6 h-9 w-64" />;
   }
   if (task === null) {
-    return <p>This task is gone.</p>;
+    return <p className="p-6">This task is gone.</p>;
   }
   return (
-    <main className="flex flex-col gap-3 p-6">
-      <h1>{task.title}</h1>
-      <Button
-        disabled={task.done}
-        onClick={async () =>
-          await complete({ id: task._id, expectedRevision: task._rev })
-        }
-      >
-        Complete
-      </Button>
+    <main className="p-6">
+      <PageHeader>
+        <PageHeaderContent>
+          <PageHeaderTitle>{task.title}</PageHeaderTitle>
+        </PageHeaderContent>
+        <PageHeaderActions>
+          <Button
+            disabled={task.done}
+            onClick={async () =>
+              await complete({ id: task._id, expectedRevision: task._rev })
+            }
+          >
+            Complete
+          </Button>
+        </PageHeaderActions>
+      </PageHeader>
     </main>
   );
 };
@@ -98,13 +111,14 @@ Pass `"skip"` instead of the arguments to read nothing yet. A query that fails t
 ```tsx screens/tasks.tsx
 import { useNavigate, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api, screens } from "@server/_generated/api";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: false });
   const navigate = useNavigate();
   if (tasks === undefined) {
-    return <output>Loading tasks…</output>;
+    return <Spinner className="m-6" />;
   }
   return (
     <main className="flex flex-col gap-2 p-6">
