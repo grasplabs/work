@@ -353,7 +353,7 @@ const trimmed = (text: string): string => {
 
 /**
  * An ARC-Seal's or ARC-Message-Signature's instance and `cv` tag (RFC 6376
- * 3.2's tag-list: `name=value` by `;`, each name once).
+ * 3.2's tag-list: `name=value` by `;`, each name once in any case).
  */
 const arcTagsOf = (
   value: string
@@ -363,11 +363,20 @@ const arcTagsOf = (
     specs.pop();
   }
   const tags = new Map<string, string>();
+  // Names are case-sensitive, but one twice in another case is refused: a
+  // sealer reading them otherwise could see another `cv` or `i` than ours.
+  const names = new Set<string>();
   for (const spec of specs) {
     const [name = "", ...rest] = spec.split("=").map(trimmed);
-    if (rest.length === 0 || !/^[A-Za-z]\w*$/u.test(name) || tags.has(name)) {
+    const folded = name.toLowerCase();
+    if (
+      rest.length === 0 ||
+      !/^[A-Za-z]\w*$/u.test(name) ||
+      names.has(folded)
+    ) {
       throw unparsable("Expected a tag-list");
     }
+    names.add(folded);
     tags.set(name, rest.join("="));
   }
   return { instance: instanceOf(tags.get("i")), cv: tags.get("cv") };

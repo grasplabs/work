@@ -402,6 +402,11 @@ describe("a reply's authentication", () => {
       casedCv: bossReport(...arcSet(1, forged, "NONE")),
       passAtOne: bossReport(...arcSet(1, forged, "pass")),
       noneAbove: bossReport(...arcSet(2, forged, "none"), ...arcSet(1, forged)),
+      // A tag twice in two cases, which a sealer may read as one.
+      casedTagTwice: bossReport(
+        ...arcSet(2, forged, "pass; CV=fail"),
+        ...arcSet(1, forged)
+      ),
       unreadableSeal: bossReport(
         { key: "arc-seal", value: "i=1; cv=maybe" },
         ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
@@ -441,6 +446,7 @@ describe("a reply's authentication", () => {
       casedCv: nothing,
       passAtOne: nothing,
       noneAbove: nothing,
+      casedTagTwice: nothing,
       unreadableSeal: nothing,
       unreadableInstance: nothing,
       lowerUnreadable: { result: "pass", domain: "bank.test" },
