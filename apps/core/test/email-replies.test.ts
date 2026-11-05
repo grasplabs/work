@@ -284,7 +284,8 @@ const replyMail = ({
   headers = routingPass,
 }: {
   messageId?: string;
-  from?: string;
+  /** Its From, or none at all for null. */
+  from?: string | null;
   subject?: string;
   text?: string;
   headers?: string[];
@@ -292,7 +293,7 @@ const replyMail = ({
   [
     ...headers,
     `Message-ID: <${messageId}>`,
-    `From: ${from}`,
+    ...(from === null ? [] : [`From: ${from}`]),
     "To: quotes@acme.test",
     `Subject: ${subject}`,
     "Date: Mon, 28 Sep 2026 08:00:00 +0000",
@@ -423,6 +424,84 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         authentication: { spf: null, dkim: null, dmarc: null },
       },
     ]);
+  });
+
+  it("reports DMARC only when it judged the one From mailbox the run gets", async () => {
+    const { runId, address } = await holdingRun(shared);
+    // Each with Email Routing's own DMARC pass for acme.test, of the From
+    // it judged: which one, the run can't tell, so only a message with one
+    // From header holding one mailbox, the one the run gets, at that
+    // domain, keeps it. By subject, each case.
+    const cases: Record<
+      string,
+      { from: string | null; headers?: string[]; envelopeFrom?: string }
+    > = {
+      aligned: { from: "Ben <ben@acme.test>" },
+      cased: { from: "Ben <ben@ACME.Test>" },
+      // DMARC vouches for the domain: which address at it may send is the
+      // domain's own policy.
+      sameDomain: { from: "Boss <boss@acme.test>" },
+      otherDomain: { from: "Boss <boss@bank.test>" },
+      // A From above the one DMARC may have judged (verifiers read From
+      // bottom up), the run getting the topmost.
+      severalFrom: {
+        from: "Ben <ben@acme.test>",
+        headers: [...routingPass, "From: Boss <boss@acme.test>"],
+      },
+      // RFC 5322 4.5's obsolete `From :`, kept apart by postal-mime.
+      spacedFrom: {
+        from: "Ben <ben@acme.test>",
+        headers: [...routingPass, "From : Boss <boss@acme.test>"],
+      },
+      severalMailboxes: { from: "boss@acme.test, ben@acme.test" },
+      group: { from: "Team: boss@acme.test;" },
+      // No From postal-mime can read: the run gets the envelope sender.
+      unreadable: { from: "", envelopeFrom: "boss@acme.test" },
+      spacedOnly: {
+        from: null,
+        headers: [...routingPass, "From : Boss <boss@acme.test>"],
+        envelopeFrom: "boss@acme.test",
+      },
+      // Several `@`: which domain it names depends on who reads it.
+      severalAt: {
+        from: "Boss <boss@bank.test@acme.test>",
+      },
+      // An address the run gets cut to 256 characters, its quoted local
+      // part ending, once cut, at another domain.
+      cut: { from: `"${"x".repeat(245)}@bank.test tail"@acme.test` },
+    };
+    await Promise.all(
+      Object.entries(cases).map(
+        async ([subject, { from, headers, envelopeFrom }]) =>
+          await deliver(address, replyMail({ subject, from, headers }), {
+            envelopeFrom,
+          })
+      )
+    );
+
+    const replies = await repliesIn(runId);
+
+    expect(
+      Object.fromEntries(
+        replies.map(({ subject, from, authentication }) => [
+          subject,
+          [from, z.object({ dmarc: z.unknown() }).parse(authentication).dmarc],
+        ])
+      )
+    ).toStrictEqual({
+      aligned: ["ben@acme.test", { result: "pass", domain: "acme.test" }],
+      cased: ["ben@ACME.Test", { result: "pass", domain: "acme.test" }],
+      sameDomain: ["boss@acme.test", { result: "pass", domain: "acme.test" }],
+      otherDomain: ["boss@bank.test", null],
+      severalFrom: ["boss@acme.test", null],
+      spacedFrom: ["ben@acme.test", null],
+      severalMailboxes: ["boss@acme.test", null],
+      group: ["boss@acme.test", null],
+      unreadable: ["boss@acme.test", null],
+      spacedOnly: ["boss@acme.test", null],
+      cut: [`"${"x".repeat(245)}@bank.test`, null],
+      severalAt: ["boss@bank.test@acme.test", null],
+    });
   });
 
   it("takes a reply delivered again as the one event it is, whatever its bytes", async () => {

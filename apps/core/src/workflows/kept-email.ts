@@ -42,10 +42,12 @@ export const stagedAttachmentKey = (
 /** The most kept messages one clock run deletes: one R2 list and delete. */
 const maxDeletedPerRun = 1000;
 
+/** postal-mime, loaded at the first message, not as core starts (GRA-1349). */
+export const postalMime = async () => await import("postal-mime");
+
 /** `raw` parsed, or undefined for a message that doesn't parse. */
 export const parsedOf = async (raw: Uint8Array): Promise<Email | undefined> => {
-  // Loaded at the first message, not as core starts (GRA-1349).
-  const { default: PostalMime } = await import("postal-mime");
+  const { default: PostalMime } = await postalMime();
   try {
     return await PostalMime.parse(raw);
   } catch {
