@@ -2479,7 +2479,9 @@ export const workflowDecisions = sqliteTable(
     // A run's open decisions (src/workflows/overview.ts): whether it waits.
     index("workflow_decisions_run_status_idx").on(table.runId, table.status),
     // The improvement signals (src/signals.ts): open decisions, oldest
-    // first, and decisions answered in a window, latest first.
+    // first, and decisions answered in a window, latest first. The runs
+    // waiting for a decision (src/workflows/overview.ts), counted and
+    // listed from the open ones.
     index("workflow_decisions_status_opened_idx").on(
       table.status,
       table.openedAt,

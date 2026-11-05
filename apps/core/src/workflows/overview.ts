@@ -36,6 +36,7 @@ import {
   listOf,
   orderedRuns,
   runView,
+  seenBy,
   visibleToMember,
   waits,
 } from "./run-view.ts";
@@ -187,6 +188,42 @@ const countedBy = async (
   return new Map(rows.map(({ workflow, count }) => [workflow, count]));
 };
 
+/**
+ * How many of the runs `scope` sees wait for a decision now, by workflow:
+ * counted from the open decisions (`workflow_decisions_status_opened_idx`),
+ * each run once, so the count reads what is open, never every run ended
+ * long ago.
+ */
+const waitingBy = async (
+  db: Db,
+  scope: RunScope,
+  now: Date
+): Promise<Map<string, number>> => {
+  const seen = seenBy(scope);
+  if (seen === undefined) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      workflow: workflowResourceRuns.workflowResourceId,
+      count: sql<number>`count(DISTINCT ${workflowResourceRuns.id})`,
+    })
+    .from(workflowDecisions)
+    .innerJoin(
+      workflowResourceRuns,
+      eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+    )
+    .where(
+      and(
+        stillOpen(workflowDecisions, now),
+        sql`${workflowResourceRuns.endedAt} IS NULL`,
+        seen
+      )
+    )
+    .groupBy(workflowResourceRuns.workflowResourceId);
+  return new Map(rows.map(({ workflow, count }) => [workflow, count]));
+};
+
 /** That a run ended `status` since `since`. */
 const endedSince =
   (status: "completed" | "failed", since: Date): RunWhere =>
@@ -228,7 +265,7 @@ export const workflowOverview = async (
   const handledSince = new Date(now.getTime() - handledRunDays * dayMs);
   const [latest, waiting, failed, handled, owners] = await Promise.all([
     latestRuns(db, by, workflows, now),
-    countedBy(db, scope, now, () => waits(now)),
+    waitingBy(db, scope, now),
     countedBy(db, scope, now, endedSince("failed", failedSince)),
     countedBy(db, scope, now, endedSince("completed", handledSince)),
     ownerNames(
@@ -269,8 +306,8 @@ const waitingRuns = async (
   scope: RunScope,
   now: Date
 ): Promise<RunRow[]> => {
-  const run = runView(db, scope, now);
-  if (run === undefined) {
+  const seen = seenBy(scope);
+  if (seen === undefined) {
     return [];
   }
   const later = alias(workflowDecisions, "later");
@@ -285,7 +322,7 @@ const waitingRuns = async (
       and(
         stillOpen(workflowDecisions, now),
         sql`${workflowResourceRuns.endedAt} IS NULL`,
-        sql`${workflowResourceRuns.id} IN (SELECT ${run.id} FROM ${run})`,
+        seen,
         // Its latest open decision alone, so each run comes once.
         notExists(
           db

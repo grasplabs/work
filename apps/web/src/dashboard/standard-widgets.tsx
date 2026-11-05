@@ -14,6 +14,7 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { formatEuro } from "../format.ts";
@@ -186,14 +187,22 @@ export const Nothing = ({ children }: { children: ReactNode }) => (
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-/** A workflow's name. */
-const WorkflowName = ({
+/** A workflow's name, as the way to its page. */
+const WorkflowLink = ({
   workflow,
   className,
 }: {
   workflow: ReturnWorkflow;
   className: string;
-}) => <span className={className}>{workflow.name}</span>;
+}) => (
+  <Link
+    className={className}
+    params={{ workflow: workflow.id }}
+    to="/workflows/$workflow"
+  >
+    {workflow.name}
+  </Link>
+);
 
 /** A workflow's mark by its return: green where it is measured, light green where it is expected, grey before. */
 const toneOfReturn = (row: WorkflowReturn): Tone => {
@@ -367,7 +376,7 @@ export const ReturnChartView = ({
                 <TableCell>
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Mark tone={toneOfReturn(row)} />
-                    <WorkflowName
+                    <WorkflowLink
                       className="min-w-0 truncate hover:underline"
                       workflow={row.workflow}
                     />
@@ -517,7 +526,7 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                       >
                         <Mark tone={toneOfStage(row.stage)} />
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <WorkflowName
+                          <WorkflowLink
                             className="text-pretty hover:underline"
                             workflow={row.workflow}
                           />

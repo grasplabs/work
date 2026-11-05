@@ -83,15 +83,28 @@ const goal: GoalProgress = {
   coming: 1200,
 };
 
-/** The widget's text as a person reads it, on the board or in full. */
-const textOf = (widget: ReactNode, full = false): string =>
+/** The widget's markup, on the board or in full. */
+const markupOf = (widget: ReactNode, full = false): string =>
   renderToStaticMarkup(
     <I18nProvider i18n={i18n}>
       <RouterContextProvider router={router}>
         <WidgetFull value={full}>{widget}</WidgetFull>
       </RouterContextProvider>
     </I18nProvider>
-  )
+  );
+
+/** A link in markup, and where it goes. */
+const linkHref = /<a [^>]*href="(?<href>[^"]*)"/gu;
+
+/** Where the widget's links go, in order. */
+const linksOf = (widget: ReactNode, full = false): string[] =>
+  [...markupOf(widget, full).matchAll(linkHref)].map(
+    ({ groups }) => groups?.href ?? ""
+  );
+
+/** The widget's text as a person reads it, on the board or in full. */
+const textOf = (widget: ReactNode, full = false): string =>
+  markupOf(widget, full)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll("&amp;", "&")
     .replaceAll(/\s+/gu, " ")
@@ -120,6 +133,9 @@ describe("the return widget", () => {
     expect(text).toContain(formatEuro(-200));
     expect(text).toMatch(/Draft replies €1,000 — —/u);
     expect(text).not.toContain("File receipts");
+    expect(linksOf(<ReturnChartView rows={[live]} />, true)).toStrictEqual([
+      "/workflows/wf-Match%20invoices",
+    ]);
   });
 });
 
@@ -130,5 +146,12 @@ describe("the goals widget", () => {
     expect(board).toContain("Close the month in a day");
     expect(full).toContain("Close the month in a day");
     expect(full).toContain("Match invoices");
+  });
+
+  it("links each of a goal's workflows in full to its page, by its ID", () => {
+    expect(linksOf(<GoalListView goals={[goal]} />, true)).toStrictEqual([
+      "/workflows/wf-Match%20invoices",
+      "/workflows/wf-Chase%20payments",
+    ]);
   });
 });

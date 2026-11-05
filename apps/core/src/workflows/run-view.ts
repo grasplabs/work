@@ -135,6 +135,15 @@ const runsSeen = (scope: RunScope, workflow: SQL): SQL | undefined => {
     : or(every, own);
 };
 
+/**
+ * That a run is one `scope` sees, as a condition on its row, for a read
+ * that finds its runs some other way (from the open decisions,
+ * workflows/overview.ts): which workflow it is of is checked, never looked
+ * up. Undefined when the scope holds none.
+ */
+export const seenBy = (scope: RunScope): SQL | undefined =>
+  runsSeen(scope, sql`+${workflowResourceRuns.workflowResourceId}`);
+
 /** The select of the view, narrowed by `where`: see `runView`. */
 const selectOf = (
   db: DrizzleD1Database,
