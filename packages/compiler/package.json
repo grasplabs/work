@@ -21,7 +21,8 @@
     }
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./css": "./src/packages/css.ts"
   },
   "scripts": {
     "build": "node build.ts"
@@ -36,6 +37,7 @@
     "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
+    "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "eslint": "catalog:",
     "eslint-plugin-import-x": "catalog:",

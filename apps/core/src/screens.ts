@@ -1141,12 +1141,6 @@ export interface BuiltScreen {
   code: FrameCode;
   /** `code`'s hash under its profile (`screenArtifact`): what an admin approves. */
   artifact: string;
-  /**
-   * A preview's: the screen's App modules as one module, which its open
-   * frame evaluates for React Fast Refresh, and the kit modules it
-   * imports (the compiler's preview entry).
-   */
-  refresh?: { code: string; kit: string[] };
 }
 
 /**
@@ -1175,10 +1169,13 @@ const pick = (
  */
 export const screenArtifact = async (
   profile: BuildProfile,
-  { entry, runtime, modules, kit, css }: FrameCode
+  { entry, runtime, modules, addresses, kit, css }: FrameCode
 ): Promise<string> =>
   await sha256Hex(
-    canonicalJson({ profile, code: { entry, runtime, modules, kit, css } })
+    canonicalJson({
+      profile,
+      code: { entry, runtime, modules, addresses, kit, css },
+    })
   );
 
 /** The screens of a version, built once, for each screen's code. */
@@ -1250,6 +1247,7 @@ export const versionScreens = async (
         profile === "preview" ? previewRuntime : screenRuntime
       ),
       modules: pick(build.modules, closure.modules),
+      addresses: pick(build.addresses, closure.modules),
       kit: pick(kit, closure.kitModules),
       css: build.css,
     };
@@ -1257,14 +1255,10 @@ export const versionScreens = async (
     // what the frame's document runs and nothing else (screen-frame.ts),
     // and what the page expects the frame to say back once the screen has
     // mounted (screen-host.ts).
-    const refresh = build.entries?.[entry];
     return {
       screen: name,
       code,
       artifact: await screenArtifact(profile, code),
-      ...(refresh === undefined
-        ? {}
-        : { refresh: { code: refresh, kit: closure.kitModules } }),
     };
   };
 };

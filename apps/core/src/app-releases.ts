@@ -345,6 +345,7 @@ const sealedScreenSchema = z.strictObject({
     entry: z.string(),
     runtime: z.string(),
     modules: z.record(z.string(), z.string()),
+    addresses: z.record(z.string(), z.string()),
     kit: z.record(z.string(), z.string()),
     css: z.string(),
   }),

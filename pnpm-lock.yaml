@@ -208,6 +208,9 @@ catalogs:
     embla-carousel-react:
       specifier: 8.6.0
       version: 8.6.0
+    es-module-lexer:
+      specifier: 3.0.4
+      version: 3.0.4
     esbuild-wasm:
       specifier: 0.28.2
       version: 0.28.2
@@ -679,6 +682,9 @@ importers:
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@cloudflare/workers-types@5.20261023.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
+      es-module-lexer:
+        specifier: 'catalog:'
+        version: 3.0.4
       fflate:
         specifier: 'catalog:'
         version: 0.8.3
@@ -967,6 +973,9 @@ importers:
       babel-plugin-react-compiler:
         specifier: 'catalog:'
         version: 1.0.0
+      es-module-lexer:
+        specifier: 'catalog:'
+        version: 3.0.4
       esbuild-wasm:
         specifier: 'catalog:'
         version: 0.28.2
@@ -6052,6 +6061,9 @@ packages:
 
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
+
+  es-module-lexer@3.0.4:
+    resolution: {integrity: sha512-BldNY5mwkVu+cQ5Ymn3e6hB9Sx8XHx4ZevWbiUyZbfKxJxYO27Hf0wfzkxIaD5CAJMaGl3YspKELj0ff/7nCMA==}
 
   es-object-atoms@1.1.2:
     resolution: {integrity: sha512-HWcBoN6NileqtSydK2FqHbS/LoDd2pqrnQHLyJzBj4kOp/ky2MWMN694xOfkK8/SnUsW2DH7EfyVlydKCsm1Zw==}
@@ -13495,6 +13507,8 @@ snapshots:
       math-intrinsics: 1.1.0
 
   es-module-lexer@2.3.2: {}
+
+  es-module-lexer@3.0.4: {}
 
   es-object-atoms@1.1.2:
     dependencies:

@@ -1,4 +1,4 @@
-import type { PreviewApplied, PreviewPart } from "@grasp-os/sdk/screen-runtime";
+import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/screen-runtime";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
@@ -7,17 +7,22 @@ import { screenErrors } from "@grasp-os/shared/screens";
 // frame it has open (spec 19.2.1): each time the chat says the draft is
 // at a newer revision, the page asks core for the previewed screen at
 // that revision (`chats.previewUpdate`, which builds each revision once,
-// for every preview that asks for it) and hands it to the frame over the
-// frame's own bridge, in parts, which the frame checks, evaluates and
-// swaps in with React Fast Refresh (@grasp-os/sdk's preview-updates.ts).
-// The frame isn't started again, so what the screen holds stays.
+// for every preview that asks for it, and stages its modules) and hands
+// the frame the address of the screen's module over the frame's own
+// bridge; the frame imports it, loading from core only the modules the
+// write changed, and swaps it in with React Fast Refresh (@grasp-os/sdk's
+// preview-updates.ts). The frame isn't started again, so what the screen
+// holds stays.
 //
 // The page decides what the frame is handed, never the frame:
 // - only an update core answered for the App the frame was opened for,
 //   and only of a revision past the one the frame shows: one asked at a
 //   time, then the newest the chat named while it was asked;
-// - each update's size and SHA-256 as core answered them, which the
-//   frame checks the module against before evaluating anything;
+// - when an update would import a module the frame evaluated before but
+//   no longer runs (an update back to an earlier write, or the version
+//   swapped back after one failed to render), a new visit, under which
+//   the frame evaluates every module afresh: a browser evaluates one
+//   address once, and Refresh takes only code evaluated anew;
 // - nothing the frame couldn't load as it is: an update that needs a kit
 //   module the frame didn't load (its import map is fixed), or past the
 //   revisions and bytes one frame takes (`previewResetRevisions`,
@@ -28,12 +33,6 @@ import { screenErrors } from "@grasp-os/shared/screens";
 // that worked and the page shows that the problem is being fixed: the
 // agent hears of it from the preview's reports (core's
 // preview-reports.ts), never the person as a stack trace.
-
-/**
- * The most characters of a module one part carries: well within what the
- * frame's port holds unread (`screenLimits.portQueue`).
- */
-export const previewPartChars = 128 * 1024;
 
 /** What the preview shows besides the screen: whether a problem is being fixed. */
 export type PreviewHealth = "working" | "fixing";
@@ -50,57 +49,34 @@ export interface PreviewUpdatesHost {
   moved: (revision: number) => void;
 }
 
-/** What the frame's receiver answers each part with. */
-type FrameReceiver = (part: PreviewPart) => Promise<PreviewApplied>;
-
-/** `refresh` in parts of at most `previewPartChars` characters of its code. */
-export const partsOf = (refresh: PreviewRefresh): PreviewPart[] => {
-  const { revision, code, bytes, sha256, css } = refresh;
-  const parts = Math.max(1, Math.ceil(code.length / previewPartChars));
-  return Array.from({ length: parts }, (_, part) => ({
-    revision,
-    part,
-    parts,
-    code: code.slice(part * previewPartChars, (part + 1) * previewPartChars),
-    bytes,
-    sha256,
-    // The CSS once, with the last part.
-    css: part === parts - 1 ? css : "",
-  }));
-};
-
-/** The bytes a frame holds once it evaluated `refresh`: its module and its CSS. */
-const loadedBytes = (refresh: PreviewRefresh): number =>
-  refresh.bytes + refresh.css.length;
+/** What the frame's receiver answers each version with. */
+type FrameReceiver = (load: PreviewLoad) => Promise<PreviewApplied>;
 
 /**
- * What handing the frame `update` may make it evaluate, at most: the
- * update itself, and, should it fail to render, a copy of `applied`, the
- * last that rendered, swapped back in (@grasp-os/sdk's preview-updates.ts).
- * A frame keeps every module it evaluated, so each counts, whether it
- * worked or not.
+ * What the frame holds of its modules: the visit it imports in, the
+ * modules it evaluated in it, and those of the version it runs.
  */
-const mostEvaluated = (
-  update: PreviewRefresh,
-  applied: PreviewRefresh
-): { modules: number; bytes: number } => ({
-  modules: 2,
-  bytes: loadedBytes(update) + loadedBytes(applied),
-});
+interface Evaluated {
+  visit: number;
+  seen: Set<string>;
+  running: ReadonlySet<string>;
+}
 
-/** Why core's answer can't come in through Refresh, if it can't. */
-const resetNeeded = (
-  update: PreviewRefresh,
-  applied: PreviewRefresh,
-  kit: ReadonlySet<string>,
-  evaluated: { modules: number; bytes: number }
-): boolean => {
-  const most = mostEvaluated(update, applied);
-  return (
-    update.kit.some((name) => !kit.has(name)) ||
-    evaluated.modules + most.modules > platformLimits.previewResetRevisions ||
-    evaluated.bytes + most.bytes > platformLimits.previewResetBytes
-  );
+/**
+ * The bytes the frame evaluates loading `version` with `seen` evaluated
+ * already: the modules it hasn't, and the CSS.
+ */
+const newBytes = (
+  version: PreviewRefresh,
+  seen: ReadonlySet<string> = new Set()
+): number => {
+  let bytes = version.css.length;
+  for (const [address, size] of Object.entries(version.modules)) {
+    if (!seen.has(address)) {
+      bytes += size;
+    }
+  }
+  return bytes;
 };
 
 /**
@@ -109,7 +85,6 @@ const resetNeeded = (
  */
 export class PreviewUpdates {
   readonly #app: string;
-  readonly #opened: PreviewRefresh;
   readonly #host: PreviewUpdatesHost;
   /** The kit modules the frame loaded: all an update may import. */
   readonly #kit: ReadonlySet<string>;
@@ -129,35 +104,38 @@ export class PreviewUpdates {
   #health: PreviewHealth = "working";
   /** The update the frame shows: the last that rendered. */
   #applied: PreviewRefresh;
+  #evaluated: Evaluated;
   /**
-   * What the frame evaluated since it started, which bounds it (spec 18.1,
-   * `previewResetRevisions`, `previewResetBytes`): every update handed
-   * over and every copy swapped back in, as modules and bytes.
+   * What the frame took since it started, which bounds it (spec 18.1,
+   * `previewResetRevisions`, `previewResetBytes`): every version handed
+   * over, and the bytes of every module it evaluated and every CSS.
    */
-  readonly #evaluated = { modules: 0, bytes: 0 };
+  readonly #taken = { revisions: 0, bytes: 0 };
 
   constructor(app: string, opened: PreviewRefresh, host: PreviewUpdatesHost) {
     this.#app = app;
-    this.#opened = opened;
     this.#applied = opened;
     this.#host = host;
     this.#kit = new Set(opened.kit);
     this.#shown = opened.revision;
     this.#wanted = opened.revision;
     this.#asked = opened.revision;
+    const modules = Object.keys(opened.modules);
+    this.#evaluated = {
+      visit: 0,
+      seen: new Set(modules),
+      running: new Set(modules),
+    };
+    this.#taken.bytes = newBytes(opened);
   }
 
-  /**
-   * The frame's receiver, once it handed it over: first given the screen
-   * as the frame opened it, the version it swaps back to should the next
-   * fail to render; then whatever the chat named since.
-   */
+  /** The frame's receiver, once it handed it over: then whatever the chat named since. */
   follow(toFrame: FrameReceiver): void {
     if (this.#toFrame !== undefined || this.#closed) {
       return;
     }
     this.#toFrame = toFrame;
-    void this.#run(this.#opened);
+    void this.#run();
   }
 
   /** The chat says the draft is at `revision` now. */
@@ -182,10 +160,11 @@ export class PreviewUpdates {
    * The revision of the screen code the frame runs now: the one it is
    * trying while it is handed an update (its first render and mount
    * effects run then, and its failure is reported before the frame
-   * answers and rolls back), or else the one it shows. What the frame
-   * calls and reports names it, and core files a problem, or a screen
-   * seen, only under the draft's own revision: an update that failed
-   * fails that revision's check, and an earlier screen's never does.
+   * answers and the page swaps back), or else the one it shows. What the
+   * frame calls and reports names it, and core files a problem, or a
+   * screen seen, only under the draft's own revision: an update that
+   * failed fails that revision's check, and an earlier screen's never
+   * does.
    */
   runningAt(): number {
     return this.#trying ?? this.#shown;
@@ -204,19 +183,15 @@ export class PreviewUpdates {
   }
 
   /**
-   * Hands the frame `first`, if given, then asks for and hands it the
-   * newest revision the chat named until none is newer than the last
-   * asked for: one at a time.
+   * Asks for and hands the frame the newest revision the chat named until
+   * none is newer than the last asked for: one at a time.
    */
-  async #run(first?: PreviewRefresh): Promise<void> {
+  async #run(): Promise<void> {
     if (this.#asking || this.#toFrame === undefined) {
       return;
     }
     this.#asking = true;
     try {
-      if (first !== undefined && !(await this.#hand(first))) {
-        return;
-      }
       while (!this.#closed && this.#wanted > this.#asked) {
         this.#asked = this.#wanted;
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
@@ -265,34 +240,27 @@ export class PreviewUpdates {
     return answered.refresh;
   }
 
-  /** Hands the frame `update`, in parts: false once it is started afresh. */
+  /**
+   * Hands the frame `update`, and the last version that rendered back
+   * should it fail to render: false once the frame is started afresh.
+   */
   async #hand(update: PreviewRefresh): Promise<boolean> {
-    const toFrame = this.#toFrame;
-    if (toFrame === undefined || this.#closed) {
-      return false;
-    }
-    if (resetNeeded(update, this.#applied, this.#kit, this.#evaluated)) {
+    if (!this.#fits(update)) {
       this.#reset();
       return false;
     }
-    let answer: PreviewApplied = "refused";
     this.#trying = update.revision;
     this.#troubled = false;
-    try {
-      for (const part of partsOf(update)) {
-        // oxlint-disable-next-line no-await-in-loop -- parts in order
-        answer = await toFrame(part);
-        if (answer !== "more") {
-          break;
-        }
-      }
-    } catch {
-      // The frame's bridge is gone: the frame is stopped as it is.
-      return false;
-    } finally {
-      this.#trying = undefined;
+    let answer = await this.#load(update);
+    this.#trying = undefined;
+    if (answer === "broken") {
+      // What rendered last, back, keeping what the screen holds.
+      answer =
+        this.#fits(this.#applied) &&
+        (await this.#load(this.#applied)) === "applied"
+          ? "failed"
+          : "reset";
     }
-    this.#count(update, answer);
     if (answer === "reset") {
       this.#reset();
       return false;
@@ -300,7 +268,7 @@ export class PreviewUpdates {
     if (answer !== "applied") {
       // Not taken: the frame shows the last version that worked.
       this.#say("fixing");
-      return true;
+      return !this.#closed;
     }
     this.#applied = update;
     if (update.revision !== this.#shown) {
@@ -316,24 +284,65 @@ export class PreviewUpdates {
   }
 
   /**
-   * Counts what the frame evaluated handing it `update`, answered
-   * `answer`: nothing for an update it refused unread; the update for one
-   * it took; for one that failed, the update and a copy of the last that
-   * rendered, as one that rendered with an error is swapped back (the
-   * frame doesn't say which way it failed, so the most it may have).
+   * Whether the frame can take `version` as it is: every kit module it
+   * imports loaded, and within what one frame takes.
    */
-  #count(update: PreviewRefresh, answer: PreviewApplied): void {
-    if (answer === "refused" || answer === "more") {
-      return;
+  #fits(version: PreviewRefresh): boolean {
+    const { revisions, bytes } = this.#taken;
+    return (
+      !this.#closed &&
+      version.kit.every((name) => this.#kit.has(name)) &&
+      revisions + 1 <= platformLimits.previewResetRevisions &&
+      bytes + newBytes(version, this.#visitFor(version).seen) <=
+        platformLimits.previewResetBytes
+    );
+  }
+
+  /** The evaluation the frame imports `version` in: a new one when it would run code it left. */
+  #visitFor(version: PreviewRefresh): Evaluated {
+    const { seen, running, visit } = this.#evaluated;
+    const left = Object.keys(version.modules).some(
+      (address) => seen.has(address) && !running.has(address)
+    );
+    return left
+      ? { visit: visit + 1, seen: new Set(), running: new Set() }
+      : this.#evaluated;
+  }
+
+  /** Hands the frame `version`, counting what it evaluates. */
+  async #load(version: PreviewRefresh): Promise<PreviewApplied> {
+    const toFrame = this.#toFrame;
+    if (toFrame === undefined || this.#closed) {
+      return "reset";
     }
-    const most = mostEvaluated(update, this.#applied);
-    if (answer === "failed") {
-      this.#evaluated.modules += most.modules;
-      this.#evaluated.bytes += most.bytes;
-      return;
+    const into = this.#visitFor(version);
+    const modules = Object.keys(version.modules);
+    this.#taken.revisions += 1;
+    this.#taken.bytes += newBytes(version, into.seen);
+    // Whatever it answers, its modules are in the frame's module map now:
+    // those that evaluated, and those that failed to.
+    const seen = new Set([...into.seen, ...modules]);
+    let answer: PreviewApplied;
+    try {
+      answer = await toFrame({
+        entry: version.entry,
+        visit: into.visit,
+        css: version.css,
+      });
+    } catch {
+      // The frame's bridge is gone: the frame is stopped as it is.
+      this.#closed = true;
+      return "reset";
     }
-    this.#evaluated.modules += 1;
-    this.#evaluated.bytes += loadedBytes(update);
+    // What it registered with Refresh: an update that evaluated, whether
+    // it rendered or not; one that didn't registers nothing.
+    const registered = answer === "applied" || answer === "broken";
+    this.#evaluated = {
+      visit: into.visit,
+      seen,
+      running: registered ? new Set(modules) : into.running,
+    };
+    return answer;
   }
 
   #reset(): void {

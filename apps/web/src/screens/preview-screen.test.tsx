@@ -9,10 +9,7 @@ import {
   register,
 } from "@grasp-os/sdk/preview-refresh";
 import { previewReceiver } from "@grasp-os/sdk/preview-updates";
-import type {
-  PreviewPart,
-  ScreenComponent,
-} from "@grasp-os/sdk/screen-runtime";
+import type { ScreenComponent } from "@grasp-os/sdk/screen-runtime";
 import { act, createElement, useState } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -27,17 +24,6 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 // as applied. A component of the same name must keep its state.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-
-const encoder = new TextEncoder();
-
-const sha256 = async (bytes: Uint8Array): Promise<string> =>
-  [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 
 /** How many times a `Desk` was mounted, which its state remembers. */
 let mounts = 0;
@@ -75,19 +61,14 @@ const modules: Record<string, () => { default: ScreenComponent }> = {
   renamed: () => desk("RenamedDesk", "Renamed"),
 };
 
-/** `code` at `revision`, as one part, the way the page sends it. */
-const update = async (
-  revision: number,
-  code: string
-): Promise<PreviewPart> => ({
-  revision,
-  part: 0,
-  parts: 1,
-  code,
-  bytes: encoder.encode(code).byteLength,
-  sha256: await sha256(encoder.encode(code)),
-  css: "",
-});
+/** The address of the module of `code`, as core would serve it. */
+const addressOf = (code: string): string =>
+  String(Object.keys(modules).indexOf(code)).repeat(64);
+
+/** Each module's code, by its address. */
+const addressed: Record<string, string> = Object.fromEntries(
+  Object.keys(modules).map((code) => [addressOf(code), code])
+);
 
 let root: Root | undefined;
 
@@ -121,12 +102,9 @@ describe("a preview's screen as its updates come", () => {
       );
     });
     const receive = previewReceiver({
-      evaluate: async (url) => {
+      evaluate: async ({ entry }) => {
         await Promise.resolve();
-        const [code = ""] = decodeURIComponent(
-          url.slice(url.indexOf(",") + 1)
-        ).split("\n");
-        return modules[code]?.();
+        return modules[addressed[entry] ?? ""]?.();
       },
       commit,
       discard,
@@ -138,24 +116,20 @@ describe("a preview's screen as its updates come", () => {
       settle: async () => {
         await Promise.resolve();
       },
+      css: () => "",
       setCss: () => {},
       report: () => {},
-      sha256,
     });
-    const shown: string[] = [];
-    for (const [revision, code] of [
-      [1, "first"],
-      [2, "edited"],
-      [3, "renamed"],
-    ] as const) {
+    const shown = [container.textContent ?? ""];
+    for (const code of ["edited", "renamed"]) {
       // oxlint-disable-next-line no-await-in-loop -- one update after another
       await act(async () => {
-        await receive(await update(revision, code));
+        await receive({ entry: addressOf(code), visit: 0, css: "" });
       });
       shown.push(container.textContent ?? "");
     }
     expect(shown).toStrictEqual([
-      // The same screen again, then edited: its state, its first mount.
+      // As it opened, then edited: its state, its first mount.
       "First (mount 1)",
       "Edited (mount 1)",
       // Renamed: another component, mounted afresh, but shown.

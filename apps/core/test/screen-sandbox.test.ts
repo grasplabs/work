@@ -250,7 +250,7 @@ describe(
 
     it("read the compiler's code only to start its isolate, and keep none of it: once for builds that start together, never for a build on the warm one", async () => {
       // Core keeps none of it (compiler.js is 22 MB as a string, kit.json
-      // 11 MB, esbuild.wasm 14 MB, in a 128 MB isolate): only the Loader
+      // 11 MB, in a 128 MB isolate): only the Loader
       // needs it, to start the compiler's isolate. Core's static assets,
       // noting each file read: a fresh binding, so no read before this
       // test is shared with it.
@@ -294,12 +294,12 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: ["compiler.js", "esbuild.wasm", "kit.json"],
+        together: ["compiler.js", "kit.json"],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: ["compiler.js", "esbuild.wasm", "kit.json"],
+        anewRead: ["compiler.js", "kit.json"],
       });
     });
 
@@ -345,7 +345,7 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "components/one.ts": [] }],
-        files: ["compiler.js", "esbuild.wasm", "kit.json", "ultracite.js"],
+        files: ["compiler.js", "kit.json", "ultracite.js"],
         overlap: false,
       });
     });

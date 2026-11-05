@@ -1,91 +1,66 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { previewReceiver } from "../src/preview-updates.ts";
+import {
+  ModuleNotLoadedError,
+  notLoaded,
+  previewReceiver,
+} from "../src/preview-updates.ts";
 import type { PreviewFrame } from "../src/preview-updates.ts";
-import type { PreviewPart } from "../src/screen-runtime.ts";
+import type { PreviewLoad } from "../src/screen-runtime.ts";
 
 // A chat's preview's frame taking its draft's updates: the ways it can
-// fail, from its threat model (preview-updates.ts): bytes other than
-// core's, a stale or replayed or broken update, an update that doesn't
-// evaluate, and one that evaluates but fails to render, which must leave
-// the last version that rendered on screen. React Fast Refresh is
-// outside: the frame here stands in for its runtime and the browser's
-// module loader, which these modules decide nothing of.
+// fail, from its threat model (preview-updates.ts): a version that names
+// anything but a module address of the frame's own, an update that
+// doesn't evaluate, one that evaluates but fails to render, and one
+// Refresh can't take. React Fast Refresh and the browser's module loader
+// are outside: the frame here stands in for them, and its modules
+// "render" what the test says each address renders.
 
-const encoder = new TextEncoder();
+/** What the modules render: a word, `throw`, or `syntax error`. */
+const renders = ["one", "two", "throw", "syntax error"];
 
-const sha256 = async (bytes: Uint8Array): Promise<string> =>
-  [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+/** A module's address: core's hash of it, here one per thing it renders. */
+const address = (what: string): string =>
+  String(renders.indexOf(what)).repeat(64);
 
-/** `code` at `revision`, as one part, the way the page sends it. */
-const update = async (
-  revision: number,
-  code: string,
-  css = `.r${revision}{}`
-): Promise<PreviewPart> => ({
-  revision,
-  part: 0,
-  parts: 1,
-  code,
-  bytes: encoder.encode(code).byteLength,
-  sha256: await sha256(encoder.encode(code)),
-  css,
+/** What each address renders. */
+const rendered = new Map(renders.map((what) => [address(what), what]));
+
+/** A version of the screen whose module renders `what`, as the page sends one. */
+const load = (what: string, visit = 0): PreviewLoad => ({
+  entry: address(what),
+  visit,
+  css: `.${what}{}`,
 });
 
-/** What a module's code says it renders: `render:<what>` or `throw`. */
-const rendersOf = (url: string): string =>
-  decodeURIComponent(url.slice(url.indexOf(",") + 1)).split("\n")[0] ?? "";
-
-/**
- * A frame whose modules "render" what their code says: what is on
- * screen, the CSS, what was evaluated and reported. Like a browser's
- * module map, it evaluates one address once: importing it again hands
- * back the module made then, and registers nothing anew. Each module's
- * default export is a screen, as the compiler makes one.
- */
 const screen = (): null => null;
 
+/** A frame whose modules render what their address says. */
 const fakeFrame = () => {
-  const evaluated: string[] = [];
+  const imported: string[] = [];
   const reported: string[] = [];
-  const seen = { screen: "opened", css: "", evaluated, reported };
-  const modules = new Set<string>();
+  const seen = { screen: "opened", css: ".opened{}", imported, reported };
   let staged = "";
   let failures = 0;
   const frame: PreviewFrame = {
-    evaluate: async (url) => {
+    evaluate: async ({ entry, visit }) => {
       await Promise.resolve();
-      seen.evaluated.push(url);
-      if (modules.has(url)) {
-        return { default: screen };
-      }
-      modules.add(url);
-      const code = rendersOf(url);
-      if (code === "syntax error") {
+      seen.imported.push(`${visit}/${entry}`);
+      const what = rendered.get(entry) ?? "";
+      if (what === "syntax error") {
         throw new SyntaxError("Unexpected token");
       }
-      staged = code;
+      staged = what;
       return { default: screen };
     },
     commit: () => {
-      if (staged === "") {
-        // Nothing registered: Refresh swaps nothing.
-        return;
-      }
-      const code = staged;
-      staged = "";
-      if (code.startsWith("throw")) {
+      if (staged.startsWith("throw")) {
         failures += 1;
         seen.screen = "error boundary";
-      } else {
-        seen.screen = code.replace("render:", "");
+      } else if (staged !== "") {
+        seen.screen = staged;
       }
+      staged = "";
     },
     discard: () => {
       staged = "";
@@ -96,80 +71,59 @@ const fakeFrame = () => {
     settle: async () => {
       await Promise.resolve();
     },
+    css: () => seen.css,
     setCss: (css) => {
       seen.css = css;
     },
     report: (value) => {
       seen.reported.push(value instanceof Error ? value.message : "?");
     },
-    sha256,
   };
   return { frame, seen };
 };
 
 describe("a preview's frame taking its draft's updates", () => {
-  it("swaps in each newer revision, and refuses one it is past or replayed", async () => {
+  it("swaps in each version it is handed, at its module's address and visit", async () => {
     const { frame, seen } = fakeFrame();
     const receive = previewReceiver(frame);
-    const answers = [
-      await receive(await update(1, "render:one")),
-      await receive(await update(2, "render:two")),
-      // Replayed, then older.
-      await receive(await update(2, "render:two")),
-      await receive(await update(1, "render:one")),
-    ];
-    expect({ answers, screen: seen.screen, css: seen.css }).toStrictEqual({
-      answers: ["applied", "applied", "refused", "refused"],
-      screen: "two",
-      css: ".r2{}",
+    const answers = [await receive(load("one")), await receive(load("two", 3))];
+    expect({ answers, seen }).toStrictEqual({
+      answers: ["applied", "applied"],
+      seen: {
+        screen: "two",
+        css: ".two{}",
+        imported: [`0/${address("one")}`, `3/${address("two")}`],
+        reported: [],
+      },
     });
   });
 
-  it("evaluates nothing whose size or SHA-256 isn't what core answered", async () => {
+  it("imports nothing but a module address of its own", async () => {
     const { frame, seen } = fakeFrame();
     const receive = previewReceiver(frame);
-    const honest = await update(1, "render:one");
-    const answers = [
-      await receive({ ...honest, code: "render:evil" }),
-      await receive({ ...honest, bytes: honest.bytes + 1 }),
-      await receive({ ...honest, sha256: "0".repeat(64) }),
-    ];
-    expect({ answers, evaluated: seen.evaluated }).toStrictEqual({
-      answers: ["refused", "refused", "refused"],
-      evaluated: [],
+    const honest = load("one");
+    const answers = await Promise.all(
+      [
+        { ...honest, entry: "https://elsewhere.example/evil.js" },
+        { ...honest, entry: `../${address("one")}` },
+        { ...honest, entry: "A".repeat(64) },
+        { ...honest, visit: -1 },
+        { ...honest, visit: 1.5 },
+        { ...honest, css: undefined },
+        null,
+      ].map(async (asked) => await receive(asked))
+    );
+    expect({ answers, imported: seen.imported }).toStrictEqual({
+      answers: Array.from({ length: 7 }, () => "refused"),
+      imported: [],
     });
   });
 
-  it("puts an update in parts together only in order, each of the same update", async () => {
+  it("keeps the version it shows when an update doesn't evaluate, its CSS too, and says why", async () => {
     const { frame, seen } = fakeFrame();
     const receive = previewReceiver(frame);
-    const whole = await update(1, "render:joined");
-    const first = { ...whole, parts: 2, code: "render:" };
-    const second = { ...whole, parts: 2, part: 1, code: "joined" };
-    const outOfTurn = await receive(second);
-    const fromAnother = [
-      await receive(first),
-      await receive({ ...second, revision: 2 }),
-    ];
-    const inOrder = [await receive(first), await receive(second)];
-    expect({
-      outOfTurn,
-      fromAnother,
-      inOrder,
-      screen: seen.screen,
-    }).toStrictEqual({
-      outOfTurn: "refused",
-      fromAnother: ["more", "refused"],
-      inOrder: ["more", "applied"],
-      screen: "joined",
-    });
-  });
-
-  it("keeps the last working version when an update doesn't evaluate, and says why", async () => {
-    const { frame, seen } = fakeFrame();
-    const receive = previewReceiver(frame);
-    await receive(await update(1, "render:one"));
-    const broken = await receive(await update(2, "syntax error"));
+    await receive(load("one"));
+    const broken = await receive(load("syntax error"));
     expect({
       broken,
       screen: seen.screen,
@@ -178,54 +132,79 @@ describe("a preview's frame taking its draft's updates", () => {
     }).toStrictEqual({
       broken: "failed",
       screen: "one",
-      css: ".r1{}",
+      css: ".one{}",
       reported: ["Unexpected token"],
     });
   });
 
-  it("swaps the last version that rendered back in when an update fails to render, then takes the fix", async () => {
+  it("says when an update evaluated and failed to render, for the page to swap the last version back", async () => {
     const { frame, seen } = fakeFrame();
     const receive = previewReceiver(frame);
-    await receive(await update(1, "render:one"));
-    const failing = await receive(await update(2, "throw"));
-    const back = seen.screen;
-    const fixed = await receive(await update(3, "render:three"));
-    expect({ failing, back, fixed, screen: seen.screen }).toStrictEqual({
-      failing: "failed",
-      back: "one",
-      fixed: "applied",
-      screen: "three",
-    });
-  });
-
-  it("swaps code back in that it evaluated before, as an update back to an earlier write, under an address of its own each time", async () => {
-    const { frame, seen } = fakeFrame();
-    const receive = previewReceiver(frame);
-    const answers = [
-      await receive(await update(1, "render:A")),
-      await receive(await update(2, "render:B")),
-      // The agent writes the screen back as it was: the same code.
-      await receive(await update(3, "render:A")),
-    ];
-    expect({
-      answers,
-      screen: seen.screen,
-      addresses: new Set(seen.evaluated).size,
-      // What is evaluated is the code checked, and one comment after it.
-      checked: seen.evaluated.every((url) =>
-        decodeURIComponent(url).includes("\n//# grasp-evaluation=")
-      ),
-    }).toStrictEqual({
-      answers: ["applied", "applied", "applied"],
-      screen: "A",
-      addresses: 3,
-      checked: true,
+    await receive(load("one"));
+    const failing = await receive(load("throw"));
+    const back = await receive(load("one", 1));
+    expect({ failing, back, screen: seen.screen }).toStrictEqual({
+      failing: "broken",
+      back: "applied",
+      screen: "one",
     });
   });
 
   it("asks for a fresh start once React Fast Refresh can't go on", async () => {
     const { frame } = fakeFrame();
     const receive = previewReceiver({ ...frame, refresh: () => false });
-    await expect(receive(await update(1, "render:one"))).resolves.toBe("reset");
+    await expect(receive(load("one"))).resolves.toBe("reset");
+  });
+
+  it("asks for a fresh start, reporting nothing of the draft, when the module doesn't load", async () => {
+    const { frame, seen } = fakeFrame();
+    const receive = previewReceiver({
+      ...frame,
+      // As after hours open: core refuses the frame's expired token.
+      evaluate: async () => {
+        await Promise.resolve();
+        throw new ModuleNotLoadedError("The screen's module didn't load.");
+      },
+    });
+    await receive(load("one"));
+    const answer = await receive(load("two"));
+    expect({ answer, seen }).toStrictEqual({
+      answer: "reset",
+      seen: { screen: "opened", css: ".opened{}", imported: [], reported: [] },
+    });
+  });
+
+  it("tells a module that didn't load, in each engine's words, from the screen's own code throwing", () => {
+    const directory = `https://acme.grasp.test/screen-modules/${"d".repeat(64)}/`;
+    const imported = `${directory}${"e".repeat(64)}.js?token=1.x`;
+    expect({
+      chromium: notLoaded(
+        new TypeError(
+          `Failed to fetch dynamically imported module: ${imported}`
+        ),
+        directory
+      ),
+      firefox: notLoaded(
+        new TypeError(`error loading dynamically imported module: ${imported}`),
+        directory
+      ),
+      webkit: notLoaded(
+        new TypeError("Importing a module script failed."),
+        directory
+      ),
+      ownTypeError: notLoaded(
+        new TypeError("Cannot read properties of undefined (reading 'x')"),
+        directory
+      ),
+      ownSyntax: notLoaded(new SyntaxError("Unexpected token"), directory),
+      thrownValue: notLoaded(imported, directory),
+    }).toStrictEqual({
+      chromium: true,
+      firefox: true,
+      webkit: true,
+      ownTypeError: false,
+      ownSyntax: false,
+      thrownValue: false,
+    });
   });
 });

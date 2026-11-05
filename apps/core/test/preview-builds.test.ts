@@ -13,25 +13,17 @@ import type { PreviewBuilt } from "../src/preview-builds.ts";
 
 const app = appIdSchema.parse("a".repeat(32));
 
-/** An update at `revision`, its code `code`, as a build answers one. */
-const builtAt = (revision: number, code: string): PreviewUpdate => ({
+/** An update at `revision`, its screen's module `entry`, as a build answers one. */
+const builtAt = (revision: number, entry: string): PreviewUpdate => ({
   app,
-  refresh: {
-    revision,
-    screen: "desk",
-    code,
-    bytes: code.length,
-    sha256: "",
-    css: "",
-    kit: [],
-  },
+  refresh: { revision, screen: "desk", entry, modules: {}, css: "", kit: [] },
 });
 
-/** What an ask answered: its update's code, or the code of its refusal. */
+/** What an ask answered: its update's module, or the code of its refusal. */
 const outcomeOf = async (ask: Promise<PreviewBuilt>): Promise<unknown> => {
   try {
     const built = await ask;
-    return built.refresh?.code;
+    return built.refresh?.entry;
   } catch (error) {
     return typeof error === "object" && error !== null && "code" in error
       ? error.code

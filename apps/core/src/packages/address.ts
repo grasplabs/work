@@ -1,7 +1,8 @@
 import type { AppId } from "@grasp-os/shared/ids";
 import { packageArtifactPath } from "@grasp-os/shared/packages";
+import type { PackageArtifactAddress } from "@grasp-os/shared/packages";
 
-import { windowedAccess } from "../screen-frame.ts";
+import { accessQuery, windowedAccess } from "../screen-frame.ts";
 
 /** A browser artifact of an App's graph, as its address names it. */
 export interface ArtifactRef {
@@ -19,15 +20,17 @@ export const artifactSubject = ({
 
 /**
  * Where artifact `ref` is served (serve.ts), for some hours: its
- * directory, on this deployment's origin, with a token core made for it,
- * each file at its own path under it. The token holds until the end of the
- * next six-hour window, like a screen module's.
+ * directory, on this deployment's origin, each file at its own path under
+ * it, and the query each file is asked with, which carries a token core
+ * made for exactly this artifact. The token is never in the path, which
+ * traces keep whole (core's screen-frame.ts says why); it holds until the
+ * end of the next window, like a published screen module's.
  */
 export const packageArtifactAddress = async (
   env: Env,
   ref: ArtifactRef,
   now = Date.now()
-): Promise<string> => {
-  const token = await windowedAccess(env, artifactSubject(ref), now);
-  return `${packageArtifactPath}/${ref.app}/${ref.graphHash}/${ref.hash}/${token}/`;
-};
+): Promise<PackageArtifactAddress> => ({
+  directory: `${packageArtifactPath}/${ref.app}/${ref.graphHash}/${ref.hash}/`,
+  query: accessQuery(await windowedAccess(env, artifactSubject(ref), now)),
+});

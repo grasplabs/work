@@ -92,6 +92,28 @@ ${imports.map((name, index) => `    "${name}": Object.fromEntries(Object.entries
   return await response.json();
 };
 
+/**
+ * `names` of a build's App modules, each at its address, as a frame loads
+ * them: they import each other there (@grasp-os/compiler's
+ * module-addresses.ts), the kit's by flat name.
+ */
+const atAddresses = (
+  built: { modules: Record<string, string>; addresses: Record<string, string> },
+  names: string[] = Object.keys(built.modules)
+): Record<string, string> =>
+  Object.fromEntries(
+    names.map((name) => [
+      `${built.addresses[name] ?? ""}.js`,
+      built.modules[name] ?? "",
+    ])
+  );
+
+/** Where a build loads its App module `name`: at its address. */
+const addressOf = (
+  built: { addresses: Record<string, string> },
+  name: string
+): string => `${built.addresses[name] ?? ""}.js`;
+
 /** The kit's modules a build's screens load, all of them. */
 const kitModulesOf = (built: {
   screens: Record<string, { kitModules: string[] }>;
@@ -136,19 +158,22 @@ describe("screen builds", { timeout: 60_000 }, () => {
     }
     expect(built.diagnostics).toStrictEqual([]);
 
-    // Evaluating them with only the kit modules the build names links
-    // every import, the icons' too, without `require`.
+    // Evaluating them at their addresses, with only the kit modules the
+    // build names, links every import, the icons' too, without `require`.
+    const [desk, inbox] = ["app~screens~desk.js", "app~screens~inbox.js"].map(
+      (name) => addressOf(built, name)
+    );
     await expect(
       evaluate(
         {
           ...(await kitModulesNamed(kitModulesOf(built))),
-          ...built.modules,
+          ...atAddresses(built),
         },
-        ["app~screens~desk.js", "app~screens~inbox.js"]
+        [desk ?? "", inbox ?? ""]
       )
     ).resolves.toMatchObject({
-      "app~screens~desk.js": { default: "function" },
-      "app~screens~inbox.js": { default: "function" },
+      [desk ?? ""]: { default: "function" },
+      [inbox ?? ""]: { default: "function" },
     });
     // The App's own classes, the kit's classes (quotes and all, from the
     // button's icon sizing) and the kit's theme.
@@ -207,19 +232,16 @@ describe("screen builds", { timeout: 60_000 }, () => {
             await evaluate(
               {
                 ...(await kitModulesNamed(closure.kitModules)),
-                ...Object.fromEntries(
-                  closure.modules.map((name) => [
-                    name,
-                    built.modules[name] ?? "",
-                  ])
-                ),
+                ...atAddresses(built, closure.modules),
               },
-              [entry]
+              [addressOf(built, entry)]
             )
         )
       )
     ).resolves.toMatchObject(
-      entries.map(([entry]) => ({ [entry]: { default: "function" } }))
+      entries.map(([entry]) => ({
+        [addressOf(built, entry)]: { default: "function" },
+      }))
     );
   });
 

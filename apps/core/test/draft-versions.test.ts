@@ -280,7 +280,14 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
             )
         )
       ),
-      elsewhere: elsewhere.artifact === proposed.artifact,
+      // The same version, read-only, in a frame of that chat's own: a
+      // preview's frame and modules are its chat's (screen-frame.ts,
+      // `previewFrame`), so its artifact is too.
+      elsewhere: {
+        revision: elsewhere.revision === proposed.revision,
+        screens: elsewhere.screens,
+        ownFrame: elsewhere.artifact !== proposed.artifact,
+      },
       reports,
       both: await failure(
         async () => await chats.preview(chatId, app, undefined, 1, version)
@@ -307,7 +314,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       asDrafted: true,
       notLive: true,
       calls: ["app.no_draft", "app.no_draft"],
-      elsewhere: true,
+      elsewhere: { revision: true, screens: ["desk"], ownFrame: true },
       reports: { problems: [], logs: [], seen: false },
       both: "screen.invalid",
       missing: "app.version_not_found",

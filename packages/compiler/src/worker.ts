@@ -18,7 +18,6 @@
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { build as esbuild } from "esbuild-wasm/esm/browser.js";
 import { compile } from "tailwindcss";
 
 import kit from "#kit";
@@ -54,7 +53,6 @@ import {
 } from "./compile.ts";
 import { isError, together } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import esbuildWasm from "./esbuild.wasm";
 import {
   collectDirectives,
   collectImports,
@@ -106,9 +104,7 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import { startEsbuild } from "./packages/build.ts";
-import { previewEntries } from "./preview-entry.ts";
-import type { Bundle } from "./preview-entry.ts";
+import { addressModules } from "./module-addresses.ts";
 import { problem, screenRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { lintServerCode } from "./server-lint.ts";
@@ -141,16 +137,13 @@ export interface ScreenClosure {
 export type ScreenBuild =
   | {
       ok: true;
+      /** Each importing the others by address (module-addresses.ts). */
       modules: Record<string, string>;
+      /** Each module's address, by flat name: where a frame loads it. */
+      addresses: Record<string, string>;
       screens: Record<string, ScreenClosure>;
       css: string;
       diagnostics: Diagnostic[];
-      /**
-       * A preview build's (`preview-screens`): each screen's App modules
-       * put together into one entry (preview-entry.ts), by its module's
-       * name, which the preview frame evaluates for an update.
-       */
-      entries?: Record<string, string>;
     }
   | { ok: false; diagnostics: Diagnostic[] };
 
@@ -540,25 +533,13 @@ const screensCheck = (
 };
 
 /**
- * esbuild, started on the WebAssembly module this isolate was loaded with
- * (`esbuild.wasm`), once: what bundles a preview's entries
- * (preview-entry.ts). Started on a preview's first build, so a build that
- * bundles nothing never pays for it.
- */
-const bundle: Bundle = async (options) => {
-  await startEsbuild(esbuildWasm);
-  return await esbuild(options);
-};
-
-/**
  * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
  * the declarations (`*.d.ts`) at the App's root and among its components,
  * which are types alone and never modules.
  *
  * With `preview`, for a chat's draft (spec 19.2.1): each module is
- * instrumented for React Fast Refresh, what a screen loads of the kit is
- * the preview kit's, and each screen's App modules are put together into
- * one entry too (`ScreenBuild.entries`). Every gate is the same.
+ * instrumented for React Fast Refresh, and what a screen loads of the kit
+ * is the preview kit's. Every gate is the same.
  *
  * Without `checks`, for a preview's frame only (`preview-frame`), the
  * type check and the lint don't run: they hold up nothing the frame
@@ -703,31 +684,10 @@ export const buildScreensIncrementally = async (
   return done(
     {
       ok: true,
-      modules,
+      ...(await addressModules(modules)),
       screens,
       css,
       diagnostics,
-      ...(preview
-        ? {
-            entries: await previewEntries(
-              {
-                screens: Object.fromEntries(
-                  Object.entries(screens).map(([entry, closure]) => [
-                    entry,
-                    {
-                      closure: closure.modules,
-                      kitModules: closure.modules.flatMap((name) => [
-                        ...(imports.get(name)?.kit ?? []),
-                      ]),
-                    },
-                  ])
-                ),
-                modules,
-              },
-              bundle
-            ),
-          }
-        : {}),
     },
     typeCheck
   );

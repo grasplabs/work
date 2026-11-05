@@ -244,30 +244,28 @@ export interface PreviewBundle extends Omit<
   /** The draft's screens, sorted. */
   screens: string[];
   /**
-   * The screen as one module for React Fast Refresh, as the frame opened
-   * it: what later updates are measured against (`PreviewUpdate`). Only
-   * for the draft as it is now; a version opened read-only never updates.
+   * The screen's modules, as the frame opened them: what later updates
+   * are measured against (`PreviewUpdate`). Only for the draft as it is
+   * now; a version opened read-only never updates.
    */
   refresh?: PreviewRefresh;
 }
 
 /**
- * One screen of a chat's draft at one revision, as a single ES module
- * (the compiler's preview entry, all of the screen's App modules) for
- * the preview's frame to evaluate and swap in with React Fast Refresh,
- * with the CSS of that revision. The frame checks the module's size and
- * SHA-256 before it evaluates it.
+ * One screen of a chat's draft at one revision, for the preview's frame
+ * to import and swap in with React Fast Refresh: its module's address,
+ * among the modules core staged for the preview, which the frame loads
+ * from core as it imports it, only those it hasn't loaded yet, and the
+ * CSS of that revision.
  */
 export interface PreviewRefresh {
   /** The draft's revision it was built from. */
   revision: number;
   screen: string;
-  /** The module's code. */
-  code: string;
-  /** Its UTF-8 bytes, counted. */
-  bytes: number;
-  /** The SHA-256 of those bytes, in hex. */
-  sha256: string;
+  /** The address of the screen's module. */
+  entry: string;
+  /** The App's modules it loads, its own among them: each one's UTF-8 bytes, by address. */
+  modules: Record<string, number>;
   css: string;
   /**
    * The kit's modules it imports, by flat name: an update that needs one
@@ -979,12 +977,13 @@ export interface ChatsApi {
   ) => Promise<PreviewBundle>;
   /**
    * Screen `screen` of the chat's draft of `app` at `revision`, the
-   * newest the preview knows of, built as one module for the open preview
-   * to swap in with React Fast Refresh (`PreviewRefresh`): one build per
-   * revision, shared by every preview that asks for it, and
-   * `app.preview_outdated` once the draft moved past `revision`. Nothing
-   * is staged for a frame and nothing sealed, and the build's type check
-   * and lint don't hold it up. For the person while they build the App.
+   * newest the preview knows of, built and its modules staged for the
+   * open preview to import and swap in with React Fast Refresh
+   * (`PreviewRefresh`): one build per revision, shared by every preview
+   * that asks for it, and `app.preview_outdated` once the draft moved past
+   * `revision`. No frame is staged and nothing sealed, and the build's
+   * type check and lint don't hold it up. For the person while they build
+   * the App.
    */
   previewUpdate: (
     chatId: string,

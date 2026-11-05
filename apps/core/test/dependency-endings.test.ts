@@ -136,7 +136,11 @@ const servedStatus = async (build: PackageBuild): Promise<number> => {
     throw new Error("A browser build has an address");
   }
   const [file] = Object.keys(build.artifact.files);
-  const response = await routed(`${build.address}${file}`);
+  const response = await routed(
+    build.address === null
+      ? "/"
+      : `${build.address.directory}${file}${build.address.query}`
+  );
   await response.body?.cancel();
   return response.status;
 };

@@ -70,10 +70,7 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
-import {
-  packageArtifactResponse,
-  withoutArtifactToken,
-} from "./packages/serve.ts";
+import { packageArtifactResponse } from "./packages/serve.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
   connectVersionResponse,
@@ -567,12 +564,13 @@ export const handleRequest = async (
     ctx,
     requestId
   );
-  // One line per request. Only the path: query strings can carry tokens,
-  // and so can an artifact's path and a webhook trigger's, without them.
+  // One line per request. Only the path: query strings can carry tokens
+  // (a screen module's, a package artifact's), and so can a webhook
+  // trigger's path, without it.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: withoutWebhookToken(withoutArtifactToken(url.pathname)),
+    path: withoutWebhookToken(url.pathname),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,

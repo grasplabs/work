@@ -1481,14 +1481,7 @@ const isolateBuild = (
       minify: true,
       target: "es2022",
       rolldownOptions: {
-        // esbuild's WebAssembly is a module of the isolate, as the
-        // package builder's is: what bundles a preview's entries.
-        external: [
-          "cloudflare:workers",
-          "#kit",
-          "./esbuild.wasm",
-          ...nodeBuiltins,
-        ],
+        external: ["cloudflare:workers", "#kit", ...nodeBuiltins],
         output: {
           format: "es",
           codeSplitting: false,

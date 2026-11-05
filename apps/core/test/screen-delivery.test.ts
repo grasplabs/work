@@ -21,7 +21,12 @@ import { classifyOutput } from "../src/data-policy-rpc.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
+import {
+  appModulesOf,
+  kitModulesOf,
+  loadFrame,
+  modulePartsOf,
+} from "./screen-frames.ts";
 import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
@@ -537,17 +542,30 @@ describe("screen delivery", { timeout: 60_000 }, () => {
       delivery: await builder.api.screens.frame(app, first.lease).delivery(),
       // The lease names the hash of everything the frame runs, as core
       // serves it to the frame: its modules, the kit's it loads, its CSS,
-      // built for production.
+      // built for production. Its modules' imports of each other carry
+      // the frame's token as core serves them, which is no part of it.
       leasedIsWhatRuns:
         first.artifact ===
         (await sha256Hex(
           canonicalJson({
             profile: "production",
             code: {
-              entry: frame.screen.entry,
+              entry: frame.entry,
               runtime: frame.screen.runtime,
               modules: Object.fromEntries(
-                appModulesOf(frame).map((name) => [name, frame.modules[name]])
+                appModulesOf(frame).map((name) => [
+                  name,
+                  frame.modules[name]?.replaceAll(
+                    new URL(frame.screen.entry).search,
+                    ""
+                  ),
+                ])
+              ),
+              addresses: Object.fromEntries(
+                appModulesOf(frame).map((name) => [
+                  name,
+                  modulePartsOf(frame.addresses[name] ?? "").hash,
+                ])
               ),
               kit: kitModulesOf(frame),
               css: frame.screen.css,
