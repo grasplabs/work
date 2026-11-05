@@ -831,7 +831,6 @@ export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "${read}", write: "${read}" } } },
-  operations: {},
   screens: [],
   migrations: [],
 });
