@@ -1,13 +1,16 @@
 /**
- * What in a comment TypeScript obeys as a directive to its type check
- * rather than reads as a comment: a triple-slash directive, which reaches
- * the whole program, or a suppression, which switches the check off. Code
- * whose types the platform checks holds neither (imports.ts
- * `collectDirectives`).
+ * What in a file TypeScript obeys as a direction to its type check rather
+ * than checks: a comment it reads as a directive (a triple-slash
+ * directive, which reaches the whole program, or a suppression, which
+ * switches the check off), and an ambient module or global declaration.
+ * Read from the file as Babel's parser gives it, comments and syntax
+ * tree: the platform's compile (imports.ts) and a standalone definition
+ * project's check (standalone-check.ts) both parse with Babel and refuse
+ * the same things through this file.
  *
  * It imports nothing: a standalone definition project
  * (scripts/package-definition-lib.ts) carries this very file beside its
- * own check (standalone-check.ts), so the two refuse the same comments.
+ * own check, so the two can't drift.
  */
 
 /**
@@ -62,10 +65,143 @@ const suppressionIn = (comment: string): string | undefined =>
  * Answers what it says, e.g. `/// <reference lib="dom" />` or
  * `@ts-ignore`.
  */
-export const directiveIn = (
+const directiveIn = (
   kind: "line" | "block",
   value: string
 ): string | undefined =>
   kind === "line" && tripleSlash.test(value)
     ? `//${value}`.trim()
     : suppressionIn(value);
+
+/**
+ * The parser options a file is read with, on the platform (compile.ts
+ * `stripTypes`, stand-ins.ts) and in a project's check alike: TypeScript,
+ * a `.d.ts` as declarations (`export const x: number;`, no initializers),
+ * and JSX in a `.tsx`.
+ */
+export const parserPlugins = (
+  file: string
+): (["typescript", { dts: boolean }] | "jsx")[] => [
+  ["typescript", { dts: file.endsWith(".d.ts") }],
+  ...(file.endsWith(".tsx") ? (["jsx"] as const) : []),
+];
+
+/** Where Babel's parser puts a node or a comment: a 1-based line, a 0-based column. */
+interface Location {
+  readonly start: { readonly line: number; readonly column: number };
+}
+
+/** A comment as Babel's parser keeps it: its text, without its delimiters. */
+export interface ParsedComment {
+  readonly type: string;
+  readonly value: string;
+  readonly loc?: Location | null;
+}
+
+/** A comment TypeScript reads as a directive to the type check. */
+export interface DirectiveSite {
+  /** What it says, e.g. `/// <reference lib="dom" />` or `@ts-ignore`. */
+  readonly directive: string;
+  readonly line: number | undefined;
+  /** 1-based. */
+  readonly column: number | undefined;
+}
+
+/** Babel's 0-based column, as a 1-based one. */
+const columnOf = (loc: Location | null | undefined): number | undefined =>
+  loc === null || loc === undefined ? undefined : loc.start.column + 1;
+
+/** Every comment of a parsed file TypeScript would obey as a directive. */
+export const directivesIn = (
+  comments: readonly ParsedComment[]
+): DirectiveSite[] =>
+  comments.flatMap(({ type, value, loc }) => {
+    const directive = directiveIn(
+      type === "CommentLine" ? "line" : "block",
+      value
+    );
+    return directive === undefined
+      ? []
+      : [{ directive, line: loc?.start.line, column: columnOf(loc) }];
+  });
+
+/** A `declare module`, `declare global` or `namespace`, as Babel parses it. */
+export interface ModuleDeclaration {
+  readonly id: {
+    readonly type: string;
+    readonly value?: unknown;
+    readonly name?: string;
+  };
+  /** Set on `declare global { … }`. */
+  readonly global?: boolean;
+}
+
+/**
+ * What a module declaration declares ambiently: globals every file sees
+ * (`declare global`), or a module by its name (`declare module "x"`),
+ * which declares or shadows that module; undefined for a namespace.
+ */
+export const ambientOf = ({
+  id,
+  global,
+}: ModuleDeclaration): { global: true } | { module: string } | undefined => {
+  if (global === true || (id.type === "Identifier" && id.name === "global")) {
+    return { global: true };
+  }
+  return id.type === "StringLiteral" && typeof id.value === "string"
+    ? { module: id.value }
+    : undefined;
+};
+
+/**
+ * The one triple-slash directive an App file may hold, written only this
+ * way: a lowercase `reference` with a lowercase `path` and nothing else.
+ * TypeScript reads a directive's tag and attributes in any case and
+ * order (`<REFERENCE PATH=…>`, `preserve="true" path=…`), so the gate
+ * names what it lets through, and refuses everything else
+ * (`referenceError`), never the other way round.
+ */
+const ownReference =
+  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
+
+/** Where `/// <reference path>` in `file` points: a path from the App's root. */
+const referencedPath = (file: string, reference: string): string => {
+  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
+  for (const part of reference.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return parts.join("/");
+};
+
+/**
+ * Why a triple-slash directive (`directive`, as `directivesIn` lists it)
+ * in `file` isn't allowed, or undefined when it is: only
+ * `/// <reference path="…" />` to another of the App's `files`, each a
+ * path from the App's root (`ownReference`). Every other one is refused,
+ * however written: a reference into the kit, a type package, a lib the
+ * page doesn't have, an AMD directive. The import checks hold every
+ * import a file writes; these are how it would name a module without
+ * one. A suppression (`@ts-expect-error`) is no directive here: a screen
+ * may hold one.
+ */
+export const referenceError = (
+  directive: string,
+  file: string,
+  files: ReadonlySet<string>
+): string | undefined => {
+  if (!directive.startsWith("///")) {
+    return undefined;
+  }
+  const groups = ownReference.exec(directive)?.groups;
+  if (groups === undefined) {
+    return `${directive} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`;
+  }
+  const name = groups.double ?? groups.single ?? "";
+  return files.has(referencedPath(file, name))
+    ? undefined
+    : `"${name}" is not one of the App's files: a reference path names only those.`;
+};

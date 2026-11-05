@@ -54,6 +54,7 @@
     "typescript": "catalog:typescript6"
   },
   "devDependencies": {
+    "@babel/parser": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@grasp-os/sdk": "workspace:*",
     "@types/node": "catalog:",

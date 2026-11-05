@@ -86,7 +86,6 @@ describe("what a workflow expression may be", () => {
       code: '($read(input, "a"))',
       reads: [{ root: "input", path: ["a"] }],
       literalDepth: 0,
-      forTypes: { code: " input.a ", added: [] },
     });
   });
 
@@ -463,39 +462,6 @@ describe("a chain in parentheses", () => {
       verdict("(input.list?.map)((x) => x)"),
       verdict("(input.list.join)(', ')"),
     ]).toStrictEqual(["expression.syntax", "expression.syntax"]);
-  });
-});
-
-/** The form an expression is type-checked in. */
-const typed = (source: string): string => {
-  const checked = checkExpression(source);
-  if (!checked.ok) {
-    throw new Error(`${source} is refused: ${checked.errors[0]?.code}`);
-  }
-  return checked.forTypes.code;
-};
-
-describe("what TypeScript type-checks", () => {
-  it("is the source with every comparison in parentheses, read as JavaScript reads it", () => {
-    expect(typed("[input.a < input.b, input.c > (input.d)]")).toBe(
-      "[(input.a < input.b), (input.c > (input.d))]"
-    );
-    expect(typed("!input.a ? -input.b : input.c ?? 1")).toBe(
-      "!input.a ? -input.b : input.c ?? 1"
-    );
-  });
-
-  it("holds no comment, so no `@ts-` directive reaches TypeScript", () => {
-    expect(typed("input.a // @ts-ignore\n+ 1")).toBe(
-      `input.a${" ".repeat(14)}\n+ 1`
-    );
-  });
-
-  it("blanks a comment unit for unit, so what follows keeps its place", () => {
-    // An emoji is two UTF-16 units, as offsets count them: two spaces.
-    expect(typed("input.a /*😀*/ < input.b")).toBe(
-      `(input.a ${" ".repeat(6)} < input.b)`
-    );
   });
 });
 

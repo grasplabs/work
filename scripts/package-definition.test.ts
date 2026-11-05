@@ -371,20 +371,30 @@ const installIn = async (
   return { status, output };
 };
 
-/** The TypeScript the platform checks App code with: the compiler's. */
-const platformTypescript = z
-  .object({ version: z.string() })
-  .parse(
-    JSON.parse(
-      readFileSync(
-        path.join(
-          ROOT,
-          "packages/compiler/node_modules/typescript/package.json"
-        ),
-        "utf-8"
+/** The version of `name` installed at `dir` (from the repo's root). */
+const installedVersion = (dir: string, name: string): string =>
+  z
+    .object({ version: z.string() })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          path.join(ROOT, dir, "node_modules", name, "package.json"),
+          "utf-8"
+        )
       )
-    )
-  ).version;
+    ).version;
+
+/** The checker the platform type-checks App code with: the compiler's tsrs. */
+const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
+
+/** The repo's TypeScript, 7: the project's, never 6. */
+const repoTypescript = installedVersion(".", "typescript");
+
+/** The Babel the platform parses App files with, its parser bundled. */
+const platformParser = installedVersion(
+  "packages/compiler",
+  "@babel/standalone"
+);
 
 const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
 
@@ -542,14 +552,35 @@ describe(
       });
     });
 
-    it("type-checks as the platform does: what it accepts passes, with the platform's TypeScript, and what it refuses fails", async () => {
+    it("type-checks as the platform does: what it accepts passes, with the platform's checker, and what it refuses fails", async () => {
       const { out } = scratch();
       await packaged(definitionOf(), out);
       const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
       const project = packageJsonSchema.parse(
         JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
       );
+      // What the platform accepts, read as its parser reads it: a regular
+      // expression holding `//` after a `)`, and a `///` comment of prose.
+      const valid: Record<string, string> = {
+        "app/workflows/lib/pattern.ts":
+          "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
+        "app/screens/prose.tsx":
+          "/// The notes screen.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
+        // A declaration file read as declarations, as the platform reads it.
+        "app/declared.d.ts":
+          "export const limit: number;\nexport type Limit = typeof limit;\n",
+      };
+      const write = (files: Record<string, string>): void => {
+        for (const [file, source] of Object.entries(files)) {
+          mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
+          writeFileSync(path.join(out, file), source);
+        }
+      };
+      write(valid);
       const accepted = projectCheck(out);
+      for (const file of Object.keys(valid)) {
+        rmSync(path.join(out, file));
+      }
 
       // What the platform's check refuses, each in a file of its own: a
       // type error in a screen and in a compute module; a workflow and
@@ -570,11 +601,31 @@ describe(
           "export const title = (): string => document.title;\n",
         "app/workflows/lib/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
+        // A package the SDK imports, which a workflow itself may not.
+        "app/workflows/lib/zod.ts":
+          'import { z } from "zod";\n\nexport const name = z.string();\n',
+        // A directive below the top of a screen, which TypeScript ignores
+        // but the platform refuses wherever it stands.
+        "app/screens/late.tsx":
+          'export const late = 1;\n/// <reference types="node" />\n',
       };
       // And what its build refuses before any check: every way a file
       // could steer the check, in a workflow, server code and a compute
       // module alike.
       const steering: Record<string, string> = {
+        // Globals a screen declares, which the platform refuses in every
+        // kind of App code; and server code the parser refuses, or that
+        // names a missing file, refused once, though the workflows' check
+        // reads it too.
+        "app/screens/globals.tsx":
+          "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
+        "app/server/unparsed.ts": "export const = ;\n",
+        "app/server/reference.ts":
+          '/// <reference path="./missing.ts" />\nexport const one = 1;\n',
+        // A suppression after a division by a non-null value, never a
+        // regular expression.
+        "app/workflows/lib/non-null.ts":
+          "const x: number | undefined = 1;\nexport const y = x! / 2; // @ts-ignore\nexport const b: string = 1;\n",
         "app/server/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
         "workflows/greet/1.0.0/code/dom.ts":
@@ -586,12 +637,6 @@ describe(
           ])
         ),
       };
-      const write = (files: Record<string, string>): void => {
-        for (const [file, source] of Object.entries(files)) {
-          mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
-          writeFileSync(path.join(out, file), source);
-        }
-      };
       write(mistyped);
       const failedCheck = projectCheck(out);
       for (const file of Object.keys(mistyped)) {
@@ -599,29 +644,47 @@ describe(
       }
       write(steering);
       const failedBuild = projectCheck(out);
+      const codesOf = (file: string): string[] =>
+        failedBuild.problems[file] ?? [];
 
       expect({
         install: install.status,
-        typescript: project.devDependencies.typescript,
+        checker: {
+          tsrs: project.devDependencies["@tsrs/wasm"],
+          typescript: project.devDependencies.typescript,
+          // The parser it reads files with, as the platform's Babel does.
+          parser: project.devDependencies["@babel/parser"],
+        },
         accepted,
         failedCheck,
         failedBuild: {
           status: failedBuild.status,
           files: Object.keys(failedBuild.problems).toSorted(),
-          notSteering: Object.values(failedBuild.problems)
-            .flat()
+          notSteering: Object.entries(failedBuild.problems)
+            .filter(([file]) => file !== "app/server/unparsed.ts")
+            .flatMap(([, codes]) => codes)
             .filter((code) => code !== "steering"),
+          shared: {
+            unparsed: codesOf("app/server/unparsed.ts"),
+            reference: codesOf("app/server/reference.ts"),
+          },
         },
       }).toStrictEqual({
         install: 0,
-        typescript: platformTypescript,
+        checker: {
+          tsrs: platformChecker,
+          typescript: repoTypescript,
+          parser: platformParser,
+        },
         accepted: { status: 0, problems: {} },
         failedCheck: {
           status: 1,
           problems: {
             "app/server/document.ts": ["TS2584"],
             "app/workflows/lib/kit.ts": ["TS2307"],
+            "app/workflows/lib/zod.ts": ["TS2307"],
             "app/workflows/lib/window.ts": ["TS2304"],
+            "app/screens/late.tsx": ["imports"],
             "app/screens/typo.tsx": ["TS2322"],
             "app/workflows/lib/typed.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
@@ -631,6 +694,7 @@ describe(
           status: 1,
           files: Object.keys(steering).toSorted(),
           notSteering: [],
+          shared: { unparsed: ["compile"], reference: ["steering"] },
         },
       });
     });

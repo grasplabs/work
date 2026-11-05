@@ -2282,15 +2282,25 @@ describe("screens", { timeout: 120_000 }, () => {
     }).toStrictEqual({ ok: false, refused: 1 });
   });
 
-  it("never declare globals, in a declaration file", async () => {
+  it.each([
+    [
+      "a declaration file",
+      "globals.d.ts",
+      "export {};\ndeclare global {\n  var leak: number;\n}\n",
+    ],
+    [
+      "a screen",
+      "screens/globals.tsx",
+      "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
+    ],
+  ])("never declare globals, in %s", async (_case, file, source) => {
     const built = await buildScreens(
       env,
       {
         ...notesFiles(),
         "screens/notes.tsx":
           "export default function Notes() {\n  return null;\n}\n",
-        "globals.d.ts":
-          "export {};\ndeclare global {\n  var leak: number;\n}\n",
+        [file]: source,
       },
       "app-test"
     );
@@ -2300,10 +2310,25 @@ describe("screens", { timeout: 120_000 }, () => {
         .parse(built)
         .diagnostics.filter(
           (diagnostic) =>
-            diagnostic.file === "globals.d.ts" &&
+            diagnostic.file === file &&
             diagnostic.message.startsWith("declare global")
         ).length,
     }).toStrictEqual({ ok: false, refused: 1 });
+  });
+
+  it("read a declaration file as declarations: a const needs no value", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          'import type { Limit } from "../limits";\nexport type Shown = Limit;\nexport default function Notes() {\n  return null;\n}\n',
+        "limits.d.ts":
+          "export const limit: number;\nexport type Limit = typeof limit;\n",
+      },
+      "app-test"
+    );
+    expect(built.ok ? [] : errorsOf(built)).toStrictEqual([]);
   });
 
   it.each([

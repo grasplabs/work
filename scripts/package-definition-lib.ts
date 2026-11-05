@@ -109,7 +109,16 @@ const vendored = [
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = ["react", "react-dom"] as const;
+/**
+ * Its own development tools, each pinned as the catalog pins it: what its
+ * check (`grasp/check.ts`) runs as the platform does, the checker App code
+ * is type-checked with (`@tsrs/wasm`, the compiler's) and the parser that
+ * reads its comments and ambient declarations (`@babel/parser`); and the
+ * TypeScript an editor reads it with, the repo's.
+ */
 const projectDevDependencies = [
+  "@babel/parser",
+  "@tsrs/wasm",
   "typescript",
   "@types/react",
   "@types/react-dom",
@@ -236,27 +245,13 @@ const newPlan = (): Plan => {
 const jsonText = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
-/**
- * The exact versions `pnpm-workspace.yaml`'s catalog pins, by name: its
- * default `catalog:`, or with `named`, that catalog under `catalogs:`.
- */
-export const readCatalog = (
-  text: string,
-  named?: string
-): Map<string, string> => {
+/** The exact versions `pnpm-workspace.yaml`'s default catalog pins, by name. */
+export const readCatalog = (text: string): Map<string, string> => {
   const catalog = new Map<string, string>();
-  // The default catalog's entries are indented once; a named catalog's
-  // once more, under its name.
   let inCatalog = false;
-  let inCatalogs = false;
   for (const line of text.split("\n")) {
     if (/^\S/u.test(line)) {
-      inCatalog = named === undefined && line.trim() === "catalog:";
-      inCatalogs = named !== undefined && line.trim() === "catalogs:";
-      continue;
-    }
-    if (inCatalogs && /^ {2}\S/u.test(line)) {
-      inCatalog = line.trim() === `${named}:`;
+      inCatalog = line.trim() === "catalog:";
       continue;
     }
     const entry =
@@ -282,29 +277,6 @@ const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
     return refuse(`${name}: the catalog pins no exact version of it.`);
   }
   return version;
-};
-
-/**
- * The TypeScript the platform type-checks App code with: the compiler's
- * own, as its package names it from the catalog (`catalog:typescript6`),
- * exactly. TypeScript 7, the repo's toolchain, has no JavaScript API.
- */
-const platformTypescript = (repo: string, catalogText: string): string => {
-  const spec = z
-    .object({ dependencies: z.object({ typescript: z.string() }) })
-    .parse(
-      JSON.parse(
-        readFileSync(path.join(repo, "packages/compiler/package.json"), "utf-8")
-      )
-    ).dependencies.typescript;
-  const named = /^catalog:(?<name>.*)$/u.exec(spec)?.groups?.name;
-  if (named === undefined) {
-    return refuse("The compiler names TypeScript by no catalog.");
-  }
-  return pinned(
-    readCatalog(catalogText, named === "" ? undefined : named),
-    "typescript"
-  );
 };
 
 const packageJsonSchema = z.looseObject({
@@ -947,13 +919,16 @@ export const planProject = async (
       vendoring
     );
   }
-  const typescriptVersion = platformTypescript(input.repo, catalogText);
   for (const name of [...projectDependencies, ...projectDevDependencies]) {
     notices.push({
       name,
-      version:
-        name === "typescript" ? typescriptVersion : pinned(catalog, name),
-      licence: installedLicence(input.repo, "sdk", name),
+      version: pinned(catalog, name),
+      // The checker is the compiler's; the rest the SDK's, or the repo's.
+      licence: installedLicence(
+        input.repo,
+        name === "@tsrs/wasm" ? "compiler" : "sdk",
+        name
+      ),
       from: "the project",
     });
   }
@@ -970,10 +945,7 @@ export const planProject = async (
       ...pins.direct,
       ...pinnedAll(projectDependencies),
     },
-    devDependencies: {
-      ...pinnedAll(projectDevDependencies),
-      typescript: typescriptVersion,
-    },
+    devDependencies: pinnedAll(projectDevDependencies),
     peerDependencies: {},
   };
   importers["."] = root;

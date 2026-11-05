@@ -13,7 +13,12 @@ import {
   sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
-import { directiveIn } from "./steering.ts";
+import { ambientOf, directivesIn } from "./steering.ts";
+import type {
+  DirectiveSite,
+  ModuleDeclaration,
+  ParsedComment,
+} from "./steering.ts";
 
 /** An import in a source file, as written. */
 export interface ImportSite {
@@ -148,14 +153,6 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
-/** A `declare module`, `declare global` or `namespace`: named by a string, or an identifier. */
-interface ModuleDeclaration {
-  id: { type: string; value?: unknown; name?: string };
-  loc?: Call["loc"];
-  /** Set on `declare global { … }`. */
-  global?: boolean;
-}
-
 /** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
 interface ImportType {
   argument: { type: string; value?: unknown };
@@ -195,7 +192,9 @@ export const collectImports = (imports: ImportSite[]) => () => {
         node: { body: Statement[] };
         traverse: (visitor: {
           TSImportType: (inner: { node: ImportType }) => void;
-          TSModuleDeclaration: (inner: { node: ModuleDeclaration }) => void;
+          TSModuleDeclaration: (inner: {
+            node: ModuleDeclaration & { loc?: Call["loc"] };
+          }) => void;
         }) => void;
       }) => {
         // A type's `import("…")` sits in types the TypeScript transform
@@ -205,26 +204,12 @@ export const collectImports = (imports: ImportSite[]) => () => {
           TSImportType: (inner) => {
             collectImportType(inner.node);
           },
-          TSModuleDeclaration: ({ node: { id, loc, global } }) => {
-            // `declare global { … }`: what it declares, every file sees.
-            if (
-              global === true ||
-              (id.type === "Identifier" && id.name === "global")
-            ) {
+          TSModuleDeclaration: ({ node }) => {
+            const ambient = ambientOf(node);
+            if (ambient !== undefined) {
               imports.push({
-                specifier: undefined,
-                line: loc?.start.line,
-                names: undefined,
-                typeOnly: true,
-                ambient: true,
-              });
-            } else if (
-              id.type === "StringLiteral" &&
-              typeof id.value === "string"
-            ) {
-              imports.push({
-                specifier: id.value,
-                line: loc?.start.line,
+                specifier: "module" in ambient ? ambient.module : undefined,
+                line: node.loc?.start.line,
                 names: undefined,
                 typeOnly: true,
                 ambient: true,
@@ -276,42 +261,18 @@ export const collectImports = (imports: ImportSite[]) => () => {
   };
 };
 
-/** A comment as Babel keeps it: its text, without its delimiters. */
-interface Comment {
-  type: string;
-  value: string;
-  loc?: { start: { line: number } } | null;
-}
-
-/** A comment TypeScript reads as a directive to the type check. */
-export interface DirectiveSite {
-  /** What it says, e.g. `/// <reference lib="dom" />` or `@ts-ignore`. */
-  directive: string;
-  line: number | undefined;
-}
-
 /**
  * A Babel plugin that lists into `directives` every comment of a file
  * TypeScript would obey as a directive to its type check rather than
- * read as a comment: a triple-slash directive (`/// <reference lib>`,
- * `types`, `path`, which reach the whole program, not only the file), or
- * a suppression (`@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`).
+ * read as a comment (steering.ts `directivesIn`).
  */
 export const collectDirectives = (directives: DirectiveSite[]) => () => ({
   visitor: {
     Program: (
       _path: unknown,
-      state: { file: { ast: { comments?: Comment[] | null } } }
+      state: { file: { ast: { comments?: ParsedComment[] | null } } }
     ) => {
-      for (const { type, value, loc } of state.file.ast.comments ?? []) {
-        const directive = directiveIn(
-          type === "CommentLine" ? "line" : "block",
-          value
-        );
-        if (directive !== undefined) {
-          directives.push({ directive, line: loc?.start.line });
-        }
-      }
+      directives.push(...directivesIn(state.file.ast.comments ?? []));
     },
   },
 });
@@ -436,58 +397,6 @@ export const typeFileError = (
     resolveTypeFile(file, specifier, files) === undefined)
     ? `"${specifier}" is not one of the App's files: a type names the App's own files by a relative path, and modules by name.`
     : undefined;
-
-/**
- * The one triple-slash directive a screen's files may hold, written only
- * this way: a lowercase `reference` with a lowercase `path` and nothing
- * else. TypeScript reads a directive's tag and attributes in any case
- * and order (`<REFERENCE PATH=…>`, `preserve="true" path=…`), so the gate
- * names what it lets through, and refuses everything else
- * (`referenceError`), never the other way round.
- */
-const ownReference =
-  /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
-
-/** Where `/// <reference path>` in `file` points: a path from the App's root. */
-const referencedPath = (file: string, reference: string): string => {
-  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
-  for (const part of reference.split("/")) {
-    if (part === "..") {
-      parts.pop();
-    } else if (part !== "." && part !== "") {
-      parts.push(part);
-    }
-  }
-  return parts.join("/");
-};
-
-/**
- * Why a screen's or a declaration's triple-slash directive (`directive`,
- * as `collectDirectives` lists it) isn't allowed, or undefined when it
- * is: only `/// <reference path="…" />` to another of the App's `files`
- * (`ownReference`). Every other one is refused, however written: a
- * reference into the kit, a type package, a lib the page doesn't have,
- * an AMD directive. The import checks hold every import a file writes;
- * these are how it would name a module without one. A suppression
- * (`@ts-expect-error`) is no directive here: a screen may hold one.
- */
-export const referenceError = (
-  directive: string,
-  file: string,
-  files: ReadonlySet<string>
-): string | undefined => {
-  if (!directive.startsWith("///")) {
-    return undefined;
-  }
-  const groups = ownReference.exec(directive)?.groups;
-  if (groups === undefined) {
-    return `${directive} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`;
-  }
-  const name = groups.double ?? groups.single ?? "";
-  return files.has(referencedPath(file, name))
-    ? undefined
-    : `"${name}" is not one of the App's files: a reference path names only those.`;
-};
 
 /**
  * Why a type-only import in a screen, component or declaration file isn't

@@ -1,6 +1,6 @@
 import { generate } from "@babel/generator";
 import * as t from "@babel/types";
-import type { Comment, Node } from "@babel/types";
+import type { Node } from "@babel/types";
 
 /** A property's name as JavaScript reads it, when written as a literal. */
 export const literalKey = (node: Node): string | undefined => {
@@ -17,9 +17,9 @@ export const literalKey = (node: Node): string | undefined => {
 };
 
 /**
- * A comparison, which the generated code and the type form put in
- * parentheses: TypeScript reads `a < b, c > (d)` as a generic call with
- * type arguments `b, c`, but no type argument list closes across a `)`.
+ * A comparison, which the generated code puts in parentheses: TypeScript
+ * reads `a < b, c > (d)` as a generic call with type arguments `b, c`, but
+ * no type argument list closes across a `)`.
  */
 const isComparison = (node: Node): boolean =>
   node.type === "BinaryExpression" &&
@@ -388,113 +388,4 @@ export const lowerExpression = (
     reads: lowering.reads,
     literalDepth: lowering.deepest,
   };
-};
-
-/**
- * An expression as TypeScript type-checks it: its source with every
- * comparison in parentheses (`isComparison`), as its code has them, and
- * every comment blanked, so TypeScript reads what JavaScript does
- * (`[a < b, c > (d)]` as two comparisons, never a generic call) and no
- * `// @ts-ignore` reaches it. The source plus parentheses, not printed,
- * so a position in `code` leads back to the source exactly
- * (`sourcePosition`). It has no guards, so its types are the data's.
- */
-export interface TypeForm {
-  readonly code: string;
-  /** Where in `code` the added parentheses are, in order. */
-  readonly added: readonly number[];
-}
-
-/** JavaScript's line terminators, as Babel and TypeScript count lines. */
-const lineBreak = /\r\n?|[\n\u2028\u2029]/u;
-
-/**
- * Each UTF-16 unit that isn't a line terminator, to blank a comment and
- * keep its lines and length: without `u`, an emoji's two units are two
- * spaces, as the parentheses' offsets count it.
- */
-// oxlint-disable-next-line eslint/require-unicode-regexp -- see above
-const notLineBreak = /[^\r\n\u2028\u2029]/g;
-
-/** The checked tree's source as `TypeForm` holds it. */
-export const typeForm = (
-  checked: Node,
-  source: string,
-  comments: readonly Comment[]
-): TypeForm => {
-  // Parentheses to add, by source offset: closing before opening where
-  // one comparison ends as the next begins.
-  const insertions: { at: number; text: ")" | "(" }[] = [];
-  const wrap = (node: Node): void => {
-    if (node.start === null || node.start === undefined) {
-      throw new Error("A parsed node has its position.");
-    }
-    if (node.end === null || node.end === undefined) {
-      throw new Error("A parsed node has its position.");
-    }
-    insertions.push({ at: node.start, text: "(" }, { at: node.end, text: ")" });
-  };
-  t.traverseFast(checked, (node) => {
-    if (isComparison(node)) {
-      wrap(node);
-    }
-  });
-  const order = { ")": 0, "(": 1 };
-  insertions.sort((a, b) => a.at - b.at || order[a.text] - order[b.text]);
-  let blanked = source;
-  for (const { start, end } of comments) {
-    blanked = `${blanked.slice(0, start)}${blanked.slice(start, end).replaceAll(notLineBreak, " ")}${blanked.slice(end)}`;
-  }
-  let code = "";
-  let from = 0;
-  const added: number[] = [];
-  for (const { at, text } of insertions) {
-    code += blanked.slice(from, at);
-    added.push(code.length);
-    code += text;
-    from = at;
-  }
-  code += blanked.slice(from);
-  return { code, added };
-};
-
-/** A 1-based line and column in `text` as an offset. */
-const offsetOf = (text: string, line: number, column: number): number => {
-  let offset = 0;
-  let rest = text;
-  for (let current = 1; current < line; current += 1) {
-    const found = lineBreak.exec(rest);
-    if (found === null) {
-      break;
-    }
-    const next = found.index + found[0].length;
-    offset += next;
-    rest = rest.slice(next);
-  }
-  return offset + column - 1;
-};
-
-/** An offset in `text` as a 1-based line and column. */
-const positionOf = (
-  text: string,
-  offset: number
-): { line: number; column: number } => {
-  const before = text.slice(0, offset).split(lineBreak);
-  return { line: before.length, column: (before.at(-1)?.length ?? 0) + 1 };
-};
-
-/**
- * Where a position in a `TypeForm`'s code (1-based line and column) is in
- * the expression's source: the same character, or the one an added
- * parenthesis stands before.
- */
-export const sourcePosition = (
-  form: TypeForm,
-  source: string,
-  line: number,
-  column: number
-): { line: number; column: number } => {
-  const offset = offsetOf(form.code, line, column);
-  const shift = form.added.filter((at) => at < offset).length;
-  return positionOf(source, Math.min(offset - shift, source.length));
 };
