@@ -7,6 +7,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   decisionPollStepPrefix,
@@ -1149,7 +1150,7 @@ const retryDecisionSchema = z.strictObject({
 });
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
-const maxRetryDelayMs = 365 * 86_400_000;
+const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
 
 /**
  * What a catch step journals: its record, and the error its catch took,
@@ -1178,7 +1179,7 @@ const maxPassedBytes = 2 * platformLimits.stepPayloadBytes + 64;
 
 /**
  * `value` as plain JSON, with its size in UTF-16 code units, if it is
- * plain JSON within `maxPassedBytes` and the evaluator's depth: written
+ * plain JSON within `maxPassedBytes` and a call's depth: written
  * once by the bounded writer, so nothing larger is walked, then read back
  * from that text. `undefined` otherwise.
  */
@@ -1187,7 +1188,7 @@ export const boundedJson = (
 ): { value: Json; size: number } | undefined => {
   const written = writeJson(value, {
     maxBytes: maxPassedBytes,
-    maxDepth: evaluatorLimits.maxJsonDepth + 2,
+    maxDepth: sealedBuildLimits.callDepth,
     maxNodes: maxPassedBytes,
     sortKeys: false,
     safeIntegers: false,
@@ -1721,7 +1722,7 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
 };
 
 /** The furthest a deadline may be, as the engine sleeps: 365 days. */
-const maxDeadlineMs = 365 * 86_400_000;
+const maxDeadlineMs = sealedBuildLimits.deadlineMs;
 
 /** The longest value a listen's filter matches an attribute by. */
 const maxAttributeLength = 1024;

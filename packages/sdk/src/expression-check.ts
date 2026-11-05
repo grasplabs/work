@@ -7,15 +7,11 @@ import {
   lowerExpression,
   typeForm,
 } from "./expression-lowering.ts";
-import type { TypeForm } from "./expression-lowering.ts";
+import type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
-export {
-  runtimeImport,
-  runtimeNames,
-  sourcePosition,
-} from "./expression-lowering.ts";
-export type { TypeForm } from "./expression-lowering.ts";
+export { runtimeNames, sourcePosition } from "./expression-lowering.ts";
+export type { ExpressionRead, TypeForm } from "./expression-lowering.ts";
 // The methods an expression can call, for the type check's own refusal
 // of a method read without a call (`checkExpressionTypes`).
 export { allowedMethods } from "./expression-runtime.ts";
@@ -61,7 +57,7 @@ export const expressionRoots = ["input", "steps", "params", "run"] as const;
  * from a value to its prototype and from there to `Function`, and
  * `Object.prototype`'s accessors to define and find getters and setters.
  */
-const blockedProperties = new Set([
+export const blockedProperties: readonly string[] = [
   "constructor",
   "prototype",
   "__proto__",
@@ -69,7 +65,9 @@ const blockedProperties = new Set([
   "__defineSetter__",
   "__lookupGetter__",
   "__lookupSetter__",
-]);
+];
+
+const blocked = new Set(blockedProperties);
 
 /**
  * Operators that work on values alone: not bitwise operators, which no
@@ -122,11 +120,23 @@ export interface ExpressionError {
  * A checked expression: its source, as written, and the code generated
  * from its syntax tree (`Lowering`), one parenthesized expression the
  * generator writes where the value is computed, in a module that
- * imports `runtimeImport`. Never write it right after an identifier on
+ * imports the guards under `runtimeNames`. Never write it right after an identifier on
  * the line before: `name\n(…)` is a call.
  */
 export type CheckedExpression =
-  | { ok: true; source: string; code: string; forTypes: TypeForm }
+  | {
+      ok: true;
+      source: string;
+      code: string;
+      /** The reads of its roots, for the caller to hold to where it stands. */
+      reads: ExpressionRead[];
+      /**
+       * The most array and object literals it nests, one in another: how
+       * deep what it writes is at least, whatever it reads.
+       */
+      literalDepth: number;
+      forTypes: TypeForm;
+    }
   | { ok: false; errors: ExpressionError[] };
 
 const fixes: Record<ExpressionErrorCode, string> = {
@@ -201,7 +211,7 @@ class Checker {
   }
 
   private property(node: Node, name: string): void {
-    if (blockedProperties.has(name)) {
+    if (blocked.has(name)) {
       this.fail(node, "expression.property", `\`${name}\` can't be read.`);
     }
   }
@@ -548,7 +558,7 @@ export const checkExpression = (
   return {
     ok: true,
     source,
-    code: lowerExpression(parsed),
+    ...lowerExpression(parsed, roots),
     forTypes: typeForm(parsed, source, parsed.comments ?? []),
   };
 };

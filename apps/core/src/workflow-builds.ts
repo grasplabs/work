@@ -9,9 +9,6 @@ import {
   generatedPath,
   generateWorkflow,
   generatorVersion,
-  maxSealedPointerLength,
-  maxTemplateItems,
-  maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
@@ -25,6 +22,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { packageLimits } from "@grasp-os/shared/packages";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
@@ -148,7 +146,7 @@ export const sealedBuildSchema = z.discriminatedUnion("executable", [
     unsupported: z
       .array(
         z.strictObject({
-          pointer: z.string().max(maxSealedPointerLength),
+          pointer: z.string().max(sealedBuildLimits.pointerLength),
           taskId: z.string().max(64).nullable(),
           feature: z.string().max(128),
         })
@@ -177,7 +175,7 @@ export const maxTaskScopes = 8;
 
 const taskBase = {
   id: z.string().min(1).max(64),
-  pointer: z.string().max(maxSealedPointerLength),
+  pointer: z.string().max(sealedBuildLimits.pointerLength),
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
   steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
   /**
@@ -221,10 +219,17 @@ const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
     z.strictObject({ param: z.string().min(1).max(64) }),
     z.strictObject({
       object: z
-        .array(z.tuple([z.string().max(maxTemplateKeyLength), templateSchema]))
-        .max(maxTemplateItems),
+        .array(
+          z.tuple([
+            z.string().max(sealedBuildLimits.templateKeyLength),
+            templateSchema,
+          ])
+        )
+        .max(sealedBuildLimits.templateItems),
     }),
-    z.strictObject({ array: z.array(templateSchema).max(maxTemplateItems) }),
+    z.strictObject({
+      array: z.array(templateSchema).max(sealedBuildLimits.templateItems),
+    }),
   ])
 );
 
@@ -385,7 +390,7 @@ const sealedCatchSchema = z.strictObject({
       status: z.int().optional(),
       title: z.string().max(2000).optional(),
       detail: z.string().max(2000).optional(),
-      instance: z.string().max(maxSealedPointerLength).optional(),
+      instance: z.string().max(sealedBuildLimits.pointerLength).optional(),
     })
     .optional(),
   when: z.int().min(0).optional(),
@@ -514,7 +519,7 @@ const workflowLimitsSchema = z.strictObject({
 /** One expression of the sealed table. */
 const sealedExpressionSchema = z.strictObject({
   slot: z.int().min(0),
-  pointer: z.string().max(maxSealedPointerLength),
+  pointer: z.string().max(sealedBuildLimits.pointerLength),
   /** Its task; null for the workflow's own input.from and output.as. */
   taskId: z.string().min(1).max(64).nullable(),
   stage: z.enum([
@@ -529,7 +534,7 @@ const sealedExpressionSchema = z.strictObject({
   ]),
   /** What it must answer: a condition a boolean (generate.ts). */
   result: z.enum(["boolean", "duration", "json"]),
-  source: z.string().max(8192),
+  source: z.string().max(sealedBuildLimits.expressionLength),
   /** The variables of the loops around its task, outermost first. */
   loopVariables: z.array(z.string().min(1).max(64)).max(2 * maxTaskScopes),
   /** The caught errors it may read, innermost last (generate.ts). */
@@ -544,9 +549,11 @@ const sealedExpressionSchema = z.strictObject({
     .optional(),
 });
 
-const tasksFileSchema = z.strictObject({
-  tasks: z.array(sealedTaskSchema).max(10_000),
-  expressions: z.array(sealedExpressionSchema).max(10_000),
+export const tasksFileSchema = z.strictObject({
+  tasks: z.array(sealedTaskSchema).max(sealedBuildLimits.tasks),
+  expressions: z
+    .array(sealedExpressionSchema)
+    .max(sealedBuildLimits.expressions),
   /** Whether the workflow has its own input.from and output.as steps. */
   workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
   /** The parameters expressions may read: those not sensitive. */

@@ -613,6 +613,9 @@ importers:
       '@grasp-os/workflow-expressions':
         specifier: workspace:*
         version: link:../../packages/workflow-expressions
+      '@grasp-os/workflow-schema':
+        specifier: workspace:*
+        version: link:../../packages/workflow-schema
       better-auth:
         specifier: 'catalog:'
         version: 1.7.14(@opentelemetry/api@1.9.1)(@tanstack/react-start@1.169.4(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2))(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261023.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)
@@ -1211,6 +1214,34 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.6.7
+
+  packages/workflow-schema:
+    dependencies:
+      '@cfworker/json-schema':
+        specifier: 'catalog:'
+        version: 4.1.1
+      '@grasp-os/open-workflow':
+        specifier: workspace:*
+        version: link:../open-workflow
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@babel/parser':
+        specifier: 'catalog:'
+        version: 7.29.9
+      '@babel/types':
+        specifier: 'catalog:'
+        version: 7.29.8
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.22.0(patch_hash=1b5827a778f33949505b9ea8d43d71a1167964cc97e3ebf8eabf235c657d1323)(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20261023.1
 
 packages:
 

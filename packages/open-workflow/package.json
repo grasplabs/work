@@ -7,6 +7,7 @@
   "sideEffects": false,
   "exports": {
     "./calls": "./src/calls.ts",
+    "./data-schema": "./src/data-schema.ts",
     "./catalog": "./src/catalog.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./diagram": "./src/diagram.ts",

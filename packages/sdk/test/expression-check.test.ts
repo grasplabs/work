@@ -84,8 +84,24 @@ describe("what a workflow expression may be", () => {
       ok: true,
       source: " input.a ",
       code: '($read(input, "a"))',
+      reads: [{ root: "input", path: ["a"] }],
+      literalDepth: 0,
       forTypes: { code: " input.a ", added: [] },
     });
+  });
+
+  it("says how deep its literals nest, one in another", () => {
+    expect(
+      [
+        "input.a",
+        "[input]",
+        "[{ a: [1] }, []]",
+        "input.lines.map((line) => ({ at: [line] }))",
+      ].map((source) => {
+        const checked = checkExpression(source);
+        return checked.ok ? checked.literalDepth : checked.errors;
+      })
+    ).toStrictEqual([0, 1, 3, 2]);
   });
 });
 
@@ -417,11 +433,29 @@ describe("the code generated from an expression", () => {
   });
 });
 
+/** What `source` reads, or why it is refused. */
+const readsOf = (source: string) => {
+  const checked = checkExpression(source);
+  return checked.ok ? checked.reads : checked.errors;
+};
+
 describe("a chain in parentheses", () => {
   it("is a chain of its own: `(a?.b).c` reads `.c` of whatever `a?.b` gives", () => {
     expect(generated("(input.a?.b).c")).toBe(
       '($read($opt($read(input, "a"), $0 => $read($0, "b")), "c"))'
     );
+  });
+
+  it("reads the whole chain through its parentheses, once", () => {
+    expect({
+      member: readsOf("(steps.fetch).output"),
+      nested: readsOf("((input.a).b).c"),
+      called: readsOf("(input.lines.map((line) => line.total)).length"),
+    }).toStrictEqual({
+      member: [{ root: "steps", path: ["fetch", "output"] }],
+      nested: [{ root: "input", path: ["a", "b", "c"] }],
+      called: [{ root: "input", path: ["lines"] }],
+    });
   });
 
   it("is never a method's callee: `(a?.map)(f)` would call `undefined`", () => {
@@ -462,6 +496,26 @@ describe("what TypeScript type-checks", () => {
     expect(typed("input.a /*😀*/ < input.b")).toBe(
       `(input.a ${" ".repeat(6)} < input.b)`
     );
+  });
+});
+
+describe("what an expression reads", () => {
+  it("is each read of a root, by its path up to a call or computed step", () => {
+    const checked = checkExpression(
+      "steps.extract.output.lines.map((line) => line.total)[0] + params.limit + input"
+    );
+    expect(checked.ok ? checked.reads : []).toStrictEqual([
+      { root: "steps", path: ["extract", "output", "lines"] },
+      { root: "params", path: ["limit"] },
+      { root: "input", path: [] },
+    ]);
+  });
+
+  it("isn't a callback parameter that shadows a root", () => {
+    const checked = checkExpression("input.items.map((steps) => steps.total)");
+    expect(checked.ok ? checked.reads : []).toStrictEqual([
+      { root: "input", path: ["items"] },
+    ]);
   });
 });
 

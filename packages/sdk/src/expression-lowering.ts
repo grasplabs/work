@@ -36,23 +36,41 @@ const nonNull = <T>(value: T | null): T => {
 };
 
 /**
- * The names the generated code calls its guards by. The workflow module
- * imports them so (`runtimeImport`); no root or callback parameter can
- * take them, as neither starts with `$`.
+ * The names the generated code calls its guards by: a generated module
+ * imports `readMember`, `callMethod`, `optionalChain` and `jsonValue`
+ * from `@grasp-os/sdk/workflow` under them. No root or callback parameter
+ * can take them, as neither starts with `$`.
  */
 export const runtimeNames = {
   read: "$read",
   call: "$call",
   optional: "$opt",
+  json: "$json",
 } as const;
-
-/** How a generated workflow module imports the guards its expressions call. */
-export const runtimeImport = `import { readMember as ${runtimeNames.read}, callMethod as ${runtimeNames.call}, optionalChain as ${runtimeNames.optional} } from "@grasp-os/sdk/workflow";`;
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
   | { kind: "member"; key: string | number; optional: boolean }
   | { kind: "call"; method: string; args: Node[]; optional: boolean };
+
+/** Whether `node` is a chain of reads and calls. */
+const isChain = (node: Node): boolean =>
+  node.type === "MemberExpression" ||
+  node.type === "OptionalMemberExpression" ||
+  node.type === "CallExpression" ||
+  node.type === "OptionalCallExpression";
+
+/** The keys `links` read before their first call. */
+const pathOf = (links: readonly Link[]): (string | number)[] => {
+  const path: (string | number)[] = [];
+  for (const link of links) {
+    if (link.kind !== "member") {
+      break;
+    }
+    path.push(link.key);
+  }
+  return path;
+};
 
 const keyOf = (node: Node): string | number => {
   if (node.type === "NumericLiteral") {
@@ -66,6 +84,55 @@ const keyOf = (node: Node): string | number => {
 };
 
 /**
+ * The base of the chain `node` and its links, from the base out. With
+ * `parentheses`, a chain in parentheses is a base of its own: `(a?.b).c`
+ * reads `.c` of what `a?.b` gives, `undefined` included, and throws
+ * there.
+ */
+const linksOf = (
+  node: Node,
+  parentheses: boolean
+): { base: Node; links: Link[] } => {
+  const links: Link[] = [];
+  let base = node;
+  for (;;) {
+    if (parentheses && base !== node && base.extra?.parenthesized === true) {
+      break;
+    }
+    if (
+      base.type === "MemberExpression" ||
+      base.type === "OptionalMemberExpression"
+    ) {
+      links.unshift({
+        kind: "member",
+        key: keyOf(base.property),
+        optional: base.type === "OptionalMemberExpression" && base.optional,
+      });
+      base = base.object;
+    } else if (
+      (base.type === "CallExpression" ||
+        base.type === "OptionalCallExpression") &&
+      (base.callee.type === "MemberExpression" ||
+        base.callee.type === "OptionalMemberExpression") &&
+      base.callee.property.type === "Identifier"
+    ) {
+      links.unshift({
+        kind: "call",
+        method: base.callee.property.name,
+        args: base.arguments,
+        optional:
+          base.callee.type === "OptionalMemberExpression" &&
+          base.callee.optional,
+      });
+      base = base.callee.object;
+    } else {
+      return { base, links };
+    }
+  }
+  return { base, links };
+};
+
+/**
  * A checked syntax tree as the code that runs, printed from the tree
  * itself (`@babel/generator`), never from the source: what runs is what
  * was checked. Every member read goes through `$read` and every call
@@ -73,14 +140,81 @@ const keyOf = (node: Node): string | number => {
  * comparison is in parentheses (`isComparison`); and every object key is
  * a computed string, so `__proto__` is an own field, never the prototype.
  */
+/**
+ * A read of one of the roots: `steps.extract.output.total` is root
+ * `steps` and path `["extract", "output", "total"]`, up to its first
+ * call or computed step. What a caller holds an expression's reads to
+ * where it stands (a step that ran before it, say).
+ */
+export interface ExpressionRead {
+  readonly root: string;
+  readonly path: readonly (string | number)[];
+}
+
 class Lowering {
   /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
   private next = 0;
+
+  readonly reads: ExpressionRead[] = [];
+
+  /** The array and object literals around what is lowered now. */
+  private literals = 0;
+
+  /** The most array and object literals it nests, one in another. */
+  deepest = 0;
+
+  private readonly roots: ReadonlySet<string>;
+
+  /** The callback parameters in scope, which a root's name may shadow. */
+  private readonly bound: string[] = [];
+
+  constructor(roots: ReadonlySet<string>) {
+    this.roots = roots;
+  }
+
+  /** Records a read of `name` with `path`, if `name` is a root there. */
+  private read(name: string, path: readonly (string | number)[]): void {
+    if (this.roots.has(name) && !this.bound.includes(name)) {
+      this.reads.push({ root: name, path });
+    }
+  }
+
+  /** An array or object literal, its values lowered. */
+  private literal(node: Node): t.Expression {
+    if (node.type === "ArrayExpression") {
+      return t.arrayExpression(
+        node.elements.map((element) =>
+          element?.type === "SpreadElement"
+            ? t.spreadElement(this.expression(element.argument))
+            : this.expression(nonNull(element))
+        )
+      );
+    }
+    if (node.type !== "ObjectExpression") {
+      throw new Error(`A literal is no ${node.type}.`);
+    }
+    return t.objectExpression(
+      node.properties.map((property) => {
+        if (property.type === "SpreadElement") {
+          return t.spreadElement(this.expression(property.argument));
+        }
+        if (property.type !== "ObjectProperty") {
+          throw new Error("A checked object literal has only fields.");
+        }
+        return t.objectProperty(
+          t.stringLiteral(String(keyOf(property.key))),
+          this.expression(property.value),
+          true
+        );
+      })
+    );
+  }
 
   expression(node: Node): t.Expression {
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- the checker allows no other
     switch (node.type) {
       case "Identifier": {
+        this.read(node.name, []);
         return t.identifier(node.name);
       }
       case "StringLiteral": {
@@ -106,31 +240,13 @@ class Lowering {
           node.expressions.map((expression) => this.expression(expression))
         );
       }
-      case "ArrayExpression": {
-        return t.arrayExpression(
-          node.elements.map((element) =>
-            element?.type === "SpreadElement"
-              ? t.spreadElement(this.expression(element.argument))
-              : this.expression(nonNull(element))
-          )
-        );
-      }
+      case "ArrayExpression":
       case "ObjectExpression": {
-        return t.objectExpression(
-          node.properties.map((property) => {
-            if (property.type === "SpreadElement") {
-              return t.spreadElement(this.expression(property.argument));
-            }
-            if (property.type !== "ObjectProperty") {
-              throw new Error("A checked object literal has only fields.");
-            }
-            return t.objectProperty(
-              t.stringLiteral(String(keyOf(property.key))),
-              this.expression(property.value),
-              true
-            );
-          })
-        );
+        this.literals += 1;
+        this.deepest = Math.max(this.deepest, this.literals);
+        const literal = this.literal(node);
+        this.literals -= 1;
+        return literal;
       }
       case "UnaryExpression": {
         return t.unaryExpression(node.operator, this.expression(node.argument));
@@ -173,46 +289,23 @@ class Lowering {
   }
 
   /** A chain of reads and calls, from its base out, `?.` links and all. */
-  private chain(node: Node): t.Expression {
-    const links: Link[] = [];
-    let base = node;
-    for (;;) {
-      // A chain in parentheses is one of its own: `(a?.b).c` reads `.c`
-      // of what `a?.b` gives, `undefined` included, and throws there.
-      if (base !== node && base.extra?.parenthesized === true) {
-        break;
-      }
-      if (
-        base.type === "MemberExpression" ||
-        base.type === "OptionalMemberExpression"
-      ) {
-        links.unshift({
-          kind: "member",
-          key: keyOf(base.property),
-          optional: base.type === "OptionalMemberExpression" && base.optional,
-        });
-        base = base.object;
-      } else if (
-        (base.type === "CallExpression" ||
-          base.type === "OptionalCallExpression") &&
-        (base.callee.type === "MemberExpression" ||
-          base.callee.type === "OptionalMemberExpression") &&
-        base.callee.property.type === "Identifier"
-      ) {
-        links.unshift({
-          kind: "call",
-          method: base.callee.property.name,
-          args: base.arguments,
-          optional:
-            base.callee.type === "OptionalMemberExpression" &&
-            base.callee.optional,
-        });
-        base = base.callee.object;
-      } else {
-        break;
-      }
+  private chain(node: Node, read = true): t.Expression {
+    // What it reads is the whole chain's, parentheses or not:
+    // `(steps.fetch).output` reads `steps.fetch.output`. A chain in
+    // parentheses is evaluated as one of its own all the same, below.
+    const whole = linksOf(node, false);
+    if (read && whole.base.type === "Identifier") {
+      this.read(whole.base.name, pathOf(whole.links));
     }
-    return this.links(this.expression(base), links, 0);
+    const { base, links } = linksOf(node, true);
+    if (base.type === "Identifier") {
+      return this.links(t.identifier(base.name), links, 0);
+    }
+    // Its reads are the outer chain's, recorded above.
+    const inner = isChain(base)
+      ? this.chain(base, false)
+      : this.expression(base);
+    return this.links(inner, links, 0);
   }
 
   /**
@@ -262,24 +355,40 @@ class Lowering {
     if (node.type !== "ArrowFunctionExpression") {
       return this.expression(node);
     }
+    const params = node.params.map((param) => {
+      if (param.type !== "Identifier") {
+        throw new Error("A checked callback has only plain parameters.");
+      }
+      return param.name;
+    });
+    this.bound.push(...params);
+    const body = this.expression(node.body);
+    this.bound.splice(this.bound.length - params.length);
     return t.arrowFunctionExpression(
-      node.params.map((param) => {
-        if (param.type !== "Identifier") {
-          throw new Error("A checked callback has only plain parameters.");
-        }
-        return t.identifier(param.name);
-      }),
-      this.expression(node.body)
+      params.map((name) => t.identifier(name)),
+      body
     );
   }
 }
 
 /**
  * The code a checked expression runs as (`Lowering`): one parenthesized
- * expression, with no comment, printed from its syntax tree.
+ * expression, with no comment, printed from its syntax tree; the reads
+ * of `roots` it makes; and the most array and object literals it nests,
+ * one in another, as deep as what it writes is at least.
  */
-export const lowerExpression = (checked: Node): string =>
-  `(${generate(new Lowering().expression(checked), { comments: false }).code})`;
+export const lowerExpression = (
+  checked: Node,
+  roots: ReadonlySet<string>
+): { code: string; reads: ExpressionRead[]; literalDepth: number } => {
+  const lowering = new Lowering(roots);
+  const lowered = lowering.expression(checked);
+  return {
+    code: `(${generate(lowered, { comments: false }).code})`,
+    reads: lowering.reads,
+    literalDepth: lowering.deepest,
+  };
+};
 
 /**
  * An expression as TypeScript type-checks it: its source with every

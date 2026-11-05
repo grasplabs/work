@@ -20,6 +20,11 @@ import type {
   WorkflowEngine,
   WorkflowEnv,
 } from "./engine.ts";
+import {
+  callMethod as callGuard,
+  optionalChain as optionalGuard,
+  readMember as readGuard,
+} from "./expression-runtime.ts";
 import { currencySchema, paramValueSchemas } from "./params.ts";
 import type { ParamDefault, ParamKind, ParamValue } from "./params.ts";
 import type {
@@ -76,8 +81,39 @@ export {
 } from "./expressions.ts";
 // The guards a workflow's JavaScript expressions run through, as the
 // code generated from them imports them (expression-check.ts,
-// `runtimeImport`).
-export { callMethod, optionalChain, readMember } from "./expression-runtime.ts";
+// `runtimeNames`).
+export { jsonValue } from "./expression-runtime.ts";
+
+/**
+ * A value an expression reads, as generated code holds it: any. Code
+ * generated from an expression must type-check whatever its data
+ * (`input.count + 1`, `(line) => line.length > 3`), and on the guards'
+ * JSON every operator but `===` is a type error TypeScript makes of
+ * JavaScript that runs well. What an expression reads is type-checked
+ * against the workflow's schemas where it is written, never in the
+ * generated code, where its data is only JSON. The guards still decide
+ * everything at run time.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- see above
+type Read = any;
+
+/** `readMember`, for generated code: what it reads is `Read`. */
+export const readMember: (object: unknown, key: string | number) => Read =
+  readGuard;
+
+/**
+ * `callMethod`, for generated code: what it answers is `Read`, and a
+ * callback's parameters are, as the arrow written in its place takes them.
+ */
+export const callMethod: (
+  receiver: unknown,
+  name: string,
+  args: readonly (Json | ((...values: Read[]) => unknown))[]
+) => Read = callGuard;
+
+/** `optionalChain`, for generated code: on `Read` values. */
+export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
+  optionalGuard;
 export type { ParamKind, ParamValue } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
