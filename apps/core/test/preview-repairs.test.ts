@@ -50,7 +50,7 @@ const attack =
 /**
  * A draft of the Invoice desk of spec 8's layout: its `desk.total` query
  * answers the attacker's words where its contract says a number, until it
- * is fixed.
+ * is fixed. Its broken code fails lint too (`prefer-structured-clone`).
  */
 const desk = (fixed: boolean): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -395,7 +395,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
-  it("waits a moment for the preview of a write checked at once, and fails on what it ran into", async () => {
+  it("waits a moment for the preview of a write checked at once, its lint failing too, and fails on what it ran into", async () => {
     const { builder, app, chatId, stub } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
@@ -403,6 +403,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         const checked = await ${checkJob};
         return {
           passed: checked.passed,
+          lint: checked.lint.status,
           seen: checked.preview.seen,
           // The screen's own report may land in the same moment: the
           // server's failure is kept first.
@@ -424,7 +425,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     );
     await previewAt(builder, chatId, 1);
     // The next write and the check in one step: the panel previews the
-    // write while the check waits for it.
+    // write while the check waits for it. A lint finding doesn't stop the
+    // preview running the code (the broken desk has one), so it doesn't
+    // stop the check waiting either.
     const asked = stub.ask(chatIdSchema.parse(chatId), {
       text: "Make the invoice desk show the total",
       model,
@@ -437,6 +440,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       broken: "contract.invalid_return",
       checked: {
         passed: false,
+        lint: "failed",
         seen: true,
         first: { source: "server", at: "desk.total" },
       },
