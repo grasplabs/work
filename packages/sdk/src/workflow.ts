@@ -650,7 +650,8 @@ export interface WorkflowContext<P extends Params, Input> {
    * and DMARC found as the deployment's mail service received it, each of
    * which domain (`null` where it recorded nothing). A pass vouches only
    * for its domain: `from` is tied to who sent it only when
-   * `dmarc.result === "pass"` and `dmarc.domain` is `from`'s domain. A reply
+   * `dmarc.result === "pass"` and `dmarc.domain` (lower case) is the
+   * domain after `from`'s last `@`, lower-cased. A reply
    * delivered again is the same event; a reply after the run ended, or
    * one sent automatically (an out-of-office), is dropped and audited. A test run gets placeholders that
    * reach nobody; any run not on a sealed build's run host, none.
