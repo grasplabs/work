@@ -34,14 +34,13 @@ import type {
   HostFileSystem,
   Diagnostic as TscDiagnostic,
 } from "@tsrs/wasm/core";
-import { parseSync } from "oxc-parser";
 import { rolldown } from "rolldown";
 import type { Plugin as RolldownPlugin } from "rolldown";
 import { dts } from "rolldown-plugin-dts";
 import { ResolverFactory } from "rolldown/experimental";
 import { __unstable__loadDesignSystem } from "tailwindcss";
 import shadcnPreset from "ultracite/oxlint/shadcn";
-import { build } from "vite-plus";
+import { build, parseSync } from "vite-plus";
 import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
@@ -635,7 +634,7 @@ const collectStylesheets = (): Record<string, string> => {
 
 /**
  * Drops JSDoc comments: most of lucide-react's declarations, and nothing
- * a type check reads. oxc-parser finds them.
+ * a type check reads. oxc's parser (Vite+'s) finds them.
  */
 const withoutDocComments = (source: string): string => {
   let result = "";
@@ -1445,8 +1444,8 @@ const moduleLocation = (moduleUrl: string) => ({
 /**
  * The design-system lint (@shadcn/lint) loads oxc-parser, which it reads
  * the kit's components with, by a `require` at runtime, which in the
- * isolate only finds Node's built-ins: this hands it the compiler's own,
- * oxc-parser's WebAssembly (src/eslint-parser.ts), started before a lint.
+ * isolate only finds Node's built-ins: this hands it the compiler's own
+ * oxc parser (src/eslint-parser.ts, on oxc.wasm), started before a lint.
  */
 const shadcnParser: Plugin = {
   name: "shadcn-lint-parser",
@@ -1556,13 +1555,12 @@ const isolateBuild = (
       rolldownOptions: {
         // esbuild's WebAssembly is a module of the isolate, as the
         // package builder's is: what bundles a preview's entries; and
-        // oxc's, Ultracite's, and oxc-parser's, the design lint's.
+        // oxc's, Ultracite's lint's and the design lint's parser's.
         external: [
           "cloudflare:workers",
           "#kit",
           "./esbuild.wasm",
           "./oxc.wasm",
-          "./oxc-parser.wasm",
           ...nodeBuiltins,
         ],
         output: {
@@ -1872,12 +1870,9 @@ const buildAppCompiler = async (
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
-  // oxlint's and oxfmt's, which Ultracite's isolate runs, as pinned.
+  // oxlint's, oxfmt's and oxc's parser's, which Ultracite's isolate and the
+  // compiler's run, as pinned.
   const oxc = await oxcWasm();
-  // oxc-parser's, the compiler's design lint's, as the package ships it.
-  const oxcParserWasm = readFileSync(
-    require.resolve("@oxc-parser/binding-wasm32-wasip1/wasm")
-  );
   // jq's, which every workflow isolate loads beside the SDK's modules.
   const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
@@ -1907,7 +1902,6 @@ const buildAppCompiler = async (
     .update(serverSdkModules.version)
     .update(ultracite)
     .update(oxc)
-    .update(oxcParserWasm)
     .update(packageBuilder)
     .update(esbuildWasm)
     .update(jqWasm)
@@ -1920,7 +1914,6 @@ const buildAppCompiler = async (
     [compilerAssets.source]: compiler,
     [compilerAssets.ultracite]: ultracite,
     [compilerAssets.oxcWasm]: oxc,
-    [compilerAssets.oxcParserWasm]: oxcParserWasm,
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
     [compilerAssets.kitPreviewModules]: JSON.stringify(kitPreviewModules),

@@ -81,10 +81,11 @@ export const compilerAssets = {
   packageBuilder: "package-builder.js",
   /** Ultracite's lint and format of App code (src/ultracite-worker.ts). */
   ultracite: "ultracite.js",
-  /** oxlint's and oxfmt's WebAssembly, which Ultracite's isolate runs (oxc-wasm/). */
+  /**
+   * oxlint's, oxfmt's and oxc's parser's WebAssembly (oxc-wasm/), which
+   * Ultracite's isolate lints with and the compiler's design lint parses with.
+   */
   oxcWasm: "oxc.wasm",
-  /** oxc-parser's WebAssembly, the compiler's design lint's (src/eslint-parser.ts). */
-  oxcParserWasm: "oxc-parser.wasm",
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
   /**

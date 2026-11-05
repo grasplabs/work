@@ -1,5 +1,7 @@
 # oxlint's linter and oxfmt's formatter as one threadless wasm32-wasip1
-# module, for the isolate that lints and formats App code (src/oxc.ts).
+# module, for the isolate that lints and formats App code (src/oxc.ts),
+# and oxc's parser with its ESTree tokens, for the compiler's design lint
+# (src/eslint-parser.ts).
 # Built inside oxc's own workspace at the commit pin.json names (build.sh),
 # so every dependency is the version that oxlint and oxfmt release ship.
 #
@@ -16,7 +18,8 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-oxc = { workspace = true, features = ["semantic"] }
+oxc = { workspace = true, features = ["ast_visit", "semantic", "serialize"] }
+oxc_estree_tokens = { workspace = true }
 oxc_formatter = { workspace = true }
 oxc_formatter_core = { workspace = true }
 oxc_linter = { workspace = true }

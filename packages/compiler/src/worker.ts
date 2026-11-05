@@ -107,7 +107,7 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import oxcParserWasm from "./oxc-parser.wasm";
+import oxcWasm from "./oxc.wasm";
 import { startEsbuild } from "./packages/build.ts";
 import { previewEntries } from "./preview-entry.ts";
 import type { Bundle } from "./preview-entry.ts";
@@ -682,7 +682,7 @@ export const buildScreensIncrementally = async (
   // (`checks`): its compile errors still fail it, and it never starts the
   // lint's parser.
   if (checks) {
-    await startOxcParser(oxcParserWasm);
+    startOxcParser(oxcWasm);
   }
   const typeCheck = checks
     ? screensCheck(files, { found: errors, unparsed, untyped })
@@ -1377,9 +1377,9 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
  * a build alone, as the seal's first, symbolic inspection makes it,
  * doesn't, since its generated modules are stand-ins without types.
  */
-export const checkAppCode = async (
+export const checkAppCode = (
   files: Record<string, string>
-): Promise<Unchecked<AppCodeBuild>> => {
+): Unchecked<AppCodeBuild> => {
   const tooMuch = appCodeLimitErrors(appCodeFiles(files));
   if (tooMuch.length > 0) {
     return { built: { ok: false, diagnostics: tooMuch } };
@@ -1407,7 +1407,7 @@ export const checkAppCode = async (
   // before the host refuses it at run time anyway.
   const checked = { ...appCodeFiles(files), ...tests };
   // Its lint's parser (`lintServerCode`).
-  await startOxcParser(oxcParserWasm);
+  startOxcParser(oxcWasm);
   return {
     built,
     typeCheck: {

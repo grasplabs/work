@@ -350,7 +350,7 @@ const compilerWorker = async (
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
       esbuildWasmOf(assets),
-      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
@@ -363,7 +363,7 @@ const compilerWorker = async (
         // bundles a preview's entries (preview-entry.ts), and what the
         // design lint parses with (eslint-parser.ts).
         "esbuild.wasm": { wasm },
-        [compilerAssets.oxcParserWasm]: { wasm: parserWasm },
+        [compilerAssets.oxcWasm]: { wasm: parserWasm },
       },
     };
   });
@@ -452,7 +452,7 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
       esbuildWasmOf(assets),
-      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     return {
       mainModule: "compiler.js",
@@ -460,7 +460,7 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
         "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
-        [compilerAssets.oxcParserWasm]: {
+        [compilerAssets.oxcWasm]: {
           type: "wasm",
           bytes: new Uint8Array(parserWasm),
         },

@@ -7,7 +7,7 @@
  * what it would have the first time. Convex has the same rule, and
  * baseflare's codegen warns of it too. A warning, never an error: the
  * code may mean it, and the host makes nothing of it either way. Through
- * ESLint's `Linter` and oxc-parser (eslint-parser.ts), as screens are
+ * ESLint's `Linter` and oxc's parser (eslint-parser.ts), as screens are
  * linted (lint.ts).
  */
 import type { Rule } from "eslint";

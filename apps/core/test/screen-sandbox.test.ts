@@ -294,22 +294,12 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: [
-          "compiler.js",
-          "esbuild.wasm",
-          "kit.json",
-          "oxc-parser.wasm",
-        ],
+        together: ["compiler.js", "esbuild.wasm", "kit.json", "oxc.wasm"],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: [
-          "compiler.js",
-          "esbuild.wasm",
-          "kit.json",
-          "oxc-parser.wasm",
-        ],
+        anewRead: ["compiler.js", "esbuild.wasm", "kit.json", "oxc.wasm"],
       });
     });
 
@@ -344,27 +334,37 @@ describe(
         ultracite.lint({ "components/one.ts": "export const one = 1;\n" }),
       ]);
 
-      const lintFiles = new Set(["ultracite.js", "oxc.wasm"]);
-      const lint = reads.filter(({ file }) => lintFiles.has(file));
-      const compilerReads = reads.filter(({ file }) => !lintFiles.has(file));
-      const overlap = lint.some((one) =>
-        compilerReads.some(({ from, to }) => one.from < to && from < one.to)
-      );
+      // Both isolates read oxc.wasm, so each isolate's reads are the ones
+      // under way while its main module's is: its turn.
+      const turnOf = (main: string): string[] => {
+        const first = reads.find(({ file }) => file === main);
+        return reads
+          .filter(
+            (read) =>
+              first !== undefined &&
+              read.from < first.to &&
+              first.from < read.to
+          )
+          .map(({ file }) => file)
+          .toSorted();
+      };
       expect({
         answers,
         files: reads.map(({ file }) => file).toSorted(),
-        overlap,
+        compiler: turnOf("compiler.js"),
+        lint: turnOf("ultracite.js"),
       }).toStrictEqual({
         answers: ["checked", { "components/one.ts": [] }],
         files: [
           "compiler.js",
           "esbuild.wasm",
           "kit.json",
-          "oxc-parser.wasm",
+          "oxc.wasm",
           "oxc.wasm",
           "ultracite.js",
         ],
-        overlap: false,
+        compiler: ["compiler.js", "esbuild.wasm", "kit.json", "oxc.wasm"],
+        lint: ["oxc.wasm", "ultracite.js"],
       });
     });
 
