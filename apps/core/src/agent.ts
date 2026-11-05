@@ -638,46 +638,6 @@ export const withheldAssistant = (
 };
 
 /**
- * `history` as a request may send it while the code runs `runs` are
- * withheld: each of their results reads as a note, and so does everything
- * after it in the same turn (the model's later text and code, and later
- * results), which may repeat what it read. What came before, the person's
- * own words and every other turn stay as they are; each call keeps its ID
- * and its result. The note never says what was read, from where or how
- * long it was.
- *
- * Accepted residual: what the model wrote in a later turn, without reading
- * again, from its own earlier answer stays: that turn's reads were its
- * own. And nothing is withheld for a run that recorded no source.
- */
-export const withholdRuns = (
-  history: readonly Message[],
-  runs: ReadonlySet<string>
-): Message[] => {
-  if (runs.size === 0) {
-    return [...history];
-  }
-  let after = false;
-  return history.map((message): Message => {
-    if (message.role === "user") {
-      after = false;
-      return message;
-    }
-    if (message.role === "toolResult") {
-      const runId = resultRunId(message);
-      if (!after && (runId === undefined || !runs.has(runId))) {
-        return message;
-      }
-      after = true;
-      return { ...message, content: [{ type: "text", text: withheldResult }] };
-    }
-    return message.role === "assistant" && after
-      ? withheldAssistant(message)
-      : message;
-  });
-};
-
-/**
  * `message` with no links in its text, as a chat platform's chat keeps
  * and shows the agent's own words (`withoutLinks`); others as they are.
  */

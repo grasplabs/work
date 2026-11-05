@@ -29,10 +29,11 @@ import { grantedPermissions } from "./permissions.ts";
 // and the Knowledge catalog's collections (`recordRunReads`). Before every
 // model request the chat asks which of those its agent may still read for
 // its person, as a read made now would be decided, and withholds the
-// results of every run that read one it may not (`withholdRuns` in
-// agent.ts): a person who left a team or an App, an agent whose grant was
-// revoked (the one a connection call was made under, whatever other grant
-// on that connection stays), a collection or App deleted.
+// results of every run that read one it may not (`withheld` in
+// chat-agent.ts, then `rebase`): a person who left a team or an App, an
+// agent whose grant was revoked (the one a connection call was made under,
+// whatever other grant on that connection stays), a collection or App
+// deleted.
 //
 // What a run read of the Brain is pinned too (GRA-299; the threat model is
 // on the issue): beside its collections, the agent's `brain` grant it read

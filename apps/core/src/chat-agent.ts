@@ -337,7 +337,12 @@ interface Copied {
  * a recall's, read as a note, and so is everything the model wrote after
  * it in its turn, which may repeat what it read, up to the next question.
  * A notice steered in mid-turn ends no turn. Each call keeps its ID and
- * its result; the person's words stay as they are.
+ * its result; the person's words stay as they are. The note never says
+ * what was read, from where or how long it was.
+ *
+ * Accepted residual: what the model wrote in a later turn, without reading
+ * again, from its own earlier answer stays: that turn's reads were its
+ * own. And nothing is withheld for a run that recorded no source.
  */
 const withheldFrom = (
   history: readonly EntryRecord[],
