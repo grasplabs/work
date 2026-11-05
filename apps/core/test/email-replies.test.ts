@@ -462,6 +462,10 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         headers: [...routingPass, "From : Boss <boss@acme.test>"],
         envelopeFrom: "boss@acme.test",
       },
+      // Several `@`: which domain it names depends on who reads it.
+      severalAt: {
+        from: "Boss <boss@bank.test@acme.test>",
+      },
       // An address the run gets cut to 256 characters, its quoted local
       // part ending, once cut, at another domain.
       cut: { from: `"${"x".repeat(245)}@bank.test tail"@acme.test` },
@@ -496,6 +500,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       unreadable: ["boss@acme.test", null],
       spacedOnly: ["boss@acme.test", null],
       cut: [`"${"x".repeat(245)}@bank.test`, null],
+      severalAt: ["boss@bank.test@acme.test", null],
     });
   });
 

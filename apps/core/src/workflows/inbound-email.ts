@@ -39,7 +39,10 @@ import {
   triggerResources,
   triggerResourceVersions,
 } from "../db/core/schema.ts";
-import { authenticationOf } from "./authentication-results.ts";
+import {
+  authenticationOf,
+  domainOf as domainNameOf,
+} from "./authentication-results.ts";
 import type { Authentication } from "./authentication-results.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
@@ -175,10 +178,10 @@ import type { StartFiles } from "./start-files.ts";
 //   binding's share, never an App screen's. What Email Routing found of
 //   SPF, DKIM and DMARC goes with it (authentication-results.ts: only
 //   its own ARC set, on top, is read), for the workflow to check; core
-//   refuses no reply on it. Its DMARC verdict only when it is of the
-//   `from` the run gets (`dmarcOfFrom`): a message whose From DMARC may
-//   not have judged (several, several mailboxes, none readable) has none,
-//   so a pass always means `from`'s domain is verified.
+//   refuses no reply on it. Its DMARC verdict only when `from`, as the
+//   run gets it, is the message's one From mailbox at the domain DMARC
+//   judged (`dmarcOfFrom`), so a pass always means `from`'s domain is
+//   verified.
 // - A reply the run can't take: one to a run that ended, through a
 //   binding whose approval went, one its contract refuses, past its
 //   inbox's limits, or one that may loop (`loopOf`) is accepted and
@@ -448,19 +451,16 @@ const textOfHtml = (full: string): string => {
     .trim();
 };
 
-/** `domain`, lower case, when it is ASCII (U+212A lower-cases to `k`). */
-const asciiLowerCase = (domain: string): string | undefined =>
-  /^[\u0021-\u007E]*$/u.test(domain) ? domain.toLowerCase() : undefined;
-
 /**
- * `authentication`, its DMARC verdict kept only when it is of `from`, the
- * address the run gets (`messageOf`, cut to fit): the message has one
- * From header (counting every spelling of its name; RFC 5322 3.6 allows
- * only one), the one postal-mime reads (`From:`, not `From :`), holding
- * one mailbox, exactly `from`, at the domain DMARC judged. Which
- * From Email Routing judged, when there are several or a header holds
- * several mailboxes or none postal-mime reads (the run then gets the
- * envelope sender), or what a cut address was, the run can't tell.
+ * `authentication`, its DMARC verdict kept only when `from`, the address
+ * the run gets (`messageOf`, cut to fit), is the message's one From
+ * mailbox, at the domain DMARC judged: one From header (counting every
+ * spelling of its name; RFC 5322 3.6 allows only one), the one postal-mime
+ * reads (`From:`, not `From :`), holding one mailbox, exactly `from`, with
+ * one `@` (`boss@bank.test@evil.test` names no one domain). Otherwise
+ * which From Email Routing judged, or which domain `from` names, the run
+ * can't tell: several From headers or mailboxes, none postal-mime reads
+ * (the run then gets the envelope sender), a cut address, another domain.
  */
 const dmarcOfFrom = (
   parsed: Email,
@@ -471,15 +471,13 @@ const dmarcOfFrom = (
   const fromMailboxes =
     fromHeaders.length === 1 ? addressParser(fromHeaders[0]?.value ?? "") : [];
   const address = fromMailboxes[0]?.address;
-  const domain =
-    address === undefined
-      ? undefined
-      : asciiLowerCase(address.slice(address.lastIndexOf("@") + 1));
+  const domain = domainNameOf(address);
   const ofFrom =
     fromHeaders[0]?.key === "from" &&
     fromMailboxes.length === 1 &&
     address === from &&
-    domain !== undefined &&
+    from.indexOf("@") === from.lastIndexOf("@") &&
+    domain !== null &&
     domain === authentication.dmarc?.domain;
   return ofFrom ? authentication : { ...authentication, dmarc: null };
 };

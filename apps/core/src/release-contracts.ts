@@ -91,10 +91,13 @@ const mailbox = v.object({ name: v.string(), address: v.string() });
  * of the signature (`header.d`), DMARC's of the From header
  * (`header.from`). A pass vouches only for that domain: SPF and DKIM may
  * pass for any domain the sender owns, while DMARC's is reported only
- * when it judged the `from` the run gets (`dmarcOfFrom` in
- * inbound-email.ts), so a DMARC pass means `from`'s domain is verified;
- * which address at it may send stays the domain's own policy. Null when Email Routing's own ARC set
- * (authentication-results.ts) records none, or none core can trust.
+ * when `from` is the message's one From mailbox at the domain it judged
+ * (`dmarcOfFrom` in inbound-email.ts), so a DMARC pass means `from`'s
+ * domain is verified; which address at it may send stays the domain's
+ * own policy. Null when Email Routing's own ARC set
+ * (authentication-results.ts) records none, or none core can trust, and
+ * DMARC's also when its verdict isn't of `from` (several From headers or
+ * mailboxes, none readable, another domain).
  */
 const methodResult = v
   .object({

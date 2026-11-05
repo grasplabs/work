@@ -648,7 +648,9 @@ export interface WorkflowContext<P extends Params, Input> {
    * reply through it: a reply is checked against the contract, but who
    * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
    * and DMARC found as the deployment's mail service received it, each of
-   * which domain (`null` where it recorded nothing). A `dmarc` pass means
+   * which domain (`null` where it recorded nothing, and `dmarc` also where
+   * its verdict isn't of `from`: several From headers or mailboxes, none
+   * readable, or another domain). A `dmarc` pass means
    * `from`'s domain is verified; which address at that domain may send
    * stays the domain's own policy. A reply
    * delivered again is the same event; a reply after the run ended, or

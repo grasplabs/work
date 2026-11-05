@@ -443,7 +443,7 @@ const trustedResults = (headers: readonly Header[]): ResultInfo[] => {
  * The domain of `address` (a domain, or `local@domain`), lower case, when
  * it is RFC 6376 3.5's `domain-name`: two or more Keywords by dots.
  */
-const domainOf = (address: string | undefined): string | null => {
+export const domainOf = (address: string | undefined): string | null => {
   // Checked before it is lower-cased: some non-ASCII letters lower-case
   // to ASCII ones (U+212A KELVIN SIGN to `k`).
   const domain = address?.slice(address.lastIndexOf("@") + 1);
