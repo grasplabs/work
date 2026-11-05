@@ -1349,6 +1349,12 @@ export interface RunKind {
   /** The run as its waits for its AI provider name it (ai-waits.ts). */
   readonly aiWaitRun: AiWaitRun;
   /**
+   * Whether its steps and calls are audited: not a test's run, which
+   * leaves nothing in the organization's audit log (fixture-runs.ts). A
+   * refusal is audited either way, as tampering's evidence.
+   */
+  readonly stepsAudited: boolean;
+  /**
    * Why step `step` may not run as `use` (a `do`, a sleep, a decision's
    * wait, a sleep until a deadline, a catch), or nothing when it may; for
    * a sleep, `time` is its length, and for a sleep until, its deadline.
@@ -1692,8 +1698,9 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Records how a step went, through the outbox. Every step the host ran
-   * is recorded, the SDK's own (`$params`) too: the isolate
+   * Records how a step went, through the outbox, unless its run is a
+   * test's (`RunKind.stepsAudited`). Every step the host ran is recorded,
+   * the SDK's own (`$params`) too: the isolate
    * names them, so a name is no reason to leave one out. A record that
    * can't be stored is logged, and the run goes on: the step happened.
    */
@@ -1702,6 +1709,9 @@ export class RunHost extends RpcTarget {
     outcome: "completed" | "failed",
     detail: { sideEffect: boolean; errorCode?: string }
   ): Promise<void> {
+    if (!this.#kind.stepsAudited) {
+      return;
+    }
     const { runId } = this.#run;
     const { actor, target, detail: runDetail } = this.#kind.audit;
     const db = drizzle(this.#env.DB);

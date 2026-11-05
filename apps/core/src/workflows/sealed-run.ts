@@ -1373,6 +1373,7 @@ class SealedRun implements SealedRunKind {
   readonly decisionRun: RunKind["decisionRun"];
   readonly decisionsKept: DecisionsKept | undefined;
   readonly aiWaitRun: RunKind["aiWaitRun"];
+  readonly stepsAudited: boolean;
 
   constructor(
     env: Env,
@@ -1402,6 +1403,7 @@ class SealedRun implements SealedRunKind {
     this.decisionRun = decisionRunOf(run.calling);
     this.decisionsKept = decisionsKeptOf(env, run);
     this.aiWaitRun = { kind: "resource", runId: run.runId };
+    this.stepsAudited = run.calling.fixture !== true;
   }
 
   /**
@@ -2538,13 +2540,17 @@ class SealedRun implements SealedRunKind {
   /**
    * Keeps the evidence of `attempt`'s call before it goes out, or it
    * doesn't go: its sealed call and binding, and a digest of its
-   * arguments as the isolate sent them, placeholders and not values.
+   * arguments as the isolate sent them, placeholders and not values. A
+   * test's run keeps none (`stepsAudited`): its calls are its fixture's.
    */
   async #auditCall(
     attempt: StepAttempt,
     template: CallTemplate,
     sent: Json
   ): Promise<void> {
+    if (!this.stepsAudited) {
+      return;
+    }
     const db = drizzle(this.#env.DB);
     const { actor, target, detail } = this.audit;
     await auditedBatch(this.#env, db, [
