@@ -405,32 +405,6 @@ describe("chat agent", () => {
     // No request for them after they left.
     expect(provider.requests).toHaveLength(1);
   });
-
-  it("stops the turn when its person leaves during it", async () => {
-    const { reply, release } = pausedReply(
-      { ...codeStep("export default async () => 'done';"), text: "Running." },
-      1
-    );
-    const { personId, provider, ask } = await newChat(
-      reply,
-      says("Never asked.")
-    );
-
-    const turn = codeOf(ask("Wait."));
-    await vi.waitFor(
-      () => {
-        expect(provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
-      .bind(personId)
-      .run();
-    release();
-
-    await expect(turn).resolves.toBe("permission.person_inactive");
-    expect(provider.requests).toHaveLength(1);
-  });
 });
 
 describe("chat agent sandbox", () => {
@@ -1109,6 +1083,38 @@ const restart = async (id: WorkspaceId): Promise<WorkspaceStub> => {
 };
 
 describe("chat agent after a restart", () => {
+  it("stops the turn when its person leaves during it and a restart of its chat's object cuts it short, and says why", async () => {
+    const { reply, release } = pausedReply(
+      { ...codeStep("export default async () => 'done';"), text: "Running." },
+      1
+    );
+    const { id, chat, personId, provider, ask } = await newChat(
+      reply,
+      says("Never asked.")
+    );
+
+    const turn = codeOf(ask("Wait."));
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(personId)
+      .run();
+    // The turn is set up again as the object wakes, for a person who left.
+    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+
+    await expect(turn).resolves.toBe("permission.person_inactive");
+    release();
+    expect(provider.requests).toHaveLength(1);
+  });
+
   it("continues the conversation with everything before it", async () => {
     const { stub, chat, ask } = await newChat(
       codeStep(
@@ -1196,50 +1202,6 @@ describe("chat agent after a restart", () => {
         }
       );
     });
-  });
-
-  it("takes a notice for a turn a restart of both objects cut short when it is the first call to reach its ChatSession", async () => {
-    const { id, stub, chat, provider, ask } = await newChat(
-      codeStep(
-        "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
-      ),
-      says("Noted.")
-    );
-    void ask("What is 6 * 7?").catch(() => "settled");
-    await vi.waitFor(
-      async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
-      },
-      { timeout: 10_000 }
-    );
-    await restart(id);
-    const session = () => chatSession(env, id, chat.id);
-    await runInDurableObject(session(), (_, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
-      // Aborting fails the call that aborted: that is the restart.
-    });
-    // The turn's ID, as its question was submitted with it.
-    const [turn] = await runInDurableObject(session(), (_, state) =>
-      state.storage.sql
-        .exec<{ turnId: string }>(
-          "SELECT json_extract(record, '$.requestId') AS turnId FROM pi_submissions ORDER BY id LIMIT 1"
-        )
-        .toArray()
-    );
-    // How a build job of the turn ended, as its Workspace tells it.
-    const notice = `Build job ${crypto.randomUUID()} ended.`;
-    await session().notify(turn?.turnId ?? "", crypto.randomUUID(), notice);
-    await vi.waitFor(
-      () => {
-        expect(
-          provider.requests.some(({ body }) =>
-            JSON.stringify(body).includes(notice)
-          )
-        ).toBeTruthy();
-      },
-      { timeout: 15_000 }
-    );
   });
 
   it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession", async () => {

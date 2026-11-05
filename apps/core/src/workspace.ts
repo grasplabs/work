@@ -187,7 +187,7 @@ import {
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
-import { chatSession } from "./durable-objects.ts";
+import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
@@ -582,17 +582,6 @@ export const maxChatsPerPerson = 500;
 /** Most chats one search finds: the most recently active first. */
 export const searchHitsMax = 50;
 
-/**
- * Why a turn under way stopped short of an answer, as its person reads
- * it: an unplanned error is logged, and shown as one, with the log line's
- * request ID for them to quote.
- */
-/**
- * How many times a turn is asked of the chat's own object, should the
- * object's restart break the call: the turn goes on there meanwhile.
- */
-const turnAttempts = 3;
-
 /** What a turn its guard stopped ends with, as its person reads it. */
 const turnStopError = (stop: TurnStop): Error => {
   switch (stop) {
@@ -611,6 +600,11 @@ const turnStopError = (stop: TurnStop): Error => {
   }
 };
 
+/**
+ * Why a turn under way stopped short of an answer, as its person reads
+ * it: an unplanned error is logged, and shown as one, with the log line's
+ * request ID for them to quote.
+ */
 const stopReason = (chatId: ChatId, error: unknown): string => {
   if (isExpectedError(error)) {
     return error.message;
@@ -637,6 +631,13 @@ const traceKeyPrefix = "trace:";
  * still shows the chat running while its turn goes on there.
  */
 const runningKeyPrefix = "running:";
+
+/**
+ * The last entry of a chat's `ChatSession` its messages were kept of, as
+ * `copied:<chat>`: that object copies at least once, so a copy it sends
+ * again after a restart is passed over (`keepTurnMessages`).
+ */
+const copiedKeyPrefix = "copied:";
 
 /** Most characters of what a chat read that its writes are traced to. */
 const traceCharsMax = 200_000;
@@ -1808,8 +1809,10 @@ export class Workspace extends DurableObject<Env> {
       // Before the model is admitted: what memory reads is a source too.
       const context = await this.#turnContext(scope, authority, work, shared);
       // Refuses a model the deployment or its rules don't allow before
-      // anything is kept: the chat's object admits it again for its turn,
-      // and every request again by the rules as they stand then.
+      // anything is kept or shown as started, and names the model the
+      // turn's capture records. The chat's object admits it again for its
+      // turn, as it sets up a turn a restart cut short on its own, with
+      // nobody here to admit it; and every request by the rules then.
       const { model } = await models(this.env).agent(
         {
           model: parsed.data.model,
@@ -1910,31 +1913,35 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Runs the turn `request` in the chat's own object (chat-session.ts),
-   * to its end. A call the object's restart broke is made again: the turn
-   * goes on there, and the same turn ID finds it rather than asking again.
+   * to its end. A call that broke on its way is made again: the turn goes
+   * on there, and the same turn ID joins or finds it rather than asking
+   * again (`ChatHarness.run`).
    */
   async #runTurn(request: TurnRequest): Promise<TurnEnd> {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        // A stub an attempt: one to an object that restarted stays broken.
-        // oxlint-disable-next-line no-await-in-loop -- again only once it broke
-        return await chatSession(
-          this.env,
-          request.scope.workspaceId,
-          request.scope.chatId
-        ).run(request);
-      } catch (error) {
-        if (isExpectedError(error) || attempt >= turnAttempts) {
-          throw error;
-        }
-        log.warn("agent.turn_retried", {
-          chatId: request.scope.chatId,
-          turnId: request.turnId,
-          attempt,
-          ...errorFields(error),
-        });
-      }
-    }
+    return await this.#toSession(
+      request.scope.chatId,
+      async (session) => await session.run(request)
+    );
+  }
+
+  /**
+   * Makes `call` to the chat's own object (chat-session.ts), again when it
+   * broke on its way (`callObject`), on a stub of its own each time.
+   */
+  async #toSession<T>(
+    chatId: ChatId,
+    call: (session: ReturnType<typeof chatSession>) => Promise<T>
+  ): Promise<T> {
+    return await callObject(async () => await call(this.#session(chatId)));
+  }
+
+  /** A stub of the chat's own object (chat-session.ts), here by its name. */
+  #session(chatId: ChatId) {
+    return chatSession(
+      this.env,
+      workspaceIdSchema.parse(this.ctx.id.name),
+      chatId
+    );
   }
 
   /** The agent's scope in `chat`: where it is, whose agent, for whom. */
@@ -2228,27 +2235,34 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Closes a code run of the chat's turn as `#endCodeRun` does: called by
-   * the chat's own object (chat-session.ts) as each of its runs ends.
+   * the chat's own object (chat-session.ts) as each of its runs ends. For
+   * the agent and person the chat holds, whatever the caller kept.
    */
   async endTurnRun(
-    scope: Omit<AgentScope, "runId">,
+    chatId: ChatId,
     runId: string,
     status: CodeRunStatus
   ): Promise<CodeRunStatus> {
-    return await this.#endCodeRun(scope, runId, status);
+    return await this.#endCodeRun(
+      this.#scopeOf(this.#chat(chatId)),
+      runId,
+      status
+    );
   }
 
   /**
    * What the chat's turn may send now, asked by its own object before every
    * model request: the runs whose results it withholds (`#withheldRuns`),
    * everything the chat has read from, for the gateway's rules, and why it
-   * may not go on, when its person may no longer act.
+   * may not go on, when its person may no longer act. For the agent and
+   * person the chat holds, whatever the caller kept.
    */
-  async turnGuard(scope: Omit<AgentScope, "runId">): Promise<{
+  async turnGuard(chatId: ChatId): Promise<{
     withheld: string[];
     sources: string[];
     stop?: "person_inactive";
   }> {
+    const scope = this.#scopeOf(this.#chat(chatId));
     const active = await memberRole(this.env.DB, scope.personId);
     return {
       withheld: [...(await this.#withheldRuns(scope))],
@@ -2257,11 +2271,6 @@ export class Workspace extends DurableObject<Env> {
     };
   }
 
-  /**
-   * Keeps what the chat's turn committed, in order, as the chat shows it:
-   * a question with the files it carries; in a chat platform's chat, the
-   * agent's words without links (`withoutLinks`).
-   */
   /**
    * Whether the chat's turn runs: from the question until its
    * `ChatSession` says it runs (`#turns`), then as that object says.
@@ -2290,14 +2299,26 @@ export class Workspace extends DurableObject<Env> {
     this.#changed(chatId);
   }
 
+  /**
+   * Keeps what the chat's turn committed, in order, as the chat shows it:
+   * a question with the files it carries; in a chat platform's chat, the
+   * agent's words without links (`withoutLinks`). Each entry once
+   * (`copiedKeyPrefix`): a copy its object sends again is passed over.
+   */
   keepTurnMessages(chatId: ChatId, messages: readonly TurnMessage[]): void {
-    const chat = this.chatState(chatId);
-    if (chat === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return;
     }
     const { via } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
-    for (const { message, files = [], thinkingMs } of messages) {
+    const copiedKey = `${copiedKeyPrefix}${chatId}`;
+    const copied = this.ctx.storage.kv.get<number>(copiedKey) ?? 0;
+    let through = copied;
+    for (const { entryId, message, files = [], thinkingMs } of messages) {
+      if (entryId !== undefined && entryId <= copied) {
+        continue;
+      }
+      through = Math.max(through, entryId ?? 0);
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
         // Only a response the provider counted a prompt for: not a request
@@ -2318,10 +2339,17 @@ export class Workspace extends DurableObject<Env> {
         live.answer = id;
       }
     }
+    // With the messages: no await between, so they are stored together.
+    if (through > copied) {
+      this.ctx.storage.kv.put(copiedKey, through);
+    }
   }
 
   /** Shows the chat's watchers the answer streaming in, or none. */
   showPartial(chatId: ChatId, partial: AssistantMessage | null): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
     if (partial === null) {
       this.#partials.delete(chatId);
     } else {
@@ -2661,25 +2689,23 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Stops `personId`'s own chat's running turn, if there is one: the model
    * request or code run in flight ends, and the turn answers `cancelled`.
+   * Answered once its ChatSession has the stop, kept (`ChatSession.abort`):
+   * a stop that can't reach it fails, for its person to try again.
    */
-  cancel(chatId: unknown, personId: string): boolean {
+  async cancel(chatId: unknown, personId: string): Promise<boolean> {
     const { id } = this.#ownChat(chatId, personId);
     const turn = this.#turns.get(id);
     // Running as its ChatSession says, too: a turn this object's restart
     // left there.
     const running = this.#isRunning(id);
-    if (running) {
-      this.ctx.waitUntil(
-        chatSession(
-          this.env,
-          this.#scopeOf(this.#chat(id)).workspaceId,
-          id
-        ).abort(turn?.id)
-      );
-    }
     if (turn !== undefined) {
       // The build jobs it submitted are the turn's work: they end with it.
       this.#terminateJobs(this.#jobs.cancelRunning(id, turn.id));
+    }
+    if (running) {
+      await this.#toSession(id, async (session) => {
+        await session.abort(turn?.id);
+      });
     }
     return running;
   }
@@ -2753,11 +2779,12 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Ends the chat's running build job `id` as `end` says, once: `false`
-   * when it had ended already. Its turn's agent is told how it ended, if
-   * that turn still runs, in a notice it answers, even once it has
-   * answered (`ChatSession.notify`), never shown as the person's; no other
-   * turn ever is, and nothing of its result goes with it: the agent reads
-   * that with `env.build.job`.
+   * when it had ended already. While the chat runs, the turn that
+   * submitted it is told how it ended, in a notice it answers, even once
+   * it has answered, never shown as the person's: its ChatSession takes
+   * it only while that turn runs (`ChatSession.notify`), through a restart
+   * of either object too, so no other turn ever is. Nothing of its result
+   * goes with it: the agent reads that with `env.build.job`.
    */
   async endBuildJob(
     chatId: unknown,
@@ -2769,52 +2796,24 @@ export class Workspace extends DurableObject<Env> {
     if (job?.status !== "running") {
       return false;
     }
-    const turn = this.#turns.get(job.chatId);
     this.#jobs.end(job.chatId, id, end);
-    if (turn?.id === job.turnId) {
-      await this.#notify(
-        job.chatId,
-        turn.id,
-        id,
-        `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`
-      );
-    }
-    return true;
-  }
-
-  /**
-   * Tells turn `turnId` of the chat how build job `jobId` ended
-   * (`ChatSession.notify`): again if a call breaks, as the job's ID makes
-   * it one notice however often it is sent.
-   */
-  async #notify(
-    chatId: ChatId,
-    turnId: string,
-    jobId: string,
-    text: string
-  ): Promise<void> {
-    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-    for (let attempt = 1; ; attempt += 1) {
+    if (this.#isRunning(job.chatId) && !this.#deleting.has(job.chatId)) {
+      const text = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
       try {
-        // oxlint-disable-next-line no-await-in-loop -- again only once it broke
-        await chatSession(this.env, workspaceId, chatId).notify(
-          turnId,
-          jobId,
-          text
-        );
-        return;
+        // Once a job, however often it is sent.
+        await this.#toSession(job.chatId, async (session) => {
+          await session.notify(job.turnId, id, text);
+        });
       } catch (error) {
-        if (attempt >= turnAttempts) {
-          log.warn("build_job.notice_lost", {
-            chatId,
-            turnId,
-            jobId,
-            ...errorFields(error),
-          });
-          return;
-        }
+        log.warn("build_job.notice_lost", {
+          chatId: job.chatId,
+          turnId: job.turnId,
+          jobId: id,
+          ...errorFields(error),
+        });
       }
     }
+    return true;
   }
 
   /**
@@ -3221,7 +3220,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * The code runs of the chat whose results may not reach the model now
-   * (`withholdRuns` in agent.ts): its agent may no longer read, for its
+   * (`withheld` in chat-agent.ts): its agent may no longer read, for its
    * person, something one of them read (`readableSources`). A source
    * newly found unreadable is marked and audited once, in one
    * transaction, by the agent acting for the person, naming the run and
@@ -3737,8 +3736,11 @@ export class Workspace extends DurableObject<Env> {
       // What the Brain captured of its turns goes before it does: should
       // that fail, the chat stays (brain-capture.ts).
       await eraseCaptured(this.env, [id]);
-      // And what its agent kept, the transcript the model reads with it.
-      await chatSession(this.env, workspaceId, id).erase();
+      // And what its agent kept, the transcript the model reads with it:
+      // erased for good, so nothing told it meanwhile is kept.
+      await this.#toSession(id, async (session) => {
+        await session.erase();
+      });
       // Their rows go with it below.
       this.ctx.storage.transactionSync(() => {
         this.#jobs.deleteChat(id);
@@ -3779,6 +3781,7 @@ export class Workspace extends DurableObject<Env> {
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
@@ -3837,10 +3840,11 @@ export class Workspace extends DurableObject<Env> {
     if (ids.length > 0) {
       await eraseCaptured(this.env, ids);
     }
-    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
     for (const id of ids) {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      await chatSession(this.env, workspaceId, id).erase();
+      await this.#toSession(id, async (session) => {
+        await session.erase();
+      });
     }
     for (const id of ids) {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
@@ -3994,11 +3998,15 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Tells the chat's agent `text` (`ChatSession.note`), and moves the chat
    * up its person's list: often decided elsewhere, it is where the agent
-   * can now go on.
+   * can now go on. Refused while the chat is deleted or its person
+   * erased: what is told then would outlive the erasure. Its callers keep
+   * the decision all the same.
    */
   async #note(chatId: ChatId, text: string): Promise<void> {
-    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-    await chatSession(this.env, workspaceId, chatId).note(text);
+    if (this.#deleting.has(chatId) || this.#erasing) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    await this.#session(chatId).note(text);
     this.#db
       .update(chats)
       .set({ lastAt: new Date() })

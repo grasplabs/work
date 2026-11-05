@@ -1,4 +1,5 @@
 import type { Wake } from "@earendil-works/pi-durable";
+import { agentErrors } from "@grasp-os/shared/agent";
 import { DurableObject } from "cloudflare:workers";
 
 import type { ChatHarness, TurnEnd, TurnRequest } from "./chat-harness.ts";
@@ -15,16 +16,34 @@ import type { ChatHarness, TurnEnd, TurnRequest } from "./chat-harness.ts";
 /** How long a turn under way may go unwatched before its alarm checks on it. */
 const heartbeatMs = 60_000;
 
+/**
+ * Kept once the object is erased (`erase`), and nothing else: it never
+ * opens pi again, so nothing that reaches it later (a note on a decision,
+ * a stop) brings back what its chat or person's erasure took.
+ */
+const erasedKey = "erased";
+
 export class ChatSession extends DurableObject<Env> {
   #opened: Promise<ChatHarness> | undefined;
+
+  /** Set as `erase` begins: the object takes nothing from then on. */
+  #erasing = false;
+
+  /** Whether the object is erased, or being erased: its chat is gone. */
+  #erased(): boolean {
+    return this.#erasing || this.ctx.storage.kv.get(erasedKey) === true;
+  }
 
   /**
    * The chat's Harness, opened at the first call that needs it: pi loads
    * with it, as the chat's first turn, not as core starts. Opened, the
    * turn a restart cut short set up again and resumed, before the object
-   * serves any call.
+   * serves any call. Never once the object is erased: its chat is gone.
    */
   async #harness(): Promise<ChatHarness> {
+    if (this.#erased()) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
     this.#opened ??= this.ctx.blockConcurrencyWhile(async () => {
       // A fallback before anything can throw: an object whose open or
       // recovery fails is started again.
@@ -61,6 +80,10 @@ export class ChatSession extends DurableObject<Env> {
    * restart cut short goes on), and for the earliest sleep, such as a retry.
    */
   async #arm(wake: Wake): Promise<void> {
+    // A call that ends after an erase keeps nothing for the object.
+    if (this.#erased()) {
+      return;
+    }
     const heartbeat = wake.active ? Date.now() + heartbeatMs : undefined;
     const at =
       heartbeat === undefined || wake.at === undefined
@@ -113,20 +136,34 @@ export class ChatSession extends DurableObject<Env> {
     });
   }
 
-  /** Deletes everything the chat's agent kept: the chat is being deleted. */
+  /**
+   * Deletes everything the chat's agent kept: the chat is being deleted,
+   * or its person erased. Kept erased (`erasedKey`), so no call after
+   * opens pi again. Asking again erases again.
+   */
   async erase(): Promise<void> {
-    if (this.#opened !== undefined) {
-      const harness = await this.#harness();
-      await harness.abort();
-      await harness.close();
-      this.#opened = undefined;
+    this.#erasing = true;
+    const opened = this.#opened;
+    this.#opened = undefined;
+    if (opened !== undefined) {
+      try {
+        const harness = await opened;
+        await harness.abort();
+        await harness.close();
+      } catch {
+        // One that failed to open, or to stop, goes with the storage below.
+      }
     }
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    this.ctx.storage.kv.put(erasedKey, true);
   }
 
   /** Goes on with a turn a restart cut short, and with what sleeps till now. */
   override async alarm(): Promise<void> {
+    if (this.#erased()) {
+      return;
+    }
     await this.#work((harness) => {
       harness.resume();
     });

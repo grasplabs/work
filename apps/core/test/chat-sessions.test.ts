@@ -1,7 +1,9 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
@@ -9,6 +11,7 @@ import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
   model,
+  pausedReply,
   personalChatsOf,
   says,
   setObjectEnv,
@@ -44,16 +47,111 @@ const tablesOf = async (
 /** A model of a 32,768-token window, as pi's catalog has it. */
 const smallModel = "mistral/voxtral-small-latest";
 
+/**
+ * Tells the agent of `chatId` how a connection it asked for was decided,
+ * again and again, until `until` settles: decisions landing at every
+ * point of what `until` does. Each told or refused.
+ */
+const decidingWhile = async (
+  stub: ReturnType<typeof workspace>,
+  chatId: string,
+  personId: string,
+  until: Promise<unknown>
+): Promise<void> => {
+  const state = { done: false };
+  const ended = until.finally(() => {
+    state.done = true;
+  });
+  const decided: Promise<unknown>[] = [];
+  while (!state.done) {
+    decided.push(
+      stub
+        .connectionDecided(chatId, personId, {
+          binding: "MAIL",
+          decision: "granted",
+        })
+        .catch(() => "refused")
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one a millisecond
+    await scheduler.wait(1);
+  }
+  await Promise.all([ended, ...decided]);
+};
+
+/** A turn's answer, or the message of the error it was refused with. */
+const outcomeOf = async (turn: Promise<{ answer: string }>): Promise<string> =>
+  await turn.then(
+    ({ answer }) => answer,
+    (error: unknown) => z.object({ message: z.string() }).parse(error).message
+  );
+
 describe("a chat's ChatSession", () => {
-  it("keeps the chat's transcript on its own SQLite, in pi's tables alone", async () => {
+  it("takes one question at a time: another turn's is refused before it is taken, and the same turn's joins it", async () => {
     const { userId } = await signedInWithRole(idp, "user");
-    const { id, chat, ask } = await chatOf(userId, says("Hi."));
-    await ask("Hello?");
-    const tables = await tablesOf(id, chat.id);
+    const { id, chat } = await chatOf(userId);
+    const first = pausedReply(says("First."), 1);
+    const provider = await fakeProviderFor(
+      [model, smallModel],
+      first.reply,
+      says("First."),
+      says("The build ended.")
+    );
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const request = (turnId: string, text: string, asked = model) => ({
+      turnId,
+      scope: {
+        workspaceId: id,
+        agentId: chat.agentId,
+        chatId: chat.id,
+        personId: userId,
+        via: chat.via,
+      },
+      question: { text, model: asked, files: [] },
+      shared: false,
+      readsBrain: false,
+      context: { skills: [] },
+    });
+    const asked = outcomeOf(session().run(request("turn-a", "First?")));
+    // Another turn, on another model, as the first is taken.
+    const refused = await outcomeOf(
+      session().run(request("turn-b", "Second?", smallModel))
+    );
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    // The first turn asked again, as its Workspace does when a call breaks.
+    const joined = outcomeOf(session().run(request("turn-a", "First?")));
+    // A restart mid-answer: the turn is set up again as it was asked.
+    await runInDurableObject(session(), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The first call to reach it: how a build job of the first turn ended.
+    const notice = `Build job ${crypto.randomUUID()} ended.`;
+    await session().notify("turn-a", crypto.randomUUID(), notice);
+    first.release();
+    const again = await session().run(request("turn-a", "First?"));
     expect({
-      some: tables.length > 0,
-      all: tables.every((name) => name.startsWith("pi_")),
-    }).toStrictEqual({ some: true, all: true });
+      refused,
+      // Both calls of the first turn were the same turn's, cut short alike.
+      cutShort: (await asked) === (await joined),
+      again: again.answer,
+      sentTo: provider.requests.map(
+        ({ body }) => z.object({ model: z.string() }).parse(body).model
+      ),
+      noticed: JSON.stringify(provider.requests.at(-1)?.body).includes(notice),
+    }).toStrictEqual({
+      refused: agentErrors.create("agent.busy").message,
+      cutShort: true,
+      // The answer to the notice, the turn's last.
+      again: "The build ended.",
+      sentTo: Array.from({ length: 3 }, () => "claude-sonnet-4-5"),
+      noticed: true,
+    });
   });
 
   it("compacts a long chat on a small window and goes on, every request the summary's included a model call of the chat's", async () => {
@@ -213,16 +311,19 @@ describe("a chat's ChatSession", () => {
     }
   });
 
-  it("ends a turn pi parked on an earlier wake that the object didn't live to end", async () => {
+  it("ends a turn pi parked that nobody waits on any more, and tells its Workspace it stopped", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
     const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
     const { id, stub, provider, newChat } = await personalChatsOf(
       userId,
+      stuck,
       stuck
     );
     const { chat, ask } = await newChat();
     const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const woken = workspace(env, id);
+    let restore: (() => Promise<void>) | undefined;
     try {
       void ask("Hello?").catch(() => "settled");
       await vi.waitFor(
@@ -232,25 +333,20 @@ describe("a chat's ChatSession", () => {
         { timeout: 10_000 }
       );
       // The Workspace first, so nothing asks for the turn again, then the
-      // chat's object, mid-answer.
-      for (const object of [stub, session()]) {
-        // oxlint-disable-next-line no-await-in-loop -- one after the other
-        await runInDurableObject(object, (_instance, state) => {
-          state.abort("Restarted by the test");
-        }).catch(() => {
-          // Aborting fails the call that aborted: that is the restart.
-        });
-      }
-      // As pi leaves a task an earlier wake parked (`restartLimit`, 5) when
-      // the object reset before it could end the turn: pending, cut off
-      // as often as pi lets it be, with no report left to come.
+      // chat's object, mid-answer: only its alarm wakes it.
+      await runInDurableObject(stub, (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+      // pi parks a task a restart cut off this many times without progress.
+      restore = await setObjectEnv(woken, { CHAT_RESTART_LIMIT: "1" });
       await runInDurableObject(session(), (_instance, state) => {
-        state.storage.sql.exec(
-          "UPDATE pi_tasks SET status = 'pending', record = json_set(record, '$.state.status', 'pending', '$.restarts', 5) WHERE json_extract(record, '$.kind') = 'pi.generation'"
-        );
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
       });
       await runDurableObjectAlarm(session());
-      const woken = workspace(env, id);
       await vi.waitFor(
         async () => {
           await expect(
@@ -273,27 +369,42 @@ describe("a chat's ChatSession", () => {
       await expect(tablesOf(id, chat.id)).resolves.toStrictEqual([]);
     } finally {
       never.resolve(true);
+      await restore?.();
     }
   });
 
-  it("is erased with its chat", async () => {
+  it("is erased with its chat, a decision told meanwhile included, and takes nothing after", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const { id, stub, chat, ask } = await chatOf(userId, says("Hi."));
     await ask("Hello?");
+    const before = await tablesOf(id, chat.id);
     const person = await personOf(env, {
       userId,
       role: "user",
       staff: false,
       email: String(signedIn.email),
     });
-    await stub.deleteChat(chat.id, userId, person, {
-      type: "person",
+    await decidingWhile(
+      stub,
+      chat.id,
       userId,
-    });
-    await expect(tablesOf(id, chat.id)).resolves.toStrictEqual([]);
+      stub.deleteChat(chat.id, userId, person, { type: "person", userId })
+    );
+    // Whatever still reaches the chat's object once it is erased.
+    const late = await chatSession(env, id, chatIdSchema.parse(chat.id))
+      .note("The connection you asked for was granted.")
+      .then(
+        () => "taken",
+        () => "refused"
+      );
+    expect({
+      before: before.length > 0,
+      late,
+      after: await tablesOf(id, chat.id),
+    }).toStrictEqual({ before: true, late: "refused", after: [] });
   });
 
-  it("is erased with its person, every chat's", async () => {
+  it("is erased with its person, every chat's, a decision told meanwhile included", async () => {
     const { userId, api } = await signedInApi(idp, "user");
     const id = personalWorkspaceId(userId);
     const stub = workspace(env, id);
@@ -312,7 +423,13 @@ describe("a chat's ChatSession", () => {
         return tables.length > 0;
       })
     );
-    await stub.erasePerson(userId);
+    const [first] = chats;
+    await decidingWhile(
+      stub,
+      first?.id ?? "",
+      userId,
+      stub.erasePerson(userId)
+    );
     const after = await Promise.all(
       chats.map(async (chat) => await tablesOf(id, chat.id))
     );

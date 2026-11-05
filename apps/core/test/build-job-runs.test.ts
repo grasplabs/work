@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { BuildJobRecords, jobRecordsKept } from "../src/build-job-records.ts";
 import { personOf } from "../src/connections.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
   codeStep,
@@ -103,7 +103,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
 
     // The turn is still answering: once its answer is in, it reads how
     // the job ended, and answers that too, in the same turn.
-    await noticed(chat, job.id);
+    await noticed(job.id);
     waiting.release();
     const answer = await answering;
     const followed = await vi.waitFor(
@@ -156,6 +156,76 @@ describe("build jobs", { timeout: 180_000 }, () => {
       last: "assistant",
       app: { pending: 1, current: null },
       versions: [{ version: 1, chat: chat.chat.id, job: job.id }],
+    });
+  });
+
+  it("tells the turn that submitted a job how it ended through a restart of both its chat's objects, the notice the first call to wake the turn", async () => {
+    const cut = pausedReply(says("I'll say once the build is done."), 3);
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      cut.reply,
+      says("I'll say once the build is done."),
+      says("The invoice desk is proposed for review."),
+    ]);
+
+    const checking = holdFiles(screenBuilds());
+    let job: z.infer<typeof jobRowSchema>;
+    void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
+    try {
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+      await vi.waitFor(
+        () => {
+          expect(chat.provider.requests).toHaveLength(2);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+      // The Workspace first, so nothing asks for the turn again, then the
+      // chat's own object, mid-answer: nothing wakes it but the job.
+      for (const object of [
+        chat.stub,
+        chatSession(env, chat.id, chatIdSchema.parse(chat.chat.id)),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await runInDurableObject(object, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+    } finally {
+      checking.restore();
+      cut.release();
+    }
+    await noticed(job.id);
+    const woken = workspace(env, chat.id);
+    const notice = `Build job ${job.id} (`;
+    await vi.waitFor(
+      async () => {
+        await expect(
+          woken.chatSummary(chat.chat.id, chat.personId)
+        ).resolves.toMatchObject({ running: false });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    const messages = await transcript(woken, chat.chat.id);
+    expect({
+      // The model was sent the notice once the turn went on.
+      sent: JSON.stringify(chat.provider.requests.at(-1)?.body).includes(
+        notice
+      ),
+      // And answered it, in the same turn; the chat doesn't show it.
+      last: messages.at(-1),
+      stored: await jobEvents(woken, chat.chat.id, job.id),
+    }).toMatchObject({
+      sent: true,
+      last: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "The invoice desk is proposed for review." },
+        ],
+      },
+      stored: [],
     });
   });
 
@@ -251,7 +321,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       checking.restore();
     }
     await endedJob(chat.stub, chat.chat.id, job.id);
-    await noticed(chat, job.id);
+    await noticed(job.id);
     waiting.release();
     // Its answer to the notice runs code, stopped in the middle.
     await vi.waitFor(
