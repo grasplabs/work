@@ -134,6 +134,9 @@ const gateway = "grasp";
  */
 const noticeRequestPrefix = (turnId: string): string => `notice:${turnId}:`;
 
+/** How soon the object wakes to sync again after a sync failed. */
+const syncRetryMs = 15_000;
+
 /** The turn under way, or the last, as its Workspace asked it. */
 const TurnDoc = defineDoc<{ request: string }>({
   kind: "grasp.turn",
@@ -260,6 +263,14 @@ const liveSchema = z.object({
     .optional(),
 });
 
+/**
+ * The entry that ends a turn stopped before the model said anything: no
+ * message for the model, only the chat's own end (`cancelledMessage`).
+ * Written once a turn, under a request ID of its own, so a turn asked
+ * again keeps one, and copied as every other entry is.
+ */
+const stoppedKind = "grasp.stopped";
+
 /** How the chat ends a turn stopped before the model said anything: core's own. */
 const cancelledMessage = (): AssistantMessage => ({
   role: "assistant",
@@ -304,14 +315,18 @@ const withPlainDiagnostics = (
 
 /**
  * The messages a committed entry shows the person: a question, then its
- * recall's step if it recalled; a response or a tool's result; or none.
+ * recall's step if it recalled; a response or a tool's result; a stopped
+ * turn's end; or none.
  */
 const shownOf = (entry: EntryRecord): TurnMessage[] => {
+  const entryId = entry.id;
+  if (entry.kind === stoppedKind) {
+    return [{ entryId, message: cancelledMessage() }];
+  }
   const [message] = entry.model ?? [];
   if (message === undefined) {
     return [];
   }
-  const entryId = entry.id;
   if (entry.kind === questionKind && message.role === "user") {
     const data = questionDataSchema.safeParse(entry.data);
     const recall = data.success ? data.data.recall : undefined;
@@ -437,6 +452,13 @@ export class ChatHarness {
   #syncing: Promise<void> | undefined;
   /** Whether something changed since the sync under way began. */
   #stale = false;
+  /**
+   * Whether the last sync failed: the Workspace may still show the chat
+   * busy, so the object's alarm wakes it to sync again (`wake`).
+   */
+  #behind = false;
+  /** Arms the object's alarm for what `wake` says. */
+  readonly #onWake: (wake: Wake) => void;
 
   constructor(
     ctx: DurableObjectState,
@@ -445,7 +467,8 @@ export class ChatHarness {
     harness: Harness,
     conversation: Conversation,
     registry: Registry,
-    pi: MutableModels
+    pi: MutableModels,
+    onWake: (wake: Wake) => void
   ) {
     this.#ctx = ctx;
     this.#env = env;
@@ -454,6 +477,7 @@ export class ChatHarness {
     this.#conversation = conversation;
     this.#registry = registry;
     this.#models = pi;
+    this.#onWake = onWake;
   }
 
   /**
@@ -511,7 +535,8 @@ export class ChatHarness {
       harness,
       conversation,
       registry,
-      pi
+      pi,
+      onWake
     );
     // The one watch of pi: called at once with the view as it is, then at
     // each commit. Whatever the Workspace was last told, and whatever a
@@ -534,7 +559,13 @@ export class ChatHarness {
     const partial = live.success
       ? (live.data.generation?.message ?? null)
       : null;
-    this.#running = live.success && live.data.run !== undefined;
+    const running = live.success && live.data.run !== undefined;
+    // A turn a restart left, with no `run` waiting on it, takes no notice
+    // once its runs end; a `run` that waits stops taking them itself.
+    if (this.#running && !running && this.#taking === undefined) {
+      this.#noticesFor = undefined;
+    }
+    this.#running = running;
     this.#partial = partial;
     if (partial !== null) {
       this.#streamedAfter ??= value.entries.at(-1)?.id ?? null;
@@ -556,9 +587,18 @@ export class ChatHarness {
     this.#syncSoon();
   }
 
-  /** When the Harness next needs the object (`Harness.wake`). */
+  /**
+   * When the object next needs to wake: when the Harness does
+   * (`Harness.wake`), and, while the Workspace is behind (`#behind`), soon
+   * enough to sync again, so a chat never stays shown busy.
+   */
   wake(): Wake {
-    return this.#harness.wake();
+    const wake = this.#harness.wake();
+    if (!this.#behind) {
+      return wake;
+    }
+    const retry = Date.now() + syncRetryMs;
+    return { ...wake, at: Math.min(wake.at ?? retry, retry) };
   }
 
   /**
@@ -574,6 +614,10 @@ export class ChatHarness {
         throw agentErrors.create("agent.busy");
       }
       return await taking.end;
+    }
+    // A turn a restart left takes no notice once another is asked.
+    if (this.#noticesFor !== request.turnId) {
+      this.#noticesFor = undefined;
     }
     const end = this.#take(request);
     this.#taking = { turnId: request.turnId, end };
@@ -615,14 +659,18 @@ export class ChatHarness {
       await this.#rebaseIfNeeded(request);
     }
     // A turn stopped before the model said anything ends in the chat as
-    // cancelled all the same: pi keeps no response of it.
+    // cancelled all the same: pi keeps no response of it, so the object
+    // writes its end (`stoppedKind`), once however often it is asked.
     if (end.outcome === "cancelled" && newest?.kind !== "pi.assistant") {
-      await this.#synced();
-      await callObject(async () => {
-        await this.#host(request.scope).keepTurnMessages(request.scope.chatId, [
-          { message: cancelledMessage() },
-        ]);
-      });
+      const written = await this.#conversation.submit(
+        {
+          type: "write",
+          requestId: `stopped:${request.turnId}`,
+          entry: { kind: stoppedKind },
+        },
+        context
+      );
+      await written.wait(context);
     }
     // Everything copied, and told it ended, before the turn returns.
     await this.#synced();
@@ -703,6 +751,9 @@ export class ChatHarness {
     }, context);
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
+    // At least once: should the object reset before the submit below, the
+    // turn asked again sets up and recalls again, a second recall run
+    // audited as the first was.
     const recall = request.readsBrain
       ? await recallFor(turn, request.question.text)
       : undefined;
@@ -810,6 +861,10 @@ export class ChatHarness {
   /** Goes on with what pi left pending, and with what sleeps till now. */
   resume(): void {
     this.#harness.resume();
+    // An alarm armed for a sync that failed (`wake`) tries it again.
+    if (this.#behind) {
+      this.#syncSoon();
+    }
   }
 
   /**
@@ -1111,11 +1166,15 @@ export class ChatHarness {
       (async () => {
         try {
           await syncing;
+          this.#behind = false;
         } catch (error) {
           log.warn("chat.sync_failed", {
             chatSession: this.#ctx.id.name,
             ...errorFields(error),
           });
+          // Woken soon to sync again, even with nothing else to do.
+          this.#behind = true;
+          this.#onWake(this.wake());
         }
       })()
     );

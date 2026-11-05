@@ -85,10 +85,55 @@ const outcomeOf = async (turn: Promise<{ answer: string }>): Promise<string> =>
     (error: unknown) => z.object({ message: z.string() }).parse(error).message
   );
 
+/**
+ * `chat`'s own object, and turn `turnId`'s request as its Workspace hands
+ * it over (`ChatSession.run`).
+ */
+const sessionOf = (
+  { id, chat }: Awaited<ReturnType<typeof chatOf>>,
+  personId: string
+) => ({
+  session: () => chatSession(env, id, chatIdSchema.parse(chat.id)),
+  request: (turnId: string, text: string, asked = model) => ({
+    turnId,
+    scope: {
+      workspaceId: id,
+      agentId: chat.agentId,
+      chatId: chat.id,
+      personId,
+      via: chat.via,
+    },
+    question: { text, model: asked, files: [] },
+    shared: false,
+    readsBrain: false,
+    context: { skills: [] },
+  }),
+});
+
+/** The chat's messages as its Workspace keeps them: each role, and how it stopped. */
+const keptOf = async (
+  stub: ReturnType<typeof workspace>,
+  chatId: string
+): Promise<string[]> =>
+  await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ message: string }>(
+        "SELECT message FROM chat_messages WHERE chat_id = ? ORDER BY id",
+        chatId
+      )
+      .toArray()
+      .map(({ message }) => {
+        const { role, stopReason } = z
+          .object({ role: z.string(), stopReason: z.string().optional() })
+          .parse(JSON.parse(message));
+        return stopReason === undefined ? role : `${role}:${stopReason}`;
+      })
+  );
+
 describe("a chat's ChatSession", () => {
   it("takes one question at a time: another turn's is refused before it is taken, and the same turn's joins it", async () => {
     const { userId } = await signedInWithRole(idp, "user");
-    const { id, chat } = await chatOf(userId);
+    const asking = await chatOf(userId);
     const first = pausedReply(says("First."), 1);
     const provider = await fakeProviderFor(
       [model, smallModel],
@@ -96,21 +141,7 @@ describe("a chat's ChatSession", () => {
       says("First."),
       says("The build ended.")
     );
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
-    const request = (turnId: string, text: string, asked = model) => ({
-      turnId,
-      scope: {
-        workspaceId: id,
-        agentId: chat.agentId,
-        chatId: chat.id,
-        personId: userId,
-        via: chat.via,
-      },
-      question: { text, model: asked, files: [] },
-      shared: false,
-      readsBrain: false,
-      context: { skills: [] },
-    });
+    const { session, request } = sessionOf(asking, userId);
     const asked = outcomeOf(session().run(request("turn-a", "First?")));
     // Another turn, on another model, as the first is taken.
     const refused = await outcomeOf(
@@ -152,6 +183,90 @@ describe("a chat's ChatSession", () => {
       sentTo: Array.from({ length: 3 }, () => "claude-sonnet-4-5"),
       noticed: true,
     });
+  });
+
+  it("takes no notice for a turn a restart cut short once it ended on its own, and the next question goes through", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const first = pausedReply(says("First."), 1);
+    const provider = await fakeProviderFor(
+      [model],
+      first.reply,
+      says("First."),
+      says("Second."),
+      says("Never asked.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    void outcomeOf(session().run(request("turn-a", "First?")));
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    // A restart mid-answer, nobody asking for the turn again: its alarm
+    // resumes it, and it ends on its own.
+    await runInDurableObject(session(), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    await runDurableObjectAlarm(session());
+    first.release();
+    await vi.waitFor(
+      async () => {
+        await expect(
+          asking.stub.chatSummary(asking.chat.id, userId)
+        ).resolves.toMatchObject({ running: false });
+        expect(provider.requests).toHaveLength(2);
+      },
+      { timeout: 15_000 }
+    );
+    // The next question, as a build job the first turn submitted ends.
+    const notice = `Build job ${crypto.randomUUID()} ended.`;
+    const asked = outcomeOf(session().run(request("turn-b", "Second?")));
+    await session().notify("turn-a", crypto.randomUUID(), notice);
+    expect({
+      answer: await asked,
+      noticed: provider.requests.some(({ body }) =>
+        JSON.stringify(body).includes(notice)
+      ),
+    }).toStrictEqual({ answer: "Second.", noticed: false });
+  });
+
+  it("keeps a stopped turn's end once, however often the turn is asked again", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const never = Promise.withResolvers<boolean>();
+    const provider = await fakeProviderFor([model], {
+      ...says("Never."),
+      pause: { at: 0, until: never.promise },
+    });
+    const { session, request } = sessionOf(asking, userId);
+    try {
+      const asked = session().run(request("turn-a", "First?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      await session().abort("turn-a");
+      const first = await asked;
+      // The same turn again, as its Workspace asks when the way back broke.
+      const again = await session().run(request("turn-a", "First?"));
+      expect({
+        first: first.outcome,
+        again: again.outcome,
+        kept: await keptOf(asking.stub, asking.chat.id),
+      }).toStrictEqual({
+        first: "cancelled",
+        again: "cancelled",
+        kept: ["user", "assistant:aborted"],
+      });
+    } finally {
+      never.resolve(true);
+    }
   });
 
   it("compacts a long chat on a small window and goes on, every request the summary's included a model call of the chat's", async () => {
