@@ -588,7 +588,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       diagnostics: [
         {
           file: "app.ts",
-          line: 3,
+          line: 5,
           rule: "server",
           severity: "error",
           says: true,

@@ -78,7 +78,6 @@ export const move = mutation({
 /** The board's registration, as the SDK's `app` takes it. */
 const registration = `import { app } from "@grasp-os/sdk";
 
-import { create, list, move } from "./server/cards.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -293,8 +292,8 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       // Where its registration threw, the call of app(), and the type
       // error that says why, together.
       diagnostics: [
-        { file: "app.ts", line: 6, refused: true },
-        { file: "app.ts", line: 9, refused: false },
+        { file: "app.ts", line: 5, refused: true },
+        { file: "app.ts", line: 8, refused: false },
       ],
       called: { ok: false, code: "version.inspection_failed", refused: true },
     });
