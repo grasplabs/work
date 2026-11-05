@@ -331,6 +331,61 @@ describe("serving an App's built packages", () => {
     expect([borrowed.status, moved.status]).toStrictEqual([403, 403]);
   });
 
+  it("refuses another artifact's token of the same App", async () => {
+    const served = await servedBuild();
+    const admin = await personApi("admin");
+    await admin.api.dependencies.grantApprover({
+      type: "person",
+      userId: admin.userId,
+    });
+    const name = named("other");
+    await publish({
+      name,
+      version: "1.0.0",
+      manifest: { type: "module", main: "index.js", license: "MIT" },
+      files: { "index.js": "export const other = 1;" },
+    });
+    const { request } = await served.builder.api.dependencies.resolve(
+      intentFor(served.app, { [name]: "1.0.0" })
+    );
+    const { policyGeneration } = await admin.api.dependencies.waiting();
+    await admin.api.dependencies.decide(request.id, {
+      approved: true,
+      reviewed: { graphHash: request.graphHash, policyGeneration },
+    });
+    const other = await buildOf({ ...served, graphHash: request.graphHash });
+    if (other.address === null) {
+      throw new Error("A browser build has an address");
+    }
+    expect({
+      own: await statusOf(fileAt(other.address, `${name}.js`)),
+      // Approved, pinned and of the same App: only the token refuses it.
+      borrowed: await statusOf(
+        fileAt(other.address, `${name}.js`, served.address.query)
+      ),
+    }).toStrictEqual({ own: 200, borrowed: 403 });
+  });
+
+  it("refuses another App's token for the very artifact this App pins", async () => {
+    // Two Apps approved for the same package build the same graph and the
+    // same artifact: admission and the pin pass for either, so only the
+    // App the token names can refuse the other's.
+    const name = await hostilePackage();
+    const one = await approvedApp({ [name]: "1.0.0" });
+    const two = await approvedApp({ [name]: "1.0.0" });
+    const [oneBuilt, twoBuilt] = [await buildOf(one), await buildOf(two)];
+    if (oneBuilt.address === null || twoBuilt.address === null) {
+      throw new Error("A browser build has an address");
+    }
+    expect({
+      same: one.graphHash === two.graphHash && oneBuilt.hash === twoBuilt.hash,
+      own: await statusOf(fileAt(twoBuilt.address, `${name}.js`)),
+      borrowed: await statusOf(
+        fileAt(twoBuilt.address, `${name}.js`, oneBuilt.address.query)
+      ),
+    }).toStrictEqual({ same: true, own: 200, borrowed: 403 });
+  });
+
   it("holds a token at most six hours", async () => {
     const { app, graphHash, built, name } = await servedBuild();
     const ref = { app, graphHash, hash: built.hash };

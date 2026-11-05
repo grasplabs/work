@@ -707,14 +707,38 @@ const textOf = (
 };
 
 /**
- * A URL of the artifact's own, as esbuild writes one it bundled: a path
- * relative to the stylesheet, with no scheme, no leading `/`, and nothing
- * that would need escaping in CSS or a query.
+ * A URL as esbuild writes one it bundled: a path relative to the
+ * stylesheet, with no scheme, no leading `/`, and nothing that would need
+ * escaping in CSS or a query.
  */
-const ownFile = /^(?![a-z][\w+.-]*:)(?!\/)[\w./-]+$/iu;
+const relativePath = /^(?![a-z][\w+.-]*:)(?!\/)[\w./-]+$/iu;
 
 /**
- * `css` with each URL of the artifact's own that it fetches from a
+ * Where an artifact's files are, for resolving one's URL against another:
+ * a directory below the root, so a `../` that climbs out lands outside it.
+ */
+const artifactRoot = new URL("https://artifact.invalid/artifact/");
+
+/**
+ * Whether `url`, in the stylesheet at `file` (its path in the artifact),
+ * names a file of the artifact: relative, and resolved, still inside the
+ * artifact's directory. A `../` that climbs out of it (to another
+ * artifact, or another of core's routes) isn't the artifact's own.
+ */
+const ownFile = (url: string, file: string): boolean => {
+  if (!relativePath.test(url)) {
+    return false;
+  }
+  const resolved = new URL(url, new URL(file, artifactRoot));
+  return (
+    resolved.origin === artifactRoot.origin &&
+    resolved.pathname.startsWith(artifactRoot.pathname)
+  );
+};
+
+/**
+ * `css`, the stylesheet at `file` in its artifact, with each URL of the
+ * artifact's own (`ownFile`) that it fetches from a
  * position esbuild bundles (`url()`, an `@import`) carrying `query`, as
  * core serves it (core's packages/serve.ts): relative to the stylesheet,
  * a URL keeps its path but drops the stylesheet's query, and the token in
@@ -723,7 +747,11 @@ const ownFile = /^(?![a-z][\w+.-]*:)(?!\/)[\w./-]+$/iu;
  * none is its text exactly; one that does is otherwise as CSS reads it
  * (§3.3: newlines and NULs normalized).
  */
-export const cssWithQuery = (css: string, query: string): string => {
+export const cssWithQuery = (
+  css: string,
+  query: string,
+  file: string
+): string => {
   const codes = preprocess(css);
   const reading: Reading = { found: [], open: [], prelude: undefined };
   const tokenizer = new Tokenizer(css);
@@ -743,7 +771,7 @@ export const cssWithQuery = (css: string, query: string): string => {
       fetched?.bundled === true &&
       !fetched.computed &&
       (token.type === "url" || token.type === "string") &&
-      ownFile.test(fetched.url)
+      ownFile(fetched.url, file)
     ) {
       const addressed = `${fetched.url}${query}`;
       text += textOf(codes, at, start);

@@ -816,7 +816,7 @@ export const screenModuleResponse = async (
     // Under the modules' path but no module's address (one with a token
     // in its path, say): nothing, rather than the frontend's page.
     return url.pathname.startsWith(`${screenModulePath}/`)
-      ? refused(404)
+      ? refused(404, [], "no-store")
       : null;
   }
   const token = url.searchParams.get(accessTokenParameter);
@@ -826,7 +826,8 @@ export const screenModuleResponse = async (
   const key = moduleKey(scope, hash);
   const module = await env.FILES.get(key);
   if (module === null) {
-    return refused(404);
+    // Its address may carry a token: no cache keeps the miss.
+    return refused(404, [], "no-store");
   }
   if (module.size > frameObjectMaxBytes) {
     // Larger than core stages: not read.
@@ -1426,6 +1427,11 @@ export const screenFrameResponse = async (
       // Its address carries its token, and so does every module's it
       // loads: neither leaves as a Referer.
       "referrer-policy": "no-referrer",
+      // Never kept, not even to revalidate: its import map carries module
+      // tokens minted for this open, and each open checks the build and
+      // its bytes again (`servedIntegrity`). A frame is framed once, with
+      // a token that holds minutes, so nothing would be saved by keeping it.
+      "cache-control": "no-store",
       // No name a screen writes is looked up ahead of time: a lookup is a
       // packet to whoever answers for that name.
       "x-dns-prefetch-control": "off",

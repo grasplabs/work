@@ -208,9 +208,13 @@ const stylesheetDecoder = new TextDecoder("utf-8", {
  * A stylesheet's `bytes` as served under `query` (`cssWithQuery`): the
  * bytes as built when it fetches nothing of the artifact's own.
  */
-const stylesheet = (bytes: Uint8Array, query: string): Uint8Array | string => {
+const stylesheet = (
+  bytes: Uint8Array,
+  query: string,
+  file: string
+): Uint8Array | string => {
   const text = stylesheetDecoder.decode(bytes);
-  const served = cssWithQuery(text, query);
+  const served = cssWithQuery(text, query, file);
   return served === text ? bytes : served;
 };
 
@@ -247,7 +251,8 @@ const keptResponse = async (
     await forgetArtifact(env, hash);
     return refused(404);
   }
-  const served = entry.type === "text/css" ? stylesheet(bytes, query) : bytes;
+  const served =
+    entry.type === "text/css" ? stylesheet(bytes, query, file) : bytes;
   return new Response(served, {
     headers: {
       "content-type": type,

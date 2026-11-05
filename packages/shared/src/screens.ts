@@ -9,10 +9,12 @@ import type {
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { packageArtifactPath } from "./packages.ts";
 import {
   screenFrameMounted,
   screenFrameReady,
   screenLimits,
+  screenModulePath,
 } from "./screen-limits.ts";
 import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 
@@ -269,19 +271,43 @@ export interface ScreenBundle {
 const reportLimits = screenLimits.report;
 
 /**
+ * The query of every address on a path whose files are asked for with a
+ * token in it (a screen module's, a package artifact's file's), up to
+ * where a stack frame's line and column, a space or a bracket begins.
+ */
+const tokenedQuery = new RegExp(
+  `((?:${screenModulePath}|${packageArtifactPath})/[^\\s?#()"'\`]*)\\?[^\\s#:()"'\`]*`,
+  "gu"
+);
+
+/**
+ * `text` with the query of each address `tokenedQuery` finds left out.
+ * Engines write a module's whole address, token and all, in every stack
+ * frame and in a failed import's message; what a screen reports goes to
+ * the App's error log, a preview's reports, the agent's check and its
+ * model, none of which may keep a token. Done where core reads a report,
+ * since the frame's own code is the App's.
+ */
+const withoutTokens = (text: string): string =>
+  text.replaceAll(tokenedQuery, "$1");
+
+/**
  * A problem in a screen, as the frame reports it: an uncaught error, an
  * unhandled rejection or a `console.error` call of the App's own code; or
  * a `warning`, a `console.error` call of the kit's (React's development
  * warnings in a preview), which shows but fails nothing. Written by App
  * code, so it is held to size and never counts as more than text; which
- * kind it is, the frame says, so it is never more than a diagnostic.
+ * kind it is, the frame says, so it is never more than a diagnostic. No
+ * address in it keeps its token (`withoutTokens`).
  */
 export const screenProblemSchema = z.strictObject({
   kind: z.enum(["error", "rejection", "console", "warning"]),
-  message: z.string().transform((text) => text.slice(0, reportLimits.message)),
+  message: z
+    .string()
+    .transform((text) => withoutTokens(text).slice(0, reportLimits.message)),
   stack: z
     .string()
-    .transform((text) => text.slice(0, reportLimits.stack))
+    .transform((text) => withoutTokens(text).slice(0, reportLimits.stack))
     .optional(),
 });
 export type ScreenProblem = z.output<typeof screenProblemSchema>;
