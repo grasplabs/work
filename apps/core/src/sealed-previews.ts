@@ -583,9 +583,15 @@ const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
     ),
   });
 
-/** Whether `running` runs the server code of `draft`. */
+/**
+ * Whether `running` runs the server code of `draft`. Its revision alone
+ * doesn't say: a draft that changes nothing previews the App's latest
+ * version, which a commit elsewhere moves on at the same revision.
+ */
 const runsServerOf = (running: Running, draft: Draft): boolean =>
-  running.revision === draft.revision || running.server === serverOf(draft);
+  (running.revision === draft.revision &&
+    running.version === sealedAs(draft)) ||
+  running.server === serverOf(draft);
 
 /**
  * The `@server/_generated/api` references the screens of `files`, an App as `version` of
@@ -1581,6 +1587,10 @@ export class SealedPreviews {
     running: Running,
     release: Release
   ): Promise<OpenStore> {
+    // Never one a drop is discarding: a preview that swaps between two
+    // builds at one revision (two frames on two versions of the App, both
+    // at core's revision for a version) would find the store the swap
+    // discards, and its call would fail as discarded.
     const kept = this.#db
       .select({ storeId: previewStores.storeId })
       .from(previewStores)
@@ -1591,7 +1601,8 @@ export class SealedPreviews {
           eq(previewStores.revision, running.revision)
         )
       )
-      .get();
+      .all()
+      .find(({ storeId }) => !this.#discarding.has(storeId));
     // Recorded with nothing awaited since the check that the preview still
     // runs, so a drop after this finds it, and discards it.
     if (this.#running.get(nameOf(chatId, app)) !== running) {

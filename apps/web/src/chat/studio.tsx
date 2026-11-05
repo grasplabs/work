@@ -7,7 +7,10 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { PreviewFrame } from "../screens/screen-frame.tsx";
+import type { ScreenEnded } from "../screens/screen-frame.tsx";
+import { useVersionPushes } from "../screens/use-version-pushes.ts";
 import { changedScreens, previewedScreen } from "./builds-state.ts";
+import { changesApp } from "./builds.tsx";
 import type { NamedDraft } from "./builds.tsx";
 import { DraftVersionBar, shownVersion } from "./draft-versions.tsx";
 import type { ShownVersion } from "./draft-versions.tsx";
@@ -23,29 +26,58 @@ import type { ShownVersion } from "./draft-versions.tsx";
 // a preview: it changes nothing and reads no real data.
 
 /**
- * The preview of a draft: its first screen, or one it changes the person
- * picks; of the draft's earlier `version` when they opened one, read-only,
- * at that version's first screen (the screens to pick are the latest's).
- * Each of the draft's writes comes into the frame it has open, keeping
- * what the screen holds, and starts afresh one that failed to start
- * (screen-frame.tsx); another screen or version starts it afresh, as its
- * key says.
+ * The preview of App `app` as the chat's `draft` has it: its first screen,
+ * or one it changes the person picks; of the draft's earlier `version`
+ * when they opened one, read-only, at that version's first screen (the
+ * screens to pick are the latest's). With no draft, or one that changes
+ * nothing, core previews the App's latest version, so the App always
+ * shows. Each of the draft's writes comes into the frame it has open,
+ * keeping what the screen holds, and starts afresh one that failed to
+ * start (screen-frame.tsx); another screen or version starts it afresh,
+ * as its key says.
  */
 export const DraftPreview = ({
   chatId,
+  app,
   draft,
   name,
   version,
+  onEnded,
+  onShows,
 }: {
   chatId: string;
-  draft: ChatDraft;
+  app: string;
+  /** The chat's draft of the App; none before its first write. */
+  draft: ChatDraft | undefined;
   name: string;
   version: number | undefined;
+  /** Told once the frame failed (`PreviewFrame`). */
+  onEnded?: ScreenEnded;
+  /** Told the App's version the frame shows (`PreviewFrame`). */
+  onShows?: (appVersion: number | undefined, screen: string) => void;
 }) => {
   const [picked, setPicked] = useState<string>();
   const { t } = useLingui();
-  const screens = changedScreens(draft);
+  const screens = draft === undefined ? [] : changedScreens(draft);
   const screen = previewedScreen(screens, picked, version);
+  // The page the open frame was opened for, and the one core said it
+  // shows: a frame opened for none shows the App's first, and one opened
+  // for a page that didn't build shows another in its place. Naming the
+  // page it shows (a write to it, or the person picking it) keeps the
+  // frame, which is asked for that page from then on (`askedFor`, the one
+  // page its updates ask for): what the page holds stays. Another page or
+  // version opens the frame afresh, as its key says.
+  const [framed, setFramed] = useState({ app, screen, version });
+  const [showing, setShowing] = useState<string>();
+  const keeps =
+    framed.app === app &&
+    framed.version === version &&
+    (framed.screen === screen || (screen !== undefined && screen === showing));
+  if (!keeps) {
+    setFramed({ app, screen, version });
+    setShowing(undefined);
+  }
+  const open = keeps ? framed : { app, screen, version };
   return (
     <section
       aria-label={t`Preview of ${name}`}
@@ -69,12 +101,18 @@ export const DraftPreview = ({
         </div>
       ) : null}
       <PreviewFrame
-        app={draft.app}
+        app={app}
         chatId={chatId}
-        key={`${draft.app}:${screen ?? ""}:${version ?? ""}`}
-        revision={draft.revision}
-        {...(screen === undefined ? {} : { screen })}
+        key={`${open.app}:${open.screen ?? ""}:${open.version ?? ""}`}
+        onShows={(appVersion, shown) => {
+          setShowing(shown);
+          onShows?.(appVersion, shown);
+        }}
+        {...(draft === undefined ? {} : { revision: draft.revision })}
+        {...(open.screen === undefined ? {} : { screen: open.screen })}
+        {...(screen === undefined ? {} : { askedFor: screen })}
         {...(version === undefined ? {} : { version })}
+        {...(onEnded === undefined ? {} : { onEnded })}
       />
     </section>
   );
@@ -108,12 +146,14 @@ const StudioBar = ({
       <h2 className="truncate font-medium" id={headingId}>
         {name}
       </h2>
-      <DraftVersionBar
-        chatId={chatId}
-        draft={draft}
-        onShow={onVersion}
-        shown={version}
-      />
+      {changesApp(draft) ? (
+        <DraftVersionBar
+          chatId={chatId}
+          draft={draft}
+          onShow={onVersion}
+          shown={version}
+        />
+      ) : null}
     </div>
     <Link
       className={buttonVariants({ variant: "outline" })}
@@ -218,8 +258,20 @@ export const ChatStudio = ({
   const [picked, setPicked] = useState<string>();
   const [opened, setOpened] = useState<ShownVersion>();
   const [view, setView] = useState<View>("app");
+  // The drafts, by App, revision and the App's version pushes since,
+  // whose preview had no App to show: changing nothing of an App with no
+  // version (core's `app.not_running`). A write, or a version from
+  // anywhere, shows it again.
+  const [unbuilt, setUnbuilt] = useState<ReadonlySet<string>>(new Set());
+  const pushes = useVersionPushes(drafts.map(({ draft }) => draft.app));
+  const unbuiltKey = ({ app, revision }: ChatDraft): string =>
+    `${app}:${revision}:${pushes[app] ?? 0}`;
   const headingId = useId();
-  const shown = drafts.find(({ draft }) => draft.app === picked) ?? drafts[0];
+  const shownDrafts = drafts.filter(
+    ({ draft }) => !unbuilt.has(unbuiltKey(draft))
+  );
+  const shown =
+    shownDrafts.find(({ draft }) => draft.app === picked) ?? shownDrafts[0];
   const version =
     shown === undefined ? undefined : shownVersion(shown.draft, opened);
   const studio = shown !== undefined;
@@ -265,19 +317,30 @@ export const ChatStudio = ({
               }}
               version={version}
             />
-            {drafts.length > 1 ? (
+            {shownDrafts.length > 1 ? (
               <DraftPicker
-                drafts={drafts}
+                drafts={shownDrafts}
                 onPick={setPicked}
                 shown={shown.draft.app}
               />
             ) : null}
             <div className="bg-muted flex min-h-0 flex-1 flex-col p-4">
               <DraftPreview
+                app={shown.draft.app}
                 chatId={chatId}
                 draft={shown.draft}
                 key={shown.draft.app}
                 name={shown.name}
+                onEnded={(ended) => {
+                  if (
+                    ended.status === "failed" &&
+                    ended.reason === "not-running" &&
+                    !changesApp(shown.draft)
+                  ) {
+                    const key = unbuiltKey(shown.draft);
+                    setUnbuilt((before) => new Set([...before, key]));
+                  }
+                }}
                 version={version}
               />
             </div>

@@ -138,8 +138,6 @@ interface FrameSource {
   chatId?: string;
   /** With `chatId`: the version of the chat's draft to preview, read-only. */
   version?: number;
-  /** With `chatId`, instead: the version of the App to preview, read-only. */
-  appVersion?: number;
   /** The route the screen was navigated to by, and its input as JSON text. */
   route?: string;
   input?: string;
@@ -178,16 +176,7 @@ const jsonInput = (text: string | undefined): unknown => {
 const start = (
   frame: HTMLIFrameElement,
   core: CoreConnection,
-  {
-    app,
-    screen,
-    chatId,
-    version,
-    appVersion,
-    route,
-    input,
-    surface,
-  }: FrameSource,
+  { app, screen, chatId, version, route, input, surface }: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
@@ -225,7 +214,6 @@ const start = (
           app,
           ...(screen === undefined ? {} : { screen }),
           ...(version === undefined ? {} : { version }),
-          ...(appVersion === undefined ? {} : { appVersion }),
         },
         onState,
         onOpened,
@@ -343,6 +331,18 @@ interface FrameProps extends FrameSource {
    * again (screen-host.ts `runPreview`).
    */
   revision?: number;
+  /**
+   * With `chatId`: the page the preview is asked for now, which its
+   * updates ask core for (screen-host.ts `runPreview`), without starting
+   * it again.
+   */
+  askedFor?: string;
+  /**
+   * With `chatId`: told the App's version the preview shows each time it
+   * shows another, or undefined while it shows the draft's own changes
+   * (`PreviewRefresh.appVersion`).
+   */
+  onShows?: (appVersion: number | undefined, screen: string) => void;
   title: string;
   onState: (state: ScreenState) => void;
   onOpened: (appName: string) => void;
@@ -365,12 +365,13 @@ const Frame = ({
   screen,
   chatId,
   version,
-  appVersion,
   route,
   input,
   surface,
   beside,
   revision,
+  askedFor,
+  onShows,
   title,
   onState,
   onOpened,
@@ -387,6 +388,8 @@ const Frame = ({
   const revisions = useRef<DraftRevisions>({
     latest: revision,
     listener: undefined,
+    askedFor,
+    onShows,
   });
   useEffect(() => {
     if (revision !== undefined) {
@@ -394,6 +397,12 @@ const Frame = ({
       revisions.current.listener?.(revision);
     }
   }, [revision]);
+  useEffect(() => {
+    revisions.current.askedFor = askedFor;
+  }, [askedFor]);
+  useEffect(() => {
+    revisions.current.onShows = onShows;
+  }, [onShows]);
   useEffect(
     () =>
       frame
@@ -405,7 +414,6 @@ const Frame = ({
               ...(screen === undefined ? {} : { screen }),
               ...(chatId === undefined ? {} : { chatId }),
               ...(version === undefined ? {} : { version }),
-              ...(appVersion === undefined ? {} : { appVersion }),
               ...(route === undefined ? {} : { route }),
               ...(input === undefined ? {} : { input }),
               ...(surface === undefined ? {} : { surface }),
@@ -432,7 +440,6 @@ const Frame = ({
       screen,
       chatId,
       version,
-      appVersion,
       route,
       input,
       surface,
@@ -522,6 +529,8 @@ type Update = "none" | "asking" | "saving";
 const FramedScreen = ({
   source,
   revision,
+  askedFor,
+  onShows,
   title,
   label,
   embedded,
@@ -533,6 +542,10 @@ const FramedScreen = ({
   source: FrameSource;
   /** A chat's preview's: the draft's newest revision (`FrameProps`). */
   revision?: number;
+  /** A chat's preview's: the page it is asked for now (`FrameProps`). */
+  askedFor?: string;
+  /** A chat's preview's: told the App's version it shows (`FrameProps`). */
+  onShows?: (appVersion: number | undefined, screen: string) => void;
   title: string;
   label: string;
   embedded: boolean;
@@ -724,14 +737,13 @@ const FramedScreen = ({
         {...(source.screen === undefined ? {} : { screen: source.screen })}
         {...(source.chatId === undefined ? {} : { chatId: source.chatId })}
         {...(source.version === undefined ? {} : { version: source.version })}
-        {...(source.appVersion === undefined
-          ? {}
-          : { appVersion: source.appVersion })}
         {...(source.route === undefined ? {} : { route: source.route })}
         {...(source.input === undefined ? {} : { input: source.input })}
         {...(source.surface === undefined ? {} : { surface: source.surface })}
         {...(source.beside === true ? { beside: true } : {})}
         {...(revision === undefined ? {} : { revision })}
+        {...(askedFor === undefined ? {} : { askedFor })}
+        {...(onShows === undefined ? {} : { onShows })}
       />
     </div>
   );
@@ -818,38 +830,43 @@ export const ScreenFrame = ({
  * A screen of the chat's draft of `app` (its first changed one when none
  * is named), running in a sandboxed frame as a preview: its server code
  * changes nothing and reads no real data, and what goes wrong goes to the
- * agent. With `version`, of that earlier version of the draft, read-only;
- * with `appVersion` instead, of that version of the App (its first
- * screen), read-only the same way. `onEnded` is told once it failed.
- * Without either, `revision`, the draft's newest, comes into the open
- * frame as it changes: each write shows without starting it again.
+ * agent. With `version`, of that earlier version of the draft, read-only.
+ * `onEnded` is told once it failed, `onShows` which version of the App it
+ * shows (`FrameProps`). Without `version`, `revision`, the draft's newest,
+ * comes into the open frame as it changes: each write shows without
+ * starting it again.
  */
 export const PreviewFrame = ({
   chatId,
   app,
-  screen,
-  version: draftVersion,
-  appVersion,
+  screen: opensOn,
+  version,
   revision,
+  askedFor = opensOn,
   onEnded,
+  onShows,
 }: {
   chatId: string;
   app: string;
+  /** The page it opens: its first when none is named. */
   screen?: string;
   version?: number;
-  appVersion?: number;
   revision?: number;
+  /**
+   * The page it is asked for now, which its updates ask for and its title
+   * names: `screen` unless the person picked the page the frame shows in
+   * place of it, which keeps the frame open.
+   */
+  askedFor?: string;
   onEnded?: ScreenEnded;
+  onShows?: (appVersion: number | undefined, screen: string) => void;
 }) => {
   const { t } = useLingui();
-  // Opened read-only: a version of the draft, or of the App.
-  const version = draftVersion ?? appVersion;
-  let title = t`Preview of the draft's first page`;
-  if (screen !== undefined) {
-    title = t`Preview of the ${screen} page`;
-  } else if (appVersion !== undefined) {
-    title = t`Preview of the version's first page`;
-  }
+  const screen = askedFor;
+  const title =
+    screen === undefined
+      ? t`Preview of the draft's first page`
+      : t`Preview of the ${screen} page`;
   return (
     <FramedScreen
       embedded
@@ -861,13 +878,14 @@ export const PreviewFrame = ({
       source={{
         chatId,
         app,
-        ...(screen === undefined ? {} : { screen }),
-        ...(draftVersion === undefined ? {} : { version: draftVersion }),
-        ...(appVersion === undefined ? {} : { appVersion }),
+        ...(opensOn === undefined ? {} : { screen: opensOn }),
+        ...(version === undefined ? {} : { version }),
       }}
       title={title}
       {...(version === undefined && revision !== undefined ? { revision } : {})}
+      {...(askedFor === undefined ? {} : { askedFor })}
       {...(onEnded === undefined ? {} : { onEnded })}
+      {...(onShows === undefined ? {} : { onShows })}
     />
   );
 };

@@ -7297,6 +7297,7 @@ msgstr "Laden"
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
+#: src/engines/app-workspace.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
@@ -9688,7 +9689,6 @@ msgid "Preview"
 msgstr "Voorvertoning"
 
 #: src/chat/studio.tsx
-#: src/engines/app-workspace.tsx
 msgid "Preview of {name}"
 msgstr "Voorbeeld van {name}"
 
@@ -9699,10 +9699,6 @@ msgstr "Voorbeeld van de pagina {screen}"
 #: src/screens/screen-frame.tsx
 msgid "Preview of the draft's first page"
 msgstr "Voorbeeld van de eerste pagina van het concept"
-
-#: src/screens/screen-frame.tsx
-msgid "Preview of the version's first page"
-msgstr "Voorbeeld van de eerste pagina van de versie"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
@@ -14261,12 +14257,20 @@ msgid "Version {version} has no build that runs, so nothing ran."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets."
 
 #: src/engines/app-workspace.tsx
+msgid "Version {version} is live: this preview changes nothing and reads no real data."
+msgstr "Versie {version} is live: deze voorvertoning verandert niets en leest geen echte gegevens."
+
+#: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish"
 msgstr "Versie {version} is klaar om te publiceren"
 
 #: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."
 msgstr "Versie {version} is klaar om te publiceren: deze voorvertoning verandert niets en leest geen echte gegevens."
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} isn't published or up for review: this preview changes nothing and reads no real data."
+msgstr "Versie {version} is niet gepubliceerd en ligt niet ter beoordeling: deze voorvertoning verandert niets en leest geen echte gegevens."
 
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."

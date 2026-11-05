@@ -105,12 +105,26 @@ test("a builder uses the live App, moves between its screens, and publishes and 
   await expect(page.getByRole("button", { name: /^Publish/u })).toHaveCount(0);
 
   // Edit opens its workspace: the chat beside the preview, which shows
-  // that nothing unpublished waits, never the live App.
+  // the App's latest version as a preview, never the live App, and says
+  // which version it is.
   await page.getByRole("link", { name: "Edit" }).click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}/edit$`, "u"));
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-  await expect(page.getByText("No unpublished changes")).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
+  const preview = page.getByRole("region", { name: `Preview of ${name}` });
+  await expect(
+    preview.frameLocator("iframe").getByRole("heading", { name: "The board" })
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    preview.getByText("Preview: changes nothing, reads no real data")
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Version 1 is live: this preview changes nothing and reads no real data."
+    )
+  ).toBeVisible();
+  await expect(
+    page.getByText("Unpublished changes", { exact: true })
+  ).toHaveCount(0);
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(
     chat.getByRole("textbox", { name: "Ask for a change" })

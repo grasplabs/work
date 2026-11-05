@@ -219,6 +219,25 @@ export const loadFrame = async (
   };
 };
 
+/**
+ * The code core serves of module `address`, from the module
+ * directory of `frame`, the preview's frame: what the frame imports.
+ */
+export const servedFrom = async (
+  frame: LoadedFrame | null,
+  address: string
+): Promise<{ status: number; code: string }> => {
+  const response = await routed(
+    pathOf(
+      new URL(
+        `${address}.js${new URL(frame?.screen.entry ?? "").search}`,
+        frame?.screen.entry
+      ).href
+    )
+  );
+  return { status: response.status, code: await response.text() };
+};
+
 /** The App's own modules of a frame: the rest are the kit's. */
 export const appModulesOf = ({
   modules,

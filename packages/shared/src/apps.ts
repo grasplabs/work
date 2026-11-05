@@ -1025,9 +1025,10 @@ export const appErrors = defineErrorFamily({
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (permissions.workflows, permission.workflow).",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
-  "app.no_draft": "This chat has no draft of that App to preview.",
   "app.draft_failed":
     "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
+  "app.not_in_chat":
+    "This chat neither changes that App nor is its chat, so it has no preview of it.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_layout":

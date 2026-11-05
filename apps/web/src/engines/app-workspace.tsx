@@ -52,7 +52,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { appSlot, setActiveChat } from "../chat/active-chat.ts";
-import { draftsOf, PendingVersion, useChatBuilds } from "../chat/builds.tsx";
+import {
+  changesApp,
+  draftsOf,
+  PendingVersion,
+  useChatBuilds,
+} from "../chat/builds.tsx";
 import type { NamedDraft } from "../chat/builds.tsx";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { DraftVersionBar, shownVersion } from "../chat/draft-versions.tsx";
@@ -61,7 +66,7 @@ import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useWide } from "../frame/wide.ts";
-import { PreviewFrame } from "../screens/screen-frame.tsx";
+import { useVersionPushes } from "../screens/use-version-pushes.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   AppChat,
@@ -84,10 +89,11 @@ import { useAppRead } from "./use-app-read.ts";
 // nothing here touches. A slim bar on top: back to the App, its name and
 // where it stands, what the main area shows (Preview, Code, Data,
 // Settings), the chat's panel, Share and Publish. The main area, by
-// default, previews the draft Grasp is building in the App's chat: the
-// compiled screens of core's draft, which change nothing and read no real
-// data; once proposed, the version up for review, built the same way and
-// read-only, so builders see what they publish. The chat that builds it
+// default, previews the App as the App's chat has it: the compiled screens
+// of core's draft, which change nothing and read no real data; with no
+// changes (none asked for yet, or proposed), the App's latest version, the
+// one up for review included, built the same way, so builders always see
+// the App and what they publish. The chat that builds it
 // is docked on the right, its edge dragged to make it wider or narrower;
 // on a narrow window it opens over the page.
 //
@@ -555,55 +561,6 @@ const PreviewState = ({
   </div>
 );
 
-/** The draft being built, previewed, with its versions and that it isn't live. */
-const DraftArea = ({
-  chatId,
-  shown,
-}: {
-  chatId: string;
-  shown: NamedDraft;
-}) => {
-  const [opened, setOpened] = useState<ShownVersion>();
-  const { draft, name } = shown;
-  const version = shownVersion(draft, opened);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
-        <Badge variant="secondary">
-          <EyeIcon data-icon="inline-start" />
-          <Trans context="an app's draft, not live">Preview</Trans>
-        </Badge>
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
-          <Trans>
-            Unpublished changes: this preview changes nothing and reads no real
-            data.
-          </Trans>
-        </span>
-        <DraftVersionBar
-          chatId={chatId}
-          draft={draft}
-          onShow={(number) => {
-            setOpened(
-              number === undefined
-                ? undefined
-                : { app: draft.app, revision: draft.revision, number }
-            );
-          }}
-          shown={version}
-        />
-      </div>
-      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
-        <DraftPreview
-          chatId={chatId}
-          draft={draft}
-          name={name}
-          version={version}
-        />
-      </div>
-    </div>
-  );
-};
-
 /** The version proposed, said to be ready, with the way to publish it. */
 const ReadyToPublish = ({ app, version }: { app: App; version: number }) => (
   <PreviewState
@@ -622,124 +579,11 @@ const ReadyToPublish = ({ app, version }: { app: App; version: number }) => (
   </PreviewState>
 );
 
-/**
- * The version proposed, previewed before it is published: read-only, as
- * an earlier version of the draft is, and the way to publish it. A
- * version with no page to show (an App of workflows alone) is said to be
- * ready instead.
- */
-const PendingArea = ({
-  app,
-  chatId,
-  version,
-}: {
-  app: App;
-  chatId: string;
-  version: number;
-}) => {
-  const { t } = useLingui();
-  const [nothingToShow, setNothingToShow] = useState(false);
-  const { id, name } = app;
-  if (nothingToShow) {
-    return <ReadyToPublish app={app} version={version} />;
-  }
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
-        <Badge variant="secondary">
-          <EyeIcon data-icon="inline-start" />
-          <Trans context="an app's draft, not live">Preview</Trans>
-        </Badge>
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
-          <Trans>
-            Version {version} is ready to publish: this preview changes nothing
-            and reads no real data.
-          </Trans>
-        </span>
-        <ReviewAndPublish app={app} size="sm" version={version}>
-          <Trans>Review and publish</Trans>
-        </ReviewAndPublish>
-      </div>
-      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
-        <section
-          aria-label={t`Preview of ${name}`}
-          className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
-        >
-          <PreviewFrame
-            app={id}
-            appVersion={version}
-            chatId={chatId}
-            onEnded={(ended) => {
-              if (ended.status === "failed" && ended.reason === "not-found") {
-                setNothingToShow(true);
-              }
-            }}
-          />
-        </section>
-      </div>
-    </div>
-  );
-};
-
-/**
- * The main area's preview: the chat's draft of the App, while Grasp builds
- * one; then the version proposed, until it is published; otherwise where
- * the App stands, never the live App itself.
- */
-const PreviewArea = ({
-  app,
-  chatId,
-  draft,
-  running,
-}: {
-  app: App;
-  chatId: string | undefined;
-  draft: NamedDraft | undefined;
-  running: boolean;
-}) => {
-  const { t } = useLingui();
-  if (chatId !== undefined && draft !== undefined) {
-    return <DraftArea chatId={chatId} shown={draft} />;
-  }
-  const { pendingVersion, currentVersion, name } = app;
-  if (pendingVersion !== null && chatId !== undefined) {
-    return (
-      <PendingArea
-        app={app}
-        chatId={chatId}
-        // Another version proposed is a fresh start.
-        key={pendingVersion}
-        version={pendingVersion}
-      />
-    );
-  }
+/** Where the App stands, with no preview to show: its version up for review, or its live one. */
+const Stands = ({ app }: { app: App }) => {
+  const { pendingVersion, currentVersion } = app;
   if (pendingVersion !== null) {
     return <ReadyToPublish app={app} version={pendingVersion} />;
-  }
-  if (running) {
-    return (
-      <PreviewState
-        icon={<Spinner aria-label={t`Building…`} />}
-        title={<Trans>Grasp is building</Trans>}
-      >
-        <Trans>
-          The preview shows here as soon as there is something to see.
-        </Trans>
-      </PreviewState>
-    );
-  }
-  if (currentVersion === null) {
-    return (
-      <PreviewState
-        icon={<LayoutGridIcon />}
-        title={<Trans>Nothing built yet</Trans>}
-      >
-        <Trans>
-          Say in the chat what {name} should do. Grasp builds it, and the
-          preview shows here.
-        </Trans>
-      </PreviewState>
-    );
   }
   return (
     <PreviewState
@@ -760,6 +604,269 @@ const PreviewArea = ({
         here as a preview before anything goes live.
       </Trans>
     </PreviewState>
+  );
+};
+
+/**
+ * What the preview's top row says of what it shows: the draft's changes,
+ * with its versions; otherwise the App's version the preview shows, as
+ * core says (`shows`): up for review, with the way to publish it; live;
+ * or neither. Nothing while the preview hasn't shown one yet.
+ */
+const PreviewBar = ({
+  app,
+  chatId,
+  draft,
+  shows,
+  shown,
+  onShow,
+}: {
+  app: App;
+  chatId: string;
+  /** The chat's draft, when it changes the App. */
+  draft: NamedDraft | undefined;
+  /** The App's version the preview shows, when it shows one. */
+  shows: number | undefined;
+  shown: number | undefined;
+  onShow: (version?: number) => void;
+}) => {
+  const { pendingVersion, currentVersion } = app;
+  let says: ReactNode = null;
+  let action: ReactNode = null;
+  if (draft !== undefined) {
+    says = (
+      <Trans>
+        Unpublished changes: this preview changes nothing and reads no real
+        data.
+      </Trans>
+    );
+    action = (
+      <DraftVersionBar
+        chatId={chatId}
+        draft={draft.draft}
+        onShow={onShow}
+        shown={shown}
+      />
+    );
+  } else if (shows !== undefined && shows === pendingVersion) {
+    const version = shows;
+    says = (
+      <Trans>
+        Version {version} is ready to publish: this preview changes nothing and
+        reads no real data.
+      </Trans>
+    );
+    action = (
+      <ReviewAndPublish app={app} size="sm" version={shows}>
+        <Trans>Review and publish</Trans>
+      </ReviewAndPublish>
+    );
+  } else if (shows !== undefined && shows === currentVersion) {
+    const version = shows;
+    says = (
+      <Trans>
+        Version {version} is live: this preview changes nothing and reads no
+        real data.
+      </Trans>
+    );
+  } else if (shows !== undefined) {
+    const version = shows;
+    says = (
+      <Trans>
+        Version {version} isn&apos;t published or up for review: this preview
+        changes nothing and reads no real data.
+      </Trans>
+    );
+  }
+  return (
+    <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
+      <Badge variant="secondary">
+        <EyeIcon data-icon="inline-start" />
+        <Trans context="an app's draft, not live">Preview</Trans>
+      </Badge>
+      <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
+        {says}
+      </span>
+      {action}
+    </div>
+  );
+};
+
+/**
+ * What the preview shows in place of the App, if anything: that nothing
+ * is built yet, for an App with no version or one core said has none to
+ * run; where it stands, without a chat, or when core found no page of it
+ * (`ended`, while still at the revision and the App's version `at` it
+ * ended).
+ */
+const nothingShown = ({
+  app,
+  chatId,
+  ended,
+  at,
+}: {
+  app: App;
+  chatId: string | undefined;
+  ended: Ended | undefined;
+  at: { revision: number; pushes: number };
+}): "unbuilt" | "stands" | undefined => {
+  const endedNow =
+    ended !== undefined &&
+    ended.at === at.revision &&
+    ended.pushes === at.pushes;
+  if (chatId !== undefined && !endedNow) {
+    return undefined;
+  }
+  const unversioned =
+    app.currentVersion === null && app.pendingVersion === null;
+  return unversioned || (endedNow && ended.reason === "not-running")
+    ? "unbuilt"
+    : "stands";
+};
+
+/** An App with no version: Grasp building its first, or nothing asked for yet. */
+const NothingBuilt = ({
+  name,
+  running,
+}: {
+  name: string;
+  running: boolean;
+}) => {
+  const { t } = useLingui();
+  return running ? (
+    <PreviewState
+      icon={<Spinner aria-label={t`Building…`} />}
+      title={<Trans>Grasp is building</Trans>}
+    >
+      <Trans>
+        The preview shows here as soon as there is something to see.
+      </Trans>
+    </PreviewState>
+  ) : (
+    <PreviewState
+      icon={<LayoutGridIcon />}
+      title={<Trans>Nothing built yet</Trans>}
+    >
+      <Trans>
+        Say in the chat what {name} should do. Grasp builds it, and the preview
+        shows here.
+      </Trans>
+    </PreviewState>
+  );
+};
+
+/**
+ * Why a preview showed no App, at which revision of the chat's draft and
+ * after how many of the App's version pushes (`useVersionPushes`).
+ */
+interface Ended {
+  at: number;
+  pushes: number;
+  /** Core has no version of the App to show, or no page of it. */
+  reason: "not-running" | "not-found";
+}
+
+/**
+ * The main area's preview: the App as the chat's draft has it, never the
+ * live App itself. Its changes while it has some; otherwise the App's
+ * latest version (core's `previewDraft`), the one up for review included.
+ * One frame throughout, so the chat's first write, and each after it,
+ * comes into the App it shows in place. Core decides what there is to
+ * show: an App with no version yet has nothing, and one whose version has
+ * no page (an App of workflows alone) says where it stands instead, until
+ * the chat's next write or the App's next version, from wherever it
+ * comes.
+ */
+const PreviewArea = ({
+  app,
+  chatId,
+  finding,
+  draft,
+  running,
+}: {
+  app: App;
+  /** The App's chat; none while core finds it, or when it gave none. */
+  chatId: string | undefined;
+  /** Whether core is finding the App's chat still. */
+  finding: boolean;
+  draft: NamedDraft | undefined;
+  running: boolean;
+}) => {
+  const { t } = useLingui();
+  const [opened, setOpened] = useState<ShownVersion>();
+  const [ended, setEnded] = useState<Ended>();
+  const pushes =
+    useVersionPushes(chatId === undefined ? [] : [app.id])[app.id] ?? 0;
+  // The App's version the preview shows, as core said (`onShows`).
+  const [shows, setShows] = useState<number>();
+  const { name } = app;
+  const changing =
+    draft !== undefined && changesApp(draft.draft) ? draft : undefined;
+  const revision = draft?.draft.revision ?? 0;
+  // A preview is of a chat's: it opens once core found the App's chat.
+  if (chatId === undefined && finding) {
+    return (
+      <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
+        <Spinner aria-label={t`Loading…`} />
+      </div>
+    );
+  }
+  // Where the App stands when core gave no chat, or showed no App at the
+  // draft's revision and the App's version now.
+  const nothing = nothingShown({
+    app,
+    chatId,
+    ended: changing === undefined ? ended : undefined,
+    at: { revision, pushes },
+  });
+  if (nothing === "unbuilt") {
+    return <NothingBuilt name={name} running={running} />;
+  }
+  if (nothing === "stands" || chatId === undefined) {
+    return <Stands app={app} />;
+  }
+  const version =
+    changing === undefined ? undefined : shownVersion(changing.draft, opened);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PreviewBar
+        app={app}
+        chatId={chatId}
+        draft={changing}
+        shows={shows}
+        onShow={(number) => {
+          setOpened(
+            number === undefined || changing === undefined
+              ? undefined
+              : {
+                  app: app.id,
+                  revision: changing.draft.revision,
+                  number,
+                }
+          );
+        }}
+        shown={version}
+      />
+      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
+        <DraftPreview
+          app={app.id}
+          chatId={chatId}
+          draft={draft?.draft}
+          name={name}
+          onShows={setShows}
+          onEnded={(end) => {
+            if (
+              changing === undefined &&
+              end.status === "failed" &&
+              (end.reason === "not-running" || end.reason === "not-found")
+            ) {
+              setEnded({ at: revision, pushes, reason: end.reason });
+            }
+          }}
+          version={version}
+        />
+      </div>
+    </div>
   );
 };
 
@@ -968,7 +1075,7 @@ const Building = ({
         }}
         identity={identity}
         running={running}
-        unpublished={draft !== undefined}
+        unpublished={draft !== undefined && changesApp(draft.draft)}
         view={view}
       />
       <Split
@@ -1008,6 +1115,7 @@ const Building = ({
                 app={app}
                 chatId={chatId}
                 draft={draft}
+                finding={failure === undefined}
                 running={running}
               />
             }

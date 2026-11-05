@@ -17,8 +17,9 @@ import {
   outcome,
   previewStores,
   requestFor,
+  refreshed,
 } from "./previews.ts";
-import { loadFrame, pathOf, routed } from "./screen-frames.ts";
+import { loadFrame, servedFrom } from "./screen-frames.ts";
 import type { LoadedFrame } from "./screen-frames.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -63,26 +64,7 @@ const builtAt = (
 
 /** The screen's module of what a build answered, an update. */
 const entryBuilt = (built: PreviewBundle | PreviewUpdate): string =>
-  built.refresh?.entry ?? "";
-
-/**
- * The code core serves of `refresh`'s module `address`, from the module
- * directory of `frame`, the preview's frame: what the frame imports.
- */
-const servedFrom = async (
-  frame: LoadedFrame | null,
-  address: string
-): Promise<{ status: number; code: string }> => {
-  const response = await routed(
-    pathOf(
-      new URL(
-        `${address}.js${new URL(frame?.screen.entry ?? "").search}`,
-        frame?.screen.entry
-      ).href
-    )
-  );
-  return { status: response.status, code: await response.text() };
-};
+  "refresh" in built ? (built.refresh?.entry ?? "") : "";
 
 /** What the test reads of a staged frame's manifest. */
 const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
@@ -136,22 +118,26 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await chats.previewUpdate(chatId, app, "desk", next);
+    const updated = await chats.previewUpdate(chatId, app, next, {
+      screen: "desk",
+    });
     const updateMs = performance.now() - started;
     const again = await write(
       { "screens/desk.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await chats.previewUpdate(chatId, app, "desk", again);
+    const second = await chats.previewUpdate(chatId, app, again, {
+      screen: "desk",
+    });
     const secondMs = performance.now() - secondStarted;
     console.info(
       `preview update after a screen write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
     );
-    const { refresh } = updated;
+    const refresh = refreshed(updated);
     const before = Object.keys(opened.refresh?.modules ?? {});
     const entry = await servedFrom(frame, refresh.entry);
-    const secondEntry = await servedFrom(frame, second.refresh.entry);
+    const secondEntry = await servedFrom(frame, refreshed(second).entry);
     expect({
       app: updated.app,
       revision: refresh.revision,
@@ -169,7 +155,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       ),
       opened: opened.refresh?.revision,
       second: {
-        revision: second.refresh.revision,
+        revision: refreshed(second).revision,
         says: secondEntry.code.includes('"Again "'),
       },
     }).toStrictEqual({
@@ -193,21 +179,27 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     // Another builder of the organization, who doesn't build this App.
     const colleague = await signedInApi(idp, "builder");
     expect({
-      // An App this chat builds no draft of.
+      // An App this chat neither changes nor is the chat of.
       otherApp: await codeOf(
-        builder.api.chats.previewUpdate(chatId, other.id, "desk", revision)
+        builder.api.chats.previewUpdate(chatId, other.id, revision, {
+          screen: "desk",
+        })
       ),
       colleague: await codeOf(
-        colleague.api.chats.previewUpdate(chatId, app, "desk", revision)
+        colleague.api.chats.previewUpdate(chatId, app, revision, {
+          screen: "desk",
+        })
       ),
-      // A screen the draft hasn't.
+      // A screen the draft hasn't: the frame opens afresh, on its first.
       noScreen: await codeOf(
-        builder.api.chats.previewUpdate(chatId, app, "nowhere", revision)
+        builder.api.chats.previewUpdate(chatId, app, revision, {
+          screen: "nowhere",
+        })
       ),
     }).toStrictEqual({
-      otherApp: "app.no_draft",
+      otherApp: "app.not_in_chat",
       colleague: "app.not_found",
-      noScreen: "screen.not_found",
+      noScreen: { app, restart: true },
     });
   });
 
@@ -230,7 +222,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       { "screens/desk.tsx": deskSaying("Changed") },
       revision
     );
-    await chats.previewUpdate(chatId, app, "desk", next);
+    await chats.previewUpdate(chatId, app, next, { screen: "desk" });
     const kept = await call(next, "notes.titles");
     const sealedAfter = await sealedAt(builder, chatId);
     const storesAfter = await previewStores(builder, chatId, app);
@@ -465,29 +457,6 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       sameBuild: again.artifact === opened.artifact,
       status: frame?.status,
     }).toStrictEqual({ sameBuild: true, status: 200 });
-  });
-
-  it("opens a version of the App only from the person's own chat", async () => {
-    const { builder, app } = await setUp();
-    const other = await signedInApi(idp, "builder");
-    const othersChat = await other.api.chats.create("Theirs");
-    expect({
-      othersChat: await codeOf(
-        builder.api.chats.preview(othersChat.id, app, "desk", undefined, 1)
-      ),
-      unknown: await codeOf(
-        builder.api.chats.preview(
-          crypto.randomUUID(),
-          app,
-          "desk",
-          undefined,
-          1
-        )
-      ),
-    }).toStrictEqual({
-      othersChat: "agent.chat_not_found",
-      unknown: "agent.chat_not_found",
-    });
   });
 
   it("builds a preview's revision for its own person alone, and never one the draft moved past", async () => {

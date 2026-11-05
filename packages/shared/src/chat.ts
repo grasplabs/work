@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppFiles } from "./apps.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
+import { screenNameSchema } from "./screens.ts";
 import type {
   QuerySnapshotPush,
   SubscriptionApi,
@@ -168,8 +169,9 @@ export interface ChatFileInput {
 }
 
 /**
- * An App the chat's agent is changing in the chat's own draft, not yet
- * proposed (`ChatsApi.drafts`).
+ * An App the chat's agent changes in the chat's own draft
+ * (`ChatsApi.drafts`): with no `changed` paths once its changes were
+ * proposed or discarded, when its preview shows the App's latest version.
  */
 export interface ChatDraft {
   app: string;
@@ -193,14 +195,38 @@ export interface ChatDraft {
 }
 
 /**
- * The revision a preview of a version of the draft, or of the App,
- * carries (`ChatsApi.preview` with `version` or `appVersion`): no draft
- * with changes is ever at it (a chat with none reads as at it, and is
- * refused for having none), so every call of that preview (function,
- * query, stream) is refused, the latest version's too, and nothing it
- * reports is kept. Read-only by construction.
+ * The revision a preview of a version of the draft carries
+ * (`ChatsApi.preview` with `version`): no draft
+ * is ever at it (a chat's draft starts at 0, before its first write), so
+ * every call of that preview (function, query, stream) is refused, the
+ * latest version's too, and nothing it reports is kept. Read-only by
+ * construction.
  */
-export const readOnlyRevision = 0;
+export const readOnlyRevision = -1;
+
+/**
+ * The build a frame of a chat's preview shows, which its calls run on and
+ * its updates are asked from: the draft at its revision
+ * (`readOnlyRevision` for a version of the draft opened read-only), or a
+ * version of the App, shown while the draft changes nothing or its
+ * screen doesn't build. A frame's calls run on exactly that build, so two
+ * frames on two versions of the App each call their own, and only the
+ * draft's own revision counts toward the agent's check of the draft.
+ */
+export type PreviewAt = number | { appVersion: number };
+
+/** A `PreviewAt` as a frame names it, checked. */
+export const previewAtSchema = z.union([
+  z.int(),
+  z.strictObject({ appVersion: z.int().positive() }),
+]);
+
+/** What a frame showing `refresh` names (`PreviewAt`). */
+export const shownAt = ({
+  revision,
+  appVersion,
+}: Pick<PreviewRefresh, "revision" | "appVersion">): PreviewAt =>
+  appVersion === undefined ? revision : { appVersion };
 
 /**
  * One write of the chat's draft of an App, kept as it left the draft
@@ -238,8 +264,10 @@ export interface PreviewBundle extends Omit<
   "version" | "lease" | "route" | "input"
 > {
   /**
-   * Which write of the draft it was built from: its calls name it.
-   * `readOnlyRevision` for a version of the draft opened read-only.
+   * The draft's revision it was opened at; `readOnlyRevision` for a
+   * version of the draft opened read-only, which is also what its calls
+   * name. A frame that takes updates names what its `refresh` shows
+   * (`shownAt`).
    */
   revision: number;
   /** The draft's screens, sorted. */
@@ -250,6 +278,14 @@ export interface PreviewBundle extends Omit<
    * now; a version opened read-only never updates.
    */
   refresh?: PreviewRefresh;
+  /**
+   * The draft's changes left it no screen that builds at
+   * `refresh.revision`: the frame opened on the App's latest version
+   * instead (`refresh.appVersion`), as a draft that changes nothing shows
+   * it, its calls on that version, and takes the draft's next write that
+   * builds.
+   */
+  fallback?: true;
 }
 
 /**
@@ -274,13 +310,45 @@ export interface PreviewRefresh {
    * import map is fixed once it loaded.
    */
   kit: string[];
+  /**
+   * The App's version it is of, when it shows one rather than the draft's
+   * changes: a draft that changes nothing shows the App's latest, as does
+   * a frame in place of a draft whose screen doesn't build.
+   */
+  appVersion?: number;
 }
 
-/** What `ChatsApi.previewUpdate` answers: one screen of the draft now. */
-export interface PreviewUpdate {
-  app: AppId;
-  refresh: PreviewRefresh;
-}
+/**
+ * What an open frame of a chat's preview shows as it asks for an update
+ * (`ChatsApi.previewUpdate`): the screen it shows; the screen it was
+ * opened for, when one was named, which it shows again once a build has
+ * it (a frame shown the App's version of another screen in place of a
+ * draft's screen that didn't build, or a version without it); and the
+ * App's version it shows, when it shows one rather than the draft's
+ * changes.
+ */
+export const previewShownSchema = z.strictObject({
+  screen: screenNameSchema,
+  asked: screenNameSchema.optional(),
+  appVersion: z.int().positive().optional(),
+});
+
+/** What an open frame of a chat's preview shows (`previewShownSchema`). */
+export type PreviewShown = z.infer<typeof previewShownSchema>;
+
+/**
+ * What `ChatsApi.previewUpdate` answers an open frame: a build of the
+ * screen it shows to swap in (`refresh`); that the build it shows is
+ * still the one to show (`unchanged`); or that the one to show is one it
+ * can't swap in, another version of the App or another screen
+ * (`restart`), which it opens afresh on, as a published App's page does
+ * on a new version: on the screen it was opened for when that build has
+ * it, its first otherwise.
+ */
+export type PreviewUpdate =
+  | { app: AppId; refresh: PreviewRefresh }
+  | { app: AppId; unchanged: true }
+  | { app: AppId; restart: true };
 
 /**
  * A problem a preview of a draft reported (`ChatsApi.previewReport`), or
@@ -899,8 +967,8 @@ export interface ChatsApi {
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
   /**
-   * The Apps the chat's agent is changing in the chat's drafts, not yet
-   * proposed, most recently written first.
+   * The Apps the chat's agent changes in the chat's drafts, those whose
+   * changes are proposed or discarded too, most recently written first.
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
   /**
@@ -952,58 +1020,61 @@ export interface ChatsApi {
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
-   * the App. With `version`, of that version of the draft, read-only:
-   * at `readOnlyRevision`, so its calls are all refused. With
-   * `appVersion` instead, of that version of the App (the one proposed,
-   * before it is published), read-only the same way.
+   * the App, from a chat that changes it or is its own
+   * (`app.not_in_chat` otherwise). A draft that changes nothing previews
+   * the App's latest version, at the draft's revision, so its next write
+   * comes into the frame; one whose changes leave no screen that builds
+   * opens on that version too (`PreviewBundle.fallback`). With `version`,
+   * of that version of the draft, read-only: at `readOnlyRevision`, so its
+   * calls are all refused.
    */
   preview: (
     chatId: string,
     app: string,
     screen?: string,
-    version?: number,
-    appVersion?: number
+    version?: number
   ) => Promise<PreviewBundle>;
   /**
-   * Screen `screen` of the chat's draft of `app` at `revision`, the
-   * newest the preview knows of, built and its modules staged for the
-   * open preview to import and swap in with React Fast Refresh
-   * (`PreviewRefresh`): one build per revision, shared by every preview
-   * that asks for it, and `app.preview_outdated` once the draft moved past
-   * `revision`. No frame is staged and nothing sealed, and the build's
-   * type check and lint don't hold it up. For the person while they build
-   * the App.
+   * What an open frame of the chat's preview of `app`, showing `shown`,
+   * takes at `revision`, the newest the preview knows of
+   * (`PreviewUpdate`): a build of the draft is built and its modules
+   * staged for the frame to import and swap in with React Fast Refresh,
+   * one build per revision, shared by every preview that asks for it, and
+   * `app.preview_outdated` once the draft moved past `revision`. No frame
+   * is staged and nothing sealed, and the build's type check and lint
+   * don't hold it up. For the person while they build the App.
    */
   previewUpdate: (
     chatId: string,
     app: string,
-    screen: string,
-    revision: number
+    revision: number,
+    shown: PreviewShown
   ) => Promise<PreviewUpdate>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a
    * screen's `callFunction` does, in the draft's preview: its draft
    * release, on a store of its own, with no resources, so it changes none
    * of the App's data and reaches nothing outside. `request` is the
-   * call's text; answers as a screen's call is answered. `revision` is
-   * the preview's: `app.preview_outdated` once the draft changed.
+   * call's text; answers as a screen's call is answered. `at` is the build
+   * the frame shows: `app.preview_outdated` once the draft's server code
+   * moved past the draft's revision it names.
    */
   previewFunction: (
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string
   ) => Promise<unknown>;
   /**
    * Follows a public query of the draft of an App of spec 8's layout in
    * its preview, as a screen's `watchQuery` does: each push goes to
-   * `onSnapshot`, until the hold is released, the draft moves past
-   * `revision` or the person no longer builds the App.
+   * `onSnapshot`, until the hold is released, the draft moves past the
+   * build `at` names or the person no longer builds the App.
    */
   previewWatchQuery: (
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ) => Promise<SubscriptionApi>;
@@ -1019,7 +1090,7 @@ export interface ChatsApi {
   previewStream: (
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     what: "stream" | "attach",
     request: string,
     onFrame: (frame: unknown) => Promise<unknown>
@@ -1031,19 +1102,20 @@ export interface ChatsApi {
   previewCancelStream: (
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     request: string
   ) => Promise<{ requested: boolean }>;
   /**
    * Tells the chat's agent of `problem`, one the preview of the draft at
-   * `revision` ran into on `screen` (an uncaught error, an unhandled
-   * rejection or a `console.error`). Its next check of the draft reads
-   * them. A report of a revision the draft moved past is dropped.
+   * `at` ran into on `screen` (an uncaught error, an unhandled rejection
+   * or a `console.error`). Its next check of the draft reads them. A
+   * report of a revision the draft moved past, or of a version of the
+   * App, is dropped.
    */
   previewReport: (
     chatId: string,
     app: string,
-    revision: number,
+    at: PreviewAt,
     screen: string,
     problem: ScreenProblem
   ) => Promise<void>;

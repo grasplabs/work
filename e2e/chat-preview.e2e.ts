@@ -206,6 +206,15 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
     await page.goto(`/apps/${app.id}/edit`);
     await expect(page.getByText("Nothing built yet")).toBeVisible();
 
+    // A version committed elsewhere, from another tab: the App shows.
+    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    const committed = page
+      .getByRole("region", { name: `Preview of ${name}` })
+      .frameLocator("iframe");
+    await expect(committed.getByRole("status")).toHaveText("0 in the App", {
+      timeout: 30_000,
+    });
+
     const { opener } = modelScripts.buildsTally;
     const chat = page.getByRole("region", { name: "Chat" });
     const ask = chat.getByRole("textbox", { name: "Ask for a change" });
@@ -277,6 +286,113 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
     await expect(files).toContainText("server");
     await files.getByRole("button", { name: "tally.tsx" }).click();
     await expect(page.locator("figure")).toContainText("Add another");
+  } finally {
+    core[Symbol.dispose]();
+  }
+});
+
+test("an App's workspace previews the App before its chat changes anything, then each change its chat makes", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    const app = await api.apps.create({ name });
+    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    const page = await pageOf(builder);
+    await page.goto(`/apps/${app.id}/edit`);
+
+    // No change asked for yet: the App's latest version, on a store of the
+    // preview's own.
+    const preview = page.getByRole("region", { name: `Preview of ${name}` });
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByText("Unpublished changes", { exact: true })
+    ).toHaveCount(0);
+
+    // A version committed elsewhere comes into the open preview.
+    await api.apps.files.commit(
+      app.id,
+      tallyFiles("in version 2"),
+      "Elsewhere"
+    );
+    await expect(frame.getByRole("status")).toHaveText("0 in version 2", {
+      timeout: 30_000,
+    });
+    // The bar names the version shown: committed, not proposed nor live.
+    await expect(
+      page.getByText(
+        "Version 2 isn't published or up for review: this preview changes nothing and reads no real data."
+      )
+    ).toBeVisible();
+
+    // Asked for one: the same preview shows it.
+    const { opener } = modelScripts.buildsTally;
+    const chat = page.getByRole("region", { name: "Chat" });
+    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+    await ask.fill(opener);
+    await ask.press("Enter");
+    await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByText("Unpublished changes", { exact: true })
+    ).toBeVisible();
+    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
+      timeout: 30_000,
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+});
+
+test("a preview opened on a draft that doesn't build shows the App's latest version, saying it is being fixed, until a write builds", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    const app = await api.apps.create({ name });
+    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    const page = await pageOf(builder);
+    await page.goto(`/apps/${app.id}/edit`);
+    const preview = page.getByRole("region", { name: `Preview of ${name}` });
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
+      timeout: 30_000,
+    });
+
+    const { opener } = modelScripts.fixesBrokenTally;
+    const chat = page.getByRole("region", { name: "Chat" });
+    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+    await ask.fill(opener);
+    await ask.press("Enter");
+    await expect(
+      chat.getByText("The tally's screen doesn't build yet.")
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Opened afresh on it: the App's latest version, on its own server
+    // code, and a word that the problem is being fixed.
+    await page.reload();
+    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
+      timeout: 30_000,
+    });
+    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+
+    await ask.fill("Fix the screen.");
+    await ask.press("Enter");
+    await expect(chat.getByText("The tally works now.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(preview.getByText("Fixing a problem…")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(frame.getByRole("status")).toHaveText("0 in the preview");
   } finally {
     core[Symbol.dispose]();
   }

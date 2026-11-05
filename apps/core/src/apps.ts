@@ -1097,6 +1097,9 @@ export const proposeDraft = async (
   if (Array.isArray(undone) && undone.length > 0) {
     throw appErrors.create("app.archived");
   }
+  // The pages open on the App hear of it, as of a commit: a chat's
+  // preview showing the App's latest version takes it.
+  waitUntil(versionMadeCurrent(env, appId));
   return toVersion(row);
 };
 

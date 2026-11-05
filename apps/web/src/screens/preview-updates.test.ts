@@ -1,5 +1,9 @@
 import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/screen-runtime";
-import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
+import type {
+  PreviewAt,
+  PreviewRefresh,
+  PreviewUpdate,
+} from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
@@ -31,7 +35,14 @@ const refreshAt = (
     part = "part",
     bytes = 10,
     kit = ["react.js"],
-  }: { desk?: string; part?: string; bytes?: number; kit?: string[] } = {}
+    appVersion,
+  }: {
+    desk?: string;
+    part?: string;
+    bytes?: number;
+    kit?: string[];
+    appVersion?: number;
+  } = {}
 ): PreviewRefresh => ({
   revision,
   screen: "desk",
@@ -39,6 +50,7 @@ const refreshAt = (
   modules: { [desk]: bytes, [part]: bytes },
   css: "",
   kit,
+  ...(appVersion === undefined ? {} : { appVersion }),
 });
 
 /** A version the frame is handed: its revision, entry, visit, and the modules it evaluated anew. */
@@ -52,51 +64,69 @@ interface Handed {
  * A preview's updates over a scripted core and frame: `answers` is what
  * core answers each ask with, in turn; the frame answers `frameSays` for
  * each version it is handed, after evaluating, as a browser does, the
- * modules of it it hasn't at that address (visit and address).
+ * modules of it it hasn't at that address (visit and address). The frame
+ * opened at `opened`, the App's latest version in place of the draft's
+ * screen when `fallback`.
  */
 const following = (
   answers: (() => Promise<PreviewUpdate>)[],
-  frameSays: (handed: Handed) => PreviewApplied = () => "applied"
+  frameSays: (handed: Handed) => PreviewApplied = () => "applied",
+  { opened = refreshAt(1), fallback = false } = {}
 ) => {
-  const opened = refreshAt(1);
   const versions = new Map<string, PreviewRefresh>([[opened.entry, opened]]);
   const moduleMap = new Set(
     Object.keys(opened.modules).map((address) => `0/${address}`)
   );
   const handedOver: Handed[] = [];
   const healths: PreviewHealth[] = [];
-  const moved: number[] = [];
+  const moved: PreviewAt[] = [];
   const askedFor: number[] = [];
+  // The App's version the frame said it shows, with each ask.
+  const showing: (number | undefined)[] = [];
+  const shows: (number | undefined)[] = [];
   const seen = {
     handed: handedOver,
     health: healths,
     moved,
     askedFor,
+    showing,
+    shows,
     resets: 0,
     asked: 0,
   };
-  const updates = new PreviewUpdates(app, opened, {
-    fetch: async (revision) => {
-      seen.askedFor.push(revision);
-      const answer = answers[seen.asked];
-      seen.asked += 1;
-      if (answer === undefined) {
-        throw new Error("Core was asked more than the test said.");
-      }
-      const update = await answer();
-      versions.set(update.refresh.entry, update.refresh);
-      return update;
+  const updates = new PreviewUpdates(
+    app,
+    opened,
+    {
+      fetch: async (revision, appVersion) => {
+        seen.askedFor.push(revision);
+        seen.showing.push(appVersion);
+        const answer = answers[seen.asked];
+        seen.asked += 1;
+        if (answer === undefined) {
+          throw new Error("Core was asked more than the test said.");
+        }
+        const update = await answer();
+        if ("refresh" in update) {
+          versions.set(update.refresh.entry, update.refresh);
+        }
+        return update;
+      },
+      health: (health) => {
+        seen.health.push(health);
+      },
+      reset: () => {
+        seen.resets += 1;
+      },
+      moved: (at) => {
+        seen.moved.push(at);
+      },
+      shows: (appVersion) => {
+        seen.shows.push(appVersion);
+      },
     },
-    health: (health) => {
-      seen.health.push(health);
-    },
-    reset: () => {
-      seen.resets += 1;
-    },
-    moved: (revision) => {
-      seen.moved.push(revision);
-    },
-  });
+    fallback
+  );
   const toFrame = async ({ entry, visit }: PreviewLoad) => {
     await Promise.resolve();
     const version = versions.get(entry);
@@ -248,8 +278,118 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     });
   });
 
+  it("keeps the App's version shown in place of a draft that didn't build being fixed, its calls on that version's own code, until a write of the draft shows", async () => {
+    // What the screen's first render and mount effects call, as each
+    // version is handed: the fallback swapped back in too.
+    const callsWhileHanded: PreviewAt[] = [];
+    const held: { updates?: PreviewUpdates } = {};
+    const { updates, seen, toFrame } = following(
+      [answered(refreshAt(2)), answered(refreshAt(3))],
+      ({ revision }) => {
+        callsWhileHanded.push(held.updates?.runningAt() ?? -1);
+        return revision === 2 ? "broken" : "applied";
+      },
+      { opened: refreshAt(1, { appVersion: 1 }), fallback: true }
+    );
+    held.updates = updates;
+    updates.follow(toFrame);
+    const opened = { health: [...seen.health], callsAt: updates.runningAt() };
+    updates.revise(2);
+    await vi.waitFor(() => {
+      expect(seen.handed).toHaveLength(2);
+    });
+    const broken = updates.runningAt();
+    updates.revise(3);
+    await vi.waitFor(() => {
+      expect(seen.moved).toStrictEqual([3]);
+    });
+
+    expect({
+      opened,
+      broken,
+      health: seen.health,
+      callsAt: updates.runningAt(),
+      callsWhileHanded,
+      shows: seen.shows,
+    }).toStrictEqual({
+      opened: { health: [], callsAt: { appVersion: 1 } },
+      broken: { appVersion: 1 },
+      health: ["working"],
+      callsAt: 3,
+      callsWhileHanded: [2, { appVersion: 1 }, 3],
+      // The App's version 1, then the draft's own changes.
+      shows: [1, undefined],
+    });
+  });
+
+  it("names the App's version it shows in its calls and asks, then the draft's revision once a write of the draft shows", async () => {
+    const { updates, seen, toFrame } = following(
+      [answered(refreshAt(1))],
+      undefined,
+      {
+        opened: refreshAt(0, { appVersion: 1 }),
+      }
+    );
+    updates.follow(toFrame);
+    const opened = updates.runningAt();
+    updates.revise(1);
+    await vi.waitFor(() => {
+      expect(seen.moved).toStrictEqual([1]);
+    });
+
+    expect({
+      opened,
+      showing: seen.showing,
+      callsAt: updates.runningAt(),
+    }).toStrictEqual({
+      opened: { appVersion: 1 },
+      showing: [1],
+      callsAt: 1,
+    });
+  });
+
+  it("starts afresh when core says another version of the App is the one to show, takes nothing when it says the one shown is, and asks nothing over the draft's own changes", async () => {
+    const drafted = following([]);
+    drafted.updates.follow(drafted.toFrame);
+    drafted.updates.again();
+    const same = following(
+      [async () => await Promise.resolve({ app, unchanged: true as const })],
+      undefined,
+      { opened: refreshAt(1, { appVersion: 1 }) }
+    );
+    same.updates.follow(same.toFrame);
+    same.updates.again();
+    await vi.waitFor(() => {
+      expect(same.seen.asked).toBe(1);
+    });
+    const another = following(
+      [async () => await Promise.resolve({ app, restart: true as const })],
+      undefined,
+      { opened: refreshAt(1, { appVersion: 1 }) }
+    );
+    another.updates.follow(another.toFrame);
+    another.updates.again();
+    await vi.waitFor(() => {
+      expect(another.seen.resets).toBe(1);
+    });
+
+    expect({
+      same: { handed: same.seen.handed, resets: same.seen.resets },
+      another: {
+        handed: another.seen.handed,
+        askedFor: another.seen.askedFor,
+        showing: another.seen.showing,
+      },
+      drafted: drafted.seen.asked,
+    }).toStrictEqual({
+      same: { handed: [], resets: 0 },
+      another: { handed: [], askedFor: [1], showing: [1] },
+      drafted: 0,
+    });
+  });
+
   it("files what the frame reports while it tries an update under that update's revision, and the rest under the one it shows", async () => {
-    const reportedAt: number[] = [];
+    const reportedAt: PreviewAt[] = [];
     const held: { updates?: PreviewUpdates } = {};
     const run = following([answered(refreshAt(2))], ({ revision }) => {
       // The frame reports the update's render error before it answers.

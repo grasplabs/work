@@ -7297,6 +7297,7 @@ msgstr "Loading"
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
+#: src/engines/app-workspace.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
@@ -9688,7 +9689,6 @@ msgid "Preview"
 msgstr "Preview"
 
 #: src/chat/studio.tsx
-#: src/engines/app-workspace.tsx
 msgid "Preview of {name}"
 msgstr "Preview of {name}"
 
@@ -9699,10 +9699,6 @@ msgstr "Preview of the {screen} page"
 #: src/screens/screen-frame.tsx
 msgid "Preview of the draft's first page"
 msgstr "Preview of the draft's first page"
-
-#: src/screens/screen-frame.tsx
-msgid "Preview of the version's first page"
-msgstr "Preview of the version's first page"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
@@ -14261,12 +14257,20 @@ msgid "Version {version} has no build that runs, so nothing ran."
 msgstr "Version {version} has no build that runs, so nothing ran."
 
 #: src/engines/app-workspace.tsx
+msgid "Version {version} is live: this preview changes nothing and reads no real data."
+msgstr "Version {version} is live: this preview changes nothing and reads no real data."
+
+#: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish"
 msgstr "Version {version} is ready to publish"
 
 #: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."
 msgstr "Version {version} is ready to publish: this preview changes nothing and reads no real data."
+
+#: src/engines/app-workspace.tsx
+msgid "Version {version} isn't published or up for review: this preview changes nothing and reads no real data."
+msgstr "Version {version} isn't published or up for review: this preview changes nothing and reads no real data."
 
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
