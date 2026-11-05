@@ -59,9 +59,10 @@ export const start = (to) => {
   return new Make(new URL("./worker.js", import.meta.url));
 };`,
       "styles.css": `@font-face { font-family: Hostile; src: url("./face.woff2") format("woff2"); }
-.hostile { font-family: Hostile; background: url(./mark.svg), url(./photo.png); }`,
+.hostile { font-family: Hostile; background: url(./mark.svg), url(./photo.png), url(./photo@2x.png); }`,
       "face.woff2": "wOF2 font bytes",
       "photo.png": "PNG image bytes",
+      "photo@2x.png": "PNG image bytes, twice as wide",
       "mark.svg": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>`,
     },
   });
@@ -748,21 +749,32 @@ describe("logging an artifact's request", () => {
       info.mockRestore();
     }
     const logged = lines.filter((line) => line.includes("/package-artifacts"));
-    const urls = [...css.matchAll(/url\((?<url>[^)]*)\)/gu)].map(
+    const urls = [...css.matchAll(/url\("?(?<url>[^")]*)"?\)/gu)].map(
       ({ groups }) => groups?.url ?? ""
+    );
+    // Each, as the browser resolves it against the stylesheet: served.
+    const base = `https://core${fileAt(address, stylesheet)}`;
+    const fetched = await Promise.all(
+      urls.map(async (url) => {
+        const { pathname, search } = new URL(url, base);
+        return await statusOf(`${pathname}${search}`);
+      })
     );
     expect({
       inDirectory: address.directory.includes(token),
       logged: logged.length,
       loggedWithToken: logged.filter((line) => line.includes(token)),
-      urls: urls.length > 0,
+      // A name a package may ship (`photo@2x.png`) among them.
+      urls: urls.some((url) => url.includes("photo@2x")),
       urlsWithoutToken: urls.filter((url) => !url.includes(address.query)),
+      fetched: fetched.filter((status) => status !== 200),
     }).toStrictEqual({
       inDirectory: false,
       logged: 2,
       loggedWithToken: [],
       urls: true,
       urlsWithoutToken: [],
+      fetched: [],
     });
   });
 });

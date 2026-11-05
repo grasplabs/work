@@ -707,38 +707,76 @@ const textOf = (
 };
 
 /**
- * A URL as esbuild writes one it bundled: a path relative to the
- * stylesheet, with no scheme, no leading `/`, and nothing that would need
- * escaping in CSS or a query.
- */
-const relativePath = /^(?![a-z][\w+.-]*:)(?!\/)[\w./-]+$/iu;
-
-/**
  * Where an artifact's files are, for resolving one's URL against another:
  * a directory below the root, so a `../` that climbs out lands outside it.
+ * An `https:` address, so the URL parser reads `\\` as `/` and decodes
+ * `%2e` as a dot, as browsers do for the deployment's own.
  */
 const artifactRoot = new URL("https://artifact.invalid/artifact/");
 
 /**
- * Whether `url`, in the stylesheet at `file` (its path in the artifact),
- * names a file of the artifact: relative, and resolved, still inside the
- * artifact's directory. A `../` that climbs out of it (to another
- * artifact, or another of core's routes) isn't the artifact's own.
+ * `url`, in the stylesheet at `file` (its path in the artifact), with
+ * `query` added to its own, if it names a file of the artifact: resolved
+ * by the URL parser, still on the artifact's origin and inside its
+ * directory. Anything else is undefined: an absolute URL, one that climbs
+ * out with `../` (to another artifact, or another of core's routes), and
+ * a fragment of the document the rule is in (`url(#id)`), which fetches
+ * nothing. Whatever the file's name (`image@2x.png`, a space, a
+ * percent-escape), it keeps the URL as written and only adds the query,
+ * before its fragment.
  */
-const ownFile = (url: string, file: string): boolean => {
-  if (!relativePath.test(url)) {
-    return false;
+const withOwnQuery = (
+  url: string,
+  file: string,
+  query: string
+): string | undefined => {
+  if (url === "" || url.startsWith("#") || URL.canParse(url)) {
+    return undefined;
   }
-  const resolved = new URL(url, new URL(file, artifactRoot));
-  return (
-    resolved.origin === artifactRoot.origin &&
-    resolved.pathname.startsWith(artifactRoot.pathname)
-  );
+  const resolved = URL.parse(url, new URL(file, artifactRoot).href);
+  if (
+    resolved?.origin !== artifactRoot.origin ||
+    !resolved.pathname.startsWith(artifactRoot.pathname)
+  ) {
+    return undefined;
+  }
+  const hash = url.indexOf("#");
+  const [before, fragment] =
+    hash === -1 ? [url, ""] : [url.slice(0, hash), url.slice(hash)];
+  const asked = query.slice(1);
+  if (!before.includes("?")) {
+    return `${before}?${asked}${fragment}`;
+  }
+  return before.endsWith("?") || before.endsWith("&")
+    ? `${before}${asked}${fragment}`
+    : `${before}&${asked}${fragment}`;
+};
+
+/**
+ * `text` as a CSS string (CSSOM's "serialize a string"): in double
+ * quotes, a quote and a backslash escaped, a control character as its
+ * code point, and a NUL as U+FFFD.
+ */
+const cssString = (text: string): string => {
+  let serialized = "";
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 0) {
+      serialized += String.fromCodePoint(replacement);
+    } else if ((code >= 0x01 && code <= 0x1f) || code === 0x7f) {
+      serialized += `\\${code.toString(16)} `;
+    } else if (char === '"' || char === "\\") {
+      serialized += `\\${char}`;
+    } else {
+      serialized += char;
+    }
+  }
+  return `"${serialized}"`;
 };
 
 /**
  * `css`, the stylesheet at `file` in its artifact, with each URL of the
- * artifact's own (`ownFile`) that it fetches from a
+ * artifact's own (`withOwnQuery`) that it fetches from a
  * position esbuild bundles (`url()`, an `@import`) carrying `query`, as
  * core serves it (core's packages/serve.ts): relative to the stylesheet,
  * a URL keeps its path but drops the stylesheet's query, and the token in
@@ -766,16 +804,20 @@ export const cssWithQuery = (
     const before = reading.found.length;
     read(reading, token);
     const fetched = reading.found.at(-1);
-    if (
+    const addressed =
       reading.found.length > before &&
       fetched?.bundled === true &&
       !fetched.computed &&
-      (token.type === "url" || token.type === "string") &&
-      ownFile(fetched.url, file)
-    ) {
-      const addressed = `${fetched.url}${query}`;
+      (token.type === "url" || token.type === "string")
+        ? withOwnQuery(fetched.url, file, query)
+        : undefined;
+    if (addressed !== undefined) {
       text += textOf(codes, at, start);
-      text += token.type === "url" ? `url(${addressed})` : `"${addressed}"`;
+      // Written as a string, which holds any name: `url()` takes one too.
+      text +=
+        token.type === "url"
+          ? `url(${cssString(addressed)})`
+          : cssString(addressed);
       at = end;
     }
   }
