@@ -11,7 +11,7 @@ export const tallyScreen = (
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
-export default function Tally() {
+const Tally = () => {
   const count = useQuery(api.tally.count, {});
   const add = useMutation(api.tally.add);
   return (
@@ -22,7 +22,9 @@ export default function Tally() {
       <output>{count ?? "Loading"}</output>
     </main>
   );
-}
+};
+
+export default Tally;
 `;
 
 /**
@@ -44,7 +46,10 @@ import { mutation, query } from "@server/_generated/server";
 export const count = query({
   args: {},
   returns: v.string(),
-  handler: async (ctx) => \`\${String((await ctx.db.query("tally").take(100)).length)} ${label}\`,
+  handler: async (ctx) => {
+    const added = await ctx.db.query("tally").take(100);
+    return \`\${String(added.length)} ${label}\`;
+  },
 });
 
 export const add = mutation({
