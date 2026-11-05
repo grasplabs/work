@@ -482,22 +482,21 @@ const logNoticeFailure = (failure: unknown): void => {
  * What the preview of the chat's draft of `app` at `revision` ran into so
  * far, as a check answers it (preview-reports.ts): once it reported on
  * that revision, or {@link previewWaitMs} passed, each problem's stack cut
- * short; with no wait once the check failed anyway (`built` false: a
- * preview of code that doesn't build can't report). It is what the
- * draft's code wrote, so it goes to the model with a note saying so, as
- * data.
+ * short; with no wait while the code the preview runs doesn't build
+ * (`runs` false: it can't report). It is what the draft's code wrote, so
+ * it goes to the model with a note saying so, as data.
  */
 const previewOf = async (
   env: Env,
   { workspaceId, chatId }: Pick<AgentScope, "workspaceId" | "chatId">,
   app: AppId,
   revision: number,
-  built: boolean
+  runs: boolean
 ): Promise<DraftCheck["preview"]> => {
   const { problems, logs, seen } = await workspace(
     env,
     workspaceId
-  ).previewReports(chatId, app, revision, built ? previewWaitMs : 0);
+  ).previewReports(chatId, app, revision, runs ? previewWaitMs : 0);
   return {
     ...newestLogs(logs),
     seen,
@@ -642,7 +641,11 @@ export const checkFiles = async (
     [builds.screens, builds.server, builds.workflows, builds.lint].every(
       buildPassed
     ) && tests.status !== "failed";
-  const preview = await previewOf(env, scope, app, revision, built);
+  // The preview runs the draft's screens and server code: a lint finding,
+  // a workflow's build or a failed test doesn't stop it, so the check
+  // still waits for what it runs into, and the agent fixes both at once.
+  const runs = [builds.screens, builds.server].every(buildPassed);
+  const preview = await previewOf(env, scope, app, revision, runs);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
