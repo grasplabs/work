@@ -171,9 +171,10 @@ export const granted = async (
  * sleeping until a deadline (`nap`); loop `pages` runs loop
  * `lines` in each item, its items stopped by a `while`; loop `cells`,
  * in try `shielded`, raises in each item (`bad`); fork `both` and
- * loop `wide`, of items at once, don't run on the run host yet.
+ * loop `wide`, of items at once, don't run on the run host yet. `extra`
+ * tasks come last.
  */
-export const sealedWorkflow = async () => {
+export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   const admin = await person("admin");
   const by = await person("builder");
   const mailKey = `mail-${unique()}`;
@@ -500,6 +501,7 @@ export const sealedWorkflow = async () => {
             do: [{ spread: { set: { w: "${ $w }" } } }],
           },
         },
+        ...extra,
       ],
     }),
     basedOn: null,

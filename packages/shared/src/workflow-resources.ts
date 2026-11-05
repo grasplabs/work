@@ -9,7 +9,7 @@ import {
   storeOperationPathPattern,
 } from "./operation-limits.ts";
 import type { RunFileListing } from "./run-files.ts";
-import { isEventType } from "./sealed-builds.ts";
+import { isEventType, sealedBuildLimits } from "./sealed-builds.ts";
 import type {
   WorkflowCandidateTrace,
   WorkflowDiagram,
@@ -145,6 +145,7 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.arguments_too_deep": `This step's arguments are nested deeper than ${sealedBuildLimits.callDepth} levels, so its call wasn't made.`,
   "workflow.branch_cancelled":
     "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
