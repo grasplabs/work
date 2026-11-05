@@ -3209,7 +3209,8 @@ const startNested = async (
       callee,
       admitted,
       // A query needs no key: only what changes something holds a place.
-      callee.kind === "query" ? [] : await within.derived()
+      callee.kind === "query" ? [] : await within.derived(),
+      args
     );
   } catch (error) {
     throw forCaller(error, run);
@@ -3279,7 +3280,8 @@ const runMutation = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  inputHash: string
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const { store } = invocation;
@@ -3301,7 +3303,7 @@ const runMutation = async (
           operationKind: "mutation",
         },
         key: [...key],
-        inputHash: await sha256Hex(canonicalJson(args)),
+        inputHash,
         runId: invocation.runId,
         deadline: invocation.deadline,
       })
@@ -3578,7 +3580,8 @@ const runAction = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  inputHash: string
 ): Promise<Json> => {
   const { invocation, compiled, progress: sink } = run;
   await admit(invocation);
@@ -3593,7 +3596,7 @@ const runAction = async (
       // Its path, as a mutation's receipt is scoped: the same call
       // retried after a publish derives the same keys.
       contract: operation.path,
-      inputHash: await sha256Hex(canonicalJson(args)),
+      inputHash,
       key: [...key],
     })
   );
@@ -3715,20 +3718,35 @@ const runAction = async (
   });
 };
 
-/** Runs `operation` with `args`, by its kind, under the call key `key`. */
+/**
+ * The hash a receipt binds a call's key to: of the input as the caller
+ * sent it, not as the release normalized it, so the same input sent again
+ * under the key after a publish that adds or changes a default still
+ * finds its receipt. `admitted` stands in only for input JSON can't hold,
+ * which the release's validator took.
+ */
+const submittedHash = async (input: unknown, admitted: Json): Promise<string> =>
+  await sha256Hex(canonicalJson(jsonOf(input) ?? admitted));
+
+/**
+ * Runs `operation` with `args` (`submitted` as the caller sent them), by
+ * its kind, under the call key `key`.
+ */
 const execute = async (
   run: Run,
   operation: OperationManifest,
   args: Json,
-  key: readonly string[]
+  key: readonly string[],
+  submitted: unknown
 ): Promise<Json> => {
   if (operation.kind === "query") {
     return await runQuery(run, operation, args);
   }
+  const inputHash = await submittedHash(submitted, args);
   if (operation.kind === "mutation") {
-    return await runMutation(run, operation, args, key);
+    return await runMutation(run, operation, args, key, inputHash);
   }
-  return await runAction(run, operation, args, key);
+  return await runAction(run, operation, args, key, inputHash);
 };
 
 /**
@@ -3876,7 +3894,8 @@ const answer = async (
       },
       operation,
       admitted,
-      ["call", key]
+      ["call", key],
+      args
     );
     return { ok: true, value };
   } catch (error) {

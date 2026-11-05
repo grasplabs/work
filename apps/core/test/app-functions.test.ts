@@ -744,6 +744,53 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     });
   });
 
+  it("recovers a save sent again under its key after a publish that gives its arguments a new default", async () => {
+    const notes = await sealedNotes();
+    const save = async (): Promise<unknown> => {
+      const answered = await callAppFunction(
+        env,
+        notes.owner,
+        notes.app,
+        JSON.stringify({
+          reference: { name: "notes.create", kind: "mutation" },
+          input: { title: "Kept" },
+          idempotencyKey: "save-once",
+        })
+      );
+      return answered.result.ok ? answered.result.value : codeOf(answered);
+    };
+    const first = await save();
+    // Version 2 gives `create` an argument with a default, which the
+    // version normalizes the same input to.
+    const files = notesFiles();
+    const operations = files["server/notes.ts"] ?? "";
+    const create = `export const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});`;
+    expect(operations).toContain(create);
+    files["server/notes.ts"] = operations.replace(
+      create,
+      `export const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body, tag: v.string().default("none") },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", { title: args.title, body: args.body }),
+});`
+    );
+    await commitFiles(env, notes.owner, notes.app, files, "Tag");
+    await seal(notes, 2);
+    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    const again = await save();
+    const page = valueOf(
+      await call(notes, notes.owner, "notes.list", { pagination: {} })
+    );
+    expect({ again, titles: titlesOn(page) }).toStrictEqual({
+      again: first,
+      titles: ["Kept"],
+    });
+  });
+
   it("is answered by the version current now, from a page still open on the one before", async () => {
     const notes = await sealedNotes();
     const opened = {
