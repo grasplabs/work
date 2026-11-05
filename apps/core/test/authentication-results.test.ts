@@ -203,7 +203,11 @@ describe("a reply's authentication", () => {
             `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=Gj4cVp/R; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=none (${trustedAuthservId}: no SPF records found for postmaster@mail.acme.test) smtp.helo=mail.acme.test; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=pass smtp.remote-ip=2a00:1440::32e`,
             "pass"
           ),
-          ...arcSet(1, "mx.acme.test; spf=fail"),
+          // Microsoft 365's own, which isn't the grammar's (`action=none`).
+          ...arcSet(
+            1,
+            "mx.microsoft.com 1; spf=pass smtp.mailfrom=acme.test; dmarc=pass action=none header.from=acme.test; dkim=pass header.d=acme.test; arc=none"
+          ),
           { key: "from", value: "Ben <ben@acme.test>" },
         ],
         "ben@acme.test"

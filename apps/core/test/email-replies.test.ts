@@ -259,7 +259,6 @@ const dropReasons = async (runId: string) => {
 /** Today, as the audit log's days are: in UTC. */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-/** Email Routing's results of a message from Ben, all passing. */
 /**
  * An ARC set at `instance` (its seal, message signature and results), its
  * seal saying `cv`.
@@ -270,10 +269,11 @@ const arcSet = (instance: number, results: string, cv = "none"): string[] => [
   `ARC-Authentication-Results: i=${String(instance)}; ${results}`,
 ];
 
-const routingPass = arcSet(
-  1,
-  `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=IRda/jbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`
-);
+/** What Email Routing found of a message from Ben: all passing. */
+const routingResults = `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=IRda/jbb; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=none smtp.remote-ip=2a00:1440::32e`;
+
+/** Email Routing's ARC set on a message from Ben, all passing. */
+const routingPass = arcSet(1, routingResults);
 
 /** A plain reply, as it goes over the wire. */
 const replyMail = ({
@@ -317,7 +317,20 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
   it("keeps a reply sent before the run waits for it, for the wait to take, with what Email Routing found", async () => {
     const { runId, address } = await holdingRun(shared);
 
-    const delivery = await deliver(address, replyMail());
+    // Sent from Microsoft 365, whose own ARC set, below Email Routing's,
+    // isn't the grammar's.
+    const delivery = await deliver(
+      address,
+      replyMail({
+        headers: [
+          ...arcSet(2, routingResults, "pass"),
+          ...arcSet(
+            1,
+            "mx.microsoft.com 1; spf=pass smtp.mailfrom=acme.test; dmarc=pass action=none header.from=acme.test; dkim=pass header.d=acme.test; arc=none"
+          ),
+        ],
+      })
+    );
     const before = await inboxEvents(runId);
     const run = await endedRun(shared, runId);
     const received = await audited("workflow.email.reply.received", runId);
@@ -328,10 +341,14 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       run,
       after: await inboxEvents(runId),
       replies: await repliesIn(runId),
-      received: received.map((detail) => ({
-        workflow: detail?.workflow,
-        binding: detail?.binding,
-      })),
+      // Once a day it is delivered: once, unless the day turned.
+      received: [
+        ...new Set(
+          received.map((detail) =>
+            JSON.stringify([detail?.workflow, detail?.binding])
+          )
+        ),
+      ],
     }).toStrictEqual({
       delivery: { rejected: undefined },
       before: [{ taken: false }],
@@ -351,7 +368,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
           },
         },
       ],
-      received: [{ workflow: shared.workflow.id, binding: "replies" }],
+      received: [JSON.stringify([shared.workflow.id, "replies"])],
     });
   });
 
@@ -412,6 +429,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
     const { runId, address } = await holdingRun(shared);
     const messageId = `${unique()}@acme.test`;
 
+    const before = today();
     const first = await deliver(address, replyMail({ messageId }));
     const again = await deliver(address, replyMail({ messageId }));
     const relayed = await deliver(
@@ -424,17 +442,19 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
         ],
       })
     );
+    const days = new Set([before, today()]);
     const events = await inboxEvents(runId);
     const received = await audited("workflow.email.reply.received", runId);
 
     expect({
       rejected: [first, again, relayed].map(({ rejected }) => rejected),
       events,
-      received: received.length,
+      // Once a day it is delivered: once, unless the day turned.
+      received: received.length >= 1 && received.length <= days.size,
     }).toStrictEqual({
       rejected: [undefined, undefined, undefined],
       events: [{ taken: false }],
-      received: 1,
+      received: true,
     });
   });
 

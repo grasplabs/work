@@ -5093,6 +5093,10 @@ msgid "Dropped a kept build of approved packages"
 msgstr "A supprimé une compilation conservée de paquets approuvés"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a reply to a run's email"
+msgstr "A abandonné une réponse à l’e-mail d’une exécution"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 
@@ -14472,6 +14476,10 @@ msgstr "Trop de modifications pour les afficher ligne par ligne"
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Trop de fichiers sont transférés en même temps. Réessayez dans un instant."
+
+#: src/activity/audit-words.ts
+msgid "Took a reply to a run's email"
+msgstr "A reçu une réponse à l’e-mail d’une exécution"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"

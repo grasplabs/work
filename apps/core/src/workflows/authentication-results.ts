@@ -9,7 +9,8 @@
 // Routing's own ARC set is read. Email Routing seals every message it
 // hands over with a set of its own, numbered past every set the message
 // carries, on top of it, its results under its authserv-id
-// (`trustedAuthservId`). So only the topmost ARC results header is read,
+// (`trustedAuthservId`). So only the topmost ARC results header is read
+// (of the others, only their instances),
 // and only when it is the message's one set at the highest instance (one
 // results header, one message signature and one seal there, none
 // higher: RFC 8617 4.1's complete set), its seal doesn't say
@@ -518,16 +519,24 @@ const parseArcSignature = (value: string): { instance: number } | undefined => {
 const trustedResults = (
   headers: readonly Header[]
 ): ResultsHeader | undefined => {
-  const results = headers
-    .filter(({ key }) => key === arcResultsKey)
-    .map(({ value }) => parseArcAuthenticationResults(value));
+  const resultHeaders = headers.filter(({ key }) => key === arcResultsKey);
+  // Only the topmost is read whole: the rest are other servers' (or a
+  // sender's), whose results needn't be the grammar's (`action=none`),
+  // and only their instances count.
+  const top =
+    resultHeaders[0] === undefined
+      ? undefined
+      : parseArcAuthenticationResults(resultHeaders[0].value);
+  const results = resultHeaders.map(({ value }) => {
+    const instance = parsed(value, instanceOf);
+    return instance === undefined ? undefined : { instance };
+  });
   const seals = headers
     .filter(({ key }) => key === arcSealKey)
     .map(({ value }) => parseArcSeal(value));
   const signatures = headers
     .filter(({ key }) => key === arcSignatureKey)
     .map(({ value }) => parseArcSignature(value));
-  const [top] = results;
   if (
     top === undefined ||
     results.includes(undefined) ||

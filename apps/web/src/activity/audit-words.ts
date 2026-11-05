@@ -279,6 +279,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "workflow.email.attachment.sent",
     text: msg`Handed an email attachment to a run`,
   },
+  {
+    action: "workflow.email.reply.received",
+    text: msg`Took a reply to a run's email`,
+  },
+  {
+    action: "workflow.email.reply.dropped",
+    text: msg`Dropped a reply to a run's email`,
+  },
   { action: "workflow.run.fix_asked", text: msg`Asked the agent to fix a run` },
   { action: "workflow.run", text: msg`Ran a workflow` },
   { action: "workflow.step", text: msg`Ran a step of a workflow` },

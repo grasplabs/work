@@ -5093,6 +5093,10 @@ msgid "Dropped a kept build of approved packages"
 msgstr "Dropped a kept build of approved packages"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a reply to a run's email"
+msgstr "Dropped a reply to a run's email"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "Dropped an event no workflow could take"
 
@@ -14472,6 +14476,10 @@ msgstr "Too many changes to show line by line"
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Too many files are moving at once. Try again shortly."
+
+#: src/activity/audit-words.ts
+msgid "Took a reply to a run's email"
+msgstr "Took a reply to a run's email"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
