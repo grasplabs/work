@@ -453,16 +453,17 @@ const asciiLowerCase = (domain: string): string | undefined =>
   /^[\u0021-\u007E]*$/u.test(domain) ? domain.toLowerCase() : undefined;
 
 /**
- * `authentication`, its DMARC verdict kept only when it is of the `from`
- * the run gets (`messageOf`): the message has one From header (any
- * spelling of its name, RFC 5322 3.6 allows only one), holding one
- * mailbox, the one postal-mime read, at the domain DMARC judged. Which
+ * `authentication`, its DMARC verdict kept only when it is of `from`, the
+ * address the run gets (`messageOf`, cut to fit): the message has one
+ * From header (any spelling of its name; RFC 5322 3.6 allows only one),
+ * holding one mailbox, exactly `from`, at the domain DMARC judged. Which
  * From Email Routing judged, when there are several or a header holds
  * several mailboxes or none postal-mime reads (the run then gets the
- * envelope sender), the run can't tell.
+ * envelope sender), or what a cut address was, the run can't tell.
  */
 const dmarcOfFrom = (
   parsed: Email,
+  from: string,
   authentication: Authentication
 ): Authentication => {
   const fromHeaders = parsed.headers.filter(({ key }) => key.trim() === "from");
@@ -475,7 +476,7 @@ const dmarcOfFrom = (
       : asciiLowerCase(address.slice(address.lastIndexOf("@") + 1));
   const ofFrom =
     fromMailboxes.length === 1 &&
-    address === parsed.from?.address &&
+    address === from &&
     domain !== undefined &&
     domain === authentication.dmarc?.domain;
   return ofFrom ? authentication : { ...authentication, dmarc: null };
@@ -962,15 +963,17 @@ const receiveReply = async (
     await replyDropped(env, inbox, "event_invalid", id);
     return;
   }
+  const input = messageOf(id, null, message.from, parsed);
   const delivery = {
     workflowId: inbox.workflowId,
     runId: inbox.runId,
     binding: inbox.binding,
     type: ingress.type,
     data: fitted({
-      ...messageOf(id, null, message.from, parsed),
+      ...input,
       authentication: dmarcOfFrom(
         parsed,
+        input.from.address,
         authenticationOf(parsed.headers, parsed.from?.address)
       ),
     }),

@@ -456,6 +456,9 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       group: { from: "Team: boss@acme.test;" },
       // No From postal-mime can read: the run gets the envelope sender.
       unreadable: { from: "", envelopeFrom: "boss@acme.test" },
+      // An address the run gets cut to 256 characters, its quoted local
+      // part ending, once cut, at another domain.
+      cut: { from: `"${"x".repeat(245)}@bank.test tail"@acme.test` },
     };
     await Promise.all(
       Object.entries(cases).map(
@@ -485,6 +488,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       severalMailboxes: ["boss@acme.test", null],
       group: ["boss@acme.test", null],
       unreadable: ["boss@acme.test", null],
+      cut: [`"${"x".repeat(245)}@bank.test`, null],
     });
   });
 
